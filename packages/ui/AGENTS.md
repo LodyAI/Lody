@@ -7,7 +7,8 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
 - Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge` or
   `@source` scanning here. Component props own visual variants, sizes, tones and
   shapes. A caller's `className` may carry layout or interaction constraints,
-  never the deleted component's visual design.
+  never the deleted component's design. `xstyle` composes inside the primitive
+  after defaults; forward dynamic variables and preserve caller style callbacks.
 - Depends on React, `@base-ui/react` and `@stylexjs/stylex` only; never on
   `@lody/components`, `@lody/platform` or a cloud package.
 - No border token: use wells, shadows and focus rings; read `src/tokens/RULES.md`.
@@ -43,10 +44,8 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
 - `Menu`, `ContextMenu` and `Menubar` share `src/popup/surface.ts` rows.
   Menu labels use weight 400; group headings retain emphasis. Menus use their
   own width floor rather than `--anchor-width`.
-- Whatever holds a glyph gives it a box — StyleX has no descendant selector:
-  a menu row's, a badge's, an avatar's, an icon-only `Button`'s. A menu `icon`
-  takes the component — the box mounts it at 100%; the element form keeps a
-  stated size for glyphs carrying props. Other boxes' glyphs state 100%.
+- Glyphs have sized boxes. A menu `icon` component fills its box; an element
+  carrying props states its size. Other boxes' glyphs state 100%.
 - Triggers use Base UI `render` for an existing element. Only default context-menu
   wrappers use `display: contents`; rendered triggers keep their box. A nested
   menu root goes inside the outer item's `render`. Product owns `finalFocus`.

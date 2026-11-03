@@ -13,6 +13,17 @@ import {
   type UnifiedProjectGroupOption,
 } from '@/components/chat/unified-project-selector';
 import { Tooltip } from '@lody/ui/tooltip';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'flex-end',
+    'justify-content': 'center',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-bottom': 'calc(var(--spacing) * 24)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const machineId = 'machine-project-selector-story' as MachineId;
 
@@ -160,7 +171,7 @@ const meta = {
   decorators: [
     (Story) => (
       <Tooltip.Provider>
-        <div className="flex min-h-dvh items-end justify-center bg-background pb-24 text-foreground">
+        <div {...stylex.props(storyLayout.row)}>
           <Story />
         </div>
       </Tooltip.Provider>

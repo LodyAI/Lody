@@ -43,7 +43,6 @@ import {
   doesAgentRolePinPermissionMode,
   type ComposerAgentRoleItem,
 } from '@/lib/composer-agent-roles';
-import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
@@ -51,6 +50,7 @@ import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { control, space } from '@lody/ui/tokens/scales.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { Menu } from '@/ui/menu';
 
 /**
@@ -68,7 +68,11 @@ import { Menu } from '@/ui/menu';
  */
 
 const styles = stylex.create({
-  permissionTooltip: { whiteSpace: 'pre-wrap' },
+  compactOption: { width: 'max-content' },
+  noOverflowY: { overflowY: 'hidden' },
+  visualSwitch: { pointerEvents: 'none' },
+  machineTooltip: { [tooltip.maxWidth]: 'calc(var(--spacing) * 64)' },
+  permissionTooltip: { whiteSpace: 'pre-wrap', [tooltip.maxWidth]: 'calc(var(--spacing) * 72)' },
   /** A row's current value, after its name: the secondary label, truncating. */
   rowValue: {
     display: 'flex',
@@ -122,7 +126,6 @@ const styles = stylex.create({
 /* Option-only submenus hug the longest label instead of inheriting the
    200px surface floor. 108px is the floor so a short name is not a sliver;
    `max-w-80` still caps a long provider list. */
-const COMPACT_OPTION_SUBMENU_CLASS = 'w-max';
 const COMPACT_OPTION_SUBMENU_BOUNDS = {
   minWidth: '108px',
   maxWidth: 'calc(var(--spacing) * 80)',
@@ -207,7 +210,7 @@ function ToggleItem({
           checked={checked}
           aria-hidden="true"
           tabIndex={-1}
-          className="pointer-events-none shrink-0"
+          className={stylex.props(styles.visualSwitch).className}
         />
       }
     >
@@ -313,7 +316,10 @@ export function DesktopMachineMenu({
                     </Badge>
                   }
                 />
-                <Tooltip.Content side="right" className="max-w-64">
+                <Tooltip.Content
+                  side="right"
+                  className={stylex.props(styles.machineTooltip).className}
+                >
                   {t(
                     'sharing.machinePrivateHelp',
                     'Only you can use this machine. Share it from machine settings so teammates can see its shared projects and conversations.'
@@ -802,7 +808,7 @@ export function DesktopRunConfigMenu({
                 <Menu.Content
                   {...submenuPlacement}
                   {...COMPACT_OPTION_SUBMENU_BOUNDS}
-                  className={COMPACT_OPTION_SUBMENU_CLASS}
+                  xstyle={styles.compactOption}
                 >
                   {agentOptions.map(({ config }) => (
                     <OptionItem
@@ -850,7 +856,7 @@ export function DesktopRunConfigMenu({
                 <Menu.Content
                   {...submenuPlacement}
                   {...COMPACT_OPTION_SUBMENU_BOUNDS}
-                  className={COMPACT_OPTION_SUBMENU_CLASS}
+                  xstyle={styles.compactOption}
                 >
                   {selector.options.map((option) => (
                     <OptionItem
@@ -882,7 +888,7 @@ export function DesktopRunConfigMenu({
                 alignOffset={shouldOfferOptionSearch(modelPickerOptions.length) ? -32 : 0}
                 // The popup is already a column: holding its own overflow keeps the
                 // search row put while only the options under it scroll.
-                className={cn(COMPACT_OPTION_SUBMENU_CLASS, 'overflow-y-hidden')}
+                xstyle={[styles.compactOption, styles.noOverflowY]}
               >
                 {/* Menu.Content's style prop sizes the positioner, so cap
                     the list inside the popup to keep its measured height accurate. */}
@@ -914,7 +920,7 @@ export function DesktopRunConfigMenu({
               <Menu.Content
                 {...submenuPlacement}
                 {...COMPACT_OPTION_SUBMENU_BOUNDS}
-                className={COMPACT_OPTION_SUBMENU_CLASS}
+                xstyle={styles.compactOption}
               >
                 {interactionSelector.options.map((opt) => (
                   <OptionItem
@@ -940,7 +946,7 @@ export function DesktopRunConfigMenu({
               <Menu.Content
                 {...submenuPlacement}
                 {...COMPACT_OPTION_SUBMENU_BOUNDS}
-                className={COMPACT_OPTION_SUBMENU_CLASS}
+                xstyle={styles.compactOption}
               >
                 {thinkingSelector.options.map((opt) => (
                   <OptionItem
@@ -1059,7 +1065,7 @@ function PermissionModeItem({
       <Tooltip.Content
         side="right"
         align="start"
-        className={cn('max-w-72', stylex.props(styles.permissionTooltip).className)}
+        className={stylex.props(styles.permissionTooltip).className}
       >
         {option.description}
       </Tooltip.Content>
@@ -1146,7 +1152,7 @@ export function DesktopPermissionModeButton({
         align="start"
         minWidth="calc(var(--spacing) * 44)"
         maxWidth="calc(var(--spacing) * 64)"
-        className="w-max"
+        xstyle={styles.compactOption}
       >
         <div {...stylex.props(surface.menuList)}>
           {options.map((opt) => (

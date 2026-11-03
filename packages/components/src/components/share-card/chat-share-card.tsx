@@ -1,7 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
-import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { scopedConversationTheme } from '@/components/ai-gui/conversation.tokens.stylex';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
@@ -319,7 +318,7 @@ export function ChatShareCard({
   const signOffOnMat = backdrop !== 'none' && matPx >= MIN_SIGN_OFF_MAT;
   // Injects the scoped theme rules before first paint; idempotent no-op after.
   ensureShareThemeScopes();
-  const themeScopeClass = cn(
+  const themeScopeClass = clsx(
     theme === 'light' ? 'light-scope' : 'dark-scope',
     stylex.props(
       theme === 'light' ? productLightPalette : productDarkPalette,
@@ -334,12 +333,11 @@ export function ChatShareCard({
     <>
       <style>{CODE_CSS}</style>
       <div
-        className={cn(
-          stylex.props(styles.card, layout.radius).className,
-          // A drop shadow needs a ground to fall on. Without one — or with a mat
-          // too thin to catch it — it would only darken the image's own edge.
-          matPx >= MIN_SIGN_OFF_MAT && 'shadow-[0_28px_70px_-20px_rgba(2,10,18,0.6)]',
-          'ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.10]'
+        {...stylex.props(
+          styles.card,
+          layout.radius,
+          styles.cardRing,
+          matPx >= MIN_SIGN_OFF_MAT && styles.cardLift
         )}
         style={{ width: layout.width }}
       >
@@ -447,6 +445,21 @@ export function ChatShareCard({
  * dimensions stay in `LAYOUT`; these are the parts every size shares.
  */
 const styles = stylex.create({
+  cardRing: {
+    boxShadow: {
+      default: 'inset 0 0 0 1px color-mix(in oklab, var(--color-black) 6%, transparent)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'inset 0 0 0 1px color-mix(in oklab, var(--color-white) 10%, transparent)',
+    },
+  },
+  cardLift: {
+    boxShadow: {
+      default:
+        'inset 0 0 0 1px color-mix(in oklab, var(--color-black) 6%, transparent), 0 28px 70px -20px rgba(2,10,18,0.6)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'inset 0 0 0 1px color-mix(in oklab, var(--color-white) 10%, transparent), 0 28px 70px -20px rgba(2,10,18,0.6)',
+    },
+  },
   /** The card itself: the ground the conversation is printed on. */
   card: {
     position: 'relative',

@@ -31,6 +31,7 @@ export interface ProgressProps extends Omit<RootBaseProps, 'className' | 'childr
   /** What the bar is about. Defaults to `running`, the one live state. */
   tone?: ProgressTone;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 /**
@@ -48,10 +49,10 @@ export interface ProgressProps extends Omit<RootBaseProps, 'className' | 'childr
  * task is called rather than a set of ARIA attributes.
  */
 export const Progress = forwardRef<HTMLDivElement, ProgressProps>(function Progress(
-  { className, label, showValue = false, tone = 'running', ...rest },
+  { className, xstyle, label, showValue = false, tone = 'running', ...rest },
   ref
 ) {
-  const sx = stylex.props(surface.progress);
+  const sx = stylex.props(surface.progress, xstyle);
   const header = stylex.props(surface.progressHeader);
   const labelSx = stylex.props(surface.progressLabel);
   const valueSx = stylex.props(surface.progressValue);
@@ -61,7 +62,14 @@ export const Progress = forwardRef<HTMLDivElement, ProgressProps>(function Progr
       ref={ref}
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={
+        xstyle
+          ? (state) => ({
+              ...sx.style,
+              ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+            })
+          : sx.style
+      }
     >
       {label != null || showValue ? (
         <div className={header.className} style={header.style}>

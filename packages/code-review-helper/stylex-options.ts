@@ -9,6 +9,6 @@ export const reviewStylexOptions = {
   useCSSLayers: {
     prefix: 'stylex',
     before: ['theme', 'base'],
-    after: ['components', 'utilities'],
+    after: ['components'],
   },
 };

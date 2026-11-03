@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 /**
  * INTEGRATION HARNESS — not production, and NOT a place to change UI appearance.
  *
@@ -125,6 +126,45 @@ import type { LodyAuthClient } from '@/lib/auth';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import { cn } from '@/lib/utils';
 import { AuthProvider } from '@/providers/convex-provider';
+
+const storyOverrides = stylex.create({ stream: { height: '100%' } });
+
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    'flex-shrink': '0',
+  },
+  frame3: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+  frame4: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+  },
+});
+
+const storyLayout = stylex.create({
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  row: {
+    display: 'flex',
+    height: '100%',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+    'padding-left': 'calc(var(--spacing) * 1)',
+  },
+});
 
 const STORY_WORKSPACE_ID = 'workspace-storybook-session-page' as WorkspaceId;
 const STORY_WORKSPACE_SLUG = 'storybook';
@@ -1459,20 +1499,20 @@ export function SessionConversationStoryHarness({
   const mobileMenuInfoRows: MobileSessionMenuInfoRow[] = [
     {
       id: 'machine',
-      icon: <Monitor className="h-3.5 w-3.5" />,
+      icon: <Monitor {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Machine',
       value: machineInfo?.name ?? machineMeta.name,
     },
     {
       id: 'base',
-      icon: <GitBranch className="h-3.5 w-3.5" />,
+      icon: <GitBranch {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Base branch',
       value: 'main',
       onCopy: action,
     },
     {
       id: 'branch',
-      icon: <GitBranch className="h-3.5 w-3.5" />,
+      icon: <GitBranch {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Current branch',
       value: 'lody/solve-merge-conflicts-a1b2c3',
       onCopy: action,
@@ -1481,39 +1521,44 @@ export function SessionConversationStoryHarness({
   const mobileMenuActions: MobileSessionMenuAction[] = [
     {
       id: 'find',
-      icon: <Search className="h-3.5 w-3.5" />,
+      icon: <Search {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Find in session',
       onClick: action,
     },
     {
       id: 'fork',
-      icon: <GitFork className="h-3.5 w-3.5" />,
+      icon: <GitFork {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Fork session',
       onClick: action,
     },
     {
       id: 'rename',
-      icon: <Pencil className="h-3.5 w-3.5" />,
+      icon: <Pencil {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Rename Chat',
       onClick: action,
     },
     {
       id: 'copy-path',
-      icon: <Copy className="h-3.5 w-3.5" />,
+      icon: <Copy {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Copy path',
       onClick: action,
       separatorBefore: true,
     },
     {
       id: 'copy-md',
-      icon: <FileText className="h-3.5 w-3.5" />,
+      icon: <FileText {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Copy as Markdown',
       onClick: action,
     },
-    { id: 'copy-url', icon: <Link className="h-3.5 w-3.5" />, label: 'Copy URL', onClick: action },
+    {
+      id: 'copy-url',
+      icon: <Link {...stylex.props(storyLayoutStyles.frame)} />,
+      label: 'Copy URL',
+      onClick: action,
+    },
     {
       id: 'archive',
-      icon: <Archive className="h-3.5 w-3.5" />,
+      icon: <Archive {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Archive session',
       onClick: action,
       separatorBefore: true,
@@ -1527,8 +1572,8 @@ export function SessionConversationStoryHarness({
         {session.title ?? 'Session'}
       </span>
       <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-        <Github className="h-3 w-3 shrink-0" />
-        <span className="truncate">{session.repoFullName ?? ''}</span>
+        <Github {...stylex.props(storyLayoutStyles.frame2)} />
+        <span {...stylex.props(storyLayout.label)}>{session.repoFullName ?? ''}</span>
       </span>
     </span>
   );
@@ -1542,7 +1587,7 @@ export function SessionConversationStoryHarness({
         label={translate('sessions.moreActions', 'More actions')}
         onClick={() => setMenuSheetOpen(true)}
       >
-        <Ellipsis className="h-4 w-4" />
+        <Ellipsis {...stylex.props(storyLayoutStyles.frame3)} />
       </GlassIconButton>
     </>
   );
@@ -1617,7 +1662,6 @@ export function SessionConversationStoryHarness({
                 }
               >
                 <SessionConversationPage
-                  className="h-full"
                   dropActive={dropActive}
                   dropKind="session-mention"
                   headerSlot={
@@ -1637,7 +1681,7 @@ export function SessionConversationStoryHarness({
                             label={translate('common.back', 'Back')}
                             onClick={action}
                           >
-                            <ChevronLeft className="h-5 w-5" />
+                            <ChevronLeft {...stylex.props(storyLayoutStyles.frame4)} />
                           </GlassIconButton>
                         }
                         title={mobileTitleNode}
@@ -1664,7 +1708,7 @@ export function SessionConversationStoryHarness({
                         onTabClose={action}
                         tabOrder={[childSession.id]}
                         rightSlot={
-                          <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
+                          <div {...stylex.props(storyLayout.row)}>
                             <SessionAccessControl state={storySharing} onShareWithTeam={action} />
                             {headerMenuNode}
                           </div>
@@ -1680,7 +1724,7 @@ export function SessionConversationStoryHarness({
                             sessionId={session.id}
                             items={toStreamItems(session.id, history)}
                             renderMessageRow={(row) => renderMessageRow(row, showCollaborators)}
-                            className="h-full"
+                            xstyle={storyOverrides.stream}
                             agentActivityLabel={
                               isWorking
                                 ? translate('sessions.statusIndicator.thinking', 'Thinking')

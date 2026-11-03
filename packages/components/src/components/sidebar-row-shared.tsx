@@ -34,7 +34,6 @@ import {
 import type { SessionSendState } from '@/lib/session-send-status';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import { Tooltip } from '@lody/ui/tooltip';
 import * as stylex from '@stylexjs/stylex';
 import { text } from '@lody/ui/tokens/scales.stylex';
@@ -61,7 +60,50 @@ import { themeDuration, themeEasing, themeRadius, themeSpace } from '../style/th
  */
 const sendSpin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
 
+const GROUP_HOVER = ':is(:where(.group):hover *)';
+const GROUP_OPEN = ':is(:where(.group)[data-menu-open] *)';
+
 const rowParts = stylex.create({
+  unsentTitle: { color: 'hsl(var(--sidebar-foreground-muted) / 1)' },
+  groupLabelInk: {
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+  },
+  compactPr: { filter: 'saturate(0.55)' },
+  prOpen: { color: 'hsl(var(--github-open) / 1)' },
+  prClosed: { color: 'hsl(var(--github-closed) / 1)' },
+  prDraft: { color: 'hsl(var(--github-draft) / 1)' },
+  prMerged: { color: 'hsl(var(--github-merged))' },
+  reveal: {
+    opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 1 }, [GROUP_OPEN]: 1 },
+    pointerEvents: {
+      default: null,
+      [GROUP_HOVER]: { '@media (hover: hover)': 'auto' },
+      [GROUP_OPEN]: 'auto',
+    },
+  },
+  fade: {
+    opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 0 }, [GROUP_OPEN]: 0 },
+  },
+  chevronReveal: { opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 1 } } },
+  menuPressed: {
+    backgroundColor: {
+      default: null,
+      [GROUP_OPEN]: 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    },
+    color: { default: null, [GROUP_OPEN]: 'hsl(var(--foreground) / 1)' },
+  },
+  sectionHover: {
+    color: {
+      default: null,
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-foreground) / 1)' },
+    },
+  },
+  treeFocus: {
+    boxShadow: {
+      default: null,
+      ':has([role="button"]:focus-visible)': 'inset 0 0 0 1px hsl(var(--primary) / 0.5)',
+    },
+  },
   hoverAction: {
     display: 'inline-flex',
     width: themeSpace[5],
@@ -74,8 +116,16 @@ const rowParts = stylex.create({
     transitionProperty: 'opacity,background-color,color',
     transitionDuration: themeDuration[100],
     transitionTimingFunction: themeEasing['in-out'],
-    opacity: 0,
-    pointerEvents: 'none',
+    opacity: {
+      default: 0,
+      [GROUP_HOVER]: { '@media (hover: hover)': 1 },
+      [GROUP_OPEN]: 1,
+    },
+    pointerEvents: {
+      default: 'none',
+      [GROUP_HOVER]: { '@media (hover: hover)': 'auto' },
+      [GROUP_OPEN]: 'auto',
+    },
   },
   hoverActionFocus: { boxShadow: { default: null, ':focus-visible': 'none' } },
   verdictSuccess: { color: themeColors.statusSuccess },
@@ -102,6 +152,8 @@ const rowParts = stylex.create({
   collapsed: { rotate: '-90deg' },
   rowList: { display: 'flex', flexDirection: 'column', gap: '1px' },
   archive: {
+    position: 'absolute',
+    zIndex: 20,
     right: 0,
     top: 0,
     opacity: 0,
@@ -152,7 +204,7 @@ const rowParts = stylex.create({
     borderColor: 'transparent',
     backgroundColor: 'transparent',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     boxShadow: { default: null, ':focus-visible': 'none' },
@@ -577,7 +629,7 @@ export function useSessionUnsentNewConversation(sessionId: string | undefined): 
 }
 
 /** Title colour for a row whose conversation has not been sent yet. */
-export const SIDEBAR_UNSENT_TITLE_CLASS = 'text-sidebar-foreground-muted';
+export const SIDEBAR_UNSENT_TITLE_CLASS = stylex.props(rowParts.unsentTitle).className ?? '';
 
 /** A row title span that mutes itself while its conversation is unsent. */
 export function SidebarSessionTitleText({
@@ -593,7 +645,7 @@ export function SidebarSessionTitleText({
 }) {
   const isUnsent = useSessionUnsentNewConversation(sessionId);
   return (
-    <span className={cn(className, isUnsent && !selected && SIDEBAR_UNSENT_TITLE_CLASS)}>
+    <span className={clsx(className, isUnsent && !selected && SIDEBAR_UNSENT_TITLE_CLASS)}>
       {children}
     </span>
   );
@@ -610,7 +662,7 @@ export function SidebarSessionTitleText({
  * CI verdict badge read identically on both platforms.
  */
 /** A filter, not opacity: the mark keeps its full lightness, only its hue is muted. */
-const SIDEBAR_PR_ICON_COMPACT_CLASS = 'saturate-[0.55]';
+const SIDEBAR_PR_ICON_COMPACT_CLASS = stylex.props(rowParts.compactPr).className;
 
 export function SessionPrIcon({
   prStatus,
@@ -629,6 +681,16 @@ export function SessionPrIcon({
 }) {
   const meta = PR_STATUS_META[prStatus] ?? PR_STATUS_META.open;
   const BaseIcon = meta.icon;
+  const toneClassName =
+    stylex.props(
+      prStatus === 'merged'
+        ? rowParts.prMerged
+        : prStatus === 'closed'
+          ? rowParts.prClosed
+          : prStatus === 'draft'
+            ? rowParts.prDraft
+            : rowParts.prOpen
+    ).className ?? '';
   const verdict: PrCiVerdict | null =
     prCiState === 's'
       ? 'success'
@@ -653,11 +715,11 @@ export function SessionPrIcon({
       <MaskedPrCiIcon
         BaseIcon={BaseIcon}
         VerdictIcon={VerdictIcon}
-        baseToneClassName={meta.iconColorClassName}
+        baseToneClassName={toneClassName}
         verdict={verdict}
-        className={cn(
+        className={clsx(
           compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
-          compact && 'h-3.5 w-3.5',
+          compact && stylex.props(rowParts.fullPr).className,
           prStatus === 'merged' && stylex.props(rowParts.mergedPr).className,
           className
         )}
@@ -666,10 +728,10 @@ export function SessionPrIcon({
   }
   return (
     <BaseIcon
-      className={cn(
+      className={clsx(
         stylex.props(compact ? rowParts.smallPr : rowParts.fullPr, rowParts.shrink).className,
         compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
-        meta.iconColorClassName,
+        toneClassName,
         className
       )}
       strokeWidth={2.25}
@@ -813,18 +875,16 @@ export const SIDEBAR_ROW_LIST_CLASS = `${stylex.props(rowParts.rowList).classNam
  * the row is hovered or its menu is open. Shared by local projects and
  * Project groups so the two rows behave alike.
  */
-export const SIDEBAR_HOVER_ACTION_CLASS = cn(
-  stylex.props(rowParts.hoverAction, rowParts.hoverActionFocus).className,
-  'group-hover:opacity-100 group-hover:pointer-events-auto',
-  'group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto'
-);
+export const SIDEBAR_HOVER_ACTION_CLASS = stylex.props(
+  rowParts.hoverAction,
+  rowParts.hoverActionFocus
+).className;
 
 /**
  * The trigger itself stays pressed-looking while its menu is open, not just the
  * row around it. Only the ⋯ opens a menu — the compose button beside it does not.
  */
-export const SIDEBAR_MENU_TRIGGER_OPEN_CLASS =
-  'group-data-[menu-open]:bg-muted/30 group-data-[menu-open]:text-foreground';
+export const SIDEBAR_MENU_TRIGGER_OPEN_CLASS = stylex.props(rowParts.menuPressed).className;
 
 /**
  * Marks one flat-list row with opened-by tree depth. `gutter={false}` leaves
@@ -870,7 +930,7 @@ export function SidebarRowArchiveButton({
   confirmLabel,
   onConfirm,
   /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+  revealClassName,
 }: {
   label: string;
   confirmLabel: string;
@@ -886,11 +946,8 @@ export function SidebarRowArchiveButton({
             label={label}
             confirmLabel={confirmLabel}
             // Override the shared button's confirming-state relative positioning.
-            className={cn(
-              'absolute z-20',
-              stylex.props(rowParts.archive).className,
-              revealClassName
-            )}
+            xstyle={rowParts.archive}
+            className={revealClassName ?? stylex.props(rowParts.reveal).className}
             onConfirm={onConfirm}
           />
         }
@@ -922,7 +979,7 @@ export function SidebarRowEndSlot({
   restIcon,
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
-  fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
+  fadeClassName = stylex.props(rowParts.fade).className,
 }: {
   /**
    * Reads this session's local send status here, in the leaf, so upload
@@ -970,7 +1027,7 @@ export function SidebarRowEndSlot({
     >
       {hasRest ? (
         <span
-          className={cn(
+          className={clsx(
             stylex.props(rowParts.rest, Boolean(archive) && rowParts.restFade).className,
             archive && fadeClassName
           )}
@@ -1213,7 +1270,7 @@ export function GitHubOwnerIcon({
  * matched the icons and details beside it and stopped reading as a heading over
  * the rows, while the earlier 70% (1.9:1) read as disabled.
  */
-export const SIDEBAR_GROUP_LABEL_COLOR_CLASS = 'text-sidebar-foreground-muted/80';
+export const SIDEBAR_GROUP_LABEL_COLOR_CLASS = stylex.props(rowParts.groupLabelInk).className ?? '';
 const sidebarTypography = stylex.create({
   group: { fontSize: text.footnoteSize, lineHeight: text.footnoteLeading },
   row: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading },
@@ -1232,7 +1289,7 @@ export const SIDEBAR_ROW_TEXT_CLASS = stylex.props(sidebarTypography.row).classN
 export const SIDEBAR_CAPTION_TEXT_CLASS = stylex.props(sidebarTypography.caption).className;
 export const SIDEBAR_HELPER_TEXT_CLASS = stylex.props(sidebarTypography.group).className;
 export const SIDEBAR_CONTROL_TEXT_CLASS = stylex.props(sidebarTypography.control).className;
-export const SIDEBAR_GROUP_LABEL_CLASS = cn(
+export const SIDEBAR_GROUP_LABEL_CLASS = clsx(
   stylex.props(sidebarTypography.groupLabel).className,
   SIDEBAR_GROUP_LABEL_COLOR_CLASS
 );
@@ -1347,18 +1404,18 @@ export function SidebarSectionHeader({
             }
           : undefined
       }
-      className={cn(
+      className={clsx(
         stylex.props(rowParts.sectionButton, canToggle ? rowParts.clickable : rowParts.inert)
           .className,
         SIDEBAR_GROUP_LABEL_CLASS,
-        canToggle && !isMobile && 'hover:text-sidebar-foreground'
+        canToggle && !isMobile && stylex.props(rowParts.sectionHover).className
       )}
     >
       {icon}
       <span {...stylex.props(rowParts.clipped)}>{label}</span>
       {canToggle ? (
         <ChevronDown
-          className={cn(
+          className={clsx(
             stylex.props(
               rowParts.sectionChevron,
               (collapsed || isMobile) && rowParts.visibleChevron,
@@ -1366,7 +1423,7 @@ export function SidebarSectionHeader({
             ).className,
             // This shared header is reserved for top-level sections (Chats,
             // machine names, GitHub Worktrees), whose folded affordance stays visible.
-            !collapsed && !isMobile && 'group-hover:opacity-100'
+            !collapsed && !isMobile && stylex.props(rowParts.chevronReveal).className
           )}
           aria-hidden="true"
         />
@@ -1378,28 +1435,14 @@ export function SidebarSectionHeader({
     </div>
   );
   return (
-    <div
-      className={clsx(
-        'group',
-        stylex.props(rowParts.treeRow).className,
-        // Retain the descendant-focus hook until this row and its control
-        // share a StyleX marker contract.
-        'has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]'
-      )}
-    >
+    <div className={clsx('group', stylex.props(rowParts.treeRow, rowParts.treeFocus).className)}>
       {wrapToggle ? wrapToggle(toggle) : toggle}
       {action ? <div {...stylex.props(rowParts.treeAction)}>{action}</div> : null}
     </div>
   );
 }
 
-const SIDEBAR_SKELETON_ROW_WIDTHS = [
-  'w-[68%]',
-  'w-[56%]',
-  'w-[74%]',
-  'w-[62%]',
-  'w-[70%]',
-] as const;
+const SIDEBAR_SKELETON_ROW_WIDTHS = ['68%', '56%', '74%', '62%', '70%'] as const;
 
 /**
  * Loading state for the sidebar lists. Keep this anatomy in sync with the
@@ -1420,7 +1463,7 @@ export function SidebarListSkeleton({
       className={clsx(stylex.props(rowParts.listStack).className, className)}
       data-sidebar-loading-skeleton=""
     >
-      <div className={cn(stylex.props(rowParts.skeletonSection).className, sectionClassName)}>
+      <div className={clsx(stylex.props(rowParts.skeletonSection).className, sectionClassName)}>
         <div className={clsx('group', stylex.props(rowParts.skeletonHeaderRow).className)}>
           <div {...stylex.props(rowParts.skeletonHeader)}>
             {showHeaderIcon ? (
@@ -1435,7 +1478,7 @@ export function SidebarListSkeleton({
           {SIDEBAR_SKELETON_ROW_WIDTHS.map((width, index) => (
             <div key={index} {...stylex.props(rowParts.skeletonRow)}>
               <Skeleton {...stylex.props(rowParts.skeletonAvatar)} />
-              <Skeleton className={cn(stylex.props(rowParts.skeletonLine).className, width)} />
+              <Skeleton className={stylex.props(rowParts.skeletonLine).className} width={width} />
               <Skeleton {...stylex.props(rowParts.skeletonTail)} />
             </div>
           ))}

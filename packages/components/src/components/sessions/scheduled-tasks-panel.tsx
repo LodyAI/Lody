@@ -40,7 +40,7 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': themeColors.foreground },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },

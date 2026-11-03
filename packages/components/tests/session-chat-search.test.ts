@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 import {
   SearchHighlightedText,
+  SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
   SessionSearchProvider,
   type SessionSearchBlockMatch,
 } from '../src/components/sessions/session-search-context';
@@ -439,7 +440,7 @@ describe('rendered session search', () => {
     assertResults(results, query);
     expect(
       marks()
-        .filter((mark) => mark.className.includes('ring-1'))
+        .filter((mark) => mark.classList.contains(SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME))
         .map((mark) => mark.dataset.searchResultId)
     ).toContain(results[1]!.resultId);
     const phantom = await renderSearch(source, 'QARESUMEDOK');
@@ -504,7 +505,7 @@ describe('rendered session search', () => {
     await renderSearch(source, 'QA_RESUMED_OK', 2);
     expect(
       marks()
-        .filter((mark) => mark.className.includes('ring-1'))
+        .filter((mark) => mark.classList.contains(SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME))
         .map((mark) => mark.dataset.searchResultId)
     ).toEqual([results[2]!.resultId]);
     assertResults(await renderSearch(source, 'QA_RESUMED_OK —'), 'QA_RESUMED_OK —');

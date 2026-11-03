@@ -142,12 +142,8 @@ function Fixture({
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild>
-                      <a
-                        href="#synthetic-slot"
-                        onClick={(e) => e.preventDefault()}
-                        {...stylex.props(styles.slotChild)}
-                      >
+                    <SidebarMenuButton asChild xstyle={opaque ? styles.slotChild : undefined}>
+                      <a href="#synthetic-slot" onClick={(e) => e.preventDefault()}>
                         <File />
                         <span>Slot item</span>
                       </a>

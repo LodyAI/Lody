@@ -12,13 +12,6 @@ import { REGISTRY_AGENT_ICON_SVGS } from './registry-agent-icons';
 import { iconSurface } from './surface';
 
 /**
- * The registry SVG is raw markup, so its own `<svg>` element cannot be given a
- * class. StyleX has no descendant selector either, so the two rules that make
- * the inner glyph fill its wrapper stay Tailwind classes on the wrapper.
- */
-const SVG_FILL_CLASS = '[&_svg]:h-full [&_svg]:w-full';
-
-/**
  * Model ids are free-form provider strings (`claude-sonnet-5`, `gpt-5-codex`,
  * `gemini-2.5-pro`, …), so the brand is matched by prefix. Order matters: the
  * first match wins, and the list is checked as written.
@@ -50,8 +43,9 @@ function RegistrySvg({ name, className }: { name: string; className: string | un
   if (!raw) return <Sparkles className={className} />;
   return (
     <InlineSvg
+      fillParent
       raw={raw}
-      className={clsx(stylex.props(iconSurface.glyphFill).className, className, SVG_FILL_CLASS)}
+      className={clsx(stylex.props(iconSurface.glyphFill).className, className)}
     />
   );
 }

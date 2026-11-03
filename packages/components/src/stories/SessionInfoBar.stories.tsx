@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { fn, userEvent, within } from 'storybook/test';
@@ -19,6 +20,30 @@ import { SessionInfoBar, type SessionInfoBarProps } from '@/components/sessions/
 import type { SessionMachineInfo } from '@/components/sessions/session-machine-info';
 import type { ContextChipAction, PrCiRun } from '@/components/sessions/session-info-chips';
 import type { SessionStatusStripState } from '@/components/sessions/session-status-strip';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'max-width': '100%',
+    'flex-direction': 'column',
+  },
+  frame: {
+    height: 'calc(var(--spacing) * 72)',
+  },
+  stack2: {
+    display: 'flex',
+    width: '760px',
+    'max-width': '100%',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  row: {
+    display: 'flex',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 56)',
+  },
+});
 
 const openPr: SessionPullRequestMeta = {
   url: 'https://github.com/loro-dev/lody/pull/2857',
@@ -171,9 +196,9 @@ function StoryHarness({
   ];
   const contextActions = actions.length > 0 ? actions : undefined;
   return (
-    <div className="flex max-w-full flex-col" style={{ width }}>
+    <div {...stylex.props(storyLayout.stack)} style={{ width }}>
       {/* Room above the bar so chip popovers (side=top) stay visible. */}
-      <div className="h-72" />
+      <div {...stylex.props(storyLayout.frame)} />
       <SessionInfoBar
         status={status}
         machine={machine}
@@ -663,8 +688,8 @@ function PeekPlayground() {
   const [goal, setGoal] = useState<SessionGoalMessage | null>(null);
   const [tasks, setTasks] = useState<PendingScheduledTask[]>([]);
   return (
-    <div className="flex w-[760px] max-w-full flex-col gap-3">
-      <div className="flex gap-2">
+    <div {...stylex.props(storyLayout.stack2)}>
+      <div {...stylex.props(storyLayout.row)}>
         <button
           type="button"
           className="rounded-md border border-border px-2 py-1 text-xs"
@@ -697,7 +722,7 @@ function PeekPlayground() {
           reset
         </button>
       </div>
-      <div className="h-56" />
+      <div {...stylex.props(storyLayout.frame2)} />
       <SessionInfoBar
         status={null}
         goal={goal}

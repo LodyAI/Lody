@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useMemo, useState } from 'react';
 import { Button } from '@lody/ui/button';
 import { useTranslation } from 'react-i18next';
@@ -18,6 +19,13 @@ import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '@/atoms/runti
 import { SessionPendingMessages } from '@/components/chat/session-pending-messages';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    gap: 'calc(var(--spacing) * 2)',
+    'padding-bottom': 'calc(var(--spacing) * 4)',
+  },
+});
 
 const sessionId = 'attachment-draft-story' as SessionId;
 const workspaceId = 'attachment-draft-workspace' as WorkspaceId;
@@ -272,7 +280,7 @@ function UploadHandoff({ width = 720 }: { width?: number }) {
   return (
     <Provider store={store}>
       <div style={{ width, maxWidth: '100%' }}>
-        <div className="flex gap-2 pb-4">
+        <div {...stylex.props(storyLayout.row)}>
           <Button
             size="small"
             disabled={phase !== 'uploading'}

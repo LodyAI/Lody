@@ -1,8 +1,22 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { useLayoutEffect, useState, type CSSProperties } from 'react';
 
 import { StuckConnectionBanner } from '@/components/stuck-connection-banner';
+const storyLayout = stylex.create({
+  frame: {
+    position: 'relative',
+    height: 'calc(var(--spacing) * 64)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame2: {
+    position: 'relative',
+    height: 'calc(var(--spacing) * 64)',
+    width: '360px',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const labels = {
   title: 'Still connecting…',
@@ -33,7 +47,7 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="relative h-64 bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),
@@ -54,7 +68,7 @@ export const Chinese: Story = {
 export const NarrowMobileViewport: Story = {
   decorators: [
     (Story) => (
-      <div className="relative h-64 w-[360px] bg-background">
+      <div {...stylex.props(storyLayout.frame2)}>
         <Story />
       </div>
     ),

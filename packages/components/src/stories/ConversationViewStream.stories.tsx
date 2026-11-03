@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 /**
  * The conversation stream over a real doc-backed `ConversationView`: 3,000
  * turns written into a `LoroDoc` through `HistoryWriter`, read back through
@@ -20,6 +21,35 @@ import {
   createConversationDerivation,
   type ConversationView,
 } from '@/lib/conversation-view';
+const storyLayout = stylex.create({
+  frame: {
+    height: '720px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  stack: {
+    display: 'flex',
+    height: '100vh',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  row: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  frame2: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  row2: {
+    display: 'flex',
+    gap: 'calc(var(--spacing) * 3)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
 
 const meta = {
   title: 'Sessions/ConversationView',
@@ -166,7 +196,7 @@ function WindowedStream({
     onOutlinePreviewRound,
   } = useConversationStreamItems(view, streamSessionId);
   return (
-    <div className="h-[720px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
         conversationView={view}
         initialWindowReady={initialWindowReady}
@@ -217,8 +247,8 @@ function OpenFlickerStory({
     return () => next.dispose();
   }, [rounds]);
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="flex shrink-0 items-center gap-2 p-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row)}>
         <button
           type="button"
           data-testid="open-conversation"
@@ -239,7 +269,7 @@ function OpenFlickerStory({
         <span data-testid="view-ready">{view ? 'view-ready' : 'building'}</span>
         {backgroundFacts && view && <BackgroundFactControls view={view} />}
       </div>
-      <div className="min-h-0 flex-1" data-testid="conversation-slot">
+      <div {...stylex.props(storyLayout.frame2)} data-testid="conversation-slot">
         {view && openId > 0 && <OpenedStream key={openId} view={view} />}
       </div>
     </div>
@@ -376,8 +406,8 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
     if (documentPending) setDocumentPending(false);
   }, [documentPending]);
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="flex shrink-0 items-center gap-2 p-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row)}>
         {[0, 1].map((index) => (
           <button
             key={index}
@@ -395,7 +425,7 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
         ))}
         <span data-testid="view-ready">{views ? 'view-ready' : 'building'}</span>
       </div>
-      <div className="min-h-0 flex-1" data-testid="conversation-slot">
+      <div {...stylex.props(storyLayout.frame2)} data-testid="conversation-slot">
         {views && (
           <OpenedStream
             key={current}
@@ -535,8 +565,8 @@ function NativeTextSelectionStory() {
   }, []);
   const stream = useConversationStreamItems(session?.history ?? null, SELECTION_SESSION_ID);
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="flex gap-3 p-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row2)}>
         <button
           data-testid="selection-start"
           onClick={() => streamRef.current?.scrollToIndex(0, false)}
@@ -578,7 +608,7 @@ function NativeTextSelectionStory() {
         </button>
         <textarea data-testid="selection-paste" aria-label="Paste copied text" className="border" />
       </div>
-      <div className="min-h-0 flex-1" data-testid="native-selection-story">
+      <div {...stylex.props(storyLayout.frame2)} data-testid="native-selection-story">
         <SessionChatStreamView
           ref={streamRef}
           conversationView={session?.history}

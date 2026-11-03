@@ -21,6 +21,13 @@ import {
   type CodexResetForecastState,
   type CodexResetForecastStore,
 } from '@/lib/codex-reset-forecast-store';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+});
 
 const styles = stylex.create({
   entries: {
@@ -131,7 +138,7 @@ function EntryPoints({ state, showActions, narrow, withoutRateLimits }: StoryPro
   return (
     <WithStubbedForecast state={state}>
       <div {...stylex.props(styles.entries, narrow && styles.narrow)}>
-        <section className="flex flex-col gap-2">
+        <section {...stylex.props(storyLayout.stack)}>
           <p className="text-xs font-medium text-muted-foreground">Composer usage popover</p>
           <SessionUsagePopover
             contextWindowUsage={{ size: 258_400, used: 203_700 }}
@@ -145,7 +152,7 @@ function EntryPoints({ state, showActions, narrow, withoutRateLimits }: StoryPro
           />
         </section>
 
-        <section className="flex flex-col gap-2">
+        <section {...stylex.props(storyLayout.stack)}>
           <p className="text-xs font-medium text-muted-foreground">Provider row</p>
           <div className="rounded-lg border border-border/60 bg-card/50">
             <ProviderRow

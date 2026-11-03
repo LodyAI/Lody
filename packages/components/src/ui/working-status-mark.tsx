@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { themeSpace } from '../style/theme-scale.stylex';
 
@@ -65,7 +65,7 @@ export function WorkingStatusMark({ working, unread, className }: WorkingStatusM
     return (
       <span
         data-session-unread-dot=""
-        className={cn(stylex.props(styles.unread).className, className)}
+        className={clsx(stylex.props(styles.unread).className, className)}
       />
     );
   }

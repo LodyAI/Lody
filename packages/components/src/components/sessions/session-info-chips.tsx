@@ -58,12 +58,14 @@ import {
   themeFontWeight,
   themeRadius,
   themeSpace,
+  themeShadow,
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
   textMuted: { color: 'hsl(var(--muted-foreground) / 1)' },
   textWarning: { color: 'hsl(var(--status-warning) / 1)' },
   ciPopover: {
+    boxShadow: themeShadow.xl,
     width: 'calc(var(--spacing) * 96)',
     borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
   },
@@ -199,7 +201,7 @@ const styles = stylex.create({
     // Keep it that way.
     boxShadow: { default: null, ':focus-visible': 'none' },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     ':disabled': { opacity: 0.5 },
@@ -234,7 +236,7 @@ const styles = stylex.create({
     // indicator. Keep it that way.
     boxShadow: { default: null, ':focus-visible': 'none' },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     '::before': {
@@ -284,7 +286,7 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     '@media (hover: hover)': {
@@ -326,7 +328,7 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -375,7 +377,7 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -403,7 +405,7 @@ const styles = stylex.create({
     fontWeight: themeFontWeight.medium,
     fontVariantNumeric: 'tabular-nums',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     ':disabled': { pointerEvents: 'none' },
@@ -470,7 +472,7 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -489,7 +491,7 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -653,16 +655,11 @@ export function GoalChip({
         content: (
           <div className={clsx(stylex.props(styles.goalPanel).className, INFO_BAR_TEXT_CLASS)}>
             <div {...stylex.props(styles.goalHeaderRow)}>
-              <Target
-                className={clsx(stylex.props(styles.goalGlyph).className, meta.textClassName)}
-                aria-hidden="true"
-              />
-              <span className={clsx(stylex.props(styles.goalLabel).className, meta.textClassName)}>
+              <Target {...stylex.props(styles.goalGlyph, meta.textStyle)} aria-hidden="true" />
+              <span {...stylex.props(styles.goalLabel, meta.textStyle)}>
                 {t('sessions.goal.banner.label', 'Goal')}
               </span>
-              <span className={clsx(stylex.props(styles.goalLabel).className, meta.textClassName)}>
-                {statusLabel}
-              </span>
+              <span {...stylex.props(styles.goalLabel, meta.textStyle)}>{statusLabel}</span>
               <span {...stylex.props(styles.goalMetrics)}>
                 {timeLabel ? (
                   <span
@@ -1408,7 +1405,7 @@ export function PrCiPill({
         aria-label={t('sessions.prCi.label', 'CI checks')}
         padding="none"
         maxWidth="min(24rem, 90vw)"
-        className={clsx(stylex.props(styles.ciPopover).className, 'shadow-xl')}
+        xstyle={styles.ciPopover}
       >
         <PrCiPopoverBody runs={runs!} onOpenRun={onOpenRun} />
       </Popover.Content>

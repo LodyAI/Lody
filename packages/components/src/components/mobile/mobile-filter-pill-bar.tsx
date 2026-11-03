@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronDown, Filter } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 
-import { cn } from '@/lib/utils';
+import {clsx} from 'clsx';
 import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
@@ -299,7 +299,7 @@ export function MobileFilterPillBar({ pills, className }: MobileFilterPillBarPro
   );
 
   return (
-    <div {...withClassName(stylex.props(styles.root), cn('mobile-filter-pill-bar', className))}>
+    <div {...withClassName(stylex.props(styles.root), clsx('mobile-filter-pill-bar', className))}>
       <div
         role="toolbar"
         aria-label="filters"

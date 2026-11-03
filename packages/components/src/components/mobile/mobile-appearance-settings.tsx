@@ -41,6 +41,7 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  modePanel: { padding: 0 },
   /** The trigger's box: it hugs its label and never takes the whole row. */
   triggerBox: { display: 'inline-block', maxWidth: '60vw' },
   /**
@@ -375,7 +376,7 @@ function ThemeModeMenuTrigger({
       <MobileInlineMenu
         id="settings-theme"
         ariaLabel={String(t('settings.theme.label'))}
-        triggerClassName={stylex.props(styles.trigger).className}
+        triggerXstyle={styles.trigger}
         triggerContent={
           <>
             {selectedIcon ? <span {...stylex.props(styles.iconSlot)}>{selectedIcon}</span> : null}
@@ -383,7 +384,7 @@ function ThemeModeMenuTrigger({
             <ChevronDown {...stylex.props(styles.chevron)} strokeWidth={2} aria-hidden="true" />
           </>
         }
-        expansionPanelClassName="p-0"
+        expansionPanelXstyle={styles.modePanel}
       >
         {() => (
           <div role="radiogroup" {...stylex.props(styles.modes)}>

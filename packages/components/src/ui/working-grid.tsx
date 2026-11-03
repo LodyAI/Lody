@@ -7,7 +7,7 @@ import {
   type CSSProperties,
 } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { useResolvedTheme } from '@/theme-provider';
 
@@ -408,7 +408,7 @@ export function WorkingGrid({
       ref={rootRef}
       data-working-grid=""
       aria-hidden="true"
-      className={cn(stylex.props(styles.root).className, className)}
+      className={clsx(stylex.props(styles.root).className, className)}
       // Tiles animate opacity between 1 and their trough; the mark's own opacity
       // sets the ceiling, so the brightest tile reaches maxOpacity.
       style={{ width: size, height: size, opacity: maxOpacity, ...style }}

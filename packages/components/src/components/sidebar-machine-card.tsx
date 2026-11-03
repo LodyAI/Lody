@@ -29,6 +29,7 @@ const OS_LABELS: Readonly<Record<string, string>> = {
 };
 
 const styles = stylex.create({
+  trigger: { display: 'flex', minWidth: 0, flex: '1 1 0%' },
   ownerAvatar: {
     [avatarTokens.sizeMedium]: 'calc(var(--spacing) * 3.5)',
     fontSize: '7px',
@@ -195,7 +196,7 @@ export function SidebarMachineHoverCard({
     <SidebarHoverCard
       disabled={disabled}
       content={<SidebarMachineCard machine={machine} />}
-      triggerClassName="flex min-w-0 flex-1"
+      triggerClassName={stylex.props(styles.trigger).className}
     >
       {children}
     </SidebarHoverCard>

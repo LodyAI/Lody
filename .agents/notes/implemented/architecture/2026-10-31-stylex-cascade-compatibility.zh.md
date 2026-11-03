@@ -9,16 +9,18 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## 摘要
 
+历史实现：该桥已被删除，当前架构见[直接 StyleX 与框架退役](2026-10-22-tailwind-to-stylex-migration.zh.md#直接-stylex-与框架退役)。下文保留当时决策、失败与证据，源码链接固定到移除前的提交。
+
 把公开Tailwind默认值移到其他层或更换class身份，会改变受支持调用方的优先级。有限构建adapter现通过一百一十六个源码绑定，让StyleX拥有MobileInlinePicker、AdaptiveTabStrip、公开旧Sidebar、WorkspaceCard、SessionMentionDropLayer、ContextSwitch、ContainerQueryProvider、SessionMonacoTextViewer、LocalTerminalPanel、AcpSessionSelect、UnifiedProjectSelector、ChatComposer、LoroSidebar、AttachmentAddMenu、message actions、window-drag几何、CommandDialog、两个Mention field owner、SidebarFilterPopover及SessionUsagePopover共二百七十二个utility位置使用的九十三个单字段key与一个封闭字重pair，同时保留原selector、class与规则位置。它先移除原声明，再插入真正StyleX compiler metadata，普通StyleX收集器保持独立。真实生产、开发及当前源码组合比较保持渲染与CSS，但过渡桥仍依赖Tailwind候选保留和排序。这是迁移边界，不代表移除Tailwind，也不是通用样式API。
 
 ## 归属与编译
 
-| Owner                                                                                                          | 职责                                                                            |
-| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | 九十四个StyleX key、九十五条物理声明及一百一十六个源码scalar／group class绑定。 |
-| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | 唯一声明／属性／旧alias映射及有序绑定成员；现有源码扫描保留九十四alias。        |
-| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | 闭合源码编译、声明等价门禁与原CSS槽位替换。                                     |
-| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | 真实compiler、cn、source map、拒绝及恢复行为。                                  |
+| Owner                                                                                                                                                                           | 职责                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [`legacy-defaults.stylex.ts`](https://github.com/LodyAI/Lody/blob/11390b40320b01a8f5807850de65a011253cedda/packages/components/src/style/legacy-defaults.stylex.ts)             | 九十四个StyleX key、九十五条物理声明及一百一十六个源码scalar／group class绑定。 |
+| [`legacy-declaration-profile.ts`](https://github.com/LodyAI/Lody/blob/11390b40320b01a8f5807850de65a011253cedda/packages/components/src/style/legacy-declaration-profile.ts)     | 唯一声明／属性／旧alias映射及有序绑定成员；现有源码扫描保留九十四alias。        |
+| [`vite-legacy-declarations.ts`](https://github.com/LodyAI/Lody/blob/11390b40320b01a8f5807850de65a011253cedda/packages/components/vite-legacy-declarations.ts)                   | 闭合源码编译、声明等价门禁与原CSS槽位替换。                                     |
+| [`legacy-declaration-bridge.test.ts`](https://github.com/LodyAI/Lody/blob/11390b40320b01a8f5807850de65a011253cedda/packages/components/tests/legacy-declaration-bridge.test.ts) | 真实compiler、cn、source map、拒绝及恢复行为。                                  |
 
 ```mermaid
 flowchart LR

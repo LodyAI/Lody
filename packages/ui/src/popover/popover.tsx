@@ -60,6 +60,7 @@ export interface PopoverContentProps extends Omit<
   maxWidth?: string | number;
   maxHeight?: string | number;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 /**
@@ -94,6 +95,7 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
   function PopoverContent(
     {
       className,
+      xstyle,
       children,
       container,
       initialFocus,
@@ -142,7 +144,7 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
           <BasePopover.Popup
             initialFocus={initialFocus}
             finalFocus={finalFocus}
-            style={stylex.props(...panelDimensions).style}
+            style={stylex.props(...panelDimensions, xstyle).style}
             className={(state) => {
               // StyleX cannot express `[data-starting-style]`, so the two ends
               // of the rise are read off Base UI's transition status here, and
@@ -157,6 +159,7 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
                   padding === 'none' && layout.noPadding,
                   gap === 'none' && layout.noGap,
                   ...panelDimensions,
+                  xstyle,
                   hidden && hiddenSurfaceForSide(state.side)
                 ).className,
                 className

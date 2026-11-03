@@ -74,8 +74,8 @@ test('counts only supported space-joined class arrays and keeps unresolved membe
     );
 
     const require = createRequire(import.meta.url);
-    const compiler = createRequire(require.resolve('@tailwindcss/postcss'))('@tailwindcss/node');
-    const css = path.join(packageRoot, 'src/tailwind/index.css');
+    const compiler = require('@tailwindcss/node');
+    const css = path.join(packageRoot, '.storybook/legacy-stories.css');
     const design = await compiler.__unstable__loadDesignSystem(await readFile(css, 'utf8'), {
       base: path.dirname(css),
     });
@@ -121,7 +121,7 @@ target[computedKey] = 'm-8';
     });
     assert.equal(result.status, 0, result.stderr);
     const report = JSON.parse(result.stdout);
-    assert.equal(report.scannerVersion, 2);
+    assert.equal(report.scannerVersion, 3);
     assert.deepEqual(
       report.files[0].entries.flatMap((entry) => entry.candidates),
       ['p-2', 'block', 'h-full', 'opacity-50']
@@ -132,14 +132,43 @@ target[computedKey] = 'm-8';
       ['runtimeClass', "target.className += 'm-4'", 'importedStyles.root']
     );
     const require = createRequire(import.meta.url);
-    const compiler = createRequire(require.resolve('@tailwindcss/postcss'))('@tailwindcss/node');
-    const css = path.join(packageRoot, 'src/tailwind/index.css');
+    const compiler = require('@tailwindcss/node');
+    const css = path.join(packageRoot, '.storybook/legacy-stories.css');
     const design = await compiler.__unstable__loadDesignSystem(await readFile(css, 'utf8'), {
       base: path.dirname(css),
     });
     for (const candidate of ['m-4', 'm-7', 'm-8', 'm-9']) {
       assert.notEqual(design.candidatesToCss([candidate])[0], null, candidate);
     }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('counts status class maps and class defaults without interpreting ordinary data', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'lody-tailwind-class-maps-'));
+  try {
+    const fixture = path.join(directory, 'status.tsx');
+    await writeFile(
+      fixture,
+      `
+export const STATUS = { active: { textClassName: 'text-status-info', surfaceClassName: 'bg-status-info/10' } };
+const unrelatedData = { label: 'm-9', color: 'p-9' };
+function view(className = 'h-full') { return <div className={className} />; }
+const props = { 'className': 'flex', iconColorClassName: 'text-github-open' };
+`
+    );
+    const result = spawnSync(process.execPath, [scanner, '--root', fixture, '--json'], {
+      cwd: packageRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(
+      report.files[0].entries.flatMap((entry) => entry.candidates),
+      ['text-status-info', 'bg-status-info/10', 'h-full', 'flex', 'text-github-open']
+    );
+    assert.equal(report.totals.occurrences, 5);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

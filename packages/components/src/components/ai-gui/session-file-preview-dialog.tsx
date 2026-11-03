@@ -1,7 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { clsx } from 'clsx';
 import { toast } from '@/lib/toast';
 import { Check, Copy, Download, Eye, EyeClosed, FileWarning, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -94,10 +93,7 @@ export function SessionFilePreviewPanel({
     <div {...stylex.props(styles.panel, mobileSheet && styles.sheetPanel)}>
       <div {...stylex.props(styles.header)}>
         <div {...stylex.props(styles.headerText)}>
-          <Title
-            fontWeight="var(--font-weight-semibold)"
-            className={clsx('leading-tight', stylex.props(styles.titleText).className)}
-          >
+          <Title fontWeight="var(--font-weight-semibold)" xstyle={styles.titleText}>
             {file.fileName}
           </Title>
           <span {...stylex.props(styles.fileMeta)}>{formatFileSize(file.sizeBytes)}</span>
@@ -310,7 +306,7 @@ const styles = stylex.create({
   },
   /** The title's own size and weight stay with the primitive that owns them. */
   titleText: {
-    '--tw-font-weight': 'var(--font-weight-semibold)',
+    lineHeight: 1.25,
     [dialog.titleSize]: 'var(--text-sm)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',

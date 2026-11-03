@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { QueuedScheduledMessagePreview } from './queued-scheduled-message-preview';
 import { SessionInfoBar } from '../components/sessions/session-info-bar';
 import { QuotaContinueView } from '../components/schedules/quota-continue-action';
@@ -23,6 +24,109 @@ import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
 import { SettingsStoryProviders } from './settings-story-shell';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  frame: {
+    position: 'relative',
+    'min-height': '100vh',
+    'background-color': '#050b1d',
+    color: 'var(--color-white)',
+  },
+  overlay: {
+    'pointer-events': 'none',
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * 0)',
+    'background-image':
+      'radial-gradient(circle at 20% 0%,rgba(88,166,255,0.2),transparent 55%),radial-gradient(circle at 80% 10%,rgba(35,82,150,0.3),transparent 60%),radial-gradient(circle at 50% 100%,rgba(8,30,58,0.9),transparent 60%)',
+  },
+  row2: {
+    position: 'relative',
+    'margin-inline': 'auto',
+    display: 'flex',
+    'min-height': '100vh',
+    width: '100%',
+    'max-width': '48rem',
+    'align-items': 'center',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 12)',
+  },
+  row3: {
+    position: 'relative',
+    display: 'flex',
+    'min-height': '100vh',
+    'align-items': 'center',
+    'background-color': '#050b1d',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    color: 'var(--color-white)',
+  },
+  frame2: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': '48rem',
+  },
+  row4: {
+    display: 'flex',
+    'min-height': '100vh',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'background-color': 'var(--color-slate-50)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 12)',
+  },
+  frame3: {
+    'min-height': '100vh',
+    'background-color': '#050b1d',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 12)',
+    color: 'var(--color-white)',
+  },
+  stack: {
+    display: 'flex',
+    'min-height': '100vh',
+    'flex-direction': 'column',
+    'justify-content': 'flex-end',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-bottom': 'calc(var(--spacing) * 6)',
+  },
+  stack2: {
+    display: 'flex',
+    'min-height': '100vh',
+    'flex-direction': 'column',
+    'justify-content': 'flex-end',
+    'background-color': '#111315',
+    'padding-inline': '9vw',
+    'padding-bottom': 'calc(var(--spacing) * 6)',
+    color: 'var(--color-white)',
+  },
+  frame4: {
+    width: '100%',
+    'max-width': '90rem',
+  },
+  frame5: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 12)',
+  },
+  row5: {
+    display: 'flex',
+    'min-height': '100vh',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  frame6: {
+    width: '100%',
+    'max-width': '42rem',
+  },
+});
 
 // So session.focusInput has a binding — the desktop ⌘L focus hint reads it.
 registerBuiltInCommands();
@@ -256,7 +360,7 @@ function DemoComposer({
         </div>
       </>
     ) : (
-      <div className="flex flex-wrap items-center gap-2">
+      <div {...stylex.props(storyLayout.row)}>
         <OptionSelector
           value={selectedRepo}
           options={repoOptions}
@@ -352,10 +456,10 @@ function DemoComposer({
 
 export const LandingDark: Story = {
   render: () => (
-    <div className="relative min-h-screen bg-[#050b1d] text-white">
+    <div {...stylex.props(storyLayout.frame)}>
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(88,166,255,0.2),transparent_55%),radial-gradient(circle_at_80%_10%,rgba(35,82,150,0.3),transparent_60%),radial-gradient(circle_at_50%_100%,rgba(8,30,58,0.9),transparent_60%)]" />
-      <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
+      <div {...stylex.props(storyLayout.overlay)} />
+      <div {...stylex.props(storyLayout.row2)}>
         <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
           <Card.Content>
             <DemoComposer tone="dark" variant="landing" title="Let's ship something" />
@@ -368,8 +472,8 @@ export const LandingDark: Story = {
 
 export const LandingMentionStress: Story = {
   render: () => (
-    <div className="relative flex min-h-screen items-center bg-[#050b1d] px-4 text-white">
-      <div className="mx-auto w-full max-w-3xl">
+    <div {...stylex.props(storyLayout.row3)}>
+      <div {...stylex.props(storyLayout.frame2)}>
         <DemoComposer
           tone="dark"
           variant="landing"
@@ -384,7 +488,7 @@ export const LandingMentionStress: Story = {
 
 export const DialogLight: Story = {
   render: () => (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
+    <div {...stylex.props(storyLayout.row4)}>
       <div className="w-full max-w-xl rounded-2xl border bg-white p-6 shadow-lg">
         <h2 className="mb-4 text-lg font-semibold text-slate-900">Start a new chat</h2>
         <DemoComposer tone="light" variant="dialog" showSecondary promptRows={4} />
@@ -395,7 +499,7 @@ export const DialogLight: Story = {
 
 export const DialogMentionStress: Story = {
   render: () => (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
+    <div {...stylex.props(storyLayout.row4)}>
       <div className="w-full max-w-xl rounded-2xl border bg-white p-6 shadow-lg">
         <h2 className="mb-4 text-lg font-semibold text-slate-900">Start a new chat</h2>
         <DemoComposer
@@ -413,8 +517,8 @@ export const DialogMentionStress: Story = {
 
 export const SessionDark: Story = {
   render: () => (
-    <div className="min-h-screen bg-[#050b1d] px-4 py-12 text-white">
-      <div className="mx-auto w-full max-w-3xl">
+    <div {...stylex.props(storyLayout.frame3)}>
+      <div {...stylex.props(storyLayout.frame2)}>
         <DemoComposer tone="dark" variant="session" />
       </div>
     </div>
@@ -424,8 +528,8 @@ export const SessionDark: Story = {
 /** Long command lists against the bottom-docked business composer. */
 export const SessionMentionStress: Story = {
   render: () => (
-    <div className="flex min-h-screen flex-col justify-end bg-background px-4 pb-6">
-      <div className="mx-auto w-full max-w-3xl">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.frame2)}>
         <DemoComposer tone="light" variant="session" initialPrompt="" showMentionCommands />
       </div>
     </div>
@@ -435,8 +539,8 @@ export const SessionMentionStress: Story = {
 /** The wide bottom-docked composer seen in a full-size desktop window. */
 export const SessionMentionWideDark: Story = {
   render: () => (
-    <div className="flex min-h-screen flex-col justify-end bg-[#111315] px-[9vw] pb-6 text-white">
-      <div className="w-full max-w-[90rem]">
+    <div {...stylex.props(storyLayout.stack2)}>
+      <div {...stylex.props(storyLayout.frame4)}>
         <DemoComposer
           tone="dark"
           variant="session"
@@ -451,8 +555,8 @@ export const SessionMentionWideDark: Story = {
 
 export const SessionLongPrompt: Story = {
   render: () => (
-    <div className="min-h-screen bg-background px-4 py-12">
-      <div className="mx-auto w-full max-w-3xl">
+    <div {...stylex.props(storyLayout.frame5)}>
+      <div {...stylex.props(storyLayout.frame2)}>
         <DemoComposer
           tone="light"
           variant="session"
@@ -465,8 +569,8 @@ export const SessionLongPrompt: Story = {
 
 export const SessionWithAttachments: Story = {
   render: () => (
-    <div className="min-h-screen bg-background px-4 py-12">
-      <div className="mx-auto w-full max-w-3xl">
+    <div {...stylex.props(storyLayout.frame5)}>
+      <div {...stylex.props(storyLayout.frame2)}>
         <DemoComposer tone="light" variant="session" showAttachments />
       </div>
     </div>
@@ -479,8 +583,8 @@ export const SessionWithAttachments: Story = {
 // failed-state retry/remove affordances.
 export const AttachmentUploadStates: Story = {
   render: () => (
-    <div className="min-h-screen bg-background px-4 py-12">
-      <div className="mx-auto w-full max-w-3xl">
+    <div {...stylex.props(storyLayout.frame5)}>
+      <div {...stylex.props(storyLayout.frame2)}>
         <DemoComposer
           tone="light"
           variant="session"
@@ -497,9 +601,9 @@ export const AttachmentUploadStatesDark: Story = {
   // text-input-foreground) flip to dark and match the dark composer shell.
   globals: { theme: 'dark' },
   render: () => (
-    <div className="relative min-h-screen bg-[#050b1d] text-white">
+    <div {...stylex.props(storyLayout.frame)}>
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
-      <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
+      <div {...stylex.props(storyLayout.row2)}>
         <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 ring-1 ring-white/10 backdrop-blur-2xl">
           <Card.Content>
             <DemoComposer
@@ -518,10 +622,10 @@ export const AttachmentUploadStatesDark: Story = {
 
 export const LandingWithPastedText: Story = {
   render: () => (
-    <div className="relative min-h-screen bg-[#050b1d] text-white">
+    <div {...stylex.props(storyLayout.frame)}>
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(88,166,255,0.2),transparent_55%),radial-gradient(circle_at_80%_10%,rgba(35,82,150,0.3),transparent_60%),radial-gradient(circle_at_50%_100%,rgba(8,30,58,0.9),transparent_60%)]" />
-      <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
+      <div {...stylex.props(storyLayout.overlay)} />
+      <div {...stylex.props(storyLayout.row2)}>
         <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
           <Card.Content>
             <DemoComposer
@@ -551,8 +655,8 @@ function ScheduledSendPreview({
   const [at, setAt] = useState<string | null>('2026-10-28T01:00:00.000Z');
   const [picker, setPicker] = useState(pickerInitiallyOpen);
   return (
-    <div className="min-h-screen bg-background p-4 flex items-center justify-center">
-      <div className="w-full max-w-2xl">
+    <div {...stylex.props(storyLayout.row5)}>
+      <div {...stylex.props(storyLayout.frame6)}>
         <SessionInfoBar
           status={null}
           machine={{
@@ -624,8 +728,8 @@ function QuotaContinuePreview() {
   const [saved, setSaved] = useState(false);
   const [text, setText] = useState('Keep this draft while waiting for quota.');
   return (
-    <div className="min-h-screen bg-background p-4 flex items-center justify-center">
-      <div className="w-full max-w-2xl">
+    <div {...stylex.props(storyLayout.row5)}>
+      <div {...stylex.props(storyLayout.frame6)}>
         <QuotaContinueView saved={saved} pending={false} onClick={() => setSaved(true)} />
         <ChatComposer
           variant="session"

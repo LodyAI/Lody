@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Check, Circle, Download, Square, Trash2, X } from 'lucide-react';
@@ -9,6 +10,31 @@ import {
 import { DEFAULT_ARRIVAL_INTENT_CONFIG } from '@/components/ai-gui/conversation-outline-arrival-intent';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { Button } from '@lody/ui/button';
+const storyLayout = stylex.create({
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    'max-width': '46rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+    overflow: 'hidden',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 8)',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'padding-block': 'calc(var(--spacing) * 3)',
+  },
+  section: {
+    'min-width': 'calc(var(--spacing) * 0)',
+  },
+  caption: {
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 const meta = {
   title: 'Sessions/ConversationOutlineRail/ArrivalIntentLab',
@@ -248,7 +274,7 @@ function ArrivalIntentLab() {
   return (
     <div className="grid min-h-screen grid-cols-1 bg-background text-foreground lg:grid-cols-[minmax(640px,1fr)_320px]">
       <div className="@container relative h-[58vh] min-h-[520px] overflow-hidden border-b border-border lg:h-screen lg:min-h-[680px] lg:border-r lg:border-b-0">
-        <div className="mx-auto flex h-full w-full max-w-[46rem] flex-col gap-3 overflow-hidden px-4 py-8">
+        <div {...stylex.props(storyLayout.stack)}>
           {entries.slice(activeIndex, activeIndex + 7).map((item, offset) => (
             <div
               key={item.key}
@@ -350,7 +376,7 @@ function ArrivalIntentLab() {
           </Button>
         </div>
 
-        <div className="min-h-0 flex-1 py-3">
+        <div {...stylex.props(storyLayout.frame)}>
           <div className="mb-2 text-xs font-medium text-muted-foreground">Recent trials</div>
           <div className="divide-y divide-border">
             {trials
@@ -362,9 +388,9 @@ function ArrivalIntentLab() {
                   className="grid grid-cols-[32px_1fr_auto] items-center gap-2 py-2 text-xs"
                 >
                   <span className="font-mono text-muted-foreground">#{trial.id}</span>
-                  <div className="min-w-0">
+                  <div {...stylex.props(storyLayout.section)}>
                     <div className="truncate font-medium">{trial.openSource}</div>
-                    <div className="text-muted-foreground">{trial.inferredOutcome}</div>
+                    <div {...stylex.props(storyLayout.caption)}>{trial.inferredOutcome}</div>
                   </div>
                   <span
                     className={
@@ -388,8 +414,8 @@ function ArrivalIntentLab() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <div className="text-muted-foreground">{label}</div>
+    <div {...stylex.props(storyLayout.section)}>
+      <div {...stylex.props(storyLayout.caption)}>{label}</div>
       <div className="mt-0.5 truncate font-mono text-[11px] text-foreground">{value}</div>
     </div>
   );

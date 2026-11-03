@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider as JotaiProvider, createStore } from 'jotai';
 import {
@@ -11,6 +12,13 @@ import {
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { MessageRowView } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+const storyLayout = stylex.create({
+  frame: {
+    width: '720px',
+    'max-width': '100vw',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 /**
  * The missing-history negative acknowledgement (`SessionMeta.lastMissingHistoryUserMsgId`)
@@ -74,7 +82,7 @@ function renderRow(
   }
   return (
     <JotaiProvider store={store}>
-      <div className="w-[720px] max-w-[100vw] bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <ConversationColumn>
           <MessageRowView {...args} />
         </ConversationColumn>

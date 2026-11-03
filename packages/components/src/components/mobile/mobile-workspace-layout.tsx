@@ -14,6 +14,7 @@ import {
 import { themeColors } from '../../style/theme-colors.stylex';
 
 const styles = stylex.create({
+  sidebar: { height: '100%' },
   content: {
     position: 'relative',
     minHeight: 0,
@@ -77,7 +78,7 @@ export function MobileWorkspaceLayout({
     <div className={getMobileMainLayoutRootClassName()}>
       <MobileSidebarDrawer open={drawerOpen} onOpenChange={setDrawerOpen} width={320}>
         <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
-          <LoroAppSidebar className="h-full" />
+          <LoroAppSidebar xstyle={styles.sidebar} />
         </ErrorBoundary>
       </MobileSidebarDrawer>
 

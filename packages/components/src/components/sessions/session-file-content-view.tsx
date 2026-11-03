@@ -278,7 +278,7 @@ const styles = stylex.create({
   },
   previewToggleTooltip: {
     [tooltip.text]: 'var(--text-xs)',
-    [tooltip.leading]: 'var(--tw-leading, var(--text-xs--line-height))',
+    [tooltip.leading]: 'var(--text-xs--line-height)',
   },
   previewToggle: {
     display: 'flex',

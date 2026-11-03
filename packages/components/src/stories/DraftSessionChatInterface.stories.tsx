@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import {
@@ -18,6 +19,12 @@ import {
   type DraftSessionSendPayload,
 } from '@/components/sessions/draft-session-chat-interface';
 import type { DraftSessionTab } from '@/lib/session-draft-tabs';
+const storyLayout = stylex.create({
+  frame: {
+    height: '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const machineId = 'machine-story' as MachineId;
 const agentConfigId = 'agent-story' as AgentConfigId;
@@ -78,7 +85,7 @@ function StoryShell({ draft }: { draft: DraftSessionTab }) {
 
   return (
     <Provider store={store}>
-      <div className="h-screen bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <DraftSessionChatInterface
           draft={currentDraft}
           parentSession={parentSession}

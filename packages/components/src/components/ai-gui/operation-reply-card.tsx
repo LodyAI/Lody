@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowUpRight, MessageSquareReply } from 'lucide-react';
@@ -9,7 +10,6 @@ import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { Button } from '@lody/ui/button';
 import { button } from '@lody/ui/button/button.tokens.stylex';
 import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
-import { cn } from '@/lib/utils';
 import { messageActionInkTheme } from '../../style/message-action-button.stylex';
 import { Dialog } from '@/ui/dialog';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -70,16 +70,15 @@ const dialogNavigationLayoutTheme = stylex.createTheme(button, {
 
 const styles = stylex.create({
   dialogTitle: {
-    '--tw-font-weight': 'var(--font-weight-medium)',
     [dialog.titleSize]: 'var(--text-base)',
-    [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
+    [dialog.titleLeading]: 'var(--text-base--line-height)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
   dialogDescription: {
     [dialog.descriptionSize]: 'var(--text-xs)',
-    [dialog.descriptionLeading]: 'var(--tw-leading, var(--text-xs--line-height))',
+    [dialog.descriptionLeading]: 'var(--text-xs--line-height)',
   },
   errorLine: {
     overflow: 'hidden',
@@ -172,6 +171,7 @@ const styles = stylex.create({
     fontWeight: themeFontWeight.medium,
     color: themeColors.foreground,
   },
+  dialogSurface: { maxHeight: '80vh' },
   dialogHeader: {
     display: 'flex',
     minWidth: 0,
@@ -287,7 +287,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
         size="small"
         height="calc(var(--spacing) * 7)"
         fontSize="var(--text-xs)"
-        lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+        lineHeight="var(--text-xs--line-height)"
         className={stylex.props(navigationLayoutTheme, messageActionInkTheme).className}
         disabled={!navigate}
         onClick={navigate}
@@ -298,7 +298,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
 
       {reply ? (
         <Dialog.Root open={open} onOpenChange={setOpen}>
-          <Dialog.Content width="42rem" padding="none" gap="none" className="max-h-[80vh]">
+          <Dialog.Content width="42rem" padding="none" gap="none" xstyle={styles.dialogSurface}>
             <div {...stylex.props(styles.dialogHeader)}>
               <div {...stylex.props(styles.body)}>
                 <Dialog.Description className={stylex.props(styles.dialogDescription).className}>
@@ -306,7 +306,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
                 </Dialog.Description>
                 <Dialog.Title
                   fontWeight="var(--font-weight-medium)"
-                  className={cn(stylex.props(styles.dialogTitle).className)}
+                  className={clsx(stylex.props(styles.dialogTitle).className)}
                   title={title}
                 >
                   {title}
@@ -319,7 +319,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
                   size="small"
                   height="calc(var(--spacing) * 7)"
                   fontSize="var(--text-xs)"
-                  lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+                  lineHeight="var(--text-xs--line-height)"
                   className={stylex.props(dialogNavigationLayoutTheme).className}
                   onClick={() => {
                     setOpen(false);

@@ -8,6 +8,15 @@ import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { MessageQueueDisplay } from '@/components/sessions/message-queue';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
+const storyLayout = stylex.create({
+  canvas: {
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  section: {
+    'margin-inline': 'calc(var(--spacing) * 3)',
+  },
+});
 
 const TASKS = [
   'Refactor the message queue to support priority ordering and cancellation tokens',
@@ -49,9 +58,9 @@ const meta = {
       const width = (ctx.parameters as { containerWidth?: string }).containerWidth ?? 'w-[420px]';
       // Mirror production: the sheet is inset over a faux composer and sits on it.
       return (
-        <div className="bg-background p-6">
+        <div {...stylex.props(storyLayout.canvas)}>
           <div className={`${width}`}>
-            <div className="mx-3">
+            <div {...stylex.props(storyLayout.section)}>
               <Story />
             </div>
             <div className="rounded-xl border border-foreground/[0.10] bg-[hsl(var(--composer))] px-3 py-3 text-xs text-muted-foreground/60">

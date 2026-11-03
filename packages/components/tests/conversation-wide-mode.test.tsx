@@ -7,10 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { conversationWideModeAtom } from '../src/atoms/settings';
 import { ConversationColumn } from '../src/components/shared/conversation-column';
-import {
-  CONVERSATION_CONTENT_WIDTH_CLASS,
-  CONVERSATION_CONTENT_WIDTH_WIDE_CLASS,
-} from '../src/lib/conversation-layout';
 
 /**
  * Full-width mode (Settings > Appearance) is owned by `ConversationColumn`:
@@ -38,51 +34,33 @@ afterEach(async () => {
   localStorage.removeItem('lody-conversation-wide-mode');
 });
 
-function renderColumn(store: ReturnType<typeof createStore>) {
-  return act(async () =>
-    root.render(
-      createElement(
-        Provider,
-        { store },
-        createElement(ConversationColumn, { 'data-testid': 'column' })
-      )
-    )
-  );
-}
-
-function columnClasses(): string {
-  return container.querySelector<HTMLElement>('[data-testid="column"]')?.className ?? '';
-}
-
 describe('ConversationColumn wide mode', () => {
-  it('renders the capped column by default', async () => {
+  it('keeps a draft and DOM identity when the shared mode changes', async () => {
     const store = createStore();
-    await renderColumn(store);
-    for (const cls of CONVERSATION_CONTENT_WIDTH_CLASS.split(' ')) {
-      expect(columnClasses()).toContain(cls);
-    }
-  });
-
-  it('drops the max-width cap when wide mode is on, keeping the shared gutter', async () => {
-    const store = createStore();
-    store.set(conversationWideModeAtom, true);
-    await renderColumn(store);
-
-    for (const cls of CONVERSATION_CONTENT_WIDTH_WIDE_CLASS.split(' ')) {
-      expect(columnClasses()).toContain(cls);
-    }
-    expect(columnClasses()).not.toContain('max-w-[calc(48rem+28px)]');
-  });
-
-  it('switches the column when the atom flips', async () => {
-    const store = createStore();
-    await renderColumn(store);
-    expect(columnClasses()).toContain('max-w-[calc(48rem+28px)]');
-
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(
+            ConversationColumn,
+            { 'aria-label': 'Conversation', style: { minHeight: 24 } },
+            createElement('input', { defaultValue: 'Draft' })
+          )
+        )
+      )
+    );
+    const column = container.querySelector<HTMLDivElement>('[data-slot="conversation-column"]')!;
+    const input = container.querySelector('input')!;
+    input.value = 'Draft still being edited';
     await act(async () => store.set(conversationWideModeAtom, true));
-    expect(columnClasses()).not.toContain('max-w-[calc(48rem+28px)]');
-
+    expect(container.querySelector('[data-slot="conversation-column"]')).toBe(column);
+    expect(container.querySelector('input')).toBe(input);
+    expect(input.value).toBe('Draft still being edited');
+    expect(column.getAttribute('aria-label')).toBe('Conversation');
+    expect(column.style.minHeight).toBe('24px');
     await act(async () => store.set(conversationWideModeAtom, false));
-    expect(columnClasses()).toContain('max-w-[calc(48rem+28px)]');
+    expect(container.querySelector('[data-slot="conversation-column"]')).toBe(column);
+    expect(input.value).toBe('Draft still being edited');
   });
 });

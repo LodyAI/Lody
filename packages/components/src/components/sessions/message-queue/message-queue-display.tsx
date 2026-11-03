@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import {
   useCallback,
@@ -29,7 +30,6 @@ import { Collapsible } from '@lody/ui/collapsible';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   NO_SCROLL_EDGE_OVERFLOW,
@@ -63,7 +63,28 @@ export type MessageQueueDisplayProps = {
 };
 
 const FADE_PX = 20;
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
+  sheet: {
+    overflow: 'hidden',
+    borderTopLeftRadius: 'var(--radius-lg)',
+    borderTopRightRadius: 'var(--radius-lg)',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderBottomWidth: 0,
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input-border) / 1) 45%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--composer))',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input) / 1) 70%, transparent)',
+    },
+  },
   joinedSheet: { paddingBottom: space[4], marginBottom: `calc(-1 * ${space[4]})` },
   header: {
     display: 'flex',
@@ -99,7 +120,7 @@ const styles = stylex.create({
   failed: { color: colors.destructive },
   scrollRegion: {
     overflowY: 'auto',
-    borderTopStyle: 'var(--tw-border-style, solid)',
+    borderTopStyle: 'solid',
     borderTopWidth: '1px',
     borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 30%, transparent)',
   },
@@ -249,10 +270,8 @@ export function MessageQueueDisplay({
       <Collapsible.Root
         open={expanded}
         onOpenChange={setExpanded}
-        className={cn(
-          'overflow-hidden rounded-t-lg rounded-b-none border-[0.5px] border-b-0',
-          'border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/45 dark:bg-input/70',
-          roomy && stylex.props(styles.joinedSheet).className,
+        className={clsx(
+          stylex.props(styles.sheet, roomy && styles.joinedSheet).className,
           className
         )}
       >

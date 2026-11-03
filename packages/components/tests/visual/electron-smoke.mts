@@ -44,6 +44,28 @@ try {
   result.bootstrap = await onboarding.waitForLocalBootstrap();
   const screenshot = async (name: string) => {
     await page.evaluate(() => document.fonts.ready);
+    const viewportGeometry = await page.evaluate(() => {
+      const root = document.querySelector('.workspace-viewport');
+      if (!root) return null;
+      const rect = root.getBoundingClientRect();
+      return {
+        height: rect.height,
+        width: rect.width,
+        viewportHeight: innerHeight,
+        viewportWidth: innerWidth,
+      };
+    });
+    if (name === 'electron-local-chat-after.png' && !viewportGeometry)
+      throw new Error('The real local chat has no workspace viewport');
+    if (
+      viewportGeometry &&
+      (Math.abs(viewportGeometry.height - viewportGeometry.viewportHeight) > 1 ||
+        Math.abs(viewportGeometry.width - viewportGeometry.viewportWidth) > 1)
+    )
+      throw new Error(
+        `The real workspace does not fill its viewport: ${JSON.stringify(viewportGeometry)}`
+      );
+    ((result.viewportGeometry ??= {}) as Record<string, unknown>)[name] = viewportGeometry;
     const readiness = await page.evaluate(async () => {
       // TourStill's spring writes transforms from requestAnimationFrame; the
       // screenshot animation switch only settles browser-owned animations.

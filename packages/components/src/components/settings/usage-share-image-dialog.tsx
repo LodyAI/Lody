@@ -40,20 +40,18 @@ const BACKDROPS: Exclude<UsageShareCardBackdrop, 'none'>[] = ['lody', 'aurora', 
 const styles = stylex.create({
   titleTypography: {
     [dialog.titleSize]: 'var(--text-base)',
-    [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
+    [dialog.titleLeading]: 'var(--text-base--line-height)',
   },
   descriptionLeading: {
     [dialog.descriptionLeading]: 'calc(var(--spacing) * 5)',
-    '--tw-leading': 'calc(var(--spacing) * 5)',
   },
   qrLabelInk: {
     [fieldTokens.label]: 'hsl(var(--muted-foreground) / 1)',
     [fieldTokens.labelWeight]: 'var(--font-weight-normal)',
-    '--tw-font-weight': 'var(--font-weight-normal)',
   },
   header: {
     borderBottomWidth: '1px',
-    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomStyle: 'solid',
     borderColor: {
       default: 'hsl(var(--border) / 1)',
       '@supports (color: color-mix(in lab, red, red))':

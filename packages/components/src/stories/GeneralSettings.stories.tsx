@@ -9,6 +9,16 @@ import { Provider, createStore } from 'jotai';
 import { useState } from 'react';
 import { userAtom } from '@/atoms';
 import { RoutedStory, SettingsStoryProviders } from './settings-story-shell';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '100vh',
+  },
+  section: {
+    flex: '1',
+    overflow: 'auto',
+  },
+});
 
 /**
  * GeneralSettings 组件的 Storybook 故事
@@ -162,7 +172,7 @@ export const DarkModeMobile: Story = {
  */
 export const InSettingsLayout: Story = {
   render: () => (
-    <div className="h-screen flex">
+    <div {...stylex.props(storyLayout.row)}>
       {/* 模拟左侧导航栏 */}
       <div className="w-64 border-r bg-background p-4 hidden md:block">
         <div className="space-y-1">
@@ -182,7 +192,7 @@ export const InSettingsLayout: Story = {
       </div>
 
       {/* 主内容区域 */}
-      <div className="flex-1 overflow-auto">
+      <div {...stylex.props(storyLayout.section)}>
         <GeneralSettingsComponent />
       </div>
     </div>

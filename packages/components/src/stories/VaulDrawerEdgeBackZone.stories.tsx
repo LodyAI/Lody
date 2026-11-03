@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
@@ -5,6 +6,18 @@ import { ChevronLeft } from 'lucide-react';
 import { EDGE_ZONE_PX } from '@/components/mobile/mobile-edge-back-swipe';
 import { VaulDrawerEdgeBackZone } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+  },
+});
+
+const storyLayout = stylex.create({
+  section: {
+    display: 'contents',
+  },
+});
 
 /* Header height of the mock drawer; the edge zone is offset by this so it never
    covers the back chevron (matching the real PR/Preview `MOBILE_DRAWER_HEADER_INSET`). */
@@ -49,13 +62,13 @@ function StoryShell({
 
             <VaulDrawerEdgeBackZone isNativeApp={isNativeApp} topInset={HEADER_HEIGHT} />
 
-            <div data-vaul-no-drag className="contents">
+            <div data-vaul-no-drag {...stylex.props(storyLayout.section)}>
               <header
                 className="flex shrink-0 items-center gap-2 border-b px-4"
                 style={{ height: HEADER_HEIGHT }}
               >
                 <button type="button" aria-label="Back" onClick={() => setOpen(false)}>
-                  <ChevronLeft className="h-5 w-5" />
+                  <ChevronLeft {...stylex.props(storyLayoutStyles.frame)} />
                 </button>
                 <span className="text-sm font-medium">详情页</span>
               </header>

@@ -40,6 +40,7 @@ type SeparatorBaseProps = ComponentProps<typeof BaseMenu.Separator>;
 
 /** What every row in this family takes beyond the part's own props. */
 interface MenuRowProps {
+  xstyle?: stylex.StyleXStyles;
   children?: ReactNode;
   /**
    * A glyph in the fixed box at the start of the row, stated as the component
@@ -71,6 +72,7 @@ export interface MenuContentProps extends Omit<
   maxWidth?: string | number;
   maxHeight?: string | number;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 const dimensions = stylex.create({
@@ -133,6 +135,7 @@ export interface MenuGroupProps extends Omit<GroupBaseProps, 'className'> {
   className?: string;
 }
 export interface MenuGroupLabelProps extends Omit<GroupLabelBaseProps, 'className'> {
+  xstyle?: stylex.StyleXStyles;
   className?: string;
 }
 export interface MenuSeparatorProps extends Omit<SeparatorBaseProps, 'className'> {
@@ -221,7 +224,8 @@ function leadingFor(icon: MenuRowProps['icon'], inset: boolean | undefined, tone
 function rowClassName(
   state: { disabled?: boolean; highlighted?: boolean; checked?: boolean; open?: boolean },
   tone: MenuItemTone,
-  className: string | undefined
+  className: string | undefined,
+  xstyle?: stylex.StyleXStyles
 ): string | undefined {
   const destructive = tone === 'destructive';
   return appendClassName(
@@ -231,7 +235,8 @@ function rowClassName(
       state.open && surface.itemOpen,
       state.highlighted && surface.itemHighlighted,
       state.highlighted && destructive && surface.itemDestructiveHighlighted,
-      state.disabled && surface.itemDisabled
+      state.disabled && surface.itemDisabled,
+      xstyle
     ).className,
     className
   );
@@ -251,6 +256,7 @@ function rowClassName(
 export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function MenuContent(
   {
     className,
+    xstyle,
     children,
     container,
     finalFocus,
@@ -294,7 +300,7 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
       >
         <BaseMenu.Popup
           finalFocus={finalFocus}
-          style={stylex.props(...bounds).style}
+          style={stylex.props(...bounds, xstyle).style}
           className={(state) => {
             // StyleX cannot express `[data-starting-style]`, so the two ends of
             // the rise are read off Base UI's transition status here, and the
@@ -308,6 +314,7 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
                 surface.popupMenu,
                 width === 'compact' && surface.popupMenuCompact,
                 ...bounds,
+                xstyle,
                 hidden && hiddenSurfaceForSide(state.side)
               ).className,
               className
@@ -323,7 +330,18 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
 
 /** A command. */
 export const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(function MenuItem(
-  { className, children, icon, shortcut, endContent, inset, tone = 'neutral', ...rest },
+  {
+    className,
+    xstyle,
+    style,
+    children,
+    icon,
+    shortcut,
+    endContent,
+    inset,
+    tone = 'neutral',
+    ...rest
+  },
   ref
 ) {
   return (
@@ -331,7 +349,11 @@ export const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(function MenuI
       ref={ref}
       data-tone={tone}
       {...rest}
-      className={(state) => rowClassName(state, tone, className)}
+      style={(state) => ({
+        ...stylex.props(xstyle).style,
+        ...(typeof style === 'function' ? style(state) : style),
+      })}
+      className={(state) => rowClassName(state, tone, className, xstyle)}
     >
       <Row leading={leadingFor(icon, inset, tone)} shortcut={shortcut} endContent={endContent}>
         {children}
@@ -342,7 +364,18 @@ export const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(function MenuI
 
 /** A command that is a link: the same row, rendered as an `<a>`. */
 export const MenuLinkItem = forwardRef<HTMLAnchorElement, MenuLinkItemProps>(function MenuLinkItem(
-  { className, children, icon, shortcut, endContent, inset, tone = 'neutral', ...rest },
+  {
+    className,
+    xstyle,
+    style,
+    children,
+    icon,
+    shortcut,
+    endContent,
+    inset,
+    tone = 'neutral',
+    ...rest
+  },
   ref
 ) {
   return (
@@ -350,7 +383,11 @@ export const MenuLinkItem = forwardRef<HTMLAnchorElement, MenuLinkItemProps>(fun
       ref={ref}
       data-tone={tone}
       {...rest}
-      className={(state) => rowClassName(state, tone, className)}
+      style={(state) => ({
+        ...stylex.props(xstyle).style,
+        ...(typeof style === 'function' ? style(state) : style),
+      })}
+      className={(state) => rowClassName(state, tone, className, xstyle)}
     >
       <Row leading={leadingFor(icon, inset, tone)} shortcut={shortcut} endContent={endContent}>
         {children}
@@ -372,7 +409,7 @@ export const MenuLinkItem = forwardRef<HTMLAnchorElement, MenuLinkItemProps>(fun
  */
 export const MenuCheckboxItem = forwardRef<HTMLDivElement, MenuCheckboxItemProps>(
   function MenuCheckboxItem(
-    { className, children, shortcut, endContent, indicatorSide = 'start', ...rest },
+    { className, xstyle, style, children, shortcut, endContent, indicatorSide = 'start', ...rest },
     ref
   ) {
     const mark = (
@@ -389,7 +426,11 @@ export const MenuCheckboxItem = forwardRef<HTMLDivElement, MenuCheckboxItemProps
       <BaseMenu.CheckboxItem
         ref={ref}
         {...rest}
-        className={(state) => rowClassName(state, 'neutral', className)}
+        style={(state) => ({
+          ...stylex.props(xstyle).style,
+          ...(typeof style === 'function' ? style(state) : style),
+        })}
+        className={(state) => rowClassName(state, 'neutral', className, xstyle)}
       >
         <Row
           leading={indicatorSide === 'start' ? mark : undefined}
@@ -416,6 +457,8 @@ export const MenuCheckboxItem = forwardRef<HTMLDivElement, MenuCheckboxItemProps
 export const MenuRadioItem = forwardRef<HTMLDivElement, MenuRadioItemProps>(function MenuRadioItem(
   {
     className,
+    xstyle,
+    style,
     children,
     icon,
     shortcut,
@@ -440,7 +483,11 @@ export const MenuRadioItem = forwardRef<HTMLDivElement, MenuRadioItemProps>(func
     <BaseMenu.RadioItem
       ref={ref}
       {...rest}
-      className={(state) => rowClassName(state, 'neutral', className)}
+      style={(state) => ({
+        ...stylex.props(xstyle).style,
+        ...(typeof style === 'function' ? style(state) : style),
+      })}
+      className={(state) => rowClassName(state, 'neutral', className, xstyle)}
     >
       <Row
         leading={indicatorSide === 'end' ? leadingFor(icon, undefined, 'neutral') : mark}
@@ -465,14 +512,18 @@ export const MenuRadioItem = forwardRef<HTMLDivElement, MenuRadioItemProps>(func
 /** A row that opens a submenu: the same row, plus the chevron that says so. */
 export const MenuSubmenuTrigger = forwardRef<HTMLDivElement, MenuSubmenuTriggerProps>(
   function MenuSubmenuTrigger(
-    { className, children, icon, shortcut, endContent, inset, ...rest },
+    { className, xstyle, style, children, icon, shortcut, endContent, inset, ...rest },
     ref
   ) {
     return (
       <BaseMenu.SubmenuTrigger
         ref={ref}
         {...rest}
-        className={(state) => rowClassName(state, 'neutral', className)}
+        style={(state) => ({
+          ...stylex.props(xstyle).style,
+          ...(typeof style === 'function' ? style(state) : style),
+        })}
+        className={(state) => rowClassName(state, 'neutral', className, xstyle)}
       >
         <Row
           leading={leadingFor(icon, inset)}
@@ -507,14 +558,21 @@ export const MenuGroup = forwardRef<HTMLDivElement, MenuGroupProps>(function Men
 });
 
 export const MenuGroupLabel = forwardRef<HTMLDivElement, MenuGroupLabelProps>(
-  function MenuGroupLabel({ className, ...rest }, ref) {
-    const sx = stylex.props(surface.groupLabel);
+  function MenuGroupLabel({ className, xstyle, ...rest }, ref) {
+    const sx = stylex.props(surface.groupLabel, xstyle);
     return (
       <BaseMenu.GroupLabel
         ref={ref}
         {...rest}
         className={appendClassName(sx.className, className)}
-        style={sx.style}
+        style={
+          xstyle
+            ? (state) => ({
+                ...sx.style,
+                ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+              })
+            : sx.style
+        }
       />
     );
   }

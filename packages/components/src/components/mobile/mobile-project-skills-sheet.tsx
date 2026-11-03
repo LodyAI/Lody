@@ -57,6 +57,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  sheet: { height: 'auto', maxHeight: '88dvh' },
   spinner: {
     width: 'calc(var(--spacing) * 4)',
     height: 'calc(var(--spacing) * 4)',
@@ -410,7 +411,7 @@ export function MobileProjectSkillsSheet({
 
   return (
     <Drawer open={open} onOpenChange={handleOpenChange}>
-      <DrawerContent className="h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60">
+      <DrawerContent xstyle={styles.sheet}>
         <div {...stylex.props(sheetSurface.columnAuto)}>
           <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>
             {detail ? (
@@ -660,7 +661,7 @@ function MobileSkillGroup({
         <div {...stylex.props(styles.groupHead)}>
           <Boxes {...stylex.props(styles.groupGlyph)} />
           <code {...stylex.props(styles.groupDir)}>{group.dir}</code>
-          <SkillScopeBadge scope={group.scope} size="sm" className="shrink-0" />
+          <SkillScopeBadge scope={group.scope} size="sm" />
         </div>
       </header>
 

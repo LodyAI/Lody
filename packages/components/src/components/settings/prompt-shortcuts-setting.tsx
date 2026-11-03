@@ -47,7 +47,7 @@ import {
 } from './prompt-shortcut-form';
 import { ScopePills } from './prompt-shortcut-scope';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
@@ -138,6 +138,7 @@ const styles = stylex.create({
     '--mention-chip-surface': `color-mix(in srgb, ${colors.background} 95%, ${WELL_INK})`,
   },
   promptInput: {
+    boxShadow: { default: null, ':focus-visible': 'none' },
     minHeight: '112px',
     width: '100%',
     padding: 0,
@@ -249,7 +250,7 @@ function PromptShortcutsSettingContent({
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
           centerOn={settingsPane}
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          xstyle={settingsEditorDialogStyles.panel}
         >
           <Dialog.Header>
             <Dialog.Title>
@@ -772,10 +773,8 @@ export function ShortcutPromptField({
       containerClassName={stylex.props(styles.promptWell).className}
       // The wrapper owns this field's focus ring; suppress the shell's global
       // inset focus shadow on the textarea inside it.
-      className={
-        withClassName(stylex.props(styles.promptInput), 'input-scrollbar focus-visible:shadow-none')
-          .className
-      }
+      className="input-scrollbar"
+      xstyle={styles.promptInput}
       skillAgent={skillAgent}
       onMentionRangesChange={(ranges) => editor.onRangesChange(toPersistedMentionRanges(ranges))}
     />

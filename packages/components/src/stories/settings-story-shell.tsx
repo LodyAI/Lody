@@ -70,6 +70,7 @@ function createStoryAuthClient(role: 'owner' | 'member') {
     role,
     members: settingsStoryOrganization.members.map((member) => ({ ...member, role })),
   };
+  const organizations = [organization];
   return {
     useSession: () => ({
       data: settingsStorySession,
@@ -78,10 +79,10 @@ function createStoryAuthClient(role: 'owner' | 'member') {
       refetch: async () => ({ data: settingsStorySession, error: null }),
     }),
     useListOrganizations: () => ({
-      data: [organization],
+      data: organizations,
       isPending: false,
       error: null,
-      refetch: async () => ({ data: [organization], error: null }),
+      refetch: async () => ({ data: organizations, error: null }),
     }),
     useActiveOrganization: () => ({
       data: organization,

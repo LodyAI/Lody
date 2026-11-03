@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
@@ -8,6 +9,34 @@ import {
   userTextCollapsedStyle,
 } from '@/components/ai-gui/conversation-font-size-classes';
 import { getUserTextRenderSlice } from '@/components/ai-gui/message-copy';
+const storyLayout = stylex.create({
+  canvas: {
+    'max-width': '100%',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground) / 1) 5%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+  },
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    'max-width': '42rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 8)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  stack2: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    'max-width': '48rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 8)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 /**
  * Chips in a sent message.
@@ -99,7 +128,7 @@ function Bubble({
   return (
     <div className={cn('flex flex-col items-end gap-1.5', className)}>
       <div className="font-medium text-muted-foreground text-xs">{title}</div>
-      <div className="min-w-0 max-w-full rounded-2xl bg-foreground/[0.05] px-4 py-2.5">
+      <div {...stylex.props(storyLayout.canvas)}>
         <div
           className={cn(
             'min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]',
@@ -163,7 +192,7 @@ const LONG_PATH = applyTextRewrites(LONG_PATH_SOURCE, [
 
 function Board({ withSpans }: { withSpans: boolean }) {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-8 bg-background p-8">
+    <div {...stylex.props(storyLayout.stack)}>
       <Bubble
         title={withSpans ? 'With chips' : 'Raw text the agent receives'}
         text={SENT.text}
@@ -222,7 +251,7 @@ export const PastedTextAlignment: Story = {
       },
     ]);
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-8 bg-background p-8">
+      <div {...stylex.props(storyLayout.stack2)}>
         {[12, 14, 18].map((fontSize) => (
           <Bubble
             key={fontSize}

@@ -74,7 +74,7 @@ export function CompleteEmailPage({
               id="complete-email-title"
               as="h1"
               fontWeight="var(--font-weight-bold)"
-              {...stylex.props(surface.stack1, surface.authTitle, styles.titleLegacy)}
+              {...stylex.props(surface.stack1, surface.authTitle)}
             >
               {t('completeEmail.title', 'Add your email')}
             </Card.Title>
@@ -140,7 +140,6 @@ export function CompleteEmailPage({
 }
 
 const styles = stylex.create({
-  titleLegacy: { '--tw-font-weight': 'var(--font-weight-bold)' },
   heroSpacing: { marginBottom: themeSpace[4] },
   account: {
     display: 'flex',

@@ -89,6 +89,13 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   authorizeButton: {
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 6%, transparent)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      },
+    },
     [buttonTokens.gap]: 'calc(var(--spacing) * 1)',
     alignSelf: { default: 'flex-start', '@media (min-width: 40rem)': 'auto' },
   },
@@ -182,7 +189,7 @@ export function GitHubPersonalIdentitySettingsCard({
         <Button
           size="small"
           variant="ghost"
-          className={`${stylex.props(styles.authorizeButton).className} bg-foreground/[0.06] hover:bg-foreground/[0.1]`}
+          xstyle={styles.authorizeButton}
           onClick={onAuthorize}
           disabled={!workspaceReady || authorizing}
         >

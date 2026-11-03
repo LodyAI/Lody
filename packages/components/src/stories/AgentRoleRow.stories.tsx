@@ -10,6 +10,13 @@ import {
 } from '@lody/shared';
 import { AgentRoleRow, type AgentRoleRowTarget } from '@/components/settings/agent-roles-setting';
 import { settingsSurface } from '@/components/settings/surface';
+const storyLayout = stylex.create({
+  frame: {
+    'margin-inline': 'auto',
+    width: '640px',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const base: AgentRole = {
   v: AGENT_ROLE_VERSION,
@@ -61,7 +68,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="mx-auto w-[640px] p-4">
+      <div {...stylex.props(storyLayout.frame)}>
         {/* The row is a line of the list's card; the list draws the card. */}
         <div {...stylex.props(settingsSurface.card)}>
           <Story />

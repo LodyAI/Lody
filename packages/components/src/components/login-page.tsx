@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { motion, useReducedMotion, type Variants } from 'framer-motion';
@@ -76,7 +77,6 @@ import {
   getAppLaunchPerformanceProperties,
 } from '@/lib/posthog-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
-import { cn } from '@/lib/utils';
 
 const LEGAL_LINK_FALLBACK_ORIGIN = 'https://lody.ai';
 const ELECTRON_OAUTH_DEBUG_PREFIX = '[electron-oauth-debug]';
@@ -432,7 +432,7 @@ function BrowserRedirect({
 
 function ProviderIcon({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <span className={cn(stylex.props(styles.providerIcon).className, className)}>{children}</span>
+    <span className={clsx(stylex.props(styles.providerIcon).className, className)}>{children}</span>
   );
 }
 
@@ -2020,9 +2020,8 @@ const SAFE_BOTTOM = 'max(12px, env(safe-area-inset-bottom))';
 const styles = stylex.create({
   authFieldLabel: {
     [field.labelSize]: 'var(--text-xs)',
-    [field.labelLeading]: 'var(--tw-leading, var(--text-xs--line-height))',
+    [field.labelLeading]: 'var(--text-xs--line-height)',
     [field.labelWeight]: 'var(--font-weight-medium)',
-    '--tw-font-weight': 'var(--font-weight-medium)',
   },
   providerIcon: {
     display: 'flex',

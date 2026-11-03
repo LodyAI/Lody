@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useState } from 'react';
 import { fn } from 'storybook/test';
@@ -5,6 +6,12 @@ import { Button } from '@lody/ui/button';
 
 import { MobileFileViewerDrawer } from '@/components/mobile/mobile-file-viewer-drawer';
 import { SessionFileErrorState } from '@/components/sessions/session-file-error-state';
+const storyLayout = stylex.create({
+  frame: {
+    height: '100dvh',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 function MobileFileViewerDrawerStory({
   error,
@@ -26,7 +33,7 @@ function MobileFileViewerDrawerStory({
   }, [rtl]);
 
   return (
-    <main className="h-dvh bg-background" data-file-viewer-fixture data-rtl={rtl}>
+    <main {...stylex.props(storyLayout.frame)} data-file-viewer-fixture data-rtl={rtl}>
       <Button variant="secondary" onClick={() => setOpen(true)}>
         Reopen file viewer
       </Button>

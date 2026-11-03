@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useLayoutEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { GitFork } from 'lucide-react';
@@ -7,6 +8,26 @@ import {
   type SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
 import { Button } from '@lody/ui/button';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'min-height': '220px',
+    'flex-direction': 'column',
+    'align-items': 'flex-start',
+    'justify-content': 'flex-end',
+    gap: 'calc(var(--spacing) * 3)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 function ForkTrigger({
   worktreeAvailability,
@@ -30,10 +51,7 @@ function ForkTrigger({
   const [open, setOpen] = useState(true);
   const [lastChoice, setLastChoice] = useState<string>('none');
   return (
-    <div
-      data-spacing-scope={spacingScope}
-      className="flex min-h-[220px] flex-col items-start justify-end gap-3 bg-background p-6 text-foreground"
-    >
+    <div data-spacing-scope={spacingScope} {...stylex.props(storyLayout.stack)}>
       <div className="text-xs text-muted-foreground">Last choice: {lastChoice}</div>
       <SessionForkDestinationMenu
         open={open}
@@ -44,7 +62,7 @@ function ForkTrigger({
         onSelect={(destination) => setLastChoice(destination)}
       >
         <Button type="button" variant="ghost" aria-label="Fork session" size="small" icon>
-          <GitFork className="h-3.5 w-3.5" />
+          <GitFork {...stylex.props(storyLayoutStyles.frame)} />
         </Button>
       </SessionForkDestinationMenu>
     </div>

@@ -1,3 +1,5 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -9,6 +11,70 @@ import {
 } from '@/components/mobile/mobile-project-skills-sheet';
 import { SkillDetailContent } from '@/components/settings/skill-detail';
 import type { ProjectSkillResolvedGroup } from '@/hooks/use-project-skills';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '760px',
+    width: '390px',
+    'align-items': 'flex-end',
+    'justify-content': 'center',
+    'background-color': 'color-mix(in oklab, var(--color-black) 30%, transparent)',
+  },
+  row2: {
+    position: 'relative',
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-top': 'calc(var(--spacing) * 2)',
+    'padding-bottom': 'calc(var(--spacing) * 2)',
+  },
+  overlay: {
+    position: 'absolute',
+    top: 'calc(var(--spacing) * 1.5)',
+    left: 'calc(var(--spacing) * 2)',
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: 'calc(var(--spacing) * 9)',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'calc(infinity * 1px)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  overlay2: {
+    position: 'absolute',
+    top: 'calc(var(--spacing) * 1.5)',
+    right: 'calc(var(--spacing) * 3)',
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: 'calc(var(--spacing) * 9)',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'calc(infinity * 1px)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  stack: {
+    position: 'relative',
+    display: 'flex',
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'overflow-y': 'auto',
+    'padding-bottom': 'calc(var(--spacing) * 4)',
+  },
+  canvas: {
+    flex: '1',
+    'overflow-y': 'auto',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-top': 'calc(var(--spacing) * 1)',
+    'padding-bottom': 'calc(var(--spacing) * 4)',
+  },
+});
 
 const FETCHED_AT = new Date('2026-06-17T11:30:00Z').getTime() - 2 * 60 * 1000;
 
@@ -118,7 +184,7 @@ function SheetFrame({
   const [refreshCount, setRefreshCount] = useState(0);
   return (
     <div
-      className="flex h-[760px] w-[390px] items-end justify-center bg-black/30"
+      {...stylex.props(storyLayout.row)}
       data-owned-skills-fixture={responsive ? '' : undefined}
       data-owned-skills-action={responsive ? lastAction : undefined}
       data-owned-skills-refresh-count={responsive ? refreshCount : undefined}
@@ -129,12 +195,12 @@ function SheetFrame({
       }
     >
       <div className="flex max-h-[88%] w-full flex-col overflow-hidden rounded-t-2xl border border-border/60 bg-background">
-        <header className="relative flex shrink-0 items-center px-4 pb-2 pt-2">
+        <header {...stylex.props(storyLayout.row2)}>
           {detail ? (
             <button
               type="button"
               onClick={() => setDetail(null)}
-              className="absolute left-2 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground"
+              {...stylex.props(storyLayout.overlay)}
             >
               <ChevronLeft className="h-5 w-5" strokeWidth={1.8} />
             </button>
@@ -142,12 +208,12 @@ function SheetFrame({
           <span className="mx-auto max-w-[68%] truncate text-[0.95rem] font-semibold tracking-tight">
             {detail ? detail.skill.name : 'Skills'}
           </span>
-          <span className="absolute right-3 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground">
+          <span {...stylex.props(storyLayout.overlay2)}>
             <X className="h-5 w-5" strokeWidth={1.8} />
           </span>
         </header>
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+        <div {...stylex.props(storyLayout.stack)}>
+          <div {...stylex.props(storyLayout.frame)}>
             <MobileProjectSkillsBody
               {...args}
               onRefresh={
@@ -175,7 +241,7 @@ function SheetFrame({
                 transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
                 className="absolute inset-0 z-10 flex flex-col bg-background"
               >
-                <div className="scrollbar-pro flex-1 overflow-y-auto px-4 pb-4 pt-1">
+                <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
                   <SkillDetailContent skill={detail.skill} scope={detail.scope} />
                 </div>
               </motion.div>

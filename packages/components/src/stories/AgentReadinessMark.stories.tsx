@@ -1,6 +1,19 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { AgentReadinessMark } from '@/components/shared/agent-readiness-mark';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const meta = {
   title: 'Shared/AgentReadinessMark',
@@ -28,7 +41,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export const Vocabulary: Story = {
   args: { cliType: 'builtin', agentType: 'codex', readiness: 'ready' },
   render: () => (
-    <div className="flex flex-col gap-3">
+    <div {...stylex.props(storyLayout.stack)}>
       <Row label="cold — nothing prepared yet">
         <AgentReadinessMark cliType="builtin" agentType="codex" readiness="cold" />
       </Row>
@@ -57,7 +70,7 @@ export const Vocabulary: Story = {
 export const InventoryFillingIn: Story = {
   args: { cliType: 'builtin', agentType: 'kimi', readiness: 'ready' },
   render: () => (
-    <div className="flex items-center gap-4">
+    <div {...stylex.props(storyLayout.row)}>
       <AgentReadinessMark cliType="builtin" agentType="kimi" readiness="ready" size="sm" />
       <AgentReadinessMark
         cliType="builtin"
@@ -74,7 +87,7 @@ export const InventoryFillingIn: Story = {
 export const Sizes: Story = {
   args: { cliType: 'builtin', agentType: 'claude', readiness: 'arriving', percent: 40 },
   render: () => (
-    <div className="flex items-center gap-4">
+    <div {...stylex.props(storyLayout.row)}>
       <AgentReadinessMark
         cliType="builtin"
         agentType="claude"
@@ -104,7 +117,7 @@ export const Sizes: Story = {
 export const AvatarSurface: Story = {
   args: { cliType: 'builtin', agentType: 'codex', readiness: 'ready' },
   render: () => (
-    <div className="flex items-center gap-4">
+    <div {...stylex.props(storyLayout.row)}>
       <AgentReadinessMark
         cliType="builtin"
         agentType="codex"

@@ -25,6 +25,7 @@ export interface InputProps extends Omit<BaseProps, 'className' | 'size' | 'rend
   leading?: ReactNode;
   /** Lands on the control: the input, or the shell once there is a `leading`. */
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Lands on the `<input>` inside the shell, for a constraint only the value takes. */
   inputClassName?: string;
 }
@@ -100,7 +101,7 @@ const dimensions = stylex.create({
 });
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { size = 'medium', controlHeight, leading, className, inputClassName, style, ...rest },
+  { size = 'medium', controlHeight, leading, className, xstyle, inputClassName, style, ...rest },
   ref
 ) {
   const ariaInvalid = rest['aria-invalid'];
@@ -120,7 +121,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
             shellStyles.shell,
             isInvalid(state.valid, ariaInvalid) && well.shellInvalid,
             state.disabled && well.dimmed,
-            controlHeight != null && dimensions.height(controlHeight)
+            controlHeight != null && dimensions.height(controlHeight),
+            xstyle
           );
           return (
             <div
@@ -139,7 +141,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       />
     );
   }
-  const heightStyle = stylex.props(controlHeight != null && dimensions.height(controlHeight)).style;
+  const heightStyle = stylex.props(
+    controlHeight != null && dimensions.height(controlHeight),
+    xstyle
+  ).style;
   return (
     <BaseInput
       ref={ref}
@@ -160,7 +165,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
             styles.input,
             sizeStyles[size],
             isInvalid(state.valid, ariaInvalid) && well.invalid,
-            controlHeight != null && dimensions.height(controlHeight)
+            controlHeight != null && dimensions.height(controlHeight),
+            xstyle
           ).className,
           className
         )

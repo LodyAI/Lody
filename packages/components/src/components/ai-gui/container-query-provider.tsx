@@ -1,6 +1,10 @@
+import { clsx } from 'clsx';
 import { forwardRef, type ReactNode } from 'react';
-import { cn } from '@/lib/utils';
-import { editorContainClass } from '@/style/legacy-defaults.stylex';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  container: { height: '100%', containerType: 'inline-size' },
+});
 
 interface ContainerQueryProviderProps {
   children: ReactNode;
@@ -16,7 +20,7 @@ interface ContainerQueryProviderProps {
 export const ContainerQueryProvider = forwardRef<HTMLDivElement, ContainerQueryProviderProps>(
   function ContainerQueryProvider({ children, className }, ref) {
     return (
-      <div ref={ref} className={cn(editorContainClass, className)}>
+      <div ref={ref} className={clsx(stylex.props(styles.container).className, className)}>
         {children}
       </div>
     );

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import type { CommentReferencePayload } from '@lody/shared';
@@ -6,6 +7,74 @@ import {
   type CommentReferenceChipItem,
 } from '@/components/chat/comment-reference-chip';
 import { CommentReferenceCard } from '@/components/ai-gui/comment-reference-card';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'max-width': '28rem',
+    'flex-wrap': 'wrap',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  section: {
+    'max-width': '28rem',
+  },
+  frame: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': '32rem',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  row2: {
+    display: 'flex',
+    'flex-wrap': 'wrap',
+    gap: 'calc(var(--spacing) * 2)',
+    'padding-bottom': 'calc(var(--spacing) * 2)',
+  },
+  row3: {
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'flex-end',
+    'padding-top': 'calc(var(--spacing) * 1)',
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    'align-items': 'flex-end',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  stack2: {
+    display: 'flex',
+    width: '100%',
+    'max-width': '85%',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  row4: {
+    display: 'flex',
+    width: '100%',
+    'justify-content': 'flex-end',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-top': 'calc(var(--spacing) * 1)',
+  },
+  row5: {
+    display: 'flex',
+    width: '100%',
+    'justify-content': 'flex-end',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+  },
+  stack3: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    width: '100%',
+    'max-width': '32rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 6)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  section2: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+});
 
 // -- Shared mock data --
 
@@ -93,7 +162,7 @@ export const MultipleChips: StoryObj = {
     ];
 
     return (
-      <div className="flex flex-wrap gap-2 max-w-md">
+      <div {...stylex.props(storyLayout.row)}>
         {items.map((item) => (
           <CommentReferenceChip
             key={item.localId}
@@ -111,7 +180,7 @@ export const MultipleChips: StoryObj = {
 export const CardDefault: StoryObj<typeof CommentReferenceCard> = {
   name: 'Card / Default',
   render: () => (
-    <div className="max-w-md">
+    <div {...stylex.props(storyLayout.section)}>
       <CommentReferenceCard reference={mockReference} onClick={() => alert('Navigate to diff')} />
     </div>
   ),
@@ -120,7 +189,7 @@ export const CardDefault: StoryObj<typeof CommentReferenceCard> = {
 export const CardGitHub: StoryObj<typeof CommentReferenceCard> = {
   name: 'Card / GitHub',
   render: () => (
-    <div className="max-w-md">
+    <div {...stylex.props(storyLayout.section)}>
       <CommentReferenceCard
         reference={mockGitHubReference}
         onClick={() => alert('Navigate to diff')}
@@ -132,7 +201,7 @@ export const CardGitHub: StoryObj<typeof CommentReferenceCard> = {
 export const CardNoClick: StoryObj<typeof CommentReferenceCard> = {
   name: 'Card / No Click',
   render: () => (
-    <div className="max-w-md">
+    <div {...stylex.props(storyLayout.section)}>
       <CommentReferenceCard reference={mockShortReference} />
     </div>
   ),
@@ -150,10 +219,10 @@ export const ComposerWithReferences: StoryObj = {
     const [text, setText] = useState('Can you fix these issues? The null check is critical.');
 
     return (
-      <div className="mx-auto w-full max-w-lg p-4">
+      <div {...stylex.props(storyLayout.frame)}>
         <div className="rounded-xl border border-input-border/70 bg-input/90 px-4 py-3">
           {items.length > 0 && (
-            <div className="flex flex-wrap gap-2 pb-2">
+            <div {...stylex.props(storyLayout.row2)}>
               {items.map((item) => (
                 <CommentReferenceChip
                   key={item.localId}
@@ -170,7 +239,7 @@ export const ComposerWithReferences: StoryObj = {
             className="w-full resize-none border-none bg-transparent text-sm leading-6 text-foreground placeholder:text-muted-foreground focus:outline-hidden"
             placeholder="Type your message..."
           />
-          <div className="flex items-center justify-end pt-1">
+          <div {...stylex.props(storyLayout.row3)}>
             <button
               type="button"
               className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground"
@@ -191,9 +260,9 @@ export const UserBubbleWithReferences: StoryObj = {
   render: () => (
     <div className="mx-auto w-full max-w-lg space-y-6 p-4">
       {/* User message with one comment ref + text */}
-      <div className="flex flex-col items-end gap-2">
-        <div className="flex w-full max-w-[85%] flex-col gap-2">
-          <div className="flex w-full justify-end px-2 pt-1">
+      <div {...stylex.props(storyLayout.stack)}>
+        <div {...stylex.props(storyLayout.stack2)}>
+          <div {...stylex.props(storyLayout.row4)}>
             <CommentReferenceCard
               reference={mockReference}
               onClick={() => alert('Navigate to diff')}
@@ -206,12 +275,12 @@ export const UserBubbleWithReferences: StoryObj = {
       </div>
 
       {/* User message with multiple comment refs + text */}
-      <div className="flex flex-col items-end gap-2">
-        <div className="flex w-full max-w-[85%] flex-col gap-2">
-          <div className="flex w-full justify-end px-2 pt-1">
+      <div {...stylex.props(storyLayout.stack)}>
+        <div {...stylex.props(storyLayout.stack2)}>
+          <div {...stylex.props(storyLayout.row4)}>
             <CommentReferenceCard reference={mockReference} onClick={() => alert('Navigate')} />
           </div>
-          <div className="flex w-full justify-end px-2">
+          <div {...stylex.props(storyLayout.row5)}>
             <CommentReferenceCard
               reference={mockGitHubReference}
               onClick={() => alert('Navigate')}
@@ -225,9 +294,9 @@ export const UserBubbleWithReferences: StoryObj = {
       </div>
 
       {/* User message with only comment ref, no text */}
-      <div className="flex flex-col items-end gap-2">
-        <div className="flex w-full max-w-[85%] flex-col gap-2">
-          <div className="flex w-full justify-end px-2 pt-1">
+      <div {...stylex.props(storyLayout.stack)}>
+        <div {...stylex.props(storyLayout.stack2)}>
+          <div {...stylex.props(storyLayout.row4)}>
             <CommentReferenceCard
               reference={mockShortReference}
               onClick={() => alert('Navigate')}
@@ -267,7 +336,7 @@ export const InteractiveFlow: StoryObj = {
     };
 
     return (
-      <div className="mx-auto flex w-full max-w-lg flex-col gap-6 p-4">
+      <div {...stylex.props(storyLayout.stack3)}>
         {/* Instructions */}
         <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-300">
           Click the paper plane icon on a thread below to add it to the composer. Then click Send.
@@ -278,7 +347,7 @@ export const InteractiveFlow: StoryObj = {
           <h3 className="text-xs font-medium text-muted-foreground">Comment Threads</h3>
           {[mockReference, mockGitHubReference].map((ref, i) => (
             <div key={i} className="flex items-start gap-2 rounded-lg border p-3">
-              <div className="min-w-0 flex-1">
+              <div {...stylex.props(storyLayout.section2)}>
                 <div className="text-xs font-medium">{ref.authorName}</div>
                 <div className="text-xs text-muted-foreground">
                   {ref.path}:{ref.lineNumber}
@@ -303,10 +372,10 @@ export const InteractiveFlow: StoryObj = {
               Sent Messages (User Bubbles)
             </h3>
             {sentMessages.map((msg, i) => (
-              <div key={i} className="flex flex-col items-end gap-2">
-                <div className="flex w-full max-w-[85%] flex-col gap-2">
+              <div key={i} {...stylex.props(storyLayout.stack)}>
+                <div {...stylex.props(storyLayout.stack2)}>
                   {msg.refs.map((ref, j) => (
-                    <div key={j} className="flex w-full justify-end px-2">
+                    <div key={j} {...stylex.props(storyLayout.row5)}>
                       <CommentReferenceCard reference={ref} onClick={() => alert('Navigate')} />
                     </div>
                   ))}
@@ -324,7 +393,7 @@ export const InteractiveFlow: StoryObj = {
           <h3 className="mb-2 text-xs font-medium text-muted-foreground">Composer</h3>
           <div className="rounded-xl border border-input-border/70 bg-input/90 px-4 py-3">
             {composerItems.length > 0 && (
-              <div className="flex flex-wrap gap-2 pb-2">
+              <div {...stylex.props(storyLayout.row2)}>
                 {composerItems.map((item) => (
                   <CommentReferenceChip
                     key={item.localId}
@@ -343,7 +412,7 @@ export const InteractiveFlow: StoryObj = {
               className="w-full resize-none border-none bg-transparent text-sm leading-6 text-foreground placeholder:text-muted-foreground focus:outline-hidden"
               placeholder="Type your message..."
             />
-            <div className="flex items-center justify-end pt-1">
+            <div {...stylex.props(storyLayout.row3)}>
               <button
                 type="button"
                 className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground"

@@ -2,7 +2,6 @@
 
 import type { DiffLineAnnotation } from '@pierre/diffs';
 import * as stylex from '@stylexjs/stylex';
-import { cn } from '@/lib/utils';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import type {
@@ -27,6 +26,10 @@ const styles = stylex.create({
     color: themeColors.foreground,
     maxWidth: '100%',
     overflow: 'hidden',
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2)',
+    },
   },
 });
 
@@ -59,7 +62,7 @@ export function SessionCommentAnnotation({
     <div
       data-diff-comment-line={lineNumber}
       data-diff-comment-side={side}
-      className={cn('space-y-2', stylex.props(styles.annotation).className)}
+      className={stylex.props(styles.annotation).className}
     >
       {ghThreads.map((thread) => (
         <GitHubCommentThread

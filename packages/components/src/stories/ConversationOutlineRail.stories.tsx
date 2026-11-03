@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 /**
  * The conversation's left table of contents: one tick per round, the current
  * round highlighted, an opening-words card on hover.
@@ -19,6 +20,46 @@ import { ConversationOutlineRail } from '@/components/ai-gui/conversation-outlin
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
+const storyLayout = stylex.create({
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    'max-width': '46rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+    overflow: 'hidden',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+  },
+  caption: {
+    'margin-top': 'calc(var(--spacing) * 1)',
+    'font-size': '12px',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  frame: {
+    height: '640px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame2: {
+    height: '720px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  stack2: {
+    display: 'flex',
+    height: '720px',
+    width: '100%',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame3: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+});
 
 const meta = {
   title: 'Sessions/ConversationOutlineRail',
@@ -88,11 +129,11 @@ function RailFrame({
   const [activeIndex, setActiveIndex] = useState(initialActiveIndex);
   return (
     <div className="@container relative w-full bg-background" style={{ height }}>
-      <div className="mx-auto flex h-full w-full max-w-[46rem] flex-col gap-3 overflow-hidden px-4 py-6">
+      <div {...stylex.props(storyLayout.stack)}>
         {entries.slice(activeIndex, activeIndex + 4).map((item) => (
           <div key={item.key} className="rounded-md border border-border/60 p-3">
             <div className="text-[13px] font-medium text-foreground">{item.title}</div>
-            <div className="mt-1 text-[12px] text-muted-foreground">{item.preview}</div>
+            <div {...stylex.props(storyLayout.caption)}>{item.preview}</div>
           </div>
         ))}
       </div>
@@ -262,7 +303,7 @@ const integrationItems: ChatStreamItem[] = Array.from({ length: 14 }, (_, round)
 export const ShortStreamHidesRail: Story = {
   args: { entries: [], activeIndex: -1, onJumpToRound: () => {} },
   render: () => (
-    <div className="h-[640px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
         items={integrationItems.slice(0, 8)}
         sessionId={integrationSessionId}
@@ -281,7 +322,7 @@ export const ShortStreamHidesRail: Story = {
 export const InsideTheConversationStream: Story = {
   args: { entries: [], activeIndex: -1, onJumpToRound: () => {} },
   render: () => (
-    <div className="h-[640px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
         items={integrationItems}
         sessionId={integrationSessionId}
@@ -374,7 +415,7 @@ const extremeItems: ChatStreamItem[] = (() => {
 export const ExtremeConversation: Story = {
   args: { entries: [], activeIndex: -1, onJumpToRound: () => {} },
   render: () => (
-    <div className="h-[720px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame2)}>
       <SessionChatStreamView
         items={extremeItems}
         sessionId={extremeSessionId}
@@ -434,12 +475,12 @@ function ExtremeConversationViewFrame() {
     onOutlinePreviewRound,
   } = useConversationStreamItems(view, sessionId);
   return (
-    <div className="flex h-[720px] w-full flex-col bg-background">
+    <div {...stylex.props(storyLayout.stack2)}>
       <div className="border-b px-3 py-1 font-mono text-xs text-muted-foreground">
         3000 rounds · {view?.turnCount ?? 0} turns ·{' '}
         {items.filter((item) => item.type === 'message').length} hydrated
       </div>
-      <div className="min-h-0 flex-1">
+      <div {...stylex.props(storyLayout.frame3)}>
         <SessionChatStreamView
           initialWindowReady={initialWindowReady}
           items={items}

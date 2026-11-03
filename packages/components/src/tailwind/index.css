@@ -1,48 +1,18 @@
 @layer theme, base, stylex, components, utilities;
 @import './fonts.css';
 @import 'katex/dist/katex.min.css';
-@import 'tw-animate-css';
-@import 'tailwindcss';
-@import 'konsta/theme.css';
+@import './reset.css';
+@import './theme-defaults.css';
 @import './scrollbars.css';
-
-@config "../../tailwind.config.js";
-@source "../**/*.{ts,tsx}";
-/* Konsta is imported for its theme, safe-area utilities and the `safe-areas`
-   hook only; no Konsta component is rendered. Do NOT scan Konsta's sources:
-   that generates utilities such as `last-child-hairline-b-none`, whose
-   unanchored `:last-child … ::after` selectors make every portal open/close
-   restyle the whole app (~25ms per popover on a large workspace). */
 
 /* Sidebar session-row lists: skip style, layout and paint for rows scrolled out
    of view. `auto` remembers each row's last rendered height; 50px is only the
    estimate for rows never on screen (two-line repo rows are 54px, child and
    chat rows 30-36px), kept close so the scrollbar barely moves as rows render.
    See SIDEBAR_ROW_LIST_CLASS. */
-@utility sidebar-row-list {
-  & > * {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 50px;
-  }
-}
-
-@custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
-
-@theme inline {
-  --font-ios: var(--font-sans);
-  --font-material: var(--font-sans);
-
-  /* Re-claim `--color-primary` from konsta/theme.css. That stylesheet's
-     `@theme { --color-primary: var(--k-color-primary); }` block wins
-     over the legacy v3 JS preset's `colors.primary = hsl(var(--primary))`
-     under Tailwind v4 (CSS @theme > @config), which made every
-     `text-primary` / `bg-primary` utility — sidebar Button, mobile
-     tabbar active highlight, mobile filter pills — render as Konsta's
-     static iOS blue (#007aff) instead of the project's themed primary.
-     Konsta's own components keep working: they reference their
-     `--k-color-*` namespace directly, not the bare `--color-primary`. */
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
+.sidebar-row-list > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 50px;
 }
 
 /* Override @pierre/diffs italic font style */
@@ -1201,16 +1171,19 @@ pre,
   }
 
   * {
-    @apply border-border outline-ring/50;
+    border-color: hsl(var(--border) / 1);
+    outline-color: color-mix(in oklab, hsl(var(--ring) / 1) 50%, transparent);
   }
 
   html {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--background) / 1);
+    color: hsl(var(--foreground) / 1);
     overflow: hidden;
   }
 
   body {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--background) / 1);
+    color: hsl(var(--foreground) / 1);
   }
 
   /* Pro selection style */
@@ -1294,8 +1267,6 @@ pre,
   *:focus,
   *:focus-visible {
     outline: none !important;
-    --tw-ring-offset-shadow: 0 0 #0000 !important;
-    --tw-ring-shadow: 0 0 #0000 !important;
   }
 
   /* Global CodeMirror cursor visibility fixes */
@@ -1780,40 +1751,9 @@ pre,
   }
 }
 
-/*
- * dvh/svh fallbacks for browsers that don't support dynamic/small viewport units
- * (Safari < 15.4, Chrome < 108, Firefox < 101).
- * Tailwind utilities like h-dvh, min-h-svh, h-svh output dvh/svh values which are
- * silently ignored by older browsers, leaving elements with no height.
- * These @supports rules provide vh-based fallbacks.
- */
+/* The workspace keeps its viewport height on older embedded browsers. */
 @supports not (height: 1dvh) {
-  @layer utilities {
-    .h-dvh {
-      height: 100vh !important;
-    }
-    .min-h-\[100dvh\] {
-      min-height: 100vh !important;
-    }
-    .max-h-\[80dvh\] {
-      max-height: 80vh !important;
-    }
-    .max-h-\[90dvh\] {
-      max-height: 90vh !important;
-    }
-    .max-h-\[min\(40dvh\2c 20rem\)\] {
-      max-height: min(40vh, 20rem) !important;
-    }
-    .h-svh {
-      height: 100vh !important;
-    }
-    .min-h-svh {
-      min-height: 100vh !important;
-    }
-    .max-h-\[70svh\] {
-      max-height: 70vh !important;
-    }
-  }
+  .workspace-viewport { height: 100vh !important; }
 }
 
 /*
@@ -2095,17 +2035,6 @@ pre,
 
 [data-sidebar-session-row][data-sidebar-title-swiping='true'] [data-sidebar-title-clip] {
   overflow: hidden;
-}
-
-/* Focus rings are for keyboard navigation. `installFocusModality` (@lody/ui)
-   marks the document `pointer` until Tab or an arrow key moves focus, and zeroes
-   `focus.ringWidth` for every StyleX ring; this does the same for the legacy
-   Tailwind `focus-visible:ring-*` utilities. Unlayered, so it outranks them.
-   Text entry keeps its ring: whoever is typing needs to see where. */
-html[data-focus-modality='pointer']
-  :focus-visible:not(input, textarea, select, [contenteditable='true'], [contenteditable='']) {
-  --tw-ring-shadow: 0 0 #0000;
-  --tw-ring-offset-shadow: 0 0 #0000;
 }
 
 /* The new-chat page's typed transition (`components/chat/home/home-dashboard.tsx`). Keep

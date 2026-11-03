@@ -36,6 +36,16 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
   const [role, setRole] = useState<'owner' | 'member'>('owner');
   const [authPending, setAuthPending] = useState(false);
   const [repos, setRepos] = useState(initialRepos);
+  const repositoryRows = useMemo(
+    () =>
+      repos.map((repo) => ({
+        id: repo.repositoryId,
+        fullName: repo.repoFullName,
+        name: repo.name,
+        private: repo.private,
+      })),
+    [repos]
+  );
   const [repoWrites, setRepoWrites] = useState(0);
   const [resolved, setResolved] = useState(false);
   const [pending, setPending] = useState(false);
@@ -76,16 +86,7 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
             ) as never;
           case 'github:getWorkspaceRepositories':
             return (
-              mode === 'repos-ready'
-                ? authPending
-                  ? undefined
-                  : repos.map((repo) => ({
-                      id: repo.repositoryId,
-                      fullName: repo.repoFullName,
-                      name: repo.name,
-                      private: repo.private,
-                    }))
-                : emptyRows
+              mode === 'repos-ready' ? (authPending ? undefined : repositoryRows) : emptyRows
             ) as never;
           case 'usage:getWorkspaceUsageTimeline':
           case 'usage:getWorkspaceUsageCalendar':
@@ -121,7 +122,7 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
         throw new Error(`Unexpected synthetic integration action: ${operation.name}`);
       },
     }),
-    [authPending, enabled, mode, repos, resolved]
+    [authPending, enabled, mode, repos, repositoryRows, resolved]
   );
   const recovering = (mode === 'auth-recovery' && !resolved) || authPending;
   return (

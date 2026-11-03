@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { Folder, GitBranch, Github, Monitor, Sparkles } from 'lucide-react';
@@ -10,6 +11,36 @@ import {
   type MobileInlinePickerOption,
 } from '@/components/mobile/mobile-inline-picker';
 import { Button } from '@lody/ui/button';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'background-color': 'var(--color-stone-200)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  row2: {
+    display: 'flex',
+    width: '100%',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  section: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 1)',
+  },
+});
 
 const machineOptions: MobileInlinePickerOption[] = [
   { value: 'zx-macbook', label: 'zx-macbook', icon: <Monitor className="h-3.5 w-3.5" /> },
@@ -43,7 +74,7 @@ function StandaloneShell() {
   const [machine, setMachine] = useState('zx-macbook');
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-6">
+    <div {...stylex.props(storyLayout.row)}>
       <div className="w-[360px] rounded-2xl bg-background p-6 shadow-2xl">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Standalone picker (no coordinator)
@@ -57,7 +88,7 @@ function StandaloneShell() {
           triggerContent={
             <>
               <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
-              <span className="truncate">{machine}</span>
+              <span {...stylex.props(storyLayout.label)}>{machine}</span>
             </>
           }
         />
@@ -71,7 +102,7 @@ function StandaloneShell() {
 
 function LoadingShell() {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-6">
+    <div {...stylex.props(storyLayout.row)}>
       <div className="w-[360px] space-y-4 rounded-2xl bg-background p-6 shadow-2xl">
         <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Loading state (spinner replaces trigger content)
@@ -87,7 +118,7 @@ function LoadingShell() {
           triggerContent={
             <>
               <GitBranch className="h-3.5 w-3.5 shrink-0 opacity-70" />
-              <span className="truncate">main</span>
+              <span {...stylex.props(storyLayout.label)}>main</span>
             </>
           }
         />
@@ -104,7 +135,7 @@ function LoadingShell() {
           triggerContent={
             <>
               <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
-              <span className="truncate">zx-macbook</span>
+              <span {...stylex.props(storyLayout.label)}>zx-macbook</span>
             </>
           }
         />
@@ -118,15 +149,15 @@ function CoordinatorRowShell({ searchable = false }: { searchable?: boolean }) {
   const [branch, setBranch] = useState('main');
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-6">
+    <div {...stylex.props(storyLayout.row)}>
       <MobileInlinePickerCoordinator>
         <div className="w-[360px] rounded-2xl bg-background p-6 shadow-2xl">
           <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Row slot + coordinator (one open at a time, shared dropdown row)
           </div>
           <MobileInlinePickerRowSlot>
-            <div className="flex w-full items-start gap-2">
-              <div className="min-w-0 flex-1">
+            <div {...stylex.props(storyLayout.row2)}>
+              <div {...stylex.props(storyLayout.section)}>
                 <MobileInlinePicker
                   id="story-coord-repo"
                   value={repo}
@@ -138,14 +169,14 @@ function CoordinatorRowShell({ searchable = false }: { searchable?: boolean }) {
                   triggerContent={
                     <>
                       <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">
+                      <span {...stylex.props(storyLayout.label)}>
                         {repoOptions.find((o) => o.value === repo)?.label}
                       </span>
                     </>
                   }
                 />
               </div>
-              <div className="min-w-0 flex-1">
+              <div {...stylex.props(storyLayout.section)}>
                 <MobileInlinePicker
                   id="story-coord-branch"
                   value={branch}
@@ -155,7 +186,7 @@ function CoordinatorRowShell({ searchable = false }: { searchable?: boolean }) {
                   triggerContent={
                     <>
                       <GitBranch className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">{branch}</span>
+                      <span {...stylex.props(storyLayout.label)}>{branch}</span>
                     </>
                   }
                 />
@@ -170,7 +201,7 @@ function CoordinatorRowShell({ searchable = false }: { searchable?: boolean }) {
 
 function MenuShell() {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-6">
+    <div {...stylex.props(storyLayout.row)}>
       <div className="w-[360px] rounded-2xl bg-background p-6 shadow-2xl">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           MobileInlineMenu (arbitrary content)
@@ -187,7 +218,7 @@ function MenuShell() {
           }
         >
           {({ close }) => (
-            <div className="flex flex-col gap-1">
+            <div {...stylex.props(storyLayout.stack)}>
               <Button variant="ghost" className="justify-start" onClick={close}>
                 <Folder className="mr-2 h-4 w-4" /> Add file
               </Button>

@@ -144,6 +144,7 @@ export function matchedRuns(
  * line only to say why it cannot be picked.
  */
 const styles = stylex.create({
+  roleDetail: { position: 'absolute', inset: 0, height: 'auto', width: 'auto' },
   /**
    * The scroller holding the rows; the docked mobile strip is its own. It also
    * gives way when the composer caps the menu to the room on its side.
@@ -746,7 +747,7 @@ function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
           agentConfig={detail.agentRole.agentConfig}
           machine={detail.agentRole.machine}
           machineLabel={detail.agentRole.machineLabel}
-          className="absolute inset-0 h-auto w-auto"
+          xstyle={styles.roleDetail}
         />
       </div>
     );

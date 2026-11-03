@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import {
   ScheduleForm,
@@ -31,6 +32,63 @@ import { createStore, Provider } from 'jotai';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import { sidebarCollapsedAtom } from '../atoms/sidebar-state';
+const storyLayout = stylex.create({
+  frame: {
+    height: '100dvh',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  frame2: {
+    position: 'relative',
+    height: '100dvh',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  overlay: {
+    'pointer-events': 'none',
+    position: 'absolute',
+    top: '16px',
+    left: '16px',
+    'z-index': '30',
+    display: 'flex',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  frame3: {
+    width: '14px',
+    height: '14px',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': '#ff5f57',
+  },
+  frame4: {
+    width: '14px',
+    height: '14px',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': '#febc2e',
+  },
+  frame5: {
+    width: '14px',
+    height: '14px',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': '#28c840',
+  },
+  row: {
+    display: 'flex',
+    height: '100dvh',
+  },
+  section: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 10%, transparent)',
+  },
+  frame6: {
+    height: '100dvh',
+  },
+  frame7: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'auto',
+  },
+});
 
 /** Frozen clock so "Next run" and the editor preview never drift. */
 const NOW = Date.parse('2026-09-06T09:12:00+08:00');
@@ -147,7 +205,7 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <div className="h-dvh bg-background text-foreground">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),
@@ -199,14 +257,11 @@ function MacElectronCollapsedSidebar({ children }: { children: ReactNode }) {
   );
   return (
     <Provider store={store}>
-      <div className="relative h-dvh bg-background text-foreground">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute top-[16px] left-[16px] z-30 flex gap-2"
-        >
-          <span className="size-[14px] rounded-full bg-[#ff5f57]" />
-          <span className="size-[14px] rounded-full bg-[#febc2e]" />
-          <span className="size-[14px] rounded-full bg-[#28c840]" />
+      <div {...stylex.props(storyLayout.frame2)}>
+        <div aria-hidden {...stylex.props(storyLayout.overlay)}>
+          <span {...stylex.props(storyLayout.frame3)} />
+          <span {...stylex.props(storyLayout.frame4)} />
+          <span {...stylex.props(storyLayout.frame5)} />
         </div>
         {children}
       </div>
@@ -433,7 +488,7 @@ export const EditorOnceMachineClock: Story = editor({
  */
 export const EditorInNarrowPanel: Story = {
   render: () => (
-    <div className="flex h-dvh">
+    <div {...stylex.props(storyLayout.row)}>
       <div className="w-[360px] shrink-0 overflow-auto border-r">
         <WithPlatform>
           <EditorStory
@@ -447,7 +502,7 @@ export const EditorInNarrowPanel: Story = {
           />
         </WithPlatform>
       </div>
-      <div className="min-w-0 flex-1 bg-muted/10" />
+      <div {...stylex.props(storyLayout.section)} />
     </div>
   ),
 };
@@ -593,7 +648,7 @@ export const EditorBesideList: Story = {
     const [open, setOpen] = useState(true);
     return (
       <WithPlatform>
-        <div className="h-dvh">
+        <div {...stylex.props(storyLayout.frame6)}>
           <ScheduleListView
             {...args}
             selectedId={open ? 'daily-review' : undefined}
@@ -617,7 +672,7 @@ export const EditorBesideList: Story = {
                         onDelete: () => {},
                       }}
                     />
-                    <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
+                    <div data-settings-surface="" {...stylex.props(storyLayout.frame7)}>
                       <EditorStory bare fixture={{ chatOnly: true }} />
                     </div>
                   </>

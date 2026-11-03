@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useMemo, useState, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
@@ -22,6 +23,17 @@ import type { UserMessageEditMentionContext } from '@/components/ai-gui/view';
 import { MessageRowView } from '@/components/ai-gui/view';
 import type { ConversationFontSize } from '@/atoms/settings';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    width: '42rem',
+    'max-width': '100%',
+    'justify-content': 'flex-end',
+  },
+  frame: {
+    width: '22rem',
+  },
+});
 
 const SHORT_TEXT = '你好';
 const LONG_TEXT = Array.from(
@@ -147,7 +159,7 @@ function EditorHarness({
     // The editor lives right-aligned in the user column, so preview it that way.
     <PlatformContext.Provider value={storyPlatform}>
       <Provider store={store}>
-        <div className="flex w-[42rem] max-w-full justify-end">
+        <div {...stylex.props(storyLayout.row)}>
           <UserMessageEditor
             value={value}
             onChange={setValue}
@@ -260,7 +272,7 @@ export const LargeFontSize: Story = {
 
 export const NarrowColumn: Story = {
   render: () => (
-    <div className="w-[22rem]">
+    <div {...stylex.props(storyLayout.frame)}>
       <EditorHarness initialValue={SHORT_TEXT} />
     </div>
   ),

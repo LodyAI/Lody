@@ -15,7 +15,6 @@ import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
-import { cn } from '@/lib/utils';
 import { Popover } from '@/ui/armed-overlays';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { useLatestRef } from '@/hooks/use-latest-ref';
@@ -158,31 +157,42 @@ const OUTLINE_INDEX_ATTRIBUTE = 'data-outline-index';
 const styles = stylex.create({
   tickListItem: { display: 'contents' },
   tickButton: {
+    '--outline-tick-ink': {
+      default: null,
+      '@media (hover: hover)': {
+        default: null,
+        ':hover:not(:focus-visible)':
+          'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 80%, transparent)',
+      },
+      ':focus-visible': 'color-mix(in oklab, hsl(var(--foreground) / 1) 80%, transparent)',
+    },
     display: 'flex',
     width: '100%',
     alignItems: 'center',
   },
-  /**
-   * The tick line itself. The colour it lifts to when the RAIL is hovered, the
-   * tick under the pointer and the tick the keyboard is on retain their
-   * utilities-layer priority over a caller's lower-specificity descendant ink.
-   */
   tickLine: {
     height: '2px',
     borderRadius: themeRadius.full,
-    backgroundColor: 'hsl(var(--muted-foreground) / 0.32)',
+    backgroundColor: 'var(--outline-tick-ink)',
     transitionProperty: 'background-color,width',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing.out,
   },
   rail: {
+    '--outline-tick-ink': {
+      default: 'hsl(var(--muted-foreground) / 0.32)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 50%, transparent)',
+      },
+    },
     pointerEvents: 'none',
     position: 'absolute',
     top: 0,
     bottom: 0,
     left: 0,
     zIndex: 10,
-    display: 'none',
+    display: { default: 'none', '@container (min-width: 928px)': 'flex' },
     alignItems: 'center',
   },
   strip: {
@@ -212,6 +222,7 @@ const styles = stylex.create({
     transitionTimingFunction: themeEasing.out,
   },
   card: {
+    padding: 'calc(var(--spacing) * 3)',
     pointerEvents: 'none',
     width: '18rem',
     userSelect: 'none',
@@ -305,23 +316,7 @@ const OutlineTick = memo(function OutlineTick({
         className={clsx('group/tick', stylex.props(styles.tickButton).className)}
         style={{ height: TICK_PITCH }}
       >
-        <span
-          aria-hidden="true"
-          style={{ width }}
-          className={clsx(
-            // Resting contrast has to carry the edge fade: at /25 the ticks
-            // were faint enough that a gradient over them had almost nothing
-            // to take away, so a scrollable edge looked the same as a hard one.
-            // /45 at rest read as a barcode beside the text in peripheral
-            // vision, so the rail rests at /32 and lifts while the pointer is on it.
-            'group-hover/rail:bg-muted-foreground/50',
-            // Ease-out so the swell tracks the cursor immediately and settles,
-            // rather than lagging behind it.
-            'group-hover/tick:bg-muted-foreground/80',
-            'group-focus-visible/tick:bg-foreground/80',
-            stylex.props(styles.tickLine).className
-          )}
-        />
+        <span aria-hidden="true" style={{ width }} {...stylex.props(styles.tickLine)} />
       </button>
     </li>
   );
@@ -708,18 +703,7 @@ export function ConversationOutlineRail({
       // Low contrast at rest so the rail reads as a margin marker, not chrome;
       // the whole strip lifts together on hover so a single tick never has to
       // be found before it becomes visible.
-      className={clsx(
-        cn(
-          'group/rail',
-          // The conversation column is 804px wide (768px of content plus its
-          // gutter) and centered. Below this the rail would sit on top of message
-          // content, so it does not render at all. A container query keeps that
-          // decision in CSS — no JS measurement, no layout shift on mount.
-          '@[928px]:flex',
-          className
-        ),
-        stylex.props(styles.rail).className
-      )}
+      className={clsx('group/rail', stylex.props(styles.rail).className, className)}
       style={{ width: RAIL_WIDTH }}
     >
       <div
@@ -792,7 +776,7 @@ export function ConversationOutlineRail({
           // dismissing it is the pointer's job.
           initialFocus={false}
           finalFocus={false}
-          className={clsx('p-3', stylex.props(styles.card).className)}
+          xstyle={styles.card}
           onTransitionEnd={(event) => {
             // The surface transitions out before Base UI unmounts it; clear the
             // anchor's state only once that fade has ended.

@@ -51,9 +51,9 @@ const styles = stylex.create({
     fontWeight: themeFontWeight.medium,
     color: 'hsl(var(--destructive) / 1)',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
     backgroundColor: {
       default: null,
       ':active': 'color-mix(in oklab, hsl(var(--destructive) / 1) 10%, transparent)',

@@ -2,7 +2,7 @@
 
 import React, { useLayoutEffect, useRef } from 'react';
 import { Fade } from '@/ui/blur-fade/blur-fade';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 
 import { ChevronDown } from 'lucide-react';
 import * as Collapsible from '@radix-ui/react-collapsible';
@@ -10,7 +10,6 @@ import { Button } from '@lody/ui/button';
 import { CopyButton } from './copy-button';
 import { clamp } from '@/lib/clamp';
 import * as stylex from '@stylexjs/stylex';
-import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -19,6 +18,15 @@ import {
   themeRadius,
   themeSpace,
 } from '../style/theme-scale.stylex';
+
+const expand = stylex.keyframes({
+  from: { height: 0 },
+  to: { height: 'var(--radix-collapsible-content-height)' },
+});
+const collapse = stylex.keyframes({
+  from: { height: 'var(--radix-collapsible-content-height)' },
+  to: { height: 0 },
+});
 
 const styles = stylex.create({
   card: {
@@ -31,6 +39,7 @@ const styles = stylex.create({
     borderStyle: 'solid',
     borderColor: themeColors.border,
     backgroundColor: themeColors.card,
+    boxShadow: 'none',
   },
   clipped: { overflow: 'hidden' },
   header: {
@@ -49,7 +58,8 @@ const styles = stylex.create({
     width: themeSpace[4],
     transitionProperty: 'transform, translate, scale, rotate',
     transitionDuration: themeDuration[200],
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    rotate: { default: null, ':is([data-state="closed"] *)': '-90deg' },
   },
   titleRow: {
     display: 'flex',
@@ -71,7 +81,24 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     minWidth: 0,
   },
-  content: { position: 'relative', height: { default: null, ':is([data-state="closed"])': 0 } },
+  content: {
+    position: 'relative',
+    height: { default: null, ':is([data-state="closed"])': 0 },
+    animationName: {
+      default: null,
+      ':is([data-state="open"])': expand,
+      ':is([data-state="closed"])': collapse,
+    },
+    animationDuration: '.2s',
+    animationTimingFunction: 'ease-out',
+  },
+  copy: {
+    opacity: {
+      default: 0,
+      ':is([data-collapsible-title-row]:hover *)': { default: null, '@media (hover: hover)': 1 },
+      ':is([data-state="copied"])': 1,
+    },
+  },
   horizontalScroll: {
     overflowX: 'auto',
     overflow: { default: null, ':is([data-state="closed"])': 'hidden' },
@@ -96,10 +123,12 @@ const styles = stylex.create({
 type CollapsibleCardProps = Collapsible.CollapsibleProps & {
   /** When true, removes overflow-hidden to allow sticky children to work with outer scroll containers */
   allowStickyChildren?: boolean;
+  xstyle?: stylex.StyleXStyles;
 };
 
 const CollapsibleCard = ({
   className,
+  xstyle,
   children,
   allowStickyChildren = false,
   ...props
@@ -107,11 +136,8 @@ const CollapsibleCard = ({
   return (
     <Collapsible.Root
       {...props}
-      // Keep the combined ring/shadow contract: cn lets caller shadows replace
-      // shadow-none without an unlayered StyleX custom property masking them.
-      className={cn(
-        stylex.props(styles.card, !allowStickyChildren && styles.clipped).className,
-        'shadow-none ring-0',
+      className={clsx(
+        stylex.props(styles.card, !allowStickyChildren && styles.clipped, xstyle).className,
         className
       )}
     >
@@ -123,12 +149,14 @@ const CollapsibleCard = ({
 type CollapsibleCardHeaderProps = React.HTMLAttributes<HTMLDivElement> & {
   sticky?: boolean;
   position?: 'sticky' | 'absolute' | 'relative';
+  xstyle?: stylex.StyleXStyles;
 };
 
 const CollapsibleCardHeader: React.FC<CollapsibleCardHeaderProps> = ({
   className,
   children,
   sticky = false,
+  xstyle,
   position,
   ...props
 }) => {
@@ -138,16 +166,13 @@ const CollapsibleCardHeader: React.FC<CollapsibleCardHeaderProps> = ({
     <Collapsible.Trigger asChild>
       <div
         {...props}
-        className={cn(stylex.props(styles.header, styles[headerPosition]).className, className)}
+        className={clsx(
+          stylex.props(styles.header, styles[headerPosition], xstyle).className,
+          className
+        )}
       >
         <Button variant="ghost" aria-label="Toggle section" size="mini" icon>
-          <ChevronDown
-            className={cn(
-              stylex.props(styles.glyph).className,
-              '[[data-state=closed]_&]:-rotate-90'
-            )}
-            aria-hidden="true"
-          />
+          <ChevronDown {...stylex.props(styles.glyph)} aria-hidden="true" />
         </Button>
         {children}
       </div>
@@ -159,16 +184,11 @@ const CollapsibleCardTitle: React.FC<
   React.HTMLAttributes<HTMLSpanElement> & { title?: string }
 > = ({ className, title, children, ...p }) => {
   return (
-    <div {...withClassName(stylex.props(styles.titleRow), 'group')}>
-      <p {...p} className={cn(stylex.props(styles.title).className, className)}>
+    <div {...stylex.props(styles.titleRow)} data-collapsible-title-row>
+      <p {...p} className={clsx(stylex.props(styles.title).className, className)}>
         {children}
       </p>
-      {title && (
-        <CopyButton
-          value={title}
-          className="opacity-0 group-hover:opacity-100 data-[state=copied]:opacity-100"
-        />
-      )}
+      {title && <CopyButton value={title} xstyle={styles.copy} />}
     </div>
   );
 };
@@ -176,12 +196,14 @@ const CollapsibleCardTitle: React.FC<
 type CollapsibleCardContentProps = React.HTMLAttributes<HTMLDivElement> & {
   showTopFade?: boolean;
   noInternalScroll?: boolean;
+  xstyle?: stylex.StyleXStyles;
 };
 
 const CollapsibleCardContent: React.FC<CollapsibleCardContentProps> = ({
   className,
   showTopFade = true,
   noInternalScroll = false,
+  xstyle,
   ...props
 }) => {
   const topFadeRef = useRef<HTMLDivElement>(null);
@@ -204,21 +226,16 @@ const CollapsibleCardContent: React.FC<CollapsibleCardContentProps> = ({
 
   return (
     <Collapsible.Content
-      className={cn(
+      className={
         stylex.props(styles.content, noInternalScroll ? styles.horizontalScroll : styles.clipped)
-          .className,
-        // When noInternalScroll is true, we need overflow-x-auto on Collapsible.Content
-        // to allow horizontal scrolling. overflow-hidden would clip the scrollbar.
-        // When collapsed (data-[state=closed]), we still need h-0 + overflow-hidden to hide content.
-        'data-[state=open]:animate-collapsible-down',
-        'data-[state=closed]:animate-collapsible-up'
-      )}
+          .className
+      }
     >
       <div
         {...props}
         ref={contentRef}
-        className={cn(
-          stylex.props(noInternalScroll ? styles.externalBody : styles.body).className,
+        className={clsx(
+          stylex.props(noInternalScroll ? styles.externalBody : styles.body, xstyle).className,
           className
         )}
         onScroll={noInternalScroll ? undefined : onScroll}

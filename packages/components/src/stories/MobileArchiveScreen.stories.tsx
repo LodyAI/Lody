@@ -1,14 +1,32 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { fn } from 'storybook/test';
 
 import { MobileArchiveScreen } from '@/components/mobile/mobile-archive-screen';
+const storyLayout = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 9)',
+    width: 'calc(var(--spacing) * 9)',
+    'flex-shrink': '0',
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'hsl(var(--muted) / 1)',
+  },
+  section: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  canvas: {
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-top': 'calc(var(--spacing) * 3)',
+  },
+});
 
 function ArchiveRow({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="flex items-center gap-3 border-b border-border/40 px-4 py-3">
-      <div className="h-9 w-9 shrink-0 rounded-lg bg-muted" />
-      <div className="min-w-0 flex-1">
+      <div {...stylex.props(storyLayout.frame)} />
+      <div {...stylex.props(storyLayout.section)}>
         <div className="truncate text-sm font-medium">{title}</div>
         <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
       </div>
@@ -49,7 +67,7 @@ function ArchiveStoryShell({
             <ArchiveRow title="权限审批弹窗布局" subtitle="fix/permission-modal · zx-macbook" />
             <ArchiveRow title="移动端归档体验" subtitle="feat/mobile-archive · zx-macbook" />
             <ArchiveRow title="登录页 OAuth 链接" subtitle="fix/oauth-callback · lab-m2" />
-            <div className="px-4 pt-3">
+            <div {...stylex.props(storyLayout.canvas)}>
               <button
                 type="button"
                 className="text-xs text-muted-foreground underline"

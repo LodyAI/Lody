@@ -1,7 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import stylex from '@stylexjs/unplugin';
 import { reviewStylexOptions } from './stylex-options';
@@ -62,14 +61,7 @@ const stylexOutput: Plugin = {
 };
 
 export default defineConfig({
-  plugins: [
-    curatedShikiLangs(),
-    react(),
-    tailwindcss(),
-    stylexTransform,
-    stylexOutput,
-    viteSingleFile(),
-  ],
+  plugins: [curatedShikiLangs(), react(), stylexTransform, stylexOutput, viteSingleFile()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
@@ -8,7 +9,6 @@ import { useTranslation } from 'react-i18next';
 import { FileTreeProviderView } from '@/components/sessions/components/file-tree-view';
 import type { FileWorkspaceProvider, FileWorkspaceSnapshot } from '@/lib/file-workspace-provider';
 import { ScrollArea } from '@lody/ui/scroll-area';
-import { cn } from '@/lib/utils';
 
 type ProjectFileBrowserProps = {
   readonly provider: FileWorkspaceProvider | null;
@@ -70,7 +70,7 @@ export function ProjectFileBrowser({
   }, [provider, selectedPath, t]);
 
   return (
-    <div className={cn(stylex.props(styles.root).className, className)}>
+    <div className={clsx(stylex.props(styles.root).className, className)}>
       <div {...stylex.props(styles.tree)}>
         <FileTreeProviderView
           fileProvider={provider}

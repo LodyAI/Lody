@@ -22,8 +22,7 @@ vi.mock('../src/lib/native-platform', () => ({
 }));
 vi.mock('../src/lib/utils', async () => {
   const { clsx } = await import('clsx');
-  const { twMerge } = await import('tailwind-merge');
-  return { cn: (...inputs: Parameters<typeof clsx>) => twMerge(clsx(...inputs)) };
+  return { cn: clsx };
 });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

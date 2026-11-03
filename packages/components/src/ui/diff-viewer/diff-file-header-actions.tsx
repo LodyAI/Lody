@@ -3,7 +3,7 @@ import { Check, Copy, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeSpace } from '../../style/theme-scale.stylex';
 
@@ -32,10 +32,10 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--accent) / 1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration, 150ms))',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
-      'var(--tw-ease, var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1)))',
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
   },
   glyph: { height: themeSpace[3.5], width: themeSpace[3.5] },
 });
@@ -70,7 +70,7 @@ export function DiffFileHeaderActions({ path, onOpenFile, className }: DiffFileH
   };
 
   return (
-    <div className={cn(stylex.props(styles.actions).className, className)}>
+    <div className={clsx(stylex.props(styles.actions).className, className)}>
       <button
         type="button"
         onPointerDown={stopHeaderTrigger}

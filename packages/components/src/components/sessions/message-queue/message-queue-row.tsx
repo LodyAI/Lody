@@ -45,9 +45,9 @@ const MUTED_FOREGROUND_70 =
 const transitionColors = stylex.create({
   colors: {
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
   },
 });
 
@@ -56,6 +56,21 @@ const transitionColors = stylex.create({
  * same row, so it reads these too.
  */
 export const queueRowStyles = stylex.create({
+  divider: {
+    borderTopWidth: {
+      default: null,
+      ':is([data-message-queue-row] + [data-message-queue-row])': '1px',
+    },
+    borderTopStyle: {
+      default: null,
+      ':is([data-message-queue-row] + [data-message-queue-row])': 'solid',
+    },
+    borderTopColor: {
+      default: null,
+      ':is([data-message-queue-row] + [data-message-queue-row])':
+        'color-mix(in oklab, hsl(var(--border) / 1) 30%, transparent)',
+    },
+  },
   row: {
     position: 'relative',
     gap: themeSpace[2],
@@ -344,6 +359,7 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
   const rowProps = stylex.props(
     stylex.defaultMarker(),
     queueSurface.row,
+    queueRowStyles.divider,
     !props.roomy && queueRowStyles.row,
     props.roomy && queueRowStyles.roomyPosition,
     props.roomy && queueSurface.roomyRow,
@@ -362,11 +378,10 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
       className={clsx(
         rowProps.className,
         // Keep the CSS hook; the StyleX marker limits the swap to this row.
-        'group/row',
+        'group/row'
         // Dividers go between rows only. (`divide-y` on the list also lined the
         // last row, because dnd-kit appends hidden nodes after it, and that
         // line doubled the composer's top border into a shadow-like band.)
-        '[&+&]:border-t [&+&]:border-border/30'
       )}
     >
       {props.roomy ? (

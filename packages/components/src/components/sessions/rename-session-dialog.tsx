@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import * as stylex from '@stylexjs/stylex';
 import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { field as fieldTokens } from '@lody/ui/field/field.tokens.stylex';
-import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import type { SessionId } from '@lody/shared';
@@ -21,9 +20,18 @@ const styles = stylex.create({
   },
   titleTypography: {
     [dialog.titleSize]: 'var(--text-base)',
-    [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
+    [dialog.titleLeading]: 'var(--text-base--line-height)',
   },
-  content: { overflow: 'hidden' },
+  content: { overflow: 'hidden', maxWidth: '24rem' },
+  description: { lineHeight: 'calc(var(--spacing) * 5)' },
+  field: {
+    lineHeight: 'calc(var(--spacing) * 5)',
+    boxShadow: {
+      default: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':focus-visible': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':focus-within': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    },
+  },
   header: {
     borderBottomWidth: 1,
     borderBottomStyle: 'solid',
@@ -160,16 +168,12 @@ export function RenameSessionDialogView({
 
   return (
     <Dialog.Root open={target != null} onOpenChange={handleOpenChange}>
-      <Dialog.Content
-        padding="none"
-        gap="none"
-        className={clsx(stylex.props(styles.content).className, 'max-w-sm')}
-      >
-        <Dialog.Header className={stylex.props(styles.header).className}>
-          <Dialog.Title className={stylex.props(styles.titleTypography).className}>
+      <Dialog.Content padding="none" gap="none" xstyle={styles.content}>
+        <Dialog.Header xstyle={styles.header}>
+          <Dialog.Title xstyle={styles.titleTypography}>
             {t('sidebar.renameChat.title', 'Rename Chat')}
           </Dialog.Title>
-          <Dialog.Description className="leading-5">
+          <Dialog.Description xstyle={styles.description}>
             {t('sidebar.renameChat.description', 'Enter a new name for this chat.')}
           </Dialog.Description>
         </Dialog.Header>
@@ -183,10 +187,7 @@ export function RenameSessionDialogView({
             disabled={saving}
             resize="none"
             style={{ overflowY: 'hidden' }}
-            className={clsx(
-              stylex.props(styles.titleFieldLayout).className,
-              'leading-5 shadow-xs focus-visible:ring-1 focus-visible:ring-ring'
-            )}
+            xstyle={[styles.titleFieldLayout, styles.field]}
             onChange={(e) => setDraft(e.target.value.replace(/[\r\n]+/g, ' '))}
             onFocus={(e) => e.currentTarget.select()}
             onKeyDown={(e) => {
@@ -198,7 +199,7 @@ export function RenameSessionDialogView({
           />
         </div>
 
-        <Dialog.Footer className={stylex.props(styles.footer).className}>
+        <Dialog.Footer xstyle={styles.footer}>
           <Button variant="secondary" size="small" onClick={onClose} disabled={saving}>
             {t('common.cancel', 'Cancel')}
           </Button>

@@ -1,0 +1,575 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedlegacysidebardisabled--natural",
+    "migration-ownedlegacysidebardisabled--opaque",
+    "migration-ownedlegacysidebardisabled--utility",
+    "migration-ownedlegacysidebardisabled--wildcard",
+    "migration-ownedlegacysidebardisabled--targeted",
+    "migration-ownedlegacysidebardisabled--where"
+  ],
+  "ready": {
+    "migration-ownedlegacysidebardisabled--natural": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-state-part]')].length===9&&[...document.querySelectorAll('[data-state-part]')].every(e=>e.dataset.stateRefTag===e.tagName)&&document.querySelector('[data-state-part=slot-disabled]').tagName==='BUTTON'&&document.querySelector('[data-state-part=aria-anchor]').tagName==='A'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-state-part=native-disabled]').matches(':disabled')&&!document.querySelector('[data-state-part=aria-anchor]').matches(':disabled')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--opaque": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-state-part]')].length===9&&[...document.querySelectorAll('[data-state-part]')].every(e=>e.dataset.stateRefTag===e.tagName)&&document.querySelector('[data-state-part=slot-disabled]').tagName==='BUTTON'&&document.querySelector('[data-state-part=aria-anchor]').tagName==='A'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-state-part=native-disabled]').matches(':disabled')&&!document.querySelector('[data-state-part=aria-anchor]').matches(':disabled')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--utility": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-state-part]')].length===9&&[...document.querySelectorAll('[data-state-part]')].every(e=>e.dataset.stateRefTag===e.tagName)&&document.querySelector('[data-state-part=slot-disabled]').tagName==='BUTTON'&&document.querySelector('[data-state-part=aria-anchor]').tagName==='A'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-state-part=native-disabled]').matches(':disabled')&&!document.querySelector('[data-state-part=aria-anchor]').matches(':disabled')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--wildcard": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-state-part]')].length===9&&[...document.querySelectorAll('[data-state-part]')].every(e=>e.dataset.stateRefTag===e.tagName)&&document.querySelector('[data-state-part=slot-disabled]').tagName==='BUTTON'&&document.querySelector('[data-state-part=aria-anchor]').tagName==='A'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-state-part=native-disabled]').matches(':disabled')&&!document.querySelector('[data-state-part=aria-anchor]').matches(':disabled')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--targeted": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-state-part]')].length===9&&[...document.querySelectorAll('[data-state-part]')].every(e=>e.dataset.stateRefTag===e.tagName)&&document.querySelector('[data-state-part=slot-disabled]').tagName==='BUTTON'&&document.querySelector('[data-state-part=aria-anchor]').tagName==='A'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-state-part=native-disabled]').matches(':disabled')&&!document.querySelector('[data-state-part=aria-anchor]').matches(':disabled')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--where": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-state-part]')].length===9&&[...document.querySelectorAll('[data-state-part]')].every(e=>e.dataset.stateRefTag===e.tagName)&&document.querySelector('[data-state-part=slot-disabled]').tagName==='BUTTON'&&document.querySelector('[data-state-part=aria-anchor]').tagName==='A'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-state-part=native-disabled]').matches(':disabled')&&!document.querySelector('[data-state-part=aria-anchor]').matches(':disabled')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedlegacysidebardisabled--natural": [
+      {
+        "name": "keyboard-enabled",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=enabled]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='1'&&document.querySelector('[data-state-events]').dataset.stateLast==='enabled'"
+          }
+        ]
+      },
+      {
+        "name": "native-disabled-skip",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=native-disabled]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=enabled]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=aria-button]')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-button",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-button]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='2'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-button'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-anchor",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=aria-anchor]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-anchor]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='3'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-anchor'"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--opaque": [
+      {
+        "name": "keyboard-enabled",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=enabled]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='1'&&document.querySelector('[data-state-events]').dataset.stateLast==='enabled'"
+          }
+        ]
+      },
+      {
+        "name": "native-disabled-skip",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=native-disabled]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=enabled]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=aria-button]')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-button",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-button]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='2'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-button'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-anchor",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=aria-anchor]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-anchor]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='3'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-anchor'"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--utility": [
+      {
+        "name": "keyboard-enabled",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=enabled]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='1'&&document.querySelector('[data-state-events]').dataset.stateLast==='enabled'"
+          }
+        ]
+      },
+      {
+        "name": "native-disabled-skip",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=native-disabled]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=enabled]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=aria-button]')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-button",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-button]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='2'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-button'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-anchor",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=aria-anchor]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-anchor]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='3'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-anchor'"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--wildcard": [
+      {
+        "name": "keyboard-enabled",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=enabled]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='1'&&document.querySelector('[data-state-events]').dataset.stateLast==='enabled'"
+          }
+        ]
+      },
+      {
+        "name": "native-disabled-skip",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=native-disabled]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=enabled]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=aria-button]')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-button",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-button]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='2'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-button'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-anchor",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=aria-anchor]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-anchor]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='3'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-anchor'"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--targeted": [
+      {
+        "name": "keyboard-enabled",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=enabled]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='1'&&document.querySelector('[data-state-events]').dataset.stateLast==='enabled'"
+          }
+        ]
+      },
+      {
+        "name": "native-disabled-skip",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=native-disabled]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=enabled]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=aria-button]')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-button",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-button]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='2'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-button'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-anchor",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=aria-anchor]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-anchor]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='3'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-anchor'"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebardisabled--where": [
+      {
+        "name": "keyboard-enabled",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=enabled]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='1'&&document.querySelector('[data-state-events]').dataset.stateLast==='enabled'"
+          }
+        ]
+      },
+      {
+        "name": "native-disabled-skip",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=native-disabled]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=enabled]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=enabled]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-state-part=aria-button]')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-button",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-button]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='2'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-button'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-aria-anchor",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-state-part=aria-anchor]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-state-part=aria-anchor]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-state-events]').dataset.stateEvents==='3'&&document.querySelector('[data-state-events]').dataset.stateLast==='aria-anchor'"
+          }
+        ]
+      }
+    ]
+  }
+}

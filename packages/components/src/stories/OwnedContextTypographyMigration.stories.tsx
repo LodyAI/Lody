@@ -18,6 +18,8 @@ const styles = stylex.create({
     backgroundColor: 'hsl(var(--background))',
   },
   receipt: { display: 'block', marginTop: 16 },
+  unrestricted: { maxWidth: { default: 'none', '@media (width >= 40rem)': '24rem' } },
+  scopedTab: { justifyContent: 'flex-start', fontWeight: 640 },
 });
 
 function LongLabels({ scoped = false }: { scoped?: boolean }) {
@@ -28,8 +30,6 @@ function LongLabels({ scoped = false }: { scoped?: boolean }) {
         '--spacing': '5px',
         '--text-sm': '17px',
         '--text-sm--line-height': '26px',
-        '--tw-leading': '1.6',
-        '--font-weight-medium': '640',
       } as CSSProperties)
     : undefined;
   return (
@@ -41,8 +41,8 @@ function LongLabels({ scoped = false }: { scoped?: boolean }) {
         localLabel="Local development workspaces"
         githubLabel="GitHub organization repositories"
         chatLabel="Independent conversations"
-        className={scoped ? 'max-w-none' : undefined}
-        triggerJustifyClassName={scoped ? 'justify-start' : undefined}
+        xstyle={scoped ? styles.unrestricted : undefined}
+        triggerXstyle={scoped ? styles.scopedTab : undefined}
       />
       <output aria-label="Selected context" {...stylex.props(styles.receipt)}>
         {value}

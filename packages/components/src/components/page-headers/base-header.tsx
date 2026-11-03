@@ -19,6 +19,7 @@ interface BaseHeaderProps {
   title: ReactNode;
   actions?: ReactNode;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Inline overrides (e.g. the mobile session floating header's exact height). */
   style?: CSSProperties;
   hideMenuButton?: boolean;
@@ -89,7 +90,10 @@ const styles = stylex.create({
   },
   /** The drawer's glyph. */
   menuIcon: { height: themeSpace[5], width: themeSpace[5] },
-  menuButtonSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
+  menuButtonSpacing: {
+    marginRight: 'calc(var(--spacing) * 2)',
+    display: { default: 'inline-flex', '@media (min-width: 768px)': 'none' },
+  },
 });
 
 /**
@@ -101,6 +105,7 @@ export function BaseHeader({
   actions,
   className,
   style,
+  xstyle,
   hideMenuButton = false,
   leading,
   truncateTitle = true,
@@ -108,23 +113,20 @@ export function BaseHeader({
   const isMobile = useIsMobile();
   const isNativeApp = isNativeAppShell();
   const toggleDrawer = useSetAtom(toggleMobileDrawerAtom);
-  const barProps = stylex.props(styles.bar, isNativeApp ? styles.barNative : styles.barWeb);
+  const barProps = stylex.props(styles.bar, isNativeApp ? styles.barNative : styles.barWeb, xstyle);
 
   return (
     <div
       {...barProps}
-      // A caller's class stays a plain Tailwind class: the `utilities` layer
-      // sits above the `stylex` layer, so it keeps overriding this bar's own
-      // layout, exactly as `twMerge` used to let it.
       className={clsx(barProps.className, className)}
-      style={style}
+      style={{ ...barProps.style, ...style }}
     >
       {/* Mobile: drawer toggle */}
       {isMobile && !hideMenuButton && (
         <Button
           variant="ghost"
           icon
-          className={clsx(stylex.props(styles.menuButtonSpacing).className, 'md:hidden')}
+          xstyle={styles.menuButtonSpacing}
           onClick={(e) => {
             // Remove focus to avoid aria-hidden warnings in some browsers.
             (e.currentTarget as HTMLElement).blur();

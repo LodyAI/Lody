@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import 'monaco-editor/min/vs/editor/editor.main.css';
 
 import { useEffect, useMemo, useRef } from 'react';
@@ -5,8 +6,6 @@ import { useAtomValue } from 'jotai';
 import * as stylex from '@stylexjs/stylex';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { extendedCodeLanguagesEnabledAtom, fileViewerWordWrapAtom } from '@/atoms/settings';
-import { cn } from '@/lib/utils';
-import { editorHeightClass, editorWidthClipClass } from '@/style/legacy-defaults.stylex';
 import { configureSessionMonacoWorkers } from '@/lib/session-monaco-workers';
 import { ensureSessionMonacoLanguages } from '@/lib/session-monaco-languages';
 import {
@@ -29,6 +28,7 @@ import { useKeyScope } from '@/lib/commands';
 configureSessionMonacoWorkers();
 
 const styles = stylex.create({
+  root: { height: '100%', width: '100%', minHeight: '240px', overflow: 'hidden' },
   editorContainer: { height: '100%', width: '100%' },
 });
 
@@ -260,7 +260,7 @@ export function SessionMonacoTextViewer({
   }, [findRequestSeq]);
 
   return (
-    <div className={cn(editorHeightClass, 'min-h-[240px]', editorWidthClipClass, className)}>
+    <div className={clsx(stylex.props(styles.root).className, className)}>
       <div ref={containerRef} {...stylex.props(styles.editorContainer)} />
     </div>
   );

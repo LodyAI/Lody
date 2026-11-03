@@ -76,7 +76,10 @@ const stage = stylex.create({
   sidebarToggleMac: { top: '5px', left: '92px' },
   sidebarTogglePlain: { left: themeSpace[3] },
   /* The Electron screen is not selectable; its text fields say so again. */
-  selectNone: { userSelect: 'none' },
+  selectNone: {
+    userSelect: 'none',
+    ':is(*) :is(input,textarea,[contenteditable])': { userSelect: 'text' },
+  },
   /* The scope the greeting and the composer share. */
   scope: {
     position: 'relative',
@@ -133,18 +136,8 @@ export function WebChatLandingScreen({
     [stageElement, groupElement]
   );
 
-  // The text fields stay selectable inside the unselectable Electron screen:
-  // StyleX has no descendant selector, so those three rules stay Tailwind and
-  // ride the element beside the compiled style.
   const screenStyle = stylex.props(stage.screen, isElectron && stage.selectNone);
-  const screenClassName = [
-    screenStyle.className,
-    isElectron
-      ? '[&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text'
-      : undefined,
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const screenClassName = screenStyle.className;
   const sidebarToggleProps = stylex.props(
     stage.sidebarToggle,
     isMacOSElectronRenderer() && !isElectronFullscreen

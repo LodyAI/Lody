@@ -16,6 +16,7 @@ import { modal } from './surface';
 export interface DialogSectionProps {
   children?: ReactNode;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 export interface DialogHeaderProps extends DialogSectionProps {
@@ -29,8 +30,13 @@ export interface DialogHeaderProps extends DialogSectionProps {
  * the panel's own `gap` separates it from the body rather than from the
  * sentence it belongs to.
  */
-export function DialogHeader({ children, className, visuallyHidden = false }: DialogHeaderProps) {
-  const sx = stylex.props(modal.header, visuallyHidden && modal.srOnly);
+export function DialogHeader({
+  children,
+  className,
+  xstyle,
+  visuallyHidden = false,
+}: DialogHeaderProps) {
+  const sx = stylex.props(modal.header, xstyle, visuallyHidden && modal.srOnly);
   return (
     <div className={appendClassName(sx.className, className)} style={sx.style}>
       {children}
@@ -43,8 +49,8 @@ export function DialogHeader({ children, className, visuallyHidden = false }: Di
  * narrow one, so the affirmative answer is the last one read and the nearest to
  * the thumb in both shapes.
  */
-export function DialogFooter({ children, className }: DialogSectionProps) {
-  const sx = stylex.props(modal.footer);
+export function DialogFooter({ children, className, xstyle }: DialogSectionProps) {
+  const sx = stylex.props(modal.footer, xstyle);
   return (
     <div className={appendClassName(sx.className, className)} style={sx.style}>
       {children}

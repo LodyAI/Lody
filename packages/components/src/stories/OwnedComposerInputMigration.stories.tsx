@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useLayoutEffect, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
-import { ChatComposer, getChatComposerTextareaClassName } from '@/components/chat/chat-composer';
+import { ChatComposer, getChatComposerTextareaStyles } from '@/components/chat/chat-composer';
 import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-textarea';
 import { commands, registerBuiltInCommands } from '@/lib/commands';
 import { SettingsStoryProviders } from './settings-story-shell';
@@ -56,7 +56,9 @@ function InputFixture({
             label="Plain message"
             disabled={disabled}
             placeholder="Write a message with the plain field branch."
-            className={getChatComposerTextareaClassName({ tone: 'light', variant })}
+            className="input-scrollbar"
+            focusRing={false}
+            xstyle={getChatComposerTextareaStyles({ tone: 'light', variant })}
           />
         ) : (
           <ChatComposer

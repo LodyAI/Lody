@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect } from 'react';
 import { Archive, Bot, FolderPlus, Search, SlidersHorizontal } from 'lucide-react';
@@ -18,6 +19,90 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Toast } from '@lody/ui';
 import { toastManager } from '@/lib/toast';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  stack2: {
+    display: 'flex',
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'flex-direction': 'column',
+  },
+  stack3: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    width: '100%',
+    'max-width': '48rem',
+    flex: '1',
+    'flex-direction': 'column',
+    'justify-content': 'flex-end',
+    'padding-inline': 'calc(var(--spacing) * 8)',
+    'padding-bottom': 'calc(var(--spacing) * 8)',
+  },
+  row: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--foreground) / 1)',
+    color: 'hsl(var(--background) / 1)',
+  },
+  caption: {
+    'padding-top': 'calc(var(--spacing) * 1)',
+    color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)',
+  },
+  row2: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+  },
+  row3: {
+    display: 'flex',
+    height: '100vh',
+    'min-height': 'calc(var(--spacing) * 0)',
+    width: '100%',
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  section: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'overflow-y': 'auto',
+  },
+  frame2: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': '64rem',
+    'padding-inline': 'calc(var(--spacing) * 8)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+  },
+  row4: {
+    'margin-bottom': 'calc(var(--spacing) * 5)',
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  section2: {
+    position: 'relative',
+    'max-width': '24rem',
+    flex: '1',
+  },
+});
 
 const now = Date.now();
 const machineId = 'machine-mac-studio' as MachineId;
@@ -174,28 +259,28 @@ function DesktopSidebar({
 
 function ProjectConversationPane() {
   return (
-    <main className="flex min-w-0 flex-1 flex-col bg-background">
+    <main {...stylex.props(storyLayout.stack)}>
       <header className="flex h-11 shrink-0 items-center border-b border-border px-4">
         <div className="truncate text-sm font-medium">完善移除项目的 UX</div>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-end px-8 pb-8">
+      <div {...stylex.props(storyLayout.stack2)}>
+        <div {...stylex.props(storyLayout.stack3)}>
           <div className="mb-8 space-y-6">
             <div className="ml-auto max-w-[72%] rounded-2xl bg-muted px-4 py-3 text-sm leading-relaxed">
               移除项目时已有对话要保留，而且设备离线时不要让项目突然消失。
             </div>
             <div className="flex max-w-[78%] gap-3 text-sm leading-relaxed">
-              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
+              <span {...stylex.props(storyLayout.row)}>
                 <Bot className="h-4 w-4" />
               </span>
-              <p className="pt-1 text-foreground/90">
+              <p {...stylex.props(storyLayout.caption)}>
                 可以。项目会留在侧栏并显示处理状态，已有对话仍然可以打开查看；设备重新上线后再完成移除。
               </p>
             </div>
           </div>
           <div className="rounded-2xl border border-border bg-card p-3 shadow-sm">
             <p className="min-h-12 text-sm text-muted-foreground">继续讨论这个项目…</p>
-            <div className="mt-2 flex items-center justify-between">
+            <div {...stylex.props(storyLayout.row2)}>
               <Button variant="ghost" size="small">
                 <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
                 Lody Desktop
@@ -211,7 +296,7 @@ function ProjectConversationPane() {
 
 function DesktopApp({ state }: { state?: LocalProjectRemovalState }) {
   return (
-    <div className="flex h-screen min-h-0 w-full overflow-hidden bg-background text-foreground">
+    <div {...stylex.props(storyLayout.row3)}>
       <DesktopSidebar state={state} />
       <ProjectConversationPane />
     </div>
@@ -305,9 +390,9 @@ const removedProjectGroup: ArchivedSessionGroup = {
 
 function RemovedProjectArchive() {
   return (
-    <div className="flex h-screen min-h-0 w-full overflow-hidden bg-background text-foreground">
+    <div {...stylex.props(storyLayout.row3)}>
       <DesktopSidebar activeNav="archive" />
-      <div className="min-w-0 flex-1">
+      <div {...stylex.props(storyLayout.section)}>
         <WebArchiveScreen
           archiveScope="my"
           isMultiSelectMode={false}
@@ -319,10 +404,10 @@ function RemovedProjectArchive() {
           onRequestBulkDelete={() => {}}
           dialogs={null}
         >
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto w-full max-w-5xl px-8 py-6">
-              <div className="mb-5 flex items-center gap-2">
-                <div className="relative max-w-sm flex-1">
+          <div {...stylex.props(storyLayout.frame)}>
+            <div {...stylex.props(storyLayout.frame2)}>
+              <div {...stylex.props(storyLayout.row4)}>
+                <div {...stylex.props(storyLayout.section2)}>
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input className="pl-9" placeholder="搜索归档对话" />
                 </div>

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -29,6 +28,9 @@ const QUICK_OPEN_OVERSCAN = 8;
 const EMPTY_QUICK_OPEN_FALLBACK_PATHS: readonly string[] = [];
 
 const styles = stylex.create({
+  dialog: { overflow: 'hidden' },
+  listCap: { maxHeight: 420 },
+  group: { padding: 'calc(var(--spacing) * 0)' },
   fileIcon: { width: '1rem', height: '1rem', flexShrink: 0 },
   fileDetails: { minWidth: 0, flex: 1 },
   basename: {
@@ -56,9 +58,15 @@ const styles = stylex.create({
   },
   virtualContainer: { position: 'relative', width: '100%' },
   /** A command row may shrink below its content, so a long path truncates. */
-  item: { minWidth: 0 },
+  item: { minWidth: 0, paddingBlock: 'calc(var(--spacing) * 2)' },
   /** The virtualized row is placed by the virtualizer. */
-  virtualItem: { left: 0, top: 0, minWidth: 0 },
+  virtualItem: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    minWidth: 0,
+    paddingBlock: 'calc(var(--spacing) * 2)',
+  },
 });
 
 export function mapSessionFileProviderEntriesToQuickOpenItems(
@@ -204,8 +212,6 @@ export function SessionFileQuickOpen({
     onOpenChange(false);
   };
   const shouldVirtualizeItems = shouldVirtualizeSessionFileQuickOpenItems(items.length);
-  const itemProps = stylex.props(styles.item);
-  const virtualItemProps = stylex.props(styles.virtualItem);
   const getVirtualItemKey = useCallback(
     (index: number) => items[index]?.fileId ?? items[index]?.path ?? index,
     [items]
@@ -237,7 +243,7 @@ export function SessionFileQuickOpen({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content width="42rem" padding="none" className="overflow-hidden">
+      <Dialog.Content width="42rem" padding="none" xstyle={styles.dialog}>
         <Dialog.Title visuallyHidden>
           {t('sessions.fileQuickOpen.title', 'Quick open file')}
         </Dialog.Title>
@@ -251,8 +257,8 @@ export function SessionFileQuickOpen({
             placeholder={t('sessions.fileQuickOpen.placeholder', 'Search files…')}
           />
           <CommandList
-            containerClassName="max-h-[420px]"
-            viewportClassName="max-h-[420px]"
+            containerXstyle={styles.listCap}
+            viewportXstyle={styles.listCap}
             viewportRef={listViewportRef}
           >
             <CommandEmpty>
@@ -262,7 +268,7 @@ export function SessionFileQuickOpen({
               </div>
             </CommandEmpty>
             {items.length > 0 && shouldVirtualizeItems ? (
-              <CommandGroup className="p-0">
+              <CommandGroup xstyle={styles.group}>
                 <div
                   {...stylex.props(styles.virtualContainer)}
                   style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
@@ -275,10 +281,7 @@ export function SessionFileQuickOpen({
                         key={virtualItem.key}
                         value={item.path}
                         onSelect={() => handleSelect(item.path)}
-                        // `absolute` and `py-2` override the shared command row's
-                        // own position and padding, so they stay Tailwind; the
-                        // placement and the shrink are this list's own.
-                        className={clsx('absolute', 'py-2', virtualItemProps.className)}
+                        xstyle={styles.virtualItem}
                         style={{
                           height: `${virtualItem.size}px`,
                           transform: `translateY(${virtualItem.start}px)`,
@@ -298,7 +301,7 @@ export function SessionFileQuickOpen({
                     key={item.fileId ?? item.path}
                     value={item.path}
                     onSelect={() => handleSelect(item.path)}
-                    className={clsx('py-2', itemProps.className)}
+                    xstyle={styles.item}
                   >
                     {renderItem(item)}
                   </CommandItem>

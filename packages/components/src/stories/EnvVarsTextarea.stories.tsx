@@ -1,6 +1,19 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { EnvVarsTextarea } from '@/components/settings/env-vars-textarea';
+const storyLayout = stylex.create({
+  frame: {
+    width: '400px',
+  },
+  frame2: {
+    width: '400px',
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 /**
  * EnvVarsTextarea component stories.
@@ -15,7 +28,7 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="w-[400px]">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),
@@ -103,7 +116,7 @@ export const WithErrors: Story = {
   },
   decorators: [
     (Story) => (
-      <div className="w-[400px]">
+      <div {...stylex.props(storyLayout.frame)}>
         <p className="mb-2 text-sm text-muted-foreground">
           Try entering invalid lines like &quot;INVALID&quot; (no =) or &quot;123ABC=value&quot;
           (invalid key)
@@ -181,7 +194,7 @@ export const DarkMode: Story = {
   },
   decorators: [
     (Story) => (
-      <div className="dark w-[400px] rounded-lg bg-background p-4">
+      <div className={clsx(stylex.props(storyLayout.frame2).className, 'dark')}>
         <Story />
       </div>
     ),

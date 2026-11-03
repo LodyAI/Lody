@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 /**
  * The mobile assistant-turn footer's leading duration slot, live and finished.
  *
@@ -13,6 +14,17 @@ import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '100dvh',
+    width: '100%',
+    'align-items': 'flex-start',
+    'justify-content': 'center',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+  },
+});
 
 const sessionId = 'session-mobile-duration-storybook' as SessionId;
 
@@ -64,7 +76,7 @@ const finishedTurn: SessionHistoryParsed = {
 
 const Phone = ({ children }: { children: React.ReactNode }) => (
   <ForceMobileLayoutProvider force>
-    <div className="flex h-dvh w-full items-start justify-center bg-muted/30 py-6">
+    <div {...stylex.props(storyLayout.row)}>
       <div className="h-[520px] w-[390px] overflow-hidden rounded-2xl border border-border bg-background">
         {children}
       </div>

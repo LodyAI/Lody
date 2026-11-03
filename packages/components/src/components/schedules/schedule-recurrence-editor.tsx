@@ -15,9 +15,8 @@ import {
   type ScheduleWeekday,
 } from '@lody/shared';
 import { Select } from '@lody/ui/select';
-import { cn } from '@/lib/utils';
 import { describeRecurrence, weekdayNames } from './schedule-format';
-import { PropertyRow, ghostValueClass } from './schedule-property-row';
+import { PropertyRow, ghostValueStyles } from './schedule-property-row';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -45,7 +44,7 @@ const styles = stylex.create({
     fontWeight: themeFontWeight.normal,
     fontVariantNumeric: 'tabular-nums',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     opacity: { default: null, ':disabled': 0.5 },
@@ -366,7 +365,7 @@ export function ScheduleRecurrenceEditor({
                 required
                 disabled={disabled}
                 aria-label={t('schedules.repeat.at', 'At')}
-                className={cn(ghostValueClass, stylex.props(styles.manualTimeInput).className)}
+                {...stylex.props(ghostValueStyles, styles.manualTimeInput)}
                 value={timeValue}
                 onChange={(event) => {
                   const [hour, minute] = event.target.value.split(':');
@@ -386,7 +385,7 @@ export function ScheduleRecurrenceEditor({
                 required
                 disabled={disabled}
                 aria-label={t('schedules.repeat.runAt', 'Run at')}
-                className={cn(ghostValueClass, stylex.props(styles.manualTimeInput).className)}
+                {...stylex.props(ghostValueStyles, styles.manualTimeInput)}
                 value={instantToZonedLocalInput(Date.parse(value.at), timeZone)}
                 onChange={(event) => {
                   const at = zonedLocalInputToInstant(event.target.value, timeZone);

@@ -78,6 +78,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  sheet: { height: 'auto', maxHeight: '85dvh' },
   /** The card of information rows. */
   infoCard: { marginBottom: themeSpace[2] },
   /** The card that holds the owner disclosure. */
@@ -314,7 +315,7 @@ export function MobileSessionMenuSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent className="h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60">
+      <DrawerContent xstyle={styles.sheet}>
         <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{heading}</DrawerTitle>
         <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>{heading}</DrawerDescription>
         <div {...stylex.props(sheetSurface.body)}>
@@ -397,7 +398,7 @@ export function MobileSessionMenuSheet({
                         <UserAvatar
                           user={{ id: member.userId, name: member.name, image: member.image }}
                           size="small"
-                          className="shrink-0"
+                          {...stylex.props(sheetSurface.shrink0)}
                         />
                         <span {...stylex.props(styles.memberName)}>{member.name}</span>
                         {isOwner ? (

@@ -7,13 +7,17 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
 import {
   PreviewConnectionStatus,
   type PreviewConnectionStatusProps,
 } from './preview-connection-status';
 
 const styles = stylex.create({
+  toolbarButton: { flexShrink: 0 },
+  annotationEnabled: {
+    backgroundColor: 'hsl(var(--accent) / 1)',
+    color: 'hsl(var(--accent-foreground) / 1)',
+  },
   toolbar: {
     display: 'flex',
     minWidth: 0,
@@ -106,6 +110,7 @@ function ToolbarButton({
   label,
   children,
   className,
+  xstyle,
   ...props
 }: ComponentProps<typeof Button> & { label: string }) {
   return (
@@ -116,7 +121,8 @@ function ToolbarButton({
             type="button"
             variant="ghost"
             icon
-            className={cn('shrink-0', className)}
+            className={className}
+            xstyle={[styles.toolbarButton, xstyle]}
             aria-label={label}
             {...props}
           >
@@ -243,7 +249,7 @@ export function SessionBrowserToolbar({
                   'Annotation is available only for local and private-network pages'
                 )
           }
-          className={annotationEnabled ? 'bg-accent text-accent-foreground' : undefined}
+          xstyle={annotationEnabled ? styles.annotationEnabled : undefined}
           disabled={!annotationAvailable || busy}
           aria-pressed={annotationEnabled}
           onClick={onToggleAnnotation}

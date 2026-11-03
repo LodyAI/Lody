@@ -1,8 +1,16 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { BaseHeader } from '@/components/page-headers/base-header';
 import { Button } from '@lody/ui/button';
 import { Plus, Filter, Search } from 'lucide-react';
 import { Input } from '@lody/ui/input';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+});
 
 /**
  * BaseHeader 组件是所有页面 header 的基础组件
@@ -41,7 +49,7 @@ export const Default: Story = {
   args: {
     title: 'Page Title',
     actions: (
-      <div className="flex items-center gap-2">
+      <div {...stylex.props(storyLayout.row)}>
         <Button variant="secondary" size="small">
           <Filter className="mr-2 h-4 w-4" />
           Filter
@@ -63,7 +71,7 @@ export const Mobile: Story = {
   args: {
     title: 'A Very Long Page Title That Should Be Truncated',
     actions: (
-      <div className="flex items-center gap-2">
+      <div {...stylex.props(storyLayout.row)}>
         <Button variant="ghost" size="small">
           <Filter className="h-4 w-4" />
         </Button>
@@ -125,7 +133,7 @@ export const Tablet: Story = {
   args: {
     title: 'Projects',
     actions: (
-      <div className="flex items-center gap-2">
+      <div {...stylex.props(storyLayout.row)}>
         <Button variant="secondary" size="small">
           <Filter className="mr-2 h-4 w-4" />
           <span className="hidden sm:inline">Filter</span>
@@ -152,7 +160,7 @@ export const DarkMode: Story = {
   args: {
     title: 'Dark Mode Header',
     actions: (
-      <div className="flex items-center gap-2">
+      <div {...stylex.props(storyLayout.row)}>
         <Button variant="secondary" size="small">
           <Filter className="mr-2 h-4 w-4" />
           Filter

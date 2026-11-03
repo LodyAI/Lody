@@ -26,7 +26,7 @@ import {
   SessionChatStreamView,
 } from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
-import { CONVERSATION_CONTENT_WIDTH_CLASS } from '@/lib/conversation-layout';
+import { conversationColumnStyles } from '@/lib/conversation-layout';
 import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -1189,7 +1189,7 @@ const planModeItems: ChatStreamItem[] = [
 /** Story-only guide at the column's content edge. */
 const RailGuide = () => (
   <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
-    <div className={cn(CONVERSATION_CONTENT_WIDTH_CLASS, 'relative h-full')}>
+    <div className={cn(stylex.props(conversationColumnStyles.base, conversationColumnStyles.capped).className, 'relative h-full')}>
       {/* `left-4` == the `sm:px-4` gutter, i.e. where every top-level row starts. */}
       <div className="absolute inset-y-0 left-4 w-px bg-status-danger/70" />
     </div>

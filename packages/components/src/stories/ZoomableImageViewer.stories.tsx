@@ -1,7 +1,20 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ZoomableImageViewer } from '@/components/shared/zoomable-image-viewer';
 import { Button } from '@lody/ui/button';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '100dvh',
+    width: '100%',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    'justify-content': 'center',
+    gap: 'calc(var(--spacing) * 3)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+  },
+});
 
 /**
  * The one full-screen image viewer in the app. Chat image blocks
@@ -63,7 +76,7 @@ function ViewerHarness({
   const [index, setIndex] = useState<number | null>(initiallyOpen ? 0 : null);
 
   return (
-    <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-muted/20">
+    <div {...stylex.props(storyLayout.stack)}>
       <p className="text-sm text-muted-foreground">
         Drag to pan, scroll or double-click to zoom; close from the top-right button or backdrop.
       </p>

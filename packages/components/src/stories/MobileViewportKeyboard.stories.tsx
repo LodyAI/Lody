@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Provider, createStore } from 'jotai';
@@ -26,11 +28,52 @@ import { getWebWorkspaceLayoutRootClassName } from '@/components/workspace-layou
 import { ChatLandingView } from '@/components/chat/chat-landing-view';
 import { ContextSwitch } from '@/components/chat/context-switch';
 import type { SessionContextType } from '@/components/chat/context-switch';
-import { getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
 import { OptionSelector } from '@/components/shared/option-selector';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 
 // ─── Shared constants & helpers ─────────────────────────────────────────────
+
+const selectorStyles = stylex.create({
+  tag: {
+    width: 'auto',
+    height: 'calc(var(--spacing) * 6)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 4,
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': { default: null, ':hover': 'hsl(var(--foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: colors.wellBackground,
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
+      },
+    },
+  },
+  tagText: { fontSize: '0.9em', lineHeight: 1.25 },
+  machineValue: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  machineGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    opacity: 0.7,
+  },
+  machineLabel: {
+    fontSize: '0.9em',
+    lineHeight: 1.25,
+    fontWeight: 500,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+});
 
 const STORY_WORKSPACE_ID = 'workspace-storybook' as WorkspaceId;
 const STORY_MACHINE_ID = 'machine-storybook' as MachineId;
@@ -191,12 +234,14 @@ function ChatLandingContent({ rootFamily = 'mobile' }: { rootFamily?: WorkspaceR
         placeholder="Machine"
         placeholderIcon={Monitor}
         tone="dark"
-        className={getSelectorTagClassName('dark')}
+        xstyle={selectorStyles.tag}
+        valueXstyle={selectorStyles.tagText}
+        labelXstyle={selectorStyles.tagText}
         contentClassName="w-56"
         renderTriggerValue={(option) => (
-          <div className="flex min-w-0 items-center gap-1.5">
-            <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            <span className="truncate text-sm font-medium">{option?.label ?? 'Machine'}</span>
+          <div {...stylex.props(selectorStyles.machineValue)}>
+            <Monitor {...stylex.props(selectorStyles.machineGlyph)} />
+            <span {...stylex.props(selectorStyles.machineLabel)}>{option?.label ?? 'Machine'}</span>
           </div>
         )}
       />

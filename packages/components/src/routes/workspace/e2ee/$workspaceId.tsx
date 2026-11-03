@@ -37,7 +37,7 @@ const styles = stylex.create({
     'padding-inline': 'calc(var(--spacing) * 4)',
     'padding-block': 'calc(var(--spacing) * 2)',
     fontSize: 'var(--text-sm)',
-    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    lineHeight: 'var(--text-sm--line-height)',
     color: 'hsl(var(--muted-foreground) / 1)',
   },
 });

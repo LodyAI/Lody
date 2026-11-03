@@ -10,7 +10,6 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
@@ -40,6 +39,7 @@ const styles = stylex.create({
   },
   downloadSpacing: { marginTop: 'calc(var(--spacing) * 3)' },
   commandCopyOffset: {
+    position: 'absolute',
     right: 'calc(var(--spacing) * 1.5)',
     top: 'calc(var(--spacing) * 1.5)',
   },
@@ -258,7 +258,7 @@ export function MachinePairingDialog({
         {connected ? (
           <>
             <Dialog.Header>
-              <Dialog.Title className={stylex.props(styles.connectedTitle).className}>
+              <Dialog.Title xstyle={styles.connectedTitle}>
                 <CheckCircle2
                   {...stylex.props(styles.icon20, styles.iconSuccess)}
                   aria-hidden="true"
@@ -380,10 +380,7 @@ export function MachinePairingDialog({
                             type="button"
                             variant="ghost"
                             icon
-                            className={clsx(
-                              stylex.props(styles.commandCopyOffset).className,
-                              'absolute'
-                            )}
+                            xstyle={styles.commandCopyOffset}
                             onClick={() => void copyCommand()}
                             aria-label={t('machinePairing.copyCommand', 'Copy command')}
                           >

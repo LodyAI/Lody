@@ -83,6 +83,7 @@ export type MobileNewChatSheetContentProps = {
 };
 
 const styles = stylex.create({
+  sheet: { height: 'auto', maxHeight: '92dvh', bottom: 'var(--native-keyboard-height,0px)' },
   /** The sheet's column. */
   root: {
     display: 'flex',
@@ -209,7 +210,8 @@ export function MobileNewChatSheet({
          own slide-up. Vaul's open/close uses `translate-y`
          (orthogonal property), so the two animations don't fight. */}
       <DrawerContent
-        className="mobile-new-chat-sheet h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60 bottom-[var(--native-keyboard-height,0px)]!"
+        className="mobile-new-chat-sheet"
+        xstyle={styles.sheet}
         style={{
           transition: 'bottom 320ms cubic-bezier(0.32, 0.72, 0, 1)',
           willChange: 'bottom',

@@ -13,6 +13,7 @@ import {
 const styles = stylex.create({
   /** The trigger's box: it hugs its label and never takes the whole row. */
   trigger: { display: 'inline-block', maxWidth: '60vw' },
+  picker: { width: 'auto' },
   /** The icon slot beside the label. */
   iconSlot: { flexShrink: 0 },
   /** The label: it truncates and keeps the row on one line. */
@@ -63,7 +64,7 @@ export function MobileSettingsPickerTrigger<T extends string>({
         ariaLabel={ariaLabel}
         searchable={searchable}
         searchPlaceholder={searchPlaceholder}
-        triggerClassName="w-auto"
+        triggerXstyle={styles.picker}
         triggerContent={
           <>
             {triggerIcon ? <span {...stylex.props(styles.iconSlot)}>{triggerIcon}</span> : null}

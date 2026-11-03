@@ -23,7 +23,7 @@
  * jsdom checks the HTML animation target, glyph-only structure and loading
  * state behavior. `tests/visual/status-native.mjs` checks actual wrapper/glyph
  * geometry and caller composition in a browser. The `transform-box` /
- * `transform-origin` contract lives in `src/tailwind/index.css`.
+ * `transform-origin` contract lives in each spinner’s local StyleX declarations.
  */
 
 import React from 'react';
@@ -71,25 +71,31 @@ function render(node: React.ReactElement) {
 
 /**
  * The single animated element in the tree, checked against both invariants.
- * `ui/spinner.tsx` animates an `.animate-spin` wrapper; `@lody/ui`'s Spinner
+ * `ui/spinner.tsx` marks its animated HTML wrapper with `data-spinning`; `@lody/ui`'s Spinner
  * animates a `[data-slot="spinner"]` one — both are the same contract.
  */
 function expectCompositableSpinner(): Element {
-  const animated = [...container.querySelectorAll('.animate-spin, [data-slot="spinner"]')];
+  const animated = [
+    ...container.querySelectorAll(
+      '[data-slot="icon-spinner"][data-spinning="true"], [data-slot="spinner"]'
+    ),
+  ];
   expect(animated.length).toBe(1);
   const wrapper = animated[0]!;
 
   // Invariant 1: the animation target is HTML, so the compositor can run it.
   expect(wrapper.namespaceURI).toBe(XHTML);
   expect(wrapper.tagName).toBe('SPAN');
-  expect(container.querySelector('svg.animate-spin')).toBeNull();
+  expect(container.querySelector('svg[data-slot="icon-spinner"][data-spinning="true"]')).toBeNull();
 
   // Invariant 2: icon-only — the animated box holds exactly the glyph, so it
   // turns in place rather than orbiting or sweeping an ellipse.
   expect(wrapper.childElementCount).toBe(1);
   expect(wrapper.firstElementChild?.tagName).toBe('svg');
   expect(wrapper.textContent).toBe('');
-  expect(wrapper.querySelector('.animate-spin, [data-slot="spinner"]')).toBeNull();
+  expect(
+    wrapper.querySelector('[data-slot="icon-spinner"][data-spinning="true"], [data-slot="spinner"]')
+  ).toBeNull();
 
   return wrapper;
 }
@@ -132,7 +138,7 @@ describe('spinners animate on a compositable wrapper and rotate in place', () =>
     render(
       React.createElement(Spinner, { icon: RefreshCw, spinning: false, className: 'h-4 w-4' })
     );
-    expect(container.querySelector('.animate-spin')).toBeNull();
+    expect(container.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')).toBeNull();
     expect(container.querySelector('svg')).not.toBeNull();
 
     render(React.createElement(Spinner, { icon: RefreshCw, spinning: true, className: 'h-4 w-4' }));
@@ -186,13 +192,17 @@ describe('status panels animate only their loading state', () => {
       render(element(false));
 
       expect(container.textContent).toContain(restingText);
-      expect(container.querySelector('.animate-spin')).toBeNull();
+      expect(
+        container.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')
+      ).toBeNull();
     });
 
     it(`${name}: the loading icon still spins`, () => {
       render(element(true));
 
-      expect(container.querySelectorAll('.animate-spin').length).toBe(1);
+      expect(
+        container.querySelectorAll('[data-slot="icon-spinner"][data-spinning="true"]').length
+      ).toBe(1);
     });
   }
 
@@ -200,6 +210,6 @@ describe('status panels animate only their loading state', () => {
     render(React.createElement(MobileProjectFileBrowser, { provider: undefined }));
 
     expect(container.textContent).toContain('Files unavailable');
-    expect(container.querySelector('.animate-spin')).toBeNull();
+    expect(container.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')).toBeNull();
   });
 });

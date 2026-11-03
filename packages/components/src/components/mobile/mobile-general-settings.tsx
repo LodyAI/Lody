@@ -48,6 +48,7 @@ import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  queuedBehavior: { width: '100%' },
   /** A row's helper copy: one line per reason. */
   helper: { display: 'flex', flexDirection: 'column', gap: themeSpace[0.5] },
   /** The line that says a thing cannot be done. */
@@ -697,7 +698,7 @@ export function MobileGeneralSettings() {
             <QueuedMessageBehaviorControl
               value={queuedMessageBehavior}
               onChange={setQueuedMessageBehavior}
-              className="w-full"
+              xstyle={styles.queuedBehavior}
             />
           </MobileSettingsRow>
           <MobileSettingsRow

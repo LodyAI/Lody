@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useMemo, useState } from 'react';
@@ -32,6 +33,30 @@ import {
   isComposerAgentRoleApplied,
   type ComposerAgentRoleItem,
 } from '@/lib/composer-agent-roles';
+const storyLayout = stylex.create({
+  frame: {
+    height: '100dvh',
+  },
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'flex-end',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  row2: {
+    'margin-bottom': 'calc(var(--spacing) * 6)',
+    display: 'flex',
+    width: '100%',
+    'max-width': '48rem',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-xl)',
+    'background-color': 'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+  },
+});
 
 /**
  * The desktop composer's run-config dropdown. A Role row sits above the
@@ -400,7 +425,7 @@ function StoryShell({
     <PlatformContext.Provider value={storyPlatform}>
       <Provider store={store}>
         {landing ? (
-          <div className="h-dvh">
+          <div {...stylex.props(storyLayout.frame)}>
             <ChatLandingView
               tone="light"
               title="今天想做点什么？"
@@ -420,10 +445,8 @@ function StoryShell({
             />
           </div>
         ) : (
-          <div className="flex min-h-dvh items-end bg-background p-8">
-            <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
-              {footer}
-            </div>
+          <div {...stylex.props(storyLayout.row)}>
+            <div {...stylex.props(storyLayout.row2)}>{footer}</div>
           </div>
         )}
       </Provider>

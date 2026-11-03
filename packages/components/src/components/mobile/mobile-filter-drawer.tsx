@@ -38,6 +38,7 @@ export type MobileFilterDrawerProps = {
 };
 
 const styles = stylex.create({
+  sheet: { height: '88dvh', maxHeight: '88dvh' },
   /** The pane the two views slide inside. */
   pane: {
     position: 'relative',
@@ -441,7 +442,7 @@ export function MobileFilterDrawer({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="mobile-filter-drawer h-[88dvh]! max-h-[88dvh]! rounded-t-2xl border-border/60">
+      <DrawerContent className="mobile-filter-drawer" xstyle={styles.sheet}>
         <div {...stylex.props(sheetSurface.column)}>
           <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>
             {activePill ? (

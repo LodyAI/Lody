@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { button } from '@lody/ui/button/button.tokens.stylex';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import type { AvatarKind, CliApiKeyRecord } from '@lody/shared';
 import {
@@ -22,7 +23,6 @@ import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Badge } from '@lody/ui/badge';
 import { Menu } from '@/ui/menu';
-import { withClassName } from '@/lib/stylex';
 import { UserAvatar } from '../user-avatar';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { Dialog } from '@/ui/dialog';
@@ -48,6 +48,33 @@ import {
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  destructiveOutline: {
+    borderColor: 'color-mix(in oklab, hsl(var(--destructive) / 1) 40%, transparent)',
+    backgroundColor: {
+      default: button.secondaryBackground,
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--destructive) / 1) 10%, transparent)',
+      },
+    },
+  },
+  destructiveConfirm: {
+    backgroundColor: {
+      default: 'hsl(var(--destructive) / 1)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--destructive) / 1) 90%, transparent)',
+      },
+    },
+  },
+  destructiveTitle: { [dialog.title]: 'hsl(var(--destructive) / 1)' },
+  fieldSpacing: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2)',
+    },
+  },
+
   // These private ghost actions contain only currentColor glyphs. Keep every other
   // control token inherited; the semantic label supplies their existing hover ink.
   workspaceActionInk: {
@@ -1018,7 +1045,7 @@ export function MobileAccountSettings({
                       variant="secondary"
                       size="small"
                       labelColor="hsl(var(--destructive) / 1)"
-                      className="border-destructive/40 hover:bg-destructive/10"
+                      xstyle={styles.destructiveOutline}
                       onClick={() => setCliApiKeyToRevoke(apiKey)}
                       disabled={revokingCliApiKeyId === apiKey.id}
                     >
@@ -1053,7 +1080,7 @@ export function MobileAccountSettings({
                 variant="secondary"
                 size="small"
                 labelColor="hsl(var(--destructive) / 1)"
-                className="border-destructive/40 hover:bg-destructive/10"
+                xstyle={styles.destructiveOutline}
                 onClick={() => setLeaveDialogOpen(true)}
               >
                 {t('workspace.danger.leaveWorkspace.button')}
@@ -1070,7 +1097,7 @@ export function MobileAccountSettings({
                 variant="secondary"
                 size="small"
                 labelColor="hsl(var(--destructive) / 1)"
-                className="border-destructive/40 hover:bg-destructive/10"
+                xstyle={styles.destructiveOutline}
                 onClick={() => {
                   // A live subscription blocks deletion; explain instead of
                   // letting the backend reject the delete.
@@ -1098,7 +1125,8 @@ export function MobileAccountSettings({
             <Button
               variant="secondary"
               size="small"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              xstyle={styles.destructiveOutline}
+              labelColor="hsl(var(--destructive) / 1)"
               onClick={() => setDeleteAccountDialogOpen(true)}
             >
               <Trash2 {...stylex.props(styles.buttonIcon)} />
@@ -1139,9 +1167,8 @@ export function MobileAccountSettings({
                 </Button>
               </div>
             ) : (
-              /* `space-y-2` stays a Tailwind class: StyleX has no descendant
-                 selector, and the gap belongs to the field's own label. */
-              <div {...withClassName(stylex.props(styles.dialogField), 'space-y-2')}>
+              /* Field spacing belongs to the field wrapper. */
+              <div {...stylex.props(styles.dialogField, styles.fieldSpacing)}>
                 <UiField.Label htmlFor="cli-api-key-note">
                   {t('settings.account.cliAuth.noteLabel')}
                 </UiField.Label>
@@ -1219,10 +1246,7 @@ export function MobileAccountSettings({
                   })();
                 }}
                 disabled={!cliApiKeyToRevoke || Boolean(revokingCliApiKeyId)}
-                className={[
-                  'bg-destructive hover:bg-destructive/90',
-                  stylex.props(styles.dangerConfirmLabel).className,
-                ].join(' ')}
+                xstyle={[styles.destructiveConfirm, styles.dangerConfirmLabel]}
               >
                 {revokingCliApiKeyId ? (
                   <Spinner
@@ -1271,10 +1295,7 @@ export function MobileAccountSettings({
               onClick={() => {
                 void handleRemoveMember();
               }}
-              className={[
-                'bg-destructive hover:bg-destructive/90',
-                stylex.props(styles.dangerConfirmLabel).className,
-              ].join(' ')}
+              xstyle={[styles.destructiveConfirm, styles.dangerConfirmLabel]}
             >
               {t('common.remove')}
             </AlertDialog.Action>
@@ -1311,10 +1332,7 @@ export function MobileAccountSettings({
                 })();
               }}
               disabled={isLeaving}
-              className={[
-                'bg-destructive hover:bg-destructive/90',
-                stylex.props(styles.dangerConfirmLabel).className,
-              ].join(' ')}
+              xstyle={[styles.destructiveConfirm, styles.dangerConfirmLabel]}
             >
               {isLeaving ? (
                 <>
@@ -1376,7 +1394,7 @@ export function MobileAccountSettings({
       >
         <Dialog.Content>
           <Dialog.Header>
-            <Dialog.Title className="text-destructive">
+            <Dialog.Title className={stylex.props(styles.destructiveTitle).className}>
               {t('settings.account.accountDeletion.confirmTitle')}
             </Dialog.Title>
             <Dialog.Description>
@@ -1384,9 +1402,8 @@ export function MobileAccountSettings({
             </Dialog.Description>
           </Dialog.Header>
           <div {...stylex.props(styles.dialogField)}>
-            {/* `space-y-2` stays a Tailwind class: StyleX has no descendant
-                selector, and the gap belongs to the field's own label. */}
-            <div className="space-y-2">
+            {/* Field spacing belongs to the field wrapper. */}
+            <div {...stylex.props(styles.fieldSpacing)}>
               <UiField.Label htmlFor="mobileDeleteAccountConfirmText">
                 {t('settings.account.accountDeletion.typeToConfirm', {
                   email: currentUser?.email ?? '',

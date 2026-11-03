@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 
@@ -6,6 +7,13 @@ import {
   type AppearanceSettingsViewProps,
 } from '@/components/settings/appearance-setting';
 import { Dialog } from '@/ui/dialog';
+const storyLayout = stylex.create({
+  canvas: {
+    'margin-inline': 'auto',
+    'max-width': '56rem',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const systemFontFamilies = [
   'Fira Code',
@@ -28,7 +36,7 @@ function ControlledAppearanceSettings({ isElectron }: { isElectron: boolean }) {
   const [fontLigaturesEnabled, setFontLigaturesEnabled] = useState(true);
 
   return (
-    <div className="mx-auto max-w-4xl p-6">
+    <div {...stylex.props(storyLayout.canvas)}>
       <AppearanceSettingsView
         theme={theme}
         onThemePreview={setTheme}

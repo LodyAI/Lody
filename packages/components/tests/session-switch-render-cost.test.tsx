@@ -53,6 +53,23 @@ describe('InlineSvg', () => {
     expect(container.querySelector('span')?.className).toBe('h-5 w-5');
   });
 
+  it('fills the glyph without replacing its parsed node or explicit SVG styles', () => {
+    const raw =
+      '<svg viewBox="0 0 16 16" style="width:4px;\nopacity:.5"><path d="M0 0h16v16H0z" /></svg>';
+    const render = (className: string) =>
+      act(() => root.render(createElement(InlineSvg, { raw, fillParent: true, className })));
+    render('first');
+    const svg = container.querySelector('svg');
+    expect(svg?.style.width).toBe('4px');
+    expect(svg?.style.height).toBe('100%');
+    expect(svg?.style.opacity).toBe('0.5');
+    const path = svg?.firstElementChild;
+    render('second');
+    expect(container.querySelector('svg')).toBe(svg);
+    expect(container.querySelector('svg')?.firstElementChild).toBe(path);
+    expect(container.querySelector('span')?.className).toBe('second');
+  });
+
   it('parses distinct markup into its own node', () => {
     act(() => root.render(createElement(InlineSvg, { raw: SVG_MARKUP })));
     const first = container.querySelector('span')?.firstElementChild;

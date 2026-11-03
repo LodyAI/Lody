@@ -1,7 +1,26 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { WebChatLandingScreen } from '@/components/chat/web-chat-landing-screen';
 import { ConversationDropOverlay } from '@/components/shared/conversation-drop-overlay';
+const storyLayout = stylex.create({
+  frame: {
+    height: '100dvh',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  frame2: {
+    position: 'relative',
+    'margin-inline': 'auto',
+    height: '320px',
+    width: '560px',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  canvas: {
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 const meta = {
   title: 'Shared/ConversationDropOverlay',
@@ -20,7 +39,7 @@ type Story = StoryObj<typeof meta>;
 
 function LandingDropDemo({ dropKind }: { dropKind: 'session-mention' | 'files' }) {
   return (
-    <div className="h-dvh bg-background text-foreground">
+    <div {...stylex.props(storyLayout.frame)}>
       <WebChatLandingScreen
         title="Let's ship something"
         dropActive
@@ -47,8 +66,8 @@ export const LandingFiles: Story = {
 
 function IsolatedDropDemo({ dropKind }: { dropKind: 'session-mention' | 'files' }) {
   return (
-    <div className="relative mx-auto h-[320px] w-[560px] bg-background text-foreground">
-      <p className="p-8">Conversation</p>
+    <div {...stylex.props(storyLayout.frame2)}>
+      <p {...stylex.props(storyLayout.canvas)}>Conversation</p>
       <ConversationDropOverlay active kind={dropKind} />
     </div>
   );

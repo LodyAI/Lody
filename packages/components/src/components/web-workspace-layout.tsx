@@ -21,7 +21,7 @@ import {
 import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace-layout-utils';
 import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { CompactNavigationDialog } from './compact-navigation-dialog';
 import { WorkspaceCard } from './workspace-frame';
 
@@ -32,10 +32,7 @@ const DesktopSidebarContent = memo(function DesktopSidebarContent({
 }) {
   return (
     <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
-      <LoroAppSidebar
-        pauseSidebarSourcesWhenHidden
-        className="h-full transition-shadow duration-150"
-      />
+      <LoroAppSidebar pauseSidebarSourcesWhenHidden xstyle={styles.desktopSidebar} />
     </ErrorBoundary>
   );
 });
@@ -107,7 +104,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     <div
       ref={setLayoutRoot}
       {...rootProps}
-      className={cn(
+      className={clsx(
         getWebWorkspaceLayoutRootClassName({ surface: 'sidebar' }),
         rootProps.className
       )}
@@ -120,7 +117,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           returnFocus={returnFocusRef}
         >
           <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
-            <LoroAppSidebar overlay className="h-full border-r border-sidebar-border shadow-xl" />
+            <LoroAppSidebar overlay xstyle={styles.overlaySidebar} />
           </ErrorBoundary>
         </CompactNavigationDialog>
       ) : (
@@ -160,6 +157,19 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
 }
 
 const styles = stylex.create({
+  desktopSidebar: {
+    height: '100%',
+    transitionProperty: 'box-shadow',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+  },
+  overlaySidebar: {
+    height: '100%',
+    borderRightWidth: '1px',
+    borderRightStyle: 'solid',
+    borderColor: 'hsl(var(--sidebar-border) / 1)',
+    boxShadow: 'var(--shadow-xl)',
+  },
   /** The settings route's single pane, under the window drag strip. */
   settingsPane: {
     minHeight: 0,

@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeDuration, themeEasing, themeSpace } from '../style/theme-scale.stylex';
 
@@ -38,10 +37,12 @@ const styles = stylex.create({
 export const CopyButton = ({
   value,
   className,
+  xstyle,
   ...props
 }: {
   value: string;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 } & React.ComponentProps<'button'>) => {
   const [copied, setCopied] = useState(false);
 
@@ -61,7 +62,8 @@ export const CopyButton = ({
       data-state={copied ? 'copied' : 'not-copied'}
       size="small"
       {...props}
-      className={cn(stylex.props(styles.layout).className, className)}
+      xstyle={[styles.layout, xstyle]}
+      className={className}
       onClick={handleCopy}
     >
       <span {...stylex.props(styles.accessibleLabel)}>Copy</span>

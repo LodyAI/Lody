@@ -98,7 +98,8 @@ function measureTouchGesture(
  * (iOS HIG / WCAG 2.5.5) that this whole fix is about.
  *
  * The primitive's dimension and labelColor props own the box and ink; padding
- * compatibility classes stay separate. Reset zoom keeps automatic width above its minimum.
+ * and the local zoom readout style own padding and typography. Reset zoom keeps
+ * automatic width above its minimum.
  */
 const CONTROL_SIZE = 'calc(var(--spacing) * 11)';
 const CONTROL_LABEL_COLOR = 'hsl(var(--muted-foreground) / 1)';
@@ -123,6 +124,13 @@ const styles = stylex.create({
     flexDirection: 'column',
     backgroundColor: 'hsl(var(--background) / 0.95)',
     backdropFilter: 'blur(4px)',
+  },
+  zoomReadout: {
+    minWidth: 'calc(var(--spacing) * 11)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontVariantNumeric: 'tabular-nums',
   },
   controls: {
     display: 'flex',
@@ -723,9 +731,9 @@ function OpenMermaidDiagramViewer({
           height={CONTROL_SIZE}
           width="auto"
           fontSize="var(--text-xs)"
-          lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+          lineHeight="var(--text-xs--line-height)"
           labelColor={CONTROL_LABEL_COLOR}
-          className="min-w-11 px-2 font-mono tabular-nums"
+          xstyle={styles.zoomReadout}
           onClick={resetZoom}
           title={resetZoomLabel}
           aria-label={resetZoomLabel}

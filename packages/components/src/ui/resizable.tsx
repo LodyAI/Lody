@@ -22,23 +22,7 @@ const styles = stylex.create({
     height: { default: null, ':is([data-panel-group-direction="vertical"])': '1px' },
     alignItems: 'center',
     justifyContent: 'center',
-    '--tw-ring-color': { default: null, ':focus-visible': themeColors.ring },
-    '--tw-ring-offset-width': { default: null, ':focus-visible': '1px' },
-    '--tw-ring-offset-shadow': {
-      default: null,
-      ':focus-visible':
-        'var(--tw-ring-inset,) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color)',
-    },
-    '--tw-ring-shadow': {
-      default: null,
-      ':focus-visible':
-        'var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)',
-    },
-    boxShadow: {
-      default: null,
-      ':focus-visible':
-        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
-    },
+    boxShadow: { default: null, ':focus-visible': 'none' },
     outlineStyle: { default: null, ':focus-visible': 'none' },
     outline: {
       default: null,
@@ -64,20 +48,21 @@ const styles = stylex.create({
   },
   edge: {
     backgroundColor: 'transparent',
+    transitionProperty:'opacity',
+    transitionDuration:'150ms',
+    transitionTimingFunction:'cubic-bezier(0.4, 0, 0.2, 1)',
     '::after': {
-      content: 'var(--tw-content)',
+      content: '""',
       insetBlock: 'calc(var(--spacing) * 0)',
       top: 'calc(var(--spacing) * 0)',
       bottom: 'calc(var(--spacing) * 0)',
       left: 'calc(var(--spacing) * 0)',
       width: '2px',
-      '--tw-translate-x': 'calc(var(--spacing) * 0)',
-      translate: 'var(--tw-translate-x) var(--tw-translate-y)',
-      '--tw-duration': '.15s',
+      translate: '0 0',
       transitionProperty:
-        'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+        'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
       transitionDuration: '150ms',
-      transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+      transitionTimingFunction: 'var(--default-transition-timing-function)',
       transitionDelay: { default: null, ':is([data-resize-handle-state="hover"])': '150ms' },
       backgroundColor: {
         default: null,

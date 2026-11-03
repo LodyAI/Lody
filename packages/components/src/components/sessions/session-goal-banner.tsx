@@ -11,7 +11,7 @@ import {
 import { ChevronDown, Clock, Pause, Play, Target, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -36,6 +36,17 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  actionSuccess: {
+    borderColor: 'color-mix(in oklab, hsl(var(--status-success) / 1) 40%, transparent)',
+    backgroundColor: {
+      default: buttonTokens.secondaryBackground,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)':
+          'color-mix(in oklab, hsl(var(--status-success) / 1) 10%, transparent)',
+      },
+    },
+  },
   banner: {
     position: 'relative',
     zIndex: 10,
@@ -141,7 +152,7 @@ const styles = stylex.create({
     // the row showed NO focus indicator at all. Keep it that way.
     boxShadow: { default: null, ':focus-visible': 'none' },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -231,9 +242,7 @@ export const GoalActionButton = ({
             ? 'hsl(var(--destructive) / 1)'
             : undefined
       }
-      className={
-        tone === 'success' ? 'border-status-success/40 hover:bg-status-success/10' : undefined
-      }
+      xstyle={tone === 'success' ? styles.actionSuccess : undefined}
     >
       {loading ? (
         <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />
@@ -376,7 +385,12 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
     ? t('sessions.goal.banner.collapseObjective', 'Collapse goal objective')
     : t('sessions.goal.banner.expandObjective', 'Expand goal objective');
 
-  const bannerProps = stylex.props(styles.banner, !isMobile && styles.bannerDimmed);
+  const bannerProps = stylex.props(
+    styles.banner,
+    !isMobile && styles.bannerDimmed,
+    meta.surfaceStyle,
+    meta.borderStyle
+  );
   const objectiveRowProps = stylex.props(
     styles.objectiveRow,
     isExpandable && styles.objectiveRowExpandable
@@ -387,27 +401,16 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
     isCleared ? styles.objectiveCleared : styles.objectiveActive
   );
   const chevronProps = stylex.props(styles.chevron, expanded && styles.chevronOpen);
-  const targetGlyphProps = stylex.props(styles.targetGlyph);
-  const labelProps = stylex.props(styles.label);
+  const targetGlyphProps = stylex.props(styles.targetGlyph, meta.textStyle);
+  const labelProps = stylex.props(styles.label, meta.textStyle);
 
   return (
-    <div
-      {...bannerProps}
-      className={clsx(bannerProps.className, meta.surfaceClassName, meta.borderClassName)}
-      role="status"
-      aria-label={statusLabel}
-    >
+    <div {...bannerProps} role="status" aria-label={statusLabel}>
       <div {...stylex.props(styles.body)}>
         <div {...stylex.props(styles.headerRow)}>
           <div {...stylex.props(styles.headerStart)}>
-            <Target
-              {...targetGlyphProps}
-              className={clsx(targetGlyphProps.className, meta.textClassName)}
-              aria-hidden="true"
-            />
-            <span {...labelProps} className={clsx(labelProps.className, meta.textClassName)}>
-              {t('sessions.goal.banner.label', 'Goal')}
-            </span>
+            <Target {...targetGlyphProps} aria-hidden="true" />
+            <span {...labelProps}>{t('sessions.goal.banner.label', 'Goal')}</span>
             {showMetrics ? (
               <div
                 {...stylex.props(styles.metrics)}

@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeRadius, themeShadow, themeSpace } from '../style/theme-scale.stylex';
@@ -114,7 +114,7 @@ export const Slider = React.forwardRef<HTMLInputElement, SliderProps>(function S
       disabled={disabled}
       onChange={(event) => onValueChange(Number(event.target.value))}
       style={{ ...style, '--lody-slider-fill': `${fill}%` } as React.CSSProperties}
-      className={cn(stylex.props(styles.input).className, className)}
+      className={clsx(stylex.props(styles.input).className, className)}
       {...props}
     />
   );

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useState } from 'react';
 import { Provider, createStore } from 'jotai';
@@ -21,6 +22,12 @@ import {
 import { machineMetaCacheAtom } from '@/atoms/doc-meta';
 import { fileViewerWordWrapAtom } from '@/atoms/settings';
 import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
+const storyLayout = stylex.create({
+  caption: {
+    'padding-left': 'calc(var(--spacing) * 4)',
+    color: '#9cdcfe',
+  },
+});
 
 const meta: Meta = {
   title: 'Sessions/CodeCollabMonacoEditor',
@@ -169,7 +176,7 @@ function StaticConflictStatusFrame() {
     <div className="flex h-[300px] w-[560px] flex-col overflow-hidden rounded-md border border-border bg-background">
       <div className="min-h-0 flex-1 overflow-hidden bg-[#1e1e1e] px-4 py-3 font-mono text-[13px] leading-6 text-[#d4d4d4]">
         <div>export function saveSnapshot() {' {'}</div>
-        <div className="pl-4 text-[#9cdcfe]">return writeFile(snapshot);</div>
+        <div {...stylex.props(storyLayout.caption)}>return writeFile(snapshot);</div>
         <div>{'}'}</div>
       </div>
       <SessionFileConflictActionRow onResolveConflict={async () => undefined} t={t} />

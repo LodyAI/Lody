@@ -48,8 +48,7 @@ describe('WindowDragStrip', () => {
     renderStrip();
     const strip = container!.querySelector('[data-window-drag-strip]');
     expect(strip).not.toBeNull();
-    expect(strip!.className).toContain('app-region-drag');
-    expect(strip!.className).toContain('h-11');
+    expect(strip!.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('hides the drag region in native fullscreen', () => {
@@ -95,18 +94,15 @@ describe('macOS traffic-light row alignment', () => {
     return container!.querySelector('[data-testid="row"]')!;
   };
 
-  it('compensates for the workspace frame while preserving window-origin rows', () => {
-    expect(renderRow().className).toBe('pt-[2px]');
+  it('does not reserve native control space in fullscreen or outside Electron', () => {
+    vi.mocked(electron.useElectronFullscreen).mockReturnValue(true);
+    expect(renderRow({ insideWorkspaceFrame: true }).className).toBe('');
     act(() => root?.unmount());
     root = undefined;
 
-    expect(renderRow({ insideWorkspaceFrame: true }).className).toBe('pb-[6px]');
-  });
-
-  it('accounts for a bottom border inside the workspace frame', () => {
-    expect(renderRow({ bottomBorder: true, insideWorkspaceFrame: true }).className).toBe(
-      'pb-[5px]'
-    );
+    vi.mocked(electron.useElectronFullscreen).mockReturnValue(false);
+    delete window.__LODY_ELECTRON__;
+    expect(renderRow({ bottomBorder: true }).className).toBe('');
   });
 });
 
@@ -140,6 +136,5 @@ describe('WebChatLandingScreen window drag', () => {
     });
     const strip = container!.querySelector('[data-window-drag-strip]');
     expect(strip).not.toBeNull();
-    expect(strip!.className).toContain('h-11');
   });
 });

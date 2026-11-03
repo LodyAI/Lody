@@ -2,12 +2,19 @@ import type { ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { settingsCard } from '@/components/settings/compact-layout';
 import { withClassName } from '@/lib/stylex';
-import { cn } from '@/lib/utils';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
-  card: { overflow: 'hidden' },
+  card: {
+    overflow: 'hidden',
+    ':is(*) > :not(:last-child)': {
+      borderTopWidth: 0,
+      borderBottomWidth: '1px',
+      borderBottomStyle: 'solid',
+      borderColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    },
+  },
   ghostValue: {
     display: 'flex',
     height: themeSpace[8],
@@ -20,16 +27,28 @@ const styles = stylex.create({
     borderRadius: themeRadius.md,
     backgroundColor: {
       default: 'transparent',
-      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 0.05)' },
+      ':is([data-state=open])': 'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': {
+          default: 'hsl(var(--foreground) / 0.05)',
+          ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+            'color-mix(in oklab, var(--color-white) 8%, transparent)',
+        },
+      },
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)):is([data-state=open])':
+        'color-mix(in oklab, var(--color-white) 8%, transparent)',
     },
     paddingInline: themeSpace[2],
     fontSize: '0.9em',
     fontWeight: themeFontWeight.normal,
     color: themeColors.foreground,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    outlineStyle: { default: null, ':focus-visible': 'none' },
     cursor: { default: null, ':disabled': 'not-allowed' },
     opacity: { default: null, ':disabled': 0.5 },
   },
@@ -98,7 +117,12 @@ const styles = stylex.create({
     alignItems: { default: null, '@media (min-width: 40rem)': 'center' },
   },
   wideLabel: { color: 'hsl(var(--muted-foreground) / 1)' },
-  wideControls: { display: 'flex', minWidth: 0, justifyContent: 'flex-end' },
+  wideControls: {
+    display: 'flex',
+    minWidth: 0,
+    justifyContent: 'flex-end',
+    ':is(*) > *': { minWidth: 0, maxWidth: '100%' },
+  },
 });
 
 /**
@@ -111,10 +135,7 @@ const styles = stylex.create({
  */
 export function scheduleCardProps(className?: string) {
   // The settings card material (its edge is its shadow), plus layout only.
-  return withClassName(
-    stylex.props(settingsCard, styles.card),
-    cn('divide-y divide-border/60', className)
-  );
+  return withClassName(stylex.props(settingsCard, styles.card), className);
 }
 
 /**
@@ -128,10 +149,7 @@ export function scheduleCardProps(className?: string) {
  * value truncates by exactly the bled 8px. Without this the chevrons, menu labels and switch each stopped at a
  * different x and the right edge read as ragged.
  */
-export const ghostValueClass = cn(
-  stylex.props(styles.ghostValue).className,
-  'dark:hover:bg-white/[0.08] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]'
-);
+export const ghostValueStyles = styles.ghostValue;
 
 /**
  * Label left, control right.
@@ -199,14 +217,7 @@ export function PropertyRowWide({ label, children }: { label: string; children: 
   return (
     <div {...stylex.props(styles.wideRow)}>
       <span {...stylex.props(styles.label, styles.wideLabel)}>{label}</span>
-      <div
-        className={cn(
-          stylex.props(styles.wideControls).className,
-          '[&>*]:min-w-0 [&>*]:max-w-full'
-        )}
-      >
-        {children}
-      </div>
+      <div {...stylex.props(styles.wideControls)}>{children}</div>
     </div>
   );
 }

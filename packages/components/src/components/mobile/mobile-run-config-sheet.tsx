@@ -28,7 +28,6 @@ import {
 } from '@/lib/composer-agent-roles';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
-import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Switch } from '@lody/ui/switch';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
@@ -47,6 +46,7 @@ import {
 } from './mobile-inline-picker';
 
 const styles = stylex.create({
+  sheet: { height: 'auto', maxHeight: '85dvh' },
   header: { paddingInline: space[4], paddingTop: space[2], paddingBottom: space[1] },
   title: {
     margin: 0,
@@ -195,10 +195,7 @@ export function MobileRunConfigSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
-        className={cn(
-          'h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60',
-          keyboard.contentClassName
-        )}
+        xstyle={[styles.sheet, keyboard.contentXstyle]}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
         <DrawerTitle {...stylex.props(styles.srOnly)}>{title}</DrawerTitle>
@@ -796,12 +793,7 @@ function ToggleRow({
       <span {...stylex.props(styles.label)}>{label}</span>
       <div {...stylex.props(styles.toggleControl)}>
         <span {...stylex.props(styles.toggleMark, checked && styles.toggleMarkOn)}>{icon}</span>
-        <Switch
-          checked={checked}
-          onCheckedChange={onCheckedChange}
-          aria-label={ariaLabel}
-          className="shrink-0"
-        />
+        <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={ariaLabel} />
       </div>
     </div>
   );

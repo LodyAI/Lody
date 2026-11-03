@@ -6,7 +6,6 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { FileIcon } from '@/components/icons/file-icons';
 import { DiffFileHeaderActions } from '@/ui/diff-viewer/diff-file-header-actions';
-import { cn } from '@/lib/utils';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeFontSize,
@@ -15,14 +14,20 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
+  content: { paddingBottom: 'calc(var(--spacing) * 0)' },
   noticeHeader: {
     insetInline: 'calc(var(--spacing) * 0)',
     borderRadius: 0,
-    borderBottomStyle: 'var(--tw-border-style)',
+    height: 'calc(var(--spacing) * 8)',
+    borderBottomStyle: 'solid',
     borderBottomWidth: '1px',
     borderColor: {
       default: 'hsl(var(--foreground) / 1)',
+      [DARK_SCOPE]: 'hsl(var(--border) / 1)',
       '@supports (color: color-mix(in lab, red, red))':
         'color-mix(in oklab, hsl(var(--foreground) / 1) 8%, transparent)',
     },
@@ -31,6 +36,15 @@ const styles = stylex.create({
     paddingRight: 'calc(var(--spacing) * 4)',
   },
   card: {
+    minHeight: 'calc(var(--spacing) * 8)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 12%, transparent)',
+      [DARK_SCOPE]: 'hsl(var(--border) / 1)',
+    },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 1px 2px hsl(0 0% 0% / 0.04)',
     width: '100%',
     overflow: 'hidden',
     borderRadius: themeRadius.xl,
@@ -86,19 +100,12 @@ export function SessionFileDiffNoticeCard({
   // forced off so overflow-hidden can clip the rounded card border.
   return (
     <CollapsibleCard
-      className={cn(
-        stylex.props(styles.card).className,
-        'min-h-8 border border-foreground/[0.12] bg-background shadow-[0_1px_2px_hsl(0_0%_0%/0.04)] dark:border-border',
-        className
-      )}
+      xstyle={styles.card}
+      className={className}
       defaultOpen
       allowStickyChildren={false}
     >
-      <CollapsibleCardHeader
-        sticky={false}
-        position="relative"
-        className={cn('h-8 dark:border-border', stylex.props(styles.noticeHeader).className)}
-      >
+      <CollapsibleCardHeader sticky={false} position="relative" xstyle={styles.noticeHeader}>
         <FileIcon filePath={filePath} className={stylex.props(styles.fileIcon).className} />
         <div {...stylex.props(styles.headerRow)}>
           <span {...stylex.props(styles.fileName)} title={filePath}>
@@ -107,7 +114,7 @@ export function SessionFileDiffNoticeCard({
           <DiffFileHeaderActions path={filePath} onOpenFile={onOpenFile} />
         </div>
       </CollapsibleCardHeader>
-      <CollapsibleCardContent noInternalScroll className="pb-0">
+      <CollapsibleCardContent noInternalScroll xstyle={styles.content}>
         <div {...stylex.props(styles.message)}>{message}</div>
       </CollapsibleCardContent>
     </CollapsibleCard>

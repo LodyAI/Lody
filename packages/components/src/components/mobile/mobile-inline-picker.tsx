@@ -1,4 +1,3 @@
-import { pickerSpinnerClass } from '../../style/legacy-defaults.stylex';
 import {
   createContext,
   useContext,
@@ -21,7 +20,6 @@ import * as stylex from '@stylexjs/stylex';
 
 import { filterFuzzyOptions } from '@/lib/fuzzy-option-filter';
 import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';
-import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -47,6 +45,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  spinner: { opacity: 0.7 },
   /** The picker's own column. */
   root: { width: '100%' },
   /** The slot a picker projects its list into. */
@@ -344,6 +343,7 @@ export type MobileInlinePickerProps<T extends string = string> = {
   searchAnalyticsPicker?: SearchPickerKind;
   /** Optional className for the trigger button. */
   triggerClassName?: string;
+  triggerXstyle?: stylex.StyleXStyles;
   /** Optional className for the expansion panel wrapper. */
   expansionClassName?: string;
   /** Optional max-width override for the dropdown panel — useful for
@@ -455,6 +455,7 @@ export function MobileInlinePicker<T extends string = string>({
   searchPlaceholder,
   searchAnalyticsPicker,
   triggerClassName,
+  triggerXstyle,
   expansionClassName,
   expansionPanelClassName,
   portalContainer,
@@ -758,9 +759,10 @@ export function MobileInlinePicker<T extends string = string>({
         stylex.props(
           styles.trigger,
           open && styles.triggerOpen,
-          (disabled || loading) && styles.triggerDisabled
+          (disabled || loading) && styles.triggerDisabled,
+          triggerXstyle
         ),
-        cn('group/picker-trigger', triggerClassName)
+        triggerClassName
       )}
     >
       <span {...stylex.props(styles.triggerBody)}>
@@ -768,7 +770,7 @@ export function MobileInlinePicker<T extends string = string>({
           <>
             <Spinner
               diameter="calc(var(--spacing) * 3.5)"
-              className={pickerSpinnerClass}
+              className={stylex.props(styles.spinner).className}
               aria-hidden="true"
             />
             {loadingText ? (
@@ -881,8 +883,10 @@ export type MobileInlineMenuProps = {
      pill-style default doesn't fit narrow icon-only triggers like
      the composer's "+" button, so each consumer styles its own. */
   triggerClassName?: string;
+  triggerXstyle?: stylex.StyleXStyles;
   expansionClassName?: string;
   expansionPanelClassName?: string;
+  expansionPanelXstyle?: stylex.StyleXStyles;
   /** Where to portal the expansion panel. When omitted, falls back to
      the nearest `MobileInlinePickerRowSlot` if present; otherwise
      renders inline below the trigger. */
@@ -917,8 +921,10 @@ export function MobileInlineMenu({
   children,
   disabled = false,
   triggerClassName,
+  triggerXstyle,
   expansionClassName,
   expansionPanelClassName,
+  expansionPanelXstyle,
   portalContainer,
 }: MobileInlineMenuProps) {
   const coordinator = useContext(PickerCoordinatorContext);
@@ -1042,7 +1048,7 @@ export function MobileInlineMenu({
       aria-expanded={open}
       aria-controls={open ? menuId : undefined}
       aria-label={ariaLabel}
-      {...withClassName(stylex.props(styles.menuTrigger), triggerClassName)}
+      {...withClassName(stylex.props(styles.menuTrigger, triggerXstyle), triggerClassName)}
     >
       {triggerContent}
     </button>
@@ -1063,7 +1069,12 @@ export function MobileInlineMenu({
           transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
           {...withClassName(stylex.props(styles.expansion), expansionClassName)}
         >
-          <div {...withClassName(stylex.props(styles.menuPanel), expansionPanelClassName)}>
+          <div
+            {...withClassName(
+              stylex.props(styles.menuPanel, expansionPanelXstyle),
+              expansionPanelClassName
+            )}
+          >
             {children({ close })}
           </div>
         </motion.div>

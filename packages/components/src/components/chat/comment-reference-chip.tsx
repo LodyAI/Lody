@@ -85,8 +85,14 @@ const styles = stylex.create({
     transitionProperty: 'opacity',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    pointerEvents: 'none',
-    opacity: 0,
+    pointerEvents: {
+      default: 'none',
+      '@media (hover: hover)': { default: null, ':is(:where(.group\\/chip):hover *)': 'auto' },
+    },
+    opacity: {
+      default: 0,
+      '@media (hover: hover)': { default: null, ':is(:where(.group\\/chip):hover *)': 1 },
+    },
   },
   removeVisible: { pointerEvents: 'auto', opacity: 1 },
   removeGlyph: { width: themeSpace[3], height: themeSpace[3] },
@@ -125,19 +131,10 @@ export function CommentReferenceChip({
     onClick?.(reference);
   };
 
-  // `group/chip` and the group-hover utilities stay Tailwind: StyleX has no
-  // ancestor selector, so the chip's hover reveal cannot live in a style. The
-  // caller's own class rides the element as a plain attribute, so it still
-  // beats the component's style from the `utilities` layer.
   const chipStyle = stylex.props(styles.chip, isInteractive && styles.chipInteractive);
   const chipClassName = ['group/chip', chipStyle.className, className].filter(Boolean).join(' ');
   const removeStyle = stylex.props(styles.remove, removeVisible && styles.removeVisible);
-  const removeClassName = [
-    removeStyle.className,
-    'group-hover/chip:pointer-events-auto group-hover/chip:opacity-100',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const removeClassName = removeStyle.className;
 
   return (
     <div

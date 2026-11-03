@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderPlus } from 'lucide-react';
@@ -36,6 +37,64 @@ import type {
   SessionMeta,
   SessionStatus,
 } from '@lody/shared';
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': '100vh',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  frame2: {
+    height: '100vh',
+    width: '100%',
+  },
+  canvas: {
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  row: {
+    display: 'flex',
+    height: '100dvh',
+    width: '100%',
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--sidebar-background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  element: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1)',
+  },
+  frame3: {
+    'min-height': '100vh',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 10)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  row3: {
+    display: 'flex',
+    height: 'calc(100vh - 5rem)',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 8)',
+  },
+  section: {
+    flex: '1',
+  },
+  row4: {
+    display: 'flex',
+    'min-height': '100vh',
+    width: '100%',
+    'align-items': 'flex-start',
+    'justify-content': 'center',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 10)',
+  },
+});
 
 const NOW = Date.now();
 const EMPTY_LIVE_SESSION_STATUSES = new Map<string, SessionStatus>();
@@ -440,8 +499,8 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
   // desktop column with truncated labels.
   if (isMobile) {
     return (
-      <div className="min-h-screen w-full bg-background text-foreground">
-        <div className="h-screen w-full">{sidebar}</div>
+      <div {...stylex.props(storyLayout.frame)}>
+        <div {...stylex.props(storyLayout.frame2)}>{sidebar}</div>
       </div>
     );
   }
@@ -449,7 +508,7 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
   // The window is the sidebar's ground and the page is a card set into it: the same
   // `WorkspaceCard` the shell uses (`web-workspace-layout.tsx`), so this shows the shell.
   const content = storyContent ?? (
-    <div className="p-6">
+    <div {...stylex.props(storyLayout.canvas)}>
       <div className="text-lg font-semibold">Content</div>
       <div className="mt-2 text-sm text-muted-foreground">
         Use the filter button at the bottom-right of the sidebar to switch between Workspace and
@@ -459,10 +518,10 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
     </div>
   );
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-sidebar text-foreground">
+    <div {...stylex.props(storyLayout.row)}>
       {sidebar}
       <WorkspaceCard>
-        {fullApp ? <main className="min-w-0 flex-1 overflow-hidden">{content}</main> : content}
+        {fullApp ? <main {...stylex.props(storyLayout.element)}>{content}</main> : content}
       </WorkspaceCard>
     </div>
   );
@@ -1200,7 +1259,7 @@ function ProductionLikeTopContent({
                 }
                 action={
                   groupIndex === 0 ? (
-                    <div className="flex items-center gap-1">
+                    <div {...stylex.props(storyLayout.row2)}>
                       <Button
                         type="button"
                         variant="ghost"
@@ -1421,8 +1480,8 @@ export function WorkspaceSidebarHarness({
 
   if (isMobile) {
     return (
-      <div className="min-h-screen w-full bg-background text-foreground">
-        <div className="h-screen w-full">{sidebar}</div>
+      <div {...stylex.props(storyLayout.frame)}>
+        <div {...stylex.props(storyLayout.frame2)}>{sidebar}</div>
       </div>
     );
   }
@@ -1430,7 +1489,7 @@ export function WorkspaceSidebarHarness({
   const content =
     storyContent ??
     (fullApp ? (
-      <div className="p-6">
+      <div {...stylex.props(storyLayout.canvas)}>
         <div className="text-lg font-semibold">Content</div>
         <div className="mt-2 text-sm text-muted-foreground">
           This area is intentionally left minimal for the component preview.
@@ -1447,20 +1506,20 @@ export function WorkspaceSidebarHarness({
 
   if (fullApp) {
     return (
-      <div className="flex h-dvh w-full overflow-hidden bg-sidebar text-foreground">
+      <div {...stylex.props(storyLayout.row)}>
         {sidebar}
         <WorkspaceCard>
-          <main className="min-w-0 flex-1 overflow-hidden">{content}</main>
+          <main {...stylex.props(storyLayout.element)}>{content}</main>
         </WorkspaceCard>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen w-full bg-background p-10 text-foreground">
-      <div className="flex h-[calc(100vh-5rem)] items-start gap-8">
+    <div {...stylex.props(storyLayout.frame3)}>
+      <div {...stylex.props(storyLayout.row3)}>
         {sidebar}
-        <div className="flex-1">{content}</div>
+        <div {...stylex.props(storyLayout.section)}>{content}</div>
       </div>
     </div>
   );
@@ -1617,7 +1676,7 @@ function MachineGroupScrollFixture() {
     []
   );
   return (
-    <div className="flex min-h-screen w-full items-start justify-center bg-background p-10">
+    <div {...stylex.props(storyLayout.row4)}>
       <div
         data-testid="machine-group-scrollbox"
         className="h-[360px] w-[280px] overflow-y-auto rounded-xl border border-sidebar-border/60 bg-sidebar p-2"

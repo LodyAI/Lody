@@ -19,6 +19,7 @@ export interface SkeletonProps extends Omit<
   /** Ring contour thickness. A number is pixels; omission keeps the 2px contour. */
   strokeWidth?: string | number;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 const SHAPES = {
@@ -57,7 +58,7 @@ const dyn = stylex.create({
  * hidden from a screen reader for the same reason.
  */
 export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skeleton(
-  { shape = 'line', inline, width, height, strokeWidth, className, ...rest },
+  { shape = 'line', inline, width, height, strokeWidth, className, xstyle, ...rest },
   ref
 ) {
   const sx = stylex.props(
@@ -66,7 +67,8 @@ export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skele
     inline === true && surface.skeletonInline,
     width != null && dyn.width(width),
     height != null && dyn.height(height),
-    shape === 'ring' && strokeWidth != null && dyn.strokeWidth(strokeWidth)
+    shape === 'ring' && strokeWidth != null && dyn.strokeWidth(strokeWidth),
+    xstyle
   );
   return (
     <div
@@ -74,7 +76,7 @@ export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skele
       aria-hidden="true"
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={xstyle ? { ...sx.style, ...rest.style } : sx.style}
     />
   );
 });

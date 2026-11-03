@@ -1,24 +1,3 @@
-import {
-  composerClearBorderClass,
-  composerInputInkClass,
-  composerSecondaryInkClass,
-  composerLandingMinimumClass,
-  composerLandingInsetClass,
-  composerSessionInsetClass,
-  composerMobileMinimumClass,
-  composerDesktopMinimumClass,
-  composerDialogInsetClass,
-  composerDialogShapeClass,
-  composerTransparentClass,
-  composerDialogActionClass,
-  composerLandingActionClass,
-  composerSessionActionClass,
-  composerLandingActionWidthClass,
-  composerActionWidthClass,
-  composerHintInsetClass,
-  composerPastedPaddingClass,
-  composerPastedMaximumClass,
-} from '@/style/legacy-defaults.stylex';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import {
   useEffect,
@@ -46,7 +25,6 @@ import {
   VisualAnnotationReferenceChip,
   type VisualAnnotationReferenceChipItem,
 } from './visual-annotation-reference-chip';
-import { cn } from '@/lib/utils';
 import { composerSurfaceStyles } from './composer-surface';
 import {
   CombinedMentionTextarea,
@@ -107,6 +85,94 @@ const DARK_SCOPE =
   ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
 const styles = stylex.create({
+  textarea: {
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    color: {
+      default: 'hsl(var(--input-foreground) / 1)',
+      '::placeholder': 'color-mix(in oklab, hsl(var(--input-placeholder) / 1) 85%, transparent)',
+    },
+    transitionProperty: 'box-shadow',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction: 'var(--default-transition-timing-function, ease)',
+  },
+  textareaQuietOutline: {
+    outlineStyle: { default: null, ':focus-visible': 'solid' },
+    outlineWidth: { default: null, ':focus-visible': '2px' },
+    outlineColor: { default: null, ':focus-visible': 'transparent' },
+    outlineOffset: { default: null, ':focus-visible': '2px' },
+  },
+  textareaLanding: {
+    minHeight: { default: '120px', '@media (min-width: 640px)': '140px' },
+    paddingInline: 'calc(var(--spacing) * 0)',
+    paddingBlock: 'calc(var(--spacing) * 0)',
+  },
+  textareaSession: {
+    paddingInline: 'calc(var(--spacing) * 1)',
+    paddingBlock: 'calc(var(--spacing) * 0)',
+  },
+  textareaMobile: { minHeight: '24px' },
+  textareaDesktop: { minHeight: '48px' },
+  textareaDialog: {
+    width: '100%',
+    minHeight: '120px',
+    borderRadius: 'var(--radius-2xl)',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
+  textareaHint: { paddingRight: 'calc(var(--spacing) * 16)' },
+  secondaryAction: {
+    width: 'auto',
+    userSelect: 'none',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    fontWeight: 'var(--font-weight-semibold)',
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction: 'var(--default-transition-timing-function, ease)',
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input-border) / 1) 60%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--background) / 1)',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input) / 1) 60%, transparent)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': {
+          default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 4%, transparent)',
+          [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
+        },
+      },
+    },
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      [DARK_SCOPE]: 'hsl(var(--input-foreground) / 1)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': {
+          default: 'hsl(var(--foreground) / 1)',
+          [DARK_SCOPE]: 'hsl(var(--input-foreground) / 1)',
+        },
+      },
+    },
+  },
+  actionDialog: {
+    height: 'calc(var(--spacing) * 10)',
+    borderRadius: 'var(--radius-lg)',
+    paddingInline: 'calc(var(--spacing) * 5)',
+  },
+  actionLanding: {
+    height: 'calc(var(--spacing) * 6)',
+    borderRadius: '4px',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    flexShrink: 0,
+  },
+  actionSession: {
+    height: 'calc(var(--spacing) * 7)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2.5)',
+  },
   /* The composer's own frame. */
   root: { display: 'flex', width: '100%', flexDirection: 'column' },
   rootDialog: { gap: themeSpace[3] },
@@ -548,7 +614,6 @@ const styles = stylex.create({
     paddingLeft: themeSpace[4],
   },
   pastedDrawerTitleRow: { display: 'flex', alignItems: 'center', gap: themeSpace[3] },
-  pastedTitleWeight: { '--tw-font-weight': 'var(--font-weight-medium)' },
   pastedTitle: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
   pastedDrawerTitle: {
     minWidth: 0,
@@ -567,9 +632,20 @@ const styles = stylex.create({
     paddingRight: themeSpace[2],
   },
   pastedDrawerContent: {
+    borderTopLeftRadius: 'var(--radius-2xl)',
+    borderTopRightRadius: 'var(--radius-2xl)',
+    paddingTop: 0,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    paddingRight: 0,
+    paddingBlockStart: 0,
+    paddingBlockEnd: 0,
+    paddingInlineStart: 0,
+    paddingInlineEnd: 0,
     [dialogTokens.gap]: 'calc(var(--spacing) * 0)',
   },
   pastedDialogContent: {
+    maxHeight: '85vh',
     display: 'flex',
     height: '85vh',
     flexDirection: 'column',
@@ -619,6 +695,7 @@ export interface ChatComposerAction {
   onClick: () => void | Promise<void>;
   disabled?: boolean;
   variant?: ButtonProps['variant'];
+  xstyle?: stylex.StyleXStyles;
   className?: string;
 }
 
@@ -739,34 +816,22 @@ export interface ChatComposerProps {
   focusOnContainerClick?: boolean;
 }
 
-export function getChatComposerTextareaClassName({
+export function getChatComposerTextareaStyles({
   variant,
   isMobile = false,
 }: {
   tone: ChatComposerTone;
   variant: ChatComposerVariant;
   isMobile?: boolean;
-}) {
-  const isLanding = variant === 'landing';
-
-  return cn(
-    'input-scrollbar transition-shadow',
-    stylex.props(typography.prompt).className,
-    isLanding
-      ? cn(
-          composerLandingMinimumClass,
-          composerClearBorderClass,
-          composerLandingInsetClass,
-          'sm:min-h-[140px]'
-        )
-      : cn(
-          cn(composerClearBorderClass, composerSessionInsetClass),
-          // Mobile session composer floors at a single line; desktop keeps two.
-          isMobile ? composerMobileMinimumClass : composerDesktopMinimumClass
-        ),
-    'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    cn(composerInputInkClass, 'placeholder:text-input-placeholder/85')
-  );
+}): stylex.StyleXStyles {
+  return [
+    typography.prompt,
+    styles.textarea,
+    styles.textareaQuietOutline,
+    variant === 'landing'
+      ? styles.textareaLanding
+      : [styles.textareaSession, isMobile ? styles.textareaMobile : styles.textareaDesktop],
+  ];
 }
 
 /**
@@ -1160,39 +1225,20 @@ export function ChatComposer({
     textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
   }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows]);
 
-  const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
-
-  // Light surface: near-white composer on the gray canvas + 1px border.
-  // Avoid heavy bg-input fills that read as muddy gray on cool-white themes.
+  const boxTextareaStyles = getChatComposerTextareaStyles({ tone, variant, isMobile });
   const mentionContainerClassName = !isLanding
     ? stylex.props(styles.dialogBox, styles.sessionColors, styles.mentionSurface).className
     : undefined;
-
-  const dialogTextareaClassName = cn(
-    cn('input-scrollbar', composerDialogInsetClass, 'transition-shadow sm:min-h-[120px]'),
-    stylex.props(typography.prompt).className,
-    cn(
-      composerDialogShapeClass,
-      composerClearBorderClass,
-      composerTransparentClass,
-      'focus-visible:ring-0 focus-visible:ring-offset-0'
-    ),
-    cn(composerInputInkClass, 'placeholder:text-input-placeholder/85')
-  );
-
-  const actionBaseClassName = cn(
-    stylex.props(isLanding ? typography.caption : typography.code).className,
-    'select-none border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
-    isDialog
-      ? composerDialogActionClass
-      : isLanding
-        ? composerLandingActionClass
-        : composerSessionActionClass
-  );
-
-  const actionWidthClassName = isLanding
-    ? composerLandingActionWidthClass
-    : composerActionWidthClass;
+  const dialogTextareaStyles: stylex.StyleXStyles = [
+    typography.prompt,
+    styles.textarea,
+    styles.textareaDialog,
+  ];
+  const secondaryButtonStyles: stylex.StyleXStyles = [
+    isLanding ? typography.caption : typography.code,
+    styles.secondaryAction,
+    isDialog ? styles.actionDialog : isLanding ? styles.actionLanding : styles.actionSession,
+  ];
 
   // Focus stays quiet: the caret and placeholder already show where typing
   // goes, so the composer keeps its resting border instead of an accent ring.
@@ -1238,14 +1284,6 @@ export function ChatComposer({
       : statusTone === 'error'
         ? styles.statusError
         : styles.statusMuted
-  );
-
-  const secondaryButtonClassName = cn(
-    actionBaseClassName,
-    'border-foreground/[0.10]',
-    composerSecondaryInkClass,
-    'hover:bg-foreground/[0.04] hover:text-foreground focus-visible:ring-ring',
-    'dark:border-input-border/60 dark:bg-input/60 dark:text-input-foreground dark:hover:bg-muted/60'
   );
 
   const rootStyle = stylex.props(
@@ -1402,7 +1440,7 @@ export function ChatComposer({
                           variant="secondary"
                           size="mini"
                           icon
-                          className={cn(isMobile ? '' : '')}
+
                           onClick={() => onImageRemove?.(image.id)}
                           aria-label={removeImageLabel}
                         >
@@ -1561,7 +1599,7 @@ export function ChatComposer({
                           variant="secondary"
                           size="mini"
                           icon
-                          className={cn(isMobile ? '' : '')}
+
                           onClick={() => onFileRemove?.(file.id)}
                           aria-label={removeAttachmentLabel}
                         >
@@ -1604,7 +1642,9 @@ export function ChatComposer({
                 // placeholder would otherwise run under the top-right ⌘L chip. Reserve
                 // room for it so the placeholder wraps before the chip; the padding is
                 // dropped once the user types (showFocusHint → false → full width).
-                className={cn(boxTextareaClassName, showFocusHint && composerHintInsetClass)}
+                className="input-scrollbar"
+                focusRing={false}
+                xstyle={[boxTextareaStyles, showFocusHint && styles.textareaHint]}
                 data-keyboard-nav="composer"
               />
 
@@ -1665,11 +1705,8 @@ export function ChatComposer({
                         void secondaryAction.onClick();
                       }}
                       disabled={secondaryAction.disabled}
-                      className={cn(
-                        actionWidthClassName,
-                        secondaryButtonClassName,
-                        secondaryAction.className
-                      )}
+                      className={secondaryAction.className}
+                      xstyle={[secondaryButtonStyles, secondaryAction.xstyle]}
                     >
                       {secondaryAction.label}
                     </Button>
@@ -1709,7 +1746,9 @@ export function ChatComposer({
               enterKeyHint={promptEnterKeyHint}
               placeholder={resolvedPromptPlaceholder}
               containerClassName={mentionContainerClassName}
-              className={dialogTextareaClassName}
+              className="input-scrollbar"
+              focusRing={false}
+              xstyle={dialogTextareaStyles}
               data-keyboard-nav="composer"
             />
 
@@ -1735,11 +1774,8 @@ export function ChatComposer({
                       void secondaryAction.onClick();
                     }}
                     disabled={secondaryAction.disabled}
-                    className={cn(
-                      actionWidthClassName,
-                      secondaryButtonClassName,
-                      secondaryAction.className
-                    )}
+                    className={secondaryAction.className}
+                    xstyle={[secondaryButtonStyles, secondaryAction.xstyle]}
                   >
                     {secondaryAction.label}
                   </Button>
@@ -1795,14 +1831,7 @@ export function ChatComposer({
               open={previewPastedTextDraft !== null}
               onOpenChange={handlePastedTextOpenChange}
             >
-              <Drawer.Content
-                side="bottom"
-                closeButton={false}
-                className={cn(
-                  stylex.props(styles.pastedDrawerContent).className,
-                  cn('rounded-t-2xl', composerPastedPaddingClass)
-                )}
-              >
+              <Drawer.Content side="bottom" closeButton={false} xstyle={styles.pastedDrawerContent}>
                 {previewPastedTextDraft ? (
                   // Base UI wraps the children in a block box, so the column
                   // that lets the editor fill the sheet has to be ours, with a
@@ -1818,11 +1847,7 @@ export function ChatComposer({
                         <Drawer.Title
                           fontWeight="var(--font-weight-medium)"
                           className={
-                            stylex.props(
-                              styles.pastedTitle,
-                              styles.pastedDrawerTitle,
-                              styles.pastedTitleWeight
-                            ).className
+                            stylex.props(styles.pastedTitle, styles.pastedDrawerTitle).className
                           }
                         >
                           <ClipboardPaste {...stylex.props(styles.glyph14, styles.glyphMuted)} />
@@ -1868,19 +1893,14 @@ export function ChatComposer({
               width="48rem"
               padding="none"
               gap="none"
-              className={cn(
-                stylex.props(styles.pastedDialogContent).className,
-                composerPastedMaximumClass
-              )}
+              xstyle={styles.pastedDialogContent}
             >
               {previewPastedTextDraft ? (
                 <>
                   <div {...stylex.props(styles.pastedDialogHeader)}>
                     <Dialog.Title
                       fontWeight="var(--font-weight-medium)"
-                      className={
-                        stylex.props(styles.pastedTitle, styles.pastedTitleWeight).className
-                      }
+                      className={stylex.props(styles.pastedTitle).className}
                     >
                       <ClipboardPaste {...stylex.props(styles.glyph14, styles.glyphMuted)} />
                       {pastedTextDialogTitle}

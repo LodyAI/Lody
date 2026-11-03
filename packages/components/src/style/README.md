@@ -5,21 +5,21 @@ its colours from `theme-colors.stylex.ts` and its sizes from
 `theme-scale.stylex.ts`. Values preserve the existing theme contract; browser
 comparisons verify their computed behavior. The migration is incomplete.
 
-| Part                                                       | Responsibility                                                                                                        |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| [Theme colors](theme-colors.stylex.ts)                     | App semantic colors, including portals and VS Code themes.                                                            |
-| [Theme scale](theme-scale.stylex.ts)                       | Existing spacing, radius, type, motion, shadow and stacking scales.                                                   |
-| [Migration guide](MIGRATION.md)                            | Style ownership, cascade, compatibility and real visual verification.                                                 |
-| [Legacy declaration bindings](legacy-defaults.stylex.ts)   | StyleX declarations with retained public class/slot contracts; one explicit [profile](legacy-declaration-profile.ts). |
-| [Alpha catalogue](ALPHAS.md)                               | Existing ad-hoc color opacity expressions.                                                                            |
-| [Visual harness](../../tests/visual/visual-regression.mjs) | Real screenshots, interaction states and self-contained HTML reports.                                                 |
+| Part                                                       | Responsibility                                                        |
+| ---------------------------------------------------------- | --------------------------------------------------------------------- |
+| [Theme colors](theme-colors.stylex.ts)                     | App semantic colors, including portals and VS Code themes.            |
+| [Theme scale](theme-scale.stylex.ts)                       | Existing spacing, radius, type, motion, shadow and stacking scales.   |
+| [Migration guide](MIGRATION.md)                            | Style ownership, cascade, compatibility and real visual verification. |
+| [Alpha catalogue](ALPHAS.md)                               | Existing ad-hoc color opacity expressions.                            |
+| [Visual harness](../../tests/visual/visual-regression.mjs) | Real screenshots, interaction states and self-contained HTML reports. |
 
-The legacy declaration bridge preserves original selector identity and rule
-position for twenty-one reviewed source owners. Its ninety-four aliases still depend on
-Tailwind ordering; imported bindings are not net utility-removal credit. Keep
-ordinary component styling in normal StyleX blocks. The
-[bridge decision](../../../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)
-owns compilation, rejection, development and source-map limits.
+The declaration bridge, its Tailwind-dependent profile and the Electron Tailwind
+plugin have been removed. Browser normalization and ordinary theme defaults live
+in `../tailwind/{reset,theme-defaults}.css`; the product stylesheet has no utility
+compiler input. Storybook retains its own temporary input for unmigrated fixtures.
+Components use local StyleX directly; primitive overrides compose through typed
+`xstyle` props. The [migration guide](MIGRATION.md) describes the remaining
+transition and verification rules.
 
 ## Why the theme's own variables
 

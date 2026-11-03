@@ -72,11 +72,7 @@ function ResizeFixture({
             withHandle={!consumer}
             disabled={disabled}
             hitAreaMargins={consumer ? { coarse: 15, fine: 12 } : undefined}
-            className={
-              consumer
-                ? 'bg-transparent transition-opacity after:left-0 after:w-[2px] after:translate-x-0 after:inset-y-0 after:top-0 after:bottom-0 after:transition-colors after:duration-150 data-[resize-handle-state=hover]:after:bg-sidebar-ring/50 data-[resize-handle-state=hover]:after:delay-150 data-[resize-handle-state=drag]:after:bg-sidebar-ring/70'
-                : undefined
-            }
+            appearance={consumer ? 'edge' : undefined}
           />
           <ResizablePanel defaultSize={45} minSize={20} id="layout-second">
             {nested ? (

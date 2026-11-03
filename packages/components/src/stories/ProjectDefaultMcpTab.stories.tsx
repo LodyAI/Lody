@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type ReactNode } from 'react';
 import type { McpServerId, WorkspaceMcpServerMeta } from '@lody/shared';
@@ -5,6 +6,17 @@ import {
   ProjectDefaultMcpView,
   type ProjectDefaultMcpViewProps,
 } from '@/components/settings/project-default-mcp-tab';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    width: '720px',
+    'max-width': '100%',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const SERVERS: WorkspaceMcpServerMeta[] = [
   {
@@ -46,9 +58,7 @@ const SERVERS: WorkspaceMcpServerMeta[] = [
 ];
 
 function Frame({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex w-[720px] max-w-full flex-col gap-3 bg-background p-4">{children}</div>
-  );
+  return <div {...stylex.props(storyLayout.stack)}>{children}</div>;
 }
 
 /** Stateful so the switches can be driven by hand; the first edit customizes. */

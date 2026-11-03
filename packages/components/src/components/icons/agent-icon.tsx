@@ -23,13 +23,6 @@ import { ICON_GLYPH_BOX_CLASS, iconSurface } from './surface';
 import bubSvg from '@/assets/bub.svg?raw';
 import dimcodeSvg from '@/assets/dimcode.svg?raw';
 
-/**
- * The registry SVG is raw markup, so its own `<svg>` element cannot be given a
- * class. StyleX has no descendant selector either, so the two rules that make
- * the inner glyph fill its wrapper stay Tailwind classes on the wrapper.
- */
-const SVG_FILL_CLASS = '[&_svg]:h-full [&_svg]:w-full';
-
 const registryNameMap = new Map(REGISTRY_ACP_AGENTS.map((a) => [a.id, a.name] as const));
 
 export function getAgentDisplayName(
@@ -94,7 +87,7 @@ export function AgentIcon({
   const cls = className ?? ICON_GLYPH_BOX_CLASS;
   const fill = stylex.props(iconSurface.glyphFill);
   /** The wrapper the raw registry markup is painted into. */
-  const inlineGlyphClass = clsx(fill.className, cls, SVG_FILL_CLASS);
+  const inlineGlyphClass = clsx(fill.className, cls);
   if (cliType === 'custom') {
     return <SquareTerminal className={cls} />;
   }
@@ -113,6 +106,7 @@ export function AgentIcon({
     if (agentType === 'bub' || agentType === 'dimcode') {
       return (
         <InlineSvg
+          fillParent
           raw={agentType === 'dimcode' ? dimcodeSvg : bubSvg}
           className={inlineGlyphClass}
         />
@@ -121,7 +115,7 @@ export function AgentIcon({
     if (agentType === 'grok') {
       const grokRaw = REGISTRY_AGENT_ICON_SVGS['grok-build'];
       if (grokRaw) {
-        return <InlineSvg raw={grokRaw} className={inlineGlyphClass} />;
+        return <InlineSvg fillParent raw={grokRaw} className={inlineGlyphClass} />;
       }
     }
   }
@@ -131,7 +125,7 @@ export function AgentIcon({
   const raw =
     REGISTRY_AGENT_ICON_SVGS[cliType === 'builtin' && agentType === 'pi' ? 'pi-acp' : agentType];
   if (raw) {
-    return <InlineSvg raw={raw} className={inlineGlyphClass} />;
+    return <InlineSvg fillParent raw={raw} className={inlineGlyphClass} />;
   }
   return fallback !== undefined ? fallback : <Bot className={cls} />;
 }

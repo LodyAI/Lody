@@ -5,14 +5,7 @@ import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
-import {
-  attachmentPointerClass,
-  attachmentMobileRowClass,
-  attachmentMobileBlockClass,
-  attachmentIntrinsicWidthClass,
-  acpMediumWeightClass,
-} from '@/style/legacy-defaults.stylex';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -61,7 +54,19 @@ const enterFromLeft = stylex.keyframes({
 });
 
 const styles = stylex.create({
-  itemMobileType: { fontSize: '15px' },
+  trigger: {
+    [button.ghostHover]: 'hsl(var(--hover) / 1)',
+  },
+  item: { cursor: 'pointer' },
+  itemMobile: {
+    gap: 'calc(var(--spacing) * 2.5)',
+    paddingBlock: 'calc(var(--spacing) * 2.5)',
+    fontSize: '15px',
+  },
+  checkboxMobile: { paddingBlock: 'calc(var(--spacing) * 2.5)' },
+  back: { fontWeight: 'var(--font-weight-medium)' },
+  content: { width: 'max-content' },
+  mcpContent: { width: 'min(20rem, calc(100vw - 2rem))' },
   rowMono: {
     fontFamily: 'var(--font-mono)',
     fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
@@ -167,14 +172,8 @@ export function AttachmentAddMenu({
     return null;
   }
 
-  // Primitive dimensions use their APIs; visual/state compatibility classes remain.
   const triggerSize =
     !isLanding && isMobile ? 'calc(var(--spacing) * 9)' : 'calc(var(--spacing) * 7)';
-  const itemClass = cn(
-    attachmentPointerClass,
-    isMobile && attachmentMobileRowClass,
-    isMobile && stylex.props(styles.itemMobileType).className
-  );
   const plusClassName = stylex.props(isMobile ? styles.plusLarge : styles.plusSmall).className;
   const selectedCount = mcp
     ? mcp.selectedIds.filter((id) => mcpServers.some((server) => server.id === id)).length
@@ -204,12 +203,7 @@ export function AttachmentAddMenu({
             height={triggerSize}
             disabled={disabled}
             aria-label={triggerLabel}
-            className={cn(
-              // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-              // `bg-accent`/`bg-muted`) because those equal the background in the
-              // dark theme and paint nothing.
-              'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-            )}
+            className={stylex.props(styles.trigger).className}
           >
             <Plus strokeWidth={1.5} className={plusClassName} />
           </Button>
@@ -223,12 +217,7 @@ export function AttachmentAddMenu({
           height={triggerSize}
           disabled={disabled}
           aria-label={triggerLabel}
-          className={cn(
-            // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-            // `bg-accent`/`bg-muted`) because those equal the background in the
-            // dark theme and paint nothing.
-            'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-          )}
+          className={stylex.props(styles.trigger).className}
         >
           <Plus strokeWidth={1.5} className={plusClassName} />
         </Button>
@@ -241,16 +230,14 @@ export function AttachmentAddMenu({
            collapsing too narrow. The pushed MCP panel needs room for server
            names, so it takes its own floor and ceiling. */
         minWidth={view === 'mcp' ? undefined : isMobile ? 160 : 140}
-        className={
-          view === 'mcp' ? 'w-[min(20rem,calc(100vw-2rem))]' : attachmentIntrinsicWidthClass
-        }
+        xstyle={view === 'mcp' ? styles.mcpContent : styles.content}
       >
         {view === 'mcp' && mcp ? (
           // Keyed so the panel swap replays the slide: the pushed level enters
           // from the right, the root returns from the left.
           <div key="mcp" {...stylex.props(styles.panelFromRight)}>
             <Menu.Item
-              className={cn(itemClass, acpMediumWeightClass)}
+              xstyle={[styles.item, isMobile && styles.itemMobile, styles.back]}
               closeOnClick={false}
               onClick={() => setView('root')}
               icon={ChevronLeft}
@@ -266,7 +253,7 @@ export function AttachmentAddMenu({
               <Menu.Item
                 onClick={onAddAttachment}
                 disabled={attachmentDisabled}
-                className={itemClass}
+                xstyle={[styles.item, isMobile && styles.itemMobile]}
                 icon={Paperclip}
               >
                 {triggerLabel}
@@ -278,7 +265,7 @@ export function AttachmentAddMenu({
                 onClick={onScheduleSend}
                 disabled={!!scheduleDisabledReason}
                 title={scheduleDisabledReason}
-                className={itemClass}
+                xstyle={[styles.item, isMobile && styles.itemMobile]}
               >
                 {t('scheduledMessage.menu')}
               </Menu.Item>
@@ -288,7 +275,7 @@ export function AttachmentAddMenu({
                 {onAddAttachment ? <Menu.Separator /> : null}
                 {isMobile ? (
                   <Menu.Item
-                    className={itemClass}
+                    xstyle={[styles.item, isMobile && styles.itemMobile]}
                     disabled={mcp.disabled}
                     closeOnClick={false}
                     onClick={() => setView('mcp')}
@@ -301,10 +288,14 @@ export function AttachmentAddMenu({
                   </Menu.Item>
                 ) : (
                   <Menu.Submenu>
-                    <Menu.SubmenuTrigger className={itemClass} disabled={mcp.disabled} icon={Plug}>
+                    <Menu.SubmenuTrigger
+                      xstyle={[styles.item, isMobile && styles.itemMobile]}
+                      disabled={mcp.disabled}
+                      icon={Plug}
+                    >
                       {mcpLabel}
                     </Menu.SubmenuTrigger>
-                    <Menu.Content className="w-[min(20rem,calc(100vw-2rem))]">
+                    <Menu.Content xstyle={styles.mcpContent}>
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
                     </Menu.Content>
                   </Menu.Submenu>
@@ -346,7 +337,7 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
             // Stays `items-center` (the shared selection-item default): the check
             // indicator is absolutely positioned from its static spot, so the row's
             // own alignment is what centers it against the two-line label.
-            className={cn(isMobile && attachmentMobileBlockClass)}
+            xstyle={isMobile && styles.checkboxMobile}
             closeOnClick={false}
             onCheckedChange={(checked) => toggle(server.id, checked === true)}
           >

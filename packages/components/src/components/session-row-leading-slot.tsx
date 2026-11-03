@@ -1,8 +1,8 @@
+import { clsx } from 'clsx';
 import type { TFunction } from 'i18next';
 import { ChevronDown, MoreHorizontal } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { text } from '@lody/ui/tokens/scales.stylex';
-import { cn } from '@/lib/utils';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeDuration, themeEasing, themeRadius, themeSpace } from '../style/theme-scale.stylex';
 
@@ -51,7 +51,28 @@ export type SessionRowOpenedByTreeSlot =
  * A first child under a two-line opener (desktop local worktree or Updated mode) also climbs the
  * opener's project/branch line: its 4px gap plus one footnote line.
  */
+const GROUP_HOVER = ':is(:where(.group):hover *)';
+const GROUP_OPEN = ':is(:where(.group)[data-menu-open] *)';
+
 const tree = stylex.create({
+  groupFade: {
+    opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 0 }, [GROUP_OPEN]: 0 },
+  },
+  groupNoPointer: {
+    pointerEvents: {
+      default: null,
+      [GROUP_HOVER]: { '@media (hover: hover)': 'none' },
+      [GROUP_OPEN]: 'none',
+    },
+  },
+  groupReveal: {
+    opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 1 }, [GROUP_OPEN]: 1 },
+    pointerEvents: {
+      default: null,
+      [GROUP_HOVER]: { '@media (hover: hover)': 'auto' },
+      [GROUP_OPEN]: 'auto',
+    },
+  },
   slot: {
     position: 'relative',
     display: 'flex',
@@ -119,8 +140,16 @@ const tree = stylex.create({
     borderRadius: themeRadius.md,
     opacity: 0,
     pointerEvents: 'none',
-    color: { default: themeColors.sidebarForegroundMuted, ':hover': themeColors.sidebarForeground },
-    backgroundColor: { default: null, ':hover': 'hsl(var(--sidebar-foreground) / 0.15)' },
+    color: {
+      default: themeColors.sidebarForegroundMuted,
+      ':hover': themeColors.sidebarForeground,
+      [GROUP_OPEN]: 'hsl(var(--sidebar-foreground) / 1)',
+    },
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--sidebar-foreground) / 0.15)',
+      [GROUP_OPEN]: 'color-mix(in oklab, hsl(var(--sidebar-foreground) / 1) 15%, transparent)',
+    },
     transitionProperty: 'opacity, color, background-color',
     transitionDuration: themeDuration[100],
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
@@ -170,11 +199,11 @@ export function SessionRowLeadingSlot({
   menuLabel,
   openedByTree,
   /** Fade the rest state while hovering (e.g. 'group-hover/row:opacity-0' for named groups). */
-  fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
+  fadeClassName = stylex.props(tree.groupFade).className,
   /** Disable an opener disclosure while its ⋯ replacement is active. */
-  restPointerClassName = 'group-hover:pointer-events-none group-data-[menu-open]:pointer-events-none',
+  restPointerClassName = stylex.props(tree.groupNoPointer).className,
   /** Reveal the ⋯ button while hovering. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+  revealClassName = stylex.props(tree.groupReveal).className,
 }: {
   showMenuButton?: boolean;
   menuLabel: string;
@@ -205,9 +234,9 @@ export function SessionRowLeadingSlot({
             event.stopPropagation();
             openerTree.onToggle();
           }}
-          className={cn(
+          className={clsx(
             stylex.props(tree.disclosure, showMenuButton && tree.fade).className,
-            showMenuButton && cn(restClassName, restPointerClassName)
+            showMenuButton && clsx(restClassName, restPointerClassName)
           )}
         >
           <ChevronDown
@@ -221,7 +250,7 @@ export function SessionRowLeadingSlot({
         </button>
       ) : childTree ? (
         <div
-          className={cn(
+          className={clsx(
             stylex.props(tree.connectorBox, showMenuButton && tree.fade).className,
             restClassName
           )}
@@ -262,14 +291,13 @@ export function SessionRowLeadingSlot({
               })
             );
           }}
-          className={cn(
+          className={clsx(
             // Overlay a 20px hit target centered on the 14px leading slot so the ⋯
             // gets a visible rounded hover chip (it reads as clickable) without
             // the tiny slot footprint clipping the background.
             stylex.props(tree.menu, controlLeft).className,
             // The trigger itself stays pressed-looking while its menu is open,
             // not just the row around it.
-            'group-data-[menu-open]:bg-sidebar-foreground/15 group-data-[menu-open]:text-sidebar-foreground',
             revealClassName
           )}
         >

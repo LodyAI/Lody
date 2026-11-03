@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { fn } from 'storybook/test';
@@ -12,6 +13,25 @@ import { MobileSettingsLayout } from '@/components/mobile/mobile-settings-layout
 import { MachineDetailPane } from '@/components/settings/machine-detail-pane';
 import { AccountMachinesOverviewView } from '@/components/settings/account-machines-overview';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+const storyLayout = stylex.create({
+  canvas: {
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-top': 'calc(var(--spacing) * 4)',
+  },
+  label: {
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  stack: {
+    display: 'flex',
+    height: '100%',
+    'min-height': 'calc(var(--spacing) * 0)',
+    'flex-direction': 'column',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  section: {
+    'padding-bottom': 'calc(var(--spacing) * 6)',
+  },
+});
 
 const machineId = 'mobile-device-story' as MachineId;
 const machine: MachineViewMeta = {
@@ -54,7 +74,7 @@ const monitorSnapshot: MachineMonitorSnapshot = {
 
 function SettingsSection({ title, rows }: { title: string; rows: string[] }) {
   return (
-    <section className="px-4 pt-4">
+    <section {...stylex.props(storyLayout.canvas)}>
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </div>
@@ -67,7 +87,7 @@ function SettingsSection({ title, rows }: { title: string; rows: string[] }) {
             }`}
           >
             <span>{row}</span>
-            <span className="text-muted-foreground">›</span>
+            <span {...stylex.props(storyLayout.label)}>›</span>
           </div>
         ))}
       </div>
@@ -97,7 +117,7 @@ function StoryShell({
           onBack={fn()}
         >
           {isMachineDetail ? (
-            <div className="flex h-full min-h-0 flex-col p-3">
+            <div {...stylex.props(storyLayout.stack)}>
               <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/60 bg-card/40">
                 <MachineDetailPane
                   mode="devices"
@@ -119,7 +139,7 @@ function StoryShell({
               </div>
             </div>
           ) : (
-            <div className="pb-6">
+            <div {...stylex.props(storyLayout.section)}>
               <SettingsSection title="账号" rows={['个人资料', '邮箱与登录', '订阅与配额']} />
               <SettingsSection title="工作空间" rows={['成员', '权限', '密钥', '集成']} />
               <SettingsSection title="机器" rows={['zx-macbook', 'lab-m2', 'mini-offline']} />

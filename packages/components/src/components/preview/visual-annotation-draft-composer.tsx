@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -13,7 +14,6 @@ import { Send, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
-import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
 import { field as fieldTokens } from '@lody/ui/field/field.tokens.stylex';
@@ -46,7 +46,7 @@ export function VisualAnnotationDraftComposer({
   return (
     <div
       data-lody-visual-comment-draft="true"
-      className={cn(stylex.props(styles.root).className, className)}
+      className={clsx(stylex.props(styles.root).className, className)}
       style={style}
     >
       <div {...stylex.props(styles.header)}>
@@ -76,7 +76,7 @@ export function VisualAnnotationDraftComposer({
         resize="none"
         style={{
           fontSize: 'var(--text-xs)',
-          lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+          lineHeight: 'var(--text-xs--line-height)',
         }}
         autoFocus={autoFocus}
       />

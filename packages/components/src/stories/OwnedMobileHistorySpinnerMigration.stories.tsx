@@ -51,7 +51,7 @@ function HistoryFixture({
     errorMessage: null,
   }));
   useLayoutEffect(() => {
-    if (!spacing) return;
+    if (!spacing) return undefined;
     const root = document.documentElement;
     const old = root.style.getPropertyValue('--spacing');
     root.style.setProperty('--spacing', '5px');

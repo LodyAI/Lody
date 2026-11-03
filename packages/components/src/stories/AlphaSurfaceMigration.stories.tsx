@@ -38,9 +38,11 @@ const longPath = 'src/本地工作区/' + 'long-directory/'.repeat(7) + 'preserv
 function NoticeFixture({
   long = false,
   overrides = false,
+  callerClassName,
 }: {
   long?: boolean;
   overrides?: boolean;
+  callerClassName?: string;
 }) {
   const [action, setAction] = useState('Ready');
   return (
@@ -58,9 +60,10 @@ function NoticeFixture({
             : 'Synthetic file contents are unavailable. Preserve the original notice.'
         }
         className={
-          overrides
+          callerClassName ??
+          (overrides
             ? 'max-w-[620px] rounded-none border-2 border-primary/40 shadow-none'
-            : undefined
+            : undefined)
         }
         onOpenFile={(path) => setAction(`Opened ${path}`)}
       />
@@ -136,6 +139,19 @@ type Story = StoryObj<typeof meta>;
 export const Notice: Story = { render: () => <NoticeFixture /> };
 export const LongNotice: Story = { render: () => <NoticeFixture long /> };
 export const NoticeCallerOverrides: Story = { render: () => <NoticeFixture overrides /> };
+export const NoticeDescendantOverrides: Story = {
+  render: () => (
+    <NoticeFixture
+      long
+      callerClassName="[&>*]:inset-x-3 [&>*]:rounded-lg [&>*]:border-dashed [&>*]:border-blue-500 [&>*]:bg-amber-100 [&>*]:pl-7 [&>*]:pr-6 dark:[&>*]:border-blue-300"
+    />
+  ),
+};
+export const NoticeDirectChildOverrides: Story = {
+  render: () => (
+    <NoticeFixture callerClassName="*:border-blue-500 *:bg-amber-100 *:rounded-lg *:border-dashed *:pl-7 *:pr-6 *:inset-x-3" />
+  ),
+};
 export const ReadCompleted: Story = { render: () => <ToolFixture /> };
 export const ReadFailed: Story = { render: () => <ToolFixture status="failed" /> };
 export const ReadRunning: Story = { render: () => <ToolFixture status="in_progress" /> };

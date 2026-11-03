@@ -15,6 +15,25 @@ import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mo
 import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-config-sheet';
 import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  row2: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: 'calc(var(--spacing) * 9)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-xl)',
+    'background-color': 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    color: 'hsl(var(--primary))',
+  },
+});
 
 const meta = {
   title: 'Mobile/MobileProjectScreen',
@@ -119,8 +138,8 @@ function MockWorktreeSettings({ shell }: { shell?: WorktreeSetupShell }) {
       <MobileSettingsSection title="Worktree">
         <MobileSettingsRow
           label={
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <div {...stylex.props(storyLayout.row)}>
+              <div {...stylex.props(storyLayout.row2)}>
                 <Wrench className="h-[1.05rem] w-[1.05rem]" />
               </div>
               <span className="truncate text-[0.95rem] font-medium leading-tight">

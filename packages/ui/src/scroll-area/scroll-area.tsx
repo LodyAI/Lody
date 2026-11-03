@@ -22,9 +22,11 @@ export interface ScrollAreaProps extends Omit<ComponentProps<'div'>, 'children'>
   compact?: boolean;
   viewportRef?: Ref<HTMLDivElement>;
   viewportClassName?: string;
+  viewportXstyle?: stylex.StyleXStyles;
   viewportStyle?: CSSProperties;
   /** Layout/interaction constraints for both tracks; appearance belongs to the tokens. */
   scrollbarClassName?: string;
+  scrollbarXstyle?: stylex.StyleXStyles;
 }
 
 /** The native viewport remains the public ref for virtualization and restoration. */
@@ -37,8 +39,10 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
     className,
     viewportRef,
     viewportClassName,
+    viewportXstyle,
     viewportStyle,
     scrollbarClassName,
+    scrollbarXstyle,
     ...rest
   },
   ref
@@ -46,6 +50,7 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
   const track = (orientation: 'vertical' | 'horizontal') => (
     <BaseScrollArea.Scrollbar
       orientation={orientation}
+      style={stylex.props(scrollbarXstyle).style}
       className={(state) =>
         appendClassName(
           stylex.props(
@@ -57,7 +62,8 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
             visibility !== 'always' &&
               !state.scrolling &&
               !(visibility === 'hover' && state.hovering) &&
-              surface.hidden
+              surface.hidden,
+            scrollbarXstyle
           ).className,
           scrollbarClassName
         )
@@ -76,10 +82,11 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
         ref={viewportRef}
         data-scroll-area-viewport=""
         className={appendClassName(
-          stylex.props(surface.viewport).className,
+          stylex.props(surface.viewport, viewportXstyle).className,
           viewportClassName
         )}
         style={{
+          ...stylex.props(viewportXstyle).style,
           ...viewportStyle,
           ...(axis === 'vertical'
             ? { overflowX: 'hidden' }

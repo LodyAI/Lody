@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { Spinner } from '@lody/ui/spinner';
@@ -21,6 +22,23 @@ import {
   type MobileSessionMenuInfoRow,
   type MobileSessionMenuOwner,
 } from '@/components/mobile/mobile-session-menu-sheet';
+const storyLayout = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 2)',
+    width: 'calc(var(--spacing) * 2)',
+    'flex-shrink': '0',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'var(--color-emerald-500)',
+  },
+  stack: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    'background-color': 'var(--color-stone-950)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const infoRows: MobileSessionMenuInfoRow[] = [
   {
@@ -28,7 +46,7 @@ const infoRows: MobileSessionMenuInfoRow[] = [
     icon: <Monitor className="h-3.5 w-3.5" />,
     label: 'Machine',
     value: 'zx-macbook',
-    trailing: <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-label="online" />,
+    trailing: <span {...stylex.props(storyLayout.frame)} aria-label="online" />,
   },
   {
     id: 'base',
@@ -102,7 +120,7 @@ const owner: MobileSessionMenuOwner = {
 function Harness({ owner: ownerProp }: { owner?: MobileSessionMenuOwner }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="flex min-h-dvh flex-col items-center bg-stone-950 p-6">
+    <div {...stylex.props(storyLayout.stack)}>
       <button
         type="button"
         onClick={() => setOpen(true)}

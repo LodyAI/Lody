@@ -40,6 +40,17 @@ import { themeSpace } from '../../style/theme-scale.stylex';
 import { mobileSurface } from './surface';
 
 const styles = stylex.create({
+  spinnerInk: { color: 'hsl(var(--muted-foreground) / 1)' },
+  searchInput: {
+    borderRadius: 'var(--radius-md)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--input-field) / 1)',
+    paddingLeft: 'calc(var(--spacing) * 9)',
+    boxShadow: { default: 'none', ':focus-visible': 'none' },
+  },
+
   /** The page: the sections stacked, set apart by the page's own rhythm. */
   page: {
     display: 'flex',
@@ -461,7 +472,10 @@ function MobileCloudIntegrationsSettings() {
             )}
           >
             {updatingPersonalPreference ? (
-              <Spinner diameter="calc(var(--spacing) * 4)" className="text-muted-foreground" />
+              <Spinner
+                diameter="calc(var(--spacing) * 4)"
+                className={stylex.props(styles.spinnerInk).className}
+              />
             ) : (
               <Switch
                 checked={personalIdentityEnabled}
@@ -530,7 +544,7 @@ function MobileCloudIntegrationsSettings() {
                 value={repoSearch}
                 onChange={(event) => setRepoSearch(event.target.value)}
                 placeholder={t('repos.search')}
-                className="rounded-md border border-input-border/70 bg-input-field pl-9 shadow-none"
+                xstyle={styles.searchInput}
               />
             </div>
           </div>

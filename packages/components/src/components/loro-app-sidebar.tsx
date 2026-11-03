@@ -49,7 +49,6 @@ import {
   SidebarMachineOfflinePill,
   type SidebarMachineInfo,
 } from '@/components/sidebar-machine-card';
-import { cn } from '@/lib/utils';
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
@@ -65,7 +64,22 @@ import {
  * The parts of the app sidebar that were Tailwind. The rows' own box, ink and
  * fills come from sidebarSurface; these are the pieces around it.
  */
+const GROUP_HOVER = ':is(:where(.group):hover *)';
 const appStyles = stylex.create({
+  swipeRoot: { borderRadius: 'var(--radius-md)' },
+  swipeContent: { backgroundColor: 'hsl(var(--sidebar) / 1)' },
+  folderDesktop: {
+    opacity: { default: 1, '@media (hover: hover)': { [GROUP_HOVER]: 0 } },
+  },
+  folderHoverInk: {
+    color: {
+      default: themeColors.sidebarForegroundMuted,
+      '@media (hover: hover)': { [GROUP_HOVER]: 'currentColor' },
+    },
+  },
+  chevronDesktop: {
+    opacity: { default: 0, '@media (hover: hover)': { [GROUP_HOVER]: 1 } },
+  },
   projectTooltip: { [tooltip.maxWidth]: '420px', wordBreak: 'break-all' },
   rowBox: {
     width: '100%',
@@ -80,11 +94,18 @@ const appStyles = stylex.create({
   rowNormalPadding: { paddingBlock: themeSpace[1] },
   rowMetaPadding: { paddingBlock: themeSpace[1.5] },
   rowInk: { color: themeColors.sidebarRowForeground },
-  rowHover: { backgroundColor: { default: 'transparent', ':hover': themeColors.sidebarHover } },
+  rowHover: {
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': themeColors.sidebarHover,
+      ':is([data-menu-open])': themeColors.sidebarHover,
+    },
+  },
   projectHover: {
     color: {
       default: themeColors.sidebarRowForeground,
       ':hover': themeColors.sidebarHoverForeground,
+      ':is([data-menu-open])': themeColors.sidebarHoverForeground,
     },
   },
   rowSelected: {
@@ -105,7 +126,7 @@ const appStyles = stylex.create({
     gap: themeSpace[2],
     fontWeight: themeFontWeight.normal,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -219,7 +240,7 @@ const appStyles = stylex.create({
     },
     backgroundColor: { default: null, ':hover': themeColors.sidebarHover },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -230,6 +251,11 @@ const appStyles = stylex.create({
     position: 'relative',
     display: 'flow-root',
     backgroundColor: themeColors.background,
+    boxShadow: {
+      default: null,
+      ':is([data-scope-active])':
+        'inset 0 0 0 2px color-mix(in oklab, hsl(var(--ring) / 1) 30%, transparent)',
+    },
   },
   shellFill: { width: '100%', height: '100%' },
   desktopFill: { backgroundColor: themeColors.sidebar },
@@ -522,6 +548,7 @@ const SIDEBAR_TOP_GROUP_SPACING = (collapsed: boolean) =>
 
 export type LoroAppSidebarProps = {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Desktop retained sidebar pauses sidebar-only sources while hidden. */
   pauseSidebarSourcesWhenHidden?: boolean;
   /**
@@ -811,7 +838,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
       // Drag a conversation onto a chat surface to mention it there.
       draggable
       onDragStart={(event) => startSessionMentionDrag(event, { sessionId: session.id, title })}
-      className={cn(
+      className={clsx(
         'group',
         stylex.props(
           appStyles.rowBox,
@@ -819,8 +846,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           appStyles.rowInk,
           !showSelectedState && !isMobile && appStyles.rowHover,
           showSelectedState && appStyles.rowSelected
-        ).className,
-        !showSelectedState && !isMobile && 'data-[menu-open]:bg-sidebar-hover'
+        ).className
       )}
       onClick={(event) => {
         if (openSessionOnModifiedClick(event, session.id)) return;
@@ -850,7 +876,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         </div>
         <div {...stylex.props(showMetaLine ? appStyles.titleColumn : appStyles.contents)}>
           <div
-            className={cn(SIDEBAR_ROW_TEXT_CLASS, stylex.props(appStyles.titleContent).className)}
+            className={clsx(SIDEBAR_ROW_TEXT_CLASS, stylex.props(appStyles.titleContent).className)}
             // Double-click to rename is scoped to the title only, so it can't be
             // triggered by double-clicking the Archive confirm button.
             onDoubleClick={(event) => {
@@ -875,7 +901,10 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             the time / branch live in the hover info card, so nothing sits here. */}
         {isMobile ? (
           <span
-            className={cn(SIDEBAR_CAPTION_TEXT_CLASS, stylex.props(appStyles.mobileTime).className)}
+            className={clsx(
+              SIDEBAR_CAPTION_TEXT_CLASS,
+              stylex.props(appStyles.mobileTime).className
+            )}
           >
             {relativeTime}
           </span>
@@ -1072,8 +1101,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     <>
       <SwipeActionRow
         enabled={isMobile}
-        className="rounded-md"
-        contentClassName="bg-sidebar"
+        rootXstyle={appStyles.swipeRoot}
+        contentXstyle={appStyles.swipeContent}
         actions={[
           {
             key: 'archive',
@@ -1081,7 +1110,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             ariaLabel: archiveTooltipLabel,
             icon: <Archive className={stylex.props(appStyles.glyph16).className} />,
             hideLabel: true,
-            className: 'bg-sidebar-hover text-sidebar-hover-foreground',
+            xstyle: appStyles.archiveAction,
             onClick: () => onArchive(session.id),
           },
         ]}
@@ -1386,7 +1415,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       // and ContextMenuTrigger both target this element through
       // `asChild`, so their `data-state` values collide here.
       data-menu-open={projectMenuOpen ? '' : undefined}
-      className={cn(
+      className={clsx(
         'group',
         stylex.props(
           appStyles.rowBox,
@@ -1399,10 +1428,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           showSelectedState && appStyles.projectSelected,
           projectCanNavigate ? appStyles.navigable : appStyles.inert
         ).className,
-        SIDEBAR_ROW_TEXT_CLASS,
-        !showSelectedState &&
-          !isMobile &&
-          'data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground'
+        SIDEBAR_ROW_TEXT_CLASS
       )}
       onClick={handleNavigate}
       onKeyDown={(event) => {
@@ -1426,27 +1452,24 @@ export const LocalProjectItem = memo(function LocalProjectItem({
             ink with the hover or selected fill. */}
         <ProjectFolderIcon
           strokeWidth={1.5}
-          className={cn(
+          className={clsx(
             stylex.props(
               appStyles.folderGlyph,
-              showSelectedState ? appStyles.currentInk : appStyles.folderIdle,
-              isMobile && appStyles.hidden
-            ).className,
-            !showSelectedState && 'group-hover:text-current',
-            // Mobile: chevron is always visible so the folder icon must hide
-            // permanently to avoid stacking. Desktop keeps the hover swap.
-            !isMobile && 'group-hover:opacity-0'
+              showSelectedState ? appStyles.currentInk : appStyles.folderHoverInk,
+              // Mobile: chevron is always visible so the folder icon must hide
+              // permanently to avoid stacking. Desktop keeps the hover swap.
+              isMobile ? appStyles.hidden : appStyles.folderDesktop
+            ).className
           )}
         />
         <ChevronDown
           strokeWidth={1.5}
-          className={cn(
+          className={clsx(
             stylex.props(
               appStyles.chevronGlyph,
-              isMobile ? appStyles.shown : appStyles.hidden,
+              isMobile ? appStyles.shown : appStyles.chevronDesktop,
               collapsed ? appStyles.collapsedChevron : appStyles.expandedChevron
-            ).className,
-            !isMobile && 'group-hover:opacity-100'
+            ).className
           )}
         />
       </button>
@@ -1458,7 +1481,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
             delay={300}
             render={
               <span
-                className={cn(
+                className={clsx(
                   SIDEBAR_CAPTION_TEXT_CLASS,
                   stylex.props(appStyles.removalStatus).className
                 )}
@@ -1482,7 +1505,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           {showProjectMenu ? (
             <button
               type="button"
-              className={cn(hoverActionClassName, menuTriggerOpenClassName)}
+              className={clsx(hoverActionClassName, menuTriggerOpenClassName)}
               aria-label={projectMenuLabel}
               onClick={(event) => {
                 // Open the row's own right-click menu from a left click.
@@ -1704,7 +1727,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               data-id={`show-more:${groupKey}`}
               data-scope-item="row"
               data-sidebar-show-more={groupKey}
-              className={cn(
+              className={clsx(
                 // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
                 SIDEBAR_CAPTION_TEXT_CLASS,
                 stylex.props(appStyles.showMore, appStyles.noFocusRing).className
@@ -1801,6 +1824,7 @@ function SidebarKeyboardNavReporter(opts: Parameters<typeof useSidebarKeyboardNa
 
 export function LoroAppSidebar({
   className,
+  xstyle,
   overlay = false,
   pauseSidebarSourcesWhenHidden = false,
 }: LoroAppSidebarProps) {
@@ -3296,7 +3320,7 @@ export function LoroAppSidebar({
                       items={sectionProjectKeys}
                       strategy={verticalListSortingStrategy}
                     >
-                      <div className="space-y-0.5">
+                      <div>
                         {section.projects.map((project) => {
                           const machineId = section.machineId;
                           if (!machineId) return null;
@@ -4015,14 +4039,12 @@ export function LoroAppSidebar({
     t('organization.workspace', 'Workspace');
   const resolvedWorkspaceId = expectedWorkspaceId ?? workspaceId ?? '';
 
+  const scopeProps = stylex.props(appStyles.focusScope, xstyle);
   return (
     <FocusScope
       id={WORKSPACE_FOCUS_SCOPES.sidebar}
-      className={cn(
-        stylex.props(appStyles.focusScope).className,
-        'data-[scope-active]:ring-2 data-[scope-active]:ring-ring/30 data-[scope-active]:ring-inset',
-        className
-      )}
+      {...scopeProps}
+      className={clsx(scopeProps.className, className)}
     >
       <SidebarVisibilityGate
         disableWhenHidden={pauseSidebarSourcesWhenHidden}
@@ -4036,7 +4058,7 @@ export function LoroAppSidebar({
       </SidebarVisibilityGate>
       {!isMobile ? <WindowDragStrip /> : null}
       <LoroSidebar
-        className={cn(
+        className={clsx(
           stylex.props(
             appStyles.shellFill,
             !isMobile && appStyles.desktopFill,

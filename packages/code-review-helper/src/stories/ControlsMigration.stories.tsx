@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type CSSProperties } from 'react';
 import { Check, Square } from 'lucide-react';
@@ -12,6 +13,74 @@ import {
 } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { Separator } from '../ui/separator';
+
+const callerStyles = stylex.create({
+  menu: {
+    minWidth: 'calc(var(--spacing) * 56)',
+    borderRadius: 0,
+    borderWidth: 4,
+    padding: 'calc(var(--spacing) * 3)',
+    color: 'hsl(var(--status-info))',
+  },
+  label: {
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+    fontSize: 14,
+    textTransform: 'none',
+    color: 'hsl(var(--status-info))',
+  },
+  item: {
+    gap: 'calc(var(--spacing) * 4)',
+    borderRadius: 0,
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+    fontSize: 15,
+    color: 'hsl(var(--status-info))',
+  },
+  separator: {
+    marginInline: 'calc(var(--spacing) * 2)',
+    marginBlock: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * .5)',
+    backgroundColor: 'hsl(var(--status-info))',
+  },
+  tooltip: {
+    width: 'calc(var(--spacing) * 72)',
+    maxWidth: '18rem',
+    borderRadius: 0,
+    borderWidth: 4,
+    padding: 0,
+    color: 'hsl(var(--status-info))',
+  },
+  hint: { paddingInline: 'calc(var(--spacing) * 3)', paddingBlock: 'calc(var(--spacing) * 2)' },
+  slotContent: { zIndex: 10, minWidth: 'calc(var(--spacing) * 24)', borderRadius: 0, padding: 0 },
+  slotLabel: { paddingInline: 0, paddingBlock: 0 },
+  slotItem: {
+    display: 'block',
+    gap: 'calc(var(--spacing) * 1)',
+    paddingInline: 0,
+    paddingBlock: 0,
+  },
+  slotSeparator: { marginBlock: 0, height: 'calc(var(--spacing) * 2)' },
+  slotTooltip: { zIndex: 10, borderRadius: 0, borderWidth: 0 },
+  separatorCaller: {
+    height: 'calc(var(--spacing) * 2)',
+    width: '50%',
+    flexShrink: 1,
+    backgroundColor: 'hsl(var(--sidebar-border))',
+  },
+  horizontal: {
+    height: 'calc(var(--spacing) * 4)',
+    width: '50%',
+    flexShrink: 1,
+    backgroundColor: 'hsl(var(--status-info))',
+  },
+  vertical: {
+    height: '50%',
+    width: 'calc(var(--spacing) * 4)',
+    flexShrink: 1,
+    backgroundColor: 'hsl(var(--status-info))',
+  },
+});
 
 const meta = {
   title: 'Code Review Helper/ControlsMigration',
@@ -51,17 +120,14 @@ function Menu({ caller = false }: { caller?: boolean }) {
           data-owned-menu
           align="start"
           style={caller ? scoped : undefined}
-          className={caller ? 'min-w-56 rounded-none border-4 p-3 text-info' : undefined}
+          xstyle={caller ? callerStyles.menu : undefined}
         >
-          <DropdownMenuLabel
-            data-owned-label
-            className={caller ? 'px-4 py-3 text-[14px] normal-case text-info' : undefined}
-          >
+          <DropdownMenuLabel data-owned-label xstyle={caller ? callerStyles.label : undefined}>
             This group
           </DropdownMenuLabel>
           <DropdownMenuItem
             data-owned-item="first"
-            className={caller ? 'gap-4 rounded-none px-4 py-3 text-[15px] text-info' : undefined}
+            xstyle={caller ? callerStyles.item : undefined}
             onSelect={() => setSelection('Viewed')}
           >
             <Check />
@@ -73,7 +139,7 @@ function Menu({ caller = false }: { caller?: boolean }) {
           </DropdownMenuItem>
           <DropdownMenuSeparator
             data-owned-separator
-            className={caller ? 'mx-2 my-3 h-0.5 bg-info' : undefined}
+            xstyle={caller ? callerStyles.separator : undefined}
           />
           <DropdownMenuItem data-owned-item="last" onSelect={() => setSelection('Expanded')}>
             Expand all files
@@ -114,9 +180,7 @@ function Hint({
             side={side}
             align="center"
             style={caller ? scoped : undefined}
-            className={
-              caller ? 'w-72 max-w-[18rem] rounded-none border-4 p-0 text-info' : 'px-3 py-2'
-            }
+            xstyle={caller ? callerStyles.tooltip : callerStyles.hint}
           >
             Synthetic local line note.
           </TooltipContent>
@@ -150,21 +214,24 @@ export const MenuSlot: Story = {
         <DropdownMenuTrigger data-menu-trigger style={triggerStyle}>
           Slot actions
         </DropdownMenuTrigger>
-        <DropdownMenuContent asChild data-owned-menu align="start">
-          <article className="z-10 min-w-24 rounded-none p-0" data-slot-child="content">
-            <DropdownMenuLabel asChild data-owned-label>
-              <span className="px-0 py-0" data-slot-child="label">
-                This group
-              </span>
+        <DropdownMenuContent
+          asChild
+          data-owned-menu
+          align="start"
+          xstyle={callerStyles.slotContent}
+        >
+          <article data-slot-child="content">
+            <DropdownMenuLabel asChild data-owned-label xstyle={callerStyles.slotLabel}>
+              <span data-slot-child="label">This group</span>
             </DropdownMenuLabel>
-            <DropdownMenuItem asChild data-owned-item="first">
-              <a className="block gap-1 px-0 py-0" href="#slot-first" data-slot-child="item">
+            <DropdownMenuItem asChild data-owned-item="first" xstyle={callerStyles.slotItem}>
+              <a href="#slot-first" data-slot-child="item">
                 <Check />
                 First action
               </a>
             </DropdownMenuItem>
-            <DropdownMenuSeparator asChild data-owned-separator>
-              <hr className="my-0 h-2" data-slot-child="separator" />
+            <DropdownMenuSeparator asChild data-owned-separator xstyle={callerStyles.slotSeparator}>
+              <hr data-slot-child="separator" />
             </DropdownMenuSeparator>
             <DropdownMenuItem data-owned-item="last">Last action</DropdownMenuItem>
           </article>
@@ -192,10 +259,8 @@ export const TooltipSlot: Story = {
           <TooltipTrigger data-tooltip-trigger style={triggerStyle}>
             Slot note
           </TooltipTrigger>
-          <TooltipContent asChild data-owned-tooltip side="top">
-            <article className="z-10 rounded-none border-0" data-slot-child="tooltip">
-              Synthetic slot note.
-            </article>
+          <TooltipContent asChild data-owned-tooltip side="top" xstyle={callerStyles.slotTooltip}>
+            <article data-slot-child="tooltip">Synthetic slot note.</article>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -249,18 +314,23 @@ function SeparatorCases({ local = false }: { local?: boolean }) {
         />
         <span>After</span>
       </div>
-      <div>Caller utility overrides and Sidebar border color</div>
+      <div>Caller StyleX overrides and Sidebar border color</div>
       <div style={row}>
         <Separator
           data-owned-separator="caller"
-          className="h-2 w-1/2 shrink bg-sidebar-border"
+          xstyle={callerStyles.separatorCaller}
           ref={separatorRef}
         />
       </div>
-      <div>Horizontal Slot with conflicting child classes and preserved content</div>
+      <div>Horizontal Slot with caller styles and preserved content</div>
       <div style={row}>
-        <Separator data-owned-separator="slot-horizontal" asChild ref={separatorRef}>
-          <span className="h-4 w-1/2 shrink bg-info" data-slot-child="horizontal">
+        <Separator
+          data-owned-separator="slot-horizontal"
+          xstyle={callerStyles.horizontal}
+          asChild
+          ref={separatorRef}
+        >
+          <span data-slot-child="horizontal">
             <i
               data-preserved-child
               style={{ display: 'block', width: 3, height: 3, backgroundColor: 'currentColor' }}
@@ -268,16 +338,17 @@ function SeparatorCases({ local = false }: { local?: boolean }) {
           </span>
         </Separator>
       </div>
-      <div>Vertical Slot with conflicting child classes</div>
+      <div>Vertical Slot with caller styles</div>
       <div style={row}>
         <Separator
           data-owned-separator="slot-vertical"
+          xstyle={callerStyles.vertical}
           orientation="vertical"
           decorative={false}
           asChild
           ref={separatorRef}
         >
-          <span className="h-1/2 w-4 shrink bg-info" data-slot-child="vertical" />
+          <span data-slot-child="vertical" />
         </Separator>
       </div>
       <div>Raw attributes and inline dimensions keep their original precedence</div>

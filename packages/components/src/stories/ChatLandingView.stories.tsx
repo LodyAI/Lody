@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useRef, useState } from 'react';
 import { Bot, Github, Monitor } from 'lucide-react';
@@ -12,7 +14,6 @@ import { HomeDashboard } from '@/components/chat/home/home-dashboard';
 import { useChatLandingKeyboardNav } from '@/hooks/use-chat-landing-keyboard-nav';
 import { ContextSwitch } from '@/components/chat/context-switch';
 import type { SessionContextType } from '@/components/chat/context-switch';
-import { getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
 import { AcpBottomBarModeSelector, AcpFooterSelectorGroup } from '@/components/shared';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
@@ -74,6 +75,48 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+const selectorStyles = stylex.create({
+  tag: {
+    width: 'auto',
+    height: 'calc(var(--spacing) * 6)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 4,
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': { default: null, ':hover': 'hsl(var(--foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: colors.wellBackground,
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
+      },
+    },
+  },
+  tagText: { fontSize: '0.9em', lineHeight: 1.25 },
+  machineValue: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  machineGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    opacity: 0.7,
+  },
+  machineLabel: {
+    fontSize: '0.9em',
+    lineHeight: 1.25,
+    fontWeight: 500,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+});
 
 const machineOptions: OptionSelectorOption<string>[] = [
   { value: 'machine-1', label: 'Mac Studio' },
@@ -306,8 +349,6 @@ function DemoLandingContent({
     verbosity: 'balanced',
   });
 
-  const selectorTagClassName = getSelectorTagClassName(tone);
-
   // Top selector: repo (shown above textarea)
   const topSelectorNode = (
     <div className="flex items-center gap-1">
@@ -350,12 +391,16 @@ function DemoLandingContent({
           placeholder="Machine"
           placeholderIcon={Monitor}
           tone={tone}
-          className={selectorTagClassName}
+          xstyle={selectorStyles.tag}
+          valueXstyle={selectorStyles.tagText}
+          labelXstyle={selectorStyles.tagText}
           contentClassName="w-56"
           renderTriggerValue={(option) => (
-            <div className="flex min-w-0 items-center gap-1.5">
-              <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
-              <span className="truncate text-sm font-medium">{option?.label ?? 'Machine'}</span>
+            <div {...stylex.props(selectorStyles.machineValue)}>
+              <Monitor {...stylex.props(selectorStyles.machineGlyph)} />
+              <span {...stylex.props(selectorStyles.machineLabel)}>
+                {option?.label ?? 'Machine'}
+              </span>
             </div>
           )}
           renderOption={(option) => (
@@ -372,7 +417,9 @@ function DemoLandingContent({
           placeholder="Select agent"
           placeholderIcon={Bot}
           tone={tone}
-          className={selectorTagClassName}
+          xstyle={selectorStyles.tag}
+          valueXstyle={selectorStyles.tagText}
+          labelXstyle={selectorStyles.tagText}
           contentClassName="w-64"
         />
       </div>

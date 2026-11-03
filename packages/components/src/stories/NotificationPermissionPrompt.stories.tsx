@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { TestCloudPlatformProvider } from '../../tests/test-platform';
 import { Provider, createStore } from 'jotai';
@@ -5,6 +6,14 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { currentWorkspaceSlugAtom, notificationPromptDismissedAtom, userAtom } from '@/atoms';
 import { NotificationPermissionPrompt } from '@/components/sessions/notification-permission-prompt';
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': 'calc(var(--spacing) * 40)',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+  },
+});
 
 const storyStore = createStore();
 storyStore.set(currentWorkspaceSlugAtom, 'storybook');
@@ -55,7 +64,7 @@ const meta = {
       <TestCloudPlatformProvider>
         <Provider store={storyStore}>
           <DefaultNotificationPermission>
-            <div className="min-h-40 w-full bg-background py-6">
+            <div {...stylex.props(storyLayout.frame)}>
               <Story />
             </div>
           </DefaultNotificationPermission>

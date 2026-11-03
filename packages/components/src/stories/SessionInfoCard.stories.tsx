@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import type { LocalProjectId, MachineId } from '@lody/shared';
@@ -8,6 +9,22 @@ import {
   type SessionInfoCardProps,
 } from '@/components/session-info-hover-card';
 import type { PrCiRun } from '@/components/sessions/session-info-chips';
+const storyLayout = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 2)',
+    width: 'calc(var(--spacing) * 2)',
+    'flex-shrink': '0',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'hsl(var(--primary))',
+  },
+  label: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+});
 
 const now = new Date('2026-07-13T21:00:00Z');
 const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000);
@@ -212,8 +229,8 @@ export const HoverInteraction: Story = {
           tabIndex={0}
           className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-hover"
         >
-          <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />
-          <span className="min-w-0 flex-1 truncate">{args.title}</span>
+          <span {...stylex.props(storyLayout.frame)} />
+          <span {...stylex.props(storyLayout.label)}>{args.title}</span>
           <span className="shrink-0 text-[11px] tabular-nums text-code-added">+312</span>
         </div>
       </SessionInfoHoverCard>
@@ -268,7 +285,7 @@ export const HoverAcrossRows: Story = {
             data-row={row.title}
             className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-hover"
           >
-            <span className="min-w-0 flex-1 truncate">{row.title}</span>
+            <span {...stylex.props(storyLayout.label)}>{row.title}</span>
           </div>
         </SessionInfoHoverCard>
       ))}

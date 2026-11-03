@@ -1,7 +1,7 @@
+import { clsx } from 'clsx';
 import { useCallbackRef, useComposedRefs } from '@diceui/shared';
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { cn } from '@/lib/utils';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { type Mention, type MentionChip, useMentionContext } from './mention-root';
 
@@ -9,8 +9,17 @@ const HIGHLIGHTER_NAME = 'MentionHighlighter';
 
 const styles = stylex.create({
   hidden: { visibility: 'hidden' },
+  chip: {
+    boxDecorationBreak: 'clone',
+    backgroundColor: 'var(--mention-chip-surface,hsl(var(--input)))',
+  },
+  selectedChip: {
+    backgroundImage: 'linear-gradient(Highlight,Highlight)',
+    color: 'HighlightText !important',
+  },
   iconSlot: { position: 'relative' },
   icon: {
+    ':is(*) > *': { maxWidth: '100%' },
     visibility: 'visible',
     position: 'absolute',
     insetBlock: 'calc(var(--spacing) * 0)',
@@ -154,7 +163,7 @@ export function getMentionHighlightSegments(
  * defaults to the input colour; a composer on a different surface must say so,
  * or its mentions will show as faint rectangles.
  */
-const CHIP_CLASS_NAME = 'box-decoration-clone bg-[var(--mention-chip-surface,hsl(var(--input)))]';
+const CHIP_CLASS_NAME = stylex.props(styles.chip).className;
 
 /**
  * Selection is the one case that still needs a fill: the surface cover also
@@ -163,8 +172,7 @@ const CHIP_CLASS_NAME = 'box-decoration-clone bg-[var(--mention-chip-surface,hsl
  * *colour*, because `Highlight` is `rgba(0, 65, 198, 0.8)` in Chrome — used
  * alone it would be translucent enough to let the covered glyphs back through.
  */
-const CHIP_SELECTED_CLASS_NAME =
-  'bg-[image:linear-gradient(Highlight,Highlight)] !text-[HighlightText]';
+const CHIP_SELECTED_CLASS_NAME = stylex.props(styles.selectedChip).className;
 
 /**
  * The textarea's selection range, tracked only while chips are painted.
@@ -241,7 +249,7 @@ function MentionChipContent({ chip, text }: { chip: MentionChip; text: string })
               // mention can wrap to the start of a line, where the space that
               // was supposed to absorb the overflow has been eaten by the break.
               // Neither is visible to CSS, so the icon simply stays inside.
-              className={cn(stylex.props(styles.icon).className, '[&>*]:max-w-full')}
+              {...stylex.props(styles.icon)}
             >
               {chip.icon}
             </span>
@@ -398,7 +406,7 @@ const MentionHighlighter = React.memo(
                 key={segment.key}
                 {...rangeProps}
                 data-selected={selected ? '' : undefined}
-                className={cn(
+                className={clsx(
                   CHIP_CLASS_NAME,
                   chip.className,
                   selected && CHIP_SELECTED_CLASS_NAME

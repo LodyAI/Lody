@@ -16,6 +16,7 @@ import {
 } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  progress: { height: 'calc(var(--spacing) * 1)', flex: '1 1 0%' },
   actionSpacing: {
     [button.paddingXSmall]: 'calc(var(--spacing) * 2.5)',
   },
@@ -118,7 +119,7 @@ export function SidebarUpdateBanner({
       </div>
       {isDownloading && percent != null ? (
         <div {...stylex.props(styles.progressRow)}>
-          <Progress value={percent} className="h-1 flex-1" />
+          <Progress value={percent} xstyle={styles.progress} />
           <span {...stylex.props(styles.percent)}>
             {t('sidebar.updateDownloading.percent', '{{percent}}%', { percent })}
           </span>
@@ -133,7 +134,7 @@ export function SidebarUpdateBanner({
           variant="ghost"
           size="small"
           height="calc(var(--spacing) * 7)"
-          className={stylex.props(styles.actionSpacing).className}
+          xstyle={styles.actionSpacing}
           onClick={onLater}
         >
           {t('sidebar.updateReady.later', 'Later')}
@@ -143,7 +144,7 @@ export function SidebarUpdateBanner({
             type="button"
             size="small"
             height="calc(var(--spacing) * 7)"
-            className={stylex.props(styles.actionSpacing).className}
+            xstyle={styles.actionSpacing}
             onClick={onRestart}
           >
             {isRestarting ? (

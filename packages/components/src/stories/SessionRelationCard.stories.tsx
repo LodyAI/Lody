@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
@@ -7,6 +8,29 @@ import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
+const storyLayout = stylex.create({
+  frame: {
+    width: '720px',
+    'max-width': 'calc(100vw - 2rem)',
+  },
+  frame2: {
+    height: '520px',
+    width: '720px',
+    'max-width': '100vw',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame3: {
+    width: '720px',
+    'max-width': 'calc(100vw - 2rem)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 5)',
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const meta = {
   title: 'Sessions/SessionRelationCard',
@@ -101,7 +125,7 @@ export const InCreateOperation: Story = {
     onAction: () => {},
   },
   render: () => (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyLayout.frame)}>
       <MessageRowView
         message={operationCompletion}
         sessionId={'storybook-opener' as SessionId}
@@ -120,7 +144,7 @@ const operationStoryArgs = {
 } as const;
 
 const renderOperation = (message: SessionHistoryParsed) => (
-  <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+  <div {...stylex.props(storyLayout.frame)}>
     <MessageRowView
       message={message}
       sessionId={'storybook-opener' as SessionId}
@@ -232,7 +256,7 @@ export const AtConversationStart: Story = {
     onAction: () => {},
   },
   render: () => (
-    <div className="h-[520px] w-[720px] max-w-[100vw] bg-background">
+    <div {...stylex.props(storyLayout.frame2)}>
       <SessionChatStreamView
         sessionId={openedSessionId}
         items={openedConversationItems}
@@ -283,7 +307,7 @@ function ProgressPreview({
   status: 'created' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 }) {
   return (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)] bg-background p-5">
+    <div {...stylex.props(storyLayout.frame3)}>
       <MessageRowView
         message={progressMessage(status)}
         sessionId={'storybook-opener' as SessionId}
@@ -316,7 +340,7 @@ export const Cancelled: Story = {
 export const AllCreationStates: Story = {
   args: CreatedConversation.args,
   render: () => (
-    <div className="flex flex-col bg-background">
+    <div {...stylex.props(storyLayout.stack)}>
       {(['created', 'running', 'succeeded', 'failed', 'cancelled'] as const).map((status) => (
         <ProgressPreview key={status} status={status} />
       ))}
@@ -376,7 +400,7 @@ export const ManyCreatedSessions: Story = {
 export const CompletedWorkBatch: Story = {
   args: operationStoryArgs,
   render: () => (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyLayout.frame)}>
       <MessageRowView
         sessionId={'storybook-opener' as SessionId}
         message={{

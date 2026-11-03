@@ -4,7 +4,6 @@ import { ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -19,18 +18,10 @@ import {
 // Indent per level: 8px (configurable in VSCode via workbench.tree.indent)
 const TREE_INDENT_PX = 8;
 
-/**
- * A tree row's look. The `group` marker and the `group-hover:` reveal of the
- * trailing actions stay Tailwind: StyleX cannot select an ancestor, so the
- * hover that reveals the actions is the one rule a row keeps in the old
- * vocabulary.
- */
 const GROUP_CLASS = 'group';
-const GROUP_HOVER_REVEAL_CLASS = 'group-hover:block';
-/** The twisty follows the group's open state; StyleX cannot select a child. */
-const OPEN_CHEVRON_CLASS = '[&[data-state=open]>svg:first-child]:rotate-90';
 
 const styles = stylex.create({
+  labelGrow: { flexGrow: 1 },
   root: {
     position: 'relative',
     padding: themeSpace[2],
@@ -96,6 +87,7 @@ const styles = stylex.create({
     lineHeight: themeLineHeight.sm,
   },
   chevron: {
+    rotate: { default: null, ':is([data-state="open"] > svg:first-child)': '90deg' },
     width: themeSpace[4],
     height: themeSpace[4],
     flexShrink: 0,
@@ -124,7 +116,12 @@ const styles = stylex.create({
     right: themeSpace[3],
   },
   actionsVisible: { display: 'block' },
-  actionsHidden: { display: 'none' },
+  actionsHidden: {
+    display: {
+      default: 'none',
+      ':is(:where(.group):hover *)': { '@media (hover: hover)': 'block' },
+    },
+  },
 });
 
 interface TreeDataItem {
@@ -153,6 +150,7 @@ type TreeRenderItemParams = {
 };
 
 type TreeProps = React.HTMLAttributes<HTMLDivElement> & {
+  xstyle?: stylex.StyleXStyles;
   data: TreeDataItem[] | TreeDataItem;
   initialSelectedItemId?: string;
   onSelectChange?: (item: TreeDataItem | undefined) => void;
@@ -173,6 +171,7 @@ const TreeView = React.forwardRef<HTMLDivElement, TreeProps>(
       defaultLeafIcon,
       defaultNodeIcon,
       className,
+      xstyle,
       onDocumentDrag,
       renderItem,
       ...props
@@ -256,7 +255,7 @@ const TreeView = React.forwardRef<HTMLDivElement, TreeProps>(
       return ids;
     }, [data, expandAll, initialSelectedItemId]);
 
-    const rootProps = stylex.props(styles.root);
+    const rootProps = stylex.props(styles.root, xstyle);
     return (
       <Tooltip.Provider delay={500}>
         <div {...rootProps} className={clsx(rootProps.className, className)}>
@@ -588,7 +587,7 @@ const TreeLeaf = React.forwardRef<
           leafProps.className,
           rowProps.className,
           GROUP_CLASS,
-          cn(className, item.className)
+          clsx(className, item.className)
         )}
         style={{ paddingLeft: leafPaddingLeft }}
         onClick={activate}
@@ -616,7 +615,7 @@ const TreeLeaf = React.forwardRef<
         ) : (
           <>
             <TreeIcon item={item} isSelected={isSelected} default={defaultLeafIcon} />
-            <TreeItemLabel name={item.name} className="grow" />
+            <TreeItemLabel name={item.name} className={stylex.props(styles.labelGrow).className} />
             <TreeActions isSelected={isSelected && !item.disabled}>{item.actions}</TreeActions>
           </>
         )}
@@ -635,7 +634,7 @@ const AccordionTrigger = React.forwardRef<
     <AccordionPrimitive.Header>
       <AccordionPrimitive.Trigger
         ref={ref}
-        className={clsx(triggerProps.className, className, OPEN_CHEVRON_CLASS)}
+        className={clsx(triggerProps.className, className)}
         style={{ paddingLeft: level * TREE_INDENT_PX + 8 }}
         {...props}
       >
@@ -730,7 +729,7 @@ const TreeActions = ({
     styles.actions,
     isSelected ? styles.actionsVisible : styles.actionsHidden
   );
-  return <div className={clsx(actionsProps.className, GROUP_HOVER_REVEAL_CLASS)}>{children}</div>;
+  return <div {...actionsProps}>{children}</div>;
 };
 
 export {

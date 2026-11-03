@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { canUseWASM } from '@pierre/diffs';
 import type { Meta, StoryObj } from '@storybook/react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
@@ -13,6 +14,62 @@ import {
   useResolvedTheme,
   useTheme,
 } from '@/theme-provider';
+
+const storyOverrides = stylex.create({ select: { width: '150px' } });
+
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  row: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    'max-width': '72rem',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  canvas: {
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  canvas2: {
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    color: 'hsl(var(--primary))',
+  },
+  row2: {
+    display: 'flex',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  canvas3: {
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--code-added) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  canvas4: {
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--code-removed) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  canvas5: {
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--muted) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 const meta = {
   title: 'Theme/VSCodeThemeProbe',
@@ -86,9 +143,9 @@ function VSCodeThemeProbe() {
   const activeVSCodeThemeId = useActiveVSCodeThemeId();
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div {...stylex.props(storyLayout.frame)}>
       <header className="border-b border-border bg-card px-6 py-4">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+        <div {...stylex.props(storyLayout.row)}>
           <div>
             <h1 className="text-base font-semibold">VSCode theme probe</h1>
             <p className="text-xs text-muted-foreground">
@@ -101,7 +158,7 @@ function VSCodeThemeProbe() {
               value={theme}
               onValueChange={(value) => setTheme(value as typeof theme)}
             >
-              <Select.Trigger className="w-[150px]">
+              <Select.Trigger xstyle={storyOverrides.select}>
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
@@ -119,23 +176,23 @@ function VSCodeThemeProbe() {
       <main className="mx-auto grid max-w-6xl gap-4 p-6 lg:grid-cols-[240px_minmax(0,1fr)]">
         <aside className="space-y-3 border border-border bg-card p-3 text-sm">
           <div className="rounded-md bg-muted px-3 py-2 font-medium">Sidebar surface</div>
-          <div className="px-3 py-2 text-muted-foreground">Explorer</div>
-          <div className="px-3 py-2 text-muted-foreground">Source Control</div>
-          <div className="px-3 py-2 text-primary">Theme workstream</div>
+          <div {...stylex.props(storyLayout.canvas)}>Explorer</div>
+          <div {...stylex.props(storyLayout.canvas)}>Source Control</div>
+          <div {...stylex.props(storyLayout.canvas2)}>Theme workstream</div>
         </aside>
 
         <div className="space-y-4">
           <section className="space-y-3 border border-border bg-background p-4">
-            <div className="flex flex-wrap items-center gap-2">
+            <div {...stylex.props(storyLayout.row2)}>
               <Button>Primary action</Button>
               <Button variant="secondary">Outline action</Button>
               <Button variant="secondary">Secondary action</Button>
             </div>
             <Input placeholder="Focus border / input background" />
             <div className="flex flex-wrap gap-2 text-xs">
-              <span className="rounded-md bg-code-added px-2 py-1 text-foreground">added</span>
-              <span className="rounded-md bg-code-removed px-2 py-1 text-foreground">removed</span>
-              <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">muted</span>
+              <span {...stylex.props(storyLayout.canvas3)}>added</span>
+              <span {...stylex.props(storyLayout.canvas4)}>removed</span>
+              <span {...stylex.props(storyLayout.canvas5)}>muted</span>
             </div>
           </section>
 
@@ -156,8 +213,11 @@ function VSCodeThemeProbe() {
             </div>
             <FileViewer
               file={fileViewerFile}
-              options={{ disableFileHeader: true, preferredHighlighter: canUseWASM() ? 'highlights' : 'shiki-js',
-                theme: activeDiffThemeName }}
+              options={{
+                disableFileHeader: true,
+                preferredHighlighter: canUseWASM() ? 'highlights' : 'shiki-js',
+                theme: activeDiffThemeName,
+              }}
             />
           </section>
 

@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
@@ -29,7 +30,6 @@ import {
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
-import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
@@ -552,7 +552,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
         <SidebarListSkeleton
           className={className}
           showHeaderIcon={false}
-          sectionClassName="mb-4 last:mb-0"
+          sectionClassName={stylex.props(updatedStyles.skeletonSpacing).className}
         />
       </div>
     );
@@ -562,7 +562,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
     return (
       <div {...stylex.props(updatedStyles.listStack)}>
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
-        <div className={cn(stylex.props(updatedStyles.emptyCard).className, className)}>
+        <div className={clsx(stylex.props(updatedStyles.emptyCard).className, className)}>
           <div {...stylex.props(updatedStyles.emptyTitle)}>{merged.emptyTitle}</div>
           <div {...stylex.props(updatedStyles.emptyDescription)}>{merged.emptyDescription}</div>
         </div>
@@ -572,7 +572,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
 
   return (
     <Tooltip.Provider>
-      <div className={cn(stylex.props(updatedStyles.listStack).className, className)}>
+      <div className={clsx(stylex.props(updatedStyles.listStack).className, className)}>
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
           const collapsed = Boolean(collapsedBuckets?.[bucket.key]);
@@ -600,7 +600,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           return (
             <div
               key={bucket.key}
-              className={cn(
+              className={clsx(
                 'group',
                 stylex.props(updatedStyles.bucket, collapsed && updatedStyles.collapsedBucket)
                   .className
@@ -719,13 +719,13 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   return (
     <div
       data-sidebar-updated-project={item.kind}
-      className={cn(
+      className={clsx(
         stylex.props(updatedStyles.projectLine, sidebarSurface.meta).className,
         SIDEBAR_CAPTION_TEXT_CLASS
       )}
     >
       <span
-        className={cn(
+        className={clsx(
           stylex.props(
             updatedStyles.projectMark,
             isGithub ? updatedStyles.githubMark : updatedStyles.smallMark
@@ -935,7 +935,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       onDragStart={(event) =>
         startSessionMentionDrag(event, { sessionId: item.id, title: item.title })
       }
-      className={cn(
+      className={clsx(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's
@@ -957,8 +957,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         // Keyboard-only focus ring — see SessionList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.
-        useAnchor &&
-          'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40'
+        useAnchor && stylex.props(updatedStyles.anchorFocus).className
       )}
       onClick={
         useAnchor
@@ -993,12 +992,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       ) : null}
 
       <div
-        className={cn(
+        className={clsx(
           stylex.props(updatedStyles.rowBody, isMobile && updatedStyles.mobileRowBody).className,
           SIDEBAR_ROW_TEXT_CLASS
         )}
       >
-        <div className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}>
+        <div
+          className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
+        >
           <SessionRowLeadingSlot
             showMenuButton={hasMenuActions}
             menuLabel={contextMenuLabels.moreActions}
@@ -1010,14 +1011,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         </div>
         {item.owner ? (
           <span
-            className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
+            className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
           >
             <SessionRowAuthorAvatar author={item.owner} />
           </span>
         ) : null}
         {showPinnedIcon && item.isPinned ? (
           <span
-            className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
+            className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
           >
             <Pin aria-hidden="true" {...stylex.props(updatedStyles.pin)} />
           </span>
@@ -1029,7 +1030,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           }
         >
           <div
-            className={cn(
+            className={clsx(
               stylex.props(updatedStyles.titleLine).className,
               SIDEBAR_ROW_LINE_CLASS,
               SIDEBAR_ROW_TEXT_CLASS
@@ -1054,7 +1055,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           ) : null}
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
-        <div className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}>
+        <div
+          className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
+        >
           <SidebarRowEndSlot
             sessionId={item.id}
             isWaitingPermission={item.isWaitingPermission}
@@ -1067,7 +1070,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
               isMobile ||
               (item.kind === 'local' && item.isWorktree) ? (
                 <span
-                  className={cn(
+                  className={clsx(
                     stylex.props(
                       updatedStyles.restMetrics,
                       sidebarSurface.faint,
@@ -1112,8 +1115,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     return (
       <SwipeActionRow
         enabled={isMobile}
-        className="rounded-md"
-        contentClassName="bg-sidebar"
+        rootXstyle={updatedStyles.swipeRoot}
+        contentXstyle={updatedStyles.swipeContent}
         actions={[
           {
             key: 'archive',
@@ -1121,7 +1124,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             ariaLabel: archiveTooltipLabel,
             icon: <Archive {...stylex.props(updatedStyles.glyph16)} />,
             hideLabel: item.kind === 'chat',
-            className: stylex.props(updatedStyles.archiveAction).className,
+            xstyle: updatedStyles.archiveAction,
             onClick: () => onArchive?.(item.id),
           },
         ]}
@@ -1309,6 +1312,16 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 UpdatedItemRow.displayName = 'UpdatedItemRow';
 
 const updatedStyles = stylex.create({
+  swipeRoot: { borderRadius: 'var(--radius-md)' },
+  swipeContent: { backgroundColor: 'hsl(var(--sidebar) / 1)' },
+  skeletonSpacing: { marginBottom: { default: themeSpace[4], ':last-child': 0 } },
+  anchorFocus: {
+    boxShadow: {
+      default: null,
+      ':has(a:focus-visible)':
+        'inset 0 0 0 1px color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 40%, transparent)',
+    },
+  },
   listStack: { display: 'flex', flexDirection: 'column' },
   headerAction: {
     display: 'flex',
@@ -1368,7 +1381,7 @@ const updatedStyles = stylex.create({
       '@media (hover: hover)': { ':hover': themeColors.sidebarHover },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     boxShadow: { default: null, ':focus-visible': 'none' },

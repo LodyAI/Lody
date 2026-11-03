@@ -11,18 +11,15 @@ import { themeSpace } from '../../style/theme-scale.stylex';
 
 /**
  * Conversation-column width at which the IDE launcher and share pills appear.
- * Keep the pixel token in `SESSION_PAGE_HEADER_PILLS_CLASS` in lockstep —
- * Tailwind cannot interpolate this constant.
+ * The named container query below uses the same pixel threshold.
  */
 export const SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX = 800;
 
-/** Named container so nested `@container`s cannot steal the page-width query. */
-export const SESSION_PAGE_CONTAINER_CLASS = '@container/session-page';
-
-/** `display: none` below the breakpoint; flex above. */
-export const SESSION_PAGE_HEADER_PILLS_CLASS = 'hidden @[800px]/session-page:flex';
-
 const styles = stylex.create({
+  container: { containerType: 'inline-size', containerName: 'session-page' },
+  headerPills: {
+    display: { default: 'none', '@container session-page (min-width: 800px)': 'flex' },
+  },
   header: {
     display: 'flex',
     flexDirection: 'column',
@@ -82,6 +79,11 @@ const styles = stylex.create({
   },
   pageFullHeight: { height: '100%' },
 });
+
+/** Named container so nested containers cannot steal the page-width query. */
+export const SESSION_PAGE_CONTAINER_CLASS = stylex.props(styles.container).className;
+/** `display: none` below the breakpoint; flex above. */
+export const SESSION_PAGE_HEADER_PILLS_CLASS = stylex.props(styles.headerPills).className;
 
 export interface SessionConversationPageHeaderProps {
   titleSlot: ReactNode;

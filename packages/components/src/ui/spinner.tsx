@@ -1,12 +1,23 @@
 import { Loader2, type LucideIcon } from 'lucide-react';
 import type { ComponentPropsWithoutRef } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
+
+const spin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
 
 const styles = stylex.create({
   root: { display: 'inline-flex', flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
-  spinning: { willChange: 'transform' },
+  spinning: {
+    willChange: 'transform',
+    transformBox: 'border-box',
+    transformOrigin: '50% 50%',
+    animationName: spin,
+    animationDuration: '1s',
+    animationTimingFunction: 'linear',
+    animationIterationCount: 'infinite',
+  },
+  glyph: { width: '100%', height: '100%' },
 });
 
 export type SpinnerProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'> & {
@@ -26,44 +37,31 @@ export type SpinnerProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'> & 
    */
   spinning?: boolean;
   strokeWidth?: number | string;
+  xstyle?: stylex.StyleXStyles;
 };
 
-/**
- * The only way to put `animate-spin` on an icon.
- *
- * The rotation runs on an HTML wrapper, never on the `<svg>` itself. Chromium
- * refuses to run a transform animation on the compositor when its target is an
- * SVG element whose effective zoom is not 1 (crbug.com/1186312), and Blink folds
- * the device scale factor into that zoom, so on every Retina / DPR≠1 display an
- * `<svg class="animate-spin">` falls back to the main thread: a style recalc,
- * pre-paint and layerize per vsync for as long as the spinner is mounted. Two
- * such sidebar spinners measured 40–50% renderer CPU at 120 Hz with the app
- * idle. The same animation on a block-level HTML element composites, so the
- * wrapper carries it.
- *
- * Sizing, spacing and colour classes go on the wrapper, and the glyph fills it,
- * so the wrapper's box is the glyph's box and the rotation stays centred on the
- * glyph. Putting a margin on the glyph instead would grow the wrapper
- * asymmetrically and turn the spin into an orbit; see the `span.animate-spin`
- * rule in `tailwind/index.css`.
+/** Rotates the HTML wrapper so glyphs remain composited on Retina displays.
+ * Caller sizing and spacing belong to that wrapper; the glyph fills its box.
  */
 export function Spinner({
   icon: Icon = Loader2,
   spinning = true,
   strokeWidth,
   className,
+  xstyle,
+  style,
   ...props
 }: SpinnerProps) {
+  const sx = stylex.props(styles.root, spinning && styles.spinning, xstyle);
   return (
     <span
-      className={cn(
-        stylex.props(styles.root, spinning && styles.spinning).className,
-        spinning && 'animate-spin',
-        className
-      )}
+      data-slot="icon-spinner"
+      data-spinning={spinning}
+      className={clsx(sx.className, className)}
       {...props}
+      style={sx.style ? { ...sx.style, ...style } : style}
     >
-      <Icon className="size-full" strokeWidth={strokeWidth} aria-hidden="true" />
+      <Icon {...stylex.props(styles.glyph)} strokeWidth={strokeWidth} aria-hidden="true" />
     </span>
   );
 }

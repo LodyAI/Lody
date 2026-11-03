@@ -11,7 +11,7 @@ import {
 export const pageSurface = stylex.create({
   authTitle: {
     [card.titleSize]: 'var(--text-2xl)',
-    [card.titleLeading]: 'var(--tw-leading, var(--text-2xl--line-height))',
+    [card.titleLeading]: 'var(--text-2xl--line-height)',
   },
   page: {
     display: 'flex',

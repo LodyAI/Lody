@@ -90,13 +90,9 @@ Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   prop. `ui/spinner.tsx` is the icon ANIMATOR — `icon`/`spinning` for a refresh
   glyph that only turns while in flight. Use the mark for "work is under way";
   use the animator for an existing icon that must spin.
-- `animate-spin` goes on an HTML wrapper only, never on an `<svg>`. Chromium will
-  not composite a transform animation on an SVG target at DPR≠1 (crbug.com/1186312),
-  so an svg spinner re-runs style, pre-paint and layerize on the main thread every
-  vsync: two idle sidebar spinners measured 40–50% renderer CPU on a Retina Mac.
-  Both implementations obey this; any other infinite transform animation (the
-  readiness orbit) follows the same rule. Both land the caller's `className`
-  on that box; a margin spaces it, not the origin.
+- Infinite transform animations go on an HTML wrapper, never SVG: Chromium cannot
+  composite SVG transforms at DPR≠1 (crbug.com/1186312). Spinner and readiness
+  orbit follow this rule. `className` lands on the wrapper; margins space the box.
 - `Spinner`'s `spinning` defaults to TRUE: a component forwarding its own optional
   `spinning`/`loading`/`spin` prop must default it to `false` — `undefined` hits the
   primitive's default and spins at rest ("No machines available" shipped that way).
@@ -131,5 +127,7 @@ Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
 
 ## Legacy Sidebar
 
-- Preserve Slot, caller and ancestor utility precedence. An empty caller-class
-  guard does not isolate ancestors. See [migration](../style/MIGRATION.md).
+- Preserve Slot, refs, events and actual in-repository caller behavior. Compose
+  caller styles through typed `xstyle`; migrate callers with the owner. Do not
+  retain Tailwind for arbitrary hypothetical utility collisions. See
+  [migration](../style/MIGRATION.md).

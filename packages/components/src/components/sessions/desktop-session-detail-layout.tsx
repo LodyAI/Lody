@@ -107,8 +107,8 @@ const styles = stylex.create({
   },
   resizeHandle: {
     transitionProperty: 'opacity',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
   },
   resizeHandleVisible: { opacity: 1 },
   resizeHandleHidden: { opacity: 0, pointerEvents: 'none' },

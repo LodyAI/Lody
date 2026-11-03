@@ -1,10 +1,10 @@
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Slot } from '@radix-ui/react-slot';
-import { cva, type VariantProps } from 'class-variance-authority';
+import { clsx, type ClassValue } from 'clsx';
 
-import { cn } from '@/lib/utils';
-
+const FOCUS = '0 0 0 3px color-mix(in oklab, hsl(var(--ring)) 50%, transparent)';
+const SMALL_SHADOW = '0 1px 2px 0 rgb(0 0 0 / 0.05)';
 const styles = stylex.create({
   base: {
     display: 'inline-flex',
@@ -13,105 +13,155 @@ const styles = stylex.create({
     gap: 'calc(var(--spacing) * 2)',
     whiteSpace: 'nowrap',
     borderRadius: 'var(--radius)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    transitionProperty: 'color,box-shadow,background-color,border-color',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    borderColor: { default: null, ':focus-visible': 'hsl(var(--ring))' },
+    boxShadow: { default: null, ':focus-visible': FOCUS },
+    outline: {
+      default: null,
+      ':focus-visible': '2px solid transparent',
+      '@media (forced-colors: active)': { ':focus-visible': 'auto' },
+    },
+    outlineOffset: { default: null, ':focus-visible': 2 },
+    pointerEvents: { default: null, ':disabled': 'none' },
+    opacity: { default: null, ':disabled': 0.5 },
   },
-  default: { backgroundColor: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))' },
+  glyphs: {
+    ':is(*) svg': { pointerEvents: 'none', flexShrink: 0 },
+    ":is(*) svg:not([class*='size-'])": {
+      width: 'calc(var(--spacing) * 4)',
+      height: 'calc(var(--spacing) * 4)',
+    },
+  },
+  shadow: { boxShadow: { default: SMALL_SHADOW, ':focus-visible': `${FOCUS}, ${SMALL_SHADOW}` } },
+  default: {
+    backgroundColor: {
+      default: 'hsl(var(--primary))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--primary)) 90%, transparent)',
+      },
+    },
+    color: 'hsl(var(--primary-foreground))',
+  },
   destructive: {
-    backgroundColor: 'hsl(var(--destructive))',
+    backgroundColor: {
+      default: 'hsl(var(--destructive))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--destructive)) 90%, transparent)',
+      },
+    },
     color: 'hsl(var(--destructive-foreground))',
   },
   outline: {
-    borderStyle: 'var(--tw-border-style)',
+    borderStyle: 'solid',
     borderWidth: 1,
     borderColor: 'hsl(var(--input))',
-    backgroundColor: 'hsl(var(--background))',
+    backgroundColor: {
+      default: 'hsl(var(--background))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+      },
+    },
+    color: {
+      default: null,
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--foreground))' },
+    },
   },
   secondary: {
-    backgroundColor: 'hsl(var(--secondary))',
+    backgroundColor: {
+      default: 'hsl(var(--secondary))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--secondary)) 80%, transparent)',
+      },
+    },
     color: 'hsl(var(--secondary-foreground))',
   },
-  link: { color: 'hsl(var(--primary))', textUnderlineOffset: 4 },
+  ghost: {
+    backgroundColor: {
+      default: null,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+      },
+    },
+    color: {
+      default: null,
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--foreground))' },
+    },
+  },
+  link: {
+    color: 'hsl(var(--primary))',
+    textUnderlineOffset: 4,
+    textDecorationLine: {
+      default: null,
+      ':hover': { default: null, '@media (hover: hover)': 'underline' },
+    },
+  },
   defaultSize: {
     height: 'calc(var(--spacing) * 9)',
-    'padding-inline': 'calc(var(--spacing) * 4)',
-    'padding-block': 'calc(var(--spacing) * 2)',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
   },
-  smallSize: { height: 'calc(var(--spacing) * 8)', 'padding-inline': 'calc(var(--spacing) * 3)' },
-  largeSize: { height: 'calc(var(--spacing) * 10)', 'padding-inline': 'calc(var(--spacing) * 6)' },
+  smallSize: {
+    height: 'calc(var(--spacing) * 8)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+  largeSize: { height: 'calc(var(--spacing) * 10)', paddingInline: 'calc(var(--spacing) * 6)' },
   iconSize: { width: 'calc(var(--spacing) * 9)', height: 'calc(var(--spacing) * 9)' },
 });
-
-// Keep one CVA declaration: Slot and the exported class selector retain their
-// original utility cascade; ordinary buttons use the owned StyleX mappings.
-function createButtonVariants(useSlotCascade: boolean) {
-  return cva(
-    cn(
-      useSlotCascade
-        ? 'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md'
-        : stylex.props(styles.base).className,
-      "text-sm font-medium transition-[color,box-shadow,background-color,border-color] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0"
-    ),
-    {
-      variants: {
-        variant: {
-          default: cn(
-            useSlotCascade
-              ? 'bg-primary text-primary-foreground'
-              : stylex.props(styles.default).className,
-            'shadow-xs hover:bg-primary/90'
-          ),
-          destructive: cn(
-            useSlotCascade
-              ? 'bg-destructive text-destructive-foreground'
-              : stylex.props(styles.destructive).className,
-            'shadow-xs hover:bg-destructive/90'
-          ),
-          outline: cn(
-            useSlotCascade
-              ? 'border border-input bg-background'
-              : stylex.props(styles.outline).className,
-            'shadow-xs hover:bg-foreground/5 hover:text-foreground'
-          ),
-          secondary: cn(
-            useSlotCascade
-              ? 'bg-secondary text-secondary-foreground'
-              : stylex.props(styles.secondary).className,
-            'shadow-xs hover:bg-secondary/80'
-          ),
-          ghost: 'hover:bg-foreground/5 hover:text-foreground',
-          link: cn(
-            useSlotCascade
-              ? 'text-primary underline-offset-4'
-              : stylex.props(styles.link).className,
-            'hover:underline'
-          ),
-        },
-        size: {
-          default: cn(
-            useSlotCascade ? 'h-9 px-4 py-2' : stylex.props(styles.defaultSize).className
-          ),
-          sm: cn(
-            useSlotCascade ? 'h-8 rounded-md px-3' : stylex.props(styles.smallSize).className,
-            'text-xs'
-          ),
-          lg: cn(
-            useSlotCascade ? 'h-10 rounded-md px-6' : stylex.props(styles.largeSize).className
-          ),
-          icon: cn(useSlotCascade ? 'size-9' : stylex.props(styles.iconSize).className),
-        },
-      },
-      defaultVariants: {
-        variant: 'default',
-        size: 'default',
-      },
-    }
+const variants = {
+  default: styles.default,
+  destructive: styles.destructive,
+  outline: styles.outline,
+  secondary: styles.secondary,
+  ghost: styles.ghost,
+  link: styles.link,
+};
+const sizes = {
+  default: styles.defaultSize,
+  sm: styles.smallSize,
+  lg: styles.largeSize,
+  icon: styles.iconSize,
+};
+type ButtonVariant = keyof typeof variants;
+type ButtonSize = keyof typeof sizes;
+type ButtonVariantOptions = {
+  variant?: ButtonVariant | null;
+  size?: ButtonSize | null;
+  className?: ClassValue;
+  class?: ClassValue;
+};
+function buttonStyles(
+  { variant = 'default', size = 'default' }: ButtonVariantOptions,
+  xstyle?: stylex.StyleXStyles
+) {
+  return stylex.props(
+    styles.base,
+    styles.glyphs,
+    variant && variants[variant],
+    variant && variant !== 'ghost' && variant !== 'link' && styles.shadow,
+    size && sizes[size],
+    xstyle
   );
 }
+function buttonVariants(options: ButtonVariantOptions = {}) {
+  return clsx(buttonStyles(options).className, options.class, options.className);
+}
 
-const buttonVariants = createButtonVariants(true);
-const ownedButtonVariants = createButtonVariants(false);
-
-export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
+export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: ButtonVariant | null;
+  size?: ButtonSize | null;
+  xstyle?: stylex.StyleXStyles;
   asChild?: boolean;
   width?: React.CSSProperties['width'];
   height?: React.CSSProperties['height'];
@@ -124,6 +174,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
       className,
+      xstyle,
       variant,
       size,
       asChild = false,
@@ -162,14 +213,13 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             ...(paddingInline != null && !overridesField('paddingInline') && { paddingInline }),
             ...style,
           };
+    const sx = buttonStyles({ variant, size }, xstyle);
     return (
       <Comp
-        className={cn(
-          (asChild ? buttonVariants : ownedButtonVariants)({ variant, size, className })
-        )}
+        className={clsx(sx.className, className)}
         ref={ref}
         {...props}
-        style={fieldStyle}
+        style={sx.style ? { ...sx.style, ...fieldStyle } : fieldStyle}
       />
     );
   }

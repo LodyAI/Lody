@@ -43,7 +43,7 @@ import { Dialog } from '@/ui/dialog';
 import { AgentRoleForm } from './agent-role-form';
 import { useSettingsPane } from './settings-page-header';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
 } from './surface';
@@ -276,7 +276,7 @@ export function AgentRoleEditorDialog({
       <Dialog.Content
         width={SETTINGS_EDITOR_DIALOG_WIDTH}
         centerOn={settingsPane}
-        className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        xstyle={settingsEditorDialogStyles.panel}
         style={{ height: 'min(680px, 88dvh)' }}
       >
         <Dialog.Header>

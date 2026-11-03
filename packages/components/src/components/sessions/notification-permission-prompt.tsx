@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -18,10 +19,9 @@ import { Button } from '@lody/ui/button';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useAtomValue } from 'jotai';
 import { notificationPromptDismissedAtom, userAtom, currentWorkspaceSlugAtom } from '@/atoms';
-import { cn } from '@/lib/utils';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { COMPOSER_ELEVATION_CLASS } from '@/components/chat/composer-surface';
+import { composerSurfaceStyles } from '@/components/chat/composer-surface';
 
 // `Notification.permission` is a synchronous browser round trip (~3ms in Chrome),
 // and this prompt remounts with every conversation. Cache it only while a
@@ -155,10 +155,12 @@ export function NotificationPermissionPrompt({
           painted the whole card amber next to otherwise neutral chrome. Colour
           is left to the one primary action. */}
       <div
-        className={cn(
-          stylex.props(styles.prompt).className,
-          'dark:border-input-border/70 dark:bg-input/90',
-          COMPOSER_ELEVATION_CLASS,
+        className={clsx(
+          stylex.props(
+            styles.prompt,
+            composerSurfaceStyles.composerElevation,
+            composerSurfaceStyles.darkElevation
+          ).className,
           className
         )}
       >
@@ -191,10 +193,7 @@ export function NotificationPermissionPrompt({
           size="mini"
           icon
           onClick={handleClose}
-          className={cn(
-            stylex.props(styles.close).className,
-            'text-muted-foreground/70 hover:text-foreground'
-          )}
+          xstyle={[styles.close, styles.closeInk]}
           aria-label={t('common.close', 'Close')}
         >
           <X {...stylex.props(styles.icon)} />
@@ -213,6 +212,12 @@ const enter = stylex.keyframes({
 });
 
 const styles = stylex.create({
+  closeInk: {
+    color: {
+      default: 'color-mix(in oklab, hsl(var(--muted-foreground)) 70%, transparent)',
+      '@media (hover: hover)': { default: null, ':hover': 'hsl(var(--foreground))' },
+    },
+  },
   column: { marginBottom: themeSpace[2] },
   prompt: {
     display: 'flex',
@@ -225,8 +230,16 @@ const styles = stylex.create({
     paddingBlock: themeSpace[3],
     fontSize: themeFontSize.sm,
     lineHeight: themeLineHeight.sm,
-    borderColor: 'hsl(var(--foreground) / 0.1)',
-    backgroundColor: themeColors.composer,
+    borderColor: {
+      default: 'hsl(var(--foreground) / 0.1)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--input-border)) 70%, transparent)',
+    },
+    backgroundColor: {
+      default: themeColors.composer,
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--input)) 90%, transparent)',
+    },
     animationName: enter,
     animationDuration: themeDuration[300],
     animationTimingFunction: 'ease',

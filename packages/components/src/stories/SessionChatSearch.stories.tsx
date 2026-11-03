@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
 import { useMemo, useRef, useState } from 'react';
@@ -13,6 +14,26 @@ import {
   type SessionSearchResult,
 } from '@/lib/session-chat-search';
 import { useTranslation } from 'react-i18next';
+const storyLayout = stylex.create({
+  frame: {
+    position: 'relative',
+    width: '100%',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 10%, transparent)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  stack: {
+    display: 'flex',
+    width: '100%',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 4)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  frame2: {
+    position: 'relative',
+    width: '100%',
+  },
+});
 
 const meta = {
   title: 'Sessions/SessionChatSearch',
@@ -246,7 +267,7 @@ function SearchStoryPreview({
 
   return (
     <SessionSearchProvider value={searchContextValue}>
-      <div className="relative w-full bg-muted/10 p-4" style={{ height }}>
+      <div {...stylex.props(storyLayout.frame)} style={{ height }}>
         <SessionSearchBar
           query={query}
           currentIndex={effectiveActiveIndex}
@@ -331,7 +352,7 @@ export const States: Story = {
     renderMessageRow,
   },
   render: () => (
-    <div className="flex w-full flex-col gap-4 bg-muted/20 p-6">
+    <div {...stylex.props(storyLayout.stack)}>
       <StateRow label="Empty (focused)">
         <SearchStoryPreview initialQuery="" showChatBackdrop={false} height={68} />
       </StateRow>
@@ -370,7 +391,7 @@ function StateRow({ label, children }: { label: string; children: React.ReactNod
       <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
-      <div className="relative w-full">{children}</div>
+      <div {...stylex.props(storyLayout.frame2)}>{children}</div>
     </div>
   );
 }

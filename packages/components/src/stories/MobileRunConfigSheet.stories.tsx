@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useMemo, useState } from 'react';
@@ -22,6 +23,17 @@ import type {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { ComposerAgentRoleItem } from '@/lib/composer-agent-roles';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    'justify-content': 'flex-start',
+    'background-color': 'var(--color-stone-950)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 /**
  * The mobile composer's consolidated run-config bottom sheet, opened by
@@ -202,7 +214,7 @@ function StoryShell({
 
   return (
     <Provider store={store}>
-      <div className="flex min-h-dvh flex-col items-center justify-start bg-stone-950 p-6">
+      <div {...stylex.props(storyLayout.stack)}>
         <button
           type="button"
           onClick={() => setOpen(true)}

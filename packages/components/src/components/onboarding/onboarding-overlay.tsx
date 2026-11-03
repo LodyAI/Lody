@@ -34,6 +34,7 @@ import {
 import { WindowDragStrip } from '@/ui/window-drag-region';
 
 const styles = stylex.create({
+  dragStrip: { zIndex: 30 },
   overlay: {
     position: 'fixed',
     inset: 'calc(var(--spacing) * 0)',
@@ -402,7 +403,7 @@ export function OnboardingOverlay({
   return (
     <OnboardingStepsProvider steps={visibleSteps}>
       <div {...stylex.props(styles.overlay)}>
-        <WindowDragStrip className="z-30" />
+        <WindowDragStrip xstyle={styles.dragStrip} />
         {phase === 'ceremony' ? (
           <div {...stylex.props(styles.screen)}>{screens[phase]}</div>
         ) : (

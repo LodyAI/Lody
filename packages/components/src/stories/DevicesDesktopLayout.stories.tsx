@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useState } from 'react';
 import { fn } from 'storybook/test';
@@ -25,6 +26,42 @@ import {
   type WorkspaceMachineAccordionMeta,
 } from '@/components/settings/workspace-machine-accordion';
 import type { MachineSettingsFilter } from '@/atoms/settings-machine-tab';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    width: '100%',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 4)',
+  },
+  section: {
+    'min-width': 'calc(var(--spacing) * 0)',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  canvas: {
+    'padding-inline': 'calc(var(--spacing) * 1)',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 6)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  section2: {
+    'margin-inline': 'auto',
+    'max-width': '64rem',
+  },
+});
 
 /**
  * Composed preview of the desktop Machines settings tab: every machine owns a
@@ -393,9 +430,9 @@ function DevicesDesktopLayout({
   };
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-4">
-      <div className="min-w-0">
-        <div className="flex items-center gap-1.5">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.section)}>
+        <div {...stylex.props(storyLayout.row)}>
           <h2 className="text-base font-semibold text-foreground">Machines</h2>
           <MachineListFilterButton filter={filter} onFilterChange={setFilter} />
         </div>
@@ -405,8 +442,8 @@ function DevicesDesktopLayout({
       </div>
       <div className="space-y-3">{sharedItems.map(renderMachine)}</div>
       <section className="space-y-3 pt-3">
-        <div className="px-1">
-          <div className="flex items-center gap-2">
+        <div {...stylex.props(storyLayout.canvas)}>
+          <div {...stylex.props(storyLayout.row2)}>
             <h3 className="text-sm font-semibold">Your private machines</h3>
             <span className="text-xs text-muted-foreground">{privateItems.length}</span>
           </div>
@@ -427,8 +464,8 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <div className="min-h-screen bg-background px-6 py-6 text-foreground">
-        <div className="mx-auto max-w-5xl">
+      <div {...stylex.props(storyLayout.frame)}>
+        <div {...stylex.props(storyLayout.section2)}>
           <Story />
         </div>
       </div>

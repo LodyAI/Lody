@@ -10,6 +10,7 @@ import {
   themeEasing,
   themeRadius,
   themeSpace,
+  themeShadow,
 } from '../../style/theme-scale.stylex';
 
 export type InfoChipIcon = ComponentType<SVGProps<SVGSVGElement> & { className?: string }>;
@@ -51,15 +52,17 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
   anchoredPopover: {
+    boxShadow: themeShadow.xl,
     width: 'var(--anchor-width)',
     borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
   },
   stagePopover: {
+    boxShadow: themeShadow.xl,
     width: 'calc(var(--spacing) * 96)',
     borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
   },
@@ -109,7 +112,7 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -237,7 +240,7 @@ export function PopoverActionChip({
         }}
         aria-label={label}
         padding="none"
-        className={clsx(stylex.props(styles.anchoredPopover).className, 'shadow-xl')}
+        xstyle={styles.anchoredPopover}
       >
         {typeof content === 'function' ? content(() => setOpen(false)) : content}
       </Popover.Content>
@@ -393,7 +396,7 @@ export function StageChip({
           aria-label={detail.ariaLabel}
           padding="none"
           maxWidth="min(24rem, 90vw)"
-          className={clsx(stylex.props(styles.stagePopover).className, 'shadow-xl')}
+          xstyle={styles.stagePopover}
         >
           {detail.content}
         </Popover.Content>

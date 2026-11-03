@@ -1,9 +1,24 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type CSSProperties } from 'react';
 import { ArrowUp } from 'lucide-react';
 
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { Button } from '@lody/ui/button';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    'padding-top': 'calc(var(--spacing) * 1)',
+  },
+  canvas: {
+    flex: '1',
+    'border-radius': 'calc(infinity * 1px)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 function MockComposer() {
   return (
@@ -13,7 +28,7 @@ function MockComposer() {
         placeholder="问 Lody 任何事情。"
         className="w-full resize-none bg-transparent text-sm leading-6 text-input-foreground placeholder:text-input-placeholder focus:outline-none"
       />
-      <div className="flex items-center pt-1">
+      <div {...stylex.props(storyLayout.row)}>
         <span className="text-xs text-muted-foreground">claude-3.5-sonnet · zx-macbook</span>
         <Button
           type="button"
@@ -36,8 +51,8 @@ function MockContextSwitch() {
       <button className="flex-1 rounded-full bg-background px-3 py-1.5 font-medium shadow">
         Local
       </button>
-      <button className="flex-1 rounded-full px-3 py-1.5 text-muted-foreground">GitHub</button>
-      <button className="flex-1 rounded-full px-3 py-1.5 text-muted-foreground">Chat</button>
+      <button {...stylex.props(storyLayout.canvas)}>GitHub</button>
+      <button {...stylex.props(storyLayout.canvas)}>Chat</button>
     </div>
   );
 }

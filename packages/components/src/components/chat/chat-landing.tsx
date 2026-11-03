@@ -81,7 +81,6 @@ import {
   WorktreeCheckboxPill,
   type WorkdirMode,
 } from '@/components/shared';
-import { cn } from '@/lib/utils';
 import { getIpcServices, onIpcEvent, sendIpc } from '@/lib/electron-ipc-client';
 import {
   bugReportDialogOpenAtom,
@@ -235,6 +234,30 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const landingStyles = stylex.create({
+  branchTrigger: { minWidth: 'calc(var(--spacing) * 0)', maxWidth: '100%' },
+  nonShrinking: { flexShrink: 0 },
+  usageTrigger: { height: 'calc(var(--spacing) * 8)', flexShrink: 0 },
+  mobileSend: {
+    height: 'calc(var(--spacing) * 8)',
+    width: 'calc(var(--spacing) * 8)',
+    borderRadius: 'calc(infinity * 1px)',
+    boxShadow: 'var(--shadow-xs)',
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)',
+      },
+    },
+    color: {
+      default: 'hsl(var(--background) / 1)',
+      '@media (hover: hover)': { default: null, ':hover': 'hsl(var(--background) / 1)' },
+    },
+    translate: { default: null, ':active': '0 1px' },
+  },
   branchSlot: { display: 'inline-flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1] },
   topSelectorRow: {
     display: 'flex',
@@ -3733,7 +3756,7 @@ function WorkspaceChatLanding({
         emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-        className="min-w-0 max-w-full"
+        xstyle={landingStyles.branchTrigger}
         disabled={isBranchDisabled}
       />
     </span>
@@ -4557,7 +4580,7 @@ function WorkspaceChatLanding({
           modelLabel={selectedModelLabel}
           showCodexResetForecast={showCodexResetForecast}
           showRateLimitWithoutContext
-          className="h-8 shrink-0"
+          xstyle={landingStyles.usageTrigger}
         />
       </div>
     </ErrorBoundary>
@@ -6554,10 +6577,7 @@ function WorkspaceChatLanding({
                 aria-label={submitDisabled ? t('chat.submitting') : t('chat.send')}
                 /* Match the in-session mobile composer send face: solid
                    foreground disc + ArrowUp (not the old primary-tint chip). */
-                className={cn(
-                  'h-8 w-8 rounded-full shadow-xs transition-all',
-                  'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-                )}
+                xstyle={landingStyles.mobileSend}
               >
                 {submitting ? (
                   <Spinner diameter="calc(var(--spacing) * 5)" />
@@ -7067,7 +7087,7 @@ function WorkspaceChatLanding({
               width="calc(var(--spacing) * 7)"
               height="calc(var(--spacing) * 7)"
               labelColor="hsl(var(--muted-foreground) / 1)"
-              className="shrink-0"
+              xstyle={landingStyles.nonShrinking}
             >
               <PanelLeft {...stylex.props(landingStyles.glyph16)} />
             </Button>

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 
@@ -7,6 +8,21 @@ import {
   getMobileMainLayoutRootClassName,
 } from '@/components/workspace-layout-utils';
 import { Button } from '@lody/ui/button';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '100%',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+  },
+});
 
 /* MobileWorkspaceLayout in production wires `<LoroAppSidebar>` directly,
    which depends on workspace / user / connection atoms not available in
@@ -21,7 +37,7 @@ function StoryShell({ initialOpen = false }: { initialOpen?: boolean }) {
       <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
         <div className={getMobileMainLayoutRootClassName()}>
           <MobileSidebarDrawer open={drawerOpen} onOpenChange={setDrawerOpen} width={320}>
-            <div className="flex h-full flex-col gap-3 bg-background p-4">
+            <div {...stylex.props(storyLayout.stack)}>
               <div className="text-sm font-semibold">App sidebar (mock)</div>
               <div className="space-y-1 text-sm text-muted-foreground">
                 <div className="rounded-md border p-2">Workspace · Lody</div>
@@ -33,7 +49,7 @@ function StoryShell({ initialOpen = false }: { initialOpen?: boolean }) {
           </MobileSidebarDrawer>
 
           <div className={getMobileMainLayoutContentClassName()}>
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div {...stylex.props(storyLayout.frame)}>
               <header className="flex h-14 items-center gap-2 border-b px-4">
                 <Button variant="ghost" size="small" onClick={() => setDrawerOpen(true)}>
                   打开抽屉

@@ -8,11 +8,11 @@ Standalone local code-review renderer and agent prompt package.
   Convex, i18n, and `@lody/components` business UI.
 - New owned renderer styles use local StyleX blocks and this package's existing
   CSS variables. The development renderer, Storybook, standalone build and tests
-  share `stylex-options.ts`; keep standalone styles in the generated HTML. Retain
-  control and third-party compatibility utilities until their real contracts are
-  verified. Do not import product primitives or palette themes to migrate a leaf.
-- Preserve the local controls' legal Radix `asChild` cascade and exported raw class
-  selectors when migrating ordinary elements; those are separate styling contracts.
+  share `stylex-options.ts`; keep standalone styles in the generated HTML. Keep local controls independent from a utility compiler; third-party diff
+  shadow-root styles remain owned by that library. Do not import product primitives or palette themes to migrate a leaf.
+- Preserve local controls' Radix `asChild` events, refs and caller/child inline-style
+  priority. Generated variant class selectors and typed `xstyle` are the styling
+  boundary; do not restore utility strings or a class-translation layer.
 - Git state is read only. The CLI may run `git show`, `git diff`, `git rev-parse`,
   and serve a local Vite viewer, but it must not mutate the reviewed repository.
 - `.review.md` line references use original merge-base/current source line numbers;

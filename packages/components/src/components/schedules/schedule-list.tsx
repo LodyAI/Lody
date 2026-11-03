@@ -27,7 +27,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { withClassName } from '@/lib/stylex';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
   useMacTrafficLightRowPadClass,
@@ -81,6 +81,12 @@ const DARK =
   ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
 const styles = stylex.create({
+  lastRunAction: {
+    opacity: {
+      default: 1,
+      '@media(hover:hover)': { default: 0, ':focus-visible': 1, ':is(:where(.group):hover *)': 1 },
+    },
+  },
   statusPill: {
     display: 'inline-flex',
     flexShrink: 0,
@@ -568,7 +574,7 @@ function ScheduleListRow({
     <div
       data-schedule-row=""
       aria-current={selected ? 'true' : undefined}
-      className={cn(rowStyle.className, 'group')}
+      className={clsx(rowStyle.className, 'group')}
       style={rowStyle.style}
     >
       <button type="button" onClick={onOpen} {...stylex.props(cell.name, styles.openButton)}>
@@ -664,7 +670,7 @@ function ScheduleListRow({
                   icon
                   // Visible by default; only a device that actually has hover is
                   // allowed to hide it until the row is hovered or focused.
-                  className="[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
+                  xstyle={styles.lastRunAction}
                   onClick={() => onOpenSession(runtime.lastDispatch!.sessionId)}
                   aria-label={t('schedules.lastRun', 'Last run')}
                 >
@@ -881,7 +887,7 @@ export function ScheduleListView({
                 icon
                 onClick={() => showNavigationSidebar()}
                 aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-                className={cn(
+                className={clsx(
                   stylex.props(styles.sidebarToggle).className,
                   WINDOW_DRAG_EXEMPT_CLASS
                 )}
@@ -895,14 +901,17 @@ export function ScheduleListView({
               leading={<Search {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
               aria-label={t('schedules.search', 'Search schedules')}
               placeholder={t('schedules.search', 'Search schedules')}
-              className={cn(stylex.props(styles.search).className, WINDOW_DRAG_EXEMPT_CLASS)}
+              className={clsx(stylex.props(styles.search).className, WINDOW_DRAG_EXEMPT_CLASS)}
               value={query}
               onChange={(event) => setLocalQuery(event.target.value)}
             />
             <Button
               variant="primary"
               size="small"
-              className={cn(stylex.props(styles.actionButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
+              className={clsx(
+                stylex.props(styles.actionButton).className,
+                WINDOW_DRAG_EXEMPT_CLASS
+              )}
               onClick={onNew}
               // The label is the only text and it is hidden on narrow screens.
               aria-label={t('schedules.new', 'New schedule')}

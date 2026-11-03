@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useState } from 'react';
 import { fn, userEvent, within } from 'storybook/test';
 
 import { AssistantEditedFiles } from '@/components/ai-gui/assistant-edited-files';
@@ -96,4 +97,30 @@ export const UncountedChanges: Story = {
       { filePath: 'src/app.ts', add: 12, del: 3 },
     ],
   },
+};
+
+function InteractiveFiles({ className }: { className?: string }) {
+  const [selected, setSelected] = useState('None');
+  return (
+    <div data-edited-files-fixture>
+      <AssistantEditedFiles
+        files={hundredFiles.slice(0, 6)}
+        className={className}
+        onFileClick={setSelected}
+      />
+      <output data-edited-files-selected>{selected}</output>
+    </div>
+  );
+}
+
+export const InteractiveExpansion: Story = {
+  args: { files: hundredFiles.slice(0, 6) },
+  render: () => <InteractiveFiles />,
+};
+
+export const AncestorStateOverride: Story = {
+  args: { files: hundredFiles.slice(0, 6) },
+  render: () => (
+    <InteractiveFiles className="[&_:where(button:hover)]:text-[rgb(211_24_151)] [&_:where(button:focus-visible)]:text-[rgb(20_134_190)]" />
+  ),
 };

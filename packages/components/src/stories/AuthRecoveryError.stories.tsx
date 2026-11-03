@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
@@ -20,6 +21,22 @@ import { SessionTabBar } from '@/components/sessions/session-tab-bar';
 import { SessionInfoBar } from '@/components/sessions/session-info-bar';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import type { SessionHistoryParsed, SessionMeta } from '@lody/shared';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '100dvh',
+    width: '100%',
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--sidebar-background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  element: {
+    position: 'relative',
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+  },
+});
 
 const session = {
   id: 'auth-recovery-story-session',
@@ -81,7 +98,7 @@ function RealWorkspace({ recovery }: { recovery?: ReactNode }) {
   return (
     <PlatformContext.Provider value={platform}>
       <AuthRecoveryEntryProvider notice={recovery}>
-        <div className="flex h-dvh w-full overflow-hidden bg-sidebar text-foreground">
+        <div {...stylex.props(storyLayout.row)}>
           <LoroSidebar
             workspaceName="Lody"
             userEmail="zixuan@lody.dev"
@@ -128,7 +145,7 @@ function RealWorkspace({ recovery }: { recovery?: ReactNode }) {
             onSchedulesClicked={fn()}
           />
           <WorkspaceCard>
-            <main className="relative min-w-0 flex-1 overflow-hidden">
+            <main {...stylex.props(storyLayout.element)}>
               <SessionConversationPage
                 className="h-full"
                 subHeaderSlot={

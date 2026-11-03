@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import {
@@ -19,6 +20,17 @@ import {
   MINIMAX_CLAUDE_PRESET_ID,
 } from '@/components/settings/agent-config-dialog';
 import { Dialog } from '@/ui/dialog';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '100%',
+  },
+  canvas: {
+    flex: '1',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 const machineId = 'machine-story' as MachineId;
 const existingConfigId = 'cfg-claude' as AgentConfigId;
@@ -109,11 +121,11 @@ function NestedCreateWrapper() {
       >
         <Dialog.Title className="sr-only">Settings</Dialog.Title>
         <Dialog.Description className="sr-only">Nested provider dialog preview</Dialog.Description>
-        <div className="flex h-full">
+        <div {...stylex.props(storyLayout.row)}>
           <aside className="w-56 border-r border-border bg-background p-4">
             <div className="rounded-lg bg-secondary px-3 py-2 text-sm font-medium">Agents</div>
           </aside>
-          <main className="flex-1 bg-background p-8">
+          <main {...stylex.props(storyLayout.canvas)}>
             <h2 className="text-xl font-semibold">Agent Provider</h2>
             <div className="mt-4 h-24 rounded-lg border border-border bg-card" />
             <button

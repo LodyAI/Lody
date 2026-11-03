@@ -1,6 +1,6 @@
-import { cn } from '@/lib/utils';
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
+import { text } from '@lody/ui/tokens/scales.stylex';
 import { sidebarSurface } from './sidebar-surface';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
@@ -15,7 +15,43 @@ import {
  * The parts of a task row that were Tailwind. The row's own box, ink and
  * fills come from sidebarSurface; these are the pieces around it.
  */
+const GROUP_HOVER = ':is(:where(.group):hover *)';
+
 const taskStyles = stylex.create({
+  groupLabelType: {
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 500,
+  },
+  groupLabelInk: {
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+  },
+  headerHover: {
+    color: {
+      default: null,
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-foreground) / 1)' },
+    },
+  },
+  groupHide: { opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 0 } } },
+  groupShow: { opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 1 } } },
+  groupReveal: {
+    opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 1 } },
+    pointerEvents: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 'auto' } },
+  },
+  anchorFocus: {
+    outlineStyle: { default: null, ':has(a:focus-visible)': 'none' },
+    boxShadow: {
+      default: null,
+      ':has(a:focus-visible)':
+        'inset 0 0 0 1px color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 40%, transparent)',
+    },
+  },
+  swipeRoot: { borderRadius: 'var(--radius-md)' },
+  swipeContent: { backgroundColor: 'hsl(var(--sidebar-background) / 1)' },
+  swipeArchive: {
+    backgroundColor: 'hsl(var(--sidebar-hover) / 1)',
+    color: 'hsl(var(--sidebar-hover-foreground) / 1)',
+  },
   /** A group: the label row and the conversations under it. */
   groupStack: { display: 'flex', flexDirection: 'column', gap: themeSpace[0.5] },
   groupSpacingCollapsed: { marginBottom: { default: themeSpace[1], ':last-child': 0 } },
@@ -242,7 +278,7 @@ const taskStyles = stylex.create({
   raisedRest: { zIndex: 20 },
   chatTime: {
     fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+    lineHeight: 'var(--text-xs--line-height)',
     color: 'hsl(var(--muted-foreground) / 1)',
   },
   timeInk: { color: 'hsl(var(--muted-foreground) / 1)' },
@@ -275,7 +311,7 @@ const taskStyles = stylex.create({
     paddingInline: 'calc(var(--spacing) * 1)',
     marginInline: 'calc(var(--spacing) * -1)',
     fontSize: 'var(--text-sm)',
-    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    lineHeight: 'var(--text-sm--line-height)',
     outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
     outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
     outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
@@ -371,8 +407,6 @@ import {
   SidebarListSkeleton,
   SidebarSessionTitleText,
   SessionMergeablePill,
-  SIDEBAR_GROUP_LABEL_CLASS,
-  SIDEBAR_GROUP_LABEL_COLOR_CLASS,
   SIDEBAR_ROW_TEXT_CLASS,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
@@ -796,11 +830,9 @@ const TaskGroupSection = memo(function TaskGroupSection({
   // (row type, medium, the row ink from `sidebarSurface.row`) and "Chats" is the
   // shared group label.
   const isRepoHeader = group.kind === 'repo';
-  const headerBaseColorClass = isRepoHeader ? undefined : SIDEBAR_GROUP_LABEL_COLOR_CLASS;
   const headerTypographyClass = isRepoHeader
     ? clsx(SIDEBAR_ROW_TEXT_CLASS, stylex.props(taskStyles.repoHeaderWeight).className)
-    : SIDEBAR_GROUP_LABEL_CLASS;
-  const headerToggleHoverClass = isRepoHeader ? undefined : 'hover:text-sidebar-foreground';
+    : stylex.props(taskStyles.groupLabelType).className;
 
   return (
     <div
@@ -818,27 +850,25 @@ const TaskGroupSection = memo(function TaskGroupSection({
           data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={clsx(
+            headerTypographyClass,
             stylex.props(
               taskStyles.groupHeader,
               showActiveGroupState && taskStyles.activeGroupBorder,
               showActiveGroupState || canNavigate || canToggle
                 ? taskStyles.pointer
-                : taskStyles.defaultCursor
-            ).className,
-            headerTypographyClass,
-            stylex.props(
+                : taskStyles.defaultCursor,
               sidebarSurface.row,
               showActiveGroupState
                 ? sidebarSurface.selected
-                : canNavigate && !isMobile && isRepoHeader && sidebarSurface.hover
-            ).className,
-            showActiveGroupState
-              ? undefined
-              : canNavigate
-                ? headerBaseColorClass
-                : canToggle
-                  ? cn(headerBaseColorClass, !isMobile && headerToggleHoverClass)
-                  : headerBaseColorClass
+                : canNavigate && !isMobile && isRepoHeader && sidebarSurface.hover,
+              !showActiveGroupState && !isRepoHeader && taskStyles.groupLabelInk,
+              !showActiveGroupState &&
+                !canNavigate &&
+                canToggle &&
+                !isMobile &&
+                !isRepoHeader &&
+                taskStyles.headerHover
+            ).className
           )}
           onClick={canNavigate ? handleNavigate : handleToggleGroup}
           onKeyDown={
@@ -875,31 +905,26 @@ const TaskGroupSection = memo(function TaskGroupSection({
             >
               <GitHubOwnerIcon
                 repoFullName={group.repoFullName}
-                className={clsx(
-                  // Left-anchored (not centered in the 20px button) so its left edge
-                  // lines up with the session rows' leading status slot below.
-                  stylex.props(taskStyles.groupMark).className,
-                  // Mobile: chevron is always shown so the owner avatar must hide
-                  // permanently to avoid the two icons overlapping.
+                className={
                   stylex.props(
-                    canToggle && isMobile ? taskStyles.chevronHidden : taskStyles.markDimmed
-                  ).className,
-                  canToggle && 'group-hover:opacity-0'
-                )}
+                    taskStyles.groupMark,
+                    canToggle && isMobile ? taskStyles.chevronHidden : taskStyles.markDimmed,
+                    canToggle && taskStyles.groupHide
+                  ).className
+                }
               />
               {canToggle && (
                 <ChevronDown
-                  className={clsx(
+                  className={
                     stylex.props(
                       taskStyles.groupChevron,
                       group.collapsed
                         ? taskStyles.groupChevronCollapsed
-                        : taskStyles.groupChevronOpen
-                    ).className,
-                    stylex.props(isMobile ? taskStyles.chevronShown : taskStyles.chevronHidden)
-                      .className,
-                    'group-hover:opacity-100'
-                  )}
+                        : taskStyles.groupChevronOpen,
+                      isMobile ? taskStyles.chevronShown : taskStyles.chevronHidden,
+                      taskStyles.groupShow
+                    ).className
+                  }
                 />
               )}
             </button>
@@ -907,16 +932,14 @@ const TaskGroupSection = memo(function TaskGroupSection({
           <span {...stylex.props(taskStyles.groupName)}>{group.label}</span>
           {!showGroupHeaderIcon && canToggle ? (
             <ChevronDown
-              className={clsx(
+              className={
                 stylex.props(
                   taskStyles.groupChevronTrailing,
-                  group.collapsed ? taskStyles.groupChevronCollapsed : taskStyles.groupChevronOpen
-                ).className,
-                stylex.props(
-                  group.collapsed || isMobile ? taskStyles.chevronShown : taskStyles.chevronHidden
-                ).className,
-                'group-hover:opacity-100'
-              )}
+                  group.collapsed ? taskStyles.groupChevronCollapsed : taskStyles.groupChevronOpen,
+                  group.collapsed || isMobile ? taskStyles.chevronShown : taskStyles.chevronHidden,
+                  taskStyles.groupShow
+                ).className
+              }
               aria-hidden="true"
             />
           ) : null}
@@ -928,10 +951,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
         {canCreateNew && (
           <button
             type="button"
-            className={clsx(
-              stylex.props(taskStyles.groupNewButton).className,
-              'group-hover:opacity-100 group-hover:pointer-events-auto'
-            )}
+            className={stylex.props(taskStyles.groupNewButton, taskStyles.groupReveal).className}
             aria-label="New task"
             onClick={() => onNew?.(group.repoFullName ?? undefined)}
           >
@@ -1070,7 +1090,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   data-id={`session:${task.taskId}`}
                   data-scope-item="row"
                   data-sidebar-session-id={task.taskId}
-                  className={cn(
+                  className={clsx(
                     'group',
                     stylex.props(taskStyles.rowBox).className,
                     // Both chat and repo rows are a single line now; the repo row's
@@ -1088,8 +1108,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     // after a mouse click (the overlay <a> keeps focus), which
                     // left a permanent inset ring on the selected row that read
                     // as a misplaced border.
-                    useAnchor &&
-                      'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40',
+                    useAnchor && stylex.props(taskStyles.anchorFocus).className,
                     stylex.props(isSelectable ? taskStyles.pointer : taskStyles.defaultCursor)
                       .className
                   )}
@@ -1377,8 +1396,8 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 <SwipeActionRow
                   key={task.taskId}
                   enabled={isMobile}
-                  className="rounded-md"
-                  contentClassName="bg-sidebar"
+                  rootXstyle={taskStyles.swipeRoot}
+                  contentXstyle={taskStyles.swipeContent}
                   actions={[
                     {
                       key: 'archive',
@@ -1386,7 +1405,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                       ariaLabel: archiveTooltipLabel,
                       icon: <Archive {...stylex.props(taskStyles.archiveIcon)} />,
                       hideLabel: group.kind === 'chat',
-                      className: 'bg-sidebar-hover text-sidebar-hover-foreground',
+                      xstyle: taskStyles.swipeArchive,
                       onClick: () => onArchiveTask?.(task.taskId),
                     },
                   ]}
@@ -1452,10 +1471,7 @@ function SortableRepoGroupSection({
     <button
       type="button"
       ref={setActivatorNodeRef}
-      className={clsx(
-        stylex.props(taskStyles.dragHandle).className,
-        'group-hover:opacity-100 group-hover:pointer-events-auto'
-      )}
+      className={stylex.props(taskStyles.dragHandle, taskStyles.groupReveal).className}
       aria-label="Reorder repo"
       {...attributes}
       {...listeners}

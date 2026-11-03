@@ -11,7 +11,7 @@ import { Button } from '@lody/ui/button';
 const spin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
 const styles = stylex.create({
   actionSpacing: {
-    '--tw-font-weight': 'var(--font-weight-normal)',
+    justifyContent: 'flex-start',
     [button.paddingXSmall]: 'calc(var(--spacing) * 2.5)',
     [button.gap]: 'calc(var(--spacing) * 2)',
   },
@@ -346,7 +346,6 @@ export function getSessionFileErrorPresentation(
 // One row per action, all the same width. A wrapping row of buttons sized by
 // their own labels was the previous layout, and in a side panel it produced
 // three ragged widths on three lines — the width difference read as meaning.
-const ACTION_BUTTON_CLASS = `justify-start ${stylex.props(styles.actionSpacing).className}`;
 
 export function SessionFileErrorState({
   message,
@@ -406,9 +405,9 @@ export function SessionFileNoticeCard({
                 width="100%"
                 height="calc(var(--spacing) * 8)"
                 fontSize="var(--text-xs)"
-                lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+                lineHeight="var(--text-xs--line-height)"
                 fontWeight="var(--font-weight-normal)"
-                className={ACTION_BUTTON_CLASS}
+                xstyle={styles.actionSpacing}
                 onClick={actions.onShare}
                 disabled={actions.sharing}
               >
@@ -428,9 +427,9 @@ export function SessionFileNoticeCard({
                   width="100%"
                   height="calc(var(--spacing) * 8)"
                   fontSize="var(--text-xs)"
-                  lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+                  lineHeight="var(--text-xs--line-height)"
                   fontWeight="var(--font-weight-normal)"
-                  className={ACTION_BUTTON_CLASS}
+                  xstyle={styles.actionSpacing}
                   onClick={localHost.onOpen}
                   data-testid="session-file-error-open"
                 >
@@ -445,9 +444,9 @@ export function SessionFileNoticeCard({
                   width="100%"
                   height="calc(var(--spacing) * 8)"
                   fontSize="var(--text-xs)"
-                  lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+                  lineHeight="var(--text-xs--line-height)"
                   fontWeight="var(--font-weight-normal)"
-                  className={ACTION_BUTTON_CLASS}
+                  xstyle={styles.actionSpacing}
                   onClick={localHost.onReveal}
                   data-testid="session-file-error-reveal"
                 >
@@ -464,9 +463,9 @@ export function SessionFileNoticeCard({
               width="100%"
               height="calc(var(--spacing) * 8)"
               fontSize="var(--text-xs)"
-              lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+              lineHeight="var(--text-xs--line-height)"
               fontWeight="var(--font-weight-normal)"
-              className={ACTION_BUTTON_CLASS}
+              xstyle={styles.actionSpacing}
               onClick={actions.onCopyPath}
               data-testid="session-file-error-copy-path"
             >

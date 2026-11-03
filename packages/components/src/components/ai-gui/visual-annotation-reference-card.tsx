@@ -42,7 +42,7 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted) / 0.7)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -104,10 +104,7 @@ export function VisualAnnotationReferenceCard({
       type="button"
       onClick={onClick}
       className={clsx(
-        stylex.props(
-          styles.card,
-          onClick ? styles.cardInteractive : styles.cardStatic
-        ).className,
+        stylex.props(styles.card, onClick ? styles.cardInteractive : styles.cardStatic).className,
         className
       )}
       title={reference.body}

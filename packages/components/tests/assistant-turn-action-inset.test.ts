@@ -87,7 +87,7 @@ describe('desktop assistant-turn action bar visibility', () => {
     // says whether the bar is showing instead of how it is painted.
     expect(actions?.hasAttribute('data-assistant-turn-actions-visible')).toBe(true);
     expect(container.querySelector('[aria-label="Copy response"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="Fork session"] .animate-spin')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Fork session"] [data-slot="icon-spinner"][data-spinning="true"]')).not.toBeNull();
 
     await act(async () => root.unmount());
     container.remove();

@@ -1,7 +1,14 @@
+import * as stylex from '@stylexjs/stylex';
 import { useRef, type ComponentProps } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { PathLaunchersSettings } from '@/components/settings/path-launchers-setting';
 import { writeStoredPathLauncherPreference } from '@/lib/session-path-launchers';
+const storyLayout = stylex.create({
+  frame: {
+    width: '760px',
+    'max-width': 'calc(100vw - 2rem)',
+  },
+});
 
 const meta = {
   title: 'Settings/PathLaunchersSettings',
@@ -15,7 +22,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="w-[760px] max-w-[calc(100vw-2rem)]">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

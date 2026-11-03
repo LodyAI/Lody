@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
@@ -6,6 +7,18 @@ import {
   SessionHeaderMenu,
   type SessionOwnerMenuState,
 } from '@/components/sessions/session-chat-interface';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'min-width': '32rem',
+    'align-items': 'flex-start',
+    'justify-content': 'center',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-top': 'calc(var(--spacing) * 24)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const ownerMenuState: SessionOwnerMenuState = {
   ownerUserId: 'user-story',
@@ -43,7 +56,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="flex min-h-dvh min-w-[32rem] items-start justify-center bg-background pt-24 text-foreground">
+      <div {...stylex.props(storyLayout.row)}>
         <Story />
       </div>
     ),

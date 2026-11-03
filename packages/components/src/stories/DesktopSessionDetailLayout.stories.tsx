@@ -1,8 +1,35 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import { Button } from '@lody/ui/button';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '100vh',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 2)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'align-self': 'stretch',
+  },
+  stack2: {
+    display: 'flex',
+    height: '100%',
+    'flex-direction': 'column',
+  },
+});
 
 /* The layout persists panel sizes under this key (autoSaveId); clear it so
    every story starts from its declared defaultSizes, not a previous drag. */
@@ -109,8 +136,8 @@ function LayoutHarness({
   }, [empty, sidebarOpen, router]);
 
   return (
-    <div className="flex h-screen flex-col gap-2 bg-muted/30 p-4">
-      <div className="flex items-center gap-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row)}>
         <Button size="small" onClick={openPrTab}>
           Open PR tab
         </Button>
@@ -124,7 +151,7 @@ function LayoutHarness({
       )}
       <div
         ref={actionRootRef}
-        className="min-h-0 flex-1 self-stretch"
+        {...stylex.props(storyLayout.frame)}
         style={{ width: containerWidthPx, maxWidth: '100%' }}
       >
         <DesktopSessionDetailLayout
@@ -139,7 +166,7 @@ function LayoutHarness({
           secondaryPanel={
             <div
               data-lody-action-scope="side-panel"
-              className="group/close-scope flex h-full flex-col"
+              className={clsx(stylex.props(storyLayout.stack2).className, 'group/close-scope')}
             >
               <div className="h-11 shrink-0 border-b border-border p-3 text-sm group-data-[lody-action-active=true]/close-scope:border-primary">
                 Panel tabs

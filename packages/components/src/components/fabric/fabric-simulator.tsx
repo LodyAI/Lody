@@ -335,6 +335,7 @@ export interface FabricSimulatorProps {
   followPointer?: boolean;
   seed?: number;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 const DEFAULT_LIGHT: FabricLight = { x: 0.25, y: 0.3, z: 0.9 };
@@ -347,6 +348,7 @@ export function FabricSimulator({
   followPointer = false,
   seed = 0,
   className,
+  xstyle,
 }: FabricSimulatorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -553,7 +555,7 @@ export function FabricSimulator({
     };
   }, [recipe, mode, light, followPointer, seed]);
 
-  const canvasProps = stylex.props(styles.canvas);
+  const canvasProps = stylex.props(styles.canvas, xstyle);
   return (
     <canvas
       ref={canvasRef}

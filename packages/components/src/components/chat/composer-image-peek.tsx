@@ -14,21 +14,24 @@ const PEEK_STYLE = {
   '--composer-peek-spring': springLinear({ stiffness: 420, damping: 28, mass: 1 }),
 } as CSSProperties;
 
-/*
- * `springLinear` samples the curve over 1.2s, so the transition has to last as
- * long for the curve to keep its shape; it is visually still well before then.
- * Closing takes no spring: a card leaving should not bounce.
- *
- * These stay Tailwind: they sit on `Popover.Content`, a `@lody/ui` primitive,
- * and they override the primitive's own padding, gap and transition. A StyleX
- * class would compete with the primitive's own styles inside the `stylex`
- * layer, where the winner is the stylesheet's order rather than the
- * `utilities` layer's.
- */
-const PEEK_CLASS =
-  'origin-(--transform-origin) gap-1.5 p-1.5 transition-[opacity,transform,scale] duration-[1200ms] ease-(--composer-peek-spring) data-[starting-style]:scale-[0.35] data-[ending-style]:scale-[0.92] data-[ending-style]:duration-150 data-[ending-style]:ease-out';
-
+// The sampled spring lasts 1.2s; closing keeps the original short ease-out.
 const styles = stylex.create({
+  panel: {
+    transformOrigin: 'var(--transform-origin)',
+    gap: 'calc(var(--spacing) * 1.5)',
+    padding: 'calc(var(--spacing) * 1.5)',
+    transitionProperty: 'opacity,transform,scale',
+    transitionDuration: { default: '1200ms', ':is([data-ending-style])': '150ms' },
+    transitionTimingFunction: {
+      default: 'var(--composer-peek-spring)',
+      ':is([data-ending-style])': 'var(--ease-out)',
+    },
+    scale: {
+      default: '1',
+      ':is([data-starting-style])': '0.35',
+      ':is([data-ending-style])': '0.92',
+    },
+  },
   image: {
     display: 'block',
     maxHeight: 'min(360px,calc(var(--available-height)-48px))',
@@ -85,7 +88,7 @@ export function ComposerImagePeek({ src, name, alt, trigger }: ComposerImagePeek
         align="start"
         sideOffset={8}
         style={PEEK_STYLE}
-        className={PEEK_CLASS}
+        xstyle={styles.panel}
       >
         <img
           src={src}

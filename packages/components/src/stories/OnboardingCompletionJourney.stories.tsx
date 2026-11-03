@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
@@ -14,6 +15,26 @@ import {
   ProvidersScreenView,
   SummaryScreen,
 } from '@/components/onboarding';
+const storyLayout = stylex.create({
+  frame: {
+    position: 'relative',
+    'min-height': '760px',
+    width: '100%',
+  },
+  frame2: {
+    position: 'relative',
+    'z-index': '10',
+    'min-height': '760px',
+  },
+  overlay: {
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * 0)',
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'center',
+    color: 'var(--color-slate-950)',
+  },
+});
 
 type JourneyStep = 'providers' | 'projects' | 'summary' | 'complete';
 
@@ -48,19 +69,16 @@ const pendingSetup: ProviderSetupTask = {
 
 function JourneyPreviewWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-[760px] w-full">
+    <div {...stylex.props(storyLayout.frame)}>
       <OnboardingBackdrop />
-      <div className="relative z-10 min-h-[760px]">{children}</div>
+      <div {...stylex.props(storyLayout.frame2)}>{children}</div>
     </div>
   );
 }
 
 function CompletionCheckpoint({ detail }: { detail: string }) {
   return (
-    <div
-      data-testid="onboarding-complete"
-      className="absolute inset-0 flex items-center justify-center text-slate-950"
-    >
+    <div data-testid="onboarding-complete" {...stylex.props(storyLayout.overlay)}>
       <div className="rounded-2xl border border-slate-200/80 bg-white/85 px-10 py-8 text-center shadow-xl backdrop-blur-xl">
         <h1 className="text-3xl font-semibold tracking-tight">Onboarding complete</h1>
         <p className="mt-3 text-sm text-slate-600">{detail}</p>

@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useRef, useState } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
 import { Field } from '../src/field/field';
@@ -12,6 +13,8 @@ const FRUIT = [
   { value: 'fuji', label: 'Fuji' },
   { value: 'pink', label: 'Pink Lady' },
 ];
+
+const extension = stylex.create({ width: (value: number) => ({ width: value }) });
 
 function Fruit({
   children,
@@ -52,6 +55,35 @@ const options = () => all('[role="listbox"] [role="option"]');
 const popup = () => one('[role="listbox"]').parentElement as HTMLElement;
 
 describe('Select trigger', () => {
+  test('keeps dynamic styles and the caller callback through a disabled state change', async () => {
+    function Example() {
+      const [disabled, setDisabled] = useState(false);
+      return (
+        <>
+          <button data-disable-select onClick={() => setDisabled(true)}>
+            Disable select
+          </button>
+          <Select.Root items={FRUIT} disabled={disabled}>
+            <Select.Trigger
+              xstyle={extension.width(disabled ? 0 : 220)}
+              style={(state) => ({ opacity: state.disabled ? 0.5 : 1 })}
+            >
+              <Select.Value placeholder="Pick a fruit" />
+            </Select.Trigger>
+          </Select.Root>
+        </>
+      );
+    }
+    mounted = await mount(<Example />);
+    expect(trigger().style.opacity).toBe('1');
+    for (const [key, value] of Object.entries(stylex.props(extension.width(220)).style!))
+      expect(trigger().style.getPropertyValue(key)).toBe(String(value));
+    await click(one('[data-disable-select]'));
+    expect(trigger().matches(':disabled')).toBe(true);
+    expect(trigger().style.opacity).toBe('0.5');
+    for (const [key, value] of Object.entries(stylex.props(extension.width(0)).style!))
+      expect(trigger().style.getPropertyValue(key)).toBe(String(value));
+  });
   test('is a real button that announces the list it opens', async () => {
     mounted = await mount(<Fruit name="fruit" />);
     expect(trigger().tagName).toBe('BUTTON');

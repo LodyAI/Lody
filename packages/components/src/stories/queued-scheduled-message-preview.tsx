@@ -12,6 +12,7 @@ import { ChatComposer } from '@/components/chat/chat-composer';
 import { MessageQueueDisplay } from '@/components/sessions/message-queue';
 
 const styles = stylex.create({
+  popup: { width: 'auto', padding: 'calc(var(--spacing) * 0)' },
   canvas: {
     minHeight: '100vh',
     padding: { default: space[8], '@media (max-width: 600px)': space[1] },
@@ -396,7 +397,7 @@ export function QueuedScheduledMessagePreview({
                       <Popover.Content
                         side="top"
                         align="start"
-                        className="w-auto p-0"
+                        xstyle={styles.popup}
                         aria-label="发送时间选择器"
                       >
                         {picker}

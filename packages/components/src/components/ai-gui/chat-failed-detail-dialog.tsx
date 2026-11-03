@@ -26,7 +26,7 @@ const styles = stylex.create({
   },
   title: {
     [dialog.titleSize]: 'var(--text-base)',
-    [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
+    [dialog.titleLeading]: 'var(--text-base--line-height)',
     display: 'flex',
     alignItems: 'flex-start',
     gap: themeSpace[2],

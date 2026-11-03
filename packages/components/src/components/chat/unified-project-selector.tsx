@@ -1,10 +1,3 @@
-import {
-  projectInputLeadClass,
-  projectInputTailClass,
-  projectRowLayoutClass,
-  projectItemsStartClass,
-  projectItemsCenterClass,
-} from '@/style/legacy-defaults.stylex';
 import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
@@ -35,16 +28,35 @@ import {
 } from '@/lib/session-sharing';
 import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
 import type { VisibleLocalProjectIndex } from '@/lib/visible-local-project-index';
-import { cn } from '@/lib/utils';
 import { contextPill } from './context-pill-class';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
+  content: { width: 'min(20rem, calc(100vw - 2rem))' },
+  search: {
+    marginBottom: 'calc(var(--spacing) * 1)',
+    height: 'calc(var(--spacing) * 8)',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 50%, transparent)',
+    backgroundColor: 'hsl(var(--input-field) / 1)',
+    paddingBlock: 'calc(var(--spacing) * 0)',
+  },
+  option: { gap: 'calc(var(--spacing) * 2)', paddingBlock: 'calc(var(--spacing) * 1.5)' },
+  optionStart: { alignItems: 'flex-start' },
+  optionCenter: { alignItems: 'center' },
+  triggerGlyphMuted: { color: 'currentColor', opacity: 0.7 },
+  triggerGlyphOpaque: { color: 'currentColor', opacity: 1 },
   projectPathTooltip: { [tooltip.maxWidth]: '22rem', wordBreak: 'break-all' },
   tooltipPadding: {
+    [tooltip.maxWidth]: 'calc(var(--spacing) * 72)',
     [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
     [tooltip.paddingY]: 'calc(var(--spacing) * 2)',
   },
@@ -166,13 +178,21 @@ const styles = stylex.create({
   },
   /**
    * The second property-row face: a faint ink wash instead of the pointer's
-   * fill. Its dark step is a hard-coded white, so it stays a Tailwind class.
+   * fill. In a dark scope it uses the existing faint white ink wash.
    */
   triggerPropertyRowInk: {
     backgroundColor: {
       default: 'transparent',
-      ':hover': 'hsl(var(--foreground) / 0.05)',
-      ':is([data-state="open"])': 'hsl(var(--foreground) / 0.05)',
+      ':hover': {
+        default: 'hsl(var(--foreground) / 0.05)',
+        [DARK_SCOPE]: {
+          '@media (hover: hover)': 'color-mix(in oklab, var(--color-white) 8%, transparent)',
+        },
+      },
+      ':is([data-state="open"])': {
+        default: 'hsl(var(--foreground) / 0.05)',
+        [DARK_SCOPE]: 'color-mix(in oklab, var(--color-white) 8%, transparent)',
+      },
     },
   },
   triggerChip: {
@@ -225,7 +245,7 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     textAlign: 'left',
   },
-  triggerChevron: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0 },
+  triggerChevron: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0, opacity: 0.5 },
 
   /* The list the trigger opens. */
   list: { maxHeight: 'min(50vh, 13rem)', overflowY: 'auto' },
@@ -259,12 +279,18 @@ const styles = stylex.create({
   },
 });
 
-function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
+function GitHubOwnerAvatarIcon({
+  repoFullName,
+  glyphStyle,
+}: {
+  repoFullName: string;
+  glyphStyle?: stylex.StyleXStyles;
+}) {
   const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
   const [failed, setFailed] = useState(false);
 
   if (!ownerHandle || failed) {
-    return <Github {...stylex.props(styles.ownerGlyph)} />;
+    return <Github {...stylex.props(styles.ownerGlyph, glyphStyle)} />;
   }
 
   return (
@@ -566,7 +592,7 @@ function ProjectAccessStatus({
       <Tooltip.Trigger delay={300} render={content} />
       <Tooltip.Content
         side={variant === 'trigger' ? 'top' : 'right'}
-        className={cn(stylex.props(styles.tooltipPadding).className, 'max-w-72')}
+        className={stylex.props(styles.tooltipPadding).className}
       >
         <div {...stylex.props(styles.accessTitle)}>{title}</div>
         <div {...stylex.props(styles.accessDescription)}>{description}</div>
@@ -717,15 +743,21 @@ export function UnifiedProjectSelectorView({
 
   const clearLabel = t('chat.projectPicker.clear', "Don't work in a project");
   const placeholder = t('chat.projectPicker.placeholder', 'Select a project');
+  const triggerGlyphStyle =
+    triggerVariant === 'property-row' ? styles.triggerGlyphMuted : styles.triggerGlyphOpaque;
   const triggerIcon =
-    selectedOption?.icon ??
-    (value.kind === 'github' ? (
-      <GitHubOwnerAvatarIcon repoFullName={value.repoFullName} />
+    value.kind === 'github' ? (
+      <GitHubOwnerAvatarIcon repoFullName={value.repoFullName} glyphStyle={triggerGlyphStyle} />
     ) : value.kind === 'group' ? (
-      <Folders {...stylex.props(styles.groupGlyph)} />
+      <Folders {...stylex.props(styles.groupGlyph, styles.groupOwnerGlyph, triggerGlyphStyle)} />
     ) : (
-      <FolderOpen {...stylex.props(styles.folderGlyph)} />
-    ));
+      <FolderOpen
+        {...stylex.props(
+          value.kind === 'none' ? styles.folderGlyph : styles.ownerGlyph,
+          triggerGlyphStyle
+        )}
+      />
+    );
   const triggerLabel =
     selectedOption?.label ??
     (value.kind === 'github'
@@ -749,11 +781,6 @@ export function UnifiedProjectSelectorView({
 
   const isPropertyRow = triggerVariant === 'property-row';
 
-  // Preserve the inherited SVG override for caller/owner glyphs, including
-  // avatar fallbacks; these marks are also rendered in the menu's options.
-  const triggerTailwind = isPropertyRow
-    ? '[&_svg]:text-current [&_svg]:opacity-70'
-    : '[&_svg]:text-current [&_svg]:opacity-100';
   return (
     <div
       data-unified-project-row=""
@@ -794,7 +821,6 @@ export function UnifiedProjectSelectorView({
                   !isPropertyRow && selectedPrivateSharing && styles.triggerChipShared,
                   value.kind === 'none' && styles.triggerEmpty
                 ).className,
-                triggerTailwind,
                 className,
               ]
                 .filter(Boolean)
@@ -825,12 +851,6 @@ export function UnifiedProjectSelectorView({
                 !isPropertyRow && selectedPrivateSharing && styles.triggerChipShared,
                 value.kind === 'none' && styles.triggerEmpty
               ).className,
-              triggerTailwind,
-              // The ink wash's dark step is a hard-coded white, so it stays a
-              // Tailwind class.
-              isPropertyRow
-                ? 'dark:hover:bg-white/[0.08] dark:data-[state=open]:bg-white/[0.08]'
-                : undefined,
               className,
             ]
               .filter(Boolean)
@@ -846,15 +866,7 @@ export function UnifiedProjectSelectorView({
             </span>
             <span {...stylex.props(styles.triggerLabel)}>{triggerLabel}</span>
             {isPropertyRow ? (
-              <ChevronDown
-                // `!opacity-50` is an important utility; StyleX cannot state
-                // `!important`, and the parent's own glyph rule would win over
-                // a plain opacity.
-                className={[stylex.props(styles.triggerChevron).className, '!opacity-50']
-                  .filter(Boolean)
-                  .join(' ')}
-                aria-hidden="true"
-              />
+              <ChevronDown {...stylex.props(styles.triggerChevron)} aria-hidden="true" />
             ) : null}
           </button>
         </Menu.Trigger>
@@ -866,14 +878,15 @@ export function UnifiedProjectSelectorView({
               ? undefined
               : { side: 'none', align: 'none', fallbackAxisSide: 'none' }
           }
-          className={cn('w-[min(20rem,calc(100vw-2rem))]', contentClassName)}
+          xstyle={styles.content}
+          className={contentClassName}
           style={contentStyle}
         >
           <MenuSearchInput
             value={query}
             onValueChange={setQuery}
             placeholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
-            className={cn(projectInputLeadClass, 'border border-border/50', projectInputTailClass)}
+            xstyle={styles.search}
           />
           <div
             className={['scrollbar-pro', stylex.props(styles.list).className]
@@ -912,10 +925,10 @@ export function UnifiedProjectSelectorView({
                       disabled={option.disabledReason !== undefined}
                       indicator="check"
                       indicatorSide="end"
-                      className={cn(
-                        projectRowLayoutClass,
-                        inlineDescription ? projectItemsStartClass : projectItemsCenterClass
-                      )}
+                      xstyle={[
+                        styles.option,
+                        inlineDescription ? styles.optionStart : styles.optionCenter,
+                      ]}
                     >
                       <span
                         {...stylex.props(

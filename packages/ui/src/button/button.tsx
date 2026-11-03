@@ -33,6 +33,7 @@ export interface ButtonProps extends Omit<BaseProps, 'className'> {
   fontWeight?: CSSProperties['fontWeight'];
   /** Constant label and currentColor glyph ink, independent of the variant's fills. */
   labelColor?: CSSProperties['color'];
+  xstyle?: stylex.StyleXStyles;
   className?: string;
 }
 
@@ -328,6 +329,7 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     lineHeight,
     fontWeight,
     labelColor,
+    xstyle,
     className,
     children,
     ...rest
@@ -348,7 +350,8 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
       variant !== 'destructive' &&
       styles.destructiveTone,
     width != null && dyn.width(width),
-    height != null && dyn.height(height)
+    height != null && dyn.height(height),
+    xstyle
   );
   // CSS-wide keywords, including var() fallbacks, must reach the actual field:
   // routing them through a custom property changes their inheritance semantics.
@@ -371,7 +374,14 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
       {...rest}
       data-ui-button-group-item={segment ? '' : undefined}
       className={className ? `${sx.className} ${className}` : sx.className}
-      style={labelStyle}
+      style={
+        xstyle
+          ? (state) => ({
+              ...labelStyle,
+              ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+            })
+          : labelStyle
+      }
     >
       {icon ? (
         <span className={glyph.className} style={glyph.style}>

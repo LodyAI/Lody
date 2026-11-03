@@ -111,6 +111,7 @@ const TRUNCATE = {
 const SHEET_BOTTOM = 'calc(12px + max(0px, var(--safe-area-bottom, 0px)))';
 
 const styles = stylex.create({
+  machineSheet: { maxHeight: '80dvh' },
   icon14: { width: '14px', height: '14px', flexShrink: 0 },
   icon16: { width: '16px', height: '16px', flexShrink: 0 },
   hint: { color: colors.tertiaryLabel },
@@ -1342,7 +1343,7 @@ export function MachineAgentSettings({
           </div>
           {remoteMachinesAvailable ? (
             <Drawer open={mobileMachinePickerOpen} onOpenChange={setMobileMachinePickerOpen}>
-              <DrawerContent className="max-h-[80dvh]!">
+              <DrawerContent xstyle={styles.machineSheet}>
                 <DrawerTitle {...stylex.props(styles.sheetTitle)}>
                   {t('settings.tabs.machines', 'Machines')}
                 </DrawerTitle>

@@ -185,6 +185,7 @@ const groupHeadingText = {
 };
 
 const styles = stylex.create({
+  selectionCheck: { pointerEvents: 'none' },
   sectionHeading: {
     ...groupHeadingBox,
     ...groupHeadingText,
@@ -1643,7 +1644,7 @@ function SelectionToolbar({
        status column. */
     <div {...stylex.props(styles.selectionToolbar)}>
       <button type="button" onClick={onToggleAll} {...stylex.props(styles.selectAllButton)}>
-        <Checkbox checked={allSelected} tabIndex={-1} className="pointer-events-none" />
+        <Checkbox checked={allSelected} tabIndex={-1} xstyle={styles.selectionCheck} />
         <span>{countLabel}</span>
       </button>
       <div {...stylex.props(styles.selectionActions)}>

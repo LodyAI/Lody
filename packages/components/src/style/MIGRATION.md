@@ -1,8 +1,9 @@
 # Tailwind → StyleX migration guide
 
 Move one owned surface at a time, preserving its rendered layout and behavior.
-Tailwind remains available for unmigrated consumers and documented compatibility
-cases. The [token reference](README.md) owns the shared vocabulary.
+The product renderer uses StyleX and native integration CSS. Only unmigrated
+Storybook fixtures retain a separate Tailwind compiler input. The
+[token reference](README.md) owns the shared vocabulary.
 
 The independent [code-review helper](../../../code-review-helper/README.md) has
 its own compiler configuration and CSS variables. Verify its real standalone
@@ -11,194 +12,48 @@ consumption, as documented by its
 [build owner](../../../code-review-helper/standalone-build.md#style-extraction-and-single-file-output).
 Its utility inventory is separate from this package's source count.
 
-## Ownership and cascade
+## Ownership and composition
 
-| Concern               | Owner                                             | Migration rule                                                                                                |
-| --------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Theme values          | `theme-colors.stylex.ts`, `theme-scale.stylex.ts` | Read the existing app CSS variables and scales.                                                               |
-| Component styling     | Local `stylex.create`                             | Put each rule on the element it styles.                                                                       |
-| Repeated area styling | Adjacent `surface.ts`                             | Share actual repeated structure, without a utility translation layer.                                         |
-| Control appearance    | `@lody/ui` primitive                              | Keep its variant/size API; preserve existing visual overrides until a separately verified replacement exists. |
-| CSS hooks             | Their owning stylesheet                           | Preserve animation, scrollbar, drag-region and integration classes.                                           |
+| Concern                 | Owner                                             | Migration rule                                                                         |
+| ----------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Theme values            | `theme-colors.stylex.ts`, `theme-scale.stylex.ts` | Preserve existing CSS variable readers and scales.                                     |
+| Component styles        | Local `stylex.create`                             | Move a complete owned module and remove its utilities.                                 |
+| Shared area styles      | Adjacent `surface.ts`                             | Share repeated structure, without a utility mapping layer.                             |
+| Primitive customization | Its variant/size props and typed `xstyle`         | Compose the caller's StyleX inside the primitive's one `stylex.props` call.            |
+| Native CSS hooks        | Their owning stylesheet                           | Keep scrollbar, animation, integration and group markers that still have real readers. |
 
-The app orders `@layer theme, base, stylex, components, utilities`. A remaining
-Tailwind utility overrides StyleX on the same property. Delete a utility when its
-replacement is verified; leaving it masks the migration. Two StyleX classes on a
-primitive can also conflict: CSS generation order does not guarantee that a
-caller's `minHeight` wins over the primitive's own `minHeight`. Do not remove a
-working compatibility class merely to lower the inventory count.
+The migration's endpoint is removal of Tailwind, its build plugins and its
+runtime class-merging dependencies. Coexistence is temporary. Retaining source
+utilities behind renamed exports or rewriting their declarations in Tailwind's
+output does not remove that dependency. The former declaration bridge has been
+removed together with its profile and build wiring.
 
-Moving an attribute variant into StyleX also moves it ahead of every remaining
-caller utility. The old attribute selector may have beaten a plain caller
-class within the utilities layer. Preserve that variant until caller precedence
-is verified, including public adapter callers beyond the current app.
+Migrate actual in-repository callers with their owner. Do not hold an entire
+module on Tailwind to preserve hypothetical arbitrary utility overrides. Preserve
+real DOM/Slot structure, refs, events, theme values and rendered states; migrate
+visual caller overrides to explicit StyleX composition. `className` remains useful
+for integration hooks and already-composed native elements. It is not the
+composition boundary between two independently generated sets of atomic styles.
 
-An empty caller-class guard does not isolate ancestor styling. A legal
-zero-specificity ancestor utility loses to an original direct utility in the same
-layer, but wins after that default moves into the earlier StyleX layer. Matching
-Slot and direct-callsite tests therefore cannot establish public compatibility.
-The legacy Sidebar keeps its original default, state and typography utility paths;
-do not add a normal-only StyleX route or infer safety from default screenshots.
-Keep public composition intact until its full supported caller contract has an
-equivalent replacement. Runtime mappings with retained source literals are not
-source-removal credit, and a counterexample withdraws the claimed mapping.
+The locked compiler supports scoped selectors such as `':is(*) > svg'`. Use them
+when the component owns the descendants; keep semantic part props when callers
+need to customize an owned part. Do not add global utility aliases or specificity
+patches to imitate the old utility layer.
 
-The [bounded declaration bridge](../../../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)
-keeps original selectors, class strings and rule positions while replacing each
-original declaration with actual StyleX metadata. It currently serves twenty-one fixed
-owners through ninety-three single-field keys, one closed font-weight pair and
-one hundred and sixteen authored static bindings; ordinary StyleX
-uses its normal collector. A missing, unequal or unsupported slot rejects. The
-single profile retains the legacy aliases through the existing source scan, so
-Tailwind candidate ordering remains an explicit dependency. Moving a literal into
-that binding is declaration ownership migration, not net utility removal.
+The application retains its existing CSS layer order while fixture migration
+continues. Product CSS contains no Tailwind imports or directives, and Electron
+has no Tailwind plugin. `tailwind/reset.css` owns browser normalization;
+`tailwind/theme-defaults.css` owns ordinary scale variables and native safe-area
+hooks. Neither generates utilities. Storybook alone imports
+`.storybook/legacy-stories.css`; remove that input and its dependencies when the
+remaining fixtures are migrated.
 
-Keep non-alias profile metadata out of implicit candidate scanning. A CSS property
-name can also be a legacy utility alias. Preserve its compiled value while avoiding
-an accidental source candidate, and verify both renderer and Storybook CSS; equal
-Storybook output alone does not qualify the renderer.
-
-Earlier flat extraction remains rejected: arbitrary-property callers changed
-width, clipping and hit testing, while changed hashes broke named cn merging.
-Preserve named, arbitrary-property, variant and shorthand order; do not replace
-this contract with a class-name guard, specificity patch or default-only images.
-The closed adapter accepts separately probed values of the same property while
-rejecting overlapping properties inside a binding and atom deduplication. It does
-not authorize dynamic values or variants. Its optimizer follows the actual shared
-Tailwind Vite options. The default components PostCSS entry shares the actual
-configuration's explicit optimization value through `postcssOptions`, including
-during serve. An empty PostCSS optimize object defaults to non-minified output;
-Vite's producer has different defaults. Producer options are mutually exclusive.
-Raw/library callers must opt into a matching phase explicitly.
-
-Keep normalization specific to the alias whose contract requires it. Only
-`min-w-0` accepts the original element-local calc-zero expression; a nonzero
-minimum keeps exact value comparison. Equal literal-zero bodies under that zero
-alias still reject. Do not relax value equality to accept a new owner.
-
-The only supported multi-declaration rule is the exact `font-medium` pair:
-the element-local `--tw-font-weight` writer followed by `font-weight`, both
-reading `var(--font-weight-medium)`. Keep its original registration and order.
-Associate native atoms by property, validate every replacement before mutation,
-and reject omitted, reordered, duplicate, important or unequal fields. This is
-not permission to add arbitrary writer rules or variants. The
-[font-pair decision](../../../../.agents/notes/implemented/architecture/2026-11-03-stylex-font-writer-pair.md)
-owns the evidence and limits.
-
-The independent helper controls' reviewed internal call graph and original raw
-selectors are separate contracts. Their local ordinary/Slot split is not a recipe
-for public adapters. Check real parent selectors, token readers, layer order and
-actual input events before changing a consumer, and preserve explicit limits.
-
-Verify an override in every control state. The archive button becomes
-`position: relative` while confirming; its caller retains `absolute z-20` so
-the confirmation still overlays the end slot. Removing that compatibility can
-shrink the title column even when a short-title screenshot looks identical.
-Compare slot geometry and a clipped long title as well as pixels.
-
-Inspect custom-property declarations in the complete application build as well
-as ordinary properties. The locked StyleX compiler groups variable rules with
-root/theme declarations; that group can be emitted outside CSS layers even when
-an isolated component probe puts the same writer inside `stylex`. This changed
-both a CollapsibleCard `--tw-shadow` override and the private message content's
-`--tw-space-y-reverse` override. The rejected spacing candidate changed a real
-utilities-layer reverse writer from start/end margins `12px / 0` to `0 / 12px`.
-Those utilities remain until their complete writer/reader cascade can be preserved.
-The card likewise retains its paired `shadow-none ring-0` compatibility classes
-so `cn` can resolve caller overrides. Moving only the visible property or only
-its variables does not preserve that composition contract.
-
-When a repeated override is owned by a primitive, migrate through its explicit
-API. Spinner's `diameter` sizes its turning wrapper while keeping SVG attributes
-and named sizes separate. Pass the original local spacing expression when the
-utility read it there; replacing it with an equal-default inherited alias changes
-subtree behavior. Verify explicit zero and removal of the override on the same
-mounted control, as well as its actual animation and rendered pixels.
-
-Button typography uses its narrow `fontSize` / `lineHeight` API. The owner writes
-these dynamic values at the actual CSS fields, merging its StyleX inline values;
-custom-property indirection changes CSS-wide keywords and even `var()` fallback
-semantics. Omission preserves the original owner style. Verify actual keyword,
-relative-unit and class-priority behavior rather than relying on ordinary-size
-screenshots. Existing direct `style` and Base UI `render` merging are separate
-contracts; do not silently change either while migrating a consumer.
-
-A constant Button ink override uses its explicit `labelColor` field, which writes
-physical inline `color` without changing the variant's fill computation. A label
-token can also feed secondary hover backgrounds; verify its complete reader graph
-before writing it. This API intentionally has inline priority: preserve an existing
-utility where a real unlayered self-theme rule must continue to win. Fixed private
-callers with no such path do not establish arbitrary class/render compatibility.
-
-Keep breakpoint predicates exact in the compiled CSS. The locked compiler lowers
-`<64rem` to `<=63.99rem`, which differs in the fractional interval. Preserve the
-original `not all and (width >= 64rem)` when that is the original contract, and
-verify actual initial font-size changes as well as JS viewport mount decisions.
-
-ResizableHandle's `appearance="edge"` composes the base and session edge inside
-the primitive owner. Its actual horizontal consumer no longer competes through
-external pseudo-element classes. Default handles retain their contract; default
-vertical coverage does not establish the new edge appearance in that orientation.
-
-Use `Button variant="solid"` for an existing flat filled face: it owns background,
-label and fine-hover alpha through the existing primary ink tokens. Preserve
-legacy shadow, transition and active utilities until their own contracts are
-migrated; removing the shadow would expose a previously overridden focus ring.
-Apply the fixed action theme only to reviewed glyph/text subtrees and check all
-non-target inherited tokens. The ordinary primary variant has additional
-appearance and press behavior, so changing to it requires a separate UI decision.
-
-Local primitive themes need their own inheritance check. `createTheme` also
-applies the variable group's defaults: a partial Button theme reset an inherited
-23px gap and 3px orange focus ring. Explicitly inherit every non-target token with
-a complete typed key map. Keep that map in the compiler owner: the locked StyleX
-0.19 compiler silently omitted an ordinary cross-file object spread, while
-literal fields and a same-file local spread emitted the expected `inherit`
-declarations. The resulting default-group class reset parent colors, gap, radius
-and text size even though default-theme screenshots matched. Inspect the actual
-full-build declarations and test nondefault parent tokens before accepting a theme.
-
-For a few existing public tokens, component-owned `stylex.create` declarations
-such as `[button.paddingXSmall]: 'calc(var(--spacing) * 2.5)'` can write only the
-target variables without attaching a default-group class. They still require a
-full-build cascade check. An element already carrying a theme may have stronger
-variable declarations; merge spacing and appearance into one complete theme in
-that owner instead of stacking themes or increasing selector specificity. Preserve
-element-local variable reads and compare every non-target token, not just the
-changed padding or gap.
-
-The search action's complete message-action theme uses a repeated class selector.
-Its radius token can therefore override a new single-class radius atom even when
-every default PNG looks equal. Keep the physical compatibility radius where this
-owner has no equivalent supported override; do not increase specificity or add a
-new public API solely to remove that class.
-
-Token writes also inherit into descendants. Audit every reader under the owned
-part before replacing a physical property with a public-token override. A panel
-accepting arbitrary children cannot safely publish a transparent background token
-merely because its own background was transparent; contained modal surfaces may
-read that token too. Keep the physical compatibility class until a replacement
-preserves that boundary.
-
-The message-action themes use their same-file complete key maps. Their semantic
-label override is limited to the reviewed fixed glyph subtrees; a child explicitly
-reading that semantic token would also change. A direct inline write to the old
-primitive color tokens changes precedence after migration, so that negative
-control remains unaccepted. Apply a theme to the actual Button; arbitrary local
-themes do not travel across portals.
-
-A component's styles live with its implementation; area-wide repeated styles
-live in its `surface.ts`. Import tokens using relative `.stylex` paths. The shared
-`componentsStylexOptions` also resolves `@/style/*` in Storybook, Vitest and the
-desktop renderer. The StyleX compiler evaluates `stylex.create` statically;
-ordinary imported runtime constants are not compile-time token values.
-
-Use the actual primitive's `visuallyHidden` option where it exists; retain
-compatibility classes on other parts until their owner supports it. Dialog, Vaul
-and Popover keep their own contexts; do not substitute one family to obtain the prop. The owner merges invariant 1px/-1px,
-clip-path and zero padding with its base, clearing logical title inset where it
-exists. Keep names mounted, without `aria-hidden` or `display: none`; verify ID
-references and default/ref/render behavior as well as an unchanged screenshot.
+Audit dynamic class maps and helper defaults as well as JSX. The inventory
+scanner v3 includes class-named object properties and parameter defaults; its
+compiler reads the remaining fixture input. A zero recognized count is still
+not proof that runtime strings or integration CSS are correct. Inspect the
+actual desktop: a viewport hook with only an old-browser fallback does not
+provide the normal `100svh` height after utility generation is removed.
 
 ## Compose props before rendering
 

@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 
 import { evidenceSurface } from './surface';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -19,7 +20,6 @@ const FIGURE_UNKNOWN_CLASS = stylex.props(evidenceSurface.figureUnknown).classNa
 const NAME_CLASS = stylex.props(evidenceSurface.name).className;
 const DETAIL_CLASS = stylex.props(evidenceSurface.detail).className;
 const CAPTION_CLASS = stylex.props(evidenceSurface.caption).className;
-const ACTION_CLASS = stylex.props(evidenceSurface.action).className;
 
 const styles = stylex.create({
   root: {
@@ -80,6 +80,11 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
   },
   directory: { marginLeft: themeSpace[1.5] },
+  rowRule: {
+    borderBlockEndWidth: { default: 1, ':last-child': 0 },
+    borderBlockEndStyle: 'solid',
+    borderBlockEndColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+  },
   row: {
     display: 'flex',
     width: '100%',
@@ -100,7 +105,7 @@ const styles = stylex.create({
   rowInteractive: {
     cursor: 'pointer',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     backgroundColor: {
@@ -109,6 +114,11 @@ const styles = stylex.create({
     },
   },
   expand: {
+    color: {
+      default: colors.secondaryLabel,
+      '@media (hover: hover)': { default: null, ':hover': themeColors.foreground },
+      ':focus-visible': themeColors.foreground,
+    },
     display: 'flex',
     height: themeSpace[8],
     width: '100%',
@@ -120,7 +130,7 @@ const styles = stylex.create({
     borderTopColor: 'hsl(var(--border) / 0.7)',
     paddingInline: themeSpace[2.5],
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     backgroundColor: {
@@ -148,6 +158,7 @@ export interface AssistantEditedFilesProps {
   files: readonly AssistantEditedFileEntry[];
   onFileClick?: (filePath: string) => void;
   className?: string;
+  cardXstyle?: stylex.StyleXStyles;
 }
 
 const DEFAULT_VISIBLE_FILE_COUNT = 4;
@@ -203,18 +214,14 @@ const DiffStats = ({ add, del }: { add?: number; del?: number }) => {
     <span className={clsx(stylex.props(styles.figures).className, FIGURE_CLASS)}>
       <span
         className={
-          add === undefined
-            ? FIGURE_UNKNOWN_CLASS
-            : stylex.props(styles.addition).className
+          add === undefined ? FIGURE_UNKNOWN_CLASS : stylex.props(styles.addition).className
         }
       >
         +{add ?? '—'}
       </span>
       <span
         className={
-          del === undefined
-            ? FIGURE_UNKNOWN_CLASS
-            : stylex.props(styles.deletion).className
+          del === undefined ? FIGURE_UNKNOWN_CLASS : stylex.props(styles.deletion).className
         }
       >
         -{del ?? '—'}
@@ -223,7 +230,12 @@ const DiffStats = ({ add, del }: { add?: number; del?: number }) => {
   );
 };
 
-export function AssistantEditedFiles({ files, onFileClick, className }: AssistantEditedFilesProps) {
+export function AssistantEditedFiles({
+  files,
+  onFileClick,
+  className,
+  cardXstyle,
+}: AssistantEditedFilesProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const uniqueFiles = useMemo(() => getMergedFiles(files), [files]);
@@ -249,7 +261,7 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
 
   return (
     <div className={clsx(stylex.props(styles.root).className, className)}>
-      <div {...stylex.props(styles.card)}>
+      <div {...stylex.props(styles.card, cardXstyle)}>
         {/* Multi-file only: summary bar. Single-file cards skip it so we
             don't stack "Edited 1 file" on top of the lone file row. */}
         {!isSingleFile ? (
@@ -263,14 +275,7 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
             {totals ? <DiffStats add={totals.add} del={totals.del} /> : null}
           </div>
         ) : null}
-        <div
-          className={clsx(
-            // The rule between the rows is a descendant rule, which StyleX
-            // cannot express, so it stays a Tailwind class on this element.
-            'divide-y divide-border/70',
-            !isSingleFile && stylex.props(styles.rows).className
-          )}
-        >
+        <div {...stylex.props(!isSingleFile && styles.rows)}>
           {visibleFiles.map((file) => {
             const { directory, name } = splitFilePath(file.filePath);
             const content = (
@@ -288,6 +293,7 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
             );
             const rowClassName = stylex.props(
               styles.row,
+              styles.rowRule,
               isSingleFile ? styles.rowTall : styles.rowShort,
               onFileClick && styles.rowInteractive
             ).className;
@@ -313,20 +319,11 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
         {hiddenFileCount > 0 ? (
           <button
             type="button"
-            className={clsx(
-              // The ink of the button belongs to the evidence surface, so its
-              // hover and focus colours stay Tailwind classes on this element.
-              'hover:text-foreground',
-              'focus-visible:text-foreground',
-              stylex.props(styles.expand).className,
-              ACTION_CLASS
-            )}
+            {...stylex.props(evidenceSurface.action, styles.expand)}
             aria-expanded={expanded}
             onClick={() => setExpanded((value) => !value)}
           >
-            <ChevronDown
-              {...stylex.props(styles.chevron, expanded && styles.chevronOpen)}
-            />
+            <ChevronDown {...stylex.props(styles.chevron, expanded && styles.chevronOpen)} />
             {expanded
               ? t('sessions.editedFiles.showLess', 'Show less')
               : t('sessions.editedFiles.showMore', {

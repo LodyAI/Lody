@@ -1,7 +1,31 @@
+import * as stylex from '@stylexjs/stylex';
 import type { ComponentType, SVGProps } from 'react';
 import { AlertTriangle, CheckCircle2, CircleSlash, Pause } from 'lucide-react';
 import { CarbonInProgress } from '@/components/icons/carbon-in-progress';
 import type { SessionGoalStatus } from '@lody/shared';
+
+const styles = stylex.create({
+  infoInk: { color: 'hsl(var(--status-info))' },
+  warningInk: { color: 'hsl(var(--status-warning))' },
+  successInk: { color: 'hsl(var(--status-success))' },
+  mutedInk: { color: 'hsl(var(--muted-foreground))' },
+  infoSurface: { backgroundColor: 'color-mix(in oklab, hsl(var(--status-info)) 10%, transparent)' },
+  warningSurface: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--status-warning)) 10%, transparent)',
+  },
+  successSurface: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--status-success)) 10%, transparent)',
+  },
+  mutedSurface: { backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)' },
+  infoBorder: { borderColor: 'color-mix(in oklab, hsl(var(--status-info)) 30%, transparent)' },
+  warningBorder: {
+    borderColor: 'color-mix(in oklab, hsl(var(--status-warning)) 30%, transparent)',
+  },
+  successBorder: {
+    borderColor: 'color-mix(in oklab, hsl(var(--status-success)) 30%, transparent)',
+  },
+  mutedBorder: { borderColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)' },
+});
 
 export type GoalStatusIcon = ComponentType<SVGProps<SVGSVGElement> & { className?: string }>;
 
@@ -10,12 +34,12 @@ export interface GoalStatusPresentation {
   labelKey: string;
   fallbackLabel: string;
   Icon: GoalStatusIcon;
-  /** Foreground colour for icon + label (`text-…`). */
-  textClassName: string;
+  /** Foreground colour for the icon and label. */
+  textStyle: stylex.StyleXStyles;
   /** Tinted surface used by the sticky banner; chat-inline marker can ignore. */
-  surfaceClassName: string;
+  surfaceStyle: stylex.StyleXStyles;
   /** Bottom-border tint matching the surface. */
-  borderClassName: string;
+  borderStyle: stylex.StyleXStyles;
   /** True when the icon should pulse to signal in-flight work. */
   pulse?: boolean;
 }
@@ -27,58 +51,58 @@ export const GOAL_STATUS_PRESENTATION: Record<SessionGoalStatus, GoalStatusPrese
     labelKey: 'sessions.goal.status.active',
     fallbackLabel: 'Pursuing goal',
     Icon: CarbonInProgress as GoalStatusIcon,
-    textClassName: 'text-status-info',
-    surfaceClassName: 'bg-status-info/10',
-    borderClassName: 'border-status-info/30',
+    textStyle: styles.infoInk,
+    surfaceStyle: styles.infoSurface,
+    borderStyle: styles.infoBorder,
     pulse: true,
   },
   paused: {
     labelKey: 'sessions.goal.status.paused',
     fallbackLabel: 'Goal paused',
     Icon: Pause,
-    textClassName: 'text-status-warning',
-    surfaceClassName: 'bg-status-warning/10',
-    borderClassName: 'border-status-warning/30',
+    textStyle: styles.warningInk,
+    surfaceStyle: styles.warningSurface,
+    borderStyle: styles.warningBorder,
   },
   budgetLimited: {
     labelKey: 'sessions.goal.status.budgetLimited',
     fallbackLabel: 'Goal unmet',
     Icon: AlertTriangle,
-    textClassName: 'text-status-warning',
-    surfaceClassName: 'bg-status-warning/10',
-    borderClassName: 'border-status-warning/30',
+    textStyle: styles.warningInk,
+    surfaceStyle: styles.warningSurface,
+    borderStyle: styles.warningBorder,
   },
   blocked: {
     labelKey: 'sessions.goal.status.blocked',
     fallbackLabel: 'Goal blocked',
     Icon: AlertTriangle,
-    textClassName: 'text-status-warning',
-    surfaceClassName: 'bg-status-warning/10',
-    borderClassName: 'border-status-warning/30',
+    textStyle: styles.warningInk,
+    surfaceStyle: styles.warningSurface,
+    borderStyle: styles.warningBorder,
   },
   usageLimited: {
     labelKey: 'sessions.goal.status.usageLimited',
     fallbackLabel: 'Usage limit reached',
     Icon: AlertTriangle,
-    textClassName: 'text-status-warning',
-    surfaceClassName: 'bg-status-warning/10',
-    borderClassName: 'border-status-warning/30',
+    textStyle: styles.warningInk,
+    surfaceStyle: styles.warningSurface,
+    borderStyle: styles.warningBorder,
   },
   complete: {
     labelKey: 'sessions.goal.status.complete',
     fallbackLabel: 'Goal achieved',
     Icon: CheckCircle2,
-    textClassName: 'text-status-success',
-    surfaceClassName: 'bg-status-success/10',
-    borderClassName: 'border-status-success/30',
+    textStyle: styles.successInk,
+    surfaceStyle: styles.successSurface,
+    borderStyle: styles.successBorder,
   },
   cleared: {
     labelKey: 'sessions.goal.status.cleared',
     fallbackLabel: 'Goal cleared',
     Icon: CircleSlash,
-    textClassName: 'text-muted-foreground',
-    surfaceClassName: 'bg-muted/40',
-    borderClassName: 'border-border/60',
+    textStyle: styles.mutedInk,
+    surfaceStyle: styles.mutedSurface,
+    borderStyle: styles.mutedBorder,
   },
 };
 

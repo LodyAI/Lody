@@ -11,6 +11,7 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  menuButton: { display: { default: 'inline-flex', '@media (min-width: 768px)': 'none' } },
   root: {
     position: 'relative',
     display: 'flex',
@@ -115,7 +116,7 @@ export function MobileChatLandingScreen({
             variant="ghost"
             size="large"
             icon
-            className="md:hidden"
+            xstyle={styles.menuButton}
             onClick={onOpenMobileDrawer}
           >
             <PanelLeft className={stylex.props(styles.menuIcon).className} />

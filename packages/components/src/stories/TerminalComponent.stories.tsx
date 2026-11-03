@@ -1,6 +1,19 @@
+import * as stylex from '@stylexjs/stylex';
 import React, { type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { TerminalComponent } from '@/components/ai-gui/terminal-component';
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  frame2: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': '48rem',
+  },
+});
 
 const meta = {
   title: 'AI/TerminalComponent',
@@ -11,8 +24,8 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="min-h-screen bg-muted/20 p-6">
-        <div className="mx-auto w-full max-w-3xl">
+      <div {...stylex.props(storyLayout.frame)}>
+        <div {...stylex.props(storyLayout.frame2)}>
           <Story />
         </div>
       </div>

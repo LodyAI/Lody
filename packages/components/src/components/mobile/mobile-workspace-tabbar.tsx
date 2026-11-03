@@ -135,6 +135,7 @@ const styles = stylex.create({
     backgroundColor: `color-mix(in srgb, ${colors.accent} 20%, transparent)`,
   },
   icon: {
+    ':is(*) > svg': { width: 'calc(var(--spacing) * 6)', height: 'calc(var(--spacing) * 6)' },
     transitionProperty: 'none',
     position: 'absolute',
     top: 0,
@@ -245,7 +246,7 @@ function DockTab<TabKey extends string>({
       )}
       <motion.span
         // Preserve the existing consumer-SVG sizing contract, including react-icons.
-        className={`${stylex.props(styles.icon, active && styles.activeContent).className} [&>svg]:h-6 [&>svg]:w-6`}
+        {...stylex.props(styles.icon, active && styles.activeContent)}
         style={{ y: iconY }}
       >
         {theme === 'ios' ? tab.ios : tab.material}

@@ -1,5 +1,3 @@
-import { legacyDeclarationBridge, type LegacyPostcssOptions } from './vite-legacy-declarations';
-import { createRequire } from 'node:module';
 import { defineConfig } from 'vite';
 import dts from 'vite-plugin-dts';
 import * as path from 'node:path';
@@ -14,10 +12,6 @@ import { rendererBundleAliases } from './vite-renderer-bundle-aliases.ts';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const postcssConfig = createRequire(import.meta.url)('./postcss.config.cjs') as {
-  plugins: { '@tailwindcss/postcss': LegacyPostcssOptions };
-};
-
 const isStorybook =
   process.env.npm_lifecycle_event?.includes('storybook') ||
   process.env.STORYBOOK === 'true' ||
@@ -26,9 +20,6 @@ const isStorybook =
 
 export default defineConfig(async () => {
   const plugins = [
-    ...(!isStorybook
-      ? legacyDeclarationBridge({ postcssOptions: postcssConfig.plugins['@tailwindcss/postcss'] })
-      : []),
     ...(isStorybook
       ? []
       : [
@@ -46,7 +37,7 @@ export default defineConfig(async () => {
 
   if (!isStorybook) {
     const { tanstackRouter } = await import('@tanstack/router-plugin/vite');
-    plugins.splice(2, 0, tanstackRouter({ target: 'react', autoCodeSplitting: true }));
+    plugins.splice(0, 0, tanstackRouter({ target: 'react', autoCodeSplitting: true }));
   }
 
   return {

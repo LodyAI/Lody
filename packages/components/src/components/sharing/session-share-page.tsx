@@ -83,12 +83,11 @@ const styles = stylex.create({
     alignItems: 'center',
     borderRadius: 'var(--radius-md)',
     borderWidth: '1px',
-    borderStyle: 'var(--tw-border-style)',
+    borderStyle: 'solid',
     borderColor: 'transparent',
     paddingInline: 'calc(var(--spacing) * 3)',
     fontSize: '0.9em',
     fontWeight: 'var(--font-weight-medium)',
-    '--tw-font-weight': 'var(--font-weight-medium)',
   },
   paneNote: {
     margin: 0,

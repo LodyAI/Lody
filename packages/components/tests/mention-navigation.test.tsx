@@ -392,7 +392,6 @@ describe('Mention navigation and insertion', () => {
       document.dispatchEvent(new Event('selectionchange'));
     });
     expect(container?.querySelector('[data-mention-caret]')).toBeNull();
-    expect(input.className).toContain('z-30');
     expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
 
     act(() => {
@@ -400,15 +399,12 @@ describe('Mention navigation and insertion', () => {
       document.dispatchEvent(new Event('selectionchange'));
     });
     expect(container?.querySelector('[data-mention-caret]')).toBeNull();
-    expect(input.className).toContain('z-30');
     expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
 
     act(() => {
       input.setSelectionRange(6, 6);
       document.dispatchEvent(new Event('selectionchange'));
     });
-    expect(input.className).toContain('z-10');
-    expect(input.className).not.toContain('z-30');
     expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('');
   });
 

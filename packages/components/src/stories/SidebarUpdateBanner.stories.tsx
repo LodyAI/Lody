@@ -1,7 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { useLayoutEffect, type ReactNode } from 'react';
 import { SidebarUpdateBanner } from '@/components/sidebar-update-banner';
+const storyLayout = stylex.create({
+  frame: {
+    width: 'calc(var(--spacing) * 72)',
+  },
+});
 
 const meta: Meta<typeof SidebarUpdateBanner> = {
   title: 'Components/SidebarUpdateBanner',
@@ -14,7 +20,7 @@ const meta: Meta<typeof SidebarUpdateBanner> = {
     onLater: fn(),
   },
   render: (args) => (
-    <div className="w-72">
+    <div {...stylex.props(storyLayout.frame)}>
       <SidebarUpdateBanner {...args} />
     </div>
   ),

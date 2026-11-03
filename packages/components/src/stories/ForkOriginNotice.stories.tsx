@@ -1,8 +1,16 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 
 import { MessageRowView } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+const storyLayout = stylex.create({
+  frame: {
+    width: '720px',
+    'max-width': '100vw',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 /**
  * The `session_fork_origin` system notice ("This conversation was forked from
@@ -18,7 +26,7 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="w-[720px] max-w-[100vw] bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <ConversationColumn>
           <Story />
         </ConversationColumn>

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
@@ -12,6 +13,22 @@ import type {
 } from '@/components/terminal/terminal-channel';
 import { TerminalDock, type TerminalDockProps } from '@/components/terminal/terminal-dock';
 import { terminalControllerAtom } from '@/components/terminal/terminal-controller';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '100vh',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const RESET = '\x1b[0m';
 const GREEN = '\x1b[32m';
@@ -154,7 +171,7 @@ function DockHarness(props: Partial<TerminalDockProps>) {
   // Mirrors the session header's dock toggle: the dock is hidden until opened.
   const controller = useAtomValue(terminalControllerAtom);
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div {...stylex.props(storyLayout.stack)}>
       <div className="flex flex-none items-center justify-between gap-2 border-b border-border px-3 py-2">
         <span className="text-sm text-muted-foreground">主内容区（对话）</span>
         <button
@@ -162,7 +179,7 @@ function DockHarness(props: Partial<TerminalDockProps>) {
           onClick={() => controller?.toggleOpen()}
           className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
         >
-          <PanelBottom className="h-3.5 w-3.5" />
+          <PanelBottom {...stylex.props(storyLayoutStyles.frame)} />
           Toggle terminal dock
         </button>
       </div>

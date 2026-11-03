@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { Provider, createStore } from 'jotai';
@@ -16,6 +17,17 @@ const meta = {
 } satisfies Meta;
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+const scopedStyles = stylex.create({
+  fileLink: { display: { default: 'inline-flex', ':is(th *, td *)': 'inline' } },
+  fileLinkText: { whiteSpace: 'nowrap' },
+  referenceChip: { borderRadius: 0 },
+});
+const scopedParts = {
+  fileLink: scopedStyles.fileLink,
+  fileLinkText: scopedStyles.fileLinkText,
+  referenceChip: scopedStyles.referenceChip,
+};
 
 const PR = 'https://github.com/synthetic-owner/synthetic-repo/pull/42';
 const LONG_PATH =
@@ -125,11 +137,7 @@ function Fixture({ mode }: { mode: 'copy' | 'open' | 'menu' | 'scoped' | 'readon
               </output>
               <MarkdownRenderer
                 text={CONTENT}
-                className={
-                  scoped
-                    ? '[&_button]:inline-flex [&_button_span]:whitespace-nowrap [&_.markdown-reference-chip]:rounded-none'
-                    : undefined
-                }
+                partStyles={scoped ? scopedParts : undefined}
                 onAgentFileLinkClick={
                   mode === 'open' || mode === 'menu'
                     ? (href) => setResult(`Opened: ${href}`)

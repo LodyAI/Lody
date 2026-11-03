@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useState } from 'react';
@@ -14,6 +15,16 @@ import { lodyPresenceStatesAtom } from '@/atoms/presence';
 import { SessionInfoBar } from '@/components/sessions/session-info-bar';
 import { SessionRelationsChip } from '@/components/sessions/session-relations-chip';
 import { buildSessionRelationTree } from '@/lib/session-relation-tree';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'max-width': '100%',
+    'flex-direction': 'column',
+  },
+  frame: {
+    height: 'calc(var(--spacing) * 60)',
+  },
+});
 
 const machineId = 'machine-1' as MachineId;
 const NOW = Date.parse('2026-09-25T08:00:00.000Z');
@@ -102,9 +113,9 @@ function StoryHarness({
   tree.session = { ...tree.session, collaborationStopped: stopped };
   return (
     <Provider store={store}>
-      <div className="flex max-w-full flex-col" style={{ width: 720 }}>
+      <div {...stylex.props(storyLayout.stack)} style={{ width: 720 }}>
         {/* Room above the bar so the popover (side=top) stays visible. */}
-        <div className="h-60" />
+        <div {...stylex.props(storyLayout.frame)} />
         <SessionInfoBar
           status={null}
           projectName="LodyAI/Lody"

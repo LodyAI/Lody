@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 
@@ -13,6 +14,16 @@ import {
   homeWeekFixture,
   homeWeekUsageFixture,
 } from './fixtures/home-week';
+const storyLayout = stylex.create({
+  frame: {
+    width: '720px',
+    'max-width': '100%',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 10)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const meta = {
   title: 'Chat/HomeDashboard',
@@ -24,7 +35,7 @@ const meta = {
       context.parameters.layout === 'fullscreen' ? (
         <Story />
       ) : (
-        <div className="w-[720px] max-w-full rounded-2xl bg-background p-10 text-foreground">
+        <div {...stylex.props(storyLayout.frame)}>
           <Story />
         </div>
       ),

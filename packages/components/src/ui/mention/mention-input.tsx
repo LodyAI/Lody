@@ -1,14 +1,9 @@
-import {
-  sidebarRelativeClass,
-  mentionRaisedCaretClass,
-  mentionRestCaretClass,
-  composerTransparentClass,
-} from '@/style/legacy-defaults.stylex';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import { composeEventHandlers, Primitive, useComposedRefs } from '@diceui/shared';
 import type { VirtualElement } from '@floating-ui/react';
 import * as React from 'react';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
-import { cn } from '@/lib/utils';
 import {
   applyTextEditToMentions,
   areMentionsEqual,
@@ -24,6 +19,13 @@ import { findTriggerCandidates, isMentionNavigationPrefix } from './mention-trig
 import { type Mention, useMentionContext } from './mention-root';
 
 const INPUT_NAME = 'MentionInput';
+
+const inputStyles = stylex.create({
+  container: { position: 'relative' },
+  input: { position: 'relative', backgroundColor: 'transparent' },
+  caret: { zIndex: 10 },
+  raisedCaret: { zIndex: 30 },
+});
 
 type InputElement = React.ElementRef<typeof Primitive.textarea>;
 
@@ -111,13 +113,16 @@ function constrainCaretToMentionBoundary(input: InputElement, mentions: readonly
 
 interface MentionInputProps extends React.ComponentPropsWithoutRef<typeof Primitive.textarea> {
   containerClassName?: string;
+  xstyle?: stylex.StyleXStyles;
+  containerXstyle?: stylex.StyleXStyles;
   highlighterClassName?: string;
 }
 
 const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, forwardedRef) => {
   const context = useMentionContext(INPUT_NAME);
   const composedRef = useComposedRefs(forwardedRef, context.inputRef);
-  const { containerClassName, highlighterClassName, ...inputProps } = props;
+  const { containerClassName, containerXstyle, xstyle, highlighterClassName, ...inputProps } =
+    props;
   const pendingSelectionFromRoot = context.pendingSelection;
   const onPendingSelectionFromRootChange = context.onPendingSelectionChange;
   const inputRef = context.inputRef;
@@ -864,8 +869,17 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     onMentionUpdate(inputElement);
   }, [context, onMentionUpdate, updateCaretLayer]);
 
+  const containerStyles = stylex.props(inputStyles.container, containerXstyle);
+  const textareaStyles = stylex.props(
+    inputStyles.input,
+    showNativeCaretAboveChip ? inputStyles.raisedCaret : inputStyles.caret,
+    xstyle
+  );
   return (
-    <div className={cn(sidebarRelativeClass, containerClassName)}>
+    <div
+      className={clsx(containerStyles.className, containerClassName)}
+      style={containerStyles.style}
+    >
       <MentionHighlighter
         className={highlighterClassName}
         renderValue={mentionRenderValue}
@@ -889,16 +903,11 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         {...inputProps}
         ref={composedRef}
         value={renderedInputValue}
-        className={cn(
-          sidebarRelativeClass,
-          showNativeCaretAboveChip ? mentionRaisedCaretClass : mentionRestCaretClass,
-          inputProps.className,
-          composerTransparentClass
-        )}
+        className={clsx(textareaStyles.className, inputProps.className)}
         style={
           showNativeCaretAboveChip
-            ? { ...inputProps.style, WebkitTextFillColor: 'transparent' }
-            : inputProps.style
+            ? { ...textareaStyles.style, ...inputProps.style, WebkitTextFillColor: 'transparent' }
+            : { ...textareaStyles.style, ...inputProps.style }
         }
         onBeforeInput={composeEventHandlers(inputProps.onBeforeInput, onBeforeInput)}
         onChange={composeEventHandlers(inputProps.onChange, onChange)}

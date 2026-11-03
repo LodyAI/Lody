@@ -64,6 +64,7 @@ const ROW_HOVER = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
 const LIST_MAX_HEIGHT = 'min(52vh, 420px)';
 
 const styles = stylex.create({
+  mobileSheet: { height: '92dvh', maxHeight: '92dvh' },
   srOnly: {
     position: 'absolute',
     width: '1px',
@@ -1022,7 +1023,7 @@ export function AddLocalProjectDialog({
           // the top (already above the keyboard), and each step decides what to
           // do with its footer — browse lets the keyboard cover it (and disables
           // Add), confirm lifts its action with `mb-[--native-keyboard-height]`.
-          className="h-[92dvh] max-h-[92dvh]"
+          xstyle={styles.mobileSheet}
         >
           <DrawerTitle visuallyHidden>{a11yTitle}</DrawerTitle>
           <DrawerDescription visuallyHidden>{a11yDescription}</DrawerDescription>

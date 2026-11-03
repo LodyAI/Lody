@@ -27,6 +27,21 @@ const MOBILE_FILE_DRAWER_HEADER_INSET = 'calc(3.5rem + var(--safe-area-top))';
 const MOBILE_FILE_DRAWER_TOUCH_SIZE = 'calc(var(--spacing) * 11)';
 
 const styles = stylex.create({
+  drawer: {
+    inset: 0,
+    borderRadius: 0,
+    borderWidth: 0,
+    borderLeftWidth: 0,
+    borderRightWidth: 0,
+    borderTopWidth: 0,
+    borderBottomWidth: 0,
+    borderInlineStartWidth: 0,
+    borderInlineEndWidth: 0,
+    borderBlockStartWidth: 0,
+    borderBlockEndWidth: 0,
+  },
+  backButton: { marginLeft: 'calc(var(--spacing) * -1)' },
+  menuButton: { marginRight: 'calc(var(--spacing) * -1)' },
   /** The drawer's column. */
   column: {
     display: 'flex',
@@ -156,11 +171,11 @@ export function MobileFileViewerDrawer({
           onOpenChange(nextOpen);
         }}
       >
-        {/* Width belongs to the Drawer; keep the consumer's insets and border compatibility. */}
+        {/* The file viewer fills the viewport without the sheet border. */}
         <DrawerContent
           forceMount
           width="full"
-          className="inset-0 rounded-none border-0 border-l-0!"
+          xstyle={styles.drawer}
           style={isNativeIOS ? { bottom: 'var(--native-keyboard-height, 0px)' } : undefined}
           data-sidebar-swipe-open-disabled
         >
@@ -174,7 +189,7 @@ export function MobileFileViewerDrawer({
                   icon
                   width={MOBILE_FILE_DRAWER_TOUCH_SIZE}
                   height={MOBILE_FILE_DRAWER_TOUCH_SIZE}
-                  className="-ml-1"
+                  xstyle={styles.backButton}
                   onClick={() => onOpenChange(false)}
                   aria-label={t('common.back', 'Back')}
                 >
@@ -193,7 +208,7 @@ export function MobileFileViewerDrawer({
                   icon
                   width={MOBILE_FILE_DRAWER_TOUCH_SIZE}
                   height={MOBILE_FILE_DRAWER_TOUCH_SIZE}
-                  className="-mr-1"
+                  xstyle={styles.menuButton}
                   onClick={() => setMenuOpen(true)}
                   aria-label={t('sessions.fileViewer.moreActions', 'File actions')}
                 >

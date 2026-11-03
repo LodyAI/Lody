@@ -9,6 +9,32 @@ import {
 import { cn } from '@/lib/utils';
 import { Mention, MentionInput, MentionLabel } from '@/ui/mention';
 import { Root as MentionRoot, type Mention as MentionRange } from '@/ui/mention/index';
+const storyLayout = stylex.create({
+  hiddenLabel: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    margin: -1,
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  stack2: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    'max-width': '42rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 6)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 /**
  * Prototype for icon chips in the plain-textarea composer.
@@ -83,7 +109,7 @@ function ComposerBox({
   const Root = unwrapped ? MentionRoot : Mention;
 
   return (
-    <div className="flex flex-col gap-1.5" data-mention-fixture-box={label}>
+    <div {...stylex.props(storyLayout.stack)} data-mention-fixture-box={label}>
       <div className="font-medium text-muted-foreground text-xs">{label}</div>
       <Root
         inputValue={value}
@@ -103,7 +129,7 @@ function ComposerBox({
           '[--mention-chip-surface:hsl(var(--background))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]'
         )}
       >
-        <MentionLabel className="sr-only">Prototype composer</MentionLabel>
+        <MentionLabel xstyle={storyLayout.hiddenLabel}>Prototype composer</MentionLabel>
         <MentionInput
           value={value}
           rows={3}
@@ -116,7 +142,7 @@ function ComposerBox({
 
 function Board({ chips, unwrapped = false }: { chips: boolean; unwrapped?: boolean }) {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-6 bg-background p-8">
+    <div {...stylex.props(storyLayout.stack2)}>
       <ComposerBox label="Mixed kinds" fixture={MIXED} chips={chips} unwrapped={unwrapped} />
       <ComposerBox label="Short paths" fixture={SHORT} chips={chips} unwrapped={unwrapped} />
       <ComposerBox

@@ -19,51 +19,32 @@ over `file://` with no server. It backs `lody review <file>.review.md` (CLI) and
 ## Style extraction and single-file output
 
 The renderer, Storybook, standalone bundle and Vitest share
-[`stylex-options.ts`](stylex-options.ts). Local StyleX blocks read the helper's
-own element-local CSS variables; this host does not import product UI or palette
-aliases. Its CSS layer order is `theme, base, stylex, components, utilities`.
+[`stylex-options.ts`](stylex-options.ts). Owned styles read the helper's local
+CSS variables. The stylesheet supplies ordinary CSS defaults and base resets;
+there is no utility compiler or CSS-macro stage.
 
-| Styling contract                 | Owner                                                           | Verification                                                                        |
-| -------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Owned layout and semantic values | Renderer-local StyleX blocks and element-local helper variables | Real Storybook and standalone frames, complete computed records and caller controls |
-| Public Slot cascade              | Original utility path in local controls                         | Native/Slot and raw exported-selector cases                                         |
-| Legacy property registration     | `src/react/styles.css`                                          | Full generated CSS and default/initial/inherit writer states                        |
+| Styling boundary             | Owner                                                | Contract                                                    |
+| ---------------------------- | ---------------------------------------------------- | ----------------------------------------------------------- |
+| Renderer and local controls  | Local StyleX blocks                                  | Native layout, state and Slot behavior                      |
+| Palette/default values       | `src/react/styles.css` and the theme provider        | HSL variables remain host-overridable                       |
+| Private writer/reader chains | Renderer StyleX and explicit `--crh-*` registrations | Original initialization, inheritance and CSS-wide semantics |
+| Diff internals               | `@pierre/diffs`                                      | Its shadow-root styles remain independent                   |
 
-The literal composer font is stored on its textarea in a private custom property.
-A direct StyleX `system-ui` declaration is expanded by the locked Lightning CSS
-postprocessor for its Android target, unlike the original Tailwind literal. Keep
-this local value independent of the ancestor font variable; changing compiler
-targets would affect unrelated styles. Direct writes to the new private property
-are outside the component API.
+The literal composer and annotation fonts remain element-local custom properties:
+the locked CSS optimizer expands direct `system-ui` declarations for its Android
+target, so replacing those variables changes the font stack.
 
-Annotation markers use their own literal font property for the same compiler
-reason; numeric feature writers and registrations remain part of the contract.
-Inherited typography candidates that change offscreen color or scroll geometry
-are rejected even when default frames match. The last-resort fallback is exercised
-through an actual React render error and ErrorBoundary, including real reload and
-return to a valid review. Its existing unlayered `.crh-shell` owns viewport minimum
-height; do not add an ineffectual StyleX duplicate underneath it. Caught errors
-are expected in this fixture, not a zero-console-error claim.
+Standalone StyleX source transforms run in the pre phase. The same plugin
+instance's `generateBundle` hook runs in a post companion immediately before
+`viteSingleFile()`: Vite emits CSS after pre plugins, and extraction must happen
+before the inliner consumes the assets. Keep this shared plugin closure so no
+unused CSS sidecar is produced.
 
-When the last consuming utility disappears, Tailwind can prune its `@property`
-registration and compatibility initialization. The stylesheet explicitly retains
-the original `--tw-space-y-reverse` registration and fallback. Compare full computed
-values under default, utility, initial, inherit and vertical-writing states; equal
-normal-state PNGs did not detect the rejected pruning regression.
-
-The standalone config keeps StyleX source transforms in the pre phase, then
-runs that same plugin instance's `generateBundle` hook in a post companion
-immediately before `viteSingleFile()`. Vite emits CSS after pre plugins. Running
-extraction there originally left the rules in an unreferenced `stylex.css` after
-the inliner had consumed the CSS assets, despite a successful build and correct
-Storybook rendering. Keeping the shared plugin closure preserves its injection
-state and avoids the unused-sidecar fallback.
-
-Verify the emitted HTML through `file://` with a synthetic review injected by
-`injectReviewSnapshot`. Check that migrated rules are inside its actual inline
-stylesheet, that no external stylesheet is required, and that painted layout,
-reference navigation and findings match the unchanged standalone baseline.
-Storybook screenshots alone cannot establish the single-file contract.
+Verify the emitted HTML over `file://` using a synthetic review injected by
+`injectReviewSnapshot`. Check real layout, navigation, checklist/menu interactions
+and absence of external stylesheet requests. Storybook rendering alone does not
+establish the single-file contract. The provider uses fixed Vesper; an embedded
+host may instead supply the existing HSL variables.
 
 ## How the viewer reaches the CLI
 

@@ -18,13 +18,6 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useStore } from 'jotai';
-import { cn } from '@/lib/utils';
-import {
-  loroRecoveryFrameClass,
-  loroSwitcherGapClass,
-  sidebarInkClass,
-  acpMediumWeightClass,
-} from '@/style/legacy-defaults.stylex';
 import { clsx } from 'clsx';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
 import {
@@ -108,7 +101,32 @@ import {
  * The parts of the sidebar shell that were Tailwind. The rows' own box, ink
  * and fills come from `sidebarSurface`; these are the pieces around it.
  */
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const shellStyles = stylex.create({
+  recovery: {
+    marginTop: 'calc(var(--spacing) * 3)',
+    borderRadius: 'calc(infinity * 1px)',
+    borderColor: 'hsl(var(--sidebar-border) / 1)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    boxShadow: { default: 'none', ':focus-visible': 'none', ':active': 'none' },
+    backgroundColor: {
+      default: 'hsl(var(--sidebar-background) / 1)',
+      ':hover': {
+        default: 'hsl(var(--sidebar-background) / 1)',
+        '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)',
+      },
+    },
+    color: {
+      default: 'hsl(var(--sidebar-foreground) / 1)',
+      ':hover': {
+        default: 'hsl(var(--sidebar-foreground) / 1)',
+        '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)',
+      },
+    },
+  },
+  switcherGap: { gap: 'calc(var(--spacing) * 1.5)' },
   headerTooltipRow: {
     display: 'flex',
     alignItems: 'center',
@@ -132,7 +150,7 @@ const shellStyles = stylex.create({
     outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
     outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -164,7 +182,7 @@ const shellStyles = stylex.create({
     outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
     outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -219,7 +237,12 @@ const shellStyles = stylex.create({
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
   /** The icon rests one step quieter than the label. */
-  navIconIdle: { color: themeColors.sidebarForegroundMuted },
+  navIconIdle: {
+    color: {
+      default: themeColors.sidebarForegroundMuted,
+      '@media (hover: hover)': { [stylex.when.ancestor(':hover')]: 'currentColor' },
+    },
+  },
   /** A navigation row's trailing control. */
   navAction: { position: 'absolute', right: themeSpace[1], display: 'flex', alignItems: 'center' },
   /** A clipped label. */
@@ -358,7 +381,10 @@ const shellStyles = stylex.create({
     paddingBlock: themeSpace[1.5],
     textAlign: 'left',
     height: themeSpace[9],
-    color: themeColors.sidebarForeground,
+    color: {
+      default: themeColors.sidebarForeground,
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--sidebar-foreground) / 1) 75%, transparent)',
+    },
   },
   /** The repository section's header. */
   repoHeader: {
@@ -430,7 +456,24 @@ const shellStyles = stylex.create({
   },
   /** The archive glyph, and the arrow that replaces it while hovered. */
   glyphFull: { width: '100%', height: '100%' },
-  glyphHidden: { width: '100%', height: '100%', display: 'none' },
+  archiveRest: {
+    display: {
+      default: 'block',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([aria-current="page"]):hover')]: 'none',
+      },
+      [stylex.when.ancestor(':is([aria-current="page"]):focus-visible')]: 'none',
+    },
+  },
+  archiveBack: {
+    display: {
+      default: 'none',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([aria-current="page"]):hover')]: 'block',
+      },
+      [stylex.when.ancestor(':is([aria-current="page"]):focus-visible')]: 'block',
+    },
+  },
   /** The desktop workspace row. */
   desktopIdentity: {
     display: 'flex',
@@ -449,7 +492,14 @@ const shellStyles = stylex.create({
   /** The mobile workspace row's hover. */
   identityMobileHover: {
     backgroundColor: { default: 'transparent', ':hover': themeColors.sidebarHover },
-    color: { default: themeColors.sidebarForeground, ':hover': themeColors.sidebarHoverForeground },
+    color: {
+      default: themeColors.sidebarForeground,
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--sidebar-foreground) / 1) 75%, transparent)',
+      ':hover': {
+        default: themeColors.sidebarHoverForeground,
+        [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--sidebar-foreground) / 1) 75%, transparent)',
+      },
+    },
   },
   /** The workspace identity's own box and name. */
   identityBox: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
@@ -913,7 +963,7 @@ function clamp(value: number, min: number, max: number): number {
 
 function GlassSurface({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={cn(stylex.props(shellStyles.glass).className, className)}>
+    <div className={clsx(stylex.props(shellStyles.glass).className, className)}>
       <div {...stylex.props(shellStyles.relative)}>{children}</div>
     </div>
   );
@@ -973,7 +1023,7 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
         type="button"
         aria-label={label}
         aria-current={active ? 'page' : undefined}
-        className={cn(
+        className={clsx(
           stylex.props(
             sidebarSurface.iconButton,
             active && sidebarSurface.selected,
@@ -1111,7 +1161,7 @@ function SidebarHeaderIconButton({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
+      className={clsx(
         // The same box, ink and fills as the footer's icon buttons.
         stylex.props(
           sidebarSurface.iconButton,
@@ -1165,15 +1215,15 @@ function NavButton({
       <button
         type="button"
         onClick={onClick}
-        className={cn(
+        className={clsx(
           // Same size as the session titles below: a smaller label reads as
           // undersized next to its 16px icon.
           SIDEBAR_ROW_TEXT_CLASS,
-          'group',
           // Desktop rows share a +15px icon and +37px text column with the
           // project, repository, and session rows below them. Same brightness as
           // unselected session titles; hover changes the fill only.
           stylex.props(
+            stylex.defaultMarker(),
             shellStyles.navControl,
             isMobile ? shellStyles.navGapMobile : shellStyles.navGapDesktop,
             sidebarSurface.row,
@@ -1196,11 +1246,9 @@ function NavButton({
         {/* Icons rest one step quieter than the label so the words lead; they
             come up to full ink with the hover or the selected fill. */}
         <span
-          className={clsx(
-            stylex.props(shellStyles.navIcon).className,
-            stylex.props(active ? shellStyles.currentInk : shellStyles.navIconIdle).className,
-            // The icon comes up to the row's ink when the pointer is over it.
-            'group-hover:text-current'
+          {...stylex.props(
+            shellStyles.navIcon,
+            active ? shellStyles.currentInk : shellStyles.navIconIdle
           )}
         >
           {icon}
@@ -1495,13 +1543,9 @@ export const LoroSidebar = memo(function LoroSidebar({
           variant="secondary"
           size="small"
           height="calc(var(--spacing) * 7)"
-          className={cn(
-            SIDEBAR_HELPER_TEXT_CLASS,
-            loroRecoveryFrameClass,
-            acpMediumWeightClass,
-            sidebarInkClass,
-            'shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
-          )}
+          fontWeight="var(--font-weight-medium)"
+          xstyle={shellStyles.recovery}
+          className={SIDEBAR_HELPER_TEXT_CLASS}
           onClick={() => onChatScopeChange('team')}
         >
           <Users
@@ -1572,11 +1616,10 @@ export const LoroSidebar = memo(function LoroSidebar({
   const windowDrag = isElectron && !isElectronFullscreen;
   const mobileWorkspaceIdentityClassName = clsx(
     SIDEBAR_CONTROL_TEXT_CLASS,
-    stylex.props(shellStyles.identityMobile).className,
-    // Preserve this explicit dark-ancestor ink step until the marker/theme
-    // contract covers the mobile workspace identity.
-    'dark:text-sidebar-foreground/75',
-    workspaceSwitcherEnabled && stylex.props(shellStyles.identityMobileHover).className
+    stylex.props(
+      shellStyles.identityMobile,
+      workspaceSwitcherEnabled && shellStyles.identityMobileHover
+    ).className
   );
   const getPlanLabel = (planTier: LoroSidebarWorkspace['planTier']) =>
     planTier === 'enterprise'
@@ -1596,7 +1639,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               isMobile ? (
                 <button
                   type="button"
-                  className={cn(
+                  className={clsx(
                     mobileWorkspaceIdentityClassName,
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
@@ -1609,7 +1652,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               ) : (
                 <button
                   type="button"
-                  className={cn(
+                  className={clsx(
                     desktopWorkspaceRowClassName(true),
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
@@ -1691,10 +1734,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                             className={stylex.props(shellStyles.switcherMenuAvatar).className}
                           />
                         }
-                        className={clsx(
-                          stylex.props(shellStyles.switcherMenuChoice).className,
-                          loroSwitcherGapClass
-                        )}
+                        xstyle={[shellStyles.switcherMenuChoice, shellStyles.switcherGap]}
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
                           if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {
@@ -1756,21 +1796,21 @@ export const LoroSidebar = memo(function LoroSidebar({
           {/* Icon boxes match the radio rows' avatars, so both row kinds
               share one leading column and one text column. */}
           <Menu.Item
-            className={loroSwitcherGapClass}
+            xstyle={shellStyles.switcherGap}
             icon={Plus}
             onClick={() => onCreateWorkspaceClicked?.()}
           >
             {mergedLabels.createWorkspace}
           </Menu.Item>
           <Menu.Item
-            className={loroSwitcherGapClass}
+            xstyle={shellStyles.switcherGap}
             icon={Users}
             onClick={() => onInviteClicked?.()}
           >
             {mergedLabels.inviteMembers}
           </Menu.Item>
           <Menu.Item
-            className={loroSwitcherGapClass}
+            xstyle={shellStyles.switcherGap}
             icon={Link2}
             onClick={() => onLinkRepoClicked?.()}
           >
@@ -1822,7 +1862,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               shellStyles.header,
               isMobile ? shellStyles.headerMobile : shellStyles.headerDesktop
             ).className,
-            cn(macTrafficLightRowPadClass, windowsCaptionRowPadClass),
+            clsx(macTrafficLightRowPadClass, windowsCaptionRowPadClass),
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >
@@ -1859,7 +1899,6 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onClick={() => onRequestCollapse()}
                     // Always visible: the collapse control is found where it
                     // was last seen, not revealed by hovering the header.
-                    className="focus-visible:outline-hidden"
                   >
                     <CuidaSidebarExpandOutline {...stylex.props(shellStyles.glyph16)} />
                   </SidebarHeaderIconButton>
@@ -2149,7 +2188,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         ) : null}
 
         <div
-          className={cn(
+          className={clsx(
             getLoroSidebarFooterClassName(isMobile),
             !isMobile && stylex.props(footerStyles.desktop).className
           )}
@@ -2196,7 +2235,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 label={t('archive.leave', 'Leave Archive')}
                 title={t('archive.leave', 'Leave Archive')}
                 active
-                className="group"
+                className={stylex.props(stylex.defaultMarker()).className}
                 onClick={() => {
                   if (canGoBack && commands.execute('nav.back')) return;
                   if (canGoBack) {
@@ -2208,17 +2247,11 @@ export const LoroSidebar = memo(function LoroSidebar({
               >
                 <Archive
                   strokeWidth={1.5}
-                  className={clsx(
-                    stylex.props(shellStyles.glyphFull).className,
-                    'group-hover:hidden group-focus-visible:hidden'
-                  )}
+                  className={stylex.props(shellStyles.glyphFull, shellStyles.archiveRest).className}
                 />
                 <ArrowLeft
                   strokeWidth={1.5}
-                  className={clsx(
-                    stylex.props(shellStyles.glyphHidden).className,
-                    'group-hover:block group-focus-visible:block'
-                  )}
+                  className={stylex.props(shellStyles.glyphFull, shellStyles.archiveBack).className}
                 />
               </IconButton>
             ) : (

@@ -21,7 +21,6 @@ import {
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
-import { cn } from '@/lib/utils';
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
@@ -33,7 +32,39 @@ import {
   themeSpace,
 } from '../style/theme-scale.stylex';
 /** The legacy flat Updated list's own layout and ink. */
+const ROW_HOVER = ':is(:where(.group\\/row):hover *)';
+const ROW_OPEN = ':is(:where(.group\\/row)[data-menu-open] *)';
+
 const updatedStyles = stylex.create({
+  skeletonSection: {
+    marginBottom: {
+      default: 'calc(var(--spacing) * 4)',
+      ':last-child': 'calc(var(--spacing) * 0)',
+    },
+  },
+  fade: { opacity: { default: null, [ROW_HOVER]: { '@media (hover: hover)': 0 }, [ROW_OPEN]: 0 } },
+  reveal: {
+    opacity: { default: null, [ROW_HOVER]: { '@media (hover: hover)': 1 }, [ROW_OPEN]: 1 },
+    pointerEvents: {
+      default: null,
+      [ROW_HOVER]: { '@media (hover: hover)': 'auto' },
+      [ROW_OPEN]: 'auto',
+    },
+  },
+  menuOpen: {
+    backgroundColor: { default: null, ':is([data-menu-open])': 'hsl(var(--sidebar-hover) / 1)' },
+    color: { default: null, ':is([data-menu-open])': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+  },
+  anchorFocus: {
+    outlineStyle: { default: null, ':has(a:focus-visible)': 'none' },
+    boxShadow: {
+      default: null,
+      ':has(a:focus-visible)':
+        'inset 0 0 0 1px color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 40%, transparent)',
+    },
+  },
+  swipeRoot: { borderRadius: 'var(--radius-md)' },
+  swipeContent: { backgroundColor: 'hsl(var(--sidebar-background) / 1)' },
   /** A list's own column. */
   listStack: { display: 'flex', flexDirection: 'column' },
   /** The right-aligned row that hosts the list's header action. */
@@ -141,7 +172,7 @@ const updatedStyles = stylex.create({
     paddingBlock: 'calc(var(--spacing) * 2)',
     textAlign: 'left',
     fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+    lineHeight: 'var(--text-xs--line-height)',
     color: {
       default: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
       '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover-foreground) / 1)' },
@@ -151,9 +182,9 @@ const updatedStyles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover) / 1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
   },
   renameInput: {
     minWidth: 0,
@@ -167,13 +198,13 @@ const updatedStyles = stylex.create({
     outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
     outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
     borderWidth: '1px',
-    borderStyle: 'var(--tw-border-style)',
+    borderStyle: 'solid',
     borderColor: 'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 40%, transparent)',
     borderRadius: 'var(--radius-sm)',
     paddingInline: 'calc(var(--spacing) * 1)',
     marginInline: 'calc(var(--spacing) * -1)',
     fontSize: 'var(--text-sm)',
-    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    lineHeight: 'var(--text-sm--line-height)',
     fontWeight: 'var(--font-weight-normal)',
   },
   title: {
@@ -198,7 +229,7 @@ const updatedStyles = stylex.create({
     paddingBlock: 'calc(var(--spacing) * 1)',
     textAlign: 'left',
     borderWidth: '1px',
-    borderStyle: 'var(--tw-border-style)',
+    borderStyle: 'solid',
     borderColor: 'transparent',
     backgroundColor: 'transparent',
   },
@@ -229,7 +260,7 @@ const updatedStyles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontSize: 'var(--text-sm)',
-    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    lineHeight: 'var(--text-sm--line-height)',
   },
   editingAnchorTitle: { position: 'relative', zIndex: 20 },
   restingMetrics: {
@@ -597,7 +628,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
         <SidebarListSkeleton
           className={className}
           showHeaderIcon={false}
-          sectionClassName="mb-4 last:mb-0"
+          sectionClassName={stylex.props(updatedStyles.skeletonSection).className}
         />
       </div>
     );
@@ -638,7 +669,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
           return (
             <div
               key={bucket.key}
-              className={cn(
+              className={clsx(
                 'group',
                 stylex.props(
                   updatedStyles.bucket,
@@ -897,7 +928,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
       data-menu-open={rowMenuOpen ? '' : undefined}
-      className={cn(
+      className={clsx(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's
@@ -907,17 +938,10 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           updatedStyles.row,
           !showSelectedState && onSelect && !isMobile && updatedStyles.rowHover,
           showSelectedState && updatedStyles.rowSelected,
-          onSelect ? updatedStyles.pointer : updatedStyles.defaultCursor
-        ).className,
-        !showSelectedState &&
-          onSelect &&
-          !isMobile &&
-          'data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
-        // Keyboard-only focus ring — see TaskList: plain :focus-within also
-        // matches after mouse clicks via the overlay <a> and left a permanent
-        // inset ring on the selected row.
-        useAnchor &&
-          'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40'
+          onSelect ? updatedStyles.pointer : updatedStyles.defaultCursor,
+          !showSelectedState && onSelect && !isMobile && updatedStyles.menuOpen,
+          useAnchor && updatedStyles.anchorFocus
+        ).className
       )}
       onClick={
         useAnchor
@@ -953,8 +977,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         <SessionRowLeadingSlot
           showMenuButton={hasMenuActions}
           menuLabel={contextMenuLabels.moreActions}
-          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
-          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+          fadeClassName={stylex.props(updatedStyles.fade).className}
+          revealClassName={stylex.props(updatedStyles.reveal).className}
         />
         {showPinnedIcon && item.isPinned ? (
           <Pin aria-hidden="true" {...stylex.props(updatedStyles.pin)} />
@@ -982,7 +1006,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           isWaitingPermission={item.isWaitingPermission}
           isWorking={item.isWorking}
           hasUnreadMessages={item.hasUnreadMessages}
-          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
+          fadeClassName={stylex.props(updatedStyles.fade).className}
           restIcon={
             showPr || showMergeablePill || isMobile || item.sharing?.visibility === 'private' ? (
               <span
@@ -1006,7 +1030,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 label={archiveTooltipLabel}
                 confirmLabel={archiveConfirmLabel}
                 onConfirm={() => onArchive?.(item.id)}
-                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                revealClassName={stylex.props(updatedStyles.reveal).className}
               />
             ) : undefined
           }
@@ -1024,8 +1048,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     return (
       <SwipeActionRow
         enabled={isMobile}
-        className="rounded-md"
-        contentClassName="bg-sidebar"
+        rootXstyle={updatedStyles.swipeRoot}
+        contentXstyle={updatedStyles.swipeContent}
         actions={[
           {
             key: 'archive',
@@ -1033,7 +1057,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             ariaLabel: archiveTooltipLabel,
             icon: <Archive className={stylex.props(updatedStyles.glyph16).className} />,
             hideLabel: item.kind === 'chat',
-            className: stylex.props(updatedStyles.archiveAction).className,
+            xstyle: updatedStyles.archiveAction,
             onClick: () => onArchive?.(item.id),
           },
         ]}

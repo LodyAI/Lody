@@ -5,7 +5,6 @@ import type { ProjectMemberId, SessionPullRequestCiState } from '@lody/shared';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import type { SessionProjectMemberRow } from '@/lib/session-project-members';
-import { cn } from '@/lib/utils';
 import { PopoverActionChip } from './info-chip';
 import { PR_STATUS_META } from './pull-request-badge';
 
@@ -229,7 +228,7 @@ function MemberRow({
   const inPlace = row.access === 'additional' || row.access === 'link';
   const statusMeta = row.pr ? PR_STATUS_META[row.pr.status] : null;
   const ciTone = row.pr?.ciState ? CI_ICON_TONE[row.pr.ciState] : undefined;
-  const prIconProps = stylex.props(styles.prIcon, ciTone);
+  const prIconProps = stylex.props(styles.prIcon, ciTone || statusMeta?.iconXstyle);
   const ciLabel = getCiLabel(t, row.pr?.ciState);
   const identity = row.repoFullName ?? row.path;
   const inPlaceHint = inPlace
@@ -303,13 +302,7 @@ function MemberRow({
             onOpenPullRequest(row.pr!.url);
           }}
         >
-          <statusMeta.icon
-            aria-hidden="true"
-            className={cn(
-              prIconProps.className,
-              ciTone ? undefined : statusMeta.iconColorClassName
-            )}
-          />
+          <statusMeta.icon aria-hidden="true" {...prIconProps} />
           <span>#{row.pr.number}</span>
         </button>
       ) : null}

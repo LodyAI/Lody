@@ -1,5 +1,8 @@
 import { useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import * as stylex from '@stylexjs/stylex';
+import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
+import { useResolvedTheme } from '@/theme-provider';
 import { ChevronLeft } from 'lucide-react';
 import {
   MobileProjectFileBrowser,
@@ -113,16 +116,22 @@ function FileBrowserHarness({
      preview in place. */
   onOpenFile,
   openedPath,
+  height,
 }: {
   provider: FileWorkspaceProvider | null;
   message?: string;
   projectName: string;
   onOpenFile?: (path: string) => void;
   openedPath?: string | null;
+  height?: number;
 }) {
   const ref = useRef<MobileProjectFileBrowserHandle>(null);
   return (
-    <div className="relative mx-auto h-[680px] w-[390px] overflow-hidden border border-border bg-background [--mobile-tabbar-height:0px]">
+    <div
+      data-file-browser-harness
+      style={height === undefined ? undefined : { height }}
+      className="relative mx-auto h-[680px] w-[390px] overflow-hidden border border-border bg-background [--mobile-tabbar-height:0px]"
+    >
       {/* Stand-in for the production project header. The breadcrumb lives
           inside the browser body, so the harness header is just back +
           project name. */}
@@ -210,4 +219,59 @@ export const Unavailable: Story = {
   render: (args) => (
     <FileBrowserHarness provider={args.provider} message={args.message} projectName="lody" />
   ),
+};
+
+export const HtmlSourceHeightBoundary: Story = {
+  args: { provider: createFakeFileWorkspaceProvider({ files: repoFiles, snapshots }) },
+  render: (args) => <FileBrowserHarness provider={args.provider} projectName="lody" height={220} />,
+};
+
+const monacoCallerStyles = stylex.create({
+  frame: { width: 320, height: 320 },
+  height: { height: 128 },
+  width: { width: 180 },
+  overflow: { overflow: 'visible' },
+  minHeight: { minHeight: 480 },
+});
+
+function MonacoCallerFixture({
+  contract = 'default',
+}: {
+  contract?: 'default' | 'height' | 'width' | 'overflow' | 'minHeight';
+}) {
+  const theme = useResolvedTheme();
+  return (
+    <div data-monaco-caller-fixture={contract} {...stylex.props(monacoCallerStyles.frame)}>
+      <SessionMonacoTextViewer
+        text={'const answer = 42;\n// actual Monaco layout caller contract\n'}
+        language="typescript"
+        resolvedTheme={theme}
+        className={
+          contract === 'default' ? undefined : stylex.props(monacoCallerStyles[contract]).className
+        }
+      />
+    </div>
+  );
+}
+
+export const MonacoDefaultCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture />,
+};
+export const MonacoHeightCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture contract="height" />,
+};
+export const MonacoWidthCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture contract="width" />,
+};
+export const MonacoOverflowCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture contract="overflow" />,
+};
+
+export const MonacoMinHeightCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture contract="minHeight" />,
 };

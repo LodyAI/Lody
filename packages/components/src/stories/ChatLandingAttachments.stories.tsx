@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type ReactNode } from 'react';
 import { ArrowUp, Bot, Github } from 'lucide-react';
@@ -20,6 +21,24 @@ import {
 } from '@/components/mobile/mobile-inline-picker';
 import { Button } from '@lody/ui/button';
 import { registerBuiltInCommands } from '@/lib/commands';
+const storyLayout = stylex.create({
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  row: {
+    display: 'flex',
+    'min-height': '100vh',
+    'justify-content': 'center',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 40%, transparent)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+  },
+});
 
 // So the composer's ⌘L focus hint has a command binding to read.
 registerBuiltInCommands();
@@ -114,7 +133,7 @@ function SelectorPill({ icon: Icon, label }: { icon: typeof Bot; label: string }
       className="inline-flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-card px-3 text-sm"
     >
       <Icon className="h-4 w-4 opacity-70" />
-      <span className="truncate">{label}</span>
+      <span {...stylex.props(storyLayout.label)}>{label}</span>
     </button>
   );
 }
@@ -127,7 +146,7 @@ function DesktopLandingDemo() {
   const [prompt, setPrompt] = useState('Review the attached spec and screenshots.');
   return (
     <StoryPlatform>
-      <div className="min-h-screen bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <ChatLandingView
           tone="light"
           isMobile={false}
@@ -213,7 +232,7 @@ function MobileNewChatDemo() {
     // Phone-width frame so the sheet reads like the real mobile drawer even on
     // a wide Storybook canvas. Mobile card sizing still keys off window width.
     <StoryPlatform>
-      <div className="flex min-h-screen justify-center bg-muted/40 py-6">
+      <div {...stylex.props(storyLayout.row)}>
         <div className="h-[720px] w-[390px] overflow-hidden rounded-3xl border bg-background shadow-xl">
           <MobileNewChatSheetContent {...contentProps} />
         </div>

@@ -1,18 +1,27 @@
 import * as React from 'react';
-import { cva, type VariantProps } from 'class-variance-authority';
 import * as stylex from '@stylexjs/stylex';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 
 const styles = stylex.create({
+  glyphs: {
+    ':is(*) > svg': {
+      width: 'calc(var(--spacing) * 4)',
+      height: 'calc(var(--spacing) * 4)',
+      translate: '0 calc(var(--spacing) * .5)',
+      color: 'currentColor',
+    },
+  },
   root: {
+    gridTemplateColumns: { default: '0 1fr', ':has(> svg)': '1rem 1fr' },
+    columnGap: { default: null, ':has(> svg)': 'calc(var(--spacing) * 2.5)' },
     position: 'relative',
     display: 'grid',
     width: '100%',
     alignItems: 'flex-start',
     rowGap: 'calc(var(--spacing) * 0.5)',
     borderRadius: 'var(--radius)',
-    borderStyle: 'var(--tw-border-style)',
+    borderStyle: 'solid',
     borderWidth: 1,
     paddingInline: 'calc(var(--spacing) * 3)',
     paddingBlock: 'calc(var(--spacing) * 2.5)',
@@ -67,70 +76,79 @@ const styles = stylex.create({
     color: 'hsl(var(--status-info))',
   },
   title: {
+    fontWeight: 'var(--font-weight-medium)',
+    lineHeight: 1,
+    letterSpacing: 'var(--tracking-tight)',
     gridColumnStart: '2',
     minHeight: 'calc(var(--spacing) * 4)',
   },
   description: {
     gridColumnStart: '2',
     fontSize: 'var(--text-sm)',
-    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    lineHeight: 'var(--crh-leading, var(--text-sm--line-height))',
     color: 'hsl(var(--muted-foreground))',
   },
 });
 
-const alertVariants = cva(stylex.props(styles.root).className, {
-  variants: {
-    variant: {
-      default: stylex.props(styles.default).className,
-      destructive: stylex.props(styles.destructive).className,
-      warning: stylex.props(styles.warning).className,
-      info: stylex.props(styles.info).className,
-    },
-  },
-  defaultVariants: { variant: 'default' },
-});
+type AlertVariant = 'default' | 'destructive' | 'warning' | 'info';
+const variants = {
+  default: styles.default,
+  destructive: styles.destructive,
+  warning: styles.warning,
+  info: styles.info,
+};
 
 function Alert({
   className,
-  variant,
+  variant = 'default',
+  xstyle,
+  style,
   ...props
-}: React.ComponentProps<'div'> & VariantProps<typeof alertVariants>) {
+}: React.ComponentProps<'div'> & { variant?: AlertVariant | null; xstyle?: stylex.StyleXStyles }) {
+  const sx = stylex.props(styles.root, styles.glyphs, variant && variants[variant], xstyle);
   return (
     <div
       data-slot="alert"
       role="alert"
-      className={cn(
-        alertVariants({ variant }),
-        'grid-cols-[0_1fr] has-[>svg]:grid-cols-[1rem_1fr] has-[>svg]:gap-x-2.5 [&>svg]:size-4 [&>svg]:translate-y-0.5 [&>svg]:text-current',
-        className
-      )}
+      {...sx}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
   );
 }
-
-function AlertTitle({ className, ...props }: React.ComponentProps<'div'>) {
+function AlertTitle({
+  className,
+  xstyle,
+  style,
+  ...props
+}: React.ComponentProps<'div'> & { xstyle?: stylex.StyleXStyles }) {
+  const sx = stylex.props(styles.title, xstyle);
   return (
     <div
       data-slot="alert-title"
-      className={cn(
-        stylex.props(styles.title).className,
-        'font-medium leading-none tracking-tight',
-        className
-      )}
+      {...sx}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
   );
 }
-
-function AlertDescription({ className, ...props }: React.ComponentProps<'div'>) {
+function AlertDescription({
+  className,
+  xstyle,
+  style,
+  ...props
+}: React.ComponentProps<'div'> & { xstyle?: stylex.StyleXStyles }) {
+  const sx = stylex.props(styles.description, xstyle);
   return (
     <div
       data-slot="alert-description"
-      className={cn(stylex.props(styles.description).className, className)}
+      {...sx}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
   );
 }
-
 export { Alert, AlertTitle, AlertDescription };

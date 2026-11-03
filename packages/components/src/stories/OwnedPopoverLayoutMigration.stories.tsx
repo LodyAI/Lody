@@ -36,7 +36,7 @@ function LayoutFixture({
   const [open, setOpen] = useState(true);
   const [value, setValue] = useState('Preserved input');
   const [applied, setApplied] = useState(0);
-  const [event, setEvent] = useState('none');
+  const [eventStatus, setEvent] = useState('none');
   const [positioner, setPositioner] = useState<HTMLDivElement | null>(null);
   return (
     <div
@@ -45,7 +45,7 @@ function LayoutFixture({
       data-layout-open={open}
       data-layout-value={value}
       data-layout-applied={applied}
-      data-layout-event={event}
+      data-layout-event={eventStatus}
       data-layout-contained={contained}
       data-layout-ref-ready={Boolean(positioner?.querySelector('[role=dialog]'))}
       {...stylex.props(styles.frame)}

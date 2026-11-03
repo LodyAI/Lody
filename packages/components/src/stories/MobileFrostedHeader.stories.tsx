@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { CSSProperties } from 'react';
 import { ChevronLeft, Ellipsis, Github } from 'lucide-react';
@@ -5,6 +6,42 @@ import { ChevronLeft, Ellipsis, Github } from 'lucide-react';
 import { ChatsIcon } from '@/components/icons/chats-icon';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { cn } from '@/lib/utils';
+const storyLayout = stylex.create({
+  frame: {
+    position: 'relative',
+    height: '100dvh',
+    width: '100%',
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  frame2: {
+    height: '100%',
+    'overflow-y': 'auto',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-bottom': 'calc(var(--spacing) * 8)',
+  },
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    width: '100%',
+    'max-width': '800px',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  row: {
+    display: 'flex',
+    height: '100dvh',
+    width: '100%',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+});
 
 /**
  * The mobile session page's floating frosted header, exercised in isolation
@@ -56,17 +93,17 @@ function Prototype() {
   const headerHeight = '3rem';
   return (
     <div
-      className="relative h-dvh w-full overflow-hidden bg-background text-foreground"
+      {...stylex.props(storyLayout.frame)}
       style={{ '--conversation-top-inset': headerHeight } as CSSProperties}
     >
       {/* Scrollable conversation — extends under the header with a top inset so
           the first message clears it but later content scrolls beneath. */}
       <div
         id="proto-scroll"
-        className="h-full overflow-y-auto px-3 pb-8"
+        {...stylex.props(storyLayout.frame2)}
         style={{ paddingTop: 'calc(var(--conversation-top-inset, 0px) + 0.5rem)' }}
       >
-        <div className="mx-auto flex w-full max-w-[800px] flex-col gap-3">
+        <div {...stylex.props(storyLayout.stack)}>
           {MESSAGES.map((m, i) => (
             <Bubble key={i} from={m.from} text={m.text} code={m.code} />
           ))}
@@ -90,7 +127,7 @@ function Prototype() {
           </span>
           <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
             <Github className="h-3 w-3 shrink-0" />
-            <span className="truncate">loro-dev/loro</span>
+            <span {...stylex.props(storyLayout.label)}>loro-dev/loro</span>
           </span>
         </div>
         <GlassIconButton label="Tabs">
@@ -109,10 +146,7 @@ function Prototype() {
    the frame used to tune the glass recipe against the reference image. */
 function GlassButtonTarget() {
   return (
-    <div
-      className="flex h-dvh w-full items-center justify-center"
-      style={{ background: '#0a0a0b' }}
-    >
+    <div {...stylex.props(storyLayout.row)} style={{ background: '#0a0a0b' }}>
       <GlassIconButton label="Back" discSize={96} className="h-28 w-28">
         <ChevronLeft className="h-10 w-10" strokeWidth={2} />
       </GlassIconButton>

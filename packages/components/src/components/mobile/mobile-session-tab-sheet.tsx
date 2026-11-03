@@ -145,6 +145,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  sheet: { height: 'auto', maxHeight: '85dvh' },
   /** A row's leading slot: one node, always the same width. */
   leadingSlot: {
     display: 'flex',
@@ -368,7 +369,7 @@ export function MobileSessionTabSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent className="h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60">
+      <DrawerContent xstyle={styles.sheet}>
         <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{title}</DrawerTitle>
         <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>{title}</DrawerDescription>
         <div {...stylex.props(sheetSurface.body)}>

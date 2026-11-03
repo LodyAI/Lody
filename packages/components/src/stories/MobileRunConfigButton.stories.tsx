@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 
@@ -8,6 +9,35 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'flex-start',
+    'justify-content': 'center',
+    'background-color': 'var(--color-stone-950)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  stack2: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  caption: {
+    'font-size': '11px',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+});
 
 const codexIcon = <AgentIcon cliType="builtin" agentType="codex" />;
 const claudeIcon = <AgentIcon cliType="builtin" agentType="claude" />;
@@ -169,16 +199,16 @@ const CASES: Case[] = [
 
 function AllStates() {
   return (
-    <div className="flex min-h-dvh items-start justify-center bg-stone-950 p-6">
+    <div {...stylex.props(storyLayout.row)}>
       <div className="w-[360px] rounded-2xl bg-background p-4 shadow-2xl">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Run config button — face states
         </div>
-        <div className="flex flex-col gap-3">
+        <div {...stylex.props(storyLayout.stack)}>
           {CASES.map((c) => (
-            <div key={c.label} className="flex flex-col gap-1.5">
-              <div className="text-[11px] text-muted-foreground">{c.label}</div>
-              <div className="flex items-center gap-2">
+            <div key={c.label} {...stylex.props(storyLayout.stack2)}>
+              <div {...stylex.props(storyLayout.caption)}>{c.label}</div>
+              <div {...stylex.props(storyLayout.row2)}>
                 <MobileRunConfigButton
                   agentIcon={c.agentIcon}
                   modelOptions={c.modelOptions ?? [{ value: c.model, label: c.model }]}

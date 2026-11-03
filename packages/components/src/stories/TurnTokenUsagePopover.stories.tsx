@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 /**
  * The turn details popover (ⓘ in a finished assistant turn's footer) with the
  * per-turn token section, including the cost-estimate row: compact
@@ -7,6 +8,13 @@ import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
+const storyLayout = stylex.create({
+  frame: {
+    height: '520px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const meta = {
   title: 'Sessions/TurnTokenUsagePopover',
@@ -49,7 +57,7 @@ const items: ChatStreamItem[] = [
 ];
 
 const render = () => (
-  <div className="h-[520px] w-full bg-background">
+  <div {...stylex.props(storyLayout.frame)}>
     <SessionChatStreamView
       items={items}
       sessionId={sessionId}

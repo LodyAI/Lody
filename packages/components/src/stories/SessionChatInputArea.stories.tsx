@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useMemo, useState } from 'react';
 import {
   createMemoryHistory,
@@ -36,6 +37,18 @@ import {
   SessionChatInputArea,
   type SessionChatInputAreaProps,
 } from '@/components/sessions/session-chat-input-area';
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 6)',
+    'padding-block': 'calc(var(--spacing) * 10)',
+  },
+  frame2: {
+    height: '20rem',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+  },
+});
 
 const STORY_WORKSPACE_ID = 'workspace-storybook' as WorkspaceId;
 const STORY_MACHINE_ID = 'machine-storybook' as MachineId;
@@ -123,9 +136,9 @@ function StoryShell({
   return (
     <PlatformContext.Provider value={storyPlatform}>
       <Provider store={store}>
-        <div className="min-h-screen bg-background px-6 py-10">
+        <div {...stylex.props(storyLayout.frame)}>
           <div className="mx-auto max-w-4xl overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-xs">
-            <div className="h-[20rem] bg-muted/20" />
+            <div {...stylex.props(storyLayout.frame2)} />
             <SessionChatInputArea
               session={session}
               claimNavigationFocus={claimNavigationFocus}

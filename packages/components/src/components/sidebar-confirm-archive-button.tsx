@@ -24,8 +24,6 @@ import {
 
 const CONFIRM_RESET_DELAY_MS = 3500;
 
-/** The public button retains its dark ink and border compatibility classes. */
-const DARK_CLASS = 'dark:border-destructive/30 dark:text-destructive-foreground';
 const DARK_SCOPE =
   ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
@@ -54,13 +52,17 @@ const styles = stylex.create({
     borderColor: {
       default: 'hsl(var(--destructive) / 0.2)',
       ':hover': 'hsl(var(--destructive) / 0.25)',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--destructive) / 1) 30%, transparent)',
     },
     backgroundColor: themeColors.sidebar,
     paddingInline: themeSpace[2],
     fontSize: '11px',
     fontWeight: themeFontWeight.medium,
     lineHeight: 1,
-    color: themeColors.destructive,
+    color: {
+      default: themeColors.destructive,
+      [DARK_SCOPE]: 'hsl(var(--destructive-foreground) / 1)',
+    },
     boxShadow: themeShadow.xs,
     transitionProperty: 'none',
   },
@@ -71,6 +73,7 @@ const styles = stylex.create({
     color: {
       default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
       ':hover': themeColors.sidebarForeground,
+      [DARK_SCOPE]: 'hsl(var(--destructive-foreground) / 1)',
     },
     transitionProperty: 'opacity, color, background-color, border-color, width',
     transitionDuration: themeDuration[100],
@@ -109,6 +112,7 @@ type SidebarConfirmArchiveButtonProps = {
   confirmLabel: string;
   className?: string;
   iconClassName?: string;
+  xstyle?: stylex.StyleXStyles;
   onConfirm: () => void;
 } & Omit<ComponentPropsWithoutRef<'button'>, 'type' | 'onConfirm'>;
 
@@ -121,6 +125,7 @@ export const SidebarConfirmArchiveButton = forwardRef<
     confirmLabel,
     className,
     iconClassName,
+    xstyle,
     onConfirm,
     onBlur,
     onClick,
@@ -197,7 +202,11 @@ export const SidebarConfirmArchiveButton = forwardRef<
     }
   };
 
-  const buttonStyle = stylex.props(styles.button, isConfirming ? styles.confirming : styles.idle);
+  const buttonStyle = stylex.props(
+    styles.button,
+    isConfirming ? styles.confirming : styles.idle,
+    xstyle
+  );
   const fillStyle = stylex.props(styles.fill);
   const glyphStyle = stylex.props(styles.glyph);
 
@@ -207,7 +216,7 @@ export const SidebarConfirmArchiveButton = forwardRef<
       ref={ref}
       type="button"
       {...buttonStyle}
-      className={clsx(buttonStyle.className, DARK_CLASS, className)}
+      className={clsx(buttonStyle.className, className)}
       aria-label={isConfirming ? `Confirm ${label}` : label}
       onClick={handleClick}
       onBlur={handleBlur}

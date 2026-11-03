@@ -1,40 +1,23 @@
-/**
- * Shared max content width for the session conversation column.
- *
- * Consumed via `ConversationColumn`
- * (`@/components/shared/conversation-column`) — the message thread rows, the
- * child-tab suggestions, pinned-message content, context strip, composer
- * content, floating permission surface, and notification prompt all render
- * inside it so they read as ONE centered column, declared once here.
- *
- * Why this is a repeated inner wrapper and NOT a single page-level parent:
- * the message list is a virtua `VList` whose scroller must span the full pane
- * (scrollbar at the pane edge, wheel works over the side margins), and the
- * composer/strip band paints a full-bleed background. Backgrounds + scroll
- * containers stay full-width; each region mounts one `ConversationColumn`.
- *
- * Horizontal gutter MUST live on `ConversationColumn` (not on the VList):
- * Virtua positions rows with `position:absolute; left:0`, which is relative to
- * the padding edge and therefore ignores the scroller's horizontal padding.
- * Putting `px-*` only on the VList made agent/user avatars flush to the screen
- * edge while the header and composer (normal flow) stayed inset.
- *
- * Do not put `ml-*` / left margin on `ConversationColumn` instances: it
- * overrides the auto left margin from `mx-auto` and pins that row to the
- * pane edge. Indent with padding or an inner wrapper instead.
- */
-/** Horizontal inset shared by stream rows, context strip, composer. */
-export const CONVERSATION_GUTTER_X_CLASS = 'px-[14px] sm:px-[18px]';
-
-// 768px of content (48rem), plus the gutter on each side: the column caps the
-// CONTENT box, so the max width adds the per-breakpoint gutter (14px / 18px).
-// Wide enough for code blocks, narrow enough to stay readable.
-export const CONVERSATION_CONTENT_WIDTH_CLASS = `mx-auto w-full max-w-[calc(48rem+28px)] sm:max-w-[calc(48rem+36px)] ${CONVERSATION_GUTTER_X_CLASS}`;
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 
 /**
- * Full-width variant (`conversationWideModeAtom`): the cap on the CONTENT box
- * drops and the column spans the pane. `ConversationColumn` owns its responsive
- * side padding, reserving room for the outline rail on desktop. `mx-auto`
- * stays so a re-capped nested column (none today) would still centre.
+ * Shared geometry for the conversation's repeated inner columns. The virtual
+ * scroller and full-bleed bands stay full-width; each region centers its content
+ * with these styles so avatars, prose, context and composer share one edge.
  */
-export const CONVERSATION_CONTENT_WIDTH_WIDE_CLASS = 'mx-auto w-full';
+export const conversationColumnStyles = stylex.create({
+  base: { marginInline: 'auto', width: '100%' },
+  capped: {
+    maxWidth: {
+      default: 'calc(48rem + 28px)',
+      '@media (min-width: 640px)': 'calc(48rem + 36px)',
+    },
+    paddingInline: { default: '14px', '@media (min-width: 640px)': '18px' },
+  },
+  wide: { paddingInline: '14px' },
+  wideDesktop: {
+    // The outline rail's inset remains owned by the column on desktop.
+    '@media (min-width: 640px)': { paddingInline: `calc(${space[8]} * 2)` },
+  },
+});

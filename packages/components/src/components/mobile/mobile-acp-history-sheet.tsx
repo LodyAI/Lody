@@ -66,6 +66,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  sheet: { height: '88dvh', maxHeight: '88dvh' },
   pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
   /** The title, with the provider's mark in front of it. */
   titleRow: {
@@ -465,7 +466,7 @@ export function MobileAcpHistorySheet({
   return (
     <>
       <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-        <DrawerContent className="mobile-acp-history-sheet h-[88dvh]! max-h-[88dvh]! rounded-t-2xl border-border/60">
+        <DrawerContent className="mobile-acp-history-sheet" xstyle={styles.sheet}>
           <div {...stylex.props(sheetSurface.column)}>
             {/* Header: provider chip centered, close on right */}
             <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>

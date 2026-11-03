@@ -2,19 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FolderOpen, FolderPlus, Github, MessageCircle } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Tabs } from '@lody/ui/tabs';
-import { disclosure } from '@lody/ui/disclosure/disclosure.tokens.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
-import {
-  contextWidthClass,
-  contextRowClass,
-  contextRemainderClass,
-  contextHeightClass,
-  contextMaximumClass,
-  contextCornerClass,
-  contextMutedClass,
-  acpMediumWeightClass,
-} from '@/style/legacy-defaults.stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -47,20 +35,58 @@ interface ContextSwitchProps {
   localDisabled?: DisabledTabOverlay;
   /** When set, the github tab is disabled */
   githubDisabled?: DisabledTabOverlay;
-  className?: string;
-  /** Override the per-trigger justify class. Defaults to `justify-center`
-     so icon+label sit as a tight centered group inside each equal-width pill. */
-  triggerJustifyClassName?: string;
+  xstyle?: stylex.StyleXStyles;
+  triggerXstyle?: stylex.StyleXStyles;
 }
 
 const styles = stylex.create({
-  tabTypography: {
-    [disclosure.tabPaddingX]: {
+  root: {
+    width: '100%',
+    maxWidth: { default: '20rem', '@media (width >= 40rem)': '24rem' },
+  },
+  list: {
+    display: 'flex',
+    width: '100%',
+    height: 'calc(var(--spacing) * 10)',
+    borderRadius: 'var(--radius-lg)',
+    padding: 'calc(var(--spacing) * 1)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+  },
+  listLight: {
+    backgroundColor: 'hsl(var(--muted) / 1)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 40%, transparent)',
+  },
+  listDark: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--card) / 1) 70%, transparent)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+  },
+  tab: {
+    flex: '1 1 0%',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: {
       default: 'calc(var(--spacing) * 2)',
       '@media (width >= 40rem)': 'calc(var(--spacing) * 3)',
     },
-    [disclosure.tabText]: 'var(--text-sm)',
-    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: themeFontWeight.medium,
+    justifyContent: 'center',
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      ':hover': 'hsl(var(--muted-foreground) / 1)',
+    },
+    transitionProperty: 'all',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  tabDark: {
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      ':hover': 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': { default: null, ':hover': 'hsl(var(--foreground) / 1)' },
+    },
   },
   disabledTab: {
     display: 'inline-flex',
@@ -162,43 +188,22 @@ export function ContextSwitch({
   chatLabel = 'Chat',
   localDisabled,
   githubDisabled,
-  className,
-  triggerJustifyClassName = 'justify-center',
+  xstyle,
+  triggerXstyle,
 }: ContextSwitchProps) {
   const isDark = tone === 'dark';
   const iconClassName = stylex.props(styles.icon).className;
   const overlayIconClassName = stylex.props(styles.overlayIcon).className;
 
-  // Padding and text size use the tab's existing tokens. The remaining
-  // physical/state classes preserve their precedence over the primitive.
-  const triggerClassName = cn(
-    stylex.props(styles.tabTypography).className,
-    contextRemainderClass,
-    `rounded-md py-1.5 ${acpMediumWeightClass} transition-all`,
-    triggerJustifyClassName,
-    isDark
-      ? 'data-[state=active]:bg-background/95 data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground hover:text-foreground'
-      : 'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground'
-  );
+  const triggerStyles = [styles.tab, isDark && styles.tabDark, triggerXstyle];
 
   return (
     <Tabs.Root
       value={value}
       onValueChange={(v) => onChange(v as SessionContextType)}
-      className={cn(contextWidthClass, contextMaximumClass, 'sm:max-w-sm', className)}
+      xstyle={[styles.root, xstyle]}
     >
-      <Tabs.List
-        className={cn(
-          contextRowClass,
-          contextHeightClass,
-          contextWidthClass,
-          contextCornerClass,
-          'p-1',
-          isDark
-            ? 'bg-card/70 border border-border/70'
-            : cn(contextMutedClass, 'border border-border/40')
-        )}
-      >
+      <Tabs.List xstyle={[styles.list, isDark ? styles.listDark : styles.listLight]}>
         {localDisabled ? (
           <DisabledTab
             icon={<FolderOpen className={iconClassName} />}
@@ -208,7 +213,7 @@ export function ContextSwitch({
             tone={tone}
           />
         ) : (
-          <Tabs.Tab value="local" className={triggerClassName}>
+          <Tabs.Tab value="local" xstyle={triggerStyles}>
             <TabFace icon={<FolderOpen className={iconClassName} />} label={localLabel} />
           </Tabs.Tab>
         )}
@@ -221,11 +226,11 @@ export function ContextSwitch({
             tone={tone}
           />
         ) : (
-          <Tabs.Tab value="github" className={triggerClassName}>
+          <Tabs.Tab value="github" xstyle={triggerStyles}>
             <TabFace icon={<Github className={iconClassName} />} label={githubLabel} />
           </Tabs.Tab>
         )}
-        <Tabs.Tab value="chat" className={triggerClassName}>
+        <Tabs.Tab value="chat" xstyle={triggerStyles}>
           <TabFace icon={<MessageCircle className={iconClassName} />} label={chatLabel} />
         </Tabs.Tab>
       </Tabs.List>

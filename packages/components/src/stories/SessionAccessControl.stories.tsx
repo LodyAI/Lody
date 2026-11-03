@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn, userEvent, within } from 'storybook/test';
 import { Copy, Image } from 'lucide-react';
@@ -6,6 +7,17 @@ import type { LocalProjectId, MachineId } from '@lody/shared';
 import { SessionAccessControl, type SessionShareEditorContext } from '@/components/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 import { ShareEditorStory } from './ShareEditorStory';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'flex-start',
+    'justify-content': 'flex-end',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 10)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const machineId = 'machine-access-story' as MachineId;
 const localProjectId = 'project-access-story' as LocalProjectId;
@@ -19,7 +31,7 @@ const meta = {
   decorators: [
     (Story) => (
       <Tooltip.Provider>
-        <div className="flex min-h-dvh items-start justify-end bg-background p-10 text-foreground">
+        <div {...stylex.props(storyLayout.row)}>
           <Story />
         </div>
       </Tooltip.Provider>

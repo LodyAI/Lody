@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { useParams, useRouter, useSearch } from '@tanstack/react-router';
 import type { SessionId } from '@lody/shared';
@@ -10,6 +11,23 @@ import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { mobileWorkspaceBaseContextAtom, type MobileWorkspaceBaseContext } from '@/atoms';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useTranslation } from 'react-i18next';
+
+const styles = stylex.create({
+  sessionDrawer: {
+    inset: 0,
+    borderLeftWidth: 0,
+    borderRightWidth: 0,
+    borderTopWidth: 0,
+    borderBottomWidth: 0,
+    borderRadius: 0,
+    '@supports (left: env(safe-area-inset-left))': {
+      '--k-safe-area-left': 'env(safe-area-inset-left)',
+      '--k-safe-area-right': 'env(safe-area-inset-right)',
+      '--k-safe-area-top': 'env(safe-area-inset-top)',
+      '--k-safe-area-bottom': 'env(safe-area-inset-bottom)',
+    },
+  },
+});
 
 const CHAT_ROUTE_ID = '/$workspaceName/_auth/chat';
 const SESSION_ROUTE_ID = '/$workspaceName/_auth/sessions/$sessionId';
@@ -156,11 +174,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
            already lifts itself with `mb-[var(--native-keyboard-height)]`; adding
            the same offset on this portal'd drawer would stack both offsets and
            push the composer up by roughly two keyboard heights. */}
-        <DrawerContent
-          width="full"
-          className="safe-areas inset-0 border-0 border-l-0! rounded-none"
-          data-sidebar-swipe-open-disabled
-        >
+        <DrawerContent width="full" xstyle={styles.sessionDrawer} data-sidebar-swipe-open-disabled>
           <DrawerTitle visuallyHidden>
             {t('sessions.prTab.conversation', 'Conversation')}
           </DrawerTitle>

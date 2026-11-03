@@ -45,7 +45,7 @@ import { isIOSRuntimeEnvironment } from '@/lib/native-platform';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getDownloadPageUrl } from '@/lib/lody-urls';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { withClassName } from '@/lib/stylex';
 import { usePullToRefresh } from '@/hooks/use-pull-to-refresh';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
@@ -113,6 +113,26 @@ const DARK_WHITE_14 = {
 } as const;
 
 const styles = stylex.create({
+  archivedIcon: {
+    color: {
+      default: 'hsl(var(--primary))',
+      ':is(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
+  },
+  helpTitle: {
+    fontSize: 'var(--text-base)',
+    lineHeight: 'var(--text-base--line-height)',
+    fontWeight: 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground))',
+  },
+  helpDescription: {
+    marginTop: 'calc(var(--spacing)*2)',
+    maxWidth: 'var(--container-sm)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--leading-relaxed)',
+    color: 'hsl(var(--muted-foreground))',
+  },
   /* The Material-icon wrapper: a sized box the icon fills. */
   reactIconGlyph: { width: '100%', height: '100%' },
   workspacePill: { width: themeSpace[9], height: themeSpace[9], justifyContent: 'center', gap: 0 },
@@ -1241,7 +1261,7 @@ function MobileReactIcon({
      `text-[0.72rem]` for the label, so 1em collapsed Material icons to ~12px. */
   return (
     <span
-      className={cn(stylex.props(styles.reactIcon).className, className)}
+      className={clsx(stylex.props(styles.reactIcon).className, className)}
       aria-hidden={ariaHidden}
     >
       <Icon {...stylex.props(styles.reactIconGlyph)} />
@@ -1831,8 +1851,8 @@ function PrivateResourceHelpSheet({
           <span {...stylex.props(styles.helpIcon)}>
             <LockKeyhole className={stylex.props(styles.icon5).className} aria-hidden="true" />
           </span>
-          <DrawerTitle className="text-base font-semibold text-foreground">{title}</DrawerTitle>
-          <DrawerDescription className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+          <DrawerTitle xstyle={styles.helpTitle}>{title}</DrawerTitle>
+          <DrawerDescription xstyle={styles.helpDescription}>
             {labels.privateHelpDescription ??
               'Private machines, local projects, and their conversations are hidden from teammates. Share a machine in device settings or a project in project settings.'}
           </DrawerDescription>
@@ -2663,7 +2683,7 @@ export function MobileHomeScreen({
                 <GlassIconButton
                   label={labels.archiveToggleLabel ?? '归档'}
                   onClick={onShowArchivedToggle}
-                  className={cn(showArchived && 'text-primary')}
+                  xstyle={showArchived && styles.archivedIcon}
                 >
                   <Archive
                     className={stylex.props(styles.icon5).className}

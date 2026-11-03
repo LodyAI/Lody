@@ -68,6 +68,7 @@ const styles = stylex.create({
     color: themeColors.mutedForeground,
   },
   chevron: {
+    rotate: { default: null, [stylex.when.ancestor(':is(.group)[data-panel-open]')]: '90deg' },
     width: themeSpace[4],
     height: themeSpace[4],
     transitionProperty: 'transform, translate, scale, rotate',
@@ -81,6 +82,8 @@ const styles = stylex.create({
     paddingTop: themeSpace[2],
   },
   entry: {
+    marginBlockStart: 0,
+    marginBlockEnd: { default: themeSpace[1], ':last-child': 0 },
     display: 'flex',
     alignItems: 'flex-start',
     gap: themeSpace[2],
@@ -205,17 +208,14 @@ export const SessionPlanBar = ({
             <span {...stylex.props(styles.count)}>
               {completedCount}/{totalCount}
             </span>
-            <ChevronRight
-              {...chevronProps}
-              className={clsx(chevronProps.className, 'group-data-[panel-open]:rotate-90')}
-            />
+            <ChevronRight {...chevronProps} />
           </div>
         </Collapsible.Trigger>
         <Collapsible.Panel {...stylex.props(styles.panelSpacing)}>
           {/* The rule and the space above the list ride on a child: the panel's
               own height is what the reveal animates, and Base UI measures it
               with `scrollHeight`, which counts padding. */}
-          <ul {...listProps} className={clsx(listProps.className, 'space-y-1')}>
+          <ul {...listProps}>
             {safeEntries.map((entry, index) => (
               <li key={`${index}-${entry.content}`} {...stylex.props(styles.entry)}>
                 <PlanStatusIcon status={entry.status} className={entryIconOffsetClassName} />

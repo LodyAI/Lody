@@ -3,7 +3,6 @@ import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ExtraProps } from 'react-markdown';
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { cn } from '@/lib/utils';
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { text as textScale } from '@lody/ui/tokens/scales.stylex';
@@ -50,7 +49,15 @@ const typography = stylex.create({
     backgroundColor: 'hsl(var(--background) / 0.9)',
     color: themeColors.mutedForeground,
     backdropFilter: 'blur(8px)',
-    opacity: { default: 0, ':focus-visible': 1, '@media (hover:none)': 1 },
+    opacity: {
+      default: 0,
+      ':focus-visible': 1,
+      '@media (hover:none)': 1,
+      '@media (hover: hover)': {
+        default: null,
+        [stylex.when.ancestor(':is([class~="group/table"]):hover')]: 1,
+      },
+    },
     transitionProperty: 'opacity',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
@@ -261,7 +268,7 @@ export function MarkdownTable({ node, children, ...props }: MarkdownTableProps) 
           data-break-anywhere-columns={columns.breakAnywhere.join(' ')}
           data-wide-columns={columns.wide.join(' ')}
           {...props}
-          className={cn(stylex.props(typography.table).className, props.className)}
+          className={clsx(stylex.props(typography.table).className, props.className)}
         >
           {columns.widthsEm.length > 0 ? (
             <colgroup>
@@ -280,11 +287,7 @@ export function MarkdownTable({ node, children, ...props }: MarkdownTableProps) 
         onClick={() => {
           void handleCopy();
         }}
-        className={clsx(
-          // Named outer groups can reveal this button without an owned StyleX marker.
-          'group-hover/table:opacity-100',
-          stylex.props(typography.copyButton, copied && typography.copyFeedback).className
-        )}
+        {...stylex.props(typography.copyButton, copied && typography.copyFeedback)}
       >
         {copied ? (
           <Check {...stylex.props(typography.glyph)} aria-hidden="true" />

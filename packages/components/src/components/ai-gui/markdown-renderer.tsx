@@ -54,7 +54,6 @@ import {
   normalizeTexMathDelimiters,
   remarkSingleDollarTextMath,
 } from '@/lib/markdown-single-dollar-math';
-import { cn } from '@/lib/utils';
 import { clsx } from 'clsx';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -188,6 +187,7 @@ const markdownStyles = stylex.create({
       ':is(li > p, table *, [data-streamdown] *, [data-tool-detail-sheet] *)': 0,
     },
   },
+  flushProse: { paddingInline: 0 },
   compactParagraph: { marginBottom: { default: space[1], ':last-child': 0 } },
   list: {
     marginBlock: { default: space[2], ':is(li > ul, li > ol)': space[1] },
@@ -304,7 +304,7 @@ const markdownStyles = stylex.create({
     fontSize: '0.92em',
     lineHeight: '1.55',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -319,9 +319,9 @@ const markdownStyles = stylex.create({
     verticalAlign: 'baseline',
     fontSize: '1em',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
   },
   /** The file link inside prose: a button that reads as the link it stands for. */
   agentFileLink: {
@@ -346,10 +346,34 @@ const markdownStyles = stylex.create({
     // with it, so the link stays as blind as it was.
     boxShadow: { default: 'none', ':focus-visible': 'none' },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
+  fileLinkInk: {
+    color: { default: 'hsl(200 72% 34%)', ':is(.dark, .dark *)': 'hsl(200 69% 70%)' },
+  },
+  fileLinkInTable: {
+    display: { default: 'inline-flex', ':is(th *, td *)': 'inline' },
+    textAlign: { default: null, ':is(th *, td *)': 'start' },
+  },
+  fileGlyphInTable: {
+    marginRight: { default: null, ':is(th *, td *)': 'calc(var(--spacing) * 1)' },
+    display: { default: null, ':is(th *, td *)': 'inline-block' },
+    verticalAlign: { default: null, ':is(th *, td *)': '-0.33em' },
+  },
+  fileTextInTable: {
+    overflow: { default: 'hidden', ':is(th *, td *)': 'visible' },
+    textOverflow: { default: 'ellipsis', ':is(th *, td *)': 'clip' },
+    whiteSpace: { default: 'nowrap', ':is(th *, td *)': 'inherit' },
+    lineBreak: { default: null, ':is(th *, td *)': 'anywhere' },
+  },
+  fileActionInTable: {
+    marginLeft: { default: null, ':is(th *, td *)': 'calc(var(--spacing) * 1)' },
+    display: { default: null, ':is(th *, td *)': 'inline-block' },
+    verticalAlign: { default: null, ':is(th *, td *)': '-0.1em' },
+  },
+  referenceLeading: { lineHeight: '1.55' },
   emGlyph: {
     width: '1.38em',
     height: '1.38em',
@@ -394,6 +418,12 @@ const markdownStyles = stylex.create({
   },
 });
 
+export interface MarkdownPartStyles {
+  fileLink?: stylex.StyleXStyles;
+  fileLinkText?: stylex.StyleXStyles;
+  referenceChip?: stylex.StyleXStyles;
+}
+
 const MarkdownListKindContext = createContext<'unordered' | 'ordered' | 'task'>('unordered');
 const MarkdownCompactContext = createContext(false);
 
@@ -420,24 +450,61 @@ function MarkdownListItem({
   );
 }
 
-const MARKDOWN_BASE_CLASSNAME =
-  'markdown-renderer ' +
-  // Color marks a link; the underline appears on hover only (a standing one
-  // made dense CJK prose read as crowded).
-  '[&_a]:no-underline [&_a]:underline-offset-2 [&_a]:decoration-current/60 [&_a:hover]:underline ' +
-  '[&_.katex-display]:!my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1 ' +
-  '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
-  '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
-  '[&_table]:!my-0 [&_table]:border-collapse ' +
-  // Lines are foreground tints (the theme border melts into the canvas). No
-  // column or row is assumed to be a label: cells share one color and weight;
-  // only the header row, which Markdown always has, gets a faint band.
-  '[&_thead]:bg-muted/80 ' +
-  '[&_th]:border-b [&_th]:border-foreground/[0.14] [&_th]:bg-foreground/[0.035] [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-normal [&_th]:align-top ' +
-  '[&_td]:border-b [&_td]:border-foreground/[0.08] [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
-  '[&_:is(th,td)+:is(th,td)]:border-l [&_:is(th,td)+:is(th,td)]:border-l-foreground/[0.08] ' +
-  '[&_tbody_tr:last-child_td]:border-b-0 ' +
-  '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
+const markdownDescendants = stylex.create({
+  content: {
+    ':is(*) a': {
+      textDecorationLine: 'none',
+      textUnderlineOffset: '2px',
+      textDecorationColor: 'color-mix(in oklab, currentColor 60%, transparent)',
+    },
+    ':is(*) a:hover': { textDecorationLine: 'underline' },
+    ':is(*) .katex-display': {
+      marginBlock: 'calc(var(--spacing) * 5) !important',
+      overflowX: 'auto',
+      overflowY: 'hidden',
+      paddingBlock: 'calc(var(--spacing) * 1)',
+    },
+    ':is(*) [data-streamdown="mermaid"]': { overflow: 'hidden' },
+    ':is(*) table': {
+      marginBlock: 'calc(var(--spacing) * 0) !important',
+      borderCollapse: 'collapse',
+    },
+    ':is(*) thead': { backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 80%, transparent)' },
+    ':is(*) th': {
+      borderBottomWidth: '1px',
+      borderBottomStyle: 'solid',
+      borderColor: 'color-mix(in oklab, hsl(var(--foreground)) 14%, transparent)',
+      backgroundColor: 'color-mix(in oklab, hsl(var(--foreground)) 3.5%, transparent)',
+      paddingInline: 'calc(var(--spacing) * 2.5)',
+      paddingBlock: 'calc(var(--spacing) * 1.5)',
+      textAlign: 'left',
+      fontWeight: 'var(--font-weight-normal)',
+      verticalAlign: 'top',
+    },
+    ':is(*) td': {
+      borderBottomWidth: '1px',
+      borderBottomStyle: 'solid',
+      borderColor: 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent)',
+      paddingInline: 'calc(var(--spacing) * 2.5)',
+      paddingBlock: 'calc(var(--spacing) * 1.5)',
+      verticalAlign: 'top',
+    },
+    ':is(*) :is(th,td)+:is(th,td)': {
+      borderLeftWidth: '1px',
+      borderLeftStyle: 'solid',
+      borderLeftColor: 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent)',
+    },
+    ':is(*) tbody tr:last-child td': { borderBottomWidth: 0 },
+    ':is(*) table code': {
+      backgroundColor: {
+        default: 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent) !important',
+        ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+          'color-mix(in oklab, hsl(var(--foreground)) 14%, transparent) !important',
+      },
+      boxShadow: 'none !important',
+    },
+  },
+});
 
 type MarkdownFontSizeStyle = CSSProperties & {
   '--markdown-body-font-size': string;
@@ -533,8 +600,10 @@ function MarkdownSessionLink({
   target,
   children,
   inert,
+  xstyle,
 }: {
   target: SessionLink;
+  xstyle?: stylex.StyleXStyles;
   children: ReactNode;
   inert: boolean;
 }) {
@@ -552,10 +621,11 @@ function MarkdownSessionLink({
     return (
       <span
         data-session-link={sessionId}
+        style={stylex.props(xstyle).style}
         title={title}
         className={clsx(
           SESSION_LINK_CHIP_CLASS_NAME,
-          stylex.props(markdownStyles.sessionChip).className
+          stylex.props(markdownStyles.sessionChip, xstyle).className
         )}
       >
         {body}
@@ -566,10 +636,12 @@ function MarkdownSessionLink({
     <button
       type="button"
       data-session-link={sessionId}
+      style={stylex.props(xstyle).style}
       title={title}
       className={clsx(
         SESSION_LINK_CHIP_CLASS_NAME,
-        stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive).className
+        stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive, xstyle)
+          .className
       )}
       onClick={() =>
         navigate({
@@ -1103,7 +1175,9 @@ const AgentFileLink = ({
   openAgentFileLabel,
   getContextMenuItems,
   fileCard = false,
+  partStyles,
 }: {
+  partStyles?: MarkdownPartStyles;
   href: string;
   fileCard?: boolean;
   children: ReactNode;
@@ -1153,32 +1227,22 @@ const AgentFileLink = ({
       }}
       title={href}
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
-      className={clsx(
-        'text-markdown-link',
-        // In a table cell the chip flows as inline text so the cell decides
-        // whether the path wraps (see `markdown-table.tsx`); a truncated path
-        // there would dictate the column's minimum width.
-        '[:is(th,td)_&]:inline',
-        '[:is(th,td)_&]:text-start',
-        stylex.props(markdownStyles.agentFileLink).className
+      {...stylex.props(
+        markdownStyles.agentFileLink,
+        markdownStyles.fileLinkInk,
+        markdownStyles.fileLinkInTable,
+        partStyles?.fileLink
       )}
     >
       <MonochromeFileIcon
         filePath={iconPath}
-        className={clsx(
-          '[:is(th,td)_&]:mr-1',
-          '[:is(th,td)_&]:inline-block',
-          '[:is(th,td)_&]:align-[-0.33em]',
-          stylex.props(markdownStyles.emGlyph).className
-        )}
+        {...stylex.props(markdownStyles.emGlyph, markdownStyles.fileGlyphInTable)}
       />
       <span
-        className={clsx(
-          '[:is(th,td)_&]:overflow-visible',
-          '[:is(th,td)_&]:text-clip',
-          '[:is(th,td)_&]:[white-space:inherit]',
-          '[:is(th,td)_&]:[line-break:anywhere]',
-          stylex.props(markdownStyles.emText).className
+        {...stylex.props(
+          markdownStyles.emText,
+          markdownStyles.fileTextInTable,
+          partStyles?.fileLinkText
         )}
       >
         {children}
@@ -1186,22 +1250,10 @@ const AgentFileLink = ({
       {!hasOpenAction ? (
         didCopy ? (
           <Check
-            className={clsx(
-              '[:is(th,td)_&]:ml-1',
-              '[:is(th,td)_&]:inline-block',
-              '[:is(th,td)_&]:align-[-0.1em]',
-              stylex.props(markdownStyles.emActionGlyph).className
-            )}
+            {...stylex.props(markdownStyles.emActionGlyph, markdownStyles.fileActionInTable)}
           />
         ) : (
-          <Copy
-            className={clsx(
-              '[:is(th,td)_&]:ml-1',
-              '[:is(th,td)_&]:inline-block',
-              '[:is(th,td)_&]:align-[-0.1em]',
-              stylex.props(markdownStyles.emActionGlyph).className
-            )}
-          />
+          <Copy {...stylex.props(markdownStyles.emActionGlyph, markdownStyles.fileActionInTable)} />
         )
       ) : null}
     </button>
@@ -1305,7 +1357,10 @@ const createMarkdownComponents = ({
   readonly,
   headingAnchors,
   compact,
+  flush,
+  partStyles,
 }: {
+  partStyles?: MarkdownPartStyles;
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
   onAgentFileLinkClick?: (href: string) => void;
@@ -1313,12 +1368,17 @@ const createMarkdownComponents = ({
   readonly: boolean;
   headingAnchors: boolean;
   compact: boolean;
+  flush: boolean;
 }): Components => ({
   p: ({ children, className, node: _node, ...props }) => (
     <p
       {...props}
       {...withClassName(
-        stylex.props(markdownStyles.paragraph, compact && markdownStyles.compactParagraph),
+        stylex.props(
+          markdownStyles.paragraph,
+          compact && markdownStyles.compactParagraph,
+          flush && markdownStyles.flushProse
+        ),
         className
       )}
     >
@@ -1354,7 +1414,8 @@ const createMarkdownComponents = ({
         stylex.props(
           markdownStyles.heading,
           markdownStyles.h1,
-          compact && markdownStyles.compactHeading
+          compact && markdownStyles.compactHeading,
+          flush && markdownStyles.flushProse
         ),
         className
       )}
@@ -1367,7 +1428,8 @@ const createMarkdownComponents = ({
         stylex.props(
           markdownStyles.heading,
           markdownStyles.h2,
-          compact && markdownStyles.compactHeading
+          compact && markdownStyles.compactHeading,
+          flush && markdownStyles.flushProse
         ),
         className
       )}
@@ -1377,7 +1439,11 @@ const createMarkdownComponents = ({
     <h3
       {...props}
       {...withClassName(
-        stylex.props(markdownStyles.heading, compact && markdownStyles.compactHeading),
+        stylex.props(
+          markdownStyles.heading,
+          compact && markdownStyles.compactHeading,
+          flush && markdownStyles.flushProse
+        ),
         className
       )}
     />
@@ -1389,7 +1455,8 @@ const createMarkdownComponents = ({
         stylex.props(
           markdownStyles.heading,
           markdownStyles.h4,
-          compact && markdownStyles.compactHeading
+          compact && markdownStyles.compactHeading,
+          flush && markdownStyles.flushProse
         ),
         className
       )}
@@ -1402,7 +1469,8 @@ const createMarkdownComponents = ({
         stylex.props(
           markdownStyles.heading,
           markdownStyles.smallHeading,
-          compact && markdownStyles.compactHeading
+          compact && markdownStyles.compactHeading,
+          flush && markdownStyles.flushProse
         ),
         className
       )}
@@ -1416,7 +1484,8 @@ const createMarkdownComponents = ({
           markdownStyles.heading,
           markdownStyles.smallHeading,
           markdownStyles.muted,
-          compact && markdownStyles.compactHeading
+          compact && markdownStyles.compactHeading,
+          flush && markdownStyles.flushProse
         ),
         className
       )}
@@ -1445,7 +1514,11 @@ const createMarkdownComponents = ({
     const linkedSession = parseSessionLink(href);
     if (linkedSession) {
       return (
-        <MarkdownSessionLink target={linkedSession} inert={readonly}>
+        <MarkdownSessionLink
+          target={linkedSession}
+          inert={readonly}
+          xstyle={partStyles?.referenceChip}
+        >
           {children}
         </MarkdownSessionLink>
       );
@@ -1462,6 +1535,7 @@ const createMarkdownComponents = ({
         <AgentFileLink
           href={href}
           fileCard={fileCard}
+          partStyles={partStyles}
           onFilePathClick={onAgentFileLinkClick}
           copyAgentFileLabel={copyAgentFileLabel}
           openAgentFileLabel={openAgentFileLabel}
@@ -1486,10 +1560,15 @@ const createMarkdownComponents = ({
           href={href}
           rel={rel}
           {...rest}
-          className={cn(
+          style={{ ...stylex.props(partStyles?.referenceChip).style, ...rest.style }}
+          className={clsx(
             rest.className,
-            'markdown-reference-chip leading-[1.55]',
-            stylex.props(markdownStyles.githubReference).className
+            'markdown-reference-chip',
+            stylex.props(
+              markdownStyles.githubReference,
+              markdownStyles.referenceLeading,
+              partStyles?.referenceChip
+            ).className
           )}
         >
           <GitHubReferenceChip reference={githubReference} />
@@ -1630,7 +1709,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   searchBlockId,
   headingAnchors = false,
   compact = false,
+  flush = false,
+  partStyles,
 }: {
+  partStyles?: MarkdownPartStyles;
   text: string;
   size?: MarkdownRendererSize;
   className?: string;
@@ -1644,6 +1726,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   headingAnchors?: boolean;
   /** Tool prose shares the control role without scaling nested code a second time. */
   compact?: boolean;
+  /** Align comment prose with its own text edge rather than the conversation rail. */
+  flush?: boolean;
 }) {
   ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
     text,
@@ -1702,6 +1786,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         readonly: readonly !== null,
         headingAnchors,
         compact,
+        flush,
+        partStyles,
       }),
     [
       copyAgentFileLabel,
@@ -1711,6 +1797,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       readonly,
       headingAnchors,
       compact,
+      flush,
+      partStyles,
     ]
   );
 
@@ -1871,7 +1959,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         if (match.resultId) {
           mark.dataset.searchResultId = match.resultId;
         }
-        mark.className = cn(
+        mark.className = clsx(
           SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
           match.isActive && SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME
         );
@@ -1903,8 +1991,12 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         ref={containerRef}
         data-search-block-id={searchBlockId}
         {...withClassName(
-          stylex.props(markdownStyles.root, compact && markdownStyles.muted),
-          cn(MARKDOWN_BASE_CLASSNAME, className)
+          stylex.props(
+            markdownStyles.root,
+            markdownDescendants.content,
+            compact && markdownStyles.muted
+          ),
+          clsx('markdown-renderer', className)
         )}
         style={markdownFontSizeStyle(normalizedSize, compact)}
         onClick={handleContainerClick}

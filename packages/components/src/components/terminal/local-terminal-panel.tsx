@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useAtomValue } from 'jotai';
@@ -14,8 +15,7 @@ import {
 } from '@/atoms';
 import { formatKeyBinding } from '@/lib/commands';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
-import { editorHeightClass, editorWidthClipClass } from '@/style/legacy-defaults.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { useActiveVSCodeThemeId, useResolvedTheme } from '../../theme-provider';
 import {
@@ -39,6 +39,10 @@ import {
   buildTerminalTheme,
   resolveTerminalFontFamily,
 } from './terminal-theme';
+
+const styles = stylex.create({
+  root: { height: '100%', width: '100%', overflow: 'hidden' },
+});
 
 // A single interactive terminal: one xterm.js instance bound to one PTY via the
 // channel. Pure/presentational — all I/O goes through the injected `TerminalChannel`,
@@ -366,7 +370,7 @@ export function LocalTerminalPanel({
   const host = (
     <div
       ref={hostRef}
-      className={cn('lody-terminal-panel', editorHeightClass, editorWidthClipClass, className)}
+      className={clsx('lody-terminal-panel', stylex.props(styles.root).className, className)}
       onContextMenu={windowsRightClick ? handleWindowsRightClick : undefined}
     />
   );

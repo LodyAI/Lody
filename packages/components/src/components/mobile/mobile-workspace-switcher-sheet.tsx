@@ -50,6 +50,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  sheet: { height: 'auto', maxHeight: '80dvh' },
   /** The sheet's scrolling body. */
   body: {
     flexGrow: 1,
@@ -183,7 +184,7 @@ export function MobileWorkspaceSwitcherSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent className="mobile-workspace-switcher-sheet h-auto! max-h-[80dvh]! rounded-t-2xl border-border/60">
+      <DrawerContent className="mobile-workspace-switcher-sheet" xstyle={styles.sheet}>
         <div {...stylex.props(sheetSurface.columnAuto)}>
           <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{title}</DrawerTitle>
           <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>
@@ -280,7 +281,7 @@ function WorkspaceLeadingAvatar({ workspace }: { workspace: MobileWorkspaceSwitc
     <WorkspaceAvatar
       workspace={{ name: workspace.name, logo: workspace.avatarUrl }}
       size="large"
-      className="shrink-0"
+      {...stylex.props(sheetSurface.shrink0)}
     />
   );
 }

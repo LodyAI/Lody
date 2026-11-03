@@ -1,8 +1,38 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import type { SidebarChatScope, SidebarOrganizeMode } from '@/atoms/sidebar-state';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '260px',
+    'align-items': 'flex-end',
+    gap: 'calc(var(--spacing) * 6)',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--sidebar-background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+  },
+  stack: {
+    display: 'flex',
+    flex: '1',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  label: {
+    color: 'hsl(var(--sidebar-foreground-muted) / 1)',
+  },
+  section: {
+    'margin-top': 'calc(var(--spacing) * 1)',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'flex-end',
+  },
+});
 
 function FilterShell({
   organize: organizeArg,
@@ -19,26 +49,26 @@ function FilterShell({
   const [showBranchNames, setShowBranchNames] = useState(false);
 
   return (
-    <div className="flex min-h-[260px] items-end gap-6 rounded-2xl bg-sidebar p-6 text-sidebar-foreground">
-      <div className="flex flex-1 flex-col gap-2">
+    <div {...stylex.props(storyLayout.row)}>
+      <div {...stylex.props(storyLayout.stack)}>
         <div className="text-xs uppercase tracking-wide text-sidebar-foreground-muted/70">
           State
         </div>
         <div className="rounded-lg border border-sidebar-border/60 bg-background/40 p-3 text-xs">
           <div>
-            <span className="text-sidebar-foreground-muted">Organize:</span>{' '}
+            <span {...stylex.props(storyLayout.label)}>Organize:</span>{' '}
             <span className="font-medium">{organize}</span>
           </div>
-          <div className="mt-1">
-            <span className="text-sidebar-foreground-muted">Scope:</span>{' '}
+          <div {...stylex.props(storyLayout.section)}>
+            <span {...stylex.props(storyLayout.label)}>Scope:</span>{' '}
             <span className="font-medium">{scope}</span>
           </div>
-          <div className="mt-1">
-            <span className="text-sidebar-foreground-muted">Project line:</span>{' '}
+          <div {...stylex.props(storyLayout.section)}>
+            <span {...stylex.props(storyLayout.label)}>Project line:</span>{' '}
             <span className="font-medium">{showUpdatedProjectNames ? 'on' : 'off'}</span>
           </div>
-          <div className="mt-1">
-            <span className="text-sidebar-foreground-muted">Branch line:</span>{' '}
+          <div {...stylex.props(storyLayout.section)}>
+            <span {...stylex.props(storyLayout.label)}>Branch line:</span>{' '}
             <span className="font-medium">{showBranchNames ? 'on' : 'off'}</span>
           </div>
         </div>
@@ -46,7 +76,7 @@ function FilterShell({
           Click the filter icon to open the popover. Selections update the panel above.
         </p>
       </div>
-      <div className="flex items-center justify-end">
+      <div {...stylex.props(storyLayout.row2)}>
         <SidebarFilterPopover
           organize={organize}
           scope={scope}

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
@@ -5,6 +6,16 @@ import type { SessionId, WorkspaceId } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { authTokenAtom } from '@/atoms/runtime';
 import { ImageGroupBubble, type ImageBubbleAlign } from '@/components/ai-gui/view';
+const storyLayout = stylex.create({
+  row: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    width: '100%',
+    'max-width': '56rem',
+    'justify-content': 'center',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const STORY_WORKSPACE_ID = 'workspace-storybook' as WorkspaceId;
 const STORY_SESSION_ID = 'session-storybook' as SessionId;
@@ -150,7 +161,7 @@ function StoryPreview({ align, imageCount, speaker }: StoryPreviewProps) {
 
   return (
     <Provider store={store}>
-      <div className="mx-auto flex w-full max-w-4xl justify-center p-6">
+      <div {...stylex.props(storyLayout.row)}>
         <div className="w-full max-w-[42rem] rounded-[28px] border border-dashed border-border/70 bg-muted/20 p-5">
           <div className={`flex w-full ${speaker === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div

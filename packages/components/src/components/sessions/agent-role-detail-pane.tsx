@@ -173,7 +173,7 @@ const styles = stylex.create({
     fontWeight: themeFontWeight.medium,
     color: themeColors.foreground,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -265,10 +265,12 @@ export function AgentRoleDetailPane({
   machineLabel,
   onEdit,
   className,
+  xstyle,
 }: AgentRoleDetailSubject & {
   onEdit?: (roleId: AgentRoleId) => void;
   /** The host's box: each menu sizes its own pane to the list beside it. */
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }) {
   const { t } = useTranslation();
   const selectorOptions = useAcpSelectorOptions(
@@ -340,7 +342,7 @@ export function AgentRoleDetailPane({
     ([configId]) => !statedConfigIds.has(configId)
   );
 
-  const paneProps = stylex.props(styles.pane);
+  const paneProps = stylex.props(styles.pane, xstyle);
   const scrollProps = stylex.props(styles.scroll);
 
   return (

@@ -314,20 +314,6 @@ describe('SessionTabBar drag sources', () => {
     expect(fresh.selected).toBe(fresh.drafts[0].id);
   });
 
-  it('does not mark a solo tab title as a window-drag hole', async () => {
-    await renderTabBar([]);
-    const tab = container.querySelector<HTMLElement>('#session-tab-session-parent')!;
-    expect(tab.className).not.toContain('app-region-no-drag');
-  });
-
-  it('marks each tab as a click target when more than one is open', async () => {
-    await renderTabBar([childSession]);
-    const parent = container.querySelector<HTMLElement>('#session-tab-session-parent')!;
-    const child = container.querySelector<HTMLElement>('#session-tab-session-child')!;
-    expect(parent.className).toContain('app-region-no-drag');
-    expect(child.className).toContain('app-region-no-drag');
-  });
-
   it('disables dragging when only the parent Session tab is visible', async () => {
     await renderTabBar([]);
 
@@ -775,7 +761,6 @@ describe('SessionTabBar rapid-close tab widths', () => {
     // viewport decides whether it applies.
     expect(items[2].style.getPropertyValue('--tab-active-min-width')).toBe('180px');
     expect(items[0].style.getPropertyValue('--tab-active-min-width')).toBe('');
-    expect(viewport().className).toContain('@container');
   });
 
   it('does not freeze for a programmatic close without a pointer gesture', async () => {

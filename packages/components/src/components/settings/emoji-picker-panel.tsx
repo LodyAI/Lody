@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { normalizeAgentRoleEmoji } from '@lody/shared';
 import { getBundledEmojibaseUrl, resolveEmojibaseLocale } from '@/lib/emojibase-assets';
@@ -7,6 +8,8 @@ import {
   EmojiPickerFooter,
   EmojiPickerSearch,
 } from '@/ui/emoji-picker';
+
+const styles = stylex.create({ root: { height: 320 } });
 
 /**
  * The picker body, in its own module so `frimousse` is not in the entry chunk.
@@ -20,7 +23,7 @@ export default function AgentRoleEmojiPicker({ onSelect }: { onSelect: (emoji: s
   const { i18n } = useTranslation();
   return (
     <EmojiPicker
-      className="h-[320px]"
+      xstyle={styles.root}
       // The dataset ships with the app, so the picker works offline.
       emojibaseUrl={getBundledEmojibaseUrl()}
       locale={resolveEmojibaseLocale(i18n.language)}

@@ -1,0 +1,947 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedlegacysidebarlayout--natural",
+    "migration-ownedlegacysidebarlayout--opaque",
+    "migration-ownedlegacysidebarlayout--utility",
+    "migration-ownedlegacysidebarlayout--wildcard",
+    "migration-ownedlegacysidebarlayout--scoped"
+  ],
+  "ready": {
+    "migration-ownedlegacysidebarlayout--natural": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('[data-layout-part]').length===5&&document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutMobile==='false'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebarlayout--opaque": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('[data-layout-part]').length===5&&document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutMobile==='false'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebarlayout--utility": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('[data-layout-part]').length===5&&document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutMobile==='false'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebarlayout--wildcard": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('[data-layout-part]').length===5&&document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutMobile==='false'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebarlayout--scoped": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('[data-layout-part]').length===5&&document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutMobile==='false'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedlegacysidebarlayout--natural": [
+      {
+        "name": "keyboard-native",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=native]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=native]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Native'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-slot",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=slot]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Slot'"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "own-icon-outer-offcanvas",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=offcanvas]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarlayout--opaque": [
+      {
+        "name": "keyboard-native",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=native]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=native]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Native'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-slot",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=slot]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Slot'"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "own-icon-outer-offcanvas",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=offcanvas]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarlayout--utility": [
+      {
+        "name": "keyboard-native",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=native]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=native]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Native'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-slot",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=slot]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Slot'"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "own-icon-outer-offcanvas",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=offcanvas]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarlayout--wildcard": [
+      {
+        "name": "keyboard-native",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=native]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=native]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Native'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-slot",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=slot]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Slot'"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "own-icon-outer-offcanvas",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=offcanvas]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarlayout--scoped": [
+      {
+        "name": "keyboard-native",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=native]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=native]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Native'"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-slot",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-action=slot]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-event]').textContent==='Slot'"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-layout-action=slot]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "own-icon-outer-offcanvas",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=offcanvas]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=offcanvas]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=icon]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=icon]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-external=none]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-external=none]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement.matches('[data-sidebar-layout-toggle]')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-layout-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-layout-state]')?.dataset.sidebarLayoutState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -3,7 +3,6 @@ import { Spinner } from '@lody/ui/spinner';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import { Menu } from '@/ui/menu';
@@ -19,6 +18,31 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  mainShape: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+  mainSecondary: { borderRightWidth: 0 },
+  mainTransparent: { borderColor: 'transparent' },
+  triggerShape: {
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderLeftWidth: '1px',
+    borderLeftStyle: 'solid',
+    borderColor: 'color-mix(in oklab, var(--color-black) 10%, transparent)',
+  },
+  triggerReady: { borderLeftColor: 'color-mix(in oklab, var(--color-white) 25%, transparent)' },
+  ready: {
+    backgroundColor: {
+      default: 'hsl(var(--status-success))',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--status-success)) 90%, transparent)',
+      },
+    },
+    color: {
+      default: 'var(--color-white)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'hsl(var(--background))',
+    },
+  },
   fullMainGap: {
     [buttonTokens.gap]: 'calc(var(--spacing) * 1)',
   },
@@ -48,7 +72,7 @@ const styles = stylex.create({
     fontWeight: themeFontWeight.medium,
     color: themeColors.statusSuccess,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     ':disabled': { opacity: 0.5 },
@@ -61,7 +85,7 @@ const styles = stylex.create({
     justifyContent: 'center',
     color: themeColors.statusSuccess,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     '::before': {
@@ -155,11 +179,6 @@ export function PrMergeButton({
   // The full (non-compact) ready button uses GitHub's green so "merge" reads as
   // the positive terminal action, matching the compact info-bar merge control.
   const readyGreen = tone === 'ready' && !compact;
-  // Dark themes brighten the green, where white text drops to ~2:1; use the
-  // canvas color on it there, as the PR tab's merge button does.
-  const greenClasses =
-    'bg-status-success text-white hover:bg-status-success/90 dark:text-background';
-
   const mainContent = (
     <>
       {isMerging ? (
@@ -192,12 +211,12 @@ export function PrMergeButton({
           variant={buttonVariant}
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
-          className={cn(
-            stylex.props(styles.fullMainGap).className,
-            'rounded-r-none',
-            buttonVariant === 'secondary' ? 'border-r-0' : 'border-transparent',
-            readyGreen && greenClasses
-          )}
+          xstyle={[
+            styles.fullMainGap,
+            styles.mainShape,
+            buttonVariant === 'secondary' ? styles.mainSecondary : styles.mainTransparent,
+            readyGreen && styles.ready,
+          ]}
         >
           {mainContent}
         </Button>
@@ -222,11 +241,12 @@ export function PrMergeButton({
                 variant={buttonVariant}
                 disabled={isMerging || !onSelectMethod}
                 aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-                className={cn(
-                  stylex.props(styles.fullTriggerPadding).className,
-                  'rounded-l-none border-l border-black/10',
-                  readyGreen && cn(greenClasses, 'border-l-white/25')
-                )}
+                xstyle={[
+                  styles.fullTriggerPadding,
+                  styles.triggerShape,
+                  readyGreen && styles.ready,
+                  readyGreen && styles.triggerReady,
+                ]}
               >
                 <ChevronDown {...stylex.props(styles.icon)} />
               </Button>

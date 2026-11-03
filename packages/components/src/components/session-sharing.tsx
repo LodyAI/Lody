@@ -204,6 +204,14 @@ function getSessionShareActionLabel(
  * on the dark canvas. */
 
 const styles = stylex.create({
+  actionStart: { justifyContent: 'flex-start' },
+  confirmationTitle: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    overflowWrap: 'break-word',
+  },
   tooltipPadding: {
     [tooltip.maxWidth]: 'calc(var(--spacing) * 72)',
     [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
@@ -783,7 +791,7 @@ export function SessionAccessControl({
                         key={row.id}
                         variant="ghost"
                         size="small"
-                        className="justify-start"
+                        xstyle={styles.actionStart}
                         disabled={row.disabled}
                         title={row.title}
                         onClick={() => (row.keepOpen ? void row.onSelect() : act(row.onSelect))}
@@ -826,7 +834,7 @@ function ShareConfirmationDialog({
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Content>
         <AlertDialog.Header>
-          <AlertDialog.Title className="line-clamp-2 break-words">{title}</AlertDialog.Title>
+          <AlertDialog.Title xstyle={styles.confirmationTitle}>{title}</AlertDialog.Title>
           <AlertDialog.Description>{description}</AlertDialog.Description>
         </AlertDialog.Header>
         <AlertDialog.Footer>

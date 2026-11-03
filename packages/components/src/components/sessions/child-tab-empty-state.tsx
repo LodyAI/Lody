@@ -42,7 +42,7 @@ const styles = stylex.create({
     lineHeight: themeLineHeight.xs,
     color: themeColors.mutedForeground,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     '@media (hover: hover)': {

@@ -1,10 +1,10 @@
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { useMentionFileSearch } from './file-search/use-file-search';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
 import { shortcutComposerScope } from './shortcut-composer-state';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import {
   type MentionFileSourceKind,
   type MentionSurface,
@@ -712,6 +712,7 @@ export interface CombinedMentionTextareaProps extends Omit<
   value: string;
   onValueChange: (value: string) => void;
   containerClassName?: string;
+  containerXstyle?: stylex.StyleXStyles;
   mentionValues?: string[];
   onMentionValuesChange?: (values: string[]) => void;
   label?: string;
@@ -778,6 +779,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       value,
       onValueChange,
       containerClassName,
+      containerXstyle,
       mentionValues: mentionValuesProp,
       onMentionValuesChange,
       label = 'Message',
@@ -791,6 +793,8 @@ export const CombinedMentionTextarea = React.forwardRef<
       draftKey,
       mentionActionsRef,
       className,
+      xstyle,
+      focusRing,
       ...props
     },
     ref
@@ -1057,13 +1061,22 @@ export const CombinedMentionTextarea = React.forwardRef<
             onValueChange(event.target.value);
           }}
           className={className}
+          focusRing={focusRing}
+          xstyle={[styles.input, xstyle]}
           aria-label={props['aria-label'] ?? label}
           {...props}
           resize="none"
         />
       );
 
-      return containerClassName ? <div className={containerClassName}>{textarea}</div> : textarea;
+      const wrapper = stylex.props(containerXstyle);
+      return containerClassName || containerXstyle ? (
+        <div className={clsx(wrapper.className, containerClassName)} style={wrapper.style}>
+          {textarea}
+        </div>
+      ) : (
+        textarea
+      );
     }
 
     return (
@@ -1136,14 +1149,16 @@ export const CombinedMentionTextarea = React.forwardRef<
             </>
           ) : null}
         </React.Fragment>
-        <MentionLabel {...stylex.props(styles.label)}>{label}</MentionLabel>
+        <MentionLabel xstyle={styles.label}>{label}</MentionLabel>
         <MentionInput
           ref={ref}
           // See the data attribute note above — scopes the ⇧Tab mode cycle.
           data-lody-composer-input=""
           value={value}
           containerClassName={containerClassName}
-          className={cn(stylex.props(styles.input).className, className)}
+          containerXstyle={containerXstyle}
+          className={className}
+          xstyle={[styles.input, focusRing === false && styles.quietFocus, xstyle]}
           {...props}
         />
         <TwoLevelMentionMenu
@@ -1183,12 +1198,12 @@ CombinedMentionTextarea.displayName = 'CombinedMentionTextarea';
 
 const styles = stylex.create({
   input: { resize: 'none' },
+  quietFocus: { boxShadow: 'none' },
   root: { width: '100%' },
   label: {
     position: 'absolute',
     width: '1px',
     height: '1px',
-    padding: 0,
     margin: '-1px',
     overflow: 'hidden',
     clip: 'rect(0, 0, 0, 0)',

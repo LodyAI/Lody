@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, createRef, useState } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -9,6 +10,8 @@ afterEach(async () => {
   await mounted?.unmount();
   mounted = undefined;
 });
+
+const extension = stylex.create({ offset: (offset: number) => ({ marginInlineStart: offset }) });
 
 describe('Button', () => {
   test('renders a native button with variant and size data attributes', () => {
@@ -200,5 +203,39 @@ describe('Button', () => {
     expect(anchor.textContent).toBe('Clicks: 1');
     expect(anchor.hasAttribute('width')).toBe(false);
     expect(anchor.hasAttribute('height')).toBe(false);
+  });
+  test('composes dynamic xstyle variables with the real caller state callback', async () => {
+    function Example() {
+      const [disabled, setDisabled] = useState(false);
+      return (
+        <>
+          <button data-disable onClick={() => setDisabled(true)}>
+            Disable target
+          </button>
+          <Button
+            data-extension
+            disabled={disabled}
+            xstyle={extension.offset(disabled ? 0 : 13)}
+            style={(state) => ({ color: state.disabled ? '#ff0000' : '#0000ff' })}
+          >
+            Styled target
+          </Button>
+        </>
+      );
+    }
+    mounted = await mount(<Example />);
+    const target = mounted.container.querySelector<HTMLButtonElement>('[data-extension]')!;
+    expect(target.style.color).toBe('rgb(0, 0, 255)');
+    const vars = stylex.props(extension.offset(13)).style!;
+    expect(Object.keys(vars).length).toBeGreaterThan(0);
+    for (const [key, value] of Object.entries(vars))
+      expect(target.style.getPropertyValue(key)).toBe(String(value));
+    await act(async () =>
+      mounted!.container.querySelector<HTMLButtonElement>('[data-disable]')!.click()
+    );
+    expect(target.disabled).toBe(true);
+    expect(target.style.color).toBe('rgb(255, 0, 0)');
+    for (const [key, value] of Object.entries(stylex.props(extension.offset(0)).style!))
+      expect(target.style.getPropertyValue(key)).toBe(String(value));
   });
 });

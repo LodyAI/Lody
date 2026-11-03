@@ -1,0 +1,372 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedlegacysidebarframe--natural",
+    "migration-ownedlegacysidebarframe--natural-none",
+    "migration-ownedlegacysidebarframe--scoped",
+    "migration-ownedlegacysidebarframe--scoped-none"
+  ],
+  "ready": {
+    "migration-ownedlegacysidebarframe--natural": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]')?.dataset.frameMobile==='true'"
+      },
+      {
+        "action": "focus",
+        "selector": "[data-frame-toggle]"
+      },
+      {
+        "action": "press",
+        "selector": "[data-frame-toggle]",
+        "key": "Control+b"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'"
+      },
+      {
+        "action": "press",
+        "selector": "[data-frame-toggle]",
+        "key": "Enter"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[data-frame-part]')];return p.length===5&&p.every(e=>e.dataset.frameRefTag===e.tagName)&&!!document.querySelector('[role=dialog]')} "
+      }
+    ],
+    "migration-ownedlegacysidebarframe--natural-none": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]')?.dataset.frameMobile==='true'"
+      },
+      {
+        "action": "focus",
+        "selector": "[data-frame-toggle]"
+      },
+      {
+        "action": "press",
+        "selector": "[data-frame-toggle]",
+        "key": "Control+b"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'"
+      },
+      {
+        "action": "press",
+        "selector": "[data-frame-toggle]",
+        "key": "Enter"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[data-frame-part]')];return p.length===6&&p.filter(e=>e.dataset.framePart!=='sidebar').every(e=>e.dataset.frameRefTag===e.tagName)&&document.querySelector('[data-frame-slot]')?.tagName==='A'}"
+      }
+    ],
+    "migration-ownedlegacysidebarframe--scoped": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]')?.dataset.frameMobile==='true'"
+      },
+      {
+        "action": "focus",
+        "selector": "[data-frame-toggle]"
+      },
+      {
+        "action": "press",
+        "selector": "[data-frame-toggle]",
+        "key": "Control+b"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'"
+      },
+      {
+        "action": "press",
+        "selector": "[data-frame-toggle]",
+        "key": "Enter"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[data-frame-part]')];return p.length===5&&p.every(e=>e.dataset.frameRefTag===e.tagName)&&!!document.querySelector('[role=dialog]')} "
+      }
+    ],
+    "migration-ownedlegacysidebarframe--scoped-none": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]')?.dataset.frameMobile==='true'"
+      },
+      {
+        "action": "focus",
+        "selector": "[data-frame-toggle]"
+      },
+      {
+        "action": "press",
+        "selector": "[data-frame-toggle]",
+        "key": "Control+b"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'"
+      },
+      {
+        "action": "press",
+        "selector": "[data-frame-toggle]",
+        "key": "Enter"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[data-frame-part]')];return p.length===6&&p.filter(e=>e.dataset.framePart!=='sidebar').every(e=>e.dataset.frameRefTag===e.tagName)&&document.querySelector('[data-frame-slot]')?.tagName==='A'}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedlegacysidebarframe--natural": [
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-frame-slot]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-slot]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-frame-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Meta+b"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarframe--natural-none": [
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Meta+b"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Control+b"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarframe--scoped": [
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-frame-slot]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-slot]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-frame-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Meta+b"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarframe--scoped-none": [
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Meta+b"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Control+b"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='false'"
+          },
+          {
+            "action": "press",
+            "selector": "[data-frame-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-frame-state]').dataset.frameOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

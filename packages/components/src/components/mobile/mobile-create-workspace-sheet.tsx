@@ -32,10 +32,21 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  sheet: {
+    height: 'auto',
+    maxHeight: '92dvh',
+    bottom: 'var(--native-keyboard-height,0px)',
+  },
+  fieldSpacing: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 1.5)',
+    },
+  },
+
   fieldLabel: {
     [field.labelSize]: '0.78rem',
     [field.labelWeight]: 'var(--font-weight-medium)',
-    '--tw-font-weight': 'var(--font-weight-medium)',
   },
   /** The sheet's description, under the header. */
   description: {
@@ -177,7 +188,8 @@ export function MobileCreateWorkspaceSheet({
   return (
     <Drawer open={open} onOpenChange={handleClose} repositionInputs={false}>
       <DrawerContent
-        className="mobile-create-workspace-sheet h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60 bottom-[var(--native-keyboard-height,0px)]!"
+        className="mobile-create-workspace-sheet"
+        xstyle={styles.sheet}
         style={{
           /* Match the new-chat sheet's keyboard-rise easing so the
              two bottom-sheets feel like the same family when the user
@@ -212,10 +224,7 @@ export function MobileCreateWorkspaceSheet({
           {creationAvailable ? (
             <div {...stylex.props(styles.body)}>
               <div {...stylex.props(styles.fields)}>
-                {/* The field's label and its control are set apart by the
-                    container's own `space-y`; StyleX has no descendant
-                    selector, so that spacing stays a Tailwind class. */}
-                <div className="space-y-1.5">
+                <div {...stylex.props(styles.fieldSpacing)}>
                   <UiField.Label
                     htmlFor="mobile-create-workspace-name"
                     className={stylex.props(styles.fieldLabel).className}
@@ -233,7 +242,7 @@ export function MobileCreateWorkspaceSheet({
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div {...stylex.props(styles.fieldSpacing)}>
                   <div {...stylex.props(styles.slugHead)}>
                     <UiField.Label
                       htmlFor="mobile-create-workspace-slug"

@@ -20,7 +20,7 @@ import {
 } from '@/components/mobile/mobile-inline-picker';
 import {
   MobileModelPickerLabel,
-  mobileModelPickerTriggerClassName,
+  mobileModelPickerTriggerStyle,
 } from '@/components/mobile/mobile-session-composer-footer';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
@@ -209,7 +209,7 @@ function MockComposer({
                   onChange={setSelectedModel}
                   options={modelPickerOptions}
                   ariaLabel="Model"
-                  triggerClassName={mobileModelPickerTriggerClassName}
+                  triggerXstyle={mobileModelPickerTriggerStyle}
                   triggerContent={<MobileModelPickerLabel>{selectedModel}</MobileModelPickerLabel>}
                 />
               </div>

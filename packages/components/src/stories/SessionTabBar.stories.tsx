@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { fn, userEvent, within } from 'storybook/test';
@@ -25,6 +26,22 @@ import { cn } from '@/lib/utils';
 import type { PathLauncherOption } from '@/lib/session-path-launchers';
 import type { DraftSessionTab } from '@/lib/session-draft-tabs';
 import type { SessionSharingState } from '@/lib/session-sharing';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '100%',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+    'padding-left': 'calc(var(--spacing) * 1)',
+  },
+  section: {
+    'max-width': '100%',
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const machineId = 'machine-1' as MachineId;
 const agentConfigId = 'agent-1' as AgentConfigId;
@@ -143,7 +160,7 @@ const vscodeLauncher: PathLauncherOption = {
 
 function ConversationToolbar() {
   return (
-    <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
+    <div {...stylex.props(storyLayout.row)}>
       <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
         <button
           type="button"
@@ -418,7 +435,7 @@ function StoryShell({
   return (
     <Provider store={store}>
       <div
-        className="max-w-full overflow-hidden bg-background"
+        {...stylex.props(storyLayout.section)}
         style={{ width: frameWidth ?? '100%' }}
         data-testid="session-tab-bar-story-frame"
       >

@@ -30,7 +30,11 @@ behavior.
 Consumers compile this package's source with `@stylexjs/unplugin` and its exported
 StyleX options. Visual choices use component props. `className` is available for
 layout and interaction constraints in product surfaces; it must not duplicate a
-primitive's visual rules.
+primitive's visual rules. Supported `xstyle` props merge caller-owned rules inside
+the primitive's `stylex.props` call and forward dynamic variables to its real
+styled element. Use this for migration overrides instead of competing atomic
+classes. Textarea's `focusRing={false}` keeps the resting well while letting its
+enclosing composer own focus feedback.
 
 The existing modal and floating-surface token groups are available at
 `@lody/ui/dialog/dialog.tokens.stylex` and `@lody/ui/popup/popup.tokens.stylex`.

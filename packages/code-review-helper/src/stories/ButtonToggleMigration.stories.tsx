@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import {
   useLayoutEffect,
@@ -11,6 +12,48 @@ import { Check, X } from 'lucide-react';
 
 import { Button } from '../ui/button';
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group';
+
+const callerStyles = stylex.create({
+  button: {
+    height: 'calc(var(--spacing) * 12)',
+    gap: 'calc(var(--spacing) * 4)',
+    borderRadius: 0,
+    paddingInline: 'calc(var(--spacing) * 6)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+    backgroundColor: 'hsl(var(--status-info))',
+    color: 'hsl(var(--background))',
+  },
+  slotButton: {
+    display: 'block',
+    height: 'calc(var(--spacing) * 7)',
+    gap: 'calc(var(--spacing) * 5)',
+    whiteSpace: 'normal',
+    borderRadius: 0,
+    borderWidth: 4,
+    backgroundColor: 'hsl(var(--background))',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    color: 'hsl(var(--status-info))',
+    textUnderlineOffset: 2,
+  },
+  item: {
+    height: 'calc(var(--spacing) * 12)',
+    gap: 'calc(var(--spacing) * 4)',
+    borderRadius: 0,
+    paddingInline: 'calc(var(--spacing) * 6)',
+  },
+  slotItem: {
+    display: 'block',
+    height: 'calc(var(--spacing) * 9)',
+    gap: 'calc(var(--spacing) * 5)',
+    whiteSpace: 'normal',
+    borderRadius: 0,
+    paddingInline: 'calc(var(--spacing) * 6)',
+    backgroundColor: 'hsl(var(--status-info))',
+    color: 'hsl(var(--status-info))',
+  },
+  glyph: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+});
 
 const meta = {
   title: 'Code Review Helper/ButtonToggleMigration',
@@ -64,9 +107,7 @@ export const ButtonSizes: Story = {
           {size !== 'icon' && size}
         </Button>
       ))}
-      <Button className="h-12 gap-4 rounded-none px-6 py-3 bg-info text-background">
-        Utility caller
-      </Button>
+      <Button xstyle={callerStyles.button}>StyleX caller</Button>
       <Button
         style={{ height: 47, gap: 11, paddingInline: 19, backgroundColor: 'rgb(24, 72, 91)' }}
       >
@@ -101,13 +142,10 @@ export const ButtonSlot: Story = {
       <Button asChild data-case="slot-default">
         <a href="#local-default">Default anchor</a>
       </Button>
-      <Button asChild data-case="slot-classes">
-        <a
-          href="#local-classes"
-          className="block h-7 gap-5 whitespace-normal rounded-none border-4 bg-background px-2 py-1 text-info underline-offset-2"
-        >
+      <Button asChild data-case="slot-classes" xstyle={callerStyles.slotButton}>
+        <a href="#local-classes">
           <Check />
-          Child utility classes
+          Slot styling
         </a>
       </Button>
       <Button asChild data-case="slot-inline">
@@ -172,7 +210,7 @@ export const ToggleSizes: Story = {
           aria-label={size}
         >
           <ToggleGroupItem value="first">First</ToggleGroupItem>
-          <ToggleGroupItem value="second" className="h-12 gap-4 rounded-none px-6">
+          <ToggleGroupItem value="second" xstyle={callerStyles.item}>
             Caller
           </ToggleGroupItem>
         </ToggleGroup>
@@ -187,10 +225,13 @@ export const ToggleSlot: Story = {
         <ToggleGroupItem value="first" asChild data-case="slot-default">
           <span>Default slot</span>
         </ToggleGroupItem>
-        <ToggleGroupItem value="second" asChild data-case="slot-classes">
-          <span className="block h-9 gap-5 whitespace-normal rounded-none px-6 bg-info text-info">
-            Child classes
-          </span>
+        <ToggleGroupItem
+          value="second"
+          asChild
+          data-case="slot-classes"
+          xstyle={callerStyles.slotItem}
+        >
+          <span>Child classes</span>
         </ToggleGroupItem>
         <ToggleGroupItem value="third" asChild data-case="slot-inline">
           <span
@@ -257,7 +298,12 @@ function PhysicalFields() {
             labelColor={fields.color}
             onClick={() => setCalls((x) => ({ ...x, native: x.native + 1 }))}
           >
-            <Check className="size-3.5" />
+            <Check
+              {...stylex.props(callerStyles.glyph)}
+              className={['crh-size-explicit', stylex.props(callerStyles.glyph).className].join(
+                ' '
+              )}
+            />
           </Button>
         </div>
         <div style={{ width: 190, height: 70, color: 'rgb(37, 130, 180)' }}>

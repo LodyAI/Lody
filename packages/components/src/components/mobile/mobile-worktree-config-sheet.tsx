@@ -33,6 +33,7 @@ export type MobileWorktreeConfigSheetProps = {
 };
 
 const styles = stylex.create({
+  sheet: { height: 'auto', maxHeight: '88dvh' },
   /** The sheet's scrolling body. */
   body: {
     display: 'flex',
@@ -86,7 +87,8 @@ export function MobileWorktreeConfigSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
-        className={`mobile-worktree-config-sheet h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60 ${keyboard.contentClassName}`}
+        className="mobile-worktree-config-sheet"
+        xstyle={[styles.sheet, keyboard.contentXstyle]}
       >
         <div {...stylex.props(sheetSurface.columnAuto)}>
           <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>

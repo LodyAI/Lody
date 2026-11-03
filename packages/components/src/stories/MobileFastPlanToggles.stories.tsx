@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 
@@ -9,6 +10,22 @@ import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'background-color': 'var(--color-stone-200)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  row2: {
+    'margin-left': 'auto',
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+});
 
 const baseSelectors: AcpConfigOptionSelector[] = [
   {
@@ -45,7 +62,7 @@ function StoryShell({
   const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>(initialValues);
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-6">
+    <div {...stylex.props(storyLayout.row)}>
       <div className="flex w-[360px] flex-col gap-6 rounded-2xl bg-background p-6 shadow-2xl">
         <div>
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -68,7 +85,7 @@ function StoryShell({
           </div>
           <div className="flex items-center gap-1.5 rounded-xl border border-border/60 bg-card p-2">
             <button className="rounded-md bg-muted/60 px-2 py-1 text-sm">Codex</button>
-            <div className="ml-auto flex items-center gap-1.5">
+            <div {...stylex.props(storyLayout.row2)}>
               <MobilePlanModeToggle
                 configOptionSelectors={baseSelectors}
                 configOptionValues={values}

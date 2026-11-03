@@ -10,12 +10,6 @@ import {
   Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { clsx } from 'clsx';
-import {
-  attachmentIntrinsicWidthClass,
-  sidebarFilterNoGapClass,
-  sidebarFilterMinimumClass,
-} from '../style/legacy-defaults.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { text } from '@lody/ui/tokens/scales.stylex';
 
@@ -36,6 +30,12 @@ const DARK_SCOPE =
   ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
 const styles = stylex.create({
+  content: {
+    width: 'max-content',
+    minWidth: 200,
+    gap: 'calc(var(--spacing) * 0)',
+    padding: 'calc(var(--spacing) * 0.5)',
+  },
   /** A menu option: the row a person picks an option from. */
   option: {
     display: 'flex',
@@ -328,13 +328,8 @@ export function SidebarFilterPopover({
         sideOffset={6}
         // A panel sets its children apart with a gap; this is a menu, whose
         // sections are set apart by their headings and separators alone.
-        className={clsx(
-          attachmentIntrinsicWidthClass,
-          sidebarFilterMinimumClass,
-          sidebarFilterNoGapClass,
-          'p-0.5',
-          className
-        )}
+        xstyle={styles.content}
+        className={className}
       >
         <div data-sidebar-filter-section="view">
           <SectionHeading>{merged.organizeHeading}</SectionHeading>

@@ -38,11 +38,11 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: themeRadius.full,
-    /* Light: one solid near-black for every glyph (matches reference).
-       Dark: soft foreground on the translucent glass — the `dark:`
-       variant stays a Tailwind class, because StyleX cannot select a
-       `.dark` ancestor. */
-    color: '#1c1c1e',
+    color: {
+      default: '#1c1c1e',
+      ':is(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
     transitionProperty: 'transform, translate, scale, rotate',
     transitionDuration: themeDuration[200],
     transitionTimingFunction: themeEasing.out,
@@ -61,16 +61,21 @@ const styles = stylex.create({
     borderRadius: themeRadius.full,
   },
   canvas: {
+    opacity: { default: 1, ':is(button:active > *)': 0 },
     transitionProperty: 'opacity',
     transitionDuration: themeDuration[200],
     transitionTimingFunction: themeEasing['in-out'],
   },
   pressed: {
-    opacity: 0,
+    opacity: { default: 0, ':is(button:active > *)': 1 },
     transitionProperty: 'opacity',
     transitionDuration: themeDuration[200],
     transitionTimingFunction: themeEasing['in-out'],
-    backgroundColor: '#f3f3f5',
+    backgroundColor: {
+      default: '#f3f3f5',
+      ':is(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--foreground)) 15%, transparent)',
+    },
   },
   content: {
     position: 'relative',
@@ -236,10 +241,11 @@ export const GlassIconButton = forwardRef<
     onClick?: () => void;
     children: ReactNode;
     className?: string;
+    xstyle?: stylex.StyleXStyles;
     /** Visible glass circle diameter; the touch target stays 44px. */
     discSize?: number;
   }
->(function GlassIconButton({ label, onClick, children, className, discSize = 36 }, ref) {
+>(function GlassIconButton({ label, onClick, children, className, xstyle, discSize = 36 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -266,17 +272,8 @@ export const GlassIconButton = forwardRef<
     return () => observer.disconnect();
   }, [discSize]);
 
-  /* `group` / `group-active:*` and the `dark:` variants stay Tailwind: they
-     select a PARENT's state or a `.dark` ancestor, which StyleX cannot
-     express. Everything else on the button is StyleX. */
-  const buttonClassName = [
-    stylex.props(styles.button).className,
-    'group',
-    'dark:text-foreground/90',
-    className,
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const sx = stylex.props(styles.button, xstyle);
+  const buttonClassName = [sx.className, className].filter(Boolean).join(' ');
 
   return (
     <button
@@ -289,11 +286,12 @@ export const GlassIconButton = forwardRef<
       aria-label={label}
       onClick={onClick}
       className={buttonClassName}
+      style={sx.style}
     >
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className={`${stylex.props(styles.disc, styles.canvas).className} group-active:opacity-0`}
+        {...stylex.props(styles.disc, styles.canvas)}
         style={{
           width: discSize,
           height: discSize,
@@ -302,7 +300,7 @@ export const GlassIconButton = forwardRef<
       {/* Pressed solid disc — slightly deeper cool gray than rest fill. */}
       <span
         aria-hidden="true"
-        className={`${stylex.props(styles.disc, styles.pressed).className} group-active:opacity-100 dark:bg-foreground/15`}
+        {...stylex.props(styles.disc, styles.pressed)}
         style={{ width: discSize, height: discSize }}
       />
       <span {...stylex.props(styles.content)}>{children}</span>

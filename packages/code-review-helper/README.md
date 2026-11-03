@@ -9,86 +9,37 @@ Standalone local code-review renderer and agent prompt package for Lody.
 | Styling builds | [`stylex-options.ts`](stylex-options.ts)                  | Shared StyleX configuration for Vite, Storybook, standalone HTML and Vitest. |
 | Review format  | [File responsibilities](context/file-responsibilities.md) | Parsing, references and checklist ownership.                                 |
 
-Owned renderer styles migrate progressively to local `stylex.create` blocks.
-They read this package's existing CSS variables at the styled element; product
-palette aliases can resolve at a different scope. Tailwind remains for control,
-private-writer and third-party compatibility. Keep the original dark theme,
-responsive layout and interactions; a styling change does not change reference
-navigation, diff readiness or comment ownership.
+Renderer and local controls use `stylex.create` with this package's HSL theme
+variables. The package has no Tailwind, CVA, utility-class merge or CSS-macro
+build dependency. [`src/react/styles.css`](src/react/styles.css) owns the small
+base reset, default variables, private property registrations and diff integration
+rules. `@pierre/diffs` keeps its own shadow-root styles.
 
-Nine reviewed private renderer glyphs use local StyleX dimensions, reading
-`--spacing` at the glyph. Their `crh-size-explicit` marker preserves the existing
-Button/Toggle SVG-size opt-out selector without changing exported raw control
-classes or adding an API. Diagnostics remains owned by Alert, and the unmounted
-gutter glyph stays on its legacy path. Actual standalone/viewer hosts and the
-renderer props provide no arbitrary SVG-utility wrapper contract; the preserved
-DOM-only ancestor counterexample is not a promise of such compatibility.
+Local controls expose optional `xstyle` for owned styling and retain Radix Slot
+rendering, events and refs. Defaults and caller styles compose once inside the
+control; explicit caller and Slot-child inline styles retain priority. Exported
+Button/ToggleGroup variant functions return generated StyleX class strings.
+These are selectors for the current styles, not a utility-class API. Root
+`ToggleGroup.asChild` retains its existing provider boundary and does not forward
+box styles through it; use a normal Root when styling the group box.
 
-The private commit Tooltip owns its width, maximum width and padding through
-local StyleX expressions. Its portal reads spacing at the popup itself; a variable
-on the source row is not implicitly a portal ancestor. Keep the exact zero-spacing
-expression and maximum tied to the root font size. Existing narrow-screen left-side clipping
-and clipboard-read permission limits remain documented in its visual acceptance.
+Button's optional CSS-typed width, height, label color, gap and padding fields,
+and ToggleGroup's gap/padding fields, still preserve CSS-wide values and caller
+shorthand/longhand order. Omitting the fields keeps the original style object.
+The `crh-size-explicit` glyph hook preserves the controls' existing SVG-size
+opt-out for the renderer's explicit glyphs.
 
-The local DropdownMenu, Tooltip, Button, ToggleGroup and Separator use StyleX on ordinary
-elements while preserving the original Tailwind cascade for legal Radix `asChild`
-children. Slot concatenates parent and
-child classes without resolving utility conflicts, so moving only parent defaults
-to an earlier CSS layer can change child precedence. Exported Button/ToggleGroup
-class selectors retain their raw utility values and order; one local CVA declaration
-provides both the public legacy selector and the private owned selector. Runtime
-StyleX mappings and source-utility removals are counted separately. Private font,
-transition, ring and descendant rules remain until their writer contracts migrate.
-Reviewed private text owners preserve each exact writer and physical reader:
-tracking, leading and weight read their original element-local theme/literal;
-numeric variants read all five numeric variables with empty fallbacks. A writer
-alone is not a substitute for that reader. Full Storybook and standalone CSS
-verification includes token pruning, actual fonts and visible numeric states;
-public Slot contracts stay on their audited paths. The private Viewed label uses
-local StyleX for base layout, typography and material, preserving its medium
-writer. Its checked/hover states use native `:has(:checked)` and mutually exclusive
-hover conditions, retaining immediate input state and original color-mix fallbacks.
-Transition fields keep their legacy variable readers. Native focus rings use
-`:has(:focus-visible)` and preserve the original ring-variable composition;
-they add no React focus state. The lazy diff layout remains a separate owner.
-Reviewed responsive headings
-keep the original rem media condition, local text token and private-leading reader.
-Numeric and length line-height owners preserve all five numeric variables and
-inherited lengths, including smaller table cells. During coexistence, Tailwind
-can still retain a utility because a StyleX value contains the same keyword;
-check complete production CSS before adding duplicate registrations. Removing
-Tailwind itself will also require explicit ownership of every retained writer
-registration and fallback.
-The private review checkbox keeps its native input and checked/indeterminate
-state. Its wrapper, checked/indeterminate branch, hover, transition, focus, input
-box and glyphs use local StyleX. Named ring custom properties may differ only in
-verified comma spacing while physical shadows remain equal; this is not general
-raw-value normalization. Zero-valued inset and margin
-retain `calc(var(--spacing) * 0)` so CSS-wide spacing values keep their behavior.
+The standalone theme provider applies Vesper. Browser light/dark preferences do
+not switch it to a different palette. Embedded hosts can omit the provider and
+supply the documented HSL variables. Private `--crh-*` writer/reader chains and
+registrations are owned here; they do not depend on framework initialization.
+The literal annotation/composer fonts stay in element-local custom properties
+because the locked CSS optimizer expands a direct `system-ui` declaration.
 
-Separator styling follows its existing JavaScript orientation branch; caller-written
-or Radix-normalized data attributes do not choose its axis. Rendering the original
-invalid-orientation case retains its original attribute/style mismatch.
-
-The local Button exposes opt-in CSS-typed `width`, `height`, `labelColor`, `gap`
-and `paddingInline` fields for reviewed private consumers. ToggleGroup exposes
-`gap`/`padding`, and its Item exposes `gap`. These write actual inline CSS properties,
-so CSS-wide keywords retain their field semantics. Caller and direct Slot-child
-styles keep their original priority. On the spacing path, an API field already
-owned by those styles is omitted before merging; inserting a duplicate first can
-reverse their shorthand/longhand order. Omitting the optional fields preserves
-the original style object and legacy dimension/ink-only path. The raw variant
-selectors, default classes and ordinary/Slot routes remain intact. ToggleGroup's
-existing Provider child does not forward root styles in its `asChild` path;
-these fields do not change that behavior or promise unchanged priority against
-arbitrary utility classes.
-
-The four build/test entries share the same compiler options. CSS layers place
-StyleX after base styles and before components/utilities. The standalone build
-keeps source transforms pre and extracts CSS post, immediately before the
-single-file inliner. Its generated HTML requires no stylesheet sidecar; the
-[standalone pipeline](standalone-build.md#style-extraction-and-single-file-output)
-owns that ordering and its `file://` verification.
+Development, Storybook, tests and standalone builds share the compiler options.
+The standalone build transforms source before Vite and extracts CSS immediately
+before the single-file inliner, so its `file://` output needs no stylesheet
+sidecar. See [the standalone pipeline](standalone-build.md).
 
 ## Review file format (`.review.md`)
 

@@ -11,7 +11,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeFontSize,
@@ -47,7 +47,7 @@ const styles = stylex.create({
     height: themeSpace[9],
     alignItems: 'center',
     gap: themeSpace[2],
-    borderBottomStyle: 'var(--tw-border-style, solid)',
+    borderBottomStyle: 'solid',
     borderBottomWidth: 1,
     paddingInline: themeSpace[3],
   },
@@ -85,6 +85,14 @@ const styles = stylex.create({
     borderRadius: themeRadius.sm,
     fontSize: themeFontSize.base,
     lineHeight: themeLineHeight.base,
+    backgroundColor: {
+      default: null,
+      ':is([data-active])': {
+        default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 5%, transparent)',
+        ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))':
+          'color-mix(in oklab, var(--color-white) 10%, transparent)',
+      },
+    },
   },
   categoryHeader: {
     // Sticky rows cover the scrolling emoji with the containing popup's surface.
@@ -121,7 +129,7 @@ const styles = stylex.create({
     minWidth: 0,
     alignItems: 'center',
     gap: themeSpace[1],
-    borderTopStyle: 'var(--tw-border-style, solid)',
+    borderTopStyle: 'solid',
     borderTopWidth: 1,
     padding: themeSpace[2],
   },
@@ -159,11 +167,15 @@ const styles = stylex.create({
 
 function EmojiPicker({
   className,
+  xstyle,
+  style,
   ...props
-}: React.ComponentProps<typeof EmojiPickerPrimitive.Root>) {
+}: React.ComponentProps<typeof EmojiPickerPrimitive.Root> & { xstyle?: stylex.StyleXStyles }) {
+  const sx = stylex.props(styles.root, xstyle);
   return (
     <EmojiPickerPrimitive.Root
-      className={cn(stylex.props(styles.root).className, className)}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
       data-slot="emoji-picker"
       {...props}
     />
@@ -176,7 +188,7 @@ function EmojiPickerSearch({
 }: React.ComponentProps<typeof EmojiPickerPrimitive.Search>) {
   return (
     <div
-      className={cn(stylex.props(styles.searchWrapper).className, className)}
+      className={clsx(stylex.props(styles.searchWrapper).className, className)}
       data-slot="emoji-picker-search-wrapper"
     >
       <SearchIcon {...stylex.props(styles.searchIcon)} />
@@ -202,12 +214,7 @@ function EmojiPickerEmoji({ emoji, className, ...props }: EmojiPickerListEmojiPr
   return (
     <button
       {...props}
-      className={cn(
-        stylex.props(styles.emoji).className,
-        // Preserve the app's nested light/dark scope predicate and overlay fills.
-        'data-[active]:bg-foreground/[0.05] dark:data-[active]:bg-white/[0.10]',
-        className
-      )}
+      className={clsx(stylex.props(styles.emoji).className, className)}
       data-slot="emoji-picker-emoji"
     >
       {emoji.emoji}
@@ -240,7 +247,7 @@ function EmojiPickerContent({
   const { t } = useTranslation();
   return (
     <EmojiPickerPrimitive.Viewport
-      className={cn(stylex.props(styles.viewport).className, className)}
+      className={clsx(stylex.props(styles.viewport).className, className)}
       data-slot="emoji-picker-viewport"
       {...props}
     >
@@ -273,7 +280,7 @@ function EmojiPickerFooter({ className, ...props }: React.ComponentProps<'div'>)
   const { t } = useTranslation();
   return (
     <div
-      className={cn(stylex.props(styles.footer).className, className)}
+      className={clsx(stylex.props(styles.footer).className, className)}
       data-slot="emoji-picker-footer"
       {...props}
     >

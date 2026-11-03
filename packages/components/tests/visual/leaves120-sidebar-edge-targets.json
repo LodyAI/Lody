@@ -1,0 +1,771 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedlegacysidebaredge--natural",
+    "migration-ownedlegacysidebaredge--natural-none",
+    "migration-ownedlegacysidebaredge--opaque",
+    "migration-ownedlegacysidebaredge--utility",
+    "migration-ownedlegacysidebaredge--wildcard",
+    "migration-ownedlegacysidebaredge--targeted",
+    "migration-ownedlegacysidebaredge--scoped",
+    "migration-ownedlegacysidebaredge--vertical"
+  ],
+  "ready": {
+    "migration-ownedlegacysidebaredge--natural": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-edge-part]')].length===2&&[...document.querySelectorAll('[data-edge-part]')].every(e=>e.dataset.edgeRefTag===e.tagName)&&document.querySelector('[data-edge-slot]')?.tagName==='A'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebaredge--natural-none": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-edge-part]')].length===2&&[...document.querySelectorAll('[data-edge-part]')].every(e=>e.dataset.edgeRefTag===e.tagName)&&document.querySelector('[data-edge-slot]')?.tagName==='A'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebaredge--opaque": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-edge-part]')].length===2&&[...document.querySelectorAll('[data-edge-part]')].every(e=>e.dataset.edgeRefTag===e.tagName)&&document.querySelector('[data-edge-slot]')?.tagName==='A'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebaredge--utility": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-edge-part]')].length===2&&[...document.querySelectorAll('[data-edge-part]')].every(e=>e.dataset.edgeRefTag===e.tagName)&&document.querySelector('[data-edge-slot]')?.tagName==='A'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebaredge--wildcard": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-edge-part]')].length===2&&[...document.querySelectorAll('[data-edge-part]')].every(e=>e.dataset.edgeRefTag===e.tagName)&&document.querySelector('[data-edge-slot]')?.tagName==='A'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebaredge--targeted": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-edge-part]')].length===2&&[...document.querySelectorAll('[data-edge-part]')].every(e=>e.dataset.edgeRefTag===e.tagName)&&document.querySelector('[data-edge-slot]')?.tagName==='A'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebaredge--scoped": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-edge-part]')].length===2&&[...document.querySelectorAll('[data-edge-part]')].every(e=>e.dataset.edgeRefTag===e.tagName)&&document.querySelector('[data-edge-slot]')?.tagName==='A'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebaredge--vertical": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase==='finished'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-edge-part]')].length===2&&[...document.querySelectorAll('[data-edge-part]')].every(e=>e.dataset.edgeRefTag===e.tagName)&&document.querySelector('[data-edge-slot]')?.tagName==='A'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedlegacysidebaredge--natural": [
+      {
+        "name": "painted-rail-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-edge-part=rail]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-edge-part=rail]'),r=e.getBoundingClientRect();return e.matches(':hover')&&r.width>0&&r.height>0&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===e&&getComputedStyle(e,'::after').content!=='none'}"
+          }
+        ]
+      },
+      {
+        "name": "rail-click-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-edge-part=rail]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          },
+          {
+            "action": "movePointer",
+            "x": 1100,
+            "y": 950
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-edge-part=rail]').matches(':hover')&&getComputedStyle(document.querySelector('[data-edge-part=rail]'),'::after').backgroundColor==='rgba(0, 0, 0, 0)'"
+          }
+        ]
+      },
+      {
+        "name": "toggle-restored",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=icon]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-offcanvas",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=offcanvas]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebaredge--natural-none": [
+      {
+        "name": "toggle-closed",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "toggle-restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=icon]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-offcanvas",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=offcanvas]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebaredge--opaque": [
+      {
+        "name": "toggle-closed",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "toggle-restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=icon]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-offcanvas",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=offcanvas]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebaredge--utility": [
+      {
+        "name": "toggle-closed",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "toggle-restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=icon]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-offcanvas",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=offcanvas]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebaredge--wildcard": [
+      {
+        "name": "toggle-closed",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "toggle-restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=icon]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-offcanvas",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=offcanvas]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebaredge--targeted": [
+      {
+        "name": "toggle-closed",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "toggle-restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=icon]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-offcanvas",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=offcanvas]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebaredge--scoped": [
+      {
+        "name": "painted-rail-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-edge-part=rail]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-edge-part=rail]'),r=e.getBoundingClientRect();return e.matches(':hover')&&r.width>0&&r.height>0&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===e&&getComputedStyle(e,'::after').content!=='none'}"
+          }
+        ]
+      },
+      {
+        "name": "rail-click-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-edge-part=rail]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          },
+          {
+            "action": "movePointer",
+            "x": 1100,
+            "y": 950
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-edge-part=rail]').matches(':hover')&&getComputedStyle(document.querySelector('[data-edge-part=rail]'),'::after').backgroundColor==='rgba(0, 0, 0, 0)'"
+          }
+        ]
+      },
+      {
+        "name": "toggle-restored",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=icon]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-offcanvas",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=offcanvas]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebaredge--vertical": [
+      {
+        "name": "toggle-closed",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-toggle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='collapsed'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "toggle-restored",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-edge-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=icon]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=icon]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "external-offcanvas",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-edge-external=offcanvas]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-edge-external=offcanvas]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-edge-state]').dataset.edgeState==='expanded'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

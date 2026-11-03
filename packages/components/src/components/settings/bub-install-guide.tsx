@@ -12,6 +12,7 @@ export const BUB_ACP_INSTALL_DOCS_URL =
 const BUB_ACP_INSTALL_COMMAND = 'curl -fsSL https://bub.build/install.sh | bash -- --preset acp';
 
 const styles = stylex.create({
+  docsLink: { padding: 0 },
   actionSpacing: {
     [button.paddingXSmall]: 'calc(var(--spacing) * 2)',
     [button.gap]: 'calc(var(--spacing) * 1)',
@@ -20,7 +21,7 @@ const styles = stylex.create({
     marginBlockStart: 0,
     marginBlockEnd: 'calc(var(--spacing) * 2)',
     fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+    lineHeight: 'var(--text-xs--line-height)',
     color: 'hsl(var(--muted-foreground) / 1)',
   },
   commandRow: {
@@ -42,7 +43,7 @@ const styles = stylex.create({
     overflowX: 'auto',
     whiteSpace: 'nowrap',
     fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+    lineHeight: 'var(--text-xs--line-height)',
   },
   mark: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)' },
 });
@@ -63,8 +64,8 @@ export function BubInstallGuide() {
           size="small"
           height="calc(var(--spacing) * 7)"
           fontSize="var(--text-xs)"
-          lineHeight="var(--tw-leading, var(--text-xs--line-height))"
-          className={stylex.props(styles.actionSpacing).className}
+          lineHeight="var(--text-xs--line-height)"
+          xstyle={styles.actionSpacing}
           aria-label={copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
           onClick={() => {
             void writeTextToClipboard(BUB_ACP_INSTALL_COMMAND).then((success) => {
@@ -86,8 +87,8 @@ export function BubInstallGuide() {
         size="small"
         height="auto"
         fontSize="var(--text-xs)"
-        lineHeight="var(--tw-leading, var(--text-xs--line-height))"
-        className="p-0"
+        lineHeight="var(--text-xs--line-height)"
+        xstyle={styles.docsLink}
         onClick={() => {
           void openExternalUrl(BUB_ACP_INSTALL_DOCS_URL);
         }}

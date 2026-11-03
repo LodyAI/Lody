@@ -30,8 +30,9 @@ const sourceRoot =
     : path.join(packageRoot, 'src/components');
 const require = createRequire(import.meta.url);
 // Use the direct dependency's compiler so validation follows the locked version.
-const tailwind = createRequire(require.resolve('@tailwindcss/postcss'))('@tailwindcss/node');
-const cssFile = path.join(packageRoot, 'src/tailwind/index.css');
+const tailwind = require('@tailwindcss/node');
+// Product CSS has no utility compiler input; the remaining fixtures own it.
+const cssFile = path.join(packageRoot, '.storybook/legacy-stories.css');
 const design = await tailwind.__unstable__loadDesignSystem(await readFile(cssFile, 'utf8'), {
   base: path.dirname(cssFile),
 });
@@ -209,6 +210,13 @@ function inspect(file, source) {
       collect(node.initializer);
     }
     if (
+      (ts.isPropertyAssignment(node) || ts.isParameter(node)) &&
+      (ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name)) &&
+      className(node.name.text)
+    ) {
+      collect(node.initializer);
+    }
+    if (
       ts.isBinaryExpression(node) &&
       node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
       node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
@@ -257,7 +265,7 @@ if (args.includes('--json')) {
   console.log(
     JSON.stringify(
       {
-        scannerVersion: 2,
+        scannerVersion: 3,
         root: path.relative(packageRoot, sourceRoot) || '.',
         method:
           'Static source-token occurrences accepted by the installed project Tailwind compiler; deduplicated by source location.',

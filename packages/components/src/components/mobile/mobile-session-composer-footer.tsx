@@ -7,16 +7,20 @@ import * as stylex from '@stylexjs/stylex';
    (model / thinking / fast row). That component was replaced by the
    consolidated run-config control (`mobile-session-run-config.tsx` +
    `mobile-run-config-sheet.tsx`) and removed. The two helpers below survive
-   because the new-chat composer (`chat-landing.tsx`) + its story still use
+   because the new-chat composer story still uses
    them: the model picker is the only chip allowed to shrink/truncate, keeping
    its tail via the rtl trick so a long "provider/model" name loses the prefix
    rather than the model. */
 
-/* The trigger is a primitive's `className`: it stays a Tailwind string so the
-   caller's own utilities keep winning over the primitive's own look. */
-export const mobileModelPickerTriggerClassName = 'h-8 min-w-0 px-2 py-1 text-sm';
-
 const styles = stylex.create({
+  trigger: {
+    height: 'calc(var(--spacing) * 8)',
+    minWidth: 0,
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
   label: {
     display: 'block',
     minWidth: 0,
@@ -28,6 +32,8 @@ const styles = stylex.create({
     direction: 'rtl',
   },
 });
+
+export const mobileModelPickerTriggerStyle = styles.trigger;
 
 export function MobileModelPickerLabel({ children }: { children: ReactNode }) {
   return (

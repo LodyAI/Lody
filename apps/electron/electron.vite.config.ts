@@ -1,11 +1,9 @@
-import { legacyDeclarationBridge } from '../../packages/components/vite-legacy-declarations'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
-import tailwindcss from '@tailwindcss/vite'
 import stylex from '@stylexjs/unplugin'
 import {
   loroCrdtBundlerAlias,
@@ -66,8 +64,6 @@ function buildViteEnvDefine(env: Record<string, string>): Record<string, string>
   }
   return define
 }
-
-const tailwindOptions = {}
 
 export default defineConfig(({ mode }) => {
   const buildMode = mode || OSS_BUILD_MODE
@@ -183,10 +179,7 @@ export default defineConfig(({ mode }) => {
           }
         }
       },
-      // Tailwind via Vite plugin so @fontsource url() assets are emitted by Vite.
       plugins: [
-        tailwindcss(tailwindOptions),
-        ...legacyDeclarationBridge({ tailwindOptions }),
         stylex.vite(componentsStylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),

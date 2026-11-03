@@ -123,8 +123,8 @@ export function CreateWorkspacePage({
             </Card.Description>
           </Card.Header>
           <Card.Content>
-            <div className="space-y-4">
-              <div className="space-y-2">
+            <div {...stylex.props(styles.formStack)}>
+              <div {...stylex.props(styles.fieldStack)}>
                 <UiField.Label htmlFor="workspace-name">
                   {t('organization.workspaceName')}
                 </UiField.Label>
@@ -140,7 +140,7 @@ export function CreateWorkspacePage({
                     }
                   }}
                   disabled={creating || fieldsDisabled}
-                  className={error ? 'border-destructive' : ''}
+                  xstyle={error ? styles.fieldError : undefined}
                 />
                 {error ? <p {...stylex.props(surface.error)}>{error}</p> : null}
                 <p {...stylex.props(surface.hint)}>
@@ -151,7 +151,7 @@ export function CreateWorkspacePage({
                 </p>
               </div>
 
-              <div className="space-y-2">
+              <div {...stylex.props(styles.fieldStack)}>
                 <div {...stylex.props(styles.between)}>
                   <UiField.Label htmlFor="workspace-slug">
                     {t('organization.workspaceSlug')}
@@ -186,7 +186,7 @@ export function CreateWorkspacePage({
                   value={workspaceSlug}
                   onChange={(event) => onWorkspaceSlugChange(event.target.value)}
                   disabled={creating || fieldsDisabled}
-                  className={slugErrorType ? 'border-destructive' : ''}
+                  xstyle={slugErrorType ? styles.fieldError : undefined}
                 />
                 {slugErrorType ? (
                   <p {...stylex.props(surface.smallError)}>
@@ -198,7 +198,7 @@ export function CreateWorkspacePage({
               {creationOptions}
 
               {paidRequired ? (
-                <div className={`space-y-2 ${stylex.props(styles.billing).className}`}>
+                <div {...stylex.props(styles.fieldStack, styles.billing)}>
                   <div {...stylex.props(styles.billingHeading)}>
                     <CreditCard {...stylex.props(surface.smallIcon)} />
                     {t('organization.plusBillingInterval', 'Billing interval')}
@@ -309,6 +309,19 @@ export function CreateWorkspacePage({
 }
 
 const styles = stylex.create({
+  formStack: {
+    ':is(*) > :where(:not(:last-child))': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 4)',
+    },
+  },
+  fieldStack: {
+    ':is(*) > :where(:not(:last-child))': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2)',
+    },
+  },
+  fieldError: { borderColor: themeColors.destructive },
   back: { marginBottom: themeSpace[3], marginLeft: 'calc(var(--spacing) * -2)' },
   hero: {
     marginInline: 'auto',
@@ -362,7 +375,7 @@ const styles = stylex.create({
     lineHeight: themeLineHeight.sm,
     fontWeight: themeFontWeight.medium,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },

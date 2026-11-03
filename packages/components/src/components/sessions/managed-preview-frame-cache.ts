@@ -23,7 +23,7 @@ const styles = stylex.create({
     display: 'block',
     height: '100%',
     width: '100%',
-    borderStyle: 'var(--tw-border-style)',
+    borderStyle: 'solid',
     borderWidth: '0px',
     backgroundColor: 'var(--color-white)',
   },

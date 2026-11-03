@@ -1,5 +1,14 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { PagedFileViewer } from '@/components/sessions/paged-file-viewer';
+const storyLayout = stylex.create({
+  frame: {
+    height: '480px',
+    width: '600px',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const meta = {
   title: 'Sessions/PagedFileViewer',
@@ -7,7 +16,7 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <div className="h-[480px] w-[600px] bg-background text-foreground">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

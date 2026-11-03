@@ -1,9 +1,22 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { fn } from 'storybook/test';
 
 import { MobileSidebarDrawer } from '@/components/mobile/mobile-sidebar-drawer';
 import { Button } from '@lody/ui/button';
+const storyLayout = stylex.create({
+  canvas: {
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  stack: {
+    display: 'flex',
+    height: '100%',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 function StoryShell({
   open,
@@ -18,7 +31,7 @@ function StoryShell({
 
   return (
     <div className="relative h-[640px] overflow-hidden border bg-muted/10">
-      <div className="p-4">
+      <div {...stylex.props(storyLayout.canvas)}>
         <Button type="button" onClick={() => setIsOpen(true)}>
           Open drawer
         </Button>
@@ -31,7 +44,7 @@ function StoryShell({
           onOpenChange?.(nextOpen);
         }}
       >
-        <div className="flex h-full flex-col bg-background p-4">
+        <div {...stylex.props(storyLayout.stack)}>
           <div className="text-sm font-semibold">Mobile sidebar</div>
           <div className="mt-3 space-y-2 text-sm text-muted-foreground">
             <div className="rounded-md border p-2">Navigation item</div>

@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -15,7 +16,6 @@ import { Badge } from '@lody/ui/badge';
 
 import type { PreviewVisualComment } from '@lody/shared/preview-comment-types';
 import type { VisualAnnotationResolvedAnchor } from '@lody/shared/visual-annotation-types';
-import { cn } from '@/lib/utils';
 import { getVisiblePreviewVisualComments } from '@/components/preview/preview-visual-comments';
 
 export type VisualAnnotationOverlayViewport = {
@@ -180,7 +180,7 @@ export function VisualAnnotationCommentsOverlay({
   return (
     <div
       data-lody-visual-comment-overlay="true"
-      className={cn(stylex.props(styles.root).className, className)}
+      className={clsx(stylex.props(styles.root).className, className)}
       style={{ width: viewport.width, height: viewport.height }}
     >
       {visibleComments.map((comment, index) => {
@@ -548,7 +548,7 @@ const styles = stylex.create({
     color: { default: themeColors.mutedForeground, ':hover': themeColors.popoverForeground },
     backgroundColor: { default: null, ':hover': themeColors.hover },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
@@ -575,7 +575,7 @@ const styles = stylex.create({
     fontSize: '11px',
     fontWeight: themeFontWeight.medium,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },

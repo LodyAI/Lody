@@ -39,6 +39,13 @@ import {
 } from './use-remote-directory-picker';
 import { localProjectsSurface as surface } from './surface';
 
+const styles = stylex.create({
+  pathInput: { flex: 1, fontSize: '0.95rem' },
+  crumbSkeleton: { marginInline: 'calc(var(--spacing) * 1.5)', flexShrink: 0 },
+  glyphSkeleton: { flexShrink: 0 },
+  textSkeleton: { flex: 1 },
+});
+
 /**
  * Mobile-optimized add-local-project flow (machine → browse → confirm). Large
  * tap targets, full-bleed rows, and the same row/skeleton/status look as the
@@ -227,7 +234,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
               }}
               placeholder={t('localProjects.add.pathPlaceholder', 'Type an absolute path')}
               controlHeight="calc(var(--spacing) * 10)"
-              className="flex-1 text-[0.95rem]"
+              xstyle={styles.pathInput}
               autoFocus
             />
             <button
@@ -243,7 +250,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
           <>
             <div {...stylex.props(surface.pathCrumbs)}>
               {crumbs.length === 0 ? (
-                <Skeleton width={128} height={16} className="mx-1.5 shrink-0" />
+                <Skeleton width={128} height={16} xstyle={styles.crumbSkeleton} />
               ) : (
                 <>
                   {breadcrumbTrail.hiddenPrefix ? (
@@ -453,8 +460,8 @@ function MobileDirectorySkeleton() {
     <div {...stylex.props(surface.skeletonBody)}>
       {Array.from({ length: 8 }).map((_, index) => (
         <div key={index} {...stylex.props(surface.skeletonRow)}>
-          <Skeleton width={28} height={28} className="shrink-0" />
-          <Skeleton height={16} className="flex-1" style={{ maxWidth: `${64 - index * 5}%` }} />
+          <Skeleton width={28} height={28} xstyle={styles.glyphSkeleton} />
+          <Skeleton height={16} xstyle={styles.textSkeleton} />
         </div>
       ))}
     </div>

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createStore, Provider } from 'jotai';
 import { useMemo, useState } from 'react';
@@ -16,6 +17,27 @@ import {
   EMPTY_SIDEBAR_GROUP_ACTIVITY,
   SidebarSectionHeader,
 } from '@/components/sidebar-row-shared';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    width: '280px',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  row: {
+    display: 'flex',
+    'min-height': '100vh',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 6)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 /**
  * What a folded sidebar group says about the Sessions it hides: one mark in the
@@ -156,7 +178,7 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
   const emptyChildren = useMemo(() => new Map<string, SessionMeta[]>(), []);
 
   return (
-    <div className="flex w-[280px] flex-col gap-2">
+    <div {...stylex.props(storyLayout.stack)}>
       {heading ? (
         <div className="px-1 text-xs font-medium text-muted-foreground">{heading}</div>
       ) : null}
@@ -286,7 +308,7 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
 export const Folded: Story = {
   render: () => (
     <Tooltip.Provider>
-      <div className="min-h-screen bg-background p-6">
+      <div {...stylex.props(storyLayout.frame)}>
         <FoldedGroupsSidebar folded />
       </div>
     </Tooltip.Provider>
@@ -297,7 +319,7 @@ export const Folded: Story = {
 export const SideBySide: Story = {
   render: () => (
     <Tooltip.Provider>
-      <div className="flex min-h-screen items-start gap-6 bg-background p-6">
+      <div {...stylex.props(storyLayout.row)}>
         <FoldedGroupsSidebar folded heading="Folded" />
         <FoldedGroupsSidebar folded={false} heading="Expanded" />
       </div>

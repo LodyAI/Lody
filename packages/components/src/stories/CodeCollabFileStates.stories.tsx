@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionMeta } from '@lody/shared';
 import { useMemo, useState } from 'react';
@@ -10,6 +11,34 @@ import {
   type SessionFileProviderEntry,
 } from '@/lib/session-file-provider';
 import { getSessionFileEntryModel } from '@/lib/session-file-provider-view-model';
+const storyLayout = stylex.create({
+  element: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    'overflow-y': 'auto',
+  },
+  label: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  label2: {
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  row: {
+    display: 'flex',
+    'min-height': '100vh',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const fileTreeStateMatrixEntries = [
   // Live collaborative
@@ -223,7 +252,7 @@ function FileTreeStateMatrixStory() {
           handleOpenFile={fn()}
         />
       </aside>
-      <main className="min-w-0 overflow-y-auto">
+      <main {...stylex.props(storyLayout.element)}>
         <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
           Per-file source states
         </div>
@@ -235,10 +264,10 @@ function FileTreeStateMatrixStory() {
                 key={entry.fileId}
                 className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2 text-xs"
               >
-                <span className="min-w-0 truncate text-foreground" title={entry.path}>
+                <span {...stylex.props(storyLayout.label)} title={entry.path}>
                   {entry.path}
                 </span>
-                <span className="text-muted-foreground">
+                <span {...stylex.props(storyLayout.label2)}>
                   {model.unavailableLabel ?? model.sourceLabel}
                 </span>
               </div>
@@ -271,7 +300,7 @@ function UnsupportedFileStory({
       <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
         {description}
       </div>
-      <div className="min-h-0 flex-1">
+      <div {...stylex.props(storyLayout.frame)}>
         <SessionFileContentView
           sessionId={fileTreeStorySession.id}
           session={fileTreeStorySession}
@@ -409,7 +438,7 @@ export const FileTreeStateMatrix: StoryObj<typeof FileTreeStateMatrixStory> = {
     },
   },
   render: () => (
-    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+    <div {...stylex.props(storyLayout.row)}>
       <FileTreeStateMatrixStory />
     </div>
   ),

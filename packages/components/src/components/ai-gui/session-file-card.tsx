@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
@@ -6,11 +7,15 @@ import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import type { SessionFilePayload } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import { FileSheet } from './session-file-sheet';
 import { evidenceSurface } from './surface';
 import { themeColors } from '../../style/theme-colors.stylex';
-import { themeFontSize, themeLineHeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import {
   formatFileSize,
   getSessionFileDisplayState,
@@ -293,7 +298,7 @@ export function SessionFileCardLayout({
   const Frame = inline ? 'span' : 'div';
   return (
     <Frame
-      className={cn(
+      className={clsx(
         stylex.props(card.root, isInteractive && card.interactive, failed && card.failed).className,
         className
       )}
@@ -448,10 +453,7 @@ export function SessionFileCardList({
       /* An assistant attachment (`align="start"`) is a top-level conversation
          row: the horizontal gutter belongs to `ConversationColumn` and the row
          gap to `cardSiblingGap`. User attachments keep their own insets. */
-      className={stylex.props(
-        card.list,
-        align === 'end' ? card.listEnd : card.listStart
-      ).className}
+      className={stylex.props(card.list, align === 'end' ? card.listEnd : card.listStart).className}
     >
       {children}
     </div>

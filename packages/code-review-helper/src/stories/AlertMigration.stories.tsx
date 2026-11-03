@@ -1,8 +1,47 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { CSSProperties } from 'react';
 import { CircleAlert } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+
+const callerStyles = stylex.create({
+  capitalize: { textTransform: 'capitalize' },
+  root: {
+    position: 'relative',
+    display: 'block',
+    width: '75%',
+    alignItems: 'center',
+    rowGap: 'calc(var(--spacing) * 3)',
+    borderRadius: 0,
+    borderWidth: 4,
+    borderColor: 'hsl(var(--status-info))',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--status-info)) 10%,transparent)',
+    paddingInline: 'calc(var(--spacing) * 5)',
+    paddingBlock: 'calc(var(--spacing) * 4)',
+    fontSize: 17,
+  },
+  glyph: {
+    width: 'calc(var(--spacing) * 6)',
+    height: 'calc(var(--spacing) * 6)',
+    translate: '0 calc(var(--spacing) * 1)',
+    color: 'hsl(var(--status-info))',
+  },
+  title: {
+    gridColumnStart: '1',
+    minHeight: 'calc(var(--spacing) * 6)',
+    fontWeight: 'var(--font-weight-normal)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    letterSpacing: 'var(--tracking-wide)',
+  },
+  description: {
+    gridColumnStart: '1',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--status-info))',
+  },
+  grid: { gridTemplateColumns: 'minmax(0,1fr)', columnGap: 'calc(var(--spacing) * 5)' },
+});
 
 const meta = {
   title: 'Code Review Helper/AlertMigration',
@@ -48,7 +87,7 @@ function Contents({ icon = 'direct' }: { icon?: 'direct' | 'nested' | 'none' }) 
           <CircleAlert />
         </span>
       )}
-      <AlertTitle className="capitalize">review diagnostic</AlertTitle>
+      <AlertTitle xstyle={callerStyles.capitalize}>review diagnostic</AlertTitle>
       <AlertDescription>
         Synthetic local diagnostic with a longer message that wraps on narrow viewports.{' '}
         <a href="#local">Local reference</a>
@@ -106,21 +145,13 @@ export const VariantDefaults: Story = {
 export const CallerOverrides: Story = {
   render: () => (
     <Scope dark={window.matchMedia('(prefers-color-scheme: dark)').matches}>
-      <Alert
-        variant="warning"
-        data-case="root-classes"
-        className="relative block w-3/4 items-center gap-y-3 rounded-none border-4 border-info bg-info/10 px-5 py-4 text-[17px]"
-      >
+      <Alert variant="warning" data-case="root-classes" xstyle={callerStyles.root}>
         <Contents icon="none" />
       </Alert>
       <Alert data-case="child-classes">
-        <CircleAlert className="size-6 translate-y-1 text-info" />
-        <AlertTitle className="col-start-1 min-h-6 font-normal leading-6 tracking-wide">
-          Caller title
-        </AlertTitle>
-        <AlertDescription className="col-start-1 text-xs text-info">
-          Caller description.
-        </AlertDescription>
+        <CircleAlert {...stylex.props(callerStyles.glyph)} />
+        <AlertTitle xstyle={callerStyles.title}>Caller title</AlertTitle>
+        <AlertDescription xstyle={callerStyles.description}>Caller description.</AlertDescription>
       </Alert>
       <Alert
         data-case="inline"
@@ -128,7 +159,7 @@ export const CallerOverrides: Story = {
       >
         <Contents />
       </Alert>
-      <Alert data-case="conditional-grid-caller" className="grid-cols-1 gap-x-5">
+      <Alert data-case="conditional-grid-caller" xstyle={callerStyles.grid}>
         <Contents />
       </Alert>
     </Scope>

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { cn } from '@/lib/utils';
@@ -10,6 +11,15 @@ import {
   useWindowsCaptionRowPadClass,
   useMacTrafficLightRowPadClass,
 } from '@/ui/window-drag-region';
+
+const storyOverrides = stylex.create({
+  strip: {
+    zIndex: 30,
+    height: 'calc(var(--spacing) * 8)',
+    insetInline: 'calc(var(--spacing) * 4)',
+  },
+  bottom: { top: '820px' },
+});
 
 function Rows({ toggle }: { toggle: () => void }) {
   const header = useWindowDragRegionClass();
@@ -77,10 +87,10 @@ function Rows({ toggle }: { toggle: () => void }) {
         data-caller-host
         style={{ position: 'relative', height: 70, background: 'hsl(var(--muted))' }}
       >
-        <WindowDragStrip className="z-30 h-8 inset-x-4" />
+        <WindowDragStrip xstyle={storyOverrides.strip} />
         <span>Public caller classes</span>
       </section>
-      <WindowDragStrip position="fixed" className="top-[820px]" />
+      <WindowDragStrip position="fixed" xstyle={storyOverrides.bottom} />
       <button data-fullscreen className={WINDOW_DRAG_EXEMPT_CLASS} onClick={toggle}>
         Toggle synthetic fullscreen push
       </button>

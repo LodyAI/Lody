@@ -12,12 +12,7 @@ import { Terminal } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { clsx } from 'clsx';
-import { cn } from '@/lib/utils';
-import {
-  CONVERSATION_PANEL_FRAME_CLASS,
-  CONVERSATION_PANEL_HEADER_CLASS,
-  conversationPanelStyles,
-} from './conversation-panel';
+import { conversationPanelStyles } from './conversation-panel';
 import {
   createVSCodeTerminalTheme,
   resolveAnsiColorToCss,
@@ -64,10 +59,9 @@ const styles = stylex.create({
     width: '100%',
     textAlign: 'left',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-    '@media (hover: hover)': { ':hover': { backgroundColor: themeColors.hover } },
   },
   body: { color: themeColors.foreground },
   commandRow: {
@@ -79,7 +73,7 @@ const styles = stylex.create({
   },
   commandRowRule: {
     borderBottomWidth: '1px',
-    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomStyle: 'solid',
     borderColor: {
       default: 'hsl(var(--border) / 1)',
       '@supports (color: color-mix(in lab, red, red))':
@@ -181,6 +175,7 @@ export type TerminalComponentProps = {
   command: string;
   output: string;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   tailLines?: number;
   focusedMaxHeightPx?: number;
   outputDisplayMode?: 'tail' | 'scroll' | 'full';
@@ -198,6 +193,7 @@ export const TerminalComponent = memo(function TerminalComponent({
   command,
   output,
   className,
+  xstyle,
   tailLines = 16,
   focusedMaxHeightPx = 320,
   outputDisplayMode = 'tail',
@@ -268,9 +264,10 @@ export const TerminalComponent = memo(function TerminalComponent({
   return (
     <div
       className={clsx(
-        stylex.props(styles.root).className,
-        cn(showBorder ? CONVERSATION_PANEL_FRAME_CLASS : null, className)
+        stylex.props(styles.root, showBorder && conversationPanelStyles.frame, xstyle).className,
+        className
       )}
+      style={stylex.props(xstyle).style}
     >
       {/* The terminal's own surface (VS Code `terminal.background`, or the muted
           fallback) wraps the header AND the body, so the header's raised tint
@@ -287,13 +284,10 @@ export const TerminalComponent = memo(function TerminalComponent({
           onHeaderClick ? (
             <button
               type="button"
-              className={clsx(
-                CONVERSATION_PANEL_HEADER_CLASS,
-                stylex.props(
-                  conversationPanelStyles.header,
-                  styles.headerButton,
-                  bodyVisible && conversationPanelStyles.headerRule
-                ).className
+              {...stylex.props(
+                styles.headerButton,
+                conversationPanelStyles.header,
+                bodyVisible && conversationPanelStyles.headerRule
               )}
               onClick={onHeaderClick}
               aria-expanded={headerExpanded}
@@ -302,12 +296,9 @@ export const TerminalComponent = memo(function TerminalComponent({
             </button>
           ) : (
             <div
-              className={clsx(
-                CONVERSATION_PANEL_HEADER_CLASS,
-                stylex.props(
-                  conversationPanelStyles.header,
-                  bodyVisible && conversationPanelStyles.headerRule
-                ).className
+              {...stylex.props(
+                conversationPanelStyles.header,
+                bodyVisible && conversationPanelStyles.headerRule
               )}
             >
               {headerContent}

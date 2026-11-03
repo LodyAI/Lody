@@ -2,19 +2,6 @@ import type { ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 
-import { cn } from '@/lib/utils';
-import {
-  acpCompactIconClass,
-  acpCompactTextLeadClass,
-  acpCompactTextTailClass,
-  acpMinimumClass,
-  acpGapClass,
-  acpIconClass,
-  acpLabelClass,
-  acpPlainCornerClass,
-  acpPlainPaddingClass,
-  acpMediumWeightClass,
-} from '@/style/legacy-defaults.stylex';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@/ui/armed-overlays';
 import { Menu } from '@/ui/menu';
@@ -48,6 +35,51 @@ export type AcpSessionSelectProps = {
 };
 
 const styles = stylex.create({
+  trigger: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    userSelect: 'none',
+    gap: 'calc(var(--spacing) * 1)',
+    color: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 70%, transparent)',
+      ':hover': {
+        default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 70%, transparent)',
+        '@media (hover: hover)': 'hsl(var(--foreground) / 1)',
+      },
+    },
+    boxShadow: { default: 'none', ':focus-visible': 'none' },
+  },
+  compact: {
+    borderRadius: '4px',
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      ':hover': {
+        default: 'hsl(var(--muted-foreground) / 1)',
+        '@media (hover: hover)': 'hsl(var(--foreground) / 1)',
+      },
+    },
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': {
+        default: 'transparent',
+        '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
+      },
+    },
+  },
+  iconTrigger: { borderRadius: '4px' },
+  compactIcon: { paddingInline: 'calc(var(--spacing) * 0)' },
+  labelTrigger: { paddingInline: 'calc(var(--spacing) * 2)' },
+  compactLabel: { flexShrink: 1 },
+  pill: {
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: { default: 'transparent', ':hover': 'hsl(var(--hover) / 1)' },
+  },
+  plain: {
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+  },
+  compactText: { fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-tight)' },
+  label: { fontWeight: 'var(--font-weight-medium)' },
   icon: { display: 'flex', flexShrink: 0, alignItems: 'center' },
   chevron: {
     height: 'calc(var(--spacing) * 3.5)',
@@ -56,14 +88,6 @@ const styles = stylex.create({
     opacity: 0.7,
   },
 });
-
-const compactClassName = (_isDark: boolean, iconOnly: boolean) =>
-  cn(
-    iconOnly
-      ? acpCompactIconClass
-      : `${acpCompactTextLeadClass} shrink ${acpCompactTextTailClass} [&_span]:text-xs [&_span]:leading-tight`,
-    'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-  );
 
 export function AcpSessionSelect({
   value,
@@ -78,14 +102,12 @@ export function AcpSessionSelect({
   align = 'start',
   ariaLabel,
   triggerTitle,
-  tone = 'light',
   variant = 'default',
   showDescription = true,
 }: AcpSessionSelectProps) {
   const selectedOption = options.find((option) => option.value === value);
   const label = selectedOption?.label ?? placeholder ?? '';
   const isMenuEnabled = !disabled && options.length > 1;
-  const isDark = tone === 'dark';
   // Icon-only triggers hide the selected label, so the tooltip and the
   // accessible name carry it instead ("Permission mode: Plan").
   const withSelectedLabel = (name: string | undefined) =>
@@ -97,23 +119,38 @@ export function AcpSessionSelect({
       variant="ghost"
       size="mini"
       icon={iconOnly}
-      className={cn(
-        `${acpMinimumClass} select-none ${acpGapClass} text-foreground/70 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0`,
-        variant === 'compact' && compactClassName(isDark, iconOnly),
-        variant !== 'compact' && iconOnly && acpIconClass,
-        variant !== 'compact' && !iconOnly && acpLabelClass,
-        variant === 'default' && !iconOnly && 'rounded-full hover:bg-hover',
-        variant === 'text' &&
-          !iconOnly &&
-          `${acpPlainCornerClass} bg-transparent ${acpPlainPaddingClass} hover:bg-transparent`,
-        className
-      )}
+      width={iconOnly ? 'calc(var(--spacing) * 6)' : variant === 'compact' ? 'auto' : undefined}
+      height={
+        variant === 'compact' || iconOnly ? 'calc(var(--spacing) * 6)' : 'calc(var(--spacing) * 8)'
+      }
+      shape={variant === 'default' && !iconOnly ? 'pill' : 'default'}
+      xstyle={[
+        styles.trigger,
+        variant === 'compact' && styles.compact,
+        iconOnly && styles.iconTrigger,
+        variant === 'compact' && iconOnly && styles.compactIcon,
+        !iconOnly && styles.labelTrigger,
+        variant === 'compact' && !iconOnly && styles.compactLabel,
+        variant === 'default' && !iconOnly && styles.pill,
+        variant === 'text' && !iconOnly && styles.plain,
+      ]}
+      className={className}
       aria-label={withSelectedLabel(ariaLabel)}
       disabled={disabled}
       title={withSelectedLabel(triggerTitle) ?? label}
     >
-      {icon ? <span {...stylex.props(styles.icon)}>{icon}</span> : null}
-      {!iconOnly ? <span className={acpMediumWeightClass}>{label}</span> : null}
+      {icon ? (
+        <span
+          {...stylex.props(styles.icon, variant === 'compact' && !iconOnly && styles.compactText)}
+        >
+          {icon}
+        </span>
+      ) : null}
+      {!iconOnly ? (
+        <span {...stylex.props(styles.label, variant === 'compact' && styles.compactText)}>
+          {label}
+        </span>
+      ) : null}
       {isMenuEnabled && !iconOnly ? <ChevronDown {...stylex.props(styles.chevron)} /> : null}
     </Button>
   );
@@ -125,7 +162,7 @@ export function AcpSessionSelect({
   return (
     <Menu.Root>
       <Menu.Trigger render={trigger}>{trigger}</Menu.Trigger>
-      <Menu.Content align={align} className={cn('min-w-[120px]', contentClassName)}>
+      <Menu.Content align={align} minWidth={120} className={contentClassName}>
         <Menu.RadioGroup value={value ?? ''} onValueChange={onChange}>
           {options.map((option) => {
             const menuItem = (

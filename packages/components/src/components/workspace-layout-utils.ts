@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 
 const styles = stylex.create({
-  root: { display: 'flex', width: '100%', overflow: 'hidden' },
+  root: { display: 'flex', width: '100%', height: '100svh', overflow: 'hidden' },
   mobileHeight: { height: '100%' },
   webSurface: { backgroundColor: 'hsl(var(--background) / 1)' },
   sidebarSurface: { backgroundColor: 'hsl(var(--sidebar-background) / 1)' },
@@ -16,8 +16,6 @@ const styles = stylex.create({
     transitionProperty: 'padding-bottom',
     transitionDuration: '.25s',
     transitionTimingFunction: 'var(--ease-out)',
-    '--tw-duration': '.25s',
-    '--tw-ease': 'var(--ease-out)',
   },
   content: {
     display: 'flex',
@@ -98,8 +96,8 @@ export function getWebWorkspaceLayoutRootClassName({
       surface === 'sidebar' ? styles.sidebarSurface : styles.webSurface,
       settingsRoute && styles.positioned
     ).className,
-    // Old-browser viewport fallbacks and Electron's devbar both select this hook.
-    'h-svh',
+    // Native viewport fallbacks and Electron's devbar select this integration hook.
+    'workspace-viewport',
     LAYOUT_SAFE_AREA_INSET_CLASS,
     NATIVE_KEYBOARD_OFFSET_CLASS,
   ]

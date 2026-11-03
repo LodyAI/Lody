@@ -30,7 +30,7 @@ import { FileIcon } from '@/components/icons/file-icons';
 import { getSessionDiffErrorMessage } from '@/lib/session-diff-diagnostics';
 import { getDiffPerfNow, isDiffPerfEnabled, logDiffPerfDurationLazy } from '@/lib/diff-perf';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DEFAULT_VSCODE_DIFF_THEME_FALLBACK } from '@/lib/vscode-theme';
 import { parseDiffInWorker, parseDiffTextSourceInWorker } from '@/lib/diff-parse-worker';
@@ -63,6 +63,15 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 
+const expand = stylex.keyframes({
+  from: { height: 0 },
+  to: { height: 'var(--radix-collapsible-content-height)' },
+});
+const collapse = stylex.keyframes({
+  from: { height: 'var(--radix-collapsible-content-height)' },
+  to: { height: 0 },
+});
+
 const styles = stylex.create({
   fullWidth: { width: '100%' },
   toggleGlyph: {
@@ -70,8 +79,9 @@ const styles = stylex.create({
     height: 'calc(var(--spacing) * 4)',
     transitionProperty: 'transform, translate, scale, rotate',
     transitionDuration: themeDuration[200],
+    rotate: { default: null, ':is([data-state="closed"] *)': '-90deg' },
     transitionTimingFunction:
-      'var(--tw-ease, var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1)))',
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
   },
   status: { paddingInline: themeSpace[4], paddingBlock: themeSpace[3] },
   statusTitle: {
@@ -98,8 +108,19 @@ const styles = stylex.create({
     overflow: 'hidden',
     borderRadius: themeRadius.xl,
     fontSize: '0.8rem',
+    minHeight: 'calc(var(--spacing) * 8)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 12%, transparent)',
+      ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))':
+        'hsl(var(--border) / 1)',
+    },
+    boxShadow: '0 1px 2px hsl(0 0% 0% / .04)',
   },
   defaultHeader: {
+    height: 'calc(var(--spacing) * 8)',
     insetInline: 'calc(var(--spacing) * 0)',
     borderRadius: 0,
     backgroundColor: 'hsl(var(--background) / 1)',
@@ -107,15 +128,24 @@ const styles = stylex.create({
     paddingRight: 'calc(var(--spacing) * 4)',
   },
   defaultHeaderOpen: {
-    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomStyle: 'solid',
     borderBottomWidth: '1px',
     borderColor: {
       default: 'hsl(var(--foreground) / 1)',
       '@supports (color: color-mix(in lab, red, red))':
         'color-mix(in oklab, hsl(var(--foreground) / 1) 8%, transparent)',
+      ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))':
+        'hsl(var(--border) / 1)',
     },
   },
   customContent: {
+    animationName: {
+      default: null,
+      ':is([data-state="open"])': expand,
+      ':is([data-state="closed"])': collapse,
+    },
+    animationDuration: '.2s',
+    animationTimingFunction: 'ease-out',
     overflow: 'hidden',
     height: { default: null, ':is([data-state="closed"])': 0 },
   },
@@ -508,13 +538,8 @@ function createParsedDiffCacheKey(
 function CollapseToggle({ className }: { className?: string }) {
   return (
     <Collapsible.Trigger asChild>
-      <Button variant="ghost" size="mini" icon className={cn('shrink-0', className)}>
-        <ChevronDown
-          className={cn(
-            stylex.props(styles.toggleGlyph).className,
-            '[[data-state=closed]_&]:-rotate-90'
-          )}
-        />
+      <Button variant="ghost" size="mini" icon className={className}>
+        <ChevronDown {...stylex.props(styles.toggleGlyph)} />
       </Button>
     </Collapsible.Trigger>
   );
@@ -1300,7 +1325,7 @@ function DiffViewerImpl({
       ref={diffHostRef}
       onPointerDownCapture={() => setKeepContentMounted(true)}
       onFocusCapture={() => setKeepContentMounted(true)}
-      className={cn('lody-pierre-diff', stylex.props(styles.diffHost).className)}
+      className={clsx('lody-pierre-diff', stylex.props(styles.diffHost).className)}
       style={pierreDiffHostStyle}
     >
       {diffContent}
@@ -1310,7 +1335,10 @@ function DiffViewerImpl({
   // No header mode - just render the diff content
   if (!showHeader && !renderHeader) {
     return (
-      <div ref={containerRef} className={cn(stylex.props(styles.headerless).className, className)}>
+      <div
+        ref={containerRef}
+        className={clsx(stylex.props(styles.headerless).className, className)}
+      >
         {diffContentContainer}
       </div>
     );
@@ -1320,12 +1348,6 @@ function DiffViewerImpl({
   // stronger edge than default --border (≈90% L), which vanishes on white.
   // Always overflow-hidden so full-bleed addition rows clip to rounded corners
   // without painting over the border.
-  const diffCardChromeClass = cn(
-    stylex.props(styles.chrome).className,
-    'min-h-8 bg-background',
-    'border border-foreground/[0.12] dark:border-border',
-    'shadow-[0_1px_2px_hsl(0_0%_0%/0.04)]'
-  );
 
   // Custom header mode - user provides their own header with CollapseToggle
   if (renderHeader) {
@@ -1335,15 +1357,10 @@ function DiffViewerImpl({
         open={isControlledOpen ? open : undefined}
         onOpenChange={handleOpenChange}
         defaultOpen={isControlledOpen ? undefined : defaultOpen}
-        className={cn(diffCardChromeClass, className)}
+        className={clsx(stylex.props(styles.chrome).className, className)}
       >
         {renderHeader({ fileName, path, additions, deletions, CollapseToggle })}
-        <Collapsible.Content
-          className={cn(
-            stylex.props(styles.customContent).className,
-            'data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up'
-          )}
-        >
+        <Collapsible.Content className={stylex.props(styles.customContent).className}>
           <div {...stylex.props(styles.flushBody)}>{diffContentContainer}</div>
         </Collapsible.Content>
       </Collapsible.Root>
@@ -1356,7 +1373,8 @@ function DiffViewerImpl({
       <CollapsibleCard
         data-section-id="diff-viewer"
         id="diff-viewer"
-        className={cn(diffCardChromeClass, className)}
+        xstyle={styles.chrome}
+        className={className}
         open={isControlledOpen ? open : undefined}
         onOpenChange={handleOpenChange}
         defaultOpen={isControlledOpen ? undefined : defaultOpen}
@@ -1368,13 +1386,7 @@ function DiffViewerImpl({
         <CollapsibleCardHeader
           sticky={false}
           position="relative"
-          className={cn(
-            'h-8',
-            stylex.props(styles.defaultHeader, isOpen && styles.defaultHeaderOpen).className,
-            // Separator only when open — collapsed cards must not stack border-b
-            // on the outer bottom edge (dirty corner AA).
-            isOpen && 'dark:border-border'
-          )}
+          xstyle={[styles.defaultHeader, isOpen && styles.defaultHeaderOpen]}
         >
           <FileIcon filePath={path} className={stylex.props(styles.fileIcon).className} />
           <div {...stylex.props(styles.pathRow)}>
@@ -1397,7 +1409,7 @@ function DiffViewerImpl({
           )}
         </CollapsibleCardHeader>
         {/* No bottom padding: green/red last rows meet the clipped card edge. */}
-        <CollapsibleCardContent noInternalScroll className="pb-0">
+        <CollapsibleCardContent noInternalScroll xstyle={styles.flushBody}>
           {diffContentContainer}
         </CollapsibleCardContent>
       </CollapsibleCard>

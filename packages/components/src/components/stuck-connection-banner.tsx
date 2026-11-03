@@ -21,6 +21,10 @@ import {
 } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  recoverButton: {
+    borderRadius: 'calc(infinity * 1px)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+  },
   dismissSpacing: { marginRight: 'calc(var(--spacing) * -1)' },
   connectionSpinner: { color: 'hsl(var(--muted-foreground) / 1)' },
   /** The sheet's place: pinned above the mobile dock, letting the pointer through. */
@@ -160,7 +164,7 @@ export function StuckConnectionBanner({
             height="calc(var(--spacing) * 6)"
             width="calc(var(--spacing) * 6)"
             labelColor="hsl(var(--muted-foreground) / 1)"
-            className={stylex.props(styles.dismissSpacing).className}
+            xstyle={styles.dismissSpacing}
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
           >
@@ -175,8 +179,8 @@ export function StuckConnectionBanner({
             size="small"
             height="calc(var(--spacing) * 7)"
             fontSize="var(--text-xs)"
-            lineHeight="var(--tw-leading, var(--text-xs--line-height))"
-            className="rounded-full px-3"
+            lineHeight="var(--text-xs--line-height)"
+            xstyle={styles.recoverButton}
             onClick={onRecover}
           >
             {labels.recover}

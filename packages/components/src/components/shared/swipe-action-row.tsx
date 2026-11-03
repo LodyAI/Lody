@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import {
   useCallback,
   useEffect,
@@ -10,7 +11,6 @@ import {
   type ReactNode,
 } from 'react';
 import { clamp } from '@/lib/clamp';
-import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -50,12 +50,19 @@ const styles = stylex.create({
     fontSize: themeFontSize.xs,
     lineHeight: themeLineHeight.xs,
     fontWeight: themeFontWeight.medium,
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    outline: {
+      default: null,
+      ':focus-visible': '2px solid transparent',
+      '@media (forced-colors: active)': { ':focus-visible': 'auto' },
+    },
+    outlineOffset: { default: null, ':focus-visible': 2 },
   },
   dragColors: {
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
   },
   spring: {
     transitionDuration: themeDuration[300],
@@ -90,6 +97,7 @@ export type SwipeActionRowAction = {
   icon?: ReactNode;
   hideLabel?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   onClick: () => void;
 };
 
@@ -109,6 +117,8 @@ type SwipeActionRowProps = {
   children: ReactNode;
   className?: string;
   contentClassName?: string;
+  rootXstyle?: stylex.StyleXStyles;
+  contentXstyle?: stylex.StyleXStyles;
   actionWidth?: number;
   commitDistance?: number;
   onCommit?: () => void;
@@ -120,6 +130,8 @@ export function SwipeActionRow({
   children,
   className,
   contentClassName,
+  rootXstyle,
+  contentXstyle,
   actionWidth = DEFAULT_ACTION_WIDTH,
   commitDistance = DEFAULT_COMMIT_DISTANCE,
   onCommit,
@@ -351,7 +363,7 @@ export function SwipeActionRow({
   }
 
   return (
-    <div ref={rootRef} {...withClassName(stylex.props(styles.root), className)}>
+    <div ref={rootRef} {...withClassName(stylex.props(styles.root, rootXstyle), className)}>
       <div
         {...stylex.props(styles.actions)}
         style={{ width: maxSwipeWidth }}
@@ -363,16 +375,19 @@ export function SwipeActionRow({
             <button
               key={action.key}
               type="button"
-              className={cn(
+              className={clsx(
                 stylex.props(
                   styles.action,
                   isDragging ? styles.dragColors : styles.actionTransition,
-                  !isDragging && styles.spring
+                  !isDragging && styles.spring,
+                  action.xstyle
                 ).className,
-                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60',
                 action.className
               )}
-              style={{ width: shouldStretchAction ? commitActionWidth : actionWidth }}
+              style={{
+                ...stylex.props(action.xstyle).style,
+                width: shouldStretchAction ? commitActionWidth : actionWidth,
+              }}
               aria-label={action.ariaLabel ?? action.label}
               tabIndex={isOpen ? 0 : -1}
               onClick={(event) => {
@@ -412,11 +427,15 @@ export function SwipeActionRow({
           stylex.props(
             styles.content,
             isDragging ? styles.noTransition : styles.contentTransition,
-            !isDragging && styles.spring
+            !isDragging && styles.spring,
+            contentXstyle
           ),
           contentClassName
         )}
-        style={{ transform: `translate3d(${visualOffset}px, 0, 0)` }}
+        style={{
+          ...stylex.props(contentXstyle).style,
+          transform: `translate3d(${visualOffset}px, 0, 0)`,
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

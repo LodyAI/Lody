@@ -1,6 +1,17 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SessionNotFound } from '@/components/sessions/session-not-found';
 import { fn } from 'storybook/test';
+const storyLayout = stylex.create({
+  frame: {
+    height: '100vh',
+  },
+  frame2: {
+    height: '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 /**
  * SessionNotFound component is displayed when a session cannot be found.
@@ -21,7 +32,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="h-screen">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),
@@ -50,7 +61,7 @@ export const DarkMode: Story = {
   },
   decorators: [
     (Story) => (
-      <div className="dark h-screen bg-background">
+      <div className={clsx(stylex.props(storyLayout.frame2).className, 'dark')}>
         <Story />
       </div>
     ),

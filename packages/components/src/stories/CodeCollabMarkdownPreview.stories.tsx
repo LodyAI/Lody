@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionMeta } from '@lody/shared';
 import { useMemo } from 'react';
@@ -7,6 +8,12 @@ import {
   createFakeSessionFileProvider,
   type SessionFileProviderEntry,
 } from '@/lib/session-file-provider';
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+});
 
 const MARKDOWN_FILE: SessionFileProviderEntry = {
   fileId: 't:readme',
@@ -68,7 +75,7 @@ function MarkdownPreviewStory() {
 
   return (
     <div className="flex h-[640px] w-[760px] flex-col overflow-hidden rounded-md border border-border bg-background">
-      <div className="min-h-0 flex-1">
+      <div {...stylex.props(storyLayout.frame)}>
         <SessionFileContentView
           sessionId={storySession.id}
           session={storySession}

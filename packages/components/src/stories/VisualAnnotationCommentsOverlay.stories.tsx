@@ -13,6 +13,42 @@ import { Button } from '@lody/ui/button';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeSpace } from '../style/theme-scale.stylex';
 import { withClassName } from '../lib/stylex';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': '820px',
+    'background-color': 'var(--color-slate-100)',
+    padding: 'calc(var(--spacing) * 6)',
+    color: 'var(--color-slate-900)',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'var(--color-slate-100)',
+    padding: 'calc(var(--spacing) * 0.5)',
+  },
+  overlay: {
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * 0)',
+    display: 'grid',
+    'grid-template-rows': 'auto 1fr auto',
+    gap: 'calc(var(--spacing) * 6)',
+    padding: 'calc(var(--spacing) * 10)',
+  },
+});
 
 const overlayDevices = [
   { id: 'desktop', label: 'Desktop', width: 960, height: 620 },
@@ -224,7 +260,7 @@ function VisualAnnotationCommentsOverlayStory() {
   const stagedCount = stagedCommentIds.length;
 
   return (
-    <div className="min-h-[820px] bg-slate-100 p-6 text-slate-900">
+    <div {...stylex.props(storyLayout.frame)}>
       <div className="mx-auto max-w-[1180px] space-y-4">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-xs ring-1 ring-slate-200">
           <div>
@@ -239,8 +275,8 @@ function VisualAnnotationCommentsOverlayStory() {
               submitted · resolved comments are hidden from the canvas
             </p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5">
+          <div {...stylex.props(storyLayout.row)}>
+            <div {...stylex.props(storyLayout.row2)}>
               {overlayDevices.map((device) => (
                 <button
                   key={device.id}
@@ -263,11 +299,11 @@ function VisualAnnotationCommentsOverlayStory() {
               disabled={stagedCommentIds.length === 0}
               onClick={submitStagedComments}
             >
-              <SendHorizontal className="h-3.5 w-3.5" />
+              <SendHorizontal {...stylex.props(storyLayoutStyles.frame)} />
               Submit staged
             </Button>
             <Button type="button" variant="secondary" size="small" onClick={reset}>
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw {...stylex.props(storyLayoutStyles.frame)} />
               Reset
             </Button>
           </div>
@@ -299,7 +335,7 @@ function VisualAnnotationCommentsOverlayStory() {
 
 function PreviewFixture() {
   return (
-    <div className="absolute inset-0 grid grid-rows-[auto_1fr_auto] gap-6 p-10">
+    <div {...stylex.props(storyLayout.overlay)}>
       <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
         Preview fixture
       </p>

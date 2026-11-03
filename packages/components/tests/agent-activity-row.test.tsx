@@ -235,7 +235,7 @@ describe('live agent status', () => {
     );
     const button = container.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
     expect(button).not.toBeNull();
-    expect(button!.querySelector('.animate-spin')).not.toBeNull();
+    expect(button!.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')).not.toBeNull();
     expect(button!.querySelector('.lucide-arrow-down')).not.toBeNull();
     await act(async () => button!.click());
     expect(container.querySelector('[data-scroll-to-latest]')).toBeNull();
@@ -249,7 +249,7 @@ describe('live agent status', () => {
     );
     const button = container.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
     expect(button).not.toBeNull();
-    expect(button!.querySelector('.animate-spin')).toBeNull();
+    expect(button!.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')).toBeNull();
     expect(button!.querySelector('.lucide-arrow-down')).not.toBeNull();
   });
 
@@ -559,8 +559,8 @@ describe('live agent status', () => {
       [...container.querySelectorAll('button')].find((button) =>
         button.textContent?.includes(text)
       )!;
-    expect(step('Running pnpm').querySelector('.animate-spin')).toBeNull();
-    expect(step('Shell: npm start').querySelector('.animate-spin')).not.toBeNull();
+    expect(step('Running pnpm').querySelector('[data-slot="icon-spinner"][data-spinning="true"]')).toBeNull();
+    expect(step('Shell: npm start').querySelector('[data-slot="icon-spinner"][data-spinning="true"]')).not.toBeNull();
   });
 
   it('opens a step onto one sheet: the command once, then its output', async () => {

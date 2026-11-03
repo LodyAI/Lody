@@ -1,7 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import type { MessageContent } from '@lody/shared';
 import { PermissionPrompt } from '@/components/sessions/floating-permission-request';
+const storyLayout = stylex.create({
+  frame: {
+    width: 'min(640px, calc(100vw - 16px))',
+  },
+});
 
 type ToolCall = Extract<MessageContent, { type: 'tool_call' }>;
 type Permission = NonNullable<ToolCall['permissionRequest']>;
@@ -64,7 +70,7 @@ const meta = {
   parameters: { layout: 'centered' },
   decorators: [
     (Story) => (
-      <div className="w-[min(640px,calc(100vw-16px))]">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

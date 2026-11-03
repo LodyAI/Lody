@@ -1,8 +1,36 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { parseDiffFromFile } from '@pierre/diffs';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
+const storyLayout = stylex.create({
+  frame: {
+    height: '100vh',
+    overflow: 'auto',
+  },
+  canvas: {
+    'margin-inline': 'auto',
+    'max-width': '64rem',
+    overflow: 'auto',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  frame2: {
+    height: '100%',
+    overflow: 'auto',
+  },
+  frame3: {
+    'margin-inline': 'calc(var(--spacing) * 2)',
+    height: 'calc(var(--spacing) * 4)',
+    width: '1px',
+    'background-color': 'hsl(var(--border) / 1)',
+  },
+  frame4: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const meta = {
   title: 'UI/DiffViewer',
@@ -22,7 +50,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="scrollbar-pro h-screen overflow-auto">
+      <div className={clsx(stylex.props(storyLayout.frame).className, 'scrollbar-pro')}>
         <Story />
       </div>
     ),
@@ -145,7 +173,7 @@ export const ComplexExample: Story = {
     newText,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -159,7 +187,7 @@ export const WithFileHeaderActions: Story = {
     onOpenFile: fn(),
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -173,7 +201,7 @@ export const SplitView: Story = {
     diffStyle: 'split',
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -187,7 +215,7 @@ export const WithoutHeader: Story = {
     showHeader: false,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -232,7 +260,7 @@ export const SparseChanges: Story = {
     newText: sparseNewText,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -246,7 +274,7 @@ export const SparseChangesSplit: Story = {
     diffStyle: 'split',
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -268,7 +296,7 @@ export const NewFile: Story = {
     newText: newFileText,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -281,7 +309,7 @@ export const DeletedFile: Story = {
     newText: '',
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -292,8 +320,14 @@ const largeContext = Array.from(
   (_, index) => `export const generated_${index} = ${index};\n`
 ).join('');
 const largePreparsedDiff = parseDiffFromFile(
-  { name: 'src/generated/large-snapshot.ts', contents: `${largeContext}export const mode = "old";\n` },
-  { name: 'src/generated/large-snapshot.ts', contents: `${largeContext}export const mode = "new";\n` }
+  {
+    name: 'src/generated/large-snapshot.ts',
+    contents: `${largeContext}export const mode = "old";\n`,
+  },
+  {
+    name: 'src/generated/large-snapshot.ts',
+    contents: `${largeContext}export const mode = "new";\n`,
+  }
 );
 
 export const ProviderSidePreparsedLargeDiff: Story = {
@@ -307,7 +341,7 @@ export const ProviderSidePreparsedLargeDiff: Story = {
     commentsEnabled: true,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -375,7 +409,7 @@ function MultiFileDiffListComponent() {
   );
 
   return (
-    <div className="scrollbar-pro h-full overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.frame2).className, 'scrollbar-pro')}>
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 p-3 backdrop-blur-xs">
         <span className="text-sm font-medium">Diff Style:</span>
         <button
@@ -400,13 +434,13 @@ function MultiFileDiffListComponent() {
         >
           Split
         </button>
-        <div className="mx-2 h-4 w-px bg-border" />
+        <div {...stylex.props(storyLayout.frame3)} />
         <label className="flex items-center gap-1.5 text-sm">
           <input
             type="checkbox"
             checked={useCustomHeader}
             onChange={(e) => setUseCustomHeader(e.target.checked)}
-            className="h-4 w-4"
+            {...stylex.props(storyLayout.frame4)}
           />
           Custom Header
         </label>

@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { Image as ImageIcon } from 'lucide-react';
@@ -7,11 +8,11 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { authTokenAtom } from '@/atoms/runtime';
 import { getSessionImageBlobUrl } from '@/lib/session-image-cache';
-import { cn } from '@/lib/utils';
 import { ZoomableImageViewer } from '@/components/shared/zoomable-image-viewer';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../../style/theme-colors.stylex';
 
+const pulse = stylex.keyframes({ '50%': { opacity: 0.5 } });
 const styles = stylex.create({
   trigger: {
     display: 'flex',
@@ -25,10 +26,25 @@ const styles = stylex.create({
     borderColor: 'hsl(var(--border) / 0.4)',
     backgroundColor: 'hsl(var(--background) / 0.6)',
     cursor: { default: 'zoom-in', ':disabled': 'default' },
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    outline: {
+      default: null,
+      ':focus-visible': '2px solid transparent',
+      '@media (forced-colors: active)': { ':focus-visible': 'auto' },
+    },
+    outlineOffset: { default: null, ':focus-visible': 2 },
   },
   thumbnail: { width: '100%', height: '100%', objectFit: 'cover' },
   failure: { color: themeColors.mutedForeground },
-  loading: { width: '100%', height: '100%', backgroundColor: 'hsl(var(--muted) / 0.7)' },
+  loading: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'hsl(var(--muted) / 0.7)',
+    animationName: pulse,
+    animationDuration: '2s',
+    animationIterationCount: 'infinite',
+    animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)',
+  },
 });
 
 export type QueuedImageBlock = Extract<SessionInputBlock, { type: 'image' }>;
@@ -137,11 +153,7 @@ export function QueuedImagePreview({
                 setPreviewOpen(true);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              className={cn(
-                stylex.props(styles.trigger).className,
-                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40',
-                className
-              )}
+              className={clsx(stylex.props(styles.trigger).className, className)}
               style={{ width: size, height: size }}
               aria-label={t('sessions.messageQueue.previewImage', 'Preview {{name}}', {
                 name: label,
@@ -155,7 +167,7 @@ export function QueuedImagePreview({
                   style={{ width: size * 0.5, height: size * 0.5 }}
                 />
               ) : (
-                <div className={cn(stylex.props(styles.loading).className, 'animate-pulse')} />
+                <div {...stylex.props(styles.loading)} />
               )}
             </button>
           }

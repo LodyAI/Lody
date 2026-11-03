@@ -11,9 +11,11 @@ import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  recentItem: { maxWidth: 'calc(var(--spacing) * 80)' },
   recentHeading: {
+    fontWeight: 'var(--font-weight-normal)',
     [textScale.captionSize]: 'var(--text-xs)',
-    [textScale.captionLeading]: 'var(--tw-leading, var(--text-xs--line-height))',
+    [textScale.captionLeading]: 'var(--text-xs--line-height)',
     [uiColors.secondaryLabel]: 'hsl(var(--muted-foreground) / 1)',
   },
   rowDot: {
@@ -136,8 +138,7 @@ export function RecentRunConfigMenuGroup({
 
   return (
     <>
-      {/* The private font-weight writer keeps its original utilities-layer precedence. */}
-      <Menu.GroupLabel className={`font-normal ${stylex.props(styles.recentHeading).className}`}>
+      <Menu.GroupLabel xstyle={styles.recentHeading}>
         {t('chat.runConfig.recentLabel', 'Recently used')}
       </Menu.GroupLabel>
       {items.map((item) => (
@@ -152,7 +153,7 @@ export function RecentRunConfigMenuGroup({
           // would otherwise stretch the whole dropdown and drag the Agent /
           // Model / Reasoning values out to the far edge. Past this cap the
           // row truncates instead of growing.
-          className="max-w-80"
+          xstyle={styles.recentItem}
         >
           {item.role ? (
             <span {...stylex.props(styles.roleEmoji)} aria-hidden="true">

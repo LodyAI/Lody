@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { fn } from 'storybook/test';
@@ -7,6 +8,16 @@ import {
   type MobileWorkspaceSwitcherWorkspace,
 } from '@/components/mobile/mobile-workspace-switcher-sheet';
 import { Button } from '@lody/ui/button';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '100%',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    'justify-content': 'center',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+});
 
 const workspaces: MobileWorkspaceSwitcherWorkspace[] = [
   { id: 'lody', name: 'Lody', isActive: true },
@@ -32,7 +43,7 @@ function StoryShell({
   return (
     <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
       <div className="relative h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
-        <div className="flex h-full flex-col items-center justify-center gap-3">
+        <div {...stylex.props(storyLayout.stack)}>
           <Button onClick={() => setOpen(true)}>Open workspace switcher</Button>
           <div className="text-xs text-muted-foreground">
             Active workspace: <code>{activeId}</code>

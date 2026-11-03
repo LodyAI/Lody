@@ -34,6 +34,9 @@ import {
 } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  trigger: { flex: 1, justifyContent: 'space-between' },
+  menu: { width: 250 },
+  fieldError: { borderColor: themeColors.destructive },
   /** A row that says the workspace is still loading. */
   loadingRow: {
     display: 'flex',
@@ -263,7 +266,7 @@ function CloudOrganizationSwitcher() {
         <Menu.Root modal={!isMobile} open={open} onOpenChange={setOpen}>
           <Menu.Trigger
             render={
-              <Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
+              <Button variant="ghost" xstyle={styles.trigger} disabled={loading}>
                 <div {...stylex.props(styles.triggerContent)}>
                   <WorkspaceAvatar
                     workspace={{
@@ -276,12 +279,6 @@ function CloudOrganizationSwitcher() {
                     <span {...stylex.props(styles.workspaceName)}>{activeOrganization.name}</span>
                   </div>
                   <div {...stylex.props(styles.statusSlot)}>
-                    {/* {loroConnect ? (
-                    <Tooltip.Root>
-                      <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-success" />}/>
-                      <Tooltip.Content>{t('common.connected')}</Tooltip.Content>
-                    </Tooltip.Root>
-                  ) :  */}
                     {/*  TODO:  ws state */}
                     <Tooltip.Root>
                       <Tooltip.Trigger
@@ -297,7 +294,7 @@ function CloudOrganizationSwitcher() {
               </Button>
             }
           >
-            <Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
+            <Button variant="ghost" xstyle={styles.trigger} disabled={loading}>
               <div {...stylex.props(styles.triggerContent)}>
                 <WorkspaceAvatar
                   workspace={{
@@ -310,12 +307,6 @@ function CloudOrganizationSwitcher() {
                   <span {...stylex.props(styles.workspaceName)}>{activeOrganization.name}</span>
                 </div>
                 <div {...stylex.props(styles.statusSlot)}>
-                  {/* {loroConnect ? (
-                    <Tooltip.Root>
-                      <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-success" />}/>
-                      <Tooltip.Content>{t('common.connected')}</Tooltip.Content>
-                    </Tooltip.Root>
-                  ) :  */}
                   {/*  TODO:  ws state */}
                   <Tooltip.Root>
                     <Tooltip.Trigger
@@ -330,7 +321,7 @@ function CloudOrganizationSwitcher() {
               <ChevronsUpDown {...stylex.props(styles.chevron)} />
             </Button>
           </Menu.Trigger>
-          <Menu.Content align="start" className="w-[250px]">
+          <Menu.Content align="start" xstyle={styles.menu}>
             <Menu.GroupLabel>{t('organization.workspaces')}</Menu.GroupLabel>
             <Menu.Separator />
             <Menu.RadioGroup
@@ -350,11 +341,7 @@ function CloudOrganizationSwitcher() {
             >
               {organizations.map((org) => (
                 <Menu.RadioItem key={org.id} value={org.id} indicator="check" indicatorSide="end">
-                  <WorkspaceAvatar
-                    workspace={{ name: org.name, logo: org.logo }}
-                    size="medium"
-                    className="shrink-0"
-                  />
+                  <WorkspaceAvatar workspace={{ name: org.name, logo: org.logo }} size="medium" />
                   {org.name}
                   {isListedEncryptedWorkspace(org) ? <EncryptedWorkspaceMark /> : null}
                   {planTierByWorkspaceId.has(org.id) ? (
@@ -441,7 +428,7 @@ function CloudOrganizationSwitcher() {
                 value={newOrgSlug}
                 onChange={(e) => setNewOrgSlug(e.target.value)}
                 placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
-                className={newOrgSlugError ? 'border-destructive' : ''}
+                xstyle={newOrgSlugError ? styles.fieldError : undefined}
                 disabled={creating}
               />
               {newOrgSlugError && (

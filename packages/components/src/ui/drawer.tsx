@@ -3,7 +3,7 @@ import { Drawer as DrawerPrimitive } from 'vaul';
 import * as stylex from '@stylexjs/stylex';
 import { ModalContainerProvider, PopupContainerProvider } from '@lody/ui/popup-container';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
@@ -28,13 +28,40 @@ const styles = stylex.create({
     height: 'auto',
     flexDirection: 'column',
   },
+  top: {
+    insetInline: 0,
+    top: 0,
+    marginBottom: 'calc(var(--spacing) * 24)',
+    maxHeight: '80dvh',
+    borderBottomLeftRadius: 'var(--radius-lg)',
+    borderBottomRightRadius: 'var(--radius-lg)',
+    borderBottomWidth: 1,
+    borderColor: 'hsl(var(--border) / 1)',
+  },
+  bottom: {
+    insetInline: 0,
+    bottom: 0,
+    marginTop: 'calc(var(--spacing) * 24)',
+    maxHeight: '80dvh',
+    borderTopLeftRadius: 'var(--radius-lg)',
+    borderTopRightRadius: 'var(--radius-lg)',
+    borderTopWidth: 1,
+    borderColor: 'hsl(var(--border) / 1)',
+  },
+  right: { insetBlock: 0, right: 0, borderLeftWidth: 1, borderColor: 'hsl(var(--border) / 1)' },
+  rightWidth: {
+    width: '75%',
+    maxWidth: { default: null, '@media (width >= 40rem)': 'var(--container-sm)' },
+  },
+  left: { insetBlock: 0, left: 0, borderRightWidth: 1, borderColor: 'hsl(var(--border) / 1)' },
+  leftWidth: { width: 'var(--lody-drawer-width)', maxWidth: 'var(--lody-drawer-width)' },
   fullWidth: { width: '100%', maxWidth: 'none' },
   safeAreaBottom: { paddingBottom: 'max(1.25rem,var(--safe-area-bottom,0px))' },
   grabber: {
     backgroundColor: `color-mix(in oklab, ${themeColors.mutedForeground} 40%, transparent)`,
     marginInline: 'auto',
     marginTop: themeSpace[3],
-    display: 'none',
+    display: { default: 'none', ':is([data-vaul-drawer-direction="bottom"] *)': 'block' },
     height: themeSpace[1.5],
     width: themeSpace[10],
     flexShrink: 0,
@@ -44,7 +71,20 @@ const styles = stylex.create({
   header: {
     display: 'flex',
     flexDirection: 'column',
-    gap: themeSpace[0.5],
+    gap: {
+      default: 'calc(var(--spacing) * .5)',
+      '@media (width >= 48rem)': 'calc(var(--spacing) * 1.5)',
+    },
+    textAlign: {
+      default: null,
+      ':is([data-vaul-drawer-direction="bottom"] *, [data-vaul-drawer-direction="top"] *)':
+        'center',
+      '@media (width >= 48rem)': {
+        default: null,
+        ':not(:is([data-vaul-drawer-direction="bottom"] *, [data-vaul-drawer-direction="top"] *))':
+          'left',
+      },
+    },
     padding: themeSpace[4],
   },
   footer: {
@@ -74,6 +114,7 @@ const styles = stylex.create({
 });
 
 const DrawerViewportContext = React.createContext(false);
+const DrawerDirectionContext = React.createContext<'top' | 'bottom' | 'left' | 'right'>('bottom');
 
 function Drawer({ repositionInputs, ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
   // Android-compatible shells can resize the layout viewport along with the
@@ -88,13 +129,15 @@ function Drawer({ repositionInputs, ...props }: React.ComponentProps<typeof Draw
     !isNativeIOSAppShell();
 
   return (
-    <DrawerViewportContext.Provider value={followViewport}>
-      <DrawerPrimitive.Root
-        data-slot="drawer"
-        {...props}
-        repositionInputs={followViewport ? false : repositionInputs}
-      />
-    </DrawerViewportContext.Provider>
+    <DrawerDirectionContext.Provider value={props.direction ?? 'bottom'}>
+      <DrawerViewportContext.Provider value={followViewport}>
+        <DrawerPrimitive.Root
+          data-slot="drawer"
+          {...props}
+          repositionInputs={followViewport ? false : repositionInputs}
+        />
+      </DrawerViewportContext.Provider>
+    </DrawerDirectionContext.Provider>
   );
 }
 
@@ -149,11 +192,7 @@ const DrawerOverlay = React.forwardRef<
   <DrawerPrimitive.Overlay
     ref={ref}
     data-slot="drawer-overlay"
-    className={cn(
-      stylex.props(styles.overlay).className,
-      'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-      className
-    )}
+    className={clsx(stylex.props(styles.overlay).className, className)}
     {...props}
   />
 ));
@@ -166,12 +205,14 @@ export type DrawerContentProps = Omit<
   /** Fill the available width without directional caps. Omission preserves defaults.
    * Regular class and inline-style precedence still applies. */
   width?: 'full';
+  xstyle?: stylex.StyleXStyles;
   /** Bottom clearance reads the safe-area variable on the content element. */
   bottomPadding?: 'safeArea';
 };
 
 function DrawerContent({
   width,
+  xstyle,
   bottomPadding,
   className,
   children,
@@ -179,9 +220,20 @@ function DrawerContent({
   ...props
 }: DrawerContentProps) {
   const viewportBottom = useDrawerViewportBottom();
+  const direction = React.useContext(DrawerDirectionContext);
   const [popupContainer, setPopupContainer] = React.useState<HTMLDivElement | null>(null);
+  const sx = stylex.props(
+    styles.content,
+    styles[direction],
+    width !== 'full' && direction === 'left' && styles.leftWidth,
+    width !== 'full' && direction === 'right' && styles.rightWidth,
+    width === 'full' && styles.fullWidth,
+    bottomPadding === 'safeArea' && styles.safeAreaBottom,
+    xstyle
+  );
   const mergedStyle = {
     '--lody-drawer-width': '256px',
+    ...sx.style,
     ...style,
     ...(viewportBottom === undefined ? {} : { bottom: viewportBottom }),
   } as React.CSSProperties;
@@ -191,39 +243,14 @@ function DrawerContent({
       <DrawerOverlay />
       <DrawerPrimitive.Content
         data-slot="drawer-content"
-        className={cn(
-          stylex.props(
-            styles.content,
-            width === 'full' && styles.fullWidth,
-            bottomPadding === 'safeArea' && styles.safeAreaBottom
-          ).className,
-          'group/drawer-content',
-          // Directional variants outrank ordinary caller classes in the original
-          // utilities layer. Keep that public override order during coexistence.
-          'data-[vaul-drawer-direction=top]:inset-x-0 data-[vaul-drawer-direction=top]:top-0 data-[vaul-drawer-direction=top]:mb-24 data-[vaul-drawer-direction=top]:max-h-[80dvh] data-[vaul-drawer-direction=top]:rounded-b-lg data-[vaul-drawer-direction=top]:border-b data-[vaul-drawer-direction=top]:border-border',
-          'data-[vaul-drawer-direction=bottom]:inset-x-0 data-[vaul-drawer-direction=bottom]:bottom-0 data-[vaul-drawer-direction=bottom]:mt-24 data-[vaul-drawer-direction=bottom]:max-h-[80dvh] data-[vaul-drawer-direction=bottom]:rounded-t-lg data-[vaul-drawer-direction=bottom]:border-t data-[vaul-drawer-direction=bottom]:border-border',
-          'data-[vaul-drawer-direction=right]:inset-y-0 data-[vaul-drawer-direction=right]:right-0',
-          width !== 'full' && 'data-[vaul-drawer-direction=right]:w-3/4',
-          'data-[vaul-drawer-direction=right]:border-l data-[vaul-drawer-direction=right]:border-border',
-          width !== 'full' && 'data-[vaul-drawer-direction=right]:sm:max-w-sm',
-          'data-[vaul-drawer-direction=left]:inset-y-0 data-[vaul-drawer-direction=left]:left-0',
-          width !== 'full' && 'data-[vaul-drawer-direction=left]:w-[var(--lody-drawer-width)]',
-          'data-[vaul-drawer-direction=left]:border-r data-[vaul-drawer-direction=left]:border-border',
-          width !== 'full' && 'data-[vaul-drawer-direction=left]:max-w-[var(--lody-drawer-width)]',
-          className
-        )}
+        className={clsx(sx.className, className)}
         style={mergedStyle}
         {...props}
       >
         {/* Drag grabber for bottom sheets. Uses `muted-foreground/40` (not
            `bg-muted`, which equals `--background` in the dark theme and renders
            invisible) so the handle actually reads as draggable. */}
-        <div
-          className={cn(
-            stylex.props(styles.grabber).className,
-            'group-data-[vaul-drawer-direction=bottom]/drawer-content:block'
-          )}
-        />
+        <div className={stylex.props(styles.grabber).className} />
         <ModalContainerProvider container={popupContainer}>
           <PopupContainerProvider container={popupContainer}>{children}</PopupContainerProvider>
         </ModalContainerProvider>
@@ -244,11 +271,7 @@ function DrawerHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="drawer-header"
-      className={cn(
-        stylex.props(styles.header).className,
-        'group-data-[vaul-drawer-direction=bottom]/drawer-content:text-center group-data-[vaul-drawer-direction=top]/drawer-content:text-center md:gap-1.5 md:text-left',
-        className
-      )}
+      className={clsx(stylex.props(styles.header).className, className)}
       {...props}
     />
   );
@@ -258,7 +281,7 @@ function DrawerFooter({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="drawer-footer"
-      className={cn(stylex.props(styles.footer).className, className)}
+      className={clsx(stylex.props(styles.footer).className, className)}
       {...props}
     />
   );
@@ -266,41 +289,49 @@ function DrawerFooter({ className, ...props }: React.ComponentProps<'div'>) {
 
 function DrawerTitle({
   className,
+  xstyle,
+  style,
   visuallyHidden = false,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Title> & { visuallyHidden?: boolean }) {
+}: React.ComponentProps<typeof DrawerPrimitive.Title> & {
+  visuallyHidden?: boolean;
+  xstyle?: stylex.StyleXStyles;
+}) {
+  const sx = stylex.props(styles.title, xstyle, visuallyHidden && styles.srOnly);
   return (
     <DrawerPrimitive.Title
       data-slot="drawer-title"
-      className={cn(
-        stylex.props(styles.title, visuallyHidden && styles.srOnly).className,
-        className
-      )}
+      className={clsx(sx.className, className)}
       {...props}
+      style={sx.style ? { ...sx.style, ...style } : style}
     />
   );
 }
 
 function DrawerDescription({
   className,
+  xstyle,
   visuallyHidden = false,
   fontSize,
   style,
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Description> & {
   visuallyHidden?: boolean;
+  xstyle?: stylex.StyleXStyles;
   /** Explicit description size; caller styles and slotted-child styles retain priority. */
   fontSize?: React.CSSProperties['fontSize'];
 }) {
+  const sx = stylex.props(styles.description, xstyle, visuallyHidden && styles.srOnly);
   return (
     <DrawerPrimitive.Description
       data-slot="drawer-description"
-      className={cn(
-        stylex.props(styles.description, visuallyHidden && styles.srOnly).className,
-        className
-      )}
+      className={clsx(sx.className, className)}
       {...props}
-      style={fontSize == null ? style : { fontSize, ...style }}
+      style={
+        sx.style || fontSize != null
+          ? { ...sx.style, ...(fontSize != null ? { fontSize } : {}), ...style }
+          : style
+      }
     />
   );
 }

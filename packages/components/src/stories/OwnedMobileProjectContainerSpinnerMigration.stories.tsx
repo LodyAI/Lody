@@ -73,7 +73,7 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
     return next;
   });
   useLayoutEffect(() => {
-    if (!spacing) return;
+    if (!spacing) return undefined;
     const root = document.documentElement;
     const old = root.style.getPropertyValue('--spacing');
     root.style.setProperty('--spacing', '5px');

@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { memo, useCallback, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowLeftRight } from 'lucide-react';
@@ -8,6 +9,7 @@ import {
   themeFontWeight,
   themeLineHeight,
   themeSpace,
+  themeShadow,
 } from '../../style/theme-scale.stylex';
 import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
@@ -26,11 +28,6 @@ import { Progress } from '@lody/ui/progress';
 import { Separator } from '@lody/ui/separator';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
-import { cn } from '@/lib/utils';
-import {
-  commandDialogCornerClass,
-  usagePopupPaddingClass,
-} from '../../style/legacy-defaults.stylex';
 import {
   FIVE_HOUR_WINDOW_SECONDS,
   SEVEN_DAY_WINDOW_SECONDS,
@@ -60,6 +57,7 @@ export type SessionUsagePopoverProps = {
    */
   showCodexResetForecast?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 export const SessionUsagePopover = memo(function SessionUsagePopover({
@@ -74,6 +72,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
   showRateLimitWithoutContext = false,
   showCodexResetForecast = false,
   className,
+  xstyle,
 }: SessionUsagePopoverProps) {
   const { t, i18n } = useTranslation();
   const [isForecastOpen, setIsForecastOpen] = useState(false);
@@ -143,11 +142,8 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
               type="button"
               variant="ghost"
               size="small"
-              className={cn(
-                stylex.props(styles.trigger).className,
-                'focus-visible:ring-1 focus-visible:ring-ring',
-                className
-              )}
+              xstyle={[styles.trigger, xstyle]}
+              className={className}
               aria-label={triggerLabel}
               title={triggerLabel}
             >
@@ -172,12 +168,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
           align="start"
           sideOffset={8}
           aria-label={t('sessions.usage.title', 'Usage')}
-          className={cn(
-            stylex.props(styles.content).className,
-            commandDialogCornerClass,
-            usagePopupPaddingClass,
-            'shadow-lg'
-          )}
+          xstyle={styles.content}
         >
           {isContextCompacting ? (
             <div>
@@ -354,7 +345,7 @@ function UsageMeter({
   });
 
   return (
-    <div className={cn(stylex.props(styles.meter).className, className)}>
+    <div className={clsx(stylex.props(styles.meter).className, className)}>
       <div {...stylex.props(styles.meterRow)}>
         <span {...stylex.props(styles.meterLabel)}>{label}</span>
         <span {...stylex.props(styles.shrink, styles.mono, styles.muted)}>{valueLabel}</span>
@@ -373,7 +364,12 @@ function UsageMeter({
 const styles = stylex.create({
   spinnerMuted: { color: 'hsl(var(--muted-foreground) / 1)' },
   trigger: { userSelect: 'none' },
-  content: { width: 'min(17rem, calc(100vw - 1rem))' },
+  content: {
+    width: 'min(17rem, calc(100vw - 1rem))',
+    borderRadius: 'var(--radius-xl)',
+    padding: 'calc(var(--spacing) * 3)',
+    boxShadow: themeShadow.lg,
+  },
   tiny: { fontSize: '11px' },
   mono: {
     fontFamily: 'var(--font-mono)',

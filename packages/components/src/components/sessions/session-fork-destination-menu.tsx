@@ -11,11 +11,12 @@ import { Tooltip } from '@/ui/armed-overlays';
 const styles = stylex.create({
   descriptionTooltip: {
     [tooltipTokens.text]: 'var(--text-xs)',
-    [tooltipTokens.leading]: 'var(--tw-leading, var(--text-xs--line-height))',
+    [tooltipTokens.leading]: 'var(--leading-snug)',
+    [tooltipTokens.maxWidth]: 'calc(var(--spacing) * 64)',
   },
   pendingStatus: {
     fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+    lineHeight: 'var(--text-xs--line-height)',
     color: 'hsl(var(--muted-foreground) / 1)',
   },
 });
@@ -91,7 +92,7 @@ export function SessionForkOptionTooltip({
         <Tooltip.Content
           side={side}
           sideOffset={8}
-          className={`max-w-64 leading-snug ${stylex.props(styles.descriptionTooltip).className}`}
+          className={stylex.props(styles.descriptionTooltip).className}
         >
           {description}
         </Tooltip.Content>

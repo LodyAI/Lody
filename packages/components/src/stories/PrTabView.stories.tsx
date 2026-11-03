@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import type {
@@ -14,6 +15,13 @@ import type {
 import { PrTabView, type PrTabViewData } from '@/components/sessions/pr-tab-view';
 import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
 import type { PrCommitSelection } from '@/lib/github-pr-diff';
+const storyLayout = stylex.create({
+  frame: {
+    height: '100vh',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const alice: GitHubUser = {
   login: 'alice',
@@ -396,7 +404,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="h-screen w-full bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

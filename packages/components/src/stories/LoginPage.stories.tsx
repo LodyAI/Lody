@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { ComponentProps, CSSProperties } from 'react';
 import { useLayoutEffect, useState } from 'react';
@@ -8,6 +9,12 @@ import { StableSessionContext } from '@/hooks/useStableSession';
 import type { LodyAuthClient } from '@/lib/auth';
 import { Provider, createStore } from 'jotai';
 import { electronLoginErrorAtom, electronLoginPhaseAtom } from '@/atoms';
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 type StableSessionValue = NonNullable<
   ComponentProps<typeof StableSessionContext.Provider>['value']
@@ -65,7 +72,7 @@ function LoginPageStoryHarness({
   return (
     <AuthProvider authClient={authClient}>
       <StableSessionContext.Provider value={sessionValue}>
-        <div className="min-h-screen bg-background">
+        <div {...stylex.props(storyLayout.frame)}>
           <LoginPage replaceLocation={replaceLocation} isElectronRenderer={isElectronRenderer} />
         </div>
       </StableSessionContext.Provider>

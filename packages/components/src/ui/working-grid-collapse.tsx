@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type ComponentPropsWithoutRef } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 
 const styles = stylex.create({
@@ -143,7 +143,7 @@ export function WorkingGridCollapse({
       ref={rootRef}
       data-working-grid-collapse=""
       aria-hidden="true"
-      className={cn(stylex.props(styles.root).className, className)}
+      className={clsx(stylex.props(styles.root).className, className)}
       style={{ width: size, height: size, ...style }}
       {...props}
     >

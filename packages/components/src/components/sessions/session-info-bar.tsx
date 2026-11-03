@@ -12,7 +12,7 @@ import type {
   SessionPullRequestMeta,
 } from '@lody/shared';
 import { sanitizeGoalObjective } from '@lody/shared';
-import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
+import { composerSurfaceStyles } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
 import { ActionChip } from './info-chip';
@@ -227,7 +227,7 @@ const styles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -483,13 +483,15 @@ export function SessionInfoBar({
 
   const surfaceStyleProps = stylex.props(
     styles.surface,
+    composerSurfaceStyles.infoBarElevation,
+    composerSurfaceStyles.darkElevation,
     hasMachine && styles.surfaceWithMachine,
     Boolean(queue) && styles.surfaceWithQueue
   );
   const surfaceProps = hasSurfaceContent
     ? {
         ...surfaceStyleProps,
-        className: clsx(surfaceStyleProps.className, INFO_BAR_TEXT_CLASS, INFO_BAR_ELEVATION_CLASS),
+        className: clsx(surfaceStyleProps.className, INFO_BAR_TEXT_CLASS),
       }
     : stylex.props(styles.machineOnly);
 

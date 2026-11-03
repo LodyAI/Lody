@@ -65,7 +65,7 @@ const styles = stylex.create({
     paddingBlock: themeSpace[2.5],
     boxShadow: '0 1px 2px hsl(0 0% 0%/0.04), 0 8px 24px -16px hsl(0 0% 0%/0.12)',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },

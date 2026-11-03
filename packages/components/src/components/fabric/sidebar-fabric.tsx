@@ -7,6 +7,7 @@ import type { FabricRecipe } from './fabric-recipe';
 import { FabricSimulator, type FabricLight } from './fabric-simulator';
 
 const styles = stylex.create({
+  canvas: { pointerEvents: 'none' },
   /**
    * The cloth sits behind the panel it decorates: it covers the whole box and
    * never takes the pointer.
@@ -181,7 +182,7 @@ export function SidebarFabricBackdrop({ className }: { className?: string }) {
   const layerProps = stylex.props(styles.layer);
   return (
     <div aria-hidden {...layerProps} className={clsx(layerProps.className, className)}>
-      <FabricSimulator recipe={recipe} light={light} className="pointer-events-none" />
+      <FabricSimulator recipe={recipe} light={light} xstyle={styles.canvas} />
     </div>
   );
 }
@@ -204,7 +205,7 @@ export function SidebarFabricBand({ className }: { className?: string }) {
         recipe={recipe}
         light={light}
         followPointer={!reducedMotion}
-        className="pointer-events-none"
+        xstyle={styles.canvas}
       />
     </div>
   );

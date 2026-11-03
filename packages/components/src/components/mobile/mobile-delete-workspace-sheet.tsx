@@ -9,7 +9,6 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { field } from '@lody/ui/field/field.tokens.stylex';
-import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import { sheetSurface } from './sheet-surface';
@@ -28,10 +27,23 @@ export type MobileDeleteWorkspaceSheetProps = {
 };
 
 const styles = stylex.create({
+  sheet: {
+    height: 'auto',
+    maxHeight: '92dvh',
+    bottom: 'var(--native-keyboard-height,0px)',
+  },
+  fieldSpacing: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 1.5)',
+    },
+  },
+
+  destructiveTitle: { color: 'hsl(var(--destructive) / 1)' },
   fieldLabel: {
+    [field.label]: 'hsl(var(--foreground) / 1)',
     [field.labelSize]: '0.78rem',
     [field.labelWeight]: 'var(--font-weight-medium)',
-    '--tw-font-weight': 'var(--font-weight-medium)',
   },
   /** The title, with the warning mark in front of it. */
   titleRow: {
@@ -148,7 +160,8 @@ export function MobileDeleteWorkspaceSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
-        className="mobile-delete-workspace-sheet h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60 bottom-[var(--native-keyboard-height,0px)]!"
+        className="mobile-delete-workspace-sheet"
+        xstyle={styles.sheet}
         style={{
           transition: 'bottom 320ms cubic-bezier(0.32, 0.72, 0, 1)',
           willChange: 'bottom',
@@ -156,14 +169,13 @@ export function MobileDeleteWorkspaceSheet({
       >
         <div {...stylex.props(sheetSurface.columnAuto)}>
           <header {...stylex.props(sheetSurface.header)}>
-            {/* The destructive tint stays a Tailwind class: the drawer's
-               own title colour is a Tailwind utility, and a StyleX colour
-               would lose to it. */}
             <DrawerTitle
-              {...withClassName(
-                stylex.props(sheetSurface.title, sheetSurface.titleCentered, styles.titleRow),
-                'text-destructive'
-              )}
+              xstyle={[
+                sheetSurface.title,
+                sheetSurface.titleCentered,
+                styles.titleRow,
+                styles.destructiveTitle,
+              ]}
             >
               <AlertTriangle
                 {...stylex.props(sheetSurface.glyph16)}
@@ -199,7 +211,7 @@ export function MobileDeleteWorkspaceSheet({
             <div {...stylex.props(styles.confirmCard)}>
               <UiField.Label
                 htmlFor="mobile-delete-workspace-confirm"
-                className={`text-foreground ${stylex.props(styles.fieldLabel).className}`}
+                className={stylex.props(styles.fieldLabel).className}
               >
                 {t('workspace.danger.deleteWorkspace.typeToConfirm', {
                   workspace: workspaceName,

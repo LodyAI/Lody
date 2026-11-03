@@ -799,7 +799,7 @@ export function ManagedPreviewSurface({
             resize="none"
             style={{
               fontSize: 'var(--text-xs)',
-              lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+              lineHeight: 'var(--text-xs--line-height)',
             }}
             autoFocus
           />

@@ -1,7 +1,6 @@
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
-import { cn } from '@/lib/utils';
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { SIDEBAR_ROW_LINE_CLASS, sidebarSurface } from './sidebar-surface';
@@ -134,7 +133,32 @@ export type { PrStatus };
  * The parts of a session row that were Tailwind. The row's own box, ink and
  * fills come from `sidebarSurface`; these are the pieces around it.
  */
+const GROUP_HOVER = ':is(:where(.group):hover *)';
 const rowStyles = stylex.create({
+  swipeRoot: { borderRadius: 'var(--radius-md)' },
+  swipeContent: { backgroundColor: 'hsl(var(--sidebar) / 1)' },
+  projectFolderDesktop: {
+    opacity: { default: 1, '@media (hover: hover)': { [GROUP_HOVER]: 0 } },
+  },
+  projectChevronDesktop: {
+    opacity: { default: 0, '@media (hover: hover)': { [GROUP_HOVER]: 1 } },
+  },
+  anchorFocus: {
+    boxShadow: {
+      default: null,
+      ':has(a:focus-visible)':
+        'inset 0 0 0 1px color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 40%, transparent)',
+    },
+  },
+  groupLabelHover: {
+    color: {
+      default: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+      ':hover': 'hsl(var(--sidebar-foreground) / 1)',
+    },
+  },
+  groupLabelInk: {
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+  },
   // Project-group declarations keep element-local app variables, including scoped themes.
   projectHeader: {
     position: 'relative',
@@ -154,9 +178,9 @@ const rowStyles = stylex.create({
     gap: 'calc(var(--spacing) * 2)',
     fontWeight: 'var(--font-weight-normal)',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
   },
   projectHeaderPlain: {
     backgroundColor: 'transparent',
@@ -202,7 +226,7 @@ const rowStyles = stylex.create({
     color: 'currentcolor',
     transitionProperty: 'opacity',
     transitionDuration: '100ms',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
   },
   projectChevron: { transitionProperty: 'opacity,translate,scale,rotate' },
   projectChevronCollapsed: { rotate: 'calc(90deg * -1)' },
@@ -1345,7 +1369,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
               title: session.title,
             })
       }
-      className={cn(
+      className={clsx(
         'group',
         // A desktop repo row is two lines (title, then branch and time); chats,
         // nested children and every mobile row stay one. The rest of the metadata (repo /
@@ -1365,8 +1389,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         // after a mouse click (the overlay <a> keeps focus), which
         // left a permanent inset ring on the selected row that read
         // as a misplaced border.
-        useAnchor &&
-          'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40'
+        useAnchor && stylex.props(rowStyles.anchorFocus).className
       )}
       onMouseOver={(event) => {
         if (!event.currentTarget.hasAttribute('data-sidebar-title-measured')) {
@@ -1869,8 +1892,8 @@ const SessionGroupRow = memo(function SessionGroupRow({
       <SwipeActionRow
         key={session.sessionId}
         enabled={isMobile}
-        className="rounded-md"
-        contentClassName="bg-sidebar"
+        rootXstyle={rowStyles.swipeRoot}
+        contentXstyle={rowStyles.swipeContent}
         actions={[
           {
             key: 'archive',
@@ -1878,7 +1901,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
             ariaLabel: archiveTooltipLabel,
             icon: <Archive className={stylex.props(rowStyles.archiveIcon).className} />,
             hideLabel: groupKind === 'chat',
-            className: stylex.props(rowStyles.archiveAction).className,
+            xstyle: rowStyles.archiveAction,
             onClick: () => onArchiveSession?.(session.sessionId),
           },
         ]}
@@ -1976,8 +1999,10 @@ function ProjectGroupHeaderRow({
         <Folders
           aria-hidden="true"
           className={clsx(
-            stylex.props(rowStyles.projectGlyph, isMobile && rowStyles.hidden).className,
-            !isMobile && 'group-hover:opacity-0'
+            stylex.props(
+              rowStyles.projectGlyph,
+              isMobile ? rowStyles.hidden : rowStyles.projectFolderDesktop
+            ).className
           )}
         />
         <ChevronDown
@@ -1986,10 +2011,9 @@ function ProjectGroupHeaderRow({
             stylex.props(
               rowStyles.projectGlyph,
               rowStyles.projectChevron,
-              isMobile ? rowStyles.projectGlyphVisible : rowStyles.hidden,
+              isMobile ? rowStyles.projectGlyphVisible : rowStyles.projectChevronDesktop,
               group.collapsed ? rowStyles.projectChevronCollapsed : rowStyles.projectChevronOpen
-            ).className,
-            !isMobile && 'group-hover:opacity-100'
+            ).className
           )}
         />
       </button>
@@ -1999,7 +2023,7 @@ function ProjectGroupHeaderRow({
           {showMenu ? (
             <button
               type="button"
-              className={cn(SIDEBAR_HOVER_ACTION_CLASS, SIDEBAR_MENU_TRIGGER_OPEN_CLASS)}
+              className={clsx(SIDEBAR_HOVER_ACTION_CLASS, SIDEBAR_MENU_TRIGGER_OPEN_CLASS)}
               aria-label={t('sessions.moreActions', 'More actions')}
               onClick={(event) => {
                 // Open the row's own right-click menu from a left click.
@@ -2297,15 +2321,15 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     sidebarSurface.row,
                     showActiveGroupState
                       ? sidebarSurface.selected
-                      : canNavigate && !isMobile && !isGroupLabel && sidebarSurface.hover
+                      : canNavigate && !isMobile && !isGroupLabel && sidebarSurface.hover,
+                    !showActiveGroupState &&
+                      isGroupLabel &&
+                      (canNavigate && !isMobile
+                        ? rowStyles.groupLabelHover
+                        : rowStyles.groupLabelInk)
                   ).className,
                   headerTypographyClass,
-                  !showActiveGroupState && headerBaseColorClass,
-                  !showActiveGroupState &&
-                    canNavigate &&
-                    !isMobile &&
-                    isGroupLabel &&
-                    'hover:text-sidebar-foreground'
+                  !showActiveGroupState && headerBaseColorClass
                 )}
                 onClick={canNavigate ? handleNavigate : handleToggleGroup}
                 onKeyDown={
@@ -2379,7 +2403,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 {repoMenuEnabled ? (
                   <button
                     type="button"
-                    className={cn(SIDEBAR_HOVER_ACTION_CLASS, SIDEBAR_MENU_TRIGGER_OPEN_CLASS)}
+                    className={clsx(SIDEBAR_HOVER_ACTION_CLASS, SIDEBAR_MENU_TRIGGER_OPEN_CLASS)}
                     aria-label={moreActionsLabel}
                     onClick={(event) => {
                       // Open the row's own right-click menu from a left click.
@@ -2636,7 +2660,7 @@ const SortableRepoGroupSection = memo(function SortableRepoGroupSection({
  * groups separate by space alone. Collapsed headers stack more tightly.
  */
 export const getSidebarGroupSpacingClass = (collapsed: boolean | undefined) =>
-  collapsed ? 'mb-1 last:mb-0' : 'mb-3 last:mb-0';
+  stylex.props(collapsed ? rowStyles.groupSpacingCollapsed : rowStyles.groupSpacing).className;
 
 export const SessionList = memo(function SessionList({
   sessions,

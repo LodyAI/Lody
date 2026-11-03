@@ -22,7 +22,6 @@ import type { IconType } from 'react-icons';
 import type { SessionPullRequestCiState, SessionPullRequestReadiness } from '@lody/shared';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
-import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
 import { useLongPress } from '@/hooks/use-long-press';
 import { Checkbox } from '@lody/ui/checkbox';
@@ -85,9 +84,11 @@ const darkColors = {
 } as const;
 
 const styles = stylex.create({
+  selectionCheck: { pointerEvents: 'none' },
   statusRunning: { color: 'hsl(var(--primary) / 1)' },
   /** A react-icon, sized to fill its box. */
   reactIcon: {
+    ':is(*) svg': { width: '100%', height: '100%' },
     display: 'inline-flex',
     flexShrink: 0,
     alignItems: 'center',
@@ -605,13 +606,7 @@ const styles = stylex.create({
 function MobileReactIcon({ icon: Icon, className }: { icon: IconType; className?: string }) {
   /* Fill the sized wrapper — not size="1em" (inherits the tab label's 0.72rem). */
   return (
-    <span
-      {...withClassName(
-        stylex.props(styles.reactIcon),
-        cn('[&_svg]:h-full [&_svg]:w-full', className)
-      )}
-      aria-hidden="true"
-    >
+    <span {...withClassName(stylex.props(styles.reactIcon), className)} aria-hidden="true">
       <Icon />
     </span>
   );
@@ -1118,8 +1113,8 @@ export function ConversationRow({
           <Checkbox
             checked={isSelected}
             tabIndex={-1}
-            className="pointer-events-none"
             aria-hidden="true"
+            xstyle={styles.selectionCheck}
           />
         ) : (
           <StatusIndicator
