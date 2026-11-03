@@ -30,6 +30,58 @@ function pinOrderedListValues(element: HTMLElement): () => void {
   };
 }
 
+// WebKit can paint positioned HTML inside an SVG foreignObject at the wrong
+// scale when its viewBox is enlarged (WebKit bug 23113). Keep the SVG at 1:1
+// and scale its HTML layout instead. Start from SnapDOM's processed SVG so its
+// WebKit shadow compatibility handling is preserved.
+async function sizeWebKitShareSvg(
+  source: HTMLImageElement,
+  width: number,
+  height: number,
+  vbW: number,
+  vbH: number
+): Promise<HTMLImageElement> {
+  if (!source.src.startsWith('data:image/svg+xml')) throw new Error('SVG rendering failed');
+  const comma = source.src.indexOf(',');
+  if (comma < 0) throw new Error('SVG rendering failed');
+  const document = new DOMParser().parseFromString(
+    decodeURIComponent(source.src.slice(comma + 1)),
+    'image/svg+xml'
+  );
+  const svg = document.documentElement;
+  const foreignObject = Array.from(svg.children).find(
+    (child) => child.localName === 'foreignObject'
+  );
+  const wrapper =
+    foreignObject && Array.from(foreignObject.children).find((child) => child.localName === 'div');
+  if (
+    svg.localName !== 'svg' ||
+    !foreignObject ||
+    !wrapper ||
+    !Number.isFinite(vbW) ||
+    !Number.isFinite(vbH) ||
+    vbW <= 0 ||
+    vbH <= 0
+  )
+    throw new Error('SVG rendering failed');
+  const scale = Math.min(width / vbW, height / vbH);
+  for (const name of ['x', 'y', 'width', 'height']) {
+    const attribute = foreignObject.getAttribute(name);
+    if (attribute === null) throw new Error('SVG rendering failed');
+    const value = Number(attribute);
+    if (!Number.isFinite(value)) throw new Error('SVG rendering failed');
+    foreignObject.setAttribute(name, String(value * scale));
+  }
+  svg.setAttribute('width', String(width));
+  svg.setAttribute('height', String(height));
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  (wrapper as HTMLElement).style.setProperty('zoom', String(scale), 'important');
+  const image = new Image();
+  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(document))}`;
+  await image.decode();
+  return image;
+}
+
 async function captureShareImage(element: HTMLElement, assertCurrent: () => void): Promise<Blob> {
   assertCurrent();
   await document.fonts.ready;
@@ -72,8 +124,8 @@ async function captureShareImage(element: HTMLElement, assertCurrent: () => void
       const scale = Math.min(2, 16384 / vbW, 16384 / vbH, Math.sqrt((16384 * 16384) / (vbW * vbH)));
       const width = Math.max(1, Math.floor(vbW * scale));
       const height = Math.max(1, Math.floor(vbH * scale));
-      const image = await snapshot.toSvg({ width, height });
-      if (!image.src.startsWith('data:image/svg+xml')) throw new Error('SVG rendering failed');
+      const processed = await snapshot.toSvg({ width, height });
+      const image = await sizeWebKitShareSvg(processed, width, height, vbW, vbH);
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
