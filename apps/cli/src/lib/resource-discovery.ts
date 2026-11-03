@@ -15,6 +15,7 @@ import {
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import type { RateLimit } from 'acp-extension-core';
+import { mapWithConcurrency } from './bounded-concurrency';
 import {
   discoveryPage,
   matchesDiscoveryQuery,
@@ -184,24 +185,15 @@ export class ResourceDiscovery {
         : status(machineId) === 'offline'
           ? { state: 'unavailable', reason: 'machine_offline' }
           : { state: 'unknown', reason: 'presence_unavailable' };
-    if (resource === 'machine') {
-      const rows: DiscoveryRow[] = [];
-      for (const machine of authorized) {
-        // Quota is advisory: an unreadable snapshot omits it, never the machine.
-        const rateLimits = await source.rateLimits?.(machine.id).catch(() => undefined);
-        const quota = rateLimits ? summarizeMachineQuota(rateLimits) : [];
-        rows.push({
-          id: machine.id,
-          name: machine.name,
-          onlineStatus: status(machine.id),
-          canUse: true,
-          availability: availability(machine.id),
-          protocolCapabilities: machine.protocolCapabilities ?? {},
-          ...(quota.length ? { quota } : {}),
-        });
-      }
-      return rows;
-    }
+    if (resource === 'machine')
+      return authorized.map((machine) => ({
+        id: machine.id,
+        name: machine.name,
+        onlineStatus: status(machine.id),
+        canUse: true,
+        availability: availability(machine.id),
+        protocolCapabilities: machine.protocolCapabilities ?? {},
+      }));
     if (resource === 'project') {
       const rows: DiscoveryRow[] = [];
       for (const machine of authorized) {
@@ -349,8 +341,8 @@ export class ResourceDiscovery {
       JSON.stringify([resource, this.source.workspaceId, this.source.userId]),
       (row) => JSON.stringify([row.kind ?? resource, row.machineId ?? '', row.id])
     );
-    if (resource === 'machine' && query.includeResources)
-      page.items = await this.withMachineResources(page.items);
+    if (resource === 'machine')
+      page.items = await this.withMachineDetails(page.items, query.includeResources === true);
     return {
       ok: true as const,
       workspaceId: this.source.workspaceId,
@@ -362,29 +354,31 @@ export class ResourceDiscovery {
   }
 
   /**
-   * Live resources for one page of machines, four at a time. A Machine that is
-   * offline, older or slow reports `resources: "unavailable"`; it never fails the list.
+   * Quota and, on request, live resources for one page of machines, four at a time.
+   * Unreadable quota is omitted; a Machine that is offline, older or slow reports
+   * `resources: "unavailable"`. Neither fails the list.
    */
-  private async withMachineResources(rows: DiscoveryRow[]): Promise<DiscoveryRow[]> {
-    const machines = new Map(
-      (await this.source.machines()).map((machine) => [machine.id, machine])
-    );
-    const enriched: DiscoveryRow[] = [];
-    for (let start = 0; start < rows.length; start += 4) {
-      enriched.push(
-        ...(await Promise.all(
-          rows.slice(start, start + 4).map(async (row) => {
-            const machine = machines.get(row.id as MachineId);
-            const resources =
-              machine && row.onlineStatus !== 'offline'
-                ? await this.source.machineResources?.(machine).catch(() => undefined)
-                : undefined;
-            return { ...row, resources: resources ?? 'unavailable' };
-          })
-        ))
-      );
-    }
-    return enriched;
+  private async withMachineDetails(
+    rows: DiscoveryRow[],
+    includeResources: boolean
+  ): Promise<DiscoveryRow[]> {
+    const machines = includeResources
+      ? new Map((await this.source.machines()).map((machine) => [machine.id, machine]))
+      : undefined;
+    return mapWithConcurrency(rows, MACHINE_DETAIL_CONCURRENCY, async (row) => {
+      const rateLimits = await this.source.rateLimits?.(row.id as MachineId).catch(() => undefined);
+      const quota = rateLimits ? summarizeMachineQuota(rateLimits) : [];
+      const machine = machines?.get(row.id as MachineId);
+      const resources =
+        machine && row.onlineStatus !== 'offline'
+          ? await this.source.machineResources?.(machine).catch(() => undefined)
+          : undefined;
+      return {
+        ...row,
+        ...(quota.length ? { quota } : {}),
+        ...(includeResources ? { resources: resources ?? 'unavailable' } : {}),
+      };
+    });
   }
 
   async get(resource: 'agent_config' | 'agent_role', id: string, machineId?: string) {
@@ -410,6 +404,7 @@ export class ResourceDiscovery {
 }
 
 const MAX_QUOTA_WINDOWS = 20;
+const MACHINE_DETAIL_CONCURRENCY = 4;
 
 /**
  * Most-used quota windows first, with reset times, so a coordinator sees an

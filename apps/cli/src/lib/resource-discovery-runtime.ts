@@ -1,7 +1,8 @@
 import {
   getMachineFlockAcpCapabilities,
   getMachineFlockRateLimits,
-  machineSupportsDiskStatus,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  machineSupportsProtocolCapability,
   getMachineFlockDocId,
   getWorkspaceFlockDocId,
   isMachineDocRoomId,
@@ -95,6 +96,12 @@ export async function createResourceDiscovery(args: {
       synced.add(id);
     }
   }
+  async function readMachineFlockRows(machineId: MachineId) {
+    const id = getMachineFlockDocId(workspaceId, machineId);
+    await sync(id);
+    const handle = await manager.repo.openFlockDoc(id);
+    return readMachineFlockRowsFromFlock(handle.flock);
+  }
   return new ResourceDiscovery({
     workspaceId,
     userId: args.delegatedRequester?.userId ?? auth.userId,
@@ -135,18 +142,15 @@ export async function createResourceDiscovery(args: {
       return listMergedAgentConfigs(manager.repo, workspaceId, [machineId]);
     },
     capabilities: async (machineId: MachineId) => {
-      const id = getMachineFlockDocId(workspaceId, machineId);
-      await sync(id);
-      machineBaselines.set(machineId, baselines.get(id) !== false);
-      const handle = await manager.repo.openFlockDoc(id);
-      return getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(handle.flock));
+      const rows = await readMachineFlockRows(machineId);
+      machineBaselines.set(
+        machineId,
+        baselines.get(getMachineFlockDocId(workspaceId, machineId)) !== false
+      );
+      return getMachineFlockAcpCapabilities(rows);
     },
-    rateLimits: async (machineId: MachineId) => {
-      const id = getMachineFlockDocId(workspaceId, machineId);
-      await sync(id);
-      const handle = await manager.repo.openFlockDoc(id);
-      return getMachineFlockRateLimits(readMachineFlockRowsFromFlock(handle.flock));
-    },
+    rateLimits: async (machineId: MachineId) =>
+      getMachineFlockRateLimits(await readMachineFlockRows(machineId)),
     machineResources: async (machine: MachineMeta) => {
       const response = await withMachineRpcClient(
         { auth, workspaceId, machineId: machine.id },
@@ -154,7 +158,12 @@ export async function createResourceDiscovery(args: {
           await client.requestMachineStatus({
             timeoutMs: MACHINE_RESOURCES_TIMEOUT_MS,
             // Older daemons reject unknown params, so only capable ones get the flag.
-            ...(machineSupportsDiskStatus(machine) ? { includeDisk: true } : {}),
+            ...(machineSupportsProtocolCapability(
+              machine,
+              MACHINE_PROTOCOL_CAPABILITIES.machineDiskStatus
+            )
+              ? { includeDisk: true }
+              : {}),
           })
       );
       if (!response?.success) return undefined;

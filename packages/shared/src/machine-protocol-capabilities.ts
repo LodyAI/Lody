@@ -602,13 +602,3 @@ export function machineSupportsAndroidEmulatorQuality(
     1
   );
 }
-
-/** Whether `machine/status` accepts `includeDisk`; older daemons reject it. */
-export function machineSupportsDiskStatus(
-  machine: MachineProtocolCapabilityCarrier | null | undefined
-): boolean {
-  return machineSupportsProtocolCapability(
-    machine,
-    MACHINE_PROTOCOL_CAPABILITIES.machineDiskStatus
-  );
-}
