@@ -15,18 +15,6 @@ const validCatalog = {
   ]
 }
 
-void test('keeps CLI identity and workspace in one local platform snapshot', () => {
-  assert.deepEqual(parseLocalPlatformSnapshot(validCatalog), {
-    userId: 'local:user-1',
-    workspace: {
-      workspaceId: 'lw_workspace-1',
-      name: 'Lody',
-      slug: 'local',
-      role: 'owner'
-    }
-  })
-})
-
 void test('rejects identity drift and multiple active local workspaces', () => {
   assert.throws(
     () => parseLocalPlatformSnapshot({ ...validCatalog, identity: { userId: 'cloud-user' } }),

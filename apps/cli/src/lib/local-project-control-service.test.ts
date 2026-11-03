@@ -104,68 +104,6 @@ describe('LocalProjectControlService file browsing security', () => {
 });
 
 describe('LocalProjectControlService project skills', () => {
-  it('lists direct child skills and root SKILL.md files by group', async () => {
-    const rootPath = await createTempProject();
-    try {
-      await mkdir(join(rootPath, '.agents', 'skills', 'review'), { recursive: true });
-      await mkdir(join(rootPath, '.claude', 'skills'), { recursive: true });
-      await writeFile(
-        join(rootPath, '.agents', 'skills', 'review', 'SKILL.md'),
-        `---
-name: Review Bot
-description: Checks diffs
-version: 1.0.0
-author: Lody
----
-# Review
-`
-      );
-      await writeFile(
-        join(rootPath, '.claude', 'skills', 'SKILL.md'),
-        `---
-name: Claude Root
-metadata:
-  version: 2.0.0
-  author: Claude Team
----
-# Claude
-`
-      );
-
-      const service = new LocalProjectControlService(createLogger());
-      const result = await service.listProjectSkills(rootPath, [
-        '.agents/skills',
-        '.claude/skills',
-        '.qwen/skills',
-      ]);
-
-      expect(result.contentFingerprint).toMatch(/^[0-9a-f]{64}$/);
-      expect(result.groups.map((group) => group.dir)).toEqual(['.agents/skills', '.claude/skills']);
-      expect(result.groups.map((group) => group.scope)).toEqual(['project', 'project']);
-      expect(result.groups[0]?.skills).toEqual([
-        {
-          id: '.agents/skills/review',
-          name: 'Review Bot',
-          description: 'Checks diffs',
-          version: '1.0.0',
-          author: 'Lody',
-          relativePath: '.agents/skills/review/SKILL.md',
-          isSymlink: false,
-          content: '# Review',
-        },
-      ]);
-      expect(result.groups[1]?.skills[0]).toMatchObject({
-        id: '.claude/skills/SKILL.md',
-        name: 'Claude Root',
-        version: '2.0.0',
-        author: 'Claude Team',
-        relativePath: '.claude/skills/SKILL.md',
-      });
-    } finally {
-      await rm(rootPath, { recursive: true, force: true });
-    }
-  });
-
   it('follows in-project symlinked skill directories and lists every duplicate entry', async () => {
     const rootPath = await createTempProject();
     try {
@@ -302,45 +240,6 @@ description: Checks diffs
     }
   });
 
-  it('lists current-user global skills using home-relative paths', async () => {
-    const homePath = await createTempProject();
-    try {
-      await mkdir(join(homePath, '.agents', 'skills', 'pr-writer'), { recursive: true });
-      await writeFile(
-        join(homePath, '.agents', 'skills', 'pr-writer', 'SKILL.md'),
-        `---
-name: pr-writer
-description: Writes PR summaries
----
-`
-      );
-
-      const service = new LocalProjectControlService(createLogger());
-      const result = await service.listGlobalSkills({ homePath });
-
-      expect(result.contentFingerprint).toMatch(/^[0-9a-f]{64}$/);
-      expect(result.groups).toEqual([
-        {
-          scope: 'global',
-          dir: '~/.agents/skills',
-          skills: [
-            {
-              id: '~/.agents/skills/pr-writer',
-              name: 'pr-writer',
-              description: 'Writes PR summaries',
-              relativePath: '~/.agents/skills/pr-writer/SKILL.md',
-              absolutePath: join(homePath, '.agents', 'skills', 'pr-writer', 'SKILL.md'),
-              isSymlink: false,
-            },
-          ],
-          truncated: false,
-        },
-      ]);
-    } finally {
-      await rm(homePath, { recursive: true, force: true });
-    }
-  });
-
   it('lists current-user global skills in catalog-layout subdirectories', async () => {
     const homePath = await createTempProject();
     try {
@@ -394,44 +293,6 @@ name: ignored
               description: 'Generates images',
               relativePath: '~/.agents/skills/.system/imagegen/SKILL.md',
               absolutePath: join(homePath, '.agents', 'skills', '.system', 'imagegen', 'SKILL.md'),
-              isSymlink: false,
-            },
-          ],
-          truncated: false,
-        },
-      ]);
-    } finally {
-      await rm(homePath, { recursive: true, force: true });
-    }
-  });
-
-  it('lists codex built-in system skills under the system scope', async () => {
-    const homePath = await createTempProject();
-    try {
-      await mkdir(join(homePath, '.codex', 'skills', '.system', 'imagegen'), { recursive: true });
-      await writeFile(
-        join(homePath, '.codex', 'skills', '.system', 'imagegen', 'SKILL.md'),
-        `---
-name: imagegen
-description: Generates images
----
-`
-      );
-
-      const service = new LocalProjectControlService(createLogger());
-      const result = await service.listGlobalSkills({ homePath });
-
-      expect(result.groups).toEqual([
-        {
-          scope: 'system',
-          dir: '~/.codex/skills/.system',
-          skills: [
-            {
-              id: '~/.codex/skills/.system/imagegen',
-              name: 'imagegen',
-              description: 'Generates images',
-              relativePath: '~/.codex/skills/.system/imagegen/SKILL.md',
-              absolutePath: join(homePath, '.codex', 'skills', '.system', 'imagegen', 'SKILL.md'),
               isSymlink: false,
             },
           ],

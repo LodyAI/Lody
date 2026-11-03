@@ -1394,6 +1394,55 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
     });
   });
 
+  it('bridges a Droid question and returns its custom answer in the expected fields', async () => {
+    const { client, onRequestPermission } = createTestClient({
+      cliType: 'registry',
+      agentType: 'factory-droid',
+    });
+    onRequestPermission.mockResolvedValueOnce({
+      outcome: {
+        outcome: 'selected',
+        optionId: 'answer',
+        _meta: { lody: { elicitation: { version: 1, answers: { question_1: 'DuckDB' } } } },
+      },
+    } as unknown as Awaited<ReturnType<typeof onRequestPermission>>);
+    const request = {
+      mode: 'form',
+      sessionId: 'acp-test',
+      message: 'Droid needs your answers to continue.',
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          question_1: {
+            type: 'string',
+            title: 'Database',
+            description: 'Which database?',
+            oneOf: [
+              { const: 'option_0', title: 'PostgreSQL' },
+              { const: 'option_1', title: 'SQLite' },
+              { const: 'other', title: 'Other answer' },
+            ],
+          },
+          question_1_other: { type: 'string', title: 'Database: Other answer' },
+        },
+        required: ['question_1'],
+      },
+    } as unknown as CreateElicitationRequest;
+    await expect(client.unstable_createElicitation(request)).resolves.toEqual({
+      action: 'accept',
+      content: { question_1: 'other', question_1_other: 'DuckDB' },
+    });
+    const calls = onRequestPermission.mock.calls as unknown as Array<
+      [string, RequestPermissionRequest]
+    >;
+    const parsed = parseAskUserQuestionPermissionMeta(calls[0]?.[1]._meta);
+    expect(parsed?.questions[0]).toMatchObject({
+      id: 'question_1',
+      question: 'Which database?',
+      options: [{ label: 'PostgreSQL' }, { label: 'SQLite' }],
+    });
+  });
+
   it('returns cancel when the user dismisses the question', async () => {
     const { client, onRequestPermission } = createTestClient({ agentType: 'claude' });
     onRequestPermission.mockResolvedValueOnce({

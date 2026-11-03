@@ -1,6 +1,7 @@
 import type { PlatformE2eeWorkspaces } from '@lody/platform';
 import {
   clearPendingE2eeWorkspace,
+  listPendingE2eeWorkspaces,
   saveE2eeGenesisPin,
   retainWorkspaceModeProof,
   type PendingE2eeWorkspace,
@@ -30,6 +31,84 @@ export function e2eeCreationErrorCode(error: unknown): string | undefined {
     typeof data.code === 'string'
     ? data.code
     : undefined;
+}
+
+/** True only after storage no longer holds the exact submitted request. A read
+ * failure keeps the component locked because storage remains authoritative. */
+export function pendingCreationRemoved(
+  storage: Storage,
+  accountId: string | null,
+  requestId: string
+): boolean {
+  if (!accountId) return false;
+  try {
+    return !listPendingE2eeWorkspaces(storage, accountId).some(
+      (request) => request.requestId === requestId
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Destructive discard runs only after the explicit confirmation. */
+export function clearConfirmedPendingCreation(
+  storage: Storage,
+  pending: PendingE2eeWorkspace | null,
+  confirmed: boolean
+): boolean {
+  if (!confirmed || !pending) return false;
+  clearPendingE2eeWorkspace(storage, pending);
+  return true;
+}
+
+/** Only the account that saved this request may resume or discard it. */
+export function canResumePendingCreation(
+  pending: PendingE2eeWorkspace | null,
+  accountId: string | null
+): boolean {
+  return Boolean(pending && accountId && pending.accountId === accountId);
+}
+
+/** While a submit is in flight, the discard action stays unavailable. */
+export function canDiscardPendingCreation(
+  creating: boolean,
+  pending: PendingE2eeWorkspace | null,
+  accountId: string | null
+): boolean {
+  return !creating && canResumePendingCreation(pending, accountId);
+}
+
+/** A pending request has already been submitted: its slug and free slot may
+ * belong to that request, so new-workspace checks must not block continuation. */
+export function e2eeCreationAvailability(
+  pending: PendingE2eeWorkspace | null,
+  availability: { canCreateFree?: boolean } | null | undefined
+) {
+  const resumable = Boolean(pending);
+  return {
+    resumable,
+    canCreate: resumable || availability?.canCreateFree === true,
+    blocked: !resumable && availability?.canCreateFree === false,
+    slugCheckApplies: !resumable,
+  };
+}
+
+/** Reuse the device's saved request instead of minting a second identity after a
+ * lost response. The caller persists the returned intent before any host call. */
+export function e2eeCreationIntent(
+  accountId: string,
+  pending: PendingE2eeWorkspace | null,
+  name: string,
+  slug: string
+): PendingE2eeWorkspace {
+  return (
+    pending ?? {
+      accountId,
+      requestId: crypto.randomUUID(),
+      name: name.trim(),
+      slug,
+    }
+  );
 }
 
 /** Reconcile the durable intent. Any unknown outcome leaves it available for retry;

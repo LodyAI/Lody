@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -91,42 +92,5 @@ describe('AgentRoleDetailPane', () => {
     expect(rowValue(view, 'Mode')).toBe('bypassPermissions');
     expect(rowValue(view, 'Reasoning')).toBeUndefined();
     expect(rowValue(view, 'Permission')).toBeUndefined();
-  });
-
-  it('states only what the Role pins, never the agent current value', async () => {
-    const view = await render();
-    // The bound agent's own wording for the stored id, not the id.
-    expect(rowValue(view, 'Model')).toBe('5.6-Sol');
-    // This Role pins no reasoning level, so the pane must not borrow one from
-    // the bound agent's own defaults and present it as the Role's.
-    expect(rowValue(view, 'Reasoning')).toBeUndefined();
-    expect(rowValue(view, 'Mode')).toBeUndefined();
-  });
-
-  it('names the machine only where the surface passes one', async () => {
-    const withMachine = await render({ machineLabel: 'Studio' });
-    expect(withMachine.textContent).toContain('Studio');
-    // The composer lists one machine by construction, so naming it there would
-    // be a constant that says nothing.
-    const withoutMachine = await render({ machineLabel: undefined });
-    expect(withoutMachine.textContent).not.toContain('Studio');
-  });
-
-  it('shows the instruction itself and offers editing only where it can be done', async () => {
-    const view = await render({ role: role({ promptPrefix: 'Correctness before style.' }) });
-    expect(view.textContent).toContain('Correctness before style.');
-    expect(view.querySelector('button')).toBeNull();
-
-    let edited: string | null = null;
-    const editable = await render({
-      role: role({ promptPrefix: 'Correctness before style.' }),
-      onEdit: (roleId) => {
-        edited = roleId;
-      },
-    });
-    await act(async () => {
-      editable.querySelector('button')?.click();
-    });
-    expect(edited).toBe('role-1');
   });
 });

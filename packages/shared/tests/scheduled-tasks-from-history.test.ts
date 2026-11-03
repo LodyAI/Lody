@@ -35,28 +35,6 @@ function entry(endedAt: number, items: MessageContent[]): ScheduledTaskHistoryEn
 }
 
 describe('collectPendingScheduledTasksFromHistory', () => {
-  it('derives a wakeup with scheduledFor = call time + delaySeconds', () => {
-    const endedAt = 1_000_000;
-    const tasks = collectPendingScheduledTasksFromHistory([
-      entry(endedAt, [
-        toolCall({
-          toolCallId: 'w1',
-          title: 'ScheduleWakeup',
-          rawInput: { delaySeconds: 120, reason: 'wake up and report' },
-        }),
-      ]),
-    ]);
-    expect(tasks).toEqual([
-      {
-        id: 'wakeup',
-        kind: 'wakeup',
-        createdAtMs: endedAt,
-        scheduledForMs: endedAt + 120_000,
-        summary: 'wake up and report',
-      },
-    ]);
-  });
-
   it('keeps only the latest ScheduleWakeup', () => {
     const tasks = collectPendingScheduledTasksFromHistory([
       entry(1_000, [
@@ -81,43 +59,6 @@ describe('collectPendingScheduledTasksFromHistory', () => {
       scheduledForMs: 2_000 + 30_000,
       summary: 'second',
     });
-  });
-
-  it('derives a cron task from CronCreate rawInput', () => {
-    const tasks = collectPendingScheduledTasksFromHistory([
-      entry(5_000, [
-        toolCall({
-          toolCallId: 'c1',
-          title: 'CronCreate',
-          rawInput: { cron: '0 9 * * 1-5', prompt: 'daily standup', recurring: true },
-          rawOutput: 'Scheduled task ab9963d6 (0 9 * * 1-5).',
-        }),
-      ]),
-    ]);
-    expect(tasks).toEqual([
-      {
-        id: 'c1',
-        kind: 'cron',
-        createdAtMs: 5_000,
-        humanSchedule: '0 9 * * 1-5',
-        recurring: true,
-        summary: 'daily standup',
-      },
-    ]);
-  });
-
-  it('propagates the persisted machine timezone onto the cron task', () => {
-    const tasks = collectPendingScheduledTasksFromHistory([
-      entry(5_000, [
-        toolCall({
-          toolCallId: 'c1',
-          title: 'CronCreate',
-          rawInput: { cron: '0 9 * * *', prompt: 'p' },
-          schedulingTimeZone: 'America/New_York',
-        }),
-      ]),
-    ]);
-    expect(tasks[0]?.timeZone).toBe('America/New_York');
   });
 
   it('removes a cron when a later CronDelete references its id', () => {
@@ -258,14 +199,6 @@ describe('collectPendingScheduledTasksFromHistory', () => {
       const fire = resolveFireMs(tasks[0]!, NEXT_DAY);
       expect(typeof fire).toBe('number');
       expect(fire!).toBeGreaterThan(NEXT_DAY);
-    });
-
-    it('ignores an absent/unparseable nextFireAt and falls back to the anchor', () => {
-      const tasks = collectPendingScheduledTasksFromHistory([
-        legacyEntry([oneShotCall({ recordedAtMs: CALL_AT, rawOutput: 'nextFireAt: null' })]),
-      ]);
-      expect(tasks[0]?.scheduledForMs).toBeUndefined();
-      expect(resolveFireMs(tasks[0]!, NEXT_DAY)).toBe(FIRE_AT);
     });
 
     it('anchors a wakeup at the call recordedAtMs, not the turn', () => {

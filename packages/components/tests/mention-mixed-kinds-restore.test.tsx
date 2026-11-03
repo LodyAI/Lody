@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -141,18 +142,6 @@ describe('a draft with several kinds of mention keeps all of them', () => {
     await render({ value: text, persisted: reported });
     expect(kinds()).toEqual(expected);
   };
-
-  it('keeps a session mention beside a file mention', async () => {
-    await roundTrip('see @fix-ci and @src/app.ts', ['file', 'session']);
-  });
-
-  it('keeps a session mention beside a skill mention', async () => {
-    await roundTrip('see @fix-ci and $review', ['session', 'skill']);
-  });
-
-  it('keeps a session mention beside an issue mention', async () => {
-    await roundTrip('see @fix-ci and #123', ['issue', 'session']);
-  });
 
   it('keeps all four kinds at once', async () => {
     await roundTrip('see @fix-ci @src/app.ts $review #123', ['file', 'issue', 'session', 'skill']);

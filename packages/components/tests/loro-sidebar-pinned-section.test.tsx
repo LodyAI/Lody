@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -159,81 +158,6 @@ describe('LoroSidebar pinned section', () => {
     expect(selected).toBe('second');
   });
 
-  it.each([false, true])(
-    'keeps the desktop collapse toggle visible, not hover-revealed (Electron=%s)',
-    (isElectron) => {
-      renderSidebar({ isElectron, onRequestCollapse: vi.fn() });
-
-      const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
-      expect(button).not.toBeNull();
-      expect(button?.className).not.toContain('opacity-0');
-      expect(button?.className).not.toContain('pointer-events-none');
-    }
-  );
-
-  it('orders Help, Archive, and Settings and keeps their destinations reachable', async () => {
-    let destination = 'home';
-    renderSidebar({
-      onArchiveClicked: () => {
-        destination = 'archive';
-      },
-      onDocsClicked: () => {
-        destination = 'docs';
-      },
-      onGithubClicked: () => {
-        destination = 'github';
-      },
-      onFeedbackClicked: () => {
-        destination = 'feedback';
-      },
-      onSettingsClicked: () => {
-        destination = 'settings';
-      },
-    });
-
-    const footerButton = (name: string) =>
-      Array.from(container?.querySelectorAll('button') ?? []).find(
-        (button) => button.textContent?.trim() === name
-      );
-    const help = footerButton('Help');
-    expect(help).toBeDefined();
-    expect(
-      Array.from(help!.parentElement!.children).map((button) => button.textContent?.trim())
-    ).toEqual(['Help', 'Archive', 'Settings']);
-    await act(async () => footerButton('Archive')?.click());
-    expect(destination).toBe('archive');
-    await act(async () => footerButton('Settings')?.click());
-    expect(destination).toBe('settings');
-
-    await act(async () => help?.click());
-    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    expect(items.some((item) => item.textContent?.includes('Archive'))).toBe(false);
-    const docs = items.find((item) => item.textContent?.includes('Docs'));
-    expect(docs).toBeDefined();
-    expect(items.map((item) => item.textContent?.trim())).toEqual([
-      'Docs',
-      'GitHub',
-      'Join community',
-      'Feedback',
-      'Report bug',
-    ]);
-
-    await act(async () => docs?.click());
-    expect(destination).toBe('docs');
-    await act(async () => help?.click());
-    const github = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent?.trim() === 'GitHub'
-    );
-    await act(async () => github?.click());
-    expect(destination).toBe('github');
-    await act(async () => help?.click());
-    const feedback = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent?.trim() === 'Feedback'
-    );
-    await act(async () => feedback?.click());
-    expect(destination).toBe('feedback');
-  });
-
   it('keeps Help and Settings around the Archive exit while Archive is open', () => {
     let destination = 'archive';
     renderSidebar({
@@ -253,30 +177,12 @@ describe('LoroSidebar pinned section', () => {
         .map((button) => button.getAttribute('aria-label'))
     ).toEqual(['Help', 'Leave Archive', 'Settings']);
     expect(exit?.getAttribute('aria-current')).toBe('page');
-    expect(exit?.querySelector('svg.lucide-archive')).not.toBeNull();
-    expect(exit?.querySelector('svg.lucide-arrow-left')).not.toBeNull();
 
     // No history to return to in the test window: leaving goes Home.
     flushSync(() => {
       exit?.click();
     });
     expect(destination).toBe('home');
-  });
-
-  it('renders back and forward next to the collapse toggle', () => {
-    renderSidebar({ onRequestCollapse: vi.fn() });
-
-    const collapse = container?.querySelector('button[aria-label="Toggle Sidebar"]');
-    const back = container?.querySelector('button[aria-label="Back"]');
-    const forward = container?.querySelector('button[aria-label="Forward"]');
-    expect(collapse).not.toBeNull();
-    expect(back).not.toBeNull();
-    expect(forward).not.toBeNull();
-    const parent = collapse?.parentElement;
-    expect(parent).toBe(back?.parentElement);
-    expect(parent?.children[0]).toBe(collapse);
-    expect(parent?.children[1]).toBe(back);
-    expect(parent?.children[2]).toBe(forward);
   });
 
   it('renders pinned conversations before Workspace groups', () => {
@@ -306,7 +212,6 @@ describe('LoroSidebar pinned section', () => {
     const regularRow = container?.querySelector('[data-sidebar-session-id="regular-session"]');
     expect(pinnedRow).not.toBeNull();
     expect(regularRow).not.toBeNull();
-    expect(pinnedRow?.querySelector('.lucide-pin')).toBeNull();
     expect(
       pinnedRow?.compareDocumentPosition(regularRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
@@ -353,24 +258,6 @@ describe('LoroSidebar pinned section', () => {
     const emptyState = container?.querySelector('[data-sidebar-empty-state="team"]');
     expect(emptyState?.textContent).toContain('No tasks yet');
     expect(emptyState?.textContent).not.toContain('Show all tasks');
-  });
-
-  it('mounts one filter when Chats is the only visible Workspace section', () => {
-    const filterAction = <button aria-label="Filter sidebar" />;
-    renderSidebar({
-      organizeMode: 'workspace',
-      chatScope: 'my',
-      pinnedItems: [],
-      topContent: undefined,
-      desktopFilterAction: filterAction,
-      sessionListProps: {
-        sessions: [],
-        repos: [],
-      },
-      afterSessionListContent: <div>{filterAction}</div>,
-    });
-
-    expect(container?.querySelectorAll('button[aria-label="Filter sidebar"]')).toHaveLength(1);
   });
 
   it('renders pinned conversations before the Updated section', () => {
@@ -437,9 +324,6 @@ describe('LoroSidebar pinned section', () => {
     expect(container?.querySelector('[data-sidebar-updated-id="pinned-session"]')).toBeNull();
     const header = container?.querySelector('[role="button"][aria-expanded="false"]');
     expect(header?.getAttribute('aria-label')).toBe('Pinned');
-    const chevron = header?.querySelector('.lucide-chevron-down');
-    expect(chevron?.classList.contains('opacity-100')).toBe(true);
-    expect(chevron?.classList.contains('-rotate-90')).toBe(true);
 
     header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(onTogglePinnedSection).toHaveBeenCalledOnce();

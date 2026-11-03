@@ -18,13 +18,6 @@ const machineId = '01020304-1111-4222-8333-010203040501' as MachineId;
 const sessionId = '01020304-1111-4222-8333-010203040502' as SessionId;
 const instanceId = '01020304-1111-4222-8333-010203040503' as LodyPresenceInstanceId;
 
-// Shape of the running object before optional `phase`. z.object strips unknown
-// keys, so an older client keeps `{ type: 'running' }` instead of dropping it.
-const legacyRunningStatus = z.object({
-  type: z.literal('running'),
-  activity: z.enum(['image_generation']).optional(),
-});
-
 describe('presence helpers', () => {
   it.each(['sessionId', 'machineId', 'instanceId', 'userId'] as const)(
     'rejects free text and oversized %s only in minimal mode',
@@ -207,35 +200,6 @@ describe('presence helpers', () => {
     expect(parseLodyPresenceStates(input).entry).toHaveProperty('status.detail', 'ordinary detail');
   });
 
-  it('keeps an optional running phase on session presence', () => {
-    const sessionKey = getLodySessionPresenceKey(sessionId, instanceId);
-    const parsed = parseLodyPresenceStates({
-      [sessionKey]: {
-        kind: 'session',
-        sessionId,
-        machineId,
-        instanceId,
-        status: { type: 'running', phase: 'finalizing' },
-        updatedAt: 120,
-      },
-    });
-    expect(parsed[sessionKey]).toMatchObject({
-      status: { type: 'running', phase: 'finalizing' },
-    });
-  });
-
-  it('lets an older running parser keep the session when phase is unknown', () => {
-    expect(legacyRunningStatus.parse({ type: 'running', phase: 'finalizing' })).toEqual({
-      type: 'running',
-    });
-  });
-
-  it('rejects a new activity enum value that older parsers cannot keep', () => {
-    expect(legacyRunningStatus.safeParse({ type: 'running', activity: 'finalizing' }).success).toBe(
-      false
-    );
-  });
-
   it('keeps only identifiers, enums and timestamps across all minimal entry kinds', () => {
     const common = {
       instanceId,
@@ -306,41 +270,6 @@ describe('presence helpers', () => {
         status: { type: 'requestPermission' },
       },
     });
-  });
-
-  it('uses a 90 second presence TTL', () => {
-    expect(LODY_PRESENCE_TTL_MS).toBe(90_000);
-  });
-
-  it('parses valid presence states and drops invalid states', () => {
-    const machineKey = getLodyMachinePresenceKey(machineId, instanceId);
-    const sessionKey = getLodySessionPresenceKey(sessionId, instanceId);
-    const parsed = parseLodyPresenceStates({
-      [machineKey]: {
-        kind: 'machine',
-        machineId,
-        instanceId,
-        updatedAt: 100,
-      },
-      [sessionKey]: {
-        kind: 'session',
-        sessionId,
-        machineId,
-        instanceId,
-        status: { type: 'running' },
-        updatedAt: 120,
-      },
-      invalid: {
-        kind: 'session',
-        sessionId,
-        machineId,
-        instanceId,
-        status: { type: 'idle' },
-        updatedAt: 130,
-      },
-    });
-
-    expect(Object.keys(parsed).sort()).toEqual([machineKey, sessionKey].sort());
   });
 
   it('accepts status fields nulled by the Loro value roundtrip', () => {

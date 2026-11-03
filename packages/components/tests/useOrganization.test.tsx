@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
+// @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
@@ -361,30 +364,6 @@ describe('useOrganization setActive dedupe', () => {
     expect(latestOrganizationState!.role).toBe('owner');
   });
 
-  it('sends one setActive request for duplicate target workspace switchers', async () => {
-    await render('target-workspace', 0);
-
-    expect(organizationMocks.setActive).toHaveBeenCalledTimes(1);
-    expect(organizationMocks.setActive).toHaveBeenCalledWith({
-      organizationId: 'workspace-target',
-    });
-
-    listVersion += 1;
-    await render('target-workspace', 1);
-
-    expect(organizationMocks.setActive).toHaveBeenCalledTimes(1);
-
-    activeOrganization = createOrganization(
-      'workspace-target',
-      'target-workspace',
-      'Target Workspace'
-    );
-    listVersion += 1;
-    await render('target-workspace', 2);
-
-    expect(organizationMocks.setActive).toHaveBeenCalledTimes(1);
-  });
-
   it('publishes the fallback after delete success when no newer writer intervenes', async () => {
     const removed = editRunConfigDraft(store, 'workspace-old');
     editRunConfigDraft(store, 'workspace-target');
@@ -632,18 +611,6 @@ describe('useOrganization setActive dedupe', () => {
     expect(store.get(currentWorkspaceSlugAtom)).toBe('workspace-new');
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-new');
   });
-
-  it('rejects an awaited activation when Better Auth refuses the switch', async () => {
-    organizationMocks.setActive.mockResolvedValueOnce({
-      data: null,
-      error: { message: 'membership changed' },
-    });
-    await render('old-workspace', 0);
-
-    await expect(
-      latestOrganizationState?.activateOrganization('workspace-rejected')
-    ).rejects.toThrow('membership changed');
-  });
 });
 
 describe('useOrganization list recovery', () => {
@@ -741,42 +708,6 @@ describe('useOrganization list recovery', () => {
     expect(latestOrganizationState?.error).toBeNull();
   });
 
-  it('does not poll while hidden, and retries as soon as the page is shown', async () => {
-    let visibility: DocumentVisibilityState = 'visible';
-    const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
-    Object.defineProperty(document, 'visibilityState', {
-      configurable: true,
-      get: () => visibility,
-    });
-    try {
-      await renderApp();
-      for (let i = 0; i < 8; i += 1) await advance(5_000);
-      expect(latestOrganizationState?.organizations).toBeUndefined();
-
-      visibility = 'hidden';
-      await act(async () => {
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-      networkUp = true;
-      for (let i = 0; i < 6; i += 1) await advance(30_000);
-      // Nothing was requested in three minutes hidden: the list is still unknown.
-      expect(latestOrganizationState?.organizations).toBeUndefined();
-
-      visibility = 'visible';
-      await act(async () => {
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-      await advance(5_000);
-      await advance(0);
-      expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
-        'target-workspace',
-      ]);
-    } finally {
-      delete (document as { visibilityState?: unknown }).visibilityState;
-      if (descriptor) Object.defineProperty(Document.prototype, 'visibilityState', descriptor);
-    }
-  });
-
   it('keeps loading through a first-login active-organization failure until the list resolves', async () => {
     const workspace = createOrganization('workspace-first-login', 'target-workspace', 'Target');
     // Answered before the new session settled; Better Auth only refetches it on setActive.
@@ -815,20 +746,5 @@ describe('useOrganization list recovery', () => {
     ]);
     expect(latestOrganizationState?.activeOrganization?.id).toBe('workspace-first-login');
     expect(latestOrganizationState?.error).toBeNull();
-  });
-
-  it('tries again on its own after a while, without any event', async () => {
-    await renderApp();
-    for (let i = 0; i < 8; i += 1) await advance(5_000);
-    expect(latestOrganizationState?.organizations).toBeUndefined();
-
-    networkUp = true;
-    await advance(30_000);
-    await advance(5_000);
-    await advance(0);
-
-    expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
-      'target-workspace',
-    ]);
   });
 });

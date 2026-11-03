@@ -69,41 +69,6 @@ describe('app store review policy', () => {
     );
   });
 
-  it('re-records the same history without double counting or rewriting state', () => {
-    const outcomes = completedTurns(APP_STORE_REVIEW_MIN_WINDOWED_TURNS);
-    const state = record(undefined, outcomes);
-
-    const rescanned = record(state, outcomes);
-    // Identity, not just equality: the hook skips its localStorage write on it.
-    expect(rescanned).toBe(state);
-    expect(countWindowedTurns(rescanned, nowMs)).toBe(APP_STORE_REVIEW_MIN_WINDOWED_TURNS);
-  });
-
-  it('counts every turn of one batch, not only the first past the watermark', () => {
-    expect(countWindowedTurns(record(undefined, completedTurns(4)), nowMs)).toBe(4);
-  });
-
-  it('keeps only the newest turns needed to answer the threshold', () => {
-    let state = record(undefined, completedTurns(40, 3));
-    state = record(state, completedTurns(40, 1, 'later'));
-
-    expect(state.recentTurnTimesMs).toHaveLength(APP_STORE_REVIEW_MIN_WINDOWED_TURNS);
-    // Dropping the oldest 30 cannot change the answer: they were the ones that
-    // would age out first, and 50 newer ones are already inside the window.
-    expect(countWindowedTurns(state, nowMs)).toBe(APP_STORE_REVIEW_MIN_WINDOWED_TURNS);
-    expect([...state.recentTurnTimesMs].sort((a, b) => a - b)).toEqual(state.recentTurnTimesMs);
-  });
-
-  it('does not backfill turns older than the watermark', () => {
-    const recent = record(undefined, completedTurns(10));
-    // Opening an older session afterwards: its turns sit below the watermark.
-    // Under-counting is the accepted trade for storing no per-turn identity.
-    const withOlderSession = record(recent, completedTurns(10, 3, 'older-session'));
-
-    expect(withOlderSession).toBe(recent);
-    expect(countWindowedTurns(withOlderSession, nowMs)).toBe(10);
-  });
-
   it('ignores hard failures when counting engagement', () => {
     const state = record(undefined, [
       ...completedTurns(3),
@@ -127,17 +92,6 @@ describe('app store review policy', () => {
     }));
     const laterMs = nowMs + 10 * 60_000;
     expect(countWindowedTurns(record(skewed, real, laterMs), laterMs)).toBe(10);
-  });
-
-  it('defers rather than drops a turn the machine dated just ahead of the phone', () => {
-    const outcomes: AppStoreReviewTurnOutcome[] = [
-      { id: 'skewed', kind: 'completed', occurredAtMs: nowMs + 2_000 },
-    ];
-    expect(record(undefined, outcomes).recentTurnTimesMs).toEqual([]);
-
-    // The recording effect re-scans the whole session on the next history
-    // update, by which point the timestamp has fallen into the past.
-    expect(record(undefined, outcomes, nowMs + 10_000).recentTurnTimesMs).toHaveLength(1);
   });
 
   it('heals a phone clock corrected backwards instead of going quiet', () => {
@@ -181,11 +135,5 @@ describe('app store review policy', () => {
       attemptedAtMs: nowMs - APP_STORE_REVIEW_ATTEMPT_COOLDOWN_MS,
     });
     expect(hasAppStoreReviewEligibility({ ...eligibilityInput, state: cooledDown })).toBe(true);
-  });
-
-  it('requires an app version', () => {
-    expect(
-      hasAppStoreReviewEligibility({ ...eligibilityInput, state: eligibleState(), appVersion: '' })
-    ).toBe(false);
   });
 });

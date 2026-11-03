@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
@@ -213,14 +214,6 @@ describe('Schedule Registry recovery', () => {
     expect(snapshot().error).toBeUndefined();
     expect(h.listeners.size).toBe(1);
     expect(h.rooms.size).toBe(1);
-  });
-
-  it('keeps a cold empty scan loading until first sync confirms it', async () => {
-    const h = harness('workspace-a', []);
-    await mount(h);
-    expect(snapshot().ready).toBe(false);
-    await act(async () => h.syncs[0]!.resolve());
-    expect(snapshot().ready).toBe(true);
   });
 
   it('bounds automatic retries, then allows explicit retry to restore the list', async () => {

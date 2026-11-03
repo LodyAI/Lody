@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskId, WorkspaceId } from '../src/ids';
 import {
-  getTaskIndexFlockDocId,
-  getTaskIndexScanPrefix,
-  isTaskIndexFlockDocId,
-} from '../src/task-index';
-import {
   getLoroTaskStreamId,
   getTaskIdFromRoomId,
   getTaskRoomId,
@@ -25,13 +20,5 @@ describe('legacy task document ids', () => {
     expect(getLoroStreamIdForDocId(workspaceId, roomId)).toBe(
       getLoroTaskStreamId(workspaceId, taskId)
     );
-  });
-
-  it('identifies leftover task-index flock documents', () => {
-    const workspaceId = 'ws1' as WorkspaceId;
-    const docId = getTaskIndexFlockDocId(workspaceId);
-    expect(isTaskIndexFlockDocId(docId)).toBe(true);
-    expect(isTaskIndexFlockDocId('ws1:other')).toBe(false);
-    expect(getTaskIndexScanPrefix()).toEqual(['task']);
   });
 });

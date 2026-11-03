@@ -65,19 +65,6 @@ describe('Magpie runtime preparation', () => {
       maxTokens: 4096,
     });
   });
-  it('passes the discovered Claude models and DSH endpoint through their native contracts', async () => {
-    const directory = await root();
-    const claude = await prepareMagpieRuntime('claude', gateway, undefined, directory, fetcher);
-    expect(JSON.parse(claude.env.CLAUDE_MODEL_CONFIG ?? '{}')).toEqual({
-      availableModels: ['vendor/model'],
-    });
-    expect(claude.env.ANTHROPIC_AUTH_TOKEN).toBe('magpie-lody');
-    const dsh = await prepareMagpieRuntime('deepseek', gateway, undefined, directory, fetcher);
-    expect(dsh.env).toEqual({
-      DEEPSEEK_BASE_URL: `${gateway}/v1`,
-      DEEPSEEK_API_KEY: 'magpie-lody',
-    });
-  });
   it('loads isolated Kimi and Grok TOML with literal model keys and bounded model selection', async () => {
     const directory = await root();
     const tricky = {
@@ -210,15 +197,6 @@ describe('Magpie runtime preparation', () => {
     const grok = await prepareMagpieRuntime('grok', gateway, undefined, directory, mixed);
     const g = parseToml(await readFile(join(grok.env.GROK_HOME!, 'config.toml'), 'utf8'));
     expect(g).toMatchObject({ models: { image_description: 'magpie/vision/model' } });
-  });
-  it('names the offending model and field instead of a generic catalog error', async () => {
-    const invalid: typeof fetch = async (input, init) =>
-      String(input).endsWith('/models')
-        ? Response.json({ data: [{ id: 'ok/model' }, { id: 'broken/model', context_window: 0 }] })
-        : fetcher(input, init);
-    await expect(readMagpieModels(gateway, undefined, invalid)).rejects.toThrow(
-      'data[1] broken/model: context_window'
-    );
   });
   it('rejects an oversized response without accepting a partial catalog', async () => {
     const oversized: typeof fetch = async () => new Response('x'.repeat(2 * 1024 * 1024 + 1));

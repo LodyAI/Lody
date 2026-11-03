@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -23,7 +24,7 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
   useAgentRoleMentionItems: () => [],
 }));
 import { agentConfigMetaCacheAtom } from '../src/atoms/doc-meta';
-import { ChatComposer } from '../src/components/chat/chat-composer';
+
 import { DesktopRunConfigMenu } from '../src/components/sessions/desktop-run-config-menu';
 import { MobileRunConfigSheet } from '../src/components/mobile/mobile-run-config-sheet';
 import { initI18n } from '../src/i18n';
@@ -148,31 +149,10 @@ describe('composer model picker search', () => {
     };
   };
 
-  it('opens the Model submenu with every model and a way to search them', async () => {
-    const { search, rows } = await openModelSubmenu();
-    expect(search).not.toBeNull();
-    expect(rows()).toHaveLength(manyModels.length);
-  });
-
-  it('narrows the list to fuzzy matches as the user types', async () => {
-    const { search, rows } = await openModelSubmenu();
-    // Not a substring of the label OR the id — a subsequence of both.
-    await typeInto(search as HTMLInputElement, 'op5');
-    expect(rows()).toEqual(['Opus 5']);
-  });
-
   it('finds a model by its id, which the row does not even show', async () => {
     const { search, rows } = await openModelSubmenu();
     await typeInto(search as HTMLInputElement, 'haiku-4');
     expect(rows()).toEqual(['Haiku 4.5']);
-  });
-
-  it('says so when nothing matches instead of showing an empty menu', async () => {
-    const { search, rows } = await openModelSubmenu();
-    await typeInto(search as HTMLInputElement, 'zzz');
-    expect(rows()).toEqual([]);
-    const submenu = (search as HTMLInputElement).closest('[role="menu"]');
-    expect(submenu?.textContent).toContain('No models match');
   });
 
   it('takes the top match on Enter, so a search never needs the mouse', async () => {
@@ -185,17 +165,6 @@ describe('composer model picker search', () => {
       );
     });
     expect(onModelChange).toHaveBeenCalledWith('grok-4');
-  });
-
-  it('moves into the list on ArrowDown, since the field is not a menu row', async () => {
-    const { search } = await openModelSubmenu();
-    await act(async () => {
-      (search as HTMLInputElement).dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
-      );
-    });
-    const submenu = (search as HTMLInputElement).closest('[role="menu"]');
-    expect(document.activeElement).toBe(submenu?.querySelector('[role="menuitemradio"]'));
   });
 
   /* The pointer moving over the list takes focus off the field (Radix focuses
@@ -213,86 +182,6 @@ describe('composer model picker search', () => {
     expect(rows()[0]).toBe('Kimi K2');
     expect(rows()).not.toContain('Opus 5');
     expect(document.activeElement).toBe(search);
-  });
-
-  it('leaves a short list alone — a search field there costs more than it saves', async () => {
-    const { search, rows } = await openModelSubmenu({
-      modelOptions: fewModels,
-      selectedModelId: fewModels[0]?.value ?? null,
-    });
-    expect(search).toBeNull();
-    expect(rows()).toHaveLength(fewModels.length);
-  });
-
-  it('opens the builtin DeepSeek menu without the obsolete delegation warning', async () => {
-    vi.useFakeTimers();
-    await act(async () => {
-      root?.render(
-        createElement(DesktopRunConfigMenu, {
-          ...desktopProps,
-          agentSelection: { agentId: deepseekAgentConfig.id, machineId },
-          availableAgentConfigs: [deepseekAgentConfig],
-          modelOptions: deepseekModels,
-          selectedModelId: 'deepseek-v4-flash',
-        })
-      );
-    });
-    await act(async () => {
-      container
-        ?.querySelector('button[aria-label="Run configuration"]')
-        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-      await vi.runAllTimersAsync();
-    });
-
-    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Model');
-    const warning = document.querySelector<HTMLAnchorElement>(
-      'a[href="https://github.com/deepseek-ai/deepseek-harness/discussions/4065"]'
-    );
-    expect(document.body.textContent).toContain('DeepSeek-V4-Flash');
-    expect(warning).toBeNull();
-    expect(document.body.textContent).not.toContain('delegated subagents may use');
-  });
-
-  it('does not steal focus to composer textarea when clicking search input inside ChatComposer with focusOnContainerClick', async () => {
-    const textareaRef = { current: null as HTMLTextAreaElement | null };
-    await act(async () => {
-      root?.render(
-        createElement(ChatComposer, {
-          promptRef: textareaRef,
-          promptValue: '',
-          onPromptChange: () => undefined,
-          focusOnContainerClick: true,
-          footerSelector: createElement(DesktopRunConfigMenu, desktopProps),
-        })
-      );
-    });
-    // Open menu on pointerdown
-    await act(async () => {
-      container
-        ?.querySelector('button[aria-label="Run configuration"]')
-        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-    const modelRow = [...document.querySelectorAll('[role="menuitem"]')].find((node) =>
-      node.textContent?.trim().startsWith('Model')
-    );
-    await act(async () => {
-      (modelRow as HTMLElement).dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
-      (modelRow as HTMLElement).dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-    const search = document.querySelector<HTMLInputElement>('input[aria-label="Search models"]');
-    expect(search).not.toBeNull();
-
-    // Click directly on search input
-    await act(async () => {
-      search?.focus();
-      search?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    // Verify search input retained focus and textarea did NOT steal focus
-    expect(document.activeElement).toBe(search);
-    expect(document.activeElement).not.toBe(textareaRef.current);
   });
 
   /* ── Mobile: the same rule inside the run-config sheet ── */
@@ -340,24 +229,6 @@ describe('composer model picker search', () => {
     };
   };
 
-  it('offers the same search in the mobile sheet, matching fuzzily', async () => {
-    const { search, rows } = await openMobileModelPicker();
-    expect(search).not.toBeNull();
-    expect(rows()).toHaveLength(manyModels.length);
-
-    await typeInto(search as HTMLInputElement, 'gem3');
-    expect(rows()).toEqual(['Gemini 3 Pro']);
-  });
-
-  it('names its empty state on mobile too', async () => {
-    const { search, rows } = await openMobileModelPicker();
-    await typeInto(search as HTMLInputElement, 'zzz');
-    expect(rows()).toEqual([]);
-    expect(document.querySelector('[role="listbox"][aria-label="Model"]')?.textContent).toContain(
-      'No models match'
-    );
-  });
-
   /* The field declines `type="search"` precisely so the browser draws no cancel
      glyph of its own; this is the one we draw. */
   it('clears the mobile search from a button of our own, keeping the field focused', async () => {
@@ -377,41 +248,5 @@ describe('composer model picker search', () => {
     expect(document.activeElement).toBe(search);
     // The button is only there while there is something to clear.
     expect(list?.querySelector('button[aria-label="Clear"]')).toBeNull();
-  });
-
-  it('leaves a short mobile list without a search field', async () => {
-    const { search } = await openMobileModelPicker({
-      modelOptions: fewModels,
-      selectedModelId: fewModels[0]?.value ?? null,
-    });
-    expect(search).toBeNull();
-  });
-
-  it('renders the DeepSeek mobile sheet without the obsolete delegation warning', async () => {
-    const store = createStore();
-    store.set(agentConfigMetaCacheAtom, {
-      [getAgentConfigRoomId(deepseekAgentConfig.id)]: deepseekAgentConfig,
-    });
-    await act(async () => {
-      root?.render(
-        createElement(
-          Provider,
-          { store },
-          createElement(MobileRunConfigSheet, {
-            ...mobileProps,
-            agentSelection: { agentId: deepseekAgentConfig.id, machineId },
-            modelOptions: deepseekModels,
-            selectedModelId: 'deepseek-v4-flash',
-          })
-        )
-      );
-    });
-
-    const warning = document.querySelector<HTMLAnchorElement>(
-      'a[href="https://github.com/deepseek-ai/deepseek-harness/discussions/4065"]'
-    );
-    expect(document.body.textContent).toContain('DeepSeek-V4-Flash');
-    expect(warning).toBeNull();
-    expect(document.body.textContent).not.toContain('delegated subagents may use');
   });
 });

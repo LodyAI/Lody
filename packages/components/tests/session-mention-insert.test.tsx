@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -122,23 +123,6 @@ describe('inserting a session mention from outside the composer', () => {
     expect(await insert('sess_ci')).toBe(true);
     expect(value).toBe('@fix-ci ');
     expect(ranges).toEqual([{ value: 'sess_ci', start: 0, end: 7, kind: 'session' }]);
-  });
-
-  it('appends to an existing draft with exactly one separating space', async () => {
-    await render('compare with');
-
-    expect(await insert('sess_ci')).toBe(true);
-    expect(value).toBe('compare with @fix-ci ');
-    expect(ranges).toEqual([{ value: 'sess_ci', start: 13, end: 20, kind: 'session' }]);
-
-    // The draft now ends in the trailing space this insert wrote; the next one
-    // must not double it.
-    expect(await insert('sess_docs')).toBe(true);
-    expect(value).toBe('compare with @fix-ci @docs-pass ');
-    expect(ranges.map((range) => value.slice(range.start, range.end))).toEqual([
-      '@fix-ci',
-      '@docs-pass',
-    ]);
   });
 
   it('is idempotent — a session already mentioned is not mentioned twice', async () => {

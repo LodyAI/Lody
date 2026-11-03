@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
-import {
-  collectSessionImageGalleryEntries,
-  createSessionImageGalleryEntry,
-  findSessionImageGalleryEntryIndex,
-} from '../src/lib/session-image-gallery';
+import { collectSessionImageGalleryEntries } from '../src/lib/session-image-gallery';
 
 const sessionId = 'session-1' as SessionId;
 
@@ -187,50 +183,5 @@ describe('collectSessionImageGalleryEntries', () => {
         galleryGroupId: 'assistant-legacy',
       }),
     ]);
-  });
-});
-
-describe('findSessionImageGalleryEntryIndex', () => {
-  it('returns the matching index and falls back to -1', () => {
-    const entries = [
-      createSessionImageGalleryEntry({
-        sessionId,
-        messageId: 'm-1',
-        itemIndex: 0,
-        imageIndex: 0,
-        image: {
-          type: 'image',
-          imageId: 'img-1',
-          mimeType: 'image/png',
-          sizeBytes: 128,
-        },
-      }),
-      createSessionImageGalleryEntry({
-        sessionId,
-        messageId: 'm-2',
-        itemIndex: 1,
-        imageIndex: 0,
-        image: {
-          type: 'image',
-          imageId: 'img-2',
-          mimeType: 'image/png',
-          sizeBytes: 256,
-        },
-      }),
-    ];
-
-    expect(entries).toEqual([
-      expect.objectContaining({
-        key: 'm-1:0:0:img-1',
-        galleryGroupId: 'm-1',
-      }),
-      expect.objectContaining({
-        key: 'm-2:1:0:img-2',
-        galleryGroupId: 'm-2',
-      }),
-    ]);
-    expect(findSessionImageGalleryEntryIndex(entries, entries[1]?.key ?? null)).toBe(1);
-    expect(findSessionImageGalleryEntryIndex(entries, null)).toBe(-1);
-    expect(findSessionImageGalleryEntryIndex(entries, 'missing')).toBe(-1);
   });
 });

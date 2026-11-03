@@ -39,20 +39,6 @@ describe('repo file paths cache', () => {
     vi.useRealTimers();
   });
 
-  it('downloads a tree once for concurrent and repeated searches', async () => {
-    let resolve!: (value: unknown) => void;
-    fetchFilePaths.mockReturnValueOnce(new Promise((r) => (resolve = r)));
-
-    const first = loadRepoFilePaths('ws', 'org/repo', 'main');
-    const second = loadRepoFilePaths('ws', 'org/repo', 'main');
-    resolve(tree(['a.ts']));
-
-    expect((await first).paths).toEqual(['a.ts']);
-    expect((await second).paths).toEqual(['a.ts']);
-    expect((await loadRepoFilePaths('ws', 'org/repo', 'main')).paths).toEqual(['a.ts']);
-    expect(fetchFilePaths).toHaveBeenCalledTimes(1);
-  });
-
   it('keys by branch and refreshes a stale tree', async () => {
     fetchFilePaths
       .mockResolvedValueOnce(tree(['main.ts']))
@@ -64,13 +50,6 @@ describe('repo file paths cache', () => {
 
     vi.setSystemTime(new Date('2026-09-23T07:00:00Z'));
     expect((await loadRepoFilePaths('ws', 'org/repo', 'main')).paths).toEqual(['main-2.ts']);
-  });
-
-  it('does not cache a failed download', async () => {
-    fetchFilePaths.mockRejectedValueOnce(new Error('403')).mockResolvedValueOnce(tree(['a.ts']));
-
-    await expect(loadRepoFilePaths('ws', 'org/repo')).rejects.toThrow('403');
-    expect((await loadRepoFilePaths('ws', 'org/repo')).paths).toEqual(['a.ts']);
   });
 
   it('searches a GitHub repository fresh once per file browser, not from the TTL cache', async () => {

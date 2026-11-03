@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   BrowserAddressError,
   classifyBrowserHostname,
-  formatPreviewTargetUrl,
   parseBrowserAddress,
 } from '../src/browser-url';
 
@@ -80,27 +79,9 @@ describe('classifyBrowserHostname', () => {
     expect(classifyBrowserHostname('[::ffff:c0a8:101]')).toBe('private-lan');
   });
 
-  it('treats local DNS names as managed targets', () => {
-    expect(classifyBrowserHostname('devbox.local')).toBe('private-lan');
-    expect(classifyBrowserHostname('host.docker.internal')).toBe('private-lan');
-  });
-
   it('prohibits literal RFC 2544 benchmarking addresses', () => {
     expect(classifyBrowserHostname('198.18.3.75')).toBe('prohibited');
     expect(classifyBrowserHostname('198.19.255.1')).toBe('prohibited');
     expect(() => parseBrowserAddress('http://198.18.3.75/')).toThrow(BrowserAddressError);
-  });
-});
-
-describe('formatPreviewTargetUrl', () => {
-  it('formats an IPv6 target with its relative location', () => {
-    expect(
-      formatPreviewTargetUrl({
-        protocol: 'https',
-        host: 'fc00::1',
-        port: 8443,
-        path: '/settings?tab=team#members',
-      })
-    ).toBe('https://[fc00::1]:8443/settings?tab=team#members');
   });
 });

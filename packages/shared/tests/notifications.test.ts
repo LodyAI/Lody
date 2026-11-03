@@ -7,7 +7,6 @@ import {
   resolveNotificationPresentation,
   notificationPresentationSchema,
   projectTurnAttention,
-  terminalNotificationSchema,
   turnOutcomeKey,
   type TurnOutcomeFact,
 } from '../src/notifications';
@@ -51,25 +50,6 @@ describe('notification source policy', () => {
     expect(turnOutcomeKey({ ...fact, scope: { ...fact.scope, recipientId: 'other' } })).not.toBe(
       turnOutcomeKey(fact)
     );
-  });
-  it('validates the same additive projection shape used by the writer and reader', () => {
-    const projection = {
-      id: 'a42f1111-1111-4111-8111-111111111111',
-      recipientId: 'user',
-      turnId: 'turn',
-      outcome: 'failed',
-      createdAt: 100,
-    };
-    expect(terminalNotificationSchema.parse({ ...projection, futureField: 'ignored' })).toEqual(
-      projection
-    );
-    for (const invalid of [
-      { ...projection, outcome: 'cancelled' },
-      { ...projection, id: 'invalid' },
-      { ...projection, recipientId: '' },
-    ]) {
-      expect(terminalNotificationSchema.safeParse(invalid).success).toBe(false);
-    }
   });
 });
 

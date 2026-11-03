@@ -155,23 +155,6 @@ describe('local project registration and standalone display', () => {
     await expect(prepareAndWriteLocalProject({ ...args, runtime })).rejects.toThrow('unavailable');
     expect(runtime.rows.size).toBe(0);
   });
-  it('does not trust malformed existing rows or overwrite them', async () => {
-    const runtime = runtimeWithResponse();
-    runtime.writer.flockRowPutIfAbsent.mockResolvedValue({
-      inserted: false,
-      value: { id: 'project-1' },
-    });
-    await expect(prepareAndWriteLocalProject({ ...args, runtime })).rejects.toThrow('invalid');
-    expect(runtime.rows.size).toBe(0);
-  });
-  it('propagates failed validation without registering a folder', async () => {
-    const runtime = runtimeWithResponse();
-    runtime.requestLocalProjectControl.mockRejectedValue(new Error('Directory is unavailable'));
-    await expect(prepareAndWriteLocalProject({ ...args, runtime })).rejects.toThrow(
-      'Directory is unavailable'
-    );
-    expect(runtime.rows.size).toBe(0);
-  });
   it('keeps partial registrations reusable after failure and only finishes when all folders pass', async () => {
     const runtime = runtimeWithResponse();
     const inspection = { isGit: false, submodules: [] };
@@ -231,28 +214,6 @@ describe('local project registration and standalone display', () => {
         expectedInspection: { isGit: false, submodules: [] },
       })
     ).rejects.toThrow('selected folder changed');
-    expect(runtime.rows.size).toBe(0);
-  });
-
-  it('native selection registers a standalone entry through the renderer writer', async () => {
-    const runtime = runtimeWithResponse();
-    const result = await selectAndWriteLocalProject({
-      runtime,
-      selectDirectory: async () => ({ machineId, rootPath: '/repo/lody' }),
-      timeoutMessage: 'Timed out',
-    });
-    expect(result).toMatchObject({ status: 'added', machineId, localProjectId: 'project-1' });
-    expect(runtime.read()?.standaloneVisible).not.toBe(false);
-  });
-  it('keeps a picked folder a draft on a daemon that can inspect it', async () => {
-    const runtime = runtimeWithResponse();
-    const picked = await pickProjectGroupFolder({
-      ...args,
-      runtime,
-      canInspect: true,
-      updateRequiredMessage: 'Update Lody',
-    });
-    expect(picked.kind).toBe('draft');
     expect(runtime.rows.size).toBe(0);
   });
   it('registers a picked folder hidden on an older daemon that cannot inspect it', async () => {

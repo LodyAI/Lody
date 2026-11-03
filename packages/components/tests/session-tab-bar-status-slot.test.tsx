@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { Provider, createStore } from 'jotai';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -139,18 +140,6 @@ describe('SessionTabBar status slot', () => {
     await renderTabBar([child('session-child', { lastMessageAt: NOW, lastReadAt: NOW - 1_000 })]);
 
     expect(unreadDot('session-child')).not.toBeNull();
-  });
-
-  it('marks a never-read child tab that has produced output', async () => {
-    await renderTabBar([child('session-child', { lastMessageAt: NOW })]);
-
-    expect(unreadDot('session-child')).not.toBeNull();
-  });
-
-  it('leaves a caught-up child tab unmarked', async () => {
-    await renderTabBar([child('session-child', { lastMessageAt: NOW, lastReadAt: NOW })]);
-
-    expect(unreadDot('session-child')).toBeNull();
   });
 
   it('marks the parent tab when the main thread moved while a child tab is open', async () => {

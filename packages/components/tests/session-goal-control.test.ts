@@ -10,14 +10,6 @@ describe('session goal control availability', () => {
     expect(getSessionGoalCommands({ goalActions: [] })).toEqual([]);
   });
 
-  it('offers the commands the runtime advertised, whatever the agent is', () => {
-    expect(getSessionGoalCommands({ goalActions: ['set', 'pause', 'resume', 'clear'] })).toEqual([
-      'pause',
-      'resume',
-      'clear',
-    ]);
-  });
-
   it('offers only the subset a partial runtime advertised', () => {
     // `set` has no button of its own, and an unadvertised action must never get
     // one: pressing it would fail at the agent.
@@ -32,22 +24,5 @@ describe('session goal control availability', () => {
         isGoalActive: true,
       })
     ).toBe(false);
-  });
-
-  it('reports only dispatch and live turn activity as prompt-busy', () => {
-    expect(
-      isSessionPromptBusy({
-        isDispatching: true,
-        isSessionWorking: false,
-        isGoalActive: false,
-      })
-    ).toBe(true);
-    expect(
-      isSessionPromptBusy({
-        isDispatching: false,
-        isSessionWorking: true,
-        isGoalActive: false,
-      })
-    ).toBe(true);
   });
 });

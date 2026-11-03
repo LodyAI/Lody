@@ -23,6 +23,7 @@
 | [`RecoveryVaultStore`](#recoveryvaultstore) | 后端 | 你的 vault 存储客户端 | `RecoveryVaults` |
 | [`WorkspaceScope`](#workspacescope) | 应用 | `Layer.succeed(WorkspaceScope, { genesis })` | 全部 |
 | [`LedgerViewSource`](#ledgerviewsource) | 应用 | `LedgerFeed.viewSource`，或你自己的已验证视图 | `VerifiedLedger` |
+| [`LedgerFeedInvalidation`](#ledgerfeedinvalidation) | 应用（可选） | 工作区 RAM 缓存 owner | `LedgerFeed` 已验证视图发布 |
 | [`EpochPublicationSource`](#epochpublicationsource) | 应用 | 查找当前纪元的发布记录 | `KeyDistributor` |
 | [`LedgerSync`](#ledgersync) | 应用 | 你的 feed 同步（`LedgerFeedSource` 分页 → `LedgerFeed.accept`，检查点独立选择） | `WorkspaceControl`、`E2eeWorkspace` |
 | `RecoveryVaultLocalStore` | 本地存储 | 支持比较并交换的本地键值存储 | `RecoveryVaults` |
@@ -127,6 +128,13 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 ### WorkspaceScope
 
 `{ genesis }`：本次组合服务的工作区。所有存储和流程都绑定到它，为其他工作区创建的存储会被拒绝。
+
+### LedgerFeedInvalidation
+
+可选的工作区级 `invalidate(): void`。构建 `LedgerFeed` 时捕获该端口，在持久追加成功后，
+与发布已变化的 verified head/count 同一个不让出执行的同步段里，使依赖的 RAM grant 失效。
+该方法不得抛错或启动 I/O。head/count 未变、只有游标变化或页面被拒绝时都不调用。
+它不授予权限，也不改变账本格式；没有依赖 RAM 缓存的宿主无需提供。
 
 ### LedgerViewSource
 

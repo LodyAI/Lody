@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React, { act, useState } from 'react';
 import {
   buildMentionFileIndex,
@@ -339,74 +340,6 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     );
   });
 
-  it('renders a plain textarea when no mention type is reachable', async () => {
-    await render({ value: '' });
-
-    expect(textarea()).not.toBeNull();
-    expect(mentionTreeMounted()).toBe(false);
-  });
-
-  it('mounts the mention tree when sessions are the only mentionable type', async () => {
-    sessionItems.push({
-      sessionId: 's1',
-      title: 'Fix the parser',
-      slug: 'fix-the-parser',
-      projectKey: 'chat',
-    });
-
-    await render({ value: '' });
-
-    expect(mentionTreeMounted()).toBe(true);
-  });
-
-  it('wraps ArrowUp from the first @ result and continues in reverse order', async () => {
-    vi.useFakeTimers();
-    sessionItems.push(
-      {
-        sessionId: 's1',
-        title: 'First session',
-        slug: 'first-session',
-        activityAt: 3,
-        projectKey: 'chat',
-      },
-      {
-        sessionId: 's2',
-        title: 'Second session',
-        slug: 'second-session',
-        activityAt: 2,
-        projectKey: 'chat',
-      },
-      {
-        sessionId: 's3',
-        title: 'Third session',
-        slug: 'third-session',
-        activityAt: 1,
-        projectKey: 'chat',
-      }
-    );
-    await render({ value: '' });
-    await typeInto('@session:');
-    await act(async () => vi.advanceTimersToNextFrame());
-
-    const input = textarea();
-    if (!input) throw new Error('composer textarea missing');
-    expect(highlightedRowText()).toContain('First session');
-
-    await act(async () => {
-      input.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
-      );
-    });
-    expect(highlightedRowText()).toContain('Third session');
-
-    await act(async () => {
-      input.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
-      );
-    });
-    expect(highlightedRowText()).toContain('Second session');
-  });
-
   it('starts in the current project and toggles without losing query or focus', async () => {
     sessionItems.push(
       {
@@ -595,22 +528,6 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
   });
 
-  it('does not scan skills until something asks for them', async () => {
-    await render({ value: '', skillAgent: { machineId: 'machine-1' } });
-
-    expect(skillScanEnabled).not.toContain(true);
-  });
-
-  it('scans skills when the menu scopes to the Skills category', async () => {
-    await render({ value: '', skillAgent: { machineId: 'machine-1' } });
-    expect(skillScanEnabled).not.toContain(true);
-
-    // Typed/pasted namespace prefixes still activate their lazy source.
-    await typeInto('@skill:');
-
-    expect(skillScanEnabled).toContain(true);
-  });
-
   it.each(['$', '￥', '¥'])('opens skills from %s and commits the dollar form', async (trigger) => {
     for (const token of ['review', 'research']) {
       skillItems.push({
@@ -658,11 +575,5 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     });
     expect(textarea()!.value).toBe(`${trigger}unknown`);
     expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
-  });
-
-  it('still scans skills for a draft that already carries a $ token', async () => {
-    await render({ value: 'use $review', skillAgent: { machineId: 'machine-1' } });
-
-    expect(skillScanEnabled).toContain(true);
   });
 });

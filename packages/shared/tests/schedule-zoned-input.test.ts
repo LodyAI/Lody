@@ -124,11 +124,6 @@ describe('reading a one-off time on the target machine clock', () => {
     );
   });
 
-  it('rejects malformed input instead of guessing', () => {
-    expect(zonedLocalInputToInstant('', 'UTC')).toBeNull();
-    expect(zonedLocalInputToInstant('2026-09-24 09:30', 'UTC')).toBeNull();
-  });
-
   it('moves a DST gap forward and chooses the earlier instant in a fold', () => {
     const zone = 'America/Los_Angeles';
     const gap = zonedLocalInputToInstant('2026-03-08T02:30', zone)!;

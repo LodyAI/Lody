@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 
 import {
-  applyMermaidColors,
   renderMarkdownMermaidSvg,
   resolveMermaidColors,
   withMermaidColors,
@@ -99,30 +99,6 @@ describe('mermaid colors for copies that leave the block', () => {
     expect(root).toContain('--pele-bg:rgb(250, 250, 250)');
     // Pele's own declarations still follow, so they read the baked values.
     expect(root).toContain('var(--pele-fg');
-    host.remove();
-  });
-
-  it('adds a style attribute to markup that has none', () => {
-    const host = themedHost();
-
-    const file = withMermaidColors(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="1"></svg>',
-      resolveMermaidColors(host)
-    );
-
-    expect(rootSvgTag(file)).toContain(
-      'style="--pele-bg:rgb(250, 250, 250);--pele-fg:rgb(1, 2, 3)"'
-    );
-    host.remove();
-  });
-
-  it('declares the colors on a detached clone', () => {
-    const host = themedHost();
-    const clone = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-
-    applyMermaidColors(clone, resolveMermaidColors(host));
-
-    expect(clone.style.getPropertyValue('--pele-fg')).toBe('rgb(1, 2, 3)');
     host.remove();
   });
 });

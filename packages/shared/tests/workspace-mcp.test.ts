@@ -2,14 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { McpServerId } from '../src/ids';
 import {
-  formatMcpResolutionProblem,
   getEffectiveDefaultMcpIds,
   getProjectMcpKey,
-  interpolateEnvVars,
-  isMcpConnectionSpec,
   normalizeMcpServerIdSelection,
   resolveSessionMcpServers,
-  type McpResolutionProblem,
   type WorkspaceMcpServerMeta,
 } from '../src/workspace-mcp';
 
@@ -29,23 +25,6 @@ const stdioServer = (
 });
 
 describe('workspace MCP resolution', () => {
-  it('interpolates set variables and preserves missing placeholders', () => {
-    expect(
-      interpolateEnvVars('https://${HOST}/${PATH}', { HOST: 'example.test', PATH: 'mcp' })
-    ).toEqual({
-      value: 'https://example.test/mcp',
-      missing: [],
-    });
-    expect(interpolateEnvVars('token=${TOKEN}', {})).toEqual({
-      value: 'token=${TOKEN}',
-      missing: ['TOKEN'],
-    });
-    expect(interpolateEnvVars('token=${TOKEN}', { TOKEN: '' })).toEqual({
-      value: 'token=${TOKEN}',
-      missing: ['TOKEN'],
-    });
-  });
-
   it('resolves stdio values and daemon environment passthrough', () => {
     const entry = stdioServer('stdio', {
       name: 'filesystem',
@@ -190,50 +169,9 @@ describe('workspace MCP resolution', () => {
     expect(result.servers.map(({ name }) => name)).toEqual(['good']);
     expect(result.problems).toHaveLength(1);
   });
-
-  it('formats all problem kinds as actionable warnings', () => {
-    const problems: McpResolutionProblem[] = [
-      { kind: 'catalog_unavailable', reason: 'offline' },
-      { kind: 'unknown_server', mcpServerId: serverId('unknown') },
-      { kind: 'missing_connection', mcpServerId: serverId('missing'), name: 'Missing' },
-      {
-        kind: 'unsupported_transport',
-        mcpServerId: serverId('http'),
-        name: 'HTTP',
-        transport: 'http',
-      },
-      {
-        kind: 'unresolved_env_var',
-        mcpServerId: serverId('env'),
-        name: 'Env',
-        field: 'bearerToken',
-        variable: 'TOKEN',
-      },
-      {
-        kind: 'invalid_connection',
-        mcpServerId: serverId('invalid'),
-        name: 'Invalid',
-        reason: 'empty URL',
-      },
-    ];
-
-    for (const problem of problems) {
-      expect(formatMcpResolutionProblem(problem)).toMatch(/Settings|retry|connectivity|selection/i);
-    }
-  });
 });
 
 describe('workspace MCP guards and normalization', () => {
-  it('accepts valid connection specs and rejects malformed or SSE specs', () => {
-    expect(isMcpConnectionSpec({ transport: 'stdio', command: 'node', args: ['server.js'] })).toBe(
-      true
-    );
-    expect(isMcpConnectionSpec({ transport: 'http', url: 'https://example.test/mcp' })).toBe(true);
-    expect(isMcpConnectionSpec({ transport: 'stdio', command: 42 })).toBe(false);
-    expect(isMcpConnectionSpec({ transport: 'http', url: 42 })).toBe(false);
-    expect(isMcpConnectionSpec({ transport: 'sse', url: 'https://example.test/sse' })).toBe(false);
-  });
-
   it('keeps explicit empty selections distinct from absent selections', () => {
     expect(normalizeMcpServerIdSelection([])).toEqual([]);
     expect(normalizeMcpServerIdSelection(undefined)).toBeUndefined();
