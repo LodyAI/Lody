@@ -4,6 +4,7 @@ import type {
   SessionMeta,
   StoredLodyOperation,
 } from '@lody/shared';
+import { readChatFailureNotice } from '@lody/shared';
 import {
   getOperationProgressTargetKey,
   type OperationProgressStatusByTarget,
@@ -56,6 +57,23 @@ export const assistantOutputPreview = (
     .filter((item) => item.length > 0)
     .join('\n\n');
   return text.length > 0 ? truncateTargetOutput(text) : undefined;
+};
+
+const MAX_FAILURE_DETAIL_CHARS = 500;
+
+/**
+ * Explains a failed target from the durable `chat_failed` notice recorded after
+ * its user turn. The reason and original message travel in the error message so
+ * older readers of the strict Operation result schema keep working. Without a
+ * notice the generic text stands; a cause is never guessed.
+ */
+export const targetFailureMessage = (output: readonly SessionHistoryInput[]): string => {
+  const notice = readChatFailureNotice(output);
+  if (!notice) return 'Target Turn failed.';
+  const detail = notice.message
+    ? `: ${Array.from(notice.message).slice(0, MAX_FAILURE_DETAIL_CHARS).join('')}`
+    : '';
+  return `Target Turn failed (${notice.reason ?? 'unknown'})${detail}`;
 };
 
 export const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>

@@ -1116,6 +1116,55 @@ describe('LodyOperationCoordinator', () => {
     }
   );
 
+  it('explains a failed target with its recorded chat failure notice', async () => {
+    const harness = await makeHarness();
+    const targetHistory = harness.histories.get(harness.targetSessionId)!;
+    targetHistory[0] = { ...targetHistory[0]!, status: 'failed' };
+    targetHistory.push({
+      id: 'system-notice-1',
+      role: 'system',
+      timestamp: '2026-07-20T00:00:00.500Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your usage limit. Try again at 7:20 AM.",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as SessionHistoryInput);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    await harness.coordinator.stop();
+
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        completion: {
+          type: 'result',
+          value: {
+            items: [
+              {
+                status: 'failed',
+                error: {
+                  code: 'TARGET_FAILED',
+                  message:
+                    "Target Turn failed (acp_upstream_api_error): You've hit your usage limit. Try again at 7:20 AM.",
+                },
+              },
+            ],
+          },
+        },
+      });
+    } finally {
+      store.close();
+    }
+  });
+
   describe('steer handoff', () => {
     const steerHandoff = async (
       successor: { status: SessionHistoryInput['status']; cancellationReason?: 'user_stop' },
