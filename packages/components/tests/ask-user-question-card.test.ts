@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import type { AskUserQuestionPermissionMeta, AskUserQuestionAnswers } from '@lody/shared';
-import { parseAskUserQuestionElicitationRequest } from '@lody/shared';
+import {
+  buildAskUserQuestionElicitationResponse,
+  createAskUserQuestionPermissionOutcome,
+  parseAskUserQuestionElicitationRequest,
+} from '@lody/shared';
 
 import { AskUserQuestionCard } from '../src/components/sessions/ask-user-question-card';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -537,5 +541,73 @@ describe('AskUserQuestionCard answer notes', () => {
     );
     expect(getButton(container, 'Small change').getAttribute('aria-pressed')).toBe('true');
     expect(container.querySelector('input')).toBeNull();
+  });
+});
+
+describe('Droid question card', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+  beforeEach(async () => {
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    flushSync(() => root.unmount());
+    container.remove();
+  });
+  it('shows the question and readable choices and returns the chosen Droid value', () => {
+    const elicitation = parseAskUserQuestionElicitationRequest({
+      mode: 'form',
+      sessionId: 'synthetic',
+      message: 'Droid needs your answers to continue.',
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          question_1: {
+            type: 'string',
+            title: 'Database',
+            description: 'Which database?',
+            oneOf: [
+              { const: 'option_0', title: 'PostgreSQL' },
+              { const: 'option_1', title: 'SQLite' },
+              { const: 'other', title: 'Other answer' },
+            ],
+          },
+          question_1_other: { type: 'string', title: 'Database: Other answer' },
+        },
+        required: ['question_1'],
+      },
+    })!;
+    let answers: AskUserQuestionAnswers | undefined;
+    flushSync(() =>
+      root.render(
+        createElement(AskUserQuestionCard, {
+          meta: elicitation.meta,
+          mode: {
+            kind: 'interactive',
+            isReady: true,
+            isPendingSubmit: false,
+            isPendingCancel: false,
+            disabled: false,
+            onSubmit: (value) => {
+              answers = value;
+            },
+            onCancel: () => {},
+          },
+        })
+      )
+    );
+    expect(container.textContent).toContain('Which database?');
+    expect(container.textContent).not.toContain('option_0');
+    flushSync(() => getButton(container, 'PostgreSQL').click());
+    flushSync(() => getButton(container, 'Submit').click());
+    expect(answers).toEqual({ question_1: 'PostgreSQL' });
+    const outcome = createAskUserQuestionPermissionOutcome('answer', answers!, elicitation.meta);
+    expect(buildAskUserQuestionElicitationResponse(elicitation, { outcome })).toEqual({
+      action: 'accept',
+      content: { question_1: 'option_0' },
+    });
   });
 });
