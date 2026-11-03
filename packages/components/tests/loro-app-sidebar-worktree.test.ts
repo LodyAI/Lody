@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import React from 'react';
+import { getDefaultStore } from 'jotai';
+import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -67,6 +69,7 @@ describe('LocalProjectItem session-type icon', () => {
     root = undefined;
     container?.remove();
     container = undefined;
+    getDefaultStore().set(sidebarShowBranchNamesAtom, false);
     vi.restoreAllMocks();
   });
 
@@ -165,6 +168,16 @@ describe('LocalProjectItem session-type icon', () => {
       },
       {
         ...baseSession,
+        id: 'session-multiple-prs',
+        title: 'Local session with multiple PRs',
+        lastReadAt: Date.parse('2026-05-09T11:45:00.000Z'),
+        pullRequests: [
+          { url: 'https://github.com/example/one/pull/42', status: 'open' },
+          { url: 'https://github.com/example/two/pull/42', status: 'merged' },
+        ],
+      },
+      {
+        ...baseSession,
         id: 'session-without-pr',
         title: 'Plain local session',
         lastReadAt: Date.parse('2026-05-09T11:45:00.000Z'),
@@ -225,13 +238,34 @@ describe('LocalProjectItem session-type icon', () => {
 
     const rowWithPr = container.querySelector('[data-sidebar-session-id="session-with-pr"]');
     const rowWithoutPr = container.querySelector('[data-sidebar-session-id="session-without-pr"]');
-    expect(rowWithPr?.querySelector('.lucide-git-pull-request')).not.toBeNull();
+    expect(rowWithPr?.querySelector('.lucide-git-pull-request')).toBeNull();
+    expect(rowWithPr?.querySelector('[aria-label="Open pull request #42"]')).toBeNull();
+    flushSync(() => getDefaultStore().set(sidebarShowBranchNamesAtom, true));
+    const singlePr = rowWithPr?.querySelector<HTMLButtonElement>(
+      '[aria-label="Open pull request #42"]'
+    );
+    expect(singlePr?.textContent).toContain('#42');
+    const openWindow = vi.spyOn(window, 'open').mockReturnValue(null);
+    flushSync(() => singlePr?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(openWindow).toHaveBeenCalledWith(
+      'https://github.com/loro-dev/lody/pull/42',
+      '_blank',
+      'noopener,noreferrer'
+    );
     expect(rowWithoutPr?.querySelector('.lucide-git-pull-request')).toBeNull();
+    expect(
+      container.querySelector(
+        '[data-sidebar-session-id="session-multiple-prs"] [aria-label="2 pull requests"]'
+      )
+    ).not.toBeNull();
 
     // An unread row spends its end slot on the status mark instead — the PR icon
     // is one of the resting metrics that yields to it.
     const unreadRow = container.querySelector('[data-sidebar-session-id="session-unread-with-pr"]');
     expect(unreadRow?.querySelector('.lucide-git-pull-request')).toBeNull();
     expect(unreadRow?.querySelector('[data-session-row-indicator]')).not.toBeNull();
+    flushSync(() => getDefaultStore().set(sidebarShowBranchNamesAtom, false));
+    expect(rowWithPr?.querySelector('.lucide-git-pull-request')).toBeNull();
+    expect(rowWithPr?.querySelector('[aria-label="Open pull request #42"]')).toBeNull();
   });
 });

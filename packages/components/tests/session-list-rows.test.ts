@@ -362,6 +362,20 @@ describe('buildSessionListRows repo + PR mapping', () => {
     expect(tasks[0]?.prReadiness).toBe('y');
   });
 
+  test('keeps all pull request URLs and statuses on the sidebar row', () => {
+    const pullRequests = [
+      { url: 'https://github.com/example/one/pull/42', status: 'open' as const },
+      { url: 'https://github.com/example/two/pull/42', status: 'merged' as const },
+    ];
+    const session = makeSession({ id: 'multi', pullRequests });
+    const rows = buildSessionListRows([session], {
+      scope: 'my',
+      currentUserId: 'user-1',
+      defaultTitle: 'Untitled',
+    });
+    expect(rows[0]?.pullRequests).toEqual(pullRequests);
+  });
+
   test('derives no readiness when the PR merge state is not clean', () => {
     const session = makeSession({
       id: 'session',

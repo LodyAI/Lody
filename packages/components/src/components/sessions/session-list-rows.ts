@@ -331,6 +331,7 @@ export function mapSessionMetaToSessionListRow(
     historyBackend: resolveSessionHistoryBackendKind(session),
     repoFullName: repoFullNameRaw ? repoFullNameRaw : null,
     branchName,
+    pullRequests: resolveSessionPullRequests(session),
     prUrl: prInfo.url,
     prNumber: prInfo.number,
     prStatus: prInfo.status,
