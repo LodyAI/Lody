@@ -903,6 +903,7 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
           return yield* memberJoins.prepare(offer, id)
         })
       ),
+    acceptedMemberJoin: (workspaceId: string) => withLock(memberJoins.accepted(workspaceId)),
     acceptMemberJoin: (workspaceId: string, pages: readonly E2eeWorkspaceHistoryPage[]) =>
       acceptJoin(
         workspaceId,

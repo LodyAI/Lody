@@ -154,6 +154,8 @@ function sender() {
 }
 /** Main-owned reader for background member key delivery; renderer webContents ids start at 1. */
 const KEY_DELIVERY_READER = 0
+/** Main-owned reader for a joined member's first full round after its key is installed. */
+const MEMBER_SETTLE_READER = -1
 const KEY_DELIVERY_RETRY_MS = 10_000
 const KEY_DELIVERY_RETRY_MAX_MS = 5 * 60_000
 const KEY_DELIVERY_RETAINED = 32
@@ -429,15 +431,11 @@ export class E2eeIpc extends IpcService {
       const credential = await scope((owner) => owner.bootstrap.deviceCredential(workspaceId))
       const mailbox = (signal: AbortSignal) =>
         cloud.client.mailbox({ workspaceId, credential }, signal)
+      // Distribution only: this device's own receive and repair run in full rounds.
       const work = await scope((owner) =>
         Effect.succeed(
           owner.host
-            .keyRound(
-              workspaceId,
-              mailbox,
-              (signal) => cloud.client.staging({ workspaceId, credential }, signal),
-              (signal) => (request) => cloud.client.history(request, signal)
-            )
+            .distributeKeys(workspaceId, mailbox)
             .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
         )
       )
@@ -498,6 +496,87 @@ export class E2eeIpc extends IpcService {
       await runDesktopE2eeOperation(accountId, ingest)
       if (!page.nextCursor) return
       cursor = page.nextCursor
+    }
+  }
+  private readonly settling = new Map<string, Promise<void>>()
+  /** Synchronization point for the owning tests; claims never await settlement. */
+  protected memberSettleIdle(accountId: string, workspaceId: string) {
+    return this.settling.get(`${accountId}\n${workspaceId}`) ?? Promise.resolve()
+  }
+  /** After a member's claim installs its key: one full round under a main-owned reader
+   * flushes its installation report and runs distribution/repair, off the ready path. */
+  private async settleMemberInstall(
+    accountId: string,
+    workspaceId: string,
+    scope: ReturnType<E2eeIpc['memberScope']>,
+    cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>
+  ) {
+    const key = `${accountId}\n${workspaceId}`
+    if (this.settling.has(key)) return
+    this.settling.set(key, Promise.resolve())
+    try {
+      await scope((owner) =>
+        owner.accountId === accountId
+          ? Effect.sync(() => {
+              const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
+              readers.set(MEMBER_SETTLE_READER, (readers.get(MEMBER_SETTLE_READER) ?? 0) + 1)
+              owner.readers.set(workspaceId, readers)
+            })
+          : Effect.fail(new Error('e2ee_account_mismatch'))
+      )
+    } catch (cause) {
+      this.settling.delete(key)
+      this.pairingFailure = cause
+      return
+    }
+    const settled = (async () => {
+      try {
+        const work = await scope((owner) =>
+          Effect.map(owner.bootstrap.deviceCredential(workspaceId), (credential) =>
+            owner.host.keyRound(
+              workspaceId,
+              (signal) => cloud.client.mailbox({ workspaceId, credential }, signal),
+              (signal) => cloud.client.staging({ workspaceId, credential }, signal),
+              (signal) => (request) => cloud.client.history(request, signal)
+            )
+          )
+        )
+        await runDesktopE2eeOperation(accountId, work)
+      } catch (cause) {
+        // The key is installed; a later full round retries the report and distribution.
+        this.pairingFailure = cause
+      } finally {
+        await this.releaseMainReader(accountId, workspaceId, scope, MEMBER_SETTLE_READER)
+        this.settling.delete(key)
+      }
+    })()
+    this.settling.set(key, settled)
+  }
+  /** Drop one main-owned reader; the last reader out drains and closes the workspace. */
+  private async releaseMainReader(
+    accountId: string,
+    workspaceId: string,
+    scope: ReturnType<E2eeIpc['memberScope']>,
+    reader: number
+  ) {
+    try {
+      const cleanup = await scope((owner) =>
+        Effect.gen(function* () {
+          const readers = owner.readers.get(workspaceId)
+          const count = readers?.get(reader) ?? 0
+          if (count > 1) readers!.set(reader, count - 1)
+          else readers?.delete(reader)
+          if (readers?.size === 0) {
+            const drain = yield* owner.host.beginCloseWorkspace(workspaceId)
+            owner.readers.delete(workspaceId)
+            return drain
+          }
+          return Effect.void
+        })
+      )
+      await runDesktopE2eeOperation(accountId, cleanup)
+    } catch (cause) {
+      this.pairingFailure = cause
     }
   }
   private readerAccount(workspaceId: string, reader: number) {
@@ -827,6 +906,15 @@ export class E2eeIpc extends IpcService {
     const scope = this.memberScope(workspaceId)
     await scope(() => Effect.void)
     const cloud = await desktopE2eeCloudClient()
+    // Already committed and accepted here for this exact request: the verified history is
+    // local, so a retry only needs this device's key (no relay claim, history or accept).
+    const accepted = await scope((owner) =>
+      owner.accountId === cloud.accountId
+        ? owner.bootstrap.acceptedMemberJoin(workspaceId)
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    if (accepted === requestId)
+      return this.readyMemberJoin(workspaceId, requestId, reader, scope, cloud, [])
     const result = await Effect.runPromise(cloud.client.memberClaim({ workspaceId, requestId }))
     if (
       result.accountId !== cloud.accountId ||
@@ -844,6 +932,16 @@ export class E2eeIpc extends IpcService {
         ? owner.bootstrap.acceptMemberJoin(workspaceId, pages)
         : Effect.fail(new Error('e2ee_account_mismatch'))
     )
+    return this.readyMemberJoin(workspaceId, requestId, reader, scope, cloud, pages)
+  }
+  private async readyMemberJoin(
+    workspaceId: string,
+    requestId: string,
+    reader: number,
+    scope: ReturnType<E2eeIpc['memberScope']>,
+    cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>,
+    pages: E2eeWorkspaceHistoryPage[]
+  ) {
     const earlier = this.pairingFailure
     const ready = await this.installMemberJoin(workspaceId, reader, scope, cloud, pages)
     // Ready only reports a current epoch key the native host installed itself.
@@ -853,7 +951,7 @@ export class E2eeIpc extends IpcService {
       state: 'committed',
       ...(!ready && failed ? { code: keyDeliveryCode(failed) } : {})
     })
-    return { ready, state: 'committed' }
+    return { ready, state: 'committed' as const }
   }
   private async installMemberJoin(
     workspaceId: string,
@@ -896,7 +994,10 @@ export class E2eeIpc extends IpcService {
         if (isAccessLossMessage(cause)) throw cause
         this.pairingFailure = cause
       }
-      return (await scope((owner) => owner.host.status(workspaceId))).hasCurrentKey
+      const ready = (await scope((owner) => owner.host.status(workspaceId))).hasCurrentKey
+      // Hand reports, distribution and repair to main before this reader goes away.
+      if (ready) await this.settleMemberInstall(cloud.accountId, workspaceId, scope, cloud)
+      return ready
     } finally {
       try {
         const cleanup = await scope((owner) =>

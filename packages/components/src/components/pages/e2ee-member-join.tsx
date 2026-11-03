@@ -95,6 +95,8 @@ function JoinSession({
   const [recovering, setRecovering] = useState(Boolean(accountId && runtime?.pendingMemberJoin));
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
+  // The fast claim window ended while committed: say why the member is still waiting.
+  const [slowWait, setSlowWait] = useState(false);
   const live = useRef(true);
   const owner = useRef(runtime);
   owner.current = runtime;
@@ -138,6 +140,7 @@ function JoinSession({
     // Committed but not ready means the key is in flight: claim sooner, for a bounded time.
     let committedSince: number | undefined;
     let delay = CLAIM_INTERVAL_MS;
+    setSlowWait(false);
     const claim = async () => {
       delay = CLAIM_INTERVAL_MS;
       try {
@@ -152,6 +155,7 @@ function JoinSession({
         if (result.state === 'committed') {
           committedSince ??= Date.now();
           if (Date.now() - committedSince < KEY_WAIT_FAST_MS) delay = KEY_WAIT_INTERVAL_MS;
+          else setSlowWait(true);
         }
       } catch {
         if (!disposed) setError(true);
@@ -228,6 +232,9 @@ function JoinSession({
           <div {...stylex.props(styles.stack)}>
             {email && <p>{email}</p>}
             {error && <p role="status">{t('e2ee.team.retryOriginal')}</p>}
+            {slowWait && !ready && message === 'e2ee.team.waitingKey' && (
+              <p role="status">{t('e2ee.team.waitingKeySlow')}</p>
+            )}
             <div {...stylex.props(styles.actions)}>
               {!accountId && !loading && (
                 <Button onClick={onSignInRequested}>{t('e2ee.team.signIn')}</Button>

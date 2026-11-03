@@ -2580,7 +2580,9 @@ async function memberIpcFixture(options = {}) {
     readers: new Map([['team', new Map([[1, 1]])]]),
     bootstrap: {
       deviceCredential: () => Effect.succeed('credential'),
-      acceptMemberJoin: () => Effect.void
+      acceptMemberJoin: () => Effect.void,
+      // No locally accepted join: every claim asks the relay first.
+      acceptedMemberJoin: () => Effect.succeed(null)
     },
     host: {
       inspectCachedState: (workspaceId, machineId) =>
@@ -2618,7 +2620,12 @@ async function memberIpcFixture(options = {}) {
       ...options.host
     }
   })
-  let current = makeOwner('A', 'original-A')
+  // Delivery runs a distribute-only round; the synthetic host answers it like keyRound.
+  const withDistribution = (owner) => {
+    owner.host.distributeKeys ??= (...args) => owner.host.keyRound(...args)
+    return owner
+  }
+  let current = withDistribution(makeOwner('A', 'original-A'))
   const sender = Object.assign(new EventEmitter(), { id: 1 })
   const cloud = {
     accountId: 'A',
@@ -2698,7 +2705,7 @@ async function memberIpcFixture(options = {}) {
     cloudGate,
     keyEntered,
     keyGate,
-    makeOwner,
+    makeOwner: (...args) => withDistribution(makeOwner(...args)),
     setTrusted(value) {
       trusted = value
     },
@@ -3423,7 +3430,8 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
           hasMore: false,
           seatPreview: { status: 'not_billed', reason: 'covered' }
         })),
-      memberRead: ({ requestId }) => relayed('owner', 'memberRead', () => ({ ...requests.get(requestId) })),
+      memberRead: ({ requestId }) =>
+        relayed('owner', 'memberRead', () => ({ ...requests.get(requestId) })),
       appendRecord: (pending) =>
         relayed('owner', 'appendRecord', () => {
           records.push(Buffer.from(pending.recordHex, 'hex'))
@@ -3440,7 +3448,10 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
     accountId: 'member',
     client: {
       accountIdentity: () =>
-        relayed('member', 'accountIdentity', () => ({ accountId: 'member', cryptoUserId: 'bb'.repeat(32) })),
+        relayed('member', 'accountIdentity', () => ({
+          accountId: 'member',
+          cryptoUserId: 'bb'.repeat(32)
+        })),
       memberSubmit: ({ keyPackageHex }) =>
         relayed('member', 'memberSubmit', () => {
           const proof = memberJoining.decodeMemberKeyPackage(keyPackageHex)
@@ -3499,6 +3510,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
     offer,
     approver,
     joiner,
+    memberApi: member.api,
     logs,
     async submit() {
       const submitted = await joiner.prepareMemberJoin(offer)
@@ -3516,24 +3528,28 @@ const claimCalls = (calls) => {
   const second = calls.indexOf('mailbox.fetch', calls.indexOf('mailbox.fetch') + 1)
   return second === -1 ? calls.length : second
 }
-void test('member key delivery and claim transitions are logged under a short request tag, never the request id', { timeout: 20_000 }, async (t) => {
-  const f = await twoDeviceMemberJoin(t)
-  await f.approver.open('team')
-  const submitted = await f.submit()
-  await f.approver.memberJoinRequests('team')
-  await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
-  await f.approver.keyDeliveryIdle('account', 'team')
-  assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, true)
-  const trail = f.logs.map(([event, fields]) => `${event}:${fields.state}:${fields.phase ?? ''}`)
-  assert.deepEqual(trail, [
-    '[E2EE] key-delivery:pending:',
-    '[E2EE] key-delivery:delivering:',
-    '[E2EE] key-delivery:delivered:',
-    '[E2EE] member-claim:committed:ready'
-  ])
-  assert.ok(f.logs.every(([, fields]) => /^[0-9a-f]{12}$/.test(fields.request)))
-  assert.ok(!JSON.stringify(f.logs).includes(submitted.requestId))
-})
+void test(
+  'member key delivery and claim transitions are logged under a short request tag, never the request id',
+  { timeout: 20_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const submitted = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('account', 'team')
+    assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, true)
+    const trail = f.logs.map(([event, fields]) => `${event}:${fields.state}:${fields.phase ?? ''}`)
+    assert.deepEqual(trail, [
+      '[E2EE] key-delivery:pending:',
+      '[E2EE] key-delivery:delivering:',
+      '[E2EE] key-delivery:delivered:',
+      '[E2EE] member-claim:committed:ready'
+    ])
+    assert.ok(f.logs.every(([, fields]) => /^[0-9a-f]{12}$/.test(fields.request)))
+    assert.ok(!JSON.stringify(f.logs).includes(submitted.requestId))
+  }
+)
 
 const e2eeIpcDependencies = (runtime, sender, recordMethod = () => {}) => ({
   '../ipc-service-deps': { getIpcServiceDeps: () => ({ cliService: {} }) },
@@ -3655,44 +3671,60 @@ for (const code of ['pairing-unavailable', 'pairing-rate-limited'])
   })
 // Critical path from the approval result: approver calls until its envelope `put`, one
 // member claim that just missed it plus the 3 s cadence, then the claim that installs.
-void test('an admitted member is ready within 30 s of the approval result on the critical path', { timeout: 20_000 }, async (t) => {
-  const calls = { owner: [], member: [] }
-  let held
-  let reachedPut
-  const f = await twoDeviceMemberJoin(t, {
-    latency: (name, { device }) => {
-      calls[device].push(name)
-      if (!(held && device === 'owner' && name === 'mailbox.put')) return Effect.void
-      reachedPut.resolve()
-      return Effect.promise(() => held.promise)
-    }
-  })
-  await f.approver.open('team')
-  // The approver has already run full key rounds, as after earlier pairings.
-  await f.approver.refresh('team')
-  const submitted = await f.submit()
-  await f.approver.memberJoinRequests('team')
-  held = deferredMember()
-  reachedPut = deferredMember()
-  const approvalStart = calls.owner.length
-  await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
-  await reachedPut.promise
-  const approval = calls.owner.slice(approvalStart)
-  const toPut = approval.length - approval.lastIndexOf('memberRead') - 1
-  // The member's first committed claim accepts the verified history; a later retry
-  // runs just before the envelope exists and misses it.
-  assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
-  calls.member = []
-  assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
-  const missed = calls.member.length
-  held.resolve()
-  await f.approver.keyDeliveryIdle('account', 'team')
-  calls.member = []
-  assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, true)
-  const installing = claimCalls(calls.member)
-  const seconds = (toPut + missed + installing) * RELAY_ROUND_TRIP_S + 3
-  t.diagnostic(
-    `to put ${toPut}, missed claim ${missed}, installing claim ${installing}: about ${seconds.toFixed(1)} s`
-  )
-  assert.ok(seconds <= 30, `about ${seconds.toFixed(1)} s from approval to ready`)
-})
+void test(
+  'an admitted member is ready within 30 s of the approval result on the critical path',
+  { timeout: 20_000 },
+  async (t) => {
+    const calls = { owner: [], member: [] }
+    let held
+    let reachedPut
+    const f = await twoDeviceMemberJoin(t, {
+      latency: (name, { device }) => {
+        calls[device].push(name)
+        if (!(held && device === 'owner' && name === 'mailbox.put')) return Effect.void
+        reachedPut.resolve()
+        return Effect.promise(() => held.promise)
+      }
+    })
+    await f.approver.open('team')
+    // The approver has already run full key rounds, as after earlier pairings.
+    await f.approver.refresh('team')
+    const submitted = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    held = deferredMember()
+    reachedPut = deferredMember()
+    const approvalStart = calls.owner.length
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await reachedPut.promise
+    const approval = calls.owner.slice(approvalStart)
+    const toPut = approval.length - approval.lastIndexOf('memberRead') - 1
+    // The member's first committed claim accepts the verified history; a later retry
+    // runs just before the envelope exists and misses it.
+    assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
+    calls.member = []
+    assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
+    const missed = calls.member.length
+    held.resolve()
+    await f.approver.keyDeliveryIdle('account', 'team')
+    calls.member = []
+    assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, true)
+    const installing = claimCalls(calls.member)
+    // Off the ready path, main still flushes the member's installation report and then
+    // releases the workspace the claim opened.
+    await f.joiner.memberSettleIdle('member', 'team')
+    assert.ok(calls.member.slice(installing).includes('mailbox.report'))
+    assert.equal(
+      await f.memberApi.withDesktopE2eeAccount(
+        (account) => Effect.succeed(account.readers.has('team')),
+        'team',
+        false
+      ),
+      false
+    )
+    const seconds = (toPut + missed + installing) * RELAY_ROUND_TRIP_S + 3
+    t.diagnostic(
+      `to put ${toPut}, missed claim ${missed}, installing claim ${installing}: about ${seconds.toFixed(1)} s`
+    )
+    assert.ok(seconds <= 30, `about ${seconds.toFixed(1)} s from approval to ready`)
+  }
+)
