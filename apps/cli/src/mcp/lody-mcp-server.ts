@@ -122,6 +122,7 @@ import {
   resolveTurnDispatchConfig,
   readSessionMcpIdsForAuthoring,
   sendSessionChatResult,
+  toSessionTranscriptEntry,
   validateSessionChatTarget,
   validateSessionCreateOptions,
   type CreateOptions,
@@ -611,6 +612,9 @@ const SessionCreateToolInputSchema = z
     }
   });
 
+const MAX_CHAT_QUOTES = 3;
+const MAX_QUOTE_CHARS = 2_000;
+
 const SessionChatToolInputSchema = z
   .object({
     mcpServerIds: McpServerIdsInputSchema,
@@ -629,6 +633,20 @@ const SessionChatToolInputSchema = z
       .trim()
       .default('')
       .describe('User prompt; may be omitted when attachments are provided.'),
+    quotes: z
+      .array(
+        z
+          .object({
+            sessionId: z.string().trim().min(1).optional(),
+            messageId: z.string().trim().min(1),
+          })
+          .strict()
+      )
+      .max(MAX_CHAT_QUOTES)
+      .optional()
+      .describe(
+        'Messages to quote verbatim, e.g. the human instruction you are relaying. Lody appends each original text with its recorded author; sessionId defaults to the current Session. An unreadable message is marked unverified instead of failing the chat.'
+      ),
     attachments: InputAttachmentPathsSchema,
     wait: z.boolean().optional().describe('Wait for the assistant reply and return it.'),
     timeoutSeconds: z
@@ -3122,6 +3140,69 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
   });
 };
 
+/**
+ * Appends quoted messages, read from history with their recorded author, to the
+ * prompt text. The result is ordinary frozen prompt text, so retries, recovery
+ * and older daemons need nothing new. Unreadable quotes are marked, not fatal.
+ */
+const appendQuotedMessages = async (
+  manager: LoroDocumentManager,
+  prompt: string,
+  quotes: NonNullable<SessionChatToolInput['quotes']>,
+  currentSessionId: string,
+  machineId: string
+): Promise<string> => {
+  const blocks: string[] = [];
+  for (const quote of quotes) {
+    const sourceId = (quote.sessionId ?? currentSessionId) as SessionId;
+    const reference = `${sourceId}/${quote.messageId}`;
+    try {
+      const source = await readCurrentSessionMeta(manager, sourceId);
+      const turn = source
+        ? await readSessionDocForMcp(
+            manager,
+            source,
+            machineId as MachineId,
+            async (sessionDoc) => {
+              const read = await (
+                await createSessionBackend(sessionDoc, source)
+              ).history.readTurn(quote.messageId);
+              return read.state === 'ready' ? read.turn : undefined;
+            },
+            REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
+          )
+        : undefined;
+      const text = turn ? toSessionTranscriptEntry(0, turn)?.text : undefined;
+      if (!turn || !text) {
+        blocks.push(
+          `[Lody] Quoted message ${reference} could not be read; treat it as an unverified relay.`
+        );
+        continue;
+      }
+      const author = readMessageAuthor(turn.author);
+      const from =
+        author?.kind === 'human'
+          ? `human user ${author.userId}`
+          : author?.kind === 'agent'
+            ? `agent in Session ${author.sessionId}`
+            : turn.role;
+      const title = source?.title ? ` "${source.title}"` : '';
+      const body = Array.from(text).slice(0, MAX_QUOTE_CHARS).join('');
+      blocks.push(
+        [
+          `[Lody] Quoted from ${from}, Session${title} (${sourceId}), ${turn.timestamp}:`,
+          ...body.split('\n').map((line) => `> ${line}`),
+        ].join('\n')
+      );
+    } catch {
+      blocks.push(
+        `[Lody] Quoted message ${reference} could not be read; treat it as an unverified relay.`
+      );
+    }
+  }
+  return [prompt, ...blocks].filter(Boolean).join('\n\n');
+};
+
 const startSessionChatOperation = async (args: SessionChatToolInput): Promise<unknown> => {
   if (!args.operationId) {
     throw new Error('operationId is required');
@@ -3131,6 +3212,17 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     await syncWorkspaceMetaForRead(manager, `mcp.session_chat:${ctx.sessionId}:operation`);
+    if (args.quotes?.length)
+      args = {
+        ...args,
+        prompt: await appendQuotedMessages(
+          manager,
+          args.prompt,
+          args.quotes,
+          ctx.sessionId,
+          auth.machineId
+        ),
+      };
     const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!currentSession) {
       throw new LodyOperationStoreError(
