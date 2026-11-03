@@ -12,9 +12,9 @@ field. Treating it as a legacy Claude form hid the question, displayed IDs as op
 and returned invalid custom answers. The shared bridge recognizes Droid's complete form,
 keeps the user-facing labels in durable question metadata, and translates submitted
 answers back into Droid's IDs and companion fields. Other form shapes retain their
-existing interpretation. The question card does not render the short question header, and treats custom text as
-a replacement for selections, including on multi-select questions; it does not offer
-combining them.
+existing interpretation. The question card renders distinct short headers above the
+question, and treats custom text as a replacement for selections, including on
+multi-select questions; it does not offer combining them.
 
 ## Decision
 

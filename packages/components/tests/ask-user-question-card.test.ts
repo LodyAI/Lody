@@ -143,6 +143,7 @@ describe('AskUserQuestionCard touch navigation', () => {
 
   it('advances to the next question on a left touch swipe after the current answer is complete', () => {
     const card = renderCard();
+    expect(container?.textContent).toContain('Breakfast');
     expect(container?.textContent).toContain('Pick ingredients');
 
     flushSync(() => {
@@ -156,6 +157,8 @@ describe('AskUserQuestionCard touch navigation', () => {
     });
 
     expect(container?.textContent).toContain('Pick a drink');
+    expect(container?.textContent).toContain('Drink');
+    expect(container?.textContent).not.toContain('Breakfast');
   });
 
   it('does not advance on a left touch swipe when the current answer is incomplete', () => {
@@ -599,6 +602,7 @@ describe('Droid question card', () => {
         })
       )
     );
+    expect(container.textContent).toContain('Database');
     expect(container.textContent).toContain('Which database?');
     expect(container.textContent).not.toContain('option_0');
     flushSync(() => getButton(container, 'PostgreSQL').click());
@@ -609,5 +613,63 @@ describe('Droid question card', () => {
       action: 'accept',
       content: { question_1: 'option_0' },
     });
+  });
+
+  it.each(['', '   ', '  Which database?  '])(
+    'does not repeat an empty or identical header (%j) on an answered card',
+    (header) => {
+      const questionMeta: AskUserQuestionPermissionMeta = {
+        source: 'lody',
+        version: 1,
+        allowCustomAnswer: false,
+        questions: [
+          {
+            id: 'database',
+            header,
+            question: 'Which database?',
+            options: [{ label: 'PostgreSQL' }],
+            multiSelect: false,
+          },
+        ],
+      };
+      flushSync(() =>
+        root.render(
+          createElement(AskUserQuestionCard, {
+            meta: questionMeta,
+            mode: { kind: 'readonly', answers: { database: 'PostgreSQL' } },
+          })
+        )
+      );
+      expect(container.textContent?.match(/Which database\?/g)).toHaveLength(1);
+      expect(container.textContent).toContain('PostgreSQL');
+    }
+  );
+
+  it('keeps the short header visible after the question is answered', () => {
+    const questionMeta: AskUserQuestionPermissionMeta = {
+      source: 'lody',
+      version: 1,
+      allowCustomAnswer: false,
+      questions: [
+        {
+          id: 'database',
+          header: 'Database',
+          question: 'Which database?',
+          options: [{ label: 'PostgreSQL' }],
+          multiSelect: false,
+        },
+      ],
+    };
+    flushSync(() =>
+      root.render(
+        createElement(AskUserQuestionCard, {
+          meta: questionMeta,
+          mode: { kind: 'readonly', answers: { database: 'PostgreSQL' } },
+        })
+      )
+    );
+    expect(container.textContent).toContain('Database');
+    expect(container.textContent).toContain('Which database?');
+    expect(container.textContent).toContain('PostgreSQL');
   });
 });

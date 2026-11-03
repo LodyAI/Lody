@@ -20,7 +20,7 @@ highlighting an action, while keyboard opening and arrow navigation focus rows.
 Both the row and the switch toggle the preference without dismissing the menu.
 
 `ask-user-question-card.tsx` owns interactive and read-only question presentation,
-including independent optional notes and secret masking. Its dedicated
+including distinct short headers, independent optional notes and secret masking. Its dedicated
 `AskUserQuestionCard` stories cover editing, replay, multiple questions and legacy
 replacement answers. The [answer notes Spec](../../../../../specs/ask-question-answer-notes.md)
 describes the shared parsing and persistence boundary.

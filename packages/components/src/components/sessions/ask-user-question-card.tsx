@@ -78,6 +78,22 @@ const styles = stylex.create({
   },
 
   header: { display: 'flex', alignItems: 'flex-start', gap: space[2], minWidth: 0 },
+  questionBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[1],
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  questionHeader: {
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    fontWeight: 500,
+    color: colors.secondaryLabel,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+  },
   question: {
     flexGrow: 1,
     flexShrink: 1,
@@ -684,6 +700,10 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
 
   if (!question) return null;
 
+  const questionHeader = question.header.trim();
+  const showQuestionHeader =
+    questionHeader.length > 0 && questionHeader !== question.question.trim();
+
   const noteInputProps = {
     value: isReadonly && question.note?.isSecret && draft.note ? '••••••••' : (draft.note ?? ''),
     disabled,
@@ -743,7 +763,12 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
       onPointerUp={finishSwipe}
     >
       <div {...stylex.props(styles.header)}>
-        <span {...stylex.props(styles.question)}>{question.question}</span>
+        <div {...stylex.props(styles.questionBlock)}>
+          {showQuestionHeader ? (
+            <span {...stylex.props(styles.questionHeader)}>{questionHeader}</span>
+          ) : null}
+          <span {...stylex.props(styles.question)}>{question.question}</span>
+        </div>
         <div {...stylex.props(styles.headerMeta)}>
           {total > 1 ? (
             <span {...stylex.props(styles.count)}>
