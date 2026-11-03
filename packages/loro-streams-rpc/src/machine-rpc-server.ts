@@ -388,7 +388,7 @@ type RpcServerDeps = {
   maxPendingRequests?: number;
   /** Required for history writes; retain a refusal until the original request expires. */
   historyRequestRejections?: SessionHistoryRpcRejectionStore;
-  getMachineStatus: () => Promise<MachineStatusResponse>;
+  getMachineStatus: (args?: { includeDisk?: boolean }) => Promise<MachineStatusResponse>;
   getPreviewControl?: () => Promise<MachinePreviewControlResponse>;
   getAutomationControl?: () => Promise<RemoteAutomationHandshake>;
   controlAutomation?: (args: {
@@ -471,6 +471,7 @@ type RpcServerDeps = {
   }) => Promise<SessionCancelResponse>;
   getSessionLiveStatus?: (args: {
     sessionId: SessionId;
+    includeActivity?: boolean;
   }) => Promise<LoroSessionLiveStatusRpcResponse>;
   withdrawSessionInput?: (args: {
     sessionId: SessionId;
@@ -1180,7 +1181,9 @@ export class LoroStreamsMachineRpcServer {
       }
       switch (request.method) {
         case 'machine/status': {
-          const response = await this.deps.getMachineStatus();
+          const response = await this.deps.getMachineStatus(
+            request.params.includeDisk ? { includeDisk: true } : undefined
+          );
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
@@ -1599,6 +1602,7 @@ export class LoroStreamsMachineRpcServer {
           }
           const response = await this.deps.getSessionLiveStatus({
             sessionId: request.params.sessionId as SessionId,
+            ...(request.params.includeActivity ? { includeActivity: true } : {}),
           });
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;

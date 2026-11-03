@@ -1,4 +1,10 @@
-import type { MessageContent, SessionHistoryInput, StoredLodyOperation } from '@lody/shared';
+import type {
+  MessageContent,
+  SessionHistoryInput,
+  SessionMeta,
+  StoredLodyOperation,
+} from '@lody/shared';
+import { readChatFailureNotice } from '@lody/shared';
 import {
   getOperationProgressTargetKey,
   type OperationProgressStatusByTarget,
@@ -53,8 +59,41 @@ export const assistantOutputPreview = (
   return text.length > 0 ? truncateTargetOutput(text) : undefined;
 };
 
+const MAX_FAILURE_DETAIL_CHARS = 500;
+
+/**
+ * Explains a failed target from the durable `chat_failed` notice recorded after
+ * its user turn. The reason and original message travel in the error message so
+ * older readers of the strict Operation result schema keep working. Without a
+ * notice the generic text stands; a cause is never guessed.
+ */
+export const targetFailureMessage = (output: readonly SessionHistoryInput[]): string => {
+  const notice = readChatFailureNotice(output);
+  if (!notice) return 'Target Turn failed.';
+  const detail = notice.message
+    ? `: ${Array.from(notice.message).slice(0, MAX_FAILURE_DETAIL_CHARS).join('')}`
+    : '';
+  return `Target Turn failed (${notice.reason ?? 'unknown'})${detail}`;
+};
+
 export const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>
   entry.role === 'assistant' && (entry.finished === true || typeof entry.endedAt === 'number');
+/** Bounds a handoff walk so a malformed steer ledger cannot loop reconciliation. */
+export const MAX_STEER_HANDOFF_HOPS = 16;
+
+/**
+ * The steered input that took over an assistant turn's work. An applied steer
+ * seals the running assistant turn and continues the same work under the steered
+ * input, so a delegated target completes with that successor's final reply.
+ */
+export const findSteerSuccessor = (
+  meta: Pick<SessionMeta, 'steerOperationLedger'>,
+  assistantTurnId: string
+): string | undefined =>
+  Object.values(meta.steerOperationLedger ?? {}).find(
+    (record) => record.expectedTurnId === assistantTurnId && record.delivery === 'applied'
+  )?.userTurnId;
+
 export function progressIsSettled(
   operation: StoredLodyOperation,
   row: SessionHistoryInput | undefined,

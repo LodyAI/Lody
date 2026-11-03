@@ -58,6 +58,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   sessionInputDispatch: 'sessionInputDispatch',
   sessionCollaborationControl: 'sessionCollaborationControl',
   bugReportClientLog: 'bugReportClientLog',
+  sessionLiveActivity: 'sessionLiveActivity',
+  machineDiskStatus: 'machineDiskStatus',
   sessionInputWithdraw: 'sessionInputWithdraw',
 } as const;
 
@@ -156,6 +158,10 @@ export const PROJECT_FILE_ROOTS_PROTOCOL_VERSION = 1;
 export const PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION = 1;
 
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  // `session/live-status` accepts `includeActivity` and may answer with `activity`.
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity]: 1,
+  // `machine/status` accepts `includeDisk` and may answer with `disk`.
+  [MACHINE_PROTOCOL_CAPABILITIES.machineDiskStatus]: 1,
   // Daemon answers `session/withdraw-input` for queued Agent inputs.
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputWithdraw]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers]:
