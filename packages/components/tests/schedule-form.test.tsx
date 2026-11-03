@@ -533,4 +533,53 @@ describe('Time rules a person opens', () => {
     expect(onSave.mock.calls[0]![0].trigger).toBe(trigger);
     expect(onSave.mock.calls[0]![0].prompt).toBe('Different prompt.');
   });
+
+  it('lets a person type a step the menu does not offer and saves it as an interval', async () => {
+    open({ kind: 'cron', expression: '*/15 * * * *', timeZone: 'Asia/Shanghai' });
+    const minutesField = () =>
+      container.querySelector<HTMLInputElement>(
+        `[aria-label="${en['schedules.repeat.customMinutes']}"]`
+      );
+    expect(minutesField()).toBeNull();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`[aria-label="${en['schedules.repeat.every']}"]`)!
+        .click();
+    });
+    await act(async () => {
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (item) => item.textContent === en['schedules.repeat.custom']
+      )!;
+      option.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      option.click();
+    });
+    // Choosing Custom keeps the current step until a new one is typed.
+    expect(minutesField()!.value).toBe('15');
+    await act(async () => {
+      const input = minutesField()!;
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '45');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.blur();
+    });
+    submit();
+    expect(onSave.mock.calls[0]![0].trigger).toEqual({
+      kind: 'interval',
+      everyMs: 45 * 60_000,
+      anchorAt: new Date(NOW).toISOString(),
+    });
+  });
+
+  it('reopens a typed step in the custom field rather than as a preset', () => {
+    open({ kind: 'interval', everyMs: 5 * 3_600_000, anchorAt: '2026-09-06T00:00:00.000Z' });
+    expect(repeatValue()).toBe(en['schedules.repeat.hours']);
+    expect(
+      container.querySelector<HTMLInputElement>(
+        `[aria-label="${en['schedules.repeat.customHours']}"]`
+      )!.value
+    ).toBe('5');
+    expect(
+      container.querySelector(`[aria-label="${en['schedules.repeat.every']}"]`)!.textContent
+    ).toBe(en['schedules.repeat.custom']);
+  });
 });

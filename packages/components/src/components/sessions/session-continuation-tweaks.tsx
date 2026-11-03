@@ -22,6 +22,7 @@ export type SessionContinuationTweaksProps = {
   value: SessionContinuationTweaksValue;
   onChange: (key: keyof SessionContinuationTweaksValue, checked: boolean) => void;
   disabled?: boolean;
+  unavailable?: boolean;
   capabilities?: Partial<
     Record<keyof SessionContinuationTweaksValue, SessionContinuationTweakAvailability>
   >;
@@ -152,6 +153,7 @@ export function SessionContinuationTweaks({
   value,
   onChange,
   disabled = false,
+  unavailable = false,
   capabilities,
   className,
 }: SessionContinuationTweaksProps) {
@@ -203,8 +205,16 @@ export function SessionContinuationTweaks({
       })}
 
       <Separator />
-      <div {...stylex.props(styles.footer)}>
-        {t('sessions.continuation.tweaks.footer', '设置立即生效。关闭设置不会取消已触发的操作。')}
+      <div {...stylex.props(styles.footer)} role={unavailable ? 'status' : undefined}>
+        {unavailable
+          ? t(
+              'sessions.continuation.tweaks.unavailable',
+              'Settings are temporarily unavailable. Retrying…'
+            )
+          : t(
+              'sessions.continuation.tweaks.footer',
+              '设置立即生效。关闭设置不会取消已触发的操作。'
+            )}
       </div>
     </div>
   );
