@@ -36,7 +36,7 @@ import {
   readPreferredWorkspaceSlug,
 } from '@/lib/workspace';
 import { RouteMessage } from '@/components/route-message';
-import { useAuthSignOut } from '@/providers/convex-provider';
+import { useAuthSignOut } from '../../providers/convex-provider';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';

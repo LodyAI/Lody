@@ -147,7 +147,7 @@ vi.mock('@/hooks/useWorkspaceSlugField', async () => {
   };
 });
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => fixture.mobile }));
-vi.mock('@/providers/convex-provider', () => ({
+vi.mock('../src/providers/convex-provider', () => ({
   useAuthSignOut: () => async () => {
     fixture.signedOut += 1;
   },
