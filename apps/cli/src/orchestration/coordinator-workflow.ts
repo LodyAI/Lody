@@ -19,12 +19,31 @@ import { Cause, Context, Effect, Exit, Layer, Scope } from 'effect';
 import { CoordinatorActivity } from './coordinator-activity';
 import {
   assistantOutputPreview,
+  findSteerSuccessor,
   isTerminalAssistantEntry,
+  MAX_STEER_HANDOFF_HOPS,
   progressIsSettled,
   targetFailureMessage,
 } from './coordinator-model';
 import { CoordinatorPorts, type CoordinatorHistory } from './coordinator-ports';
 import { OperationRepository } from './operation-repository';
+
+/** Where a delegated target's work stands after following applied steer handoffs. */
+type SteerHandoffOutcome =
+  | { readonly _tag: 'Done'; readonly assistant: SessionHistoryInput }
+  | { readonly _tag: 'Running' }
+  | { readonly _tag: 'Failed' }
+  | {
+      readonly _tag: 'Cancelled';
+      readonly cancellationReason: SessionHistoryInput['cancellationReason'];
+    };
+
+const HANDOFF_PROGRESS_STATUS = {
+  Done: 'succeeded',
+  Running: 'running',
+  Failed: 'failed',
+  Cancelled: 'cancelled',
+} as const satisfies Record<SteerHandoffOutcome['_tag'], OperationProgressStatus>;
 export class CoordinatorWorkflow {
   recoverSubscriptions = () =>
     Effect.forEach([...this.subscriptions.values()], (detach) => detach, { discard: true });
@@ -268,7 +287,8 @@ export class CoordinatorWorkflow {
               return;
             }
             if (assistantRead !== undefined && isTerminalAssistantEntry(assistantRead)) {
-              statuses.set(key, 'succeeded');
+              const handoff = yield* this.followSteerHandoff(backend, meta, assistantRead);
+              statuses.set(key, HANDOFF_PROGRESS_STATUS[handoff._tag]);
               return;
             }
             const execution = this.ports.execution(target.sessionId);
@@ -287,6 +307,46 @@ export class CoordinatorWorkflow {
       return statuses;
     }.bind(this)
   );
+  /**
+   * A steer applied to a target's running turn seals that turn and continues its
+   * work under the steered input. Follow those handoffs so the delegated item
+   * completes with the final reply instead of the sealed partial output.
+   */
+  followSteerHandoff = Effect.fnUntraced(function* (
+    backend: CoordinatorHistory,
+    meta: SessionMeta,
+    assistant: SessionHistoryInput
+  ): Effect.fn.Return<SteerHandoffOutcome, unknown> {
+    let current = assistant;
+    for (let hop = 0; hop < MAX_STEER_HANDOFF_HOPS; hop += 1) {
+      const successorTurnId = findSteerSuccessor(meta, current.id);
+      if (successorTurnId === undefined) break;
+      const output = yield* backend.readTurnOutput(successorTurnId);
+      const userTurn = output.find(
+        (entry) => entry.id === successorTurnId && entry.role === 'user'
+      );
+      const next = output.find(
+        (entry) => entry.role === 'assistant' && entry.userTurnId === successorTurnId
+      );
+      if (!next) {
+        // An applied steer can still lose the race with the turn it targeted
+        // (stale-turn, or a failure before handoff) and never start a successor.
+        // Only an unsettled input may still hand off; otherwise `current` stands.
+        const settling =
+          userTurn === undefined ||
+          userTurn.status === 'processing' ||
+          userTurn.status === 'pending_apply';
+        return settling ? { _tag: 'Running' } : { _tag: 'Done', assistant: current };
+      }
+      if (userTurn?.status === 'failed') return { _tag: 'Failed' };
+      if (userTurn?.status === 'canceled') {
+        return { _tag: 'Cancelled', cancellationReason: userTurn.cancellationReason };
+      }
+      if (!isTerminalAssistantEntry(next)) return { _tag: 'Running' };
+      current = next;
+    }
+    return { _tag: 'Done', assistant: current };
+  });
   reconcileItem = Effect.fnUntraced(
     function* (
       this: CoordinatorWorkflow,
@@ -431,14 +491,21 @@ export class CoordinatorWorkflow {
           entry.userTurnId === item.target.userTurnId &&
           isTerminalAssistantEntry(entry)
       );
-      if (userTurn?.status === 'failed') {
-        return {
-          status: 'failed',
-          ...(item.label ? { label: item.label } : {}),
-          target: item.target,
-          error: makeLodyError('TARGET_FAILED', targetFailureMessage(targetOutput), false),
-        };
-      }
+      const targetFailed = (): LodyOperationItemResult => ({
+        status: 'failed',
+        ...(item.label ? { label: item.label } : {}),
+        target: item.target,
+        error: makeLodyError('TARGET_FAILED', targetFailureMessage(targetOutput), false),
+      });
+      const targetCancelled = (
+        cancellationReason: SessionHistoryInput['cancellationReason']
+      ): LodyOperationItemResult => ({
+        status: 'cancelled',
+        ...(cancellationReason ? { cancellationReason } : {}),
+        ...(item.label ? { label: item.label } : {}),
+        target: item.target,
+      });
+      if (userTurn?.status === 'failed') return targetFailed();
       if (userTurn?.status === 'delivery_unknown') {
         // An Agent chat steer whose provider verdict is uncertain. Never replay it:
         // the requesting Agent decides whether resending is safe.
@@ -453,23 +520,19 @@ export class CoordinatorWorkflow {
           ),
         };
       }
-      if (userTurn?.status === 'canceled') {
-        return {
-          status: 'cancelled',
-          ...(userTurn.cancellationReason
-            ? { cancellationReason: userTurn.cancellationReason }
-            : {}),
-          ...(item.label ? { label: item.label } : {}),
-          target: item.target,
-        };
-      }
-      if (assistant) {
-        const output = assistantOutputPreview(assistant);
+      if (userTurn?.status === 'canceled') return targetCancelled(userTurn.cancellationReason);
+      const handoff = assistant
+        ? yield* this.followSteerHandoff(backend, metaRecord.meta as SessionMeta, assistant)
+        : undefined;
+      if (handoff?._tag === 'Failed') return targetFailed();
+      if (handoff?._tag === 'Cancelled') return targetCancelled(handoff.cancellationReason);
+      if (handoff?._tag === 'Done') {
+        const output = assistantOutputPreview(handoff.assistant);
         return {
           status: 'succeeded',
           ...(item.label ? { label: item.label } : {}),
           target: item.target,
-          assistantTurnId: assistant.id,
+          assistantTurnId: handoff.assistant.id,
           ...(output ? { output } : {}),
         };
       }

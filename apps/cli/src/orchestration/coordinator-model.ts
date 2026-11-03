@@ -1,4 +1,9 @@
-import type { MessageContent, SessionHistoryInput, StoredLodyOperation } from '@lody/shared';
+import type {
+  MessageContent,
+  SessionHistoryInput,
+  SessionMeta,
+  StoredLodyOperation,
+} from '@lody/shared';
 import { readChatFailureNotice } from '@lody/shared';
 import {
   getOperationProgressTargetKey,
@@ -73,6 +78,22 @@ export const targetFailureMessage = (output: readonly SessionHistoryInput[]): st
 
 export const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>
   entry.role === 'assistant' && (entry.finished === true || typeof entry.endedAt === 'number');
+/** Bounds a handoff walk so a malformed steer ledger cannot loop reconciliation. */
+export const MAX_STEER_HANDOFF_HOPS = 16;
+
+/**
+ * The steered input that took over an assistant turn's work. An applied steer
+ * seals the running assistant turn and continues the same work under the steered
+ * input, so a delegated target completes with that successor's final reply.
+ */
+export const findSteerSuccessor = (
+  meta: Pick<SessionMeta, 'steerOperationLedger'>,
+  assistantTurnId: string
+): string | undefined =>
+  Object.values(meta.steerOperationLedger ?? {}).find(
+    (record) => record.expectedTurnId === assistantTurnId && record.delivery === 'applied'
+  )?.userTurnId;
+
 export function progressIsSettled(
   operation: StoredLodyOperation,
   row: SessionHistoryInput | undefined,
