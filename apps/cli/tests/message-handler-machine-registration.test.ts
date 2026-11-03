@@ -186,6 +186,7 @@ describe('MessageHandler machine registration', () => {
     const hostCapabilities = getHostMachineProtocolCapabilities();
     expect(registeredMeta.protocolCapabilities).toEqual({
       multiRepoProject: 1,
+      machineDiskStatus: 1,
       projectFileRoots: 1,
       projectRepositoryMembers: 1,
       projectFolderSelection: 1,
