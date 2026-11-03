@@ -67,6 +67,7 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     memberProfiles,
     children,
     onOpen,
+    onBack,
     memberManagement,
   }: {
     history: {
@@ -81,6 +82,7 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     memberProfiles?: ReadonlyMap<string, { name: string }>;
     children?: ReactNode;
     onOpen?: () => void;
+    onBack: () => void;
   }) => {
     fixture.management = memberManagement;
     return createElement(
@@ -106,7 +108,8 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
       children,
       onOpen
         ? createElement('button', { 'data-open-workspace': true, onClick: onOpen }, 'open')
-        : null
+        : null,
+      createElement('button', { 'data-back': true, 'aria-label': 'back', onClick: onBack })
     );
   },
 }));
@@ -127,6 +130,7 @@ import {
   readObservedLedgerCheckpoint,
 } from '../src/lib/e2ee-workspace-storage';
 import { Route } from '../src/routes/workspace/e2ee/$workspaceId';
+import { writePreferredWorkspaceSlug } from '../src/lib/workspace';
 import { useE2eeAccountId } from '../src/lib/e2ee-account';
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -331,16 +335,62 @@ it.each([
       'missing-binding',
       'closed',
     ].includes(code);
+    // No binding on this device means it never joined: the page asks for approval.
     expect(container.querySelector('[data-control-state]')?.textContent).toBe(
-      availability && !mismatch ? '1' : 'failed'
+      availability && !mismatch
+        ? code === 'missing-binding'
+          ? 'approval-required'
+          : '1'
+        : 'failed'
     );
-    if (!mismatch && ['custody_unavailable', 'missing-binding', 'corrupt'].includes(code))
+    if (code === 'missing-binding')
+      expect(container.textContent).not.toContain('e2ee.identity.lostTitle');
+    if (!mismatch && ['custody_unavailable', 'corrupt'].includes(code))
       expect(container.textContent).toContain(
         code === 'custody_unavailable' ? 'e2ee.identity.lockedTitle' : 'e2ee.identity.lostTitle'
       );
     expect(fetched).toEqual(availability ? ['describe'] : []);
   }
 );
+
+// A desktop that never joined this workspace (the phone created it) has no local
+// identity binding here. Its next step is approval from another device, never the
+// "local identity is unavailable" recovery with its archive-and-reset actions.
+it('guides a desktop that never joined this workspace to approval instead of identity recovery', async () => {
+  fixture.port = {
+    create: async () => {
+      throw new Error('unused');
+    },
+    describe: async () => ({
+      workspaceId,
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash,
+      cryptoOrgId: genesisHash,
+      activation: 'control-only',
+    }),
+    history: async () => ({
+      workspaceId,
+      genesisHash,
+      checkpoint: { headHash: genesisHash, length: 1 },
+      startIndex: 0,
+      recordsHex: [raw],
+      position: local.status.position!,
+      nextCursor: null,
+    }),
+    runtime: {
+      open: async () => {
+        throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
+      },
+      close: async () => {},
+      status: async () => local.status,
+    },
+  } as unknown as PlatformE2eeWorkspaces;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
+  expect(container.textContent).not.toContain('e2ee.identity.lostTitle');
+});
 
 it('opens the local ledger with an expired renderer snapshot and offline main identity, then reconnects', async () => {
   fixture.session.status = 'loading';
@@ -804,6 +854,62 @@ it('offers the routed workspace only after a successful approved host open', asy
   expect(fixture.navigation).toEqual([
     { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
   ]);
+});
+
+// "Workspaces" must lead to the workspaces the account already has. The create
+// route is where a mobile account at its plan limit has no way forward, and this
+// workspace's own chat route would hand an unopened encrypted workspace straight
+// back to this page.
+it.each([
+  [
+    'another ordinary workspace',
+    [{ id: 'workspace-team', slug: 'team', name: 'Team', role: 'owner' }],
+    { to: '/$workspaceName/chat', params: { workspaceName: 'team' } },
+  ],
+  [
+    'only encrypted workspaces',
+    [
+      {
+        id: 'workspace-other',
+        slug: 'other-vault',
+        name: 'Vault',
+        role: 'owner',
+        contentMode: 'e2ee',
+      },
+    ],
+    { to: '/workspace/create', search: { allowExisting: true } },
+  ],
+])('returns "Workspaces" to the account\'s workspaces with %s', async (_, others, target) => {
+  fixture.workspaces = {
+    status: 'ready',
+    activeWorkspaceId: workspaceId,
+    workspaces: [
+      {
+        id: workspaceId,
+        slug: 'protected-home',
+        name: 'Protected',
+        role: 'owner',
+        contentMode: 'e2ee',
+      },
+      ...others,
+    ],
+  };
+  // The just-created encrypted workspace is also the remembered one.
+  writePreferredWorkspaceSlug('protected-home');
+  fixture.port = displayPort(async () => [] as never);
+  fixture.port.runtime = {
+    open: async () => local.status,
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    recordCreated: async () => {
+      throw new PersonalHostError({ code: 'unsupported' });
+    },
+    close: async () => {},
+  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-back]')!.click());
+  expect(fixture.navigation).toEqual([target]);
 });
 
 it('shows verified history during a slow or failed directory and recovers labels on refresh', async () => {

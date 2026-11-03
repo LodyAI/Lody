@@ -131,6 +131,10 @@ const PAIRING_REFUSALS = new Set([
   'pairing-tampered',
   'pairing-expired',
   'pairing-used',
+  // Relay refusals the new device explains: switched off on this deployment, or
+  // too many new requests this hour.
+  'pairing-unavailable',
+  'pairing-rate-limited',
   'invalid-input'
 ])
 function sender() {

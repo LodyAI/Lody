@@ -12,6 +12,7 @@ import {
   E2eeAccountPairingApprove,
   E2eeAccountPairingRequest,
 } from '../src/components/pages/e2ee-account-pairing';
+import { withAccountPairingCode } from '../src/lib/e2ee-account-pairing-ipc';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -130,6 +131,25 @@ describe('new device request', () => {
     await tick();
     expect(joined).toBe(1);
   });
+
+  // Desktop IPC carries only the message; the reason must survive to the screen
+  // instead of a generic "Pairing failed".
+  it.each(['pairing-unavailable', 'pairing-rate-limited'])(
+    'explains a relay refusal (%s) from the desktop host',
+    async (code) => {
+      const host = requesterHost();
+      host.runtime.requestAccountPairing = () =>
+        withAccountPairingCode(Promise.reject(new Error(`e2ee_${code}`)));
+      await act(async () =>
+        root.render(
+          <E2eeAccountPairingRequest runtime={host.runtime} autoStart onJoined={() => {}} />
+        )
+      );
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+        `e2ee.accountPair.error.${code}`
+      );
+    }
+  );
 
   it('on Web asks before creating any request', async () => {
     const host = requesterHost();

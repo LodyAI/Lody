@@ -3503,3 +3503,122 @@ void test(
     assert.ok(!JSON.stringify(f.logs).includes(submitted.requestId))
   }
 )
+
+const e2eeIpcDependencies = (runtime, sender, recordMethod = () => {}) => ({
+  '../ipc-service-deps': { getIpcServiceDeps: () => ({ cliService: {} }) },
+  'electron-ipc-decorator': {
+    IpcService: class {},
+    IpcMethod: () => (_target, name, descriptor) => {
+      recordMethod(name)
+      return descriptor
+    },
+    getIpcContext: () => ({ event: { sender } })
+  },
+  '../../platform': { isLocalPlatform: () => false },
+  '../../services/e2ee-bootstrap.mjs': {},
+  '../../services/e2ee-account-runtime': runtime,
+  '../assert-sender': { assertProductWindowSender: () => {} }
+})
+
+void test('preload admits every renderer-facing E2EE IPC method', async () => {
+  // Preload lists the E2EE methods it admits; every `@IpcMethod()` must be on it,
+  // or the renderer cannot call a method the product already uses (#2204 shipped
+  // the account pairing methods without it).
+  const methods = []
+  await load(
+    '../ipc/services/e2ee-ipc.ts',
+    e2eeIpcDependencies({}, new EventEmitter(), (name) => methods.push(name))
+  )
+  assert.ok(methods.includes('requestAccountPairing'))
+  assert.deepEqual(
+    methods.filter((method) => !isIpcInvokeChannel(`e2ee.${method}`)),
+    []
+  )
+})
+
+/** Another device (the phone) created an encrypted workspace under this account;
+ * this desktop has never opened anything. Account pairing runs through the real
+ * IPC service, account runtime, custody and journals, as production wires them. */
+async function newDesktopAccountPairing(t, pairingSubmit) {
+  const phone = await nativeAccountFixture(t)
+  const created = await createAccountWorkspace(phone.api, 'workspace')
+  const genesisHash = created.creation.genesisHashHex
+  const ledgerPage = async () => {
+    const ledger = await phone.api.withDesktopE2eeAccount(
+      (owner) => owner.host.ledgerView('workspace'),
+      'workspace'
+    )
+    return {
+      workspaceId: 'workspace',
+      genesisHash,
+      startIndex: 0,
+      recordsHex: ledger.recordsHex,
+      checkpoint: { length: ledger.status.length, headHash: ledger.status.headHash },
+      position: `p1:workspace:${ledger.status.length}:source-${ledger.status.length}:0`,
+      nextCursor: null
+    }
+  }
+  const desktop = await nativeAccountFixture(t)
+  const client = {
+    accountIdentity: () => Effect.succeed({ accountId: 'account', cryptoUserId: 'aa'.repeat(32) }),
+    history: () => Effect.promise(ledgerPage),
+    pairingSubmit,
+    pairingClaim: () => Effect.succeed({ status: 'pending', approvals: [] })
+  }
+  const sender = Object.assign(new EventEmitter(), { id: 31 })
+  const { E2eeIpc } = await load(
+    '../ipc/services/e2ee-ipc.ts',
+    e2eeIpcDependencies(
+      {
+        ...desktop.api,
+        desktopE2eeCloudClient: async () => ({ accountId: 'account', client }),
+        desktopAccountPairingDatabase: (accountId) =>
+          join(desktop.directory, `account-pairing-${accountId}.sqlite`)
+      },
+      sender
+    )
+  )
+  const ipc = new E2eeIpc()
+  const hints = [{ workspaceId: 'workspace', name: 'Phone workspace', genesisHash }]
+  return { ipc, hints, genesisHash }
+}
+
+void test('a brand-new desktop gets a pairing code for a workspace another device created', async (t) => {
+  const submitted = []
+  const { ipc, hints, genesisHash } = await newDesktopAccountPairing(t, (request) =>
+    Effect.sync(() => {
+      submitted.push(request)
+      return {
+        requestId: 'request-1',
+        status: 'pending',
+        deviceName: request.deviceName,
+        approximateLocation: null,
+        requestedAt: Date.now(),
+        expiresAt: request.expiresAt
+      }
+    })
+  )
+  // The renderer first asks for a retained request, then starts one.
+  assert.equal(await ipc.accountPairingRequest(hints), null)
+  const state = await ipc.requestAccountPairing({}, hints)
+  assert.equal(state.status, 'waiting')
+  assert.match(state.pairingString, /\S/)
+  assert.deepEqual(state.workspaces, [
+    { workspaceId: 'workspace', name: 'Phone workspace', state: 'pending' }
+  ])
+  assert.deepEqual(
+    submitted.map((request) => request.workspaces),
+    [[{ workspaceId: 'workspace', genesisHash }]]
+  )
+})
+
+for (const code of ['pairing-unavailable', 'pairing-rate-limited'])
+  void test(`a relay refusal (${code}) reaches the new desktop's UI with its reason`, async (t) => {
+    const refusal = Object.assign(new Error('synthetic private relay cause'), { code })
+    const { ipc, hints } = await newDesktopAccountPairing(t, () => Effect.fail(refusal))
+    await assert.rejects(ipc.requestAccountPairing({}, hints), (error) => {
+      assert.equal(error.message, `e2ee_${code}`)
+      assert.equal(ipc.pairingFailure, refusal)
+      return true
+    })
+  })
