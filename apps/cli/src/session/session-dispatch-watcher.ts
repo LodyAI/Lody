@@ -870,6 +870,11 @@ export class SessionDispatchWatcher {
     return null;
   }
 
+  /** Forget a stashed RPC offer whose input was withdrawn before it started. */
+  discardRpcTurn(sessionId: SessionId, userTurnId: string): void {
+    this.consumeStashedRpcTurn(sessionId, userTurnId);
+  }
+
   private consumeStashedRpcTurn(sessionId: SessionId, userTurnId: string): void {
     const stash = this.rpcTurnStash.get(sessionId);
     if (!stash) {

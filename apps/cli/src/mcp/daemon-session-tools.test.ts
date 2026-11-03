@@ -1174,6 +1174,116 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(list).toHaveBeenCalledTimes(1);
   });
 
+  it('resolves short Session ids, reports ambiguous prefixes and filters by pull request', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), name, args)
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+    const base = (await manager.repo.getDocMeta(getSessionRoomId(sessionId)))!.meta as SessionMeta;
+    const seed = async (id: string, extra: Partial<SessionMeta>) => {
+      await manager.repo.upsertDocMeta(getSessionRoomId(id as SessionId), {
+        ...base,
+        id: id as SessionId,
+        ...extra,
+      });
+    };
+    await seed('prefixunique-1111', {
+      title: 'Fix sharing',
+      branchName: 'fix/sharing',
+      pullRequests: [{ url: 'https://github.com/LodyAI/Lody/pull/4094', status: 'open' }],
+    });
+    await seed('prefixdup-aaaa', { title: 'First' });
+    await seed('prefixdup-bbbb', { title: 'Second' });
+
+    const status = await call('lody_session_status_many', {
+      sessionIds: ['prefixuniq', 'prefixdup'],
+    });
+    expect(status.isError, status.text).toBe(false);
+    expect(JSON.parse(status.text).items).toEqual([
+      expect.objectContaining({ ok: true, sessionId: 'prefixunique-1111' }),
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ code: 'SESSION_ID_AMBIGUOUS' }),
+      }),
+    ]);
+    expect(JSON.stringify(JSON.parse(status.text).items[1])).toContain('prefixdup-bbbb');
+
+    const history = await call('lody_session_history', { sessionId: 'prefixdup' });
+    expect(history.isError).toBe(true);
+    expect(history.text).toContain('SESSION_ID_AMBIGUOUS');
+
+    for (const pullRequest of [
+      { number: 4094 },
+      { url: 'https://github.com/lodyai/lody/pull/4094/' },
+    ]) {
+      const listed = await call('lody_session_list', { pullRequest });
+      expect(listed.isError, listed.text).toBe(false);
+      expect(JSON.parse(listed.text).items).toEqual([
+        expect.objectContaining({ id: 'prefixunique-1111', branch: 'fix/sharing' }),
+      ]);
+    }
+    const none = await call('lody_session_list', { pullRequest: { number: 409 } });
+    expect(JSON.parse(none.text).items).toEqual([]);
+  });
+
+  it('lists queued inputs and leaves them untouched when the target daemon cannot withdraw', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), name, args)
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+    const targetId = await manager.createSession(machineId, 'custom', 'claude');
+    const doc = await manager.getOrCreateSessionDoc(targetId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'queued-1',
+      role: 'user',
+      status: 'pending',
+      author: { v: 1, kind: 'agent', sessionId, turnId: 'synthetic-turn', name: 'Codex' },
+      timestamp: '2026-11-03T01:00:00.000Z',
+      items: [{ type: 'text', text: 'Also run the edge-case suite before reporting.' }],
+      fileDiff: [],
+    } as never);
+
+    const listed = await call('lody_session_queue', { action: 'list', sessionId: targetId });
+    expect(listed.isError, listed.text).toBe(false);
+    expect(JSON.parse(listed.text).items).toEqual([
+      expect.objectContaining({
+        userTurnId: 'queued-1',
+        own: true,
+        sender: { kind: 'agent', sessionId },
+        preview: 'Also run the edge-case suite before reporting.',
+      }),
+    ]);
+
+    // The daemon fixture advertises no withdrawal capability, like an older release.
+    const withdrawn = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(JSON.parse(withdrawn.text)).toMatchObject({ outcome: 'error' });
+    const read = await backend.history.readTurn('queued-1');
+    expect(read.state === 'ready' ? read.turn.status : undefined).toBe(
+      JSON.parse(listed.text).items[0].status
+    );
+  });
+
   it('binds daemon workspace resolution to the daemon identity and workspace', async () => {
     const list = vi.spyOn(workspaceApi, 'listWorkspacesForToken');
     const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };

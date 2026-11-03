@@ -118,6 +118,61 @@ const source = (overrides: Partial<DiscoverySource> = {}): DiscoverySource => ({
 });
 
 describe('resource discovery across MCP and CLI', () => {
+  it('reports quota windows and opt-in machine resources without failing on an unavailable machine', async () => {
+    const discovery = new ResourceDiscovery(
+      source({
+        rateLimits: async (id) =>
+          id === 'one'
+            ? {
+                weekly: {
+                  limitId: 'weekly',
+                  scope: { providerId: 'codex' },
+                  windows: [
+                    { usedPercent: 40, windowDurationSeconds: 3600, resetsAtEpochSeconds: null },
+                    {
+                      usedPercent: 100,
+                      windowDurationSeconds: 604800,
+                      resetsAtEpochSeconds: 1_793_000_000,
+                    },
+                  ],
+                },
+              }
+            : Promise.reject(new Error('Synthetic flock read failure')),
+        onlineMachineIds: async () => new Set(['one', 'two'] as MachineId[]),
+        machineResources: async (target) => {
+          if (target.id === 'two') throw new Error('Synthetic RPC timeout');
+          return { disk: { totalGB: 100, freeGB: 1, usedPercent: 99 } };
+        },
+      })
+    );
+    const plain = await discovery.list('machine', {});
+    expect(plain.items).toEqual([
+      expect.objectContaining({
+        id: 'one',
+        quota: [
+          expect.objectContaining({ provider: 'codex', usedPercent: 100, exhausted: true }),
+          expect.objectContaining({ usedPercent: 40, exhausted: false }),
+        ],
+      }),
+      expect.not.objectContaining({ quota: expect.anything() }),
+    ]);
+    expect(plain.items[0]).not.toHaveProperty('resources');
+    expect(plain.items[0]?.quota).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ resetsAt: new Date(1_793_000_000_000).toISOString() }),
+      ])
+    );
+
+    const withResources = await discovery.list('machine', { includeResources: true });
+    expect(withResources.items).toEqual([
+      expect.objectContaining({
+        id: 'one',
+        resources: { disk: expect.objectContaining({ freeGB: 1 }) },
+      }),
+      expect.objectContaining({ id: 'two', resources: 'unavailable' }),
+    ]);
+  });
+
   it('marks unconfirmed catalogs as syncing instead of inventing missing configurations or capabilities', async () => {
     const readiness = {
       metadata: true,
