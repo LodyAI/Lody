@@ -244,6 +244,59 @@ describe('Schedule worker handoff', () => {
     expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
     expect(h.store.unfinished('workspace')[0]?.scheduledFor).toBe(60_000);
   });
+  it('defers one run until the agent quota resets and skips the rest of the outage', async () => {
+    const h = harness();
+    let resetAt: number | undefined = 200_000;
+    h.ports.capacityRetryAt = async () => resetAt;
+    await h.engine.evaluate();
+    expect(h.ports.dispatch).not.toHaveBeenCalled();
+    const deferred = h.store.unfinished('workspace')[0]!;
+    expect(deferred).toMatchObject({
+      state: 'retry_wait',
+      retryAt: 200_000,
+      errorCode: 'CAPACITY_EXHAUSTED',
+    });
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({ queueState: 'blocked', blockedCode: 'CAPACITY_EXHAUSTED' })
+    );
+
+    // A later slot during the same exhaustion is skipped rather than queued behind it.
+    h.time(120_000);
+    await h.engine.evaluate();
+    expect(h.ports.dispatch).not.toHaveBeenCalled();
+    expect(
+      h.store
+        .history('workspace', 'schedule')
+        .filter((run) => run.state === 'skipped')
+        .map((run) => run.errorCode)
+    ).toEqual(['CAPACITY_EXHAUSTED']);
+
+    // After the reset the deferred run dispatches once; capacity is no longer reported exhausted.
+    resetAt = undefined;
+    h.time(200_000);
+    await h.engine.evaluate();
+    expect(
+      h.store.history('workspace', 'schedule').find((run) => run.runKey === deferred.runKey)
+    ).toMatchObject({ state: 'dispatched' });
+  });
+  it('dispatches as usual when capacity is unknown or cannot be read', async () => {
+    const h = harness();
+    h.ports.capacityRetryAt = async () => {
+      throw new Error('Synthetic capacity ledger failure');
+    };
+    await h.engine.evaluate();
+    expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
+  });
+  it('skips a run whose quota resets only after its dispatch window', async () => {
+    const h = harness();
+    h.ports.capacityRetryAt = async () => 60_000 + 86_400_000;
+    await h.engine.evaluate();
+    expect(h.ports.dispatch).not.toHaveBeenCalled();
+    expect(h.store.history('workspace', 'schedule')[0]).toMatchObject({
+      state: 'skipped',
+      errorCode: 'CAPACITY_EXHAUSTED',
+    });
+  });
   it('does not hand off a preparation that outlives its dispatch deadline', async () => {
     const h = harness();
     h.ports.materialize = vi.fn(async () => {

@@ -1128,6 +1128,9 @@ export class LodyFleet {
                 return automation.dispatchQuotaSchedule(run, prepared);
               },
               hasSessionTurnWork: (sessionId) => startedLody.hasAutomationTurnWork(sessionId),
+              // Without the automation owner, capacity is unknown and runs dispatch as usual.
+              capacityRetryAt: async (run) =>
+                await this.runtimes.get(workspace.id)?.automations?.capacityRetryAt(run),
             });
         stopSchedules = schedules.dispose;
         const automationsSupported = workspaceSupports(

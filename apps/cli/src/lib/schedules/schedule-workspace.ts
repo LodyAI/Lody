@@ -78,6 +78,10 @@ export async function createScheduleWorkspace(args: {
   ) => Promise<'dispatched' | 'discarded'>;
   /** Message admission: only work that occupies the chat's own Turns. */
   hasSessionTurnWork: (sessionId: SessionId) => boolean;
+  /** Quota reset time for a definitively exhausted agent binding; see ScheduleEnginePorts. */
+  capacityRetryAt?: (
+    run: import('./schedule-store').ScheduleRun<PreparedSessionInput>
+  ) => Promise<number | undefined>;
 }): Promise<ScheduleWorkspaceHandle> {
   const { manager, workspace, auth } = args;
   const workspaceId = workspace.id as WorkspaceId;
@@ -155,6 +159,7 @@ export async function createScheduleWorkspace(args: {
     });
   };
   const engine = new ScheduleEngine<PreparedSessionInput>({
+    ...(args.capacityRetryAt ? { capacityRetryAt: args.capacityRetryAt } : {}),
     workspaceId,
     machineId: auth.machineId,
     userId: auth.userId,
