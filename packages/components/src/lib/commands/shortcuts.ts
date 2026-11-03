@@ -32,6 +32,7 @@ export type ShortcutCommandId =
   | 'session.switchToTab7'
   | 'session.switchToTab8'
   | 'session.switchToLastTab'
+  | `session.selectVisible${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
   | 'session.previousVisible'
   | 'session.nextVisible'
   | 'session.cycleMode'
@@ -43,6 +44,10 @@ export type ShortcutCommandId =
 type CommandKeybindings = Array<string | KeyBinding>;
 
 const electron = (key: string): KeyBinding => ({ key, runtimes: ['electron'] });
+const secondaryNumber = (digit: number): KeyBinding[] => [
+  { key: `Ctrl+${digit}`, platforms: ['mac'], runtimes: ['electron'] },
+  { key: `Alt+${digit}`, platforms: ['win', 'linux', 'unknown'], runtimes: ['electron'] },
+];
 const web = (key: string): KeyBinding => ({ key, runtimes: ['web'] });
 const whileComposerFocused = (key: string): KeyBinding => ({
   key,
@@ -105,6 +110,16 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'session.switchToTab7': [electron('Mod+7')],
   'session.switchToTab8': [electron('Mod+8')],
   'session.switchToLastTab': [electron('Mod+9')],
+  'session.selectVisible1': secondaryNumber(1),
+  'session.selectVisible2': secondaryNumber(2),
+  'session.selectVisible3': secondaryNumber(3),
+  'session.selectVisible4': secondaryNumber(4),
+  'session.selectVisible5': secondaryNumber(5),
+  'session.selectVisible6': secondaryNumber(6),
+  'session.selectVisible7': secondaryNumber(7),
+  'session.selectVisible8': secondaryNumber(8),
+  'session.selectVisible9': secondaryNumber(9),
+
   // ⇧Tab cycles the agent mode while the composer is focused. The other cyclers ship
   // WITHOUT a default binding — they're rebindable from the keyboard settings page.
   'session.cycleMode': [whileComposerFocused('Shift+Tab')],

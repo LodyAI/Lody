@@ -6108,5 +6108,19 @@
   "e2ee.create.savedRequest": "Continuing your last creation",
   "e2ee.create.discardConfirmTitle": "Discard saved creation request?",
   "e2ee.create.discardConfirmDescription": "This removes the only saved request for this workspace on this device. It cannot be undone.",
-  "e2ee.create.discardConfirmAction": "Discard request"
+  "e2ee.create.discardConfirmAction": "Discard request",
+  "commands.session.selectVisible1": "Select Chat 1",
+  "commands.session.selectVisible2": "Select Chat 2",
+  "commands.session.selectVisible3": "Select Chat 3",
+  "commands.session.selectVisible4": "Select Chat 4",
+  "commands.session.selectVisible5": "Select Chat 5",
+  "commands.session.selectVisible6": "Select Chat 6",
+  "commands.session.selectVisible7": "Select Chat 7",
+  "commands.session.selectVisible8": "Select Chat 8",
+  "commands.session.selectVisible9": "Select Chat 9",
+  "settings.keyboardShortcuts.numbers.title": "Number shortcuts",
+  "settings.keyboardShortcuts.numbers.tabs": "{{keys}} switch tabs",
+  "settings.keyboardShortcuts.numbers.chats": "{{keys}} select chats",
+  "settings.keyboardShortcuts.numbers.custom": "Custom",
+  "settings.keyboardShortcuts.numbers.helper": "Use {{primary}} for the selected group and {{secondary}} for the other. Chats follow visible sidebar order; tab 9 selects the last tab. Choosing a preset replaces both groups’ bindings."
 }

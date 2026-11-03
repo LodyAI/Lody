@@ -6097,5 +6097,19 @@
   "e2ee.create.savedRequest": "正在继续上次的创建",
   "e2ee.create.discardConfirmTitle": "放弃已保存的创建请求？",
   "e2ee.create.discardConfirmDescription": "这会删除本机为这个工作区保存的唯一创建请求，且无法撤销。",
-  "e2ee.create.discardConfirmAction": "放弃请求"
+  "e2ee.create.discardConfirmAction": "放弃请求",
+  "commands.session.selectVisible1": "选择聊天 1",
+  "commands.session.selectVisible2": "选择聊天 2",
+  "commands.session.selectVisible3": "选择聊天 3",
+  "commands.session.selectVisible4": "选择聊天 4",
+  "commands.session.selectVisible5": "选择聊天 5",
+  "commands.session.selectVisible6": "选择聊天 6",
+  "commands.session.selectVisible7": "选择聊天 7",
+  "commands.session.selectVisible8": "选择聊天 8",
+  "commands.session.selectVisible9": "选择聊天 9",
+  "settings.keyboardShortcuts.numbers.title": "数字快捷键",
+  "settings.keyboardShortcuts.numbers.tabs": "{{keys}} 切换标签页",
+  "settings.keyboardShortcuts.numbers.chats": "{{keys}} 选择聊天",
+  "settings.keyboardShortcuts.numbers.custom": "自定义",
+  "settings.keyboardShortcuts.numbers.helper": "使用 {{primary}} 切换所选分组，{{secondary}} 切换另一分组。聊天按侧边栏可见顺序排列；标签页 9 选择最后一页。选择预设会替换这两组快捷键。"
 }

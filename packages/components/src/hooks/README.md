@@ -288,6 +288,13 @@ A session switch renders synchronously for longer than the key repeat interval, 
 held shortcut would otherwise queue renders nobody sees. The one-navigation-per-
 painted-frame rule is a frame budget, not a time-based debounce.
 
+Numbered chat commands read the current visible sidebar order at key time, sharing
+that frame budget with sequential navigation. Positions beyond the visible list do
+nothing. Desktop Keyboard settings swaps the two number groups using the existing
+per-device command overrides; individual edits show the preset as Custom. The default
+keeps Mod+1–9 on tabs and uses Control on macOS (Alt elsewhere) for chats. Tab 9 retains
+its last-tab behavior; chat 9 selects the ninth visible chat.
+
 ## `use-lody-live-activity.ts`
 
 `atoms/doc-meta` republishes the session and agent-config arrays once per flushed

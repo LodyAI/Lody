@@ -1,3 +1,4 @@
+import { NUMBERED_CHAT_COMMANDS } from './number-shortcuts';
 import { commands } from './registry';
 import { getCommandPaletteOpen, setCommandPaletteOpen } from './palette-state';
 import { getCommandKeybindings, type ShortcutCommandId } from './shortcuts';
@@ -21,6 +22,7 @@ type BuiltInCommandDefinition = {
 // carry a `titleKey` (not a pre-translated string) because this module registers outside
 // React and can't call `t()` — display surfaces translate via the key instead.
 const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
+  ...NUMBERED_CHAT_COMMANDS,
   {
     id: 'nav.back',
     titleKey: 'commands.nav.back',

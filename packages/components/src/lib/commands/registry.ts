@@ -252,12 +252,15 @@ class CommandRegistry {
    * the override (back to declared defaults). Passing `[]` explicitly unbinds.
    */
   setUserKeybindings(id: string, bindings: string[] | null): void {
+    this.setUserKeybindingsBatch({ [id]: bindings });
+  }
+
+  /** Apply a shortcut preset in one persistence/dispatch update. */
+  setUserKeybindingsBatch(overrides: Record<string, string[] | null>): void {
     this.ensureUserOverridesLoaded();
-    if (bindings === null) {
-      if (!(id in this.userOverrides)) return;
-      delete this.userOverrides[id];
-    } else {
-      this.userOverrides[id] = [...bindings];
+    for (const [id, bindings] of Object.entries(overrides)) {
+      if (bindings === null) delete this.userOverrides[id];
+      else this.userOverrides[id] = [...bindings];
     }
     saveUserBindings(this.userOverrides);
     this.rebuildBindings();

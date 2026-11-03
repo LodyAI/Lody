@@ -8,6 +8,8 @@ import {
 } from '@/atoms/focus-layer';
 import { toggleNavigationSidebarAtom } from '@/atoms/layout-state';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
+import { commands, getRuntime } from '@/lib/commands';
+import { NUMBERED_CHAT_COMMANDS } from '@/lib/commands/number-shortcuts';
 import { useFocusScopeSwitcher } from '@/ui/focus-scope';
 import { useIsMobile } from './use-mobile';
 
@@ -144,6 +146,42 @@ export function useKeyboardNavigation(): void {
     },
     [abandonBurst, claimBurstTarget, flushSessionNavigation, getCallbacks, getVisibleSessionIds]
   );
+
+  useEffect(() => {
+    const disposers = NUMBERED_CHAT_COMMANDS.map((definition) =>
+      commands.register({
+        ...definition,
+        keybindings: getCommandKeybindings(definition.id),
+        allowInTextInput: true,
+        when: () =>
+          !isMobile &&
+          getRuntime() === 'electron' &&
+          !isPopupOpen() &&
+          getCallbacks() !== null &&
+          getVisibleSessionIds()[definition.index] !== undefined,
+        run: () => {
+          const callbacks = getCallbacks();
+          const sessionIds = getVisibleSessionIds();
+          const target = sessionIds[definition.index];
+          if (!callbacks || !target) return;
+          // Share the frame budget with sequential navigation. A direct jump
+          // replaces the queued destination instead of replaying the burst.
+          if (claimBurstTarget(sessionIds) === null) abandonBurst();
+          if (target === callbacks.getSelectedSessionId() && frameRef.current === null) return;
+          pendingSessionRef.current = target;
+          if (frameRef.current === null) flushSessionNavigation();
+        },
+      })
+    );
+    return () => disposers.forEach((dispose) => dispose());
+  }, [
+    abandonBurst,
+    claimBurstTarget,
+    flushSessionNavigation,
+    getCallbacks,
+    getVisibleSessionIds,
+    isMobile,
+  ]);
 
   useFocusScopeSwitcher({ enabled: !isMobile });
 

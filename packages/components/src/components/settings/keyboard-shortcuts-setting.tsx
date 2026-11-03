@@ -11,6 +11,9 @@ import {
   type GlobalShortcutId,
   type GlobalShortcutSetError,
 } from '@lody/shared';
+import { Select } from '@lody/ui/select';
+import { isMac } from '@/lib/commands/platform';
+import { getNumberShortcutTarget, setNumberShortcutTarget } from '@/lib/commands/number-shortcuts';
 import { Button } from '@lody/ui/button';
 import {
   canonicalizeBinding,
@@ -103,6 +106,16 @@ const ROW_MARKER = stylex.props(stylex.defaultMarker()).className;
 export function KeyboardShortcutsSetting() {
   const { t } = useTranslation();
   const all = useCommands();
+  const numberTarget = getNumberShortcutTarget();
+  const primary = formatKeyBinding('Mod+1').replace('1', '1–9');
+  const secondary = formatKeyBinding(`${isMac() ? 'Ctrl' : 'Alt'}+1`).replace('1', '1–9');
+  const numberOptions = [
+    { value: 'tabs', label: t('settings.keyboardShortcuts.numbers.tabs', { keys: primary }) },
+    { value: 'chats', label: t('settings.keyboardShortcuts.numbers.chats', { keys: primary }) },
+    ...(numberTarget === 'custom'
+      ? [{ value: 'custom', label: t('settings.keyboardShortcuts.numbers.custom') }]
+      : []),
+  ];
 
   const grouped = useMemo(() => {
     const groups = new Map<CommandCategory, Command[]>();
@@ -166,6 +179,40 @@ export function KeyboardShortcutsSetting() {
           key={category}
           title={t(`settings.keyboardShortcuts.category.${category}`, { defaultValue: category })}
         >
+          {category === 'Navigation' && getRuntime() === 'electron' && (
+            <CompactRow
+              label={t('settings.keyboardShortcuts.numbers.title')}
+              labelId="number-shortcuts-label"
+              helper={t('settings.keyboardShortcuts.numbers.helper', { primary, secondary })}
+              helperId="number-shortcuts-helper"
+            >
+              <Select.Root
+                items={numberOptions}
+                value={numberTarget}
+                onValueChange={(value) => {
+                  if (value === 'tabs' || value === 'chats') setNumberShortcutTarget(value);
+                }}
+              >
+                <Select.Trigger
+                  aria-labelledby="number-shortcuts-label"
+                  aria-describedby="number-shortcuts-helper"
+                >
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {numberOptions.map((option) => (
+                    <Select.Item
+                      key={option.value}
+                      value={option.value}
+                      disabled={option.value === 'custom'}
+                    >
+                      {option.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            </CompactRow>
+          )}
           {items.map((cmd) => (
             <ShortcutRow
               key={cmd.id}
