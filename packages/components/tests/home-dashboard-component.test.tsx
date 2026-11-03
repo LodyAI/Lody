@@ -214,8 +214,11 @@ describe('HomeDashboard', () => {
       const attention = q('[data-now-column="left"] [data-testid="home-now-attention"]')!;
       expect(attention.textContent).toBe('Needs you0');
       expect(attention.querySelectorAll('[data-session]')).toHaveLength(0);
-      const running = q('[data-now-column="right"] [data-testid="home-now-running"]')!;
+      // Running takes the left column with needs you — the arrangement that leaves those two
+      // columns level here — and just finished stays on the right under worth continuing.
+      const running = q('[data-now-column="left"] [data-testid="home-now-running"]')!;
       expect(running.querySelectorAll('[data-session]')).toHaveLength(4);
+      expect(q('[data-now-column="right"]')?.contains(byTestId('home-now-finished')!)).toBe(true);
       // "Show all" under the last row: an action, not a session.
       const toggle = byTestId('home-now-running-toggle')!;
       expect(toggle.textContent).toBe('Show all 6');
@@ -227,9 +230,10 @@ describe('HomeDashboard', () => {
       const all = byTestId('home-now-running-all')!;
       expect(all.querySelectorAll('[data-session]')).toHaveLength(6);
       expect(byTestId('home-now')?.getAttribute('data-focus')).toBe('running');
-      expect(q('[data-now-column="right"]')?.contains(all)).toBe(true);
+      expect(q('[data-now-column="left"]')?.contains(all)).toBe(true);
       expect(running.closest('[inert]')).not.toBeNull();
-      expect(attention.closest('[inert]')).toBeNull();
+      expect(attention.closest('[inert]')).not.toBeNull();
+      expect(byTestId('home-now-next')?.closest('[inert]')).toBeNull();
       const back = byTestId('home-now-back')!;
       expect(document.activeElement).toBe(back);
       expect(back.textContent).toBe('Show less');
@@ -291,11 +295,11 @@ describe('HomeDashboard', () => {
       render({ rows, defaultBoard: 'now', stage: { height: 2000, rest: 100 } });
       expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(6);
 
-      // Room for six rows a column (182px of board): needs you keeps one row and its "Show all"
-      // over just finished's title, and running, in the other column, the same.
-      render({ rows, defaultBoard: 'now', stage: { height: 340, rest: 100 } });
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(1);
-      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      // Room for ten rows a column (262px of board): needs you takes the left column alone and
+      // shows seven of its nine, and running, just finished and worth continuing share the right.
+      render({ rows, defaultBoard: 'now', stage: { height: 420, rest: 100 } });
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(7);
+      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(3);
       expect(byTestId('home-now-running-toggle')).not.toBeNull();
       expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(false);
 
@@ -334,10 +338,13 @@ describe('HomeDashboard', () => {
         stage: { height: 492, rest: 60 },
       });
 
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(5);
+      // One row a list: three tiles in the left column leave six of the twelve rows to their
+      // heads and their "Show all" lines, and worth continuing levels the right column up to it.
+      // The counts stay in the line above, and each tile opens its whole list on a press.
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(1);
       expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(1);
       expect(byTestId('home-now-finished')?.querySelectorAll('[data-session]')).toHaveLength(1);
-      expect(byTestId('home-now-next')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      expect(byTestId('home-now-next')?.querySelectorAll('[data-session]')).toHaveLength(5);
       expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(false);
     });
 

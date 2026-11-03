@@ -10,13 +10,18 @@ import {
 } from '../src/lib/home-now';
 import { parseHomeBoard, serializeHomeBoard } from '../src/lib/home-board';
 import {
+  HOME_NOW_ARRANGEMENTS,
+  HOME_NOW_COLUMN,
   HOME_NOW_LISTS,
   HOME_NOW_ROW_BUDGET,
   HOME_NOW_ROW_CAP,
+  HOME_NOW_SWITCH_MARGIN,
   HOME_NOW_TALLEST_COLUMN,
   allocateHomeNowRows,
   homeNowBlockHeight,
   layoutHomeNow,
+  solveHomeNowColumn,
+  type HomeNowColumn,
   type HomeNowLayout,
   type HomeNowTotals,
 } from '../src/lib/home-now-layout';
@@ -188,21 +193,22 @@ describe("spending the board's height", () => {
   });
 
   it('keeps every list in its own place, the columns level', () => {
-    // Needs you and just finished on the left, the usage, running and worth continuing on the
-    // right. The left ends two rows short (13 of 15), so just finished shows two more of its own
-    // rows rather than leaving a band.
+    // Needs you over running over just finished on the left, the usage over worth continuing on
+    // the right: the reached cap (running's four rows at this budget) and the fixed usage card
+    // are what the other column levels against, so the left ends on the right's line.
     expect(shape(layoutHomeNow(totals(30, 10, 8, 6), true))).toEqual([
-      ['attention:6', 'finished:3'],
-      ['usage', 'running:4', 'next:1'],
+      ['attention:6', 'running:4', 'finished:1'],
+      ['usage', 'next:6'],
     ]);
     // A list with nothing keeps its place as its title.
     expect(shape(layoutHomeNow(totals(1, 1, 0, 0), true))).toEqual([
-      ['attention:1', 'finished:0'],
-      ['usage', 'running:1', 'next:0'],
+      ['attention:1', 'running:1', 'finished:0'],
+      ['usage', 'next:0'],
     ]);
   });
 
-  it('never moves a list to another column, whatever the others hold', () => {
+  it('draws the arrangement it is given, whatever the others hold', () => {
+    expect(HOME_NOW_COLUMN).toEqual({ attention: 0, running: 0, finished: 0, next: 1 });
     const sizes = [0, 1, 3, 9, 40];
     const columnOf = (layout: ReturnType<typeof layoutHomeNow>) =>
       Object.fromEntries(
@@ -222,12 +228,117 @@ describe("spending the board's height", () => {
                 expect(columnOf(layout)).toEqual({});
                 continue;
               }
-              expect(columnOf(layout)).toEqual({ attention: 0, finished: 0, running: 1, next: 1 });
+              expect(columnOf(layout)).toEqual(HOME_NOW_COLUMN);
             }
   });
 
+  it('places the lists so the board levels against a ruler, the best of the eight', () => {
+    // The state the page sits in: nothing waiting on the person, worth continuing over its cap
+    // (so its tile is a fixed 2 + 3 + 1 rows, no matter what the backlog holds). With the usage
+    // card beside it, that column is ten rows — and needs you, running and just finished, none of
+    // them capped here, are all on the other side to be levelled against it one row at a time.
+    const family: HomeNowTotals[] = [];
+    for (let running = 0; running <= HOME_NOW_ROW_CAP.running + 1; running += 1)
+      for (let finished = 0; finished <= HOME_NOW_ROW_CAP.finished + 1; finished += 1)
+        for (let next = HOME_NOW_ROW_CAP.next + 1; next <= HOME_NOW_ROW_CAP.next + 5; next += 1)
+          family.push(totals(0, running, finished, next));
+    const gapIn = (arrangement: HomeNowColumn) => {
+      const heights = family.map((given) =>
+        layoutHomeNow(given, true, Infinity, arrangement).columns.map((column) =>
+          column.reduce((sum, block) => sum + homeNowBlockHeight(block, given), 0)
+        )
+      );
+      const gaps = heights.map(([left, right]) => Math.abs(left! - right!));
+      return {
+        mean: gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length,
+        worst: Math.max(...gaps),
+        ruler: new Set(heights.filter(([left]) => left! <= 10).map(([, right]) => right)),
+      };
+    };
+
+    const chosen = gapIn(HOME_NOW_COLUMN);
+    expect(chosen.ruler).toEqual(new Set([10]));
+    expect(chosen.worst).toBe(5);
+    expect(chosen.mean).toBeLessThan(1.2);
+
+    // The other seven anchored arrangements, each measured the same way: none is even close.
+    const free = ['running', 'finished', 'next'] as const;
+    for (let mask = 0; mask < 8; mask += 1) {
+      const arrangement: Record<string, 0 | 1> = { attention: 0 };
+      free.forEach((key, index) => {
+        arrangement[key] = ((mask >> index) & 1) as 0 | 1;
+      });
+      const same = free.every((key) => arrangement[key] === HOME_NOW_COLUMN[key]);
+      if (same) continue;
+      expect(gapIn(arrangement as HomeNowColumn).mean).toBeGreaterThan(chosen.mean + 1);
+    }
+  });
+
+  it('speaks with the arrangement it had unless another is two rows more level', () => {
+    const gapOf = (given: HomeNowTotals, column: HomeNowColumn) =>
+      Math.abs(
+        layoutHomeNow(given, true, Infinity, column)
+          .columns.map((columnBlocks) =>
+            columnBlocks.reduce((sum, block) => sum + homeNowBlockHeight(block, given), 0)
+          )
+          .reduce((left, right) => left - right)
+      );
+
+    // Running joining needs you on the left would leave one row less than the arrangement on
+    // show: one row is rounding, not a reason for a tile to change sides.
+    const nearly = totals(2, 5, 0, 5);
+    expect(gapOf(nearly, HOME_NOW_COLUMN)).toBe(2);
+    expect(gapOf(nearly, { attention: 0, running: 0, finished: 1, next: 1 })).toBe(1);
+    expect(solveHomeNowColumn(nearly, true, Infinity, HOME_NOW_COLUMN)).toEqual(HOME_NOW_COLUMN);
+
+    // The day the arrangement was never meant for: thirteen waiting and six just finished, one
+    // worth continuing. Every list but the anchors on the left leaves ten rows; running joining
+    // needs you on the left leaves none.
+    const mirror = totals(10, 0, 6, 1);
+    expect(gapOf(mirror, HOME_NOW_COLUMN)).toBe(10);
+    expect(solveHomeNowColumn(mirror, true, Infinity, HOME_NOW_COLUMN)).toEqual({
+      attention: 0,
+      running: 0,
+      finished: 1,
+      next: 1,
+    });
+    expect(gapOf(mirror, { attention: 0, running: 0, finished: 1, next: 1 })).toBe(0);
+
+    // And back again when the day turns: from the mirror's arrangement, a backlog and a couple of
+    // running sessions put the level one back.
+    const back = totals(0, 3, 1, 10);
+    expect(
+      solveHomeNowColumn(back, true, Infinity, { attention: 0, running: 0, finished: 1, next: 1 })
+    ).toEqual(HOME_NOW_COLUMN);
+  });
+
+  it('never leaves more than the margin above the best arrangement of that state', () => {
+    for (const a of [0, 1, 4, 7])
+      for (const r of [0, 1, 3, 5])
+        for (const f of [0, 1, 3, 4])
+          for (const n of [0, 1, 4, 8]) {
+            const given = totals(a, r, f, n);
+            const gapIn = (column: HomeNowColumn) =>
+              Math.abs(
+                layoutHomeNow(given, true, Infinity, column)
+                  .columns.map((blocks) =>
+                    blocks.reduce((sum, block) => sum + homeNowBlockHeight(block, given), 0)
+                  )
+                  .reduce((left, right) => left - right)
+              );
+            const best = Math.min(...HOME_NOW_ARRANGEMENTS.map(gapIn));
+            for (const previous of HOME_NOW_ARRANGEMENTS) {
+              const solved = solveHomeNowColumn(given, true, Infinity, previous);
+              expect(HOME_NOW_ARRANGEMENTS).toContainEqual(solved);
+              expect(gapIn(solved)).toBeLessThanOrEqual(best + HOME_NOW_SWITCH_MARGIN);
+            }
+          }
+  });
+
   it('keeps the tallest column any lists can make for the board', () => {
-    expect(HOME_NOW_TALLEST_COLUMN).toBe(17);
+    // Needs you in one column and the usage in the other, at their tallest: the columns never
+    // pass this, whatever the lists hold.
+    expect(HOME_NOW_TALLEST_COLUMN).toBe(21);
     for (const hasUsage of [false, true])
       for (const a of [0, 1, 6, 40])
         for (const r of [0, 1, 4, 40])
@@ -242,15 +353,15 @@ describe("spending the board's height", () => {
               }
   });
 
-  it('gives way to a short window, lower lists first, and says when one row each is too tall', () => {
+  it('gives way to a short window, lower lists first, and says when one row each is tall', () => {
     // Twelve rows per column: the budget shrinks until the taller column fits.
     const short = layoutHomeNow(totals(30, 10, 8, 6), true, 12);
     expect(short.fits).toBe(true);
     expect(shape(short)).toEqual([
-      ['attention:5', 'finished:1'],
-      ['usage', 'running:1', 'next:1'],
+      ['attention:1', 'running:1', 'finished:1'],
+      ['usage', 'next:6'],
     ]);
-    // One row each, with its "Show all", is twelve tall at the right; eleven has no room for it.
+    // One row each, with its "Show all", is twelve tall in the left column; eleven has no room.
     expect(layoutHomeNow(totals(30, 10, 8, 6), true, 11).fits).toBe(false);
     expect(layoutHomeNow(totals(30, 10, 8, 6), true).fits).toBe(true);
   });
