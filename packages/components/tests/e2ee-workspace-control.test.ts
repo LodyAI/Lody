@@ -2,7 +2,7 @@ import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Result } from 'effect';
 import { ClientCustodyError } from '@lody/e2ee-core/services';
-
+import { PersonalHostError } from '@lody/e2ee-client';
 import {
   encodeCbor,
   hashRecordBytes,

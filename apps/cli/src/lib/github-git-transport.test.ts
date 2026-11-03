@@ -395,10 +395,4 @@ process.exit(child.status ?? 1);
       expect(fs.readFileSync(target, 'utf8')).toBe('existing helper\n');
     }
   );
-
-  describe('exec-path probe resilience', () => {
-    const markerPath = () => path.join(directory, 'lody-git-transport.json');
-    const spawnError = (code: string) =>
-      Object.assign(new Error(`spawnSync git ${code}`), { code });
-  });
 });

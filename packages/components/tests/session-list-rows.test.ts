@@ -1,10 +1,18 @@
-import { getEffectiveSessionActivitySummary as getTaskActivitySummary, mapSessionMetaToTaskListTask } from '../src/components/sessions/session-tasklist-mapping';
+import {
+  getEffectiveSessionActivitySummary as getTaskActivitySummary,
+  mapSessionMetaToTaskListTask,
+} from '../src/components/sessions/session-tasklist-mapping';
 import { getSessionGitHubState } from '../src/lib/session-github-state';
 import { describe, expect, test } from 'vitest';
 
 import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/shared';
 
-import { buildChildSessionsByParent, buildSessionListRows, selectSidebarTaskSessions, getEffectiveSessionActivitySummary } from '../src/components/sessions/session-list-rows';
+import {
+  buildChildSessionsByParent,
+  buildSessionListRows,
+  selectSidebarTaskSessions,
+  getEffectiveSessionActivitySummary,
+} from '../src/components/sessions/session-list-rows';
 
 const machineId = 'machine-1' as MachineId;
 
@@ -38,9 +46,6 @@ function makeSession(overrides: Partial<SessionMeta> & { id: string }): SessionM
     ...overrides,
   } as SessionMeta;
 }
-
-describe('getEffectiveLatestMessageAt', () => {
-});
 
 describe('buildSessionListRows child-time aggregation', () => {
   test("parent task's latestMessageAt reflects the most recent child activity", () => {
@@ -171,7 +176,6 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
 });
 
 describe('buildSessionListRows repo + PR mapping', () => {
-
   test('keeps all pull request URLs and statuses on the sidebar row', () => {
     const pullRequests = [
       { url: 'https://github.com/example/one/pull/42', status: 'open' as const },
@@ -242,7 +246,6 @@ describe('buildSessionListRows repo + PR mapping', () => {
 });
 
 describe('buildSessionListRows opened-by provenance', () => {
-
   test('a parentSessionId child keeps its own child aggregation and is not confused with an opened session', () => {
     // The sidebar never receives child sessions (they are filtered upstream by
     // `sessionListAtom`), but a child that also carries `openedBySessionId`
