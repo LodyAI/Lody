@@ -1,3 +1,4 @@
+import { LedgerFeedInvalidation } from '@lody/e2ee-core/services';
 import { Effect, Result, Fiber, Exit, Scope } from 'effect';
 import { makeLedgerStreamReader } from '@lody/e2ee-core/adapters/loro-streams';
 import Database from 'better-sqlite3';
@@ -163,6 +164,72 @@ describe('verified ledger increments without known-record skipping', () => {
 });
 
 describe('durable full-history feed boundary', () => {
+  it('retires a RAM grant on verified publication, without retiring it on transport-only progress', async () => {
+    const f = envelopeFixture(),
+      dir = mkdtempSync(path.join(tmpdir(), 'ledger-invalidation-'));
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            let grantCurrent = true;
+            const feed = yield* makeSqliteLedgerFeed({
+              path: path.join(dir, 'feed.sqlite'),
+              mode: 'create',
+              genesis: f.context.genesis,
+              genesisRecord: f.genesisRecord,
+              expected: { head: hashRecordBytes(f.genesisRecord), length: 1 },
+              budget: { maxRecords: 100, maxBytes: 100000 },
+            }).pipe(
+              Effect.provideService(LedgerFeedInvalidation, {
+                invalidate: () => {
+                  grantCurrent = false;
+                },
+              })
+            );
+            yield* feed.accept(
+              {
+                requestOffset: '-1',
+                nextOffset: 'opaque/genesis',
+                records: [f.genesisRecord],
+                upToDate: false,
+              },
+              { head: hashRecordBytes(f.genesisRecord), length: 1 }
+            );
+            expect(grantCurrent).toBe(true);
+            const unchanged = (yield* feed.current()).view;
+            const refused = yield* Effect.result(
+              feed.accept(
+                {
+                  requestOffset: 'opaque/genesis',
+                  nextOffset: 'opaque/bad',
+                  records: [new Uint8Array(8)],
+                  upToDate: true,
+                },
+                { head: f.view().head, length: 2 }
+              )
+            );
+            expect(Result.isFailure(refused)).toBe(true);
+            expect(grantCurrent).toBe(true);
+            expect((yield* feed.current()).view.head.equals(unchanged.head)).toBe(true);
+            const accepted = yield* feed.accept(
+              {
+                requestOffset: 'opaque/genesis',
+                nextOffset: 'opaque/device',
+                records: f.records().slice(1),
+                upToDate: true,
+              },
+              { head: f.view().head, length: f.view().length }
+            );
+            expect(accepted.view.head.equals(f.view().head)).toBe(true);
+            expect(grantCurrent).toBe(false);
+          })
+        )
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // These cover the Web Crypto fallback used when WebAssembly is unavailable.
   beforeAll(() => setEd25519WasmEnabled(false));
   afterAll(() => setEd25519WasmEnabled(true));

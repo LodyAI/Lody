@@ -31,6 +31,7 @@ an older ledger.
 | [`RecoveryVaultStore`](#recoveryvaultstore) | Backend | your vault storage client | `RecoveryVaults` |
 | [`WorkspaceScope`](#workspacescope) | Application | `Layer.succeed(WorkspaceScope, { genesis })` | everything |
 | [`LedgerViewSource`](#ledgerviewsource) | Application | `LedgerFeed.viewSource`, or your own verified view | `VerifiedLedger` |
+| [`LedgerFeedInvalidation`](#ledgerfeedinvalidation) | Application (optional) | workspace RAM-cache owner | `LedgerFeed` verified publication |
 | [`EpochPublicationSource`](#epochpublicationsource) | Application | lookup of the current epoch's publication record | `KeyDistributor` |
 | [`LedgerSync`](#ledgersync) | Application | your feed sync (`LedgerFeedSource` pages → `LedgerFeed.accept`, checkpoint chosen independently) | `WorkspaceControl`, `E2eeWorkspace` |
 | `RecoveryVaultLocalStore` | Local storage | a local key/value store with compare-and-swap | `RecoveryVaults` |
@@ -194,6 +195,15 @@ These are synthetic compatibility checks, not native custody or IDB acceptance.
 
 `{ genesis }`: the workspace this composition serves. Every store and workflow
 binds itself to it; a store created for another workspace is refused.
+
+### LedgerFeedInvalidation
+
+Optional workspace-scoped `invalidate(): void`. Capture this port when building
+`LedgerFeed` to retire dependent RAM grants synchronously after durable append,
+in the same non-yielding segment that publishes a changed verified head/count.
+It must neither throw nor start I/O. Unchanged heads, cursor-only progress and
+rejected pages do not call it. It grants no authority and changes no ledger format;
+hosts without a dependent RAM cache need not provide it.
 
 ### LedgerViewSource
 

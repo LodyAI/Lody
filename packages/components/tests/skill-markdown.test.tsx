@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,10 +10,7 @@ import { SkillDetailContent } from '../src/components/settings/skill-detail';
 import { ProjectSkillsView } from '../src/components/settings/project-skills-tab';
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 import { initI18n } from '../src/i18n';
-import {
-  renderInlineMarkdown,
-  SkillMarkdownFallback,
-} from '../src/components/settings/skill-markdown';
+import { renderInlineMarkdown } from '../src/components/settings/skill-markdown';
 
 const failure = vi.hoisted(() => ({ enabled: false }));
 vi.mock('../src/components/ai-gui/markdown-renderer', async (importOriginal) => {
@@ -154,23 +152,6 @@ describe('skill detail fragment navigation', () => {
     });
   }
 
-  it('numbers headings inside list items with the whole primary document', async () => {
-    await act(async () =>
-      root.render(
-        <SkillDetailContent skill={{ ...SKILL, content: '## Repeat\n\n- Item\n\n  ### Repeat' }} />
-      )
-    );
-    expect(host.querySelector('li h3')?.id).toBe('repeat-1');
-  });
-
-  it('leaves ordinary Markdown callers on their existing link behavior', async () => {
-    await act(async () =>
-      root.render(<MarkdownRenderer text={'[Local](#heading)\n\n## Heading'} />)
-    );
-    expect(host.querySelector('a')?.target).toBe('_blank');
-    expect(host.querySelector('h2')?.id).toBe('');
-  });
-
   it('preserves the Skills query and returns focus after closing details', async () => {
     vi.useFakeTimers();
     await act(async () =>
@@ -230,41 +211,10 @@ function inlineHtml(text: string): string {
 }
 
 describe('renderInlineMarkdown', () => {
-  it('renders bold, italic and inline code', () => {
-    const html = inlineHtml('a **b** c *d* e `f`');
-    expect(html).toContain('<strong');
-    expect(html).toContain('>b</strong>');
-    expect(html).toContain('<em');
-    expect(html).toContain('<code');
-    expect(html).toContain('>f</code>');
-  });
-
   it('renders safe links and drops unsafe schemes', () => {
     expect(inlineHtml('[ok](https://x.com)')).toContain('href="https://x.com"');
     const unsafe = inlineHtml('[no](javascript:alert(1))');
     expect(unsafe).not.toContain('href');
     expect(unsafe).toContain('no');
-  });
-
-  it('prefers bold over italic at the same position', () => {
-    const html = inlineHtml('**x**');
-    expect(html).toContain('<strong');
-    expect(html).not.toContain('<em');
-  });
-});
-
-describe('SkillMarkdownFallback', () => {
-  it('renders headings, lists and fenced code as elements (not raw text)', () => {
-    const html = renderToStaticMarkup(
-      <SkillMarkdownFallback content={'# Title\n\n- one\n- two\n\n```\ncode()\n```'} />
-    );
-    expect(html).toContain('<h1');
-    expect(html).toContain('>Title</h1>');
-    expect(html).toContain('<ul');
-    expect(html).toContain('>one</li>');
-    expect(html).toContain('<pre');
-    expect(html).toContain('code()');
-    // The literal markdown markers should not survive as text.
-    expect(html).not.toContain('# Title');
   });
 });

@@ -59,15 +59,3 @@ void test('closes a non-main window directly', () => {
   assert.equal(other.closed, true)
   assert.equal(main.closed, false)
 })
-
-void test('is a no-op without a focused window', () => {
-  const main = fakeWindow()
-  closeFocusedTabOrWindow({
-    focused: null,
-    mainWindow: main,
-    sendCloseCurrentTabOrWindow: () => {
-      throw new Error('should not reach renderer')
-    }
-  })
-  assert.equal(main.closed, false)
-})

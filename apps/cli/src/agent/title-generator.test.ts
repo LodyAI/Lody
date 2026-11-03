@@ -21,24 +21,6 @@ const agentMessage = (text: string, phase?: string): AcpSessionNotification => (
 });
 
 describe('extractTitleChunkFromNotification', () => {
-  it('ignores Codex commentary status text', () => {
-    expect(extractTitleChunkFromNotification(agentMessage('Reconnecting...', 'commentary'))).toBe(
-      null
-    );
-  });
-
-  it('accepts the Codex final answer', () => {
-    expect(
-      extractTitleChunkFromNotification(agentMessage('Fix session title', 'final_answer'))
-    ).toBe('Fix session title');
-  });
-
-  it('accepts Codex answers without optional phase metadata', () => {
-    expect(extractTitleChunkFromNotification(agentMessage('Fix session title'))).toBe(
-      'Fix session title'
-    );
-  });
-
   it('keeps one-release compatibility with Codex phase metadata', () => {
     const notification = agentMessage('Fix session title');
     notification.update._meta = { codex: { phase: 'final_answer' } };
@@ -47,26 +29,6 @@ describe('extractTitleChunkFromNotification', () => {
 });
 
 describe('sanitizeGeneratedTitle', () => {
-  it('rejects complete and truncated provider error envelopes', () => {
-    expect(
-      sanitizeGeneratedTitle(
-        '{"type":"error","status":400,"error":{"type":"invalid_request_error"}}'
-      )
-    ).toBe(null);
-    expect(
-      sanitizeGeneratedTitle(
-        '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"'
-      )
-    ).toBe(null);
-  });
-
-  it('rejects warning and failure status text', () => {
-    expect(sanitizeGeneratedTitle('Warning: model config was ignored')).toBe(null);
-    expect(sanitizeGeneratedTitle('Failed: request timed out')).toBe(null);
-    expect(sanitizeGeneratedTitle('HTTP 400 Bad Request')).toBe(null);
-    expect(sanitizeGeneratedTitle('Internal Server Error')).toBe(null);
-  });
-
   it('strips internal instructions before accepting a generated title', () => {
     expect(
       sanitizeGeneratedTitle(

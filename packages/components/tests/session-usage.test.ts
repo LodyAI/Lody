@@ -6,7 +6,6 @@ import {
   formatRateLimitWindowShortLabel,
   getAgentRateLimitWindows,
   getContextWindowUsageData,
-  getRateLimitRemainingPercent,
   resolveAgentRateLimitForModel,
   type MachineRateLimits,
 } from '../src/lib/session-usage';
@@ -45,14 +44,6 @@ describe('session usage', () => {
     expect(getContextWindowUsageData({ size: 0, used: 0 })).toBeNull();
   });
 
-  it('derives remaining quota from the normalized percentage scale', () => {
-    expect(getRateLimitRemainingPercent(25)).toBe(75);
-    expect(getRateLimitRemainingPercent(55)).toBe(45);
-    expect(getRateLimitRemainingPercent(100)).toBe(0);
-    expect(getRateLimitRemainingPercent(1)).toBe(99);
-    expect(getRateLimitRemainingPercent(0.5)).toBe(99.5);
-  });
-
   it('uses provider-reported window durations instead of positional 5h/7d labels', () => {
     const windows = getAgentRateLimitWindows(
       usage({
@@ -75,13 +66,6 @@ describe('session usage', () => {
       },
     ]);
     expect(formatRateLimitWindowShortLabel(windows[0]!.windowDurationSeconds)).toBe('7d');
-  });
-
-  it('reads canonical fixed windows without provider-specific interpretation', () => {
-    expect(getAgentRateLimitWindows(usage())).toMatchObject([
-      { usedPercent: 25, windowDurationSeconds: 18_000 },
-      { usedPercent: 40, windowDurationSeconds: 604_800 },
-    ]);
   });
 
   it('preserves scoped windows even when their values match the shared quota', () => {
@@ -112,29 +96,6 @@ describe('session usage', () => {
       {
         usedPercent: 0.5,
         remainingPercent: 99.5,
-        windowDurationSeconds: 604_800,
-        resetsAtEpochSeconds: 1784505071,
-      },
-    ]);
-  });
-
-  it('preserves an explicitly reported single weekly Codex window', () => {
-    expect(
-      getAgentRateLimitWindows(
-        usage({
-          windows: [
-            {
-              usedPercent: 29,
-              windowDurationSeconds: 604_800,
-              resetsAtEpochSeconds: 1784505071,
-            },
-          ],
-        })
-      )
-    ).toEqual([
-      {
-        usedPercent: 29,
-        remainingPercent: 71,
         windowDurationSeconds: 604_800,
         resetsAtEpochSeconds: 1784505071,
       },

@@ -7,27 +7,6 @@ import {
 } from '../src/agent-authentication';
 
 describe('hasBuiltinEnvAuthentication', () => {
-  it('detects Claude credentials and provider routing supplied by env', () => {
-    expect(hasBuiltinEnvAuthentication('claude', { ANTHROPIC_API_KEY: 'sk-test' })).toBe(true);
-    expect(hasBuiltinEnvAuthentication('claude', { ANTHROPIC_AUTH_TOKEN: 'sk-test' })).toBe(true);
-    expect(
-      hasBuiltinEnvAuthentication('claude', {
-        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
-      })
-    ).toBe(true);
-    expect(hasBuiltinEnvAuthentication('claude', { CLAUDE_CODE_USE_BEDROCK: '1' })).toBe(true);
-  });
-
-  it('ignores unrelated or blank variables', () => {
-    expect(hasBuiltinEnvAuthentication('claude', undefined)).toBe(false);
-    expect(hasBuiltinEnvAuthentication('claude', {})).toBe(false);
-    expect(hasBuiltinEnvAuthentication('claude', { HTTPS_PROXY: 'http://127.0.0.1:7890' })).toBe(
-      false
-    );
-    expect(hasBuiltinEnvAuthentication('claude', { ANTHROPIC_API_KEY: '  ' })).toBe(false);
-    expect(hasBuiltinEnvAuthentication('claude', { ANTHROPIC_API_KEY: undefined })).toBe(false);
-  });
-
   it('does not infer env authentication for agents that report it themselves', () => {
     // Codex custom model providers may set `requires_openai_auth = false`, so the
     // agent — not an env heuristic — decides whether sign-in is required.

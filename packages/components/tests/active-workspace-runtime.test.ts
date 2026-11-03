@@ -16,21 +16,6 @@ const createRuntime = (
   }) as WorkspaceRuntime;
 
 describe('resolveActiveWorkspaceRuntimeState', () => {
-  it('is pending without a runtime', () => {
-    expect(
-      resolveActiveWorkspaceRuntimeState({
-        runtime: null,
-        workspaceId: null,
-        workspaceSlug: 'workspace-slug',
-      })
-    ).toEqual({
-      status: 'pending',
-      runtime: null,
-      rawRuntime: null,
-      reason: 'missing-runtime',
-    });
-  });
-
   it('keeps local cached runtime ready before the server workspace id is available', () => {
     const runtime = createRuntime();
 

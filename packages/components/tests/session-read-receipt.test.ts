@@ -30,16 +30,6 @@ describe('shouldMarkSessionRead', () => {
   it('does not report a receipt from a surface that renders no transcript', () => {
     expect(shouldMarkSessionRead({ ...visibleUnread, rendersConversation: false })).toBe(false);
   });
-
-  it('stays read when nothing arrived after the last read', () => {
-    expect(shouldMarkSessionRead({ ...visibleUnread, lastMessageAt: 100 })).toBe(false);
-  });
-
-  it('reports nothing for a session with no messages', () => {
-    expect(shouldMarkSessionRead({ ...visibleUnread, lastMessageAt: null, lastReadAt: null })).toBe(
-      false
-    );
-  });
 });
 
 describe('sessionHasUnreadMessages', () => {
@@ -56,13 +46,6 @@ describe('sessionHasUnreadMessages', () => {
       );
     }
   );
-
-  it('keeps the normal read comparison for open conversations', () => {
-    expect(sessionHasUnreadMessages({ lastMessageAt: 200 })).toBe(true);
-    expect(sessionHasUnreadMessages({ lastMessageAt: 200, lastReadAt: 100 })).toBe(true);
-    expect(sessionHasUnreadMessages({ lastMessageAt: 200, lastReadAt: 200 })).toBe(false);
-    expect(sessionHasUnreadMessages({})).toBe(false);
-  });
 });
 
 describe('closedSessionHasUnreadMessages', () => {

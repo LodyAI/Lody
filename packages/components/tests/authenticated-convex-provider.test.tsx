@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+/** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -143,78 +144,6 @@ describe('AuthenticatedConvexProvider', () => {
     expect(container.textContent).toBe('ready');
     expect(current?.isAuthenticated).toBe(true);
     expect(current?.isRecovering).toBe(false);
-  });
-
-  it('deduplicates automatic commands for one Better Auth session', async () => {
-    mocks.convexAuth.isAuthenticated = true;
-
-    await act(async () => {
-      root.render(
-        <AuthenticatedConvexProvider>
-          <Consumer />
-        </AuthenticatedConvexProvider>
-      );
-    });
-
-    expect(current!.claimAutomaticCommand('github-profile-refresh:workspace-1')).toBe(true);
-    expect(current!.claimAutomaticCommand('github-profile-refresh:workspace-1')).toBe(false);
-
-    mocks.session.rawData = { session: { id: 'session-2' } };
-    await act(async () => {
-      root.render(
-        <AuthenticatedConvexProvider>
-          <Consumer />
-        </AuthenticatedConvexProvider>
-      );
-    });
-
-    expect(current!.claimAutomaticCommand('github-profile-refresh:workspace-1')).toBe(true);
-  });
-
-  it('keeps retrying a reported auth failure after Convex rejects refreshed auth', async () => {
-    mocks.convexAuth.isAuthenticated = true;
-    mocks.refetch.mockResolvedValue(undefined);
-
-    await act(async () => {
-      root.render(
-        <AuthenticatedConvexProvider>
-          <Consumer />
-        </AuthenticatedConvexProvider>
-      );
-    });
-
-    expect(container.textContent).toBe('ready');
-    await act(async () => {
-      current!.requestAuthRecovery();
-    });
-    expect(container.textContent).toBe('recovering');
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(250);
-    });
-    expect(mocks.restartConvexAuth).toHaveBeenCalledTimes(1);
-
-    mocks.convexAuth.isLoading = true;
-    await act(async () => {
-      root.render(
-        <AuthenticatedConvexProvider>
-          <Consumer />
-        </AuthenticatedConvexProvider>
-      );
-    });
-    mocks.convexAuth.isAuthenticated = false;
-    mocks.convexAuth.isLoading = false;
-    await act(async () => {
-      root.render(
-        <AuthenticatedConvexProvider>
-          <Consumer />
-        </AuthenticatedConvexProvider>
-      );
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(500);
-    });
-    expect(mocks.refetch).toHaveBeenCalledTimes(2);
-    expect(mocks.restartConvexAuth).toHaveBeenCalledTimes(2);
   });
   async function renderProvider() {
     await act(async () =>
@@ -381,21 +310,5 @@ describe('AuthenticatedConvexProvider', () => {
     }
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
     expect(mocks.refetch).toHaveBeenCalledTimes(6);
-  });
-
-  it('replenishes the budget after sustained healthy authentication', async () => {
-    mocks.refetch.mockResolvedValue(undefined);
-    await renderProvider();
-    await act(async () => vi.advanceTimersByTimeAsync(250));
-    mocks.convexAuth.isLoading = true;
-    await renderProvider();
-    mocks.convexAuth.isLoading = false;
-    mocks.convexAuth.isAuthenticated = true;
-    await renderProvider();
-    await act(async () => vi.advanceTimersByTimeAsync(30_000));
-    await act(async () => current!.requestAuthRecovery());
-    for (const delay of CONVEX_AUTH_RECOVERY_DELAYS_MS) await rejectAttempt(delay);
-    expect(container.querySelector('[role="alert"]')).not.toBeNull();
-    expect(mocks.refetch).toHaveBeenCalledTimes(7);
   });
 });

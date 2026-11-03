@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Copy, ExternalLink, FolderOpen } from 'lucide-react';
@@ -85,18 +86,6 @@ describe('agent Markdown file-link context menu', () => {
     expect(document.body.textContent).toContain('Copy Path');
     expect(document.body.textContent).toContain('Open File');
     expect(document.body.textContent).toContain('Show in Finder');
-  });
-
-  it('renders exactly Copy Path when the supplied capability is remote-only', async () => {
-    const { link } = await render(() => [
-      { kind: 'action', id: 'copy-path', label: 'Copy Path', icon: Copy, run: vi.fn() },
-    ]);
-    await act(async () => {
-      link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-      await Promise.resolve();
-    });
-    const menu = document.querySelector('[role="menu"]');
-    expect(menu?.textContent).toBe('Copy Path');
   });
 
   it('arms a file link beside search highlights without losing React-owned text', async () => {

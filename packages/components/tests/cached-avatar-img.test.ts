@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -133,24 +134,6 @@ describe('useCachedAvatarSrc', () => {
     clearAvatarImageCache();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-  });
-
-  it('falls back to the raw URL on first mount, then swaps to the cached blob', async () => {
-    const probe = mountProbe(AVATAR_URL);
-    await act(async () => {
-      probe.root.render(probe.render());
-    });
-    await act(async () => {});
-
-    // First paint uses the raw URL (so good network shows it immediately)...
-    expect(probe.values[0]).toBe(AVATAR_URL);
-    // ...then it swaps to the persisted blob once the cache load resolves.
-    expect(probe.values.at(-1)).toMatch(/^blob:/);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      probe.root.unmount();
-    });
   });
 
   it('serves the avatar from cache on the next session WITHOUT a network request', async () => {

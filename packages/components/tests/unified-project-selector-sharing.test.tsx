@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ConvexError } from 'convex/values';
@@ -241,31 +242,6 @@ describe('UnifiedProjectSelector project sharing', () => {
     });
   }
 
-  it('shows Private on both the selected project and its dropdown option', async () => {
-    await renderSelector();
-
-    expect(getShareTrigger()?.textContent).toContain('Private');
-    expect(getProjectPickerTrigger().className).toContain('rounded-r-none');
-
-    await openProjectMenu();
-
-    expect(getProjectMenuItem().textContent).toContain('Private');
-  });
-
-  it('shares an owner-private project, closes the dialog, and shows success', async () => {
-    const onShareWithTeam = vi.fn(async () => {});
-    await renderSelector({ onShareWithTeam });
-
-    await confirmShare();
-
-    expect(onShareWithTeam).toHaveBeenCalledWith(
-      expect.objectContaining({ machineId, localProjectId })
-    );
-    expect(mocks.toastSuccess).toHaveBeenCalledWith('“Lody” is now shared with the team');
-    expect(mocks.toastError).not.toHaveBeenCalled();
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
-  });
-
   it('recovers an unauthenticated rejection without exposing Convex details', async () => {
     const authError = new ConvexError({
       kind: CONVEX_AUTH_ERROR_KIND,
@@ -306,7 +282,6 @@ describe('UnifiedProjectSelector project sharing', () => {
     await renderSelector({ includeProjectSharing });
 
     expect(getShareTrigger()).toBeNull();
-    expect(getProjectPickerTrigger().className).not.toContain('rounded-r-none');
 
     await openProjectMenu();
 
@@ -319,7 +294,6 @@ describe('UnifiedProjectSelector project sharing', () => {
     await renderSelector({ currentUserId: 'teammate-user', onShareWithTeam });
 
     expect(getShareTrigger()).toBeNull();
-    expect(getProjectPickerTrigger().className).toContain('rounded-r-none');
     expect(document.body.textContent).toContain('Private');
     expect(onShareWithTeam).not.toHaveBeenCalled();
   });

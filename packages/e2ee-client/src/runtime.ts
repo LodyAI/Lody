@@ -207,6 +207,36 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
   const runtime: E2eeWorkspaceRuntime = {
     readerLeases: 'preallocated-v1',
     account: (input) => run(account(input)),
+    /** Purpose-limited admission signing for account pairing: ensure one approved
+     * reader, then expose only this session's existing accountApproval operations.
+     * No private key, generic signer or ordinary execution capability is added. */
+    accountApproval: () =>
+      run(
+        Effect.gen(function* () {
+          yield* guard(workspaceId);
+          if (!entry || entry.closing || !entry.readers.size) {
+            yield* Effect.tryPromise({
+              try: () => runtime.open(workspaceId, undefined, accountId, 'account-approval'),
+              catch: (cause) => cause,
+            });
+          }
+          const lease = entry;
+          if (!lease || lease.closing) return yield* fail('closed');
+          const approval = lease.session.accountApproval;
+          return {
+            device: toHex(lease.session.binding.device.toBytes()),
+            sign: (row: {
+              signingPublicKey: Uint8Array;
+              encryptionPublicKey: Uint8Array;
+              possessionProof: Uint8Array;
+            }) => run(approval.sign(row)),
+            settle: (record: Uint8Array) => run(approval.settle(record)),
+            invitation: (record: Uint8Array) => run(approval.invitation(record)),
+            access: () => run(approval.access()),
+            refresh: () => run(Effect.asVoid(lease.session.refresh())),
+          };
+        })
+      ),
     open: (id, supplied, expected, requestedOwner) => {
       const observed = supplied ? { ...supplied } : undefined;
       const readerOwner = requestedOwner ?? `${ownerId}:${++nextReader}`;

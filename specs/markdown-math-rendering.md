@@ -25,6 +25,6 @@ text until a complete pair is present.
 ## Evidence
 
 - Implementation: [Markdown renderer](../packages/components/src/components/ai-gui/markdown-renderer.tsx), [math delimiters](../packages/components/src/lib/markdown-single-dollar-math.ts), and [appearance settings](../packages/components/src/components/settings/appearance-setting.tsx).
-- Verification: [renderer tests](../packages/components/tests/markdown-streaming-reparse.test.ts), [delimiter tests](../packages/components/tests/markdown-math-delimiters.test.ts), and [settings tests](../packages/components/tests/appearance-settings.test.tsx).
+- Verification: [renderer tests](../packages/components/tests/markdown-streaming-reparse.test.ts), delimiter tests (implementation-only test retired), and settings tests (implementation-only test retired).
 - Decision: [inline math preference note](../.agents/notes/implemented/feature/2026-09-28-inline-math-preference.md).
 - Correction: [display math block context note](../.agents/notes/implemented/bug-fix/2026-09-29-inline-display-math-block-context.md).

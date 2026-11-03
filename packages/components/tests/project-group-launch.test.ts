@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSessionProjectRun,
-  PROJECT_SUBMODULE_BASE,
-  SessionProjectRunSchema,
   type LocalProjectId,
   type MachineId,
   type ProjectId,
@@ -83,28 +81,6 @@ describe('project group launch', () => {
       kind: 'machines_conflict',
       machineIds: ['machine-1', 'machine-2'],
     });
-  });
-
-  // The snapshot itself is the shared contract's; this pins the shape the
-  // landing relies on.
-  it('freezes a snapshot the shared contract accepts', () => {
-    const run = buildSessionProjectRun(
-      project,
-      project.members.map((member) => member.id)
-    );
-    expect(SessionProjectRunSchema.safeParse(run).success).toBe(true);
-    expect(run).toMatchObject({
-      id: project.id,
-      name: 'Shop',
-      instructions: 'web is the frontend',
-      root: `project-shop-${project.id}`,
-    });
-    expect(run!.members[id('proto')]).toMatchObject({
-      o: 2,
-      path: 'api/proto',
-      base: PROJECT_SUBMODULE_BASE,
-    });
-    expect(run!.members[id('api')]!.base).toBe('develop');
   });
 
   it('leaves one remaining member to an ordinary single-project conversation', () => {

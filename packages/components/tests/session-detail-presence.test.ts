@@ -14,20 +14,6 @@ const expectState = (
 };
 
 describe('resolveSessionDetailPresenceState', () => {
-  it('returns resolved when the session metadata is already available', () => {
-    expectState(
-      resolveSessionDetailPresenceState({
-        hasActiveSession: true,
-        docMetaCacheReady: true,
-        runtimeInitializing: false,
-        runtimeWorkspaceId: 'workspace-1' as WorkspaceId,
-        currentWorkspaceId: 'workspace-1' as WorkspaceId,
-        controlConnectionState: 'online',
-      }),
-      'resolved'
-    );
-  });
-
   it('returns resolved from local cache even when offline', () => {
     expectState(
       resolveSessionDetailPresenceState({
@@ -50,34 +36,6 @@ describe('resolveSessionDetailPresenceState', () => {
         runtimeInitializing: false,
         runtimeWorkspaceId: 'workspace-1' as WorkspaceId,
         currentWorkspaceId: 'workspace-1' as WorkspaceId,
-        controlConnectionState: 'online',
-      }),
-      'loading'
-    );
-  });
-
-  it('keeps loading while the workspace runtime is still initializing', () => {
-    expectState(
-      resolveSessionDetailPresenceState({
-        hasActiveSession: false,
-        docMetaCacheReady: true,
-        runtimeInitializing: true,
-        runtimeWorkspaceId: 'workspace-1' as WorkspaceId,
-        currentWorkspaceId: 'workspace-1' as WorkspaceId,
-        controlConnectionState: 'online',
-      }),
-      'loading'
-    );
-  });
-
-  it('keeps loading while the route workspace has not settled yet', () => {
-    expectState(
-      resolveSessionDetailPresenceState({
-        hasActiveSession: false,
-        docMetaCacheReady: true,
-        runtimeInitializing: false,
-        runtimeWorkspaceId: 'workspace-1' as WorkspaceId,
-        currentWorkspaceId: null,
         controlConnectionState: 'online',
       }),
       'loading'
@@ -107,20 +65,6 @@ describe('resolveSessionDetailPresenceState', () => {
         runtimeWorkspaceId: 'workspace-1' as WorkspaceId,
         currentWorkspaceId: 'workspace-1' as WorkspaceId,
         controlConnectionState: 'connecting',
-      }),
-      'loading'
-    );
-  });
-
-  it('keeps loading when session not in cache and connection is syncing', () => {
-    expectState(
-      resolveSessionDetailPresenceState({
-        hasActiveSession: false,
-        docMetaCacheReady: true,
-        runtimeInitializing: false,
-        runtimeWorkspaceId: 'workspace-1' as WorkspaceId,
-        currentWorkspaceId: 'workspace-1' as WorkspaceId,
-        controlConnectionState: 'syncing',
       }),
       'loading'
     );

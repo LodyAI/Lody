@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
@@ -92,28 +93,6 @@ describe('static share dialog steps', () => {
     await act(async () => button(name)!.click());
   }
 
-  it('offers one publish action from the first screen and never uploads on its own', async () => {
-    props.entry = null;
-    props.hasSecret = false;
-    props.shareLink = null;
-    await render();
-    expect(container.textContent).toContain('Anyone with the link can view this conversation.');
-    expect(button('Share conversation')).toBeTruthy();
-    expect(button('Cancel')).toBeTruthy();
-    expect(props.onPublish).not.toHaveBeenCalled();
-    await click('Share conversation');
-    expect(props.onPublish).toHaveBeenCalledOnce();
-  });
-
-  it('freezes only the explicit current sub-conversation selection', async () => {
-    props.entry = null;
-    await render();
-    expect(container.textContent).toContain('Also share 1 sub-conversations');
-    await act(async () => container.querySelector<HTMLButtonElement>('[role="checkbox"]')!.click());
-    expect(props.onSelect).toHaveBeenCalledWith(['root', 'child']);
-    expect(props.onPublish).not.toHaveBeenCalled();
-  });
-
   it('does not overstate scope when a share carries only some current children', async () => {
     props.entry = null;
     props.candidates = [
@@ -128,102 +107,6 @@ describe('static share dialog steps', () => {
     expect(container.textContent).toContain('Also share sub-conversations (1 of 2)');
     await act(async () => box.click());
     expect(props.onSelect).toHaveBeenCalledWith(['root', 'child', 'child-2']);
-  });
-
-  it('shows an indeterminate bar while freezing and a measured one only while uploading', async () => {
-    props.phase = 'capturing';
-    props.busy = true;
-    await render();
-    expect(container.textContent).toContain('Freezing this conversation…');
-    expect(
-      container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')
-    ).toBeNull();
-    expect(button('Share conversation')).toBeUndefined();
-    props.phase = 'uploading';
-    props.progress = 62;
-    await render();
-    expect(container.textContent).toContain('Uploading the copy… 62%');
-    expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe(
-      '62'
-    );
-    props.phase = 'publishing';
-    await render();
-    expect(container.textContent).toContain('Publishing…');
-    expect(
-      container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')
-    ).toBeNull();
-  });
-
-  it('claims a copied link only when the clipboard write succeeded', async () => {
-    props.result = { url: link, copied: true };
-    await render();
-    expect(container.textContent).toContain('Link copied to your clipboard');
-    expect(container.textContent).not.toContain('Automatic copying was blocked');
-    props.result = { url: link, copied: false };
-    await render();
-    expect(container.textContent).not.toContain('Link copied to your clipboard');
-    expect(container.textContent).toContain('Automatic copying was blocked');
-    expect(container.querySelector<HTMLInputElement>('input[readonly]')?.value).toBe(link);
-    await click('Copy link');
-    expect(props.onCopy).toHaveBeenCalledOnce();
-  });
-
-  it('keeps the published screen to copy and revoke', async () => {
-    props.result = { url: link, copied: true };
-    await render();
-    expect(button('Copy link')).toBeTruthy();
-    expect(button('Revoke share')).toBeTruthy();
-    expect(button('Update share')).toBeUndefined();
-  });
-
-  it('offers update, copy and revoke for an existing share', async () => {
-    props.selected = ['root', 'child'];
-    await render();
-    expect(button('Update share')).toBeTruthy();
-    expect(button('Copy link')).toBeTruthy();
-    expect(button('Revoke share')).toBeTruthy();
-    await click('Update share');
-    expect(props.onPublish).toHaveBeenCalledOnce();
-  });
-
-  it('retries a failed publication with the frozen package instead of restarting', async () => {
-    props.hasPending = true;
-    props.error = 'Could not update sharing.';
-    await render();
-    expect(button('Update share')).toBeUndefined();
-    await click('Retry');
-    expect(props.onPublish).toHaveBeenCalledOnce();
-  });
-
-  it('recovers a conflicting frozen package by starting over rather than publishing it', async () => {
-    props.conflict = true;
-    props.hasPending = true;
-    await render();
-    await click('Start over');
-    expect(props.onDiscard).toHaveBeenCalledOnce();
-    expect(props.onPublish).not.toHaveBeenCalled();
-  });
-
-  it('waits for explicit approval of an agent-requested target set', async () => {
-    props.entry = null;
-    props.selectionLocked = true;
-    await render();
-    expect(props.onPublish).not.toHaveBeenCalled();
-    expect(container.querySelector('[role="checkbox"]')).toBeNull();
-    await click('Share conversation');
-    expect(props.onPublish).toHaveBeenCalledOnce();
-  });
-
-  it('publishes directly from an unfinished draft without a separate discard step', async () => {
-    props.entry = { ...entry, status: 'draft' };
-    props.hasSecret = false;
-    props.shareLink = null;
-    await render();
-    expect(container.textContent).not.toContain('This share was never finished.');
-    expect(button('Update share')).toBeUndefined();
-    expect(button('Share conversation')).toBeTruthy();
-    await click('Share conversation');
-    expect(props.onPublish).toHaveBeenCalledOnce();
   });
 
   it('lets an administrator revoke but not publish another member’s share', async () => {

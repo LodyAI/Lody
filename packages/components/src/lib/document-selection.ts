@@ -1,3 +1,5 @@
+import { SESSION_IMAGE_MAX_SIZE_BYTES } from '@lody/shared';
+
 export interface DocumentSelection {
   readonly path: string;
   readonly location: string;
@@ -254,12 +256,39 @@ export function drawImageMarkup(
   context.restore();
 }
 
-export async function encodeSelectionImage(canvas: HTMLCanvasElement, path: string): Promise<File> {
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-  if (blob === null || blob.size === 0) throw new Error('Could not encode selection image');
+export async function encodeSelectionImage(
+  canvas: HTMLCanvasElement,
+  path: string,
+  format: 'image/png' | 'image/jpeg' = 'image/png'
+): Promise<File> {
+  let output = canvas;
+  if (format === 'image/jpeg') {
+    // JPEG has no alpha channel. Composite without changing the editor canvas,
+    // so failed acceptance and further editing retain the original preview.
+    output = document.createElement('canvas');
+    output.width = canvas.width;
+    output.height = canvas.height;
+    const context = output.getContext('2d');
+    if (!context) throw new Error('Could not prepare selection image');
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, output.width, output.height);
+    context.drawImage(canvas, 0, 0);
+  }
+
+  const qualities = format === 'image/jpeg' ? [0.92, 0.82, 0.7, 0.55, 0.4] : [undefined];
+  let blob: Blob | null = null;
+  for (const quality of qualities) {
+    blob = await new Promise<Blob | null>((resolve) => output.toBlob(resolve, format, quality));
+    if (blob === null || blob.size === 0 || (format === 'image/jpeg' && blob.type !== format))
+      throw new Error('Could not encode selection image');
+    if (format !== 'image/jpeg' || blob.size <= SESSION_IMAGE_MAX_SIZE_BYTES) break;
+  }
+  if (!blob || (format === 'image/jpeg' && blob.size > SESSION_IMAGE_MAX_SIZE_BYTES))
+    throw new Error('Encoded selection image exceeds the attachment limit');
   const basename = path.split(/[\\/]/).at(-1) ?? '';
-  return new File([blob], `${basename.length > 0 ? basename : 'document'}-selection.png`, {
-    type: 'image/png',
+  const extension = format === 'image/jpeg' ? 'jpg' : 'png';
+  return new File([blob], `${basename.length > 0 ? basename : 'document'}-selection.${extension}`, {
+    type: format,
   });
 }
 

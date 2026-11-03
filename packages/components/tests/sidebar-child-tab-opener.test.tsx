@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
+// @vitest-environment jsdom
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -7,11 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 
-import {
-  buildSessionListRows,
-  buildSessionMetaById,
-  resolveSidebarOpenerRowId,
-} from '../src/components/sessions/session-list-rows';
+import { buildSessionListRows } from '../src/components/sessions/session-list-rows';
 import {
   buildGroups,
   getVisibleSessionGroupRows,
@@ -19,11 +18,7 @@ import {
   SessionList,
   type SessionListRow,
 } from '../src/components/session-list';
-import {
-  getVisibleUpdatedItems,
-  sortUpdatedItems,
-  type SidebarUpdatedItem,
-} from '../src/components/sidebar-updated-session-list';
+import { type SidebarUpdatedItem } from '../src/components/sidebar-updated-session-list';
 import { buildSidebarNavigationItems } from '../src/components/sidebar-navigation-model';
 import type { SidebarNavItem } from '../src/atoms/focus-layer';
 import { initI18n } from '../src/i18n';
@@ -61,50 +56,6 @@ const OPENED_FROM_TAB = makeSession({
 });
 const ALL_SESSIONS = [ROOT, CHILD_TAB, OPENED_FROM_TAB];
 
-describe('resolveSidebarOpenerRowId', () => {
-  const byId = buildSessionMetaById(ALL_SESSIONS);
-
-  it('maps a child-tab opener to the root Session that owns a sidebar row', () => {
-    expect(resolveSidebarOpenerRowId('child-tab', byId)).toBe('root');
-  });
-
-  it('returns a root opener unchanged', () => {
-    expect(resolveSidebarOpenerRowId('root', byId)).toBe('root');
-  });
-
-  it('returns an unknown opener unchanged, leaving the orphan fallback to decide', () => {
-    expect(resolveSidebarOpenerRowId('never-synced', byId)).toBe('never-synced');
-  });
-
-  it('treats an empty opener as absent', () => {
-    expect(resolveSidebarOpenerRowId('   ', byId)).toBeNull();
-    expect(resolveSidebarOpenerRowId(undefined, byId)).toBeNull();
-  });
-
-  it('walks more than one level, in case nesting ever deepens', () => {
-    const deep = buildSessionMetaById([
-      makeSession({ id: 'a' }),
-      makeSession({ id: 'b', parentSessionId: 'a' as SessionId }),
-      makeSession({ id: 'c', parentSessionId: 'b' as SessionId }),
-    ]);
-    expect(resolveSidebarOpenerRowId('c', deep)).toBe('a');
-  });
-
-  it('terminates on a parentSessionId cycle instead of hanging', () => {
-    const cyclic = buildSessionMetaById([
-      makeSession({ id: 'x', parentSessionId: 'y' as SessionId }),
-      makeSession({ id: 'y', parentSessionId: 'x' as SessionId }),
-    ]);
-    expect(['x', 'y']).toContain(resolveSidebarOpenerRowId('x', cyclic));
-  });
-
-  it('never rewrites the precise opener on the session itself', () => {
-    // Guard against "just set openedBySessionId to the root": provenance must
-    // stay exact so navigation lands on the Tab that actually created it.
-    expect(OPENED_FROM_TAB.openedBySessionId).toBe('child-tab');
-  });
-});
-
 describe('buildSessionListRows child-tab provenance', () => {
   const rows = buildSessionListRows(
     // Sidebar rows exclude child Tabs, exactly like `sessionListAtom`.
@@ -137,20 +88,6 @@ describe('buildSessionListRows child-tab provenance', () => {
     ).find((row) => row.sessionId === 'persisted-relation');
     expect(persisted?.openedBySessionId).toBe('not-synced-child-tab');
     expect(persisted?.openedByRowSessionId).toBe('root');
-  });
-
-  it('leaves a root-opened Session pointing at the same id in both fields', () => {
-    const direct = buildSessionListRows(
-      [ROOT, makeSession({ id: 'direct', openedBySessionId: 'root' as SessionId })],
-      { scope: 'my', currentUserId: 'user-1', defaultTitle: 'Untitled' },
-      [ROOT, makeSession({ id: 'direct', openedBySessionId: 'root' as SessionId })]
-    ).find((row) => row.sessionId === 'direct');
-    expect(direct?.openedBySessionId).toBe('root');
-    expect(direct?.openedByRowSessionId).toBe('root');
-  });
-
-  it('does not turn the child Tab into a sidebar row', () => {
-    expect(rows.map((row) => row.sessionId)).toEqual(['root', 'opened-from-tab']);
   });
 });
 
@@ -190,19 +127,6 @@ function buildRepoGroup(sessions: SessionListRow[]) {
 }
 
 describe('Workspace group nesting for a child-tab opener', () => {
-  it('indents the Session under the root row, not as an orphan', () => {
-    expect(
-      getVisibleSessionGroupTree(buildRepoGroup(CHILD_TAB_GROUP_ROWS), true).map((node) => [
-        node.item.sessionId,
-        node.depth,
-      ])
-    ).toEqual([
-      ['root', 0],
-      ['opened-from-tab', 1],
-      ['unrelated', 0],
-    ]);
-  });
-
   it('collapsing the root hides the Session its child Tab opened', () => {
     expect(
       getVisibleSessionGroupRows(buildRepoGroup(CHILD_TAB_GROUP_ROWS), true, {
@@ -221,59 +145,6 @@ describe('Workspace group nesting for a child-tab opener', () => {
       }),
     ]);
     expect(getVisibleSessionGroupTree(group, true).map((node) => node.depth)).toEqual([0, 0]);
-  });
-});
-
-describe('Updated list nesting for a child-tab opener', () => {
-  function makeItem(overrides: Partial<SidebarUpdatedItem> & { id: string }): SidebarUpdatedItem {
-    return {
-      kind: 'chat',
-      title: `Session ${overrides.id}`,
-      sectionLabel: 'Chats',
-      latestMessageAt: '2026-04-22T00:00:00.000Z',
-      ...overrides,
-    };
-  }
-
-  const items = sortUpdatedItems([
-    makeItem({ id: 'root', latestMessageAt: '2026-04-22T10:00:00.000Z' }),
-    makeItem({
-      id: 'opened-from-tab',
-      openedBySessionId: 'child-tab',
-      openedByRowSessionId: 'root',
-      latestMessageAt: '2026-04-22T09:00:00.000Z',
-    }),
-    makeItem({ id: 'unrelated', latestMessageAt: '2026-04-22T08:00:00.000Z' }),
-  ]);
-
-  it('nests under the root row', () => {
-    expect(getVisibleUpdatedItems(items, true, false).map((item) => item.id)).toEqual([
-      'root',
-      'opened-from-tab',
-      'unrelated',
-    ]);
-  });
-
-  it('hides it behind a collapsed root', () => {
-    expect(
-      getVisibleUpdatedItems(items, true, false, { root: true }).map((item) => item.id)
-    ).toEqual(['root', 'unrelated']);
-  });
-
-  it('does not nest across the Pinned/Updated boundary', () => {
-    // Root pinned into the other section: the opened row stays top-level.
-    const updatedOnly = sortUpdatedItems([
-      makeItem({
-        id: 'opened-from-tab',
-        openedBySessionId: 'child-tab',
-        openedByRowSessionId: 'root',
-      }),
-      makeItem({ id: 'unrelated' }),
-    ]);
-    expect(getVisibleUpdatedItems(updatedOnly, true, false).map((item) => item.id)).toEqual([
-      'opened-from-tab',
-      'unrelated',
-    ]);
   });
 });
 

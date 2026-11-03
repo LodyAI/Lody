@@ -7848,6 +7848,7 @@ export const SessionChatInterface = memo(
                             onModelChange={handleModelChange}
                             onConfigOptionChange={handleConfigOptionChange}
                             onSendMessage={handleSendMessage}
+                            onRestoreSession={onRestoreSession ?? toolbarActions?.onRestoreSession}
                             onStop={() => {
                               void handleStop();
                             }}

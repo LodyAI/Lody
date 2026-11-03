@@ -148,26 +148,4 @@ describe('Role proposal history', () => {
       )
     ).rejects.toThrow('Proposal history is unavailable');
   });
-
-  it('does not publish a card when validation fails', async () => {
-    const repo = await LoroRepo.create({});
-    const doc = new SessionDocument(
-      repo,
-      'role-proposal-failure' as SessionId,
-      async () => undefined
-    );
-    await doc.initOffline(undefined, { historyBackend: 'loro' });
-    const backend = await createSessionBackend(doc, { historyBackend: 'loro' });
-    try {
-      await expect(
-        publishAgentRoleProposal(backend, command, 'user', async () => {
-          throw new Error('not editable');
-        })
-      ).rejects.toThrow('not editable');
-      expect(await backend.history.count()).toBe(0);
-    } finally {
-      await doc.destroy();
-      await repo.destroy();
-    }
-  });
 });

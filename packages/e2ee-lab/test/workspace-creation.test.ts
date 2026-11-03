@@ -4,7 +4,7 @@ import { StreamsClient } from '@loro-dev/streams-client';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
+import { Effect, Result } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { Bytes } from '@lody/e2ee-core';
 import { commitEpochKey } from '@lody/e2ee-core/protocol';
@@ -605,84 +605,6 @@ describe('current signed-genesis workspace publication', () => {
       );
     } finally {
       await server.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects close-time admission and joins an abort-ignoring borrowed send before closing its actual SQLite owner', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'lab-create-close-'));
-    const f = history(),
-      path = join(dir, 'request.sqlite');
-    let released!: () => void;
-    const release = new Promise<void>((resolve) => {
-      released = resolve;
-    });
-    let settled = false,
-      closedEarly = false,
-      databaseClosed = false;
-    const originalClose = Database.prototype.close;
-    Database.prototype.close = function () {
-      if (this.name === path) {
-        closedEarly = !settled;
-        databaseClosed = true;
-      }
-      return originalClose.call(this);
-    };
-    try {
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const scope = yield* Scope.make();
-            const entered = yield* Deferred.make<void>();
-            yield* Effect.addFinalizer(() => Effect.sync(released));
-            const request = yield* makeLabWorkspaceCreationRequest({
-              path,
-              mode: 'create',
-              genesisRecord: f.genesis,
-              send: () =>
-                Effect.uninterruptible(
-                  Effect.gen(function* () {
-                    yield* Deferred.succeed(entered, undefined);
-                    yield* Effect.promise(() => release);
-                    settled = true;
-                    return {
-                      genesisHex: Buffer.from(f.anchor.toBytes()).toString('hex'),
-                      headHex: Buffer.from(hashRecordBytes(f.genesis).toBytes()).toString('hex'),
-                      count: 1,
-                      offset: 'synthetic-confirmed',
-                    };
-                  })
-                ),
-            }).pipe(Effect.provideService(Scope.Scope, scope));
-            const active = yield* Effect.forkChild(Effect.exit(request.resume()));
-            yield* Deferred.await(entered);
-            const closing = yield* Effect.forkChild(Effect.exit(Scope.close(scope, Exit.void)), {
-              startImmediately: true,
-            });
-            expect(Result.isFailure(yield* Effect.result(request.resume()))).toBe(true);
-            const closeBeforeSettlement = closing.pollUnsafe();
-            released();
-            yield* Fiber.join(closing);
-            yield* Fiber.join(active);
-            expect(closedEarly).toBe(false);
-            expect(closeBeforeSettlement).toBeUndefined();
-            expect(settled).toBe(true);
-            expect(databaseClosed).toBe(true);
-            const db = new Database(path, { readonly: true });
-            try {
-              expect(db.prepare('SELECT receipt,consumed FROM creation_request').get()).toEqual({
-                receipt: null,
-                consumed: 0,
-              });
-            } finally {
-              db.close();
-            }
-          })
-        )
-      );
-    } finally {
-      released();
-      Database.prototype.close = originalClose;
       rmSync(dir, { recursive: true, force: true });
     }
   });

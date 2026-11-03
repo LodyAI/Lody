@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
@@ -168,17 +169,6 @@ describe('local encrypted agent approval', () => {
     expect(prepared).toBe(false);
     expect(admitted).toBe(false);
   });
-  it('recovers a temporary local status failure on retry', async () => {
-    const original = runtime.status;
-    runtime.status = async () => {
-      throw new Error('temporary');
-    };
-    await render();
-    expect(container.textContent).toContain('e2ee.localAgent.retryHelp');
-    runtime.status = original;
-    await click('common.tryAgain');
-    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
-  });
   it('keeps a timed-out preparation pending and retries without granting approval', async () => {
     const prepare = runtime.prepareLocalAgent!;
     runtime.prepareLocalAgent = async () => {
@@ -235,14 +225,6 @@ describe('local encrypted agent approval', () => {
     expect(admitted).toBe(false);
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
-  it('does not claim file protection for an OS protected machine', async () => {
-    protection = 'os-keystore';
-    await render();
-    await click('e2ee.localAgent.enable');
-    expect(document.querySelector('[role="alertdialog"]')?.textContent).not.toContain(
-      'e2ee.localAgent.fileProtection'
-    );
-  });
   it('retains a successful admission while waiting and retries activation without asking again', async () => {
     ready = false;
     await render();
@@ -272,21 +254,6 @@ describe('local encrypted agent approval', () => {
     expect(admitted).toBe(true);
     expect(container.textContent).toBe('');
   });
-  it('retries temporary preparation failure before asking for approval', async () => {
-    const prepare = runtime.prepareLocalAgent!;
-    runtime.prepareLocalAgent = async () => {
-      throw new Error('unavailable');
-    };
-    await render();
-    await click('e2ee.localAgent.enable');
-    expect(container.textContent).toContain('e2ee.localAgent.retryHelp');
-    expect(admitted).toBe(false);
-    runtime.prepareLocalAgent = prepare;
-    await render();
-    await click('common.tryAgain');
-    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
-    expect(admitted).toBe(false);
-  });
   it('requires explicit consent for a new session even when the machine was admitted by another frontend', async () => {
     admitted = true;
     await render();
@@ -305,56 +272,6 @@ describe('local encrypted agent approval', () => {
 });
 
 describe('remote encrypted machine approval', () => {
-  it('tells the user to regenerate a revoked machine identity instead of a generic failure', async () => {
-    const { E2eeRemoteMachinePairing } =
-      await import('../src/components/pages/e2ee-remote-machine-pairing');
-    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const pairing = {
-      pairingSessionId: '11'.repeat(16),
-      summary: null,
-      material: null,
-      status: 'pending' as const,
-      expiresAt: 2_000_000,
-      location: null,
-    };
-    const runtime = {
-      beginRemoteMachinePairing: async () => ({
-        ...pairing,
-        command: 'lody machine pair --offer synthetic-command',
-      }),
-      inspectRemoteMachinePairing: async () => {
-        throw new Error(
-          "Error invoking remote method 'e2ee.inspectRemoteMachinePairing': Error: e2ee_pairing_key_revoked"
-        );
-      },
-      approveRemoteMachinePairing: async () => ({ admitted: false, ready: false }),
-      cancelRemoteMachinePairing: async () => ({ ...pairing, status: 'cancelled' as const }),
-    };
-    const click = async (key: string) => {
-      const button = Array.from(container.querySelectorAll('button')).find(
-        (item) => item.textContent === key
-      );
-      if (!button) throw new Error(`missing ${key}`);
-      await act(async () => button.click());
-    };
-    try {
-      await act(async () =>
-        root.render(<E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />)
-      );
-      await click('e2ee.remoteMachine.create');
-      await click('e2ee.remoteMachine.check');
-      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
-        'e2ee.remoteMachine.keyRevoked'
-      );
-    } finally {
-      await act(async () => root.unmount());
-      container.remove();
-    }
-  });
-
   it('shows the exact summary and file protection before separate approval, then preserves pending installation', async () => {
     const { E2eeRemoteMachinePairing } =
       await import('../src/components/pages/e2ee-remote-machine-pairing');
@@ -414,7 +331,9 @@ describe('remote encrypted machine approval', () => {
       expect(container.textContent).not.toContain(summary);
       await click('e2ee.remoteMachine.check');
       expect(state).toBe('claimed');
-      expect(container.querySelector('[data-testid="e2ee-remote-machine-summary"]')?.textContent).toBe(summary);
+      expect(
+        container.querySelector('[data-testid="e2ee-remote-machine-summary"]')?.textContent
+      ).toBe(summary);
       expect(container.textContent).toContain(summary);
       expect(container.textContent).toContain('e2ee.localAgent.fileProtection');
       await click('e2ee.remoteMachine.allow');

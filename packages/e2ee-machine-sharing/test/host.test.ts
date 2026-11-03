@@ -1114,3 +1114,119 @@ it('passive cache evidence counts only the requested machine and never renews a 
       expect(f.machine.inspectCache('fixture-machine').cachedPolicies).toBe(0);
     })
   ));
+
+it('does not refill a cache from an in-flight read invalidated by a ledger advance', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      yield* f.run(
+        f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+      );
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const slow: SharingRemote = {
+        ...f.remote,
+        readHead: (input) =>
+          Effect.gen(function* () {
+            const head = yield* f.remote.readHead(input);
+            yield* Deferred.succeed(entered, undefined);
+            yield* Deferred.await(release);
+            return head;
+          }),
+      };
+      const reading = yield* Effect.forkChild(
+        f.run(f.machine.read('fixture-machine', slow)).pipe(Effect.result)
+      );
+      yield* Deferred.await(entered);
+      // Even an unrelated verified change retires the read's captured ledger generation.
+      yield* f.append({
+        _tag: 'SetRole',
+        membershipId: ok(P.Bytes.membershipId(new Uint8Array(16).fill(20))),
+        role: 'admin',
+      });
+      f.machine.invalidate();
+      yield* Deferred.succeed(release, undefined);
+      expect(Result.isFailure(yield* Fiber.join(reading))).toBe(true);
+      expect(f.machine.inspectCache('fixture-machine').cachedExecutionGrants).toBe(0);
+      // Recovery starts a new authenticated read; it does not reuse the invalidated one.
+      expect(
+        yield* f.run(
+          f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+        )
+      ).toMatchObject({ allowed: true });
+    })
+  ));
+
+for (const revocation of ['member', 'device', 'generation', 'withdrawal'] as const) {
+  it(`retires an issued grant immediately on observed ${revocation} revocation`, () =>
+    test((f) =>
+      Effect.gen(function* () {
+        yield* f.append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            hex(f.f.phone.publicKey),
+            rid(1),
+            { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true },
+            f.remote
+          )
+        );
+        const requester = hex(f.bob.publicKey);
+        const grant = yield* f.run(
+          f.machine.authorize('fixture-machine', requester, 'project-a', f.remote)
+        );
+        if (!grant.allowed || !('isCurrent' in grant) || typeof grant.isCurrent !== 'function')
+          throw new Error('expected a fenced team grant');
+        expect(grant.isCurrent()).toBe(true);
+        if (revocation === 'withdrawal') {
+          yield* f.run(
+            f.owner.write(
+              'fixture-machine',
+              hex(f.f.phone.publicKey),
+              rid(2),
+              { kind: 'machine', sharedWithTeam: false },
+              f.remote
+            )
+          );
+          // Withdrawal becomes known here; do not change the pre-observation TTL contract.
+          yield* f.run(f.machine.read('fixture-machine', f.remote));
+        } else {
+          if (revocation === 'member') {
+            yield* f.append({
+              _tag: 'RemoveMember',
+              membershipId: ok(P.Bytes.membershipId(new Uint8Array(16).fill(20))),
+            });
+          } else if (revocation === 'device') {
+            yield* f.append({ _tag: 'RevokeDevice', target: f.f.phone.publicKey });
+          } else {
+            yield* f.append({ _tag: 'RevokeDevice', target: f.f.phone.publicKey });
+            const replacement = f.f.ed(29);
+            yield* f.append(
+              yield* P.prepareDeviceAdmission({
+                genesis: f.view().genesis,
+                membershipId: f.view().inspectState().owner,
+                encryptionPublicKey: ok(P.Bytes.encryptionPublicKey(new Uint8Array(32).fill(29))),
+                kind: 'machine',
+                machineId: 'fixture-machine',
+                signer: replacement.signer,
+              })
+            );
+            f.newResource();
+          }
+          // The desktop's verified-view observer invokes this synchronous fence.
+          f.machine.invalidate();
+        }
+        expect(grant.isCurrent()).toBe(false);
+        f.io.offline = true;
+        const current = yield* Effect.result(
+          f.run(f.machine.authorize('fixture-machine', requester, 'project-a', f.remote))
+        );
+        if (revocation === 'generation') {
+          expect(Result.isFailure(current)).toBe(true);
+          expect(f.machine.inspectCache('fixture-machine').cachedExecutionGrants).toBe(0);
+        } else {
+          expect(ok(current)).toMatchObject({ allowed: false });
+        }
+        expect(grant.isCurrent()).toBe(false);
+      })
+    ));
+}

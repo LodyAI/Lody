@@ -120,10 +120,30 @@ export interface E2eeManagementState {
     mayRevoke: boolean;
   }[];
 }
+/** Purpose-limited account-pairing admission signing. It exposes only the operations
+ * one already-open personal session needs to approve another device; no general
+ * signing, ledger write or custody capability crosses this port. */
+export interface E2eeAccountApprovalSession {
+  /** This session's admitted personal-device signing key, lowercase hex. */
+  readonly device: string;
+  sign(row: {
+    signingPublicKey: Uint8Array;
+    encryptionPublicKey: Uint8Array;
+    possessionProof: Uint8Array;
+  }): Promise<{ requestId: string; record: Uint8Array }>;
+  settle(record: Uint8Array): Promise<'committed' | 'lost' | 'unknown'>;
+  invitation(record: Uint8Array): Promise<Uint8Array | null>;
+  access(): Promise<{ workspaceId: string; credential: string }>;
+  refresh(): Promise<void>;
+}
+
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
 export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
   /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
   readonly readerLeases?: 'preallocated-v1';
+  /** Portable hosts that can sign an account-pairing admission from an already
+   * approved workspace session. Absence keeps the approver surface hidden. */
+  accountApproval?(workspaceId?: string): Promise<E2eeAccountApprovalSession>;
   readMachineSharing?(
     workspaceId: string,
     machineId: string

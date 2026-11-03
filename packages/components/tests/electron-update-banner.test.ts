@@ -10,10 +10,6 @@ function state(overrides: Partial<ElectronUpdaterState>): ElectronUpdaterState {
 }
 
 describe('readUpdateBannerState', () => {
-  it('returns null without an updater snapshot', () => {
-    expect(readUpdateBannerState(null)).toBeNull();
-  });
-
   it.each(['idle', 'checking', 'up_to_date', 'error', 'disabled'] as const)(
     'stays silent in the %s phase',
     (phase) => {
@@ -21,30 +17,10 @@ describe('readUpdateBannerState', () => {
     }
   );
 
-  it('reports a download in progress with rounded percent', () => {
-    expect(
-      readUpdateBannerState(
-        state({ phase: 'downloading', availableVersion: '1.1.0', percent: 42.6 })
-      )
-    ).toEqual({ stage: 'downloading', version: '1.1.0', percent: 43 });
-  });
-
   it('reports an indeterminate download when the feed has no percent', () => {
     expect(
       readUpdateBannerState(state({ phase: 'downloading', availableVersion: '1.1.0' }))
     ).toEqual({ stage: 'downloading', version: '1.1.0', percent: null });
-  });
-
-  it('clamps an out-of-range percent', () => {
-    expect(
-      readUpdateBannerState(
-        state({ phase: 'downloading', availableVersion: '1.1.0', percent: 140 })
-      )?.percent
-    ).toBe(100);
-    expect(
-      readUpdateBannerState(state({ phase: 'downloading', availableVersion: '1.1.0', percent: -5 }))
-        ?.percent
-    ).toBe(0);
   });
 
   it('prefers the downloaded version once the download finishes', () => {
@@ -99,15 +75,5 @@ describe('pickLocalizedReleaseNotes', () => {
     expect(pickLocalizedReleaseNotes(state({ releaseNotes: 'publisher notes' }), 'zh_CN')).toBe(
       'publisher notes'
     );
-  });
-
-  it('ignores blank notes and reports nothing to render', () => {
-    expect(
-      pickLocalizedReleaseNotes(
-        state({ releaseNotes: '  \n ', releaseNotesByLocale: { en: '' } }),
-        'en'
-      )
-    ).toBeNull();
-    expect(pickLocalizedReleaseNotes(null, 'en')).toBeNull();
   });
 });

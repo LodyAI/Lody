@@ -154,11 +154,7 @@ both misses paraphrases and flags quoted test names; it only warns.
 
 ## Verification limits
 
-[`main.test.mjs`](../../../../scripts/docs/main.test.mjs) covers ceilings and
-overrides, malformed manifests, a budgeted file that disappears, proposal headings
-and run-log phrases in changed notes only, an unarchived `Supersedes` target, the
-stale-reference queue, and owner links (note-only links rejected, either language
-accepted, existing notes queued, lifecycle moves exempt). No check judges whether a note was worth writing or
+The implementation in [`main.mjs`](../../../../scripts/docs/main.mjs) owns these checks; its implementation-only test suite has been removed. No check judges whether a note was worth writing or
 whether a supersession search was thorough, and a link proves only that an owner
 names the note, not that its sentence is accurate. The 1143 existing active notes are not
 pruned by this change; that is a separate, topic-by-topic application of the

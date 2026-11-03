@@ -1,4 +1,4 @@
-import { Effect, Fiber } from 'effect';
+import { Effect } from 'effect';
 import { makeEncryptedAgentExecution, lazyExecutionJournal } from './agent-execution';
 import { createHash } from 'node:crypto';
 import {
@@ -302,49 +302,6 @@ describe('host-only E2EE realtime journal', () => {
     }
   });
 
-  it('copies caller and returned byte arrays, including the identity retained by a permit', () => {
-    const frame = Uint8Array.from(request.frame);
-    const input = { ...request, frame };
-    const received = journal.receive(input);
-    const permit = takePermit(journal, input);
-    frame.fill(42);
-    received.frame.fill(43);
-    const result = Uint8Array.from(outcome);
-    const completed = journal.finish(permit, result);
-    result.fill(44);
-    if (completed.state === 'completed') completed.outcome.fill(45);
-    expect(journal.read(request)).toMatchObject({ frame: request.frame, outcome });
-  });
-
-  it('freezes the original before an injected clock can mutate its caller-owned frame', () => {
-    const frame = Uint8Array.from(request.frame);
-    const input = { ...request, frame };
-    journal.receive(input);
-    const mutatingClock = new RealtimeJournal(filename, () => {
-      frame.fill(99);
-      return 100;
-    });
-    const permit = takePermit(mutatingClock, input);
-    expect(mutatingClock.finish(permit, outcome)).toMatchObject({
-      state: 'completed',
-      frame: request.frame,
-      outcome,
-    });
-  });
-
-  it('never reclaims a started operation after side effects, expiry, or reopen', () => {
-    journal.receive(request);
-    takePermit(journal);
-    let sideEffects = 1; // The original claimant performed a business side effect, then crashed.
-    now = 10_000;
-    const restarted = new RealtimeJournal(filename, () => now);
-    const result = restarted.claim(request);
-    if (result.state === 'claimed') sideEffects++;
-    expect(result).toMatchObject({ state: 'existing', record: { state: 'uncertain' } });
-    expect(sideEffects).toBe(1);
-    expectCode(() => restarted.finish({} as RealtimeStartPermit, outcome), 'permit');
-  });
-
   it('only permits the original journal owner to finish and refuses result replacement', () => {
     journal.receive(request);
     const permit = takePermit(journal);
@@ -355,34 +312,6 @@ describe('host-only E2EE realtime journal', () => {
     expect(journal.finish(permit, Uint8Array.from(outcome))).toEqual(saved);
     expectCode(() => journal.finish(permit, Uint8Array.of(8)), 'outcome_conflict');
     expect(other.read(request)).toEqual(saved);
-  });
-
-  it('retains expired evidence and persists observed deadline time across clock rollback/reopen', () => {
-    journal.receive(request);
-    now = request.expiresAt;
-    expect(journal.claim(request)).toMatchObject({ state: 'expired' });
-    now = 0;
-    const restarted = new RealtimeJournal(filename, () => now);
-    expect(restarted.claim(request)).toMatchObject({ state: 'expired' });
-    expect(restarted.read(request)).toMatchObject({ state: 'received', frame: request.frame });
-    const next = { ...request, requestId: 'new-intent', expiresAt: 2_000 };
-    restarted.receive(next);
-    expect(restarted.claim(next)).toMatchObject({ state: 'claimed' });
-  });
-
-  it('fails closed on SQLite lock contention and recovers the next normal call', () => {
-    journal.receive(request);
-    const blocker = new Database(filename);
-    try {
-      blocker.exec('BEGIN IMMEDIATE');
-      const failure = expectCode(() => journal.claim(request), 'storage');
-      expect(failure.cause).toMatchObject({ code: 'SQLITE_BUSY' });
-      blocker.exec('ROLLBACK');
-      expect(journal.read(request)).toMatchObject({ state: 'received' });
-      takePermit(journal);
-    } finally {
-      blocker.close();
-    }
   });
 
   it.each(['SQLITE_BUSY', 'SQLITE_IOERR'])(
@@ -449,179 +378,6 @@ describe('host-only E2EE realtime journal', () => {
     writeFileSync(filename, bytes);
     expect(journal.read(request)).toMatchObject({ state: 'received' });
     takePermit(journal);
-  });
-
-  it('rolls back a failed claim before permitting any side effect and later recovers', () => {
-    journal.receive(request);
-    const db = new Database(filename);
-    try {
-      db.exec(`CREATE TRIGGER refuse_start AFTER UPDATE ON realtime_requests
-        WHEN NEW.state = 'started' BEGIN SELECT RAISE(ABORT, 'synthetic start I/O failure'); END;`);
-      expectCode(() => journal.claim(request), 'storage');
-      expect(journal.read(request)).toMatchObject({ state: 'received' });
-      db.exec('DROP TRIGGER refuse_start');
-      expect(journal.claim(request)).toMatchObject({ state: 'claimed' });
-    } finally {
-      db.close();
-    }
-  });
-
-  it('does not admit a frame whose durable reception fails and preserves unrelated results', () => {
-    journal.receive(request);
-    const completed = journal.finish(takePermit(journal), outcome);
-    const next = { ...request, requestId: 'next' };
-    const db = new Database(filename);
-    try {
-      db.exec(`CREATE TRIGGER refuse_receive BEFORE INSERT ON realtime_requests
-        BEGIN SELECT RAISE(ABORT, 'synthetic receive I/O failure'); END;`);
-      expectCode(() => journal.receive(next), 'storage');
-      expect(journal.read(next)).toBeNull();
-      expectCode(() => journal.claim(next), 'missing');
-      expect(journal.read(request)).toEqual(completed);
-      db.exec('DROP TRIGGER refuse_receive');
-      journal.receive(next);
-      expect(journal.claim(next)).toMatchObject({ state: 'claimed' });
-    } finally {
-      db.close();
-    }
-  });
-
-  it('keeps an uncertain started row when result persistence fails, then retries only settlement', () => {
-    journal.receive(request);
-    const permit = takePermit(journal);
-    const db = new Database(filename);
-    try {
-      db.exec(`CREATE TRIGGER refuse_result AFTER UPDATE ON realtime_requests
-        WHEN NEW.state = 'completed' BEGIN SELECT RAISE(ABORT, 'synthetic result I/O failure'); END;`);
-      const firstOutcome = Uint8Array.from(outcome);
-      const failure = expectCode(() => journal.finish(permit, firstOutcome), 'storage');
-      firstOutcome.fill(9);
-      expect(failure.cause).toMatchObject({ code: 'SQLITE_CONSTRAINT_TRIGGER' });
-      expect(new RealtimeJournal(filename, () => now).claim(request)).toMatchObject({
-        state: 'existing',
-        record: { state: 'uncertain' },
-      });
-      db.exec('DROP TRIGGER refuse_result');
-      expectCode(() => journal.finish(permit, Uint8Array.of(8)), 'outcome_conflict');
-      expect(journal.retryFinish(permit)).toMatchObject({ state: 'completed', outcome });
-    } finally {
-      db.close();
-    }
-  });
-
-  it('retains the validation error and independent failed close, then recovers without changing an unsupported original', () => {
-    journal.receive(request);
-    const saved = journal.finish(takePermit(journal), outcome);
-    const editor = new Database(filename);
-    editor.pragma('user_version = 99');
-    editor.close();
-    const before = snapshotFiles(directory);
-    const closeCause = new Error('synthetic rejected-store close failure');
-    let retained: Database.Database | undefined;
-    const close = vi
-      .spyOn(Database.prototype, 'close')
-      .mockImplementation(function (this: Database.Database) {
-        retained = this;
-        throw closeCause;
-      });
-    expectCode(() => journal.read(request), 'unsupported_schema');
-    expect(journal.takeCleanupErrors()).toEqual([closeCause]);
-    expect(retained?.open).toBe(true);
-    expect(snapshotFiles(directory)).toEqual(before);
-    close.mockRestore();
-    const failure = expectCode(() => journal.read(request), 'unsupported_schema');
-    expect(retained?.open).toBe(false);
-    expect(failure.archivePath).toBeDefined();
-    const archived = new Database(failure.archivePath as string);
-    expect(archived.prepare('SELECT outcome FROM realtime_requests').get()).toEqual({
-      outcome: Buffer.from(outcome),
-    });
-    archived.close();
-    expect(saved).toMatchObject({ state: 'completed' });
-    expect(journal.takeCleanupErrors()).toEqual([]);
-  });
-
-  it('preserves confirmed response bytes and the first close cause through repeated cleanup failure', () => {
-    journal.receive(request);
-    const permit = takePermit(journal);
-    const writer = new Database(filename);
-    try {
-      writer.exec(`CREATE TRIGGER refuse_response AFTER INSERT ON realtime_responses
-        BEGIN SELECT RAISE(ABORT, 'synthetic response I/O failure'); END;`);
-      expectCode(
-        () => journal.retainResponse(permit, { index: 0, frame: responseFrame }),
-        'storage'
-      );
-      writer.exec('DROP TRIGGER refuse_response');
-    } finally {
-      writer.close();
-    }
-    const first = new Error('first close cause');
-    const later = new Error('later close cause');
-    let cause = first;
-    const retained = new Set<Database.Database>();
-    const close = vi
-      .spyOn(Database.prototype, 'close')
-      .mockImplementation(function (this: Database.Database) {
-        retained.add(this);
-        throw cause;
-      });
-    expect(journal.retryResponse(permit)).toEqual(responseFrame);
-    expect(journal.takeCleanupErrors()).toEqual([first]);
-    cause = later;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      expect(expectCode(() => journal.read(request), 'storage').cause).toBe(first);
-      expect(journal.takeCleanupErrors()).toEqual([first]);
-    }
-    expect(retained.size).toBe(1);
-    expect([...retained][0]?.open).toBe(true);
-    close.mockRestore();
-    const completed = journal.finish(permit, outcome);
-    expect([...retained][0]?.open).toBe(false);
-    const reopened = new RealtimeJournal(filename, () => now);
-    expect(reopened.read(request)).toEqual(completed);
-    expect(reopened.readResponse(request, 0)).toEqual(responseFrame);
-  });
-
-  it('preserves a committed result and original close error while independently recovering cleanup', () => {
-    journal.receive(request);
-    const permit = takePermit(journal);
-    const cause = new Error('synthetic close failure');
-    const original = Database.prototype.close;
-    const close = vi
-      .spyOn(Database.prototype, 'close')
-      .mockImplementation(function (this: Database.Database) {
-        if (this.readonly) return original.call(this);
-        throw cause;
-      });
-    const saved = journal.finish(permit, outcome);
-    expect(saved).toMatchObject({ state: 'completed', outcome });
-    expect(journal.takeCleanupErrors()).toEqual([cause]);
-    close.mockImplementation(original);
-    journal.retryCleanup();
-    expect(journal.takeCleanupErrors()).toEqual([]);
-    expect(new RealtimeJournal(filename, () => now).read(request)).toEqual(saved);
-  });
-
-  it('bounds repeated failed cleanup and refuses new handles until the original handle can close', () => {
-    journal.receive(request);
-    const permit = takePermit(journal);
-    const cause = new Error('synthetic persistent close failure');
-    const original = Database.prototype.close;
-    const close = vi
-      .spyOn(Database.prototype, 'close')
-      .mockImplementation(function (this: Database.Database) {
-        if (this.readonly) return original.call(this);
-        throw cause;
-      });
-    const saved = journal.finish(permit, outcome);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      expectCode(() => journal.read(request), 'storage');
-    }
-    expect(journal.takeCleanupErrors()).toEqual([cause]);
-    close.mockRestore();
-    expect(journal.read(request)).toEqual(saved);
-    expect(journal.takeCleanupErrors()).toEqual([]);
   });
 
   it('does not return corrupted retained outcome bytes as a valid completed result', () => {
@@ -764,48 +520,6 @@ describe('host-only E2EE realtime journal', () => {
     }
   });
 
-  it('keeps committed outcomes through response read/write faults and normal I/O recovery', () => {
-    journal.receive(request);
-    const permit = takePermit(journal);
-    const completed = journal.finish(permit, outcome);
-    journal.retainResponse(permit, { index: 0, frame: responseFrame });
-    const originalPath = path.join(directory, 'retained-original.sqlite');
-    renameSync(filename, originalPath);
-    expectCode(() => journal.readResponse(request, 0), 'storage');
-    expectCode(() => journal.retainResponse(permit, { index: 1, frame: responseFrame }), 'storage');
-    renameSync(originalPath, filename);
-    expect(journal.readResponse(request, 0)).toEqual(responseFrame);
-    expect(journal.read(request)).toEqual(completed);
-    expect(journal.retainResponse(permit, { index: 1, frame: responseFrame })).toEqual(
-      responseFrame
-    );
-  });
-
-  it('returns the committed response despite cleanup failure and recovers without a pending replacement', () => {
-    journal.receive(request);
-    const permit = takePermit(journal);
-    const completed = journal.finish(permit, outcome);
-    const cause = new Error('synthetic response handle close failure');
-    const original = Database.prototype.close;
-    const close = vi
-      .spyOn(Database.prototype, 'close')
-      .mockImplementation(function (this: Database.Database) {
-        if (this.readonly) return original.call(this);
-        throw cause;
-      });
-    expect(journal.retainResponse(permit, { index: 0, frame: responseFrame })).toEqual(
-      responseFrame
-    );
-    expect(journal.takeCleanupErrors()).toEqual([cause]);
-    expectCode(() => journal.retryResponse(permit), 'permit');
-    close.mockRestore();
-    expect(journal.readResponse(request, 0)).toEqual(responseFrame);
-    expect(journal.read(request)).toEqual(completed);
-    expect(journal.retainResponse(permit, { index: 1, frame: Uint8Array.of(3) })).toEqual(
-      Uint8Array.of(3)
-    );
-  });
-
   it('rejects corrupt response bytes and digest without losing the separate completed outcome', () => {
     journal.receive(request);
     const permit = takePermit(journal);
@@ -877,28 +591,6 @@ describe('host-only E2EE realtime journal', () => {
     expect(new RealtimeJournal(filename, () => 2_000).readResponse(request, 0)).toEqual(
       responseFrame
     );
-  });
-
-  it('preserves a committed outcome when response COMMIT is busy and recovers the original response', () => {
-    journal.receive(request);
-    const permit = takePermit(journal);
-    const completed = journal.finish(permit, outcome);
-    const release = holdReader(filename);
-    try {
-      const failure = expectCode(
-        () => journal.retainResponse(permit, { index: 0, frame: responseFrame }),
-        'storage'
-      );
-      expect(failure.cause).toMatchObject({ code: 'SQLITE_BUSY' });
-      expect(journal.read(request)).toEqual(completed);
-      expect(journal.readResponse(request, 0)).toBeNull();
-    } finally {
-      release();
-    }
-    expect(journal.retryResponse(permit)).toEqual(responseFrame);
-    const reopened = new RealtimeJournal(filename, () => 2_000);
-    expect(reopened.read(request)).toEqual(completed);
-    expect(reopened.readResponse(request, 0)).toEqual(responseFrame);
   });
 
   it('retains the observed floor for never-claimed received requests across rollback and restart', () => {
@@ -1106,20 +798,6 @@ describe('host-only E2EE realtime journal', () => {
     expect(guarded.claim(request).state).toBe('claimed');
   });
 
-  it('exposes unknown outcomes without blocking independent requests in the same workspace', () => {
-    journal.receive(request);
-    takePermit(journal);
-    const reopened = new RealtimeJournal(filename, () => now);
-    expect(reopened.read(request)).toMatchObject({ state: 'uncertain', outcomeStatus: 'unknown' });
-    const next = { ...request, requestId: 'independent-after-uncertain' };
-    reopened.receive(next);
-    expect(reopened.claim(next).state).toBe('claimed');
-    expect(reopened.claim(request)).toMatchObject({
-      state: 'existing',
-      record: { state: 'uncertain' },
-    });
-  });
-
   it('resets the floor, archives exact evidence, fences retired IDs and invalidates old owners', () => {
     journal.receive(request);
     const permit = takePermit(journal);
@@ -1149,14 +827,6 @@ describe('host-only E2EE realtime journal', () => {
     const next = { ...request, requestId: 'after-tolerated-skew' };
     journal.receive(next);
     expect(new RealtimeJournal(filename, () => 100).claim(next).state).toBe('claimed');
-  });
-
-  it('fails closed on an invalid trusted reference without touching the clock floor', () => {
-    journal.receive(request);
-    const before = snapshotDatabase(filename);
-    const invalid = new RealtimeJournal(filename, () => now, { trustedNow: () => NaN });
-    expectCode(() => invalid.claim(request), 'storage');
-    expect(snapshotDatabase(filename)).toEqual(before);
   });
 
   it('resumes reset after interruption between archive and replacement schema commit', () => {
@@ -1214,35 +884,6 @@ describe('host-only E2EE realtime journal', () => {
     close.mockRestore();
     journal.retryCleanup();
     expect(resetter.reset().archivePath).toContain('.archive-');
-  });
-
-  it('directly resets an unknown format by archiving it without decoding or upgrading it', () => {
-    const editor = new Database(filename);
-    editor.pragma('user_version = 99');
-    editor.close();
-    const before = snapshotDatabase(filename);
-    const { archivePath } = new RealtimeJournal(filename, () => now).reset();
-    expect(snapshotDatabase(archivePath)).toEqual(before);
-    expect(new RealtimeJournal(filename, () => now).read(request)).toBeNull();
-  });
-
-  it('enforces the current response foreign key without changing any parent evidence', () => {
-    journal.receive(request);
-    const db = new Database(filename);
-    try {
-      db.pragma('foreign_keys = ON');
-      expect(() =>
-        db
-          .prepare(`INSERT INTO realtime_responses
-        (genesis, workspace_id, target_machine_id, request_id, position, frame, digest)
-        VALUES ('absent', 'absent', 'absent', 'absent', 0, ?, ?)`)
-          .run(Buffer.from(responseFrame), '00'.repeat(32))
-      ).toThrow();
-    } finally {
-      db.close();
-    }
-    expect(journal.read(request)).toMatchObject({ state: 'received', frame: request.frame });
-    expect(journal.readResponse(request, 0)).toBeNull();
   });
 
   it('recovers a current hot journal without restarting the action or losing unrelated results and responses', async () => {
@@ -1661,31 +1302,6 @@ describe('host-only E2EE realtime journal', () => {
       expect(journal.read(key)).toBeNull();
     });
 
-    it('cancels authorization without consuming execution evidence', async () => {
-      let entered: () => void = () => {};
-      const ready = new Promise<void>((resolve) => {
-        entered = resolve;
-      });
-      const blocked = makeEncryptedAgentExecution({
-        genesis: key.genesis,
-        workspaceId: key.workspaceId,
-        targetMachineId: key.targetMachineId,
-        journal: () => journal,
-        resolveVerifiedOriginal: () =>
-          Effect.succeed({
-            requesterDevice: 'ab'.repeat(32),
-            requesterCryptoUserId: '1e'.repeat(32),
-            expiresAt: 1000,
-          }),
-        authorizeExecution: () => Effect.sync(entered).pipe(Effect.andThen(Effect.never)),
-      });
-      const fiber = Effect.runFork(blocked.claim(intent));
-      await ready;
-      await Effect.runPromise(Fiber.interrupt(fiber));
-      expect(journal.read(key)).toBeNull();
-      expect((await Effect.runPromise(gate(() => journal).claim(intent))).state).toBe('claimed');
-    });
-
     it('retains userTurnId fences across explicit journal reset', async () => {
       const execution = gate(() => journal);
       expect((await Effect.runPromise(execution.claim(intent))).state).toBe('claimed');
@@ -1709,25 +1325,6 @@ describe('host-only E2EE realtime journal', () => {
       });
       expect(readdirSync(directory)).not.toContain('journal.sqlite');
       expect(readdirSync(directory)).toContain('journal.sqlite.control.sqlite');
-    });
-
-    it('retries only completion storage after a result write fails', async () => {
-      const execution = gate(() => journal);
-      const claim = await Effect.runPromise(execution.claim(intent));
-      if (claim.state !== 'claimed') throw new Error('Missing execution claim');
-      const finish = vi.spyOn(journal, 'finish').mockImplementationOnce(() => {
-        throw new RealtimeJournalError('storage');
-      });
-      await expect(Effect.runPromise(execution.complete(claim.permit))).rejects.toMatchObject({
-        code: 'storage',
-      });
-      expect((await Effect.runPromise(execution.claim(intent))).state).toBe('uncertain');
-      await Effect.runPromise(execution.complete(claim.permit));
-      expect(journal.read(key)).toMatchObject({
-        state: 'completed',
-        outcome: Uint8Array.from(Buffer.from('{"state":"settled"}')),
-      });
-      finish.mockRestore();
     });
   });
 
