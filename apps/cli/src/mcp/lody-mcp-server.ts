@@ -12,7 +12,11 @@ import {
 } from '@/commands/session-catalog-read';
 import { getMachineRoomId } from '@lody/shared';
 import { getLogger } from '@/utils/logger';
-import { machineSupportsProtocolCapability, MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
+import {
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  parseGitHubPullRequestUrl,
+} from '@lody/shared';
 import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
 import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
 import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
@@ -1934,14 +1938,19 @@ const matchesSessionListFilters = (
       .filter((item): item is NonNullable<typeof item> => item !== null);
     if (prFilter.exists === false) return prs.length === 0;
     if (prFilter.url !== undefined || prFilter.number !== undefined) {
-      const normalizeUrl = (url: string) => url.replace(/\/+$/, '').toLowerCase();
-      const wantedUrl = prFilter.url === undefined ? undefined : normalizeUrl(prFilter.url);
-      const matches = prs.some(
-        (pr) =>
-          (wantedUrl === undefined || normalizeUrl(pr.url) === wantedUrl) &&
-          (prFilter.number === undefined ||
-            normalizeUrl(pr.url).endsWith(`/pull/${prFilter.number}`))
-      );
+      const wanted =
+        prFilter.url === undefined ? undefined : parseGitHubPullRequestUrl(prFilter.url);
+      if (prFilter.url !== undefined && !wanted) return false;
+      const matches = prs.some((pr) => {
+        const parsed = parseGitHubPullRequestUrl(pr.url);
+        return (
+          parsed !== null &&
+          (wanted == null ||
+            (parsed.prNumber === wanted.prNumber &&
+              parsed.repoFullName.toLowerCase() === wanted.repoFullName.toLowerCase())) &&
+          (prFilter.number === undefined || parsed.prNumber === prFilter.number)
+        );
+      });
       if (!matches) return false;
     }
     if (prFilter.exists === true && prs.length === 0) return false;
@@ -2088,7 +2097,7 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
       input.sessionIds,
       ctx,
       (id) => readCurrentSessionMeta(manager, id),
-      (id) => resolveSessionIdPrefix(manager, id)
+      createSessionIdResolver(manager)
     );
     const liveStatuses = await readSessionLiveStatusesMany({
       auth,
@@ -2182,7 +2191,7 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   const requestedSessionId = resolveMcpSessionId(input.sessionId, ctx);
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    const sessionId = (await resolveSessionIdPrefix(manager, requestedSessionId)) as SessionId;
+    const sessionId = (await createSessionIdResolver(manager)(requestedSessionId)) as SessionId;
     const session = await readCurrentSessionMeta(manager, sessionId);
     if (!session) {
       throw new LodyOperationStoreError(
@@ -2204,10 +2213,10 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
           history: backend.history,
           limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
           ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
-          ...(input.direction ? { direction: input.direction } : {}),
-          ...(input.role ? { role: input.role } : {}),
-          ...(input.since ? { since: input.since } : {}),
-          ...(input.maxChars ? { maxChars: input.maxChars } : {}),
+          direction: input.direction,
+          role: input.role,
+          since: input.since,
+          maxChars: input.maxChars,
           maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
         });
       },
@@ -2338,29 +2347,33 @@ const readCurrentSessionMeta = async (
 
 const MAX_AMBIGUOUS_SESSION_CANDIDATES = 8;
 
+/** Session ids are UUIDs; anything shorter may be a copied prefix. */
+const FULL_SESSION_ID_LENGTH = 36;
+
 /**
- * Expands a unique Session id prefix within the workspace. An exact or unknown id
- * is returned unchanged so the caller keeps its own not-found handling; only a
- * prefix shared by several Sessions fails, listing candidates to choose from.
+ * One resolver per request: the workspace Session list is read at most once and
+ * only when a short id misses. An exact or unknown id is returned unchanged so the
+ * caller keeps its own not-found handling; only a prefix shared by several
+ * Sessions fails, listing candidates to choose from.
  */
-const resolveSessionIdPrefix = async (
-  manager: LoroDocumentManager,
-  sessionId: string
-): Promise<string> => {
-  if (await readCurrentSessionMeta(manager, sessionId as SessionId)) return sessionId;
-  const matches = (await listAliveSessionMetas(manager))
-    .map((row) => row.meta)
-    .filter((meta) => meta.id.startsWith(sessionId));
-  if (matches.length === 1) return matches[0]!.id;
-  if (matches.length === 0) return sessionId;
-  const candidates = matches
-    .slice(0, MAX_AMBIGUOUS_SESSION_CANDIDATES)
-    .map((meta) => ({ id: meta.id, ...(meta.title ? { title: meta.title } : {}) }));
-  throw new LodyOperationStoreError(
-    'SESSION_ID_AMBIGUOUS',
-    `Session id prefix ${sessionId} matches ${matches.length} Sessions: ${JSON.stringify(candidates)}`,
-    false
-  );
+const createSessionIdResolver = (manager: LoroDocumentManager) => {
+  let alive: Promise<SessionMeta[]> | undefined;
+  return async (sessionId: string): Promise<string> => {
+    if (sessionId.length >= FULL_SESSION_ID_LENGTH) return sessionId;
+    if (await readCurrentSessionMeta(manager, sessionId as SessionId)) return sessionId;
+    alive ??= listAliveSessionMetas(manager).then((rows) => rows.map((row) => row.meta));
+    const matches = (await alive).filter((meta) => meta.id.startsWith(sessionId));
+    if (matches.length === 1) return matches[0]!.id;
+    if (matches.length === 0) return sessionId;
+    const candidates = matches
+      .slice(0, MAX_AMBIGUOUS_SESSION_CANDIDATES)
+      .map((meta) => ({ id: meta.id, ...(meta.title ? { title: meta.title } : {}) }));
+    throw new LodyOperationStoreError(
+      'SESSION_ID_AMBIGUOUS',
+      `Session id prefix ${sessionId} matches ${matches.length} Sessions: ${JSON.stringify(candidates)}`,
+      false
+    );
+  };
 };
 
 const bindMcpCreateContext = (
@@ -3206,7 +3219,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     await syncWorkspaceMetaForRead(manager, `mcp.session_chat:${ctx.sessionId}:operation`);
-    args = { ...args, sessionId: await resolveSessionIdPrefix(manager, args.sessionId) };
+    args = { ...args, sessionId: await createSessionIdResolver(manager)(args.sessionId) };
     const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!currentSession) {
       throw new LodyOperationStoreError(
@@ -3875,13 +3888,12 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     }
     // A unique prefix expands; an ambiguous or unknown one stays as given so the
     // item fails on its own instead of rejecting its siblings.
+    const resolveSessionId = createSessionIdResolver(manager);
     const expanded = await Promise.all(
       args.items.map(async (item) => {
         const merged = { ...(args.defaults ?? {}), ...item };
         if (!merged.sessionId) return merged;
-        const sessionId = await resolveSessionIdPrefix(manager, merged.sessionId).catch(
-          () => merged.sessionId!
-        );
+        const sessionId = await resolveSessionId(merged.sessionId).catch(() => merged.sessionId!);
         return { ...merged, sessionId };
       })
     );
