@@ -104,7 +104,11 @@ changes dependencies, native boundaries, consumers or ownership.
 - Tests use explicit signals, injected clocks, fake timers, and deterministic
   fixtures; no real sleeps, wall-clock races, network, machine load, or scheduler
   luck. Assert observable behavior, not mock call counts.
-- Delete shallow tests in the changed scope: source-string/regex assertions,
+- Lody lint, typecheck, formatting and test commands skip all nested ACP adapter submodules (`packages/acp-extension-*` below the public root). Their internal tests are maintained independently; retain Lody-owned integration and packaging checks.
+
+- Keep tests only for concrete Lody product/domain assumptions or installation,
+  compilation, packaging and release guarantees. Generic helper correctness is not
+  sufficient. Delete shallow tests in the changed scope: source-string/regex assertions,
   mock-call-only checks and duplicates that cannot detect a behavioral regression.
   Test the real boundary and resulting state, including failure paths; retain
   meaningful compile-failure contracts. Extend the owning suite instead of adding

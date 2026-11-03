@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
+// @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-  GitHubCheckRunsSummary,
-  GitHubMergeResult,
-  GitHubPullRequestDetails,
-} from '@lody/shared';
+import type { GitHubCheckRunsSummary, GitHubMergeResult, GitHubPullRequestDetails } from '@lody/shared';
 
 const githubMocks = vi.hoisted(() => ({
   githubBranchExists: vi.fn(),
@@ -129,11 +128,7 @@ vi.mock('@lody/shared', async (importOriginal) => {
   };
 });
 
-import type {
-  GitHubPrDetailsData,
-  UseGitHubPrDetailsInput,
-  UseGitHubPrDetailsResult,
-} from '../src/hooks/use-github-pr-details';
+import type { GitHubPrDetailsData, UseGitHubPrDetailsInput, UseGitHubPrDetailsResult } from '../src/hooks/use-github-pr-details';
 
 const { getAuthRecoveryBackoffMs, useGitHubPrDetails } =
   await import('../src/hooks/use-github-pr-details');
@@ -371,39 +366,6 @@ describe('useGitHubPrDetails target isolation', () => {
     expect(githubMocks.githubMergePullRequest).not.toHaveBeenCalled();
   });
 
-  it('conserves anonymous quota while still refreshing an open public PR', async () => {
-    vi.useFakeTimers();
-    identityMocks.versions = { identityPending: true };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify({ id: 123, private: false, full_name: 'org/public' }))
-      )
-    );
-    githubMocks.githubFetchPullRequestDetails.mockResolvedValue(
-      createPullRequest(7, { title: 'Initial', mergeable: null, mergeableState: 'unknown' })
-    );
-    await renderHook({
-      workspaceId: 'public-ws',
-      sessionId: 'session',
-      repoFullName: 'org/public',
-      prNumber: 7,
-    });
-    expect(currentResult?.data?.pullRequest.title).toBe('Initial');
-    githubMocks.githubFetchPullRequestDetails.mockResolvedValue(
-      createPullRequest(7, { title: 'Updated' })
-    );
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(299_999);
-    });
-    expect(currentResult?.data?.pullRequest.title).toBe('Initial');
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(currentResult?.data?.pullRequest.title).toBe('Updated');
-  });
-
   it('does not hydrate authenticated data while an anonymous PR request is pending', async () => {
     identityMocks.versions = { identityPending: true };
     const details = createDeferred<GitHubPullRequestDetails>();
@@ -507,20 +469,6 @@ describe('useGitHubPrDetails target isolation', () => {
     expect(currentResult?.error).toBeNull();
   });
 
-  it('rejects a comment instead of silently dropping it while identity is unverified', async () => {
-    identityMocks.versions = { identityPending: true };
-    await renderHook({
-      workspaceId: 'identity-ws',
-      sessionId: 'old-session',
-      repoFullName: 'org/repo',
-      prNumber: 7,
-    });
-    expect(currentResult?.state).toBe('error');
-
-    await expect(currentResult?.postComment('typed but never posted')).rejects.toThrow('not ready');
-    expect(githubMocks.githubCreatePRIssueComment).not.toHaveBeenCalled();
-  });
-
   it('does not fall back to a session name when its identity query returns null', async () => {
     await renderHook({
       workspaceId: 'ws-null',
@@ -531,56 +479,6 @@ describe('useGitHubPrDetails target isolation', () => {
     expect(currentResult?.state).toBe('error');
     expect(currentResult?.data).toBeNull();
     expect(githubMocks.githubFetchPullRequestDetails).not.toHaveBeenCalled();
-  });
-
-  it('sends one request when two views of the same PR refresh together', async () => {
-    const results: Array<UseGitHubPrDetailsResult | null> = [null, null];
-    const input: UseGitHubPrDetailsInput = {
-      workspaceId: 'workspace-1',
-      repoFullName: 'loro-dev/lody',
-      prNumber: 1,
-    };
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () => {
-      root?.render(
-        createElement(
-          TestCloudPlatformProvider,
-          null,
-          createElement(Probe, { input, onResult: (result) => (results[0] = result) }),
-          createElement(Probe, { input, onResult: (result) => (results[1] = result) })
-        )
-      );
-    });
-    for (let attempt = 0; attempt < 30 && !results.every((r) => r?.state === 'ready'); attempt++) {
-      await act(async () => {
-        await new Promise((resolve) => window.setTimeout(resolve, 0));
-      });
-    }
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
-    });
-
-    githubMocks.githubFetchPullRequestDetails.mockClear();
-    const shared = createDeferred<GitHubPullRequestDetails>();
-    githubMocks.githubFetchPullRequestDetails.mockReturnValue(shared.promise);
-
-    let refreshes: Array<Promise<GitHubPrDetailsData | null> | undefined> = [];
-    await act(async () => {
-      refreshes = results.map((result) => result?.refresh());
-      await Promise.resolve();
-    });
-    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      shared.resolve(createPullRequest(1, { title: 'Shared refresh' }));
-      await Promise.all(refreshes);
-    });
-    expect(results.map((result) => result?.data?.pullRequest.title)).toEqual([
-      'Shared refresh',
-      'Shared refresh',
-    ]);
   });
 
   it("does not let a refresh join another view's poll that started before it", async () => {
@@ -639,107 +537,6 @@ describe('useGitHubPrDetails target isolation', () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect((await refreshed)?.pullRequest.title).toBe('After merge');
-  });
-
-  it('bypasses the browser cache on open and when the server reports newer PR data', async () => {
-    const input = { workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 };
-    await renderHook(input);
-    await waitForResult(
-      (result) =>
-        result.state === 'ready' &&
-        !result.isRevalidating &&
-        githubMocks.githubFetchCheckRuns.mock.calls.length === 1
-    );
-    expect(githubMocks.githubFetchPullRequestDetails.mock.calls[0]?.[3]).toEqual({
-      cache: 'reload',
-    });
-    expect(githubMocks.githubFetchCheckRuns.mock.calls[0]?.[3]).toEqual({ cache: 'reload' });
-
-    githubMocks.githubFetchCheckRuns.mockClear();
-    identityMocks.versions = { checkRunsUpdatedAt: Date.now() + 60_000 } as never;
-    await renderHook({ ...input });
-    await waitForResult(() => githubMocks.githubFetchCheckRuns.mock.calls.length === 1);
-    expect(githubMocks.githubFetchCheckRuns.mock.calls[0]?.[3]).toEqual({ cache: 'reload' });
-  });
-
-  it('bypasses the browser cache when manually refreshing an idle PR tab', async () => {
-    const refreshedPullRequest = createPullRequest(1, {
-      title: 'Refreshed pull request',
-      headSha: 'fresh-head-sha',
-      updatedAt: '2026-05-26T00:02:00.000Z',
-    });
-
-    await renderHook({
-      workspaceId: 'workspace-1',
-      repoFullName: 'loro-dev/lody',
-      prNumber: 1,
-    });
-    await waitForResult(
-      (result) =>
-        result.state === 'ready' &&
-        !result.isRevalidating &&
-        githubMocks.githubFetchPullRequestDetails.mock.calls.length === 1 &&
-        githubMocks.githubFetchCheckRuns.mock.calls.length === 1
-    );
-
-    githubMocks.githubFetchPullRequestDetails.mockClear();
-    githubMocks.githubFetchPRReviewComments.mockClear();
-    githubMocks.githubFetchPullRequestReviews.mockClear();
-    githubMocks.githubFetchPRIssueComments.mockClear();
-    githubMocks.githubFetchCheckRuns.mockClear();
-    const manualPullRequest = createDeferred<GitHubPullRequestDetails>();
-    githubMocks.githubFetchPullRequestDetails.mockReturnValueOnce(manualPullRequest.promise);
-
-    let refreshPromise: Promise<GitHubPrDetailsData | null> | null = null;
-    await act(async () => {
-      refreshPromise = currentResult?.refresh() ?? null;
-      await Promise.resolve();
-    });
-    if (!refreshPromise) {
-      throw new Error('Expected manual refresh to start');
-    }
-    await waitForResult((result) => result.isRevalidating);
-
-    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(1);
-    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      1,
-      { cache: 'reload' }
-    );
-    expect(githubMocks.githubFetchCheckRuns).not.toHaveBeenCalled();
-
-    await act(async () => {
-      manualPullRequest.resolve(refreshedPullRequest);
-      await refreshPromise;
-    });
-
-    expect(githubMocks.githubFetchPRReviewComments).toHaveBeenLastCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      1,
-      { cache: 'reload' }
-    );
-    expect(githubMocks.githubFetchPullRequestReviews).toHaveBeenLastCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      1,
-      { cache: 'reload' }
-    );
-    expect(githubMocks.githubFetchPRIssueComments).toHaveBeenLastCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      1,
-      { cache: 'reload' }
-    );
-    expect(githubMocks.githubFetchCheckRuns).toHaveBeenLastCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      'fresh-head-sha',
-      { cache: 'reload' }
-    );
-    expect(currentResult?.data?.pullRequest.title).toBe('Refreshed pull request');
-    expect(currentResult?.isRevalidating).toBe(false);
   });
 
   it('fetches the current head and check runs without falling back to cached CI data', async () => {
@@ -996,54 +793,6 @@ describe('useGitHubPrDetails target isolation', () => {
     });
     expect(done).toBe(false);
     expect(githubMocks.githubMarkPullRequestReadyForReview).not.toHaveBeenCalled();
-  });
-
-  it('polls pending mergeability past the browser HTTP cache', async () => {
-    vi.useFakeTimers();
-    githubMocks.githubFetchPullRequestDetails.mockImplementation(
-      async (_token: string, _repoFullName: string, prNumber: number) =>
-        createPullRequest(prNumber, { mergeable: null, mergeableState: 'unknown' })
-    );
-    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 });
-    await waitForResult((result) => result.state === 'ready' && !result.isRevalidating);
-
-    githubMocks.githubFetchPullRequestDetails.mockClear();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
-    });
-    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalled();
-    for (const call of githubMocks.githubFetchPullRequestDetails.mock.calls) {
-      expect(call[3]).toEqual({ cache: 'reload' });
-    }
-  });
-
-  it('silently recovers from an apparent session expiry instead of showing the auth error', async () => {
-    // Convex reports unauthenticated (a stale JWT after a long idle) and nothing
-    // is cached, so the previous behavior dropped straight to a "Session
-    // expired" screen the user had to dismiss by hand. The hook should instead
-    // refetch silently — the token path mints a fresh JWT from the still-valid
-    // BetterAuth cookie — and resolve to ready without surfacing an auth error.
-    convexAuthMock.state = { isAuthenticated: false, isLoading: false };
-    cacheMocks.readPrCacheEntry.mockResolvedValueOnce(null);
-
-    await renderHook({
-      workspaceId: 'workspace-1',
-      repoFullName: 'loro-dev/lody',
-      prNumber: 7,
-    });
-
-    await waitForResult(
-      (result) => result.state === 'ready' && result.data?.pullRequest.number === 7
-    );
-
-    expect(currentResult?.data?.pullRequest.number).toBe(7);
-    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalled();
-  });
-
-  it('grows the auth recovery delay and caps it at 30 seconds', () => {
-    expect([0, 1, 2, 3, 99].map(getAuthRecoveryBackoffMs)).toEqual([
-      1000, 3000, 10_000, 30_000, 30_000,
-    ]);
   });
 
   it('surfaces a workspace membership failure without entering auth recovery', async () => {

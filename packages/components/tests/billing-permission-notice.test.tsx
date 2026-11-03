@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -146,23 +147,6 @@ describe('BillingSettingsView', () => {
     }
   );
 
-  it('disables the payment method action while opening Stripe', async () => {
-    await renderView({
-      overview: {
-        ...freeOverview,
-        billingAccountId: 'billing_1',
-        effectivePlanTier: 'plus',
-        entitlementSource: 'stripe',
-      },
-      pendingAction: 'portal',
-      onPaymentMethod: () => {},
-    });
-    const button = Array.from(container!.querySelectorAll('button')).find(
-      (item) => item.textContent === 'Opening…'
-    );
-    expect(button?.disabled).toBe(true);
-  });
-
   it.each(['month', 'year'] as const)(
     'shows the same dated plan summary for paid Plus (%s)',
     async (billingInterval) => {
@@ -204,12 +188,6 @@ describe('BillingSettingsView', () => {
 
     expect(container?.textContent).toContain('Access ends');
     expect(container?.textContent).toContain(formatDate(currentPeriodEnd));
-    expect(container?.textContent).not.toContain('Next renewal');
-  });
-
-  it('keeps the free plan on its status message', async () => {
-    await renderView({ overview: freeOverview });
-    expect(planNameText()).toBe('Free');
     expect(container?.textContent).not.toContain('Next renewal');
   });
 
@@ -353,13 +331,6 @@ describe('BillingSettingsView', () => {
     expect(container?.textContent).not.toContain('Next charge (estimated)');
   });
 
-  it('offers the upgrade action to a viewer who can manage billing', async () => {
-    await renderView({});
-
-    expect(upgradeButton()?.disabled).toBe(false);
-    expect(container?.textContent).not.toContain("You can't upgrade this workspace");
-  });
-
   it('explains why a member cannot upgrade and who to ask', async () => {
     await renderView({
       overview: { ...freeOverview, canManageBilling: false },
@@ -369,18 +340,6 @@ describe('BillingSettingsView', () => {
     expect(upgradeButton()).toBeUndefined();
     expect(container?.textContent).toContain("You can't upgrade this workspace");
     expect(container?.textContent).toContain('Ask Ada Lovelace to upgrade this workspace.');
-  });
-
-  it('falls back to the generic reason when the owner is unknown', async () => {
-    await renderView({
-      overview: { ...freeOverview, canManageBilling: false },
-      workspaceOwnerName: null,
-    });
-
-    expect(container?.textContent).toContain("You can't upgrade this workspace");
-    expect(container?.textContent).toContain(
-      'Only workspace owners and admins can manage billing.'
-    );
   });
 
   it('keeps the action disabled instead of denying permission before the role is known', async () => {

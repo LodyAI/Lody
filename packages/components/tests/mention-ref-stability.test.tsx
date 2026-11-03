@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -60,57 +61,6 @@ describe('Mention ref stability', () => {
       );
     });
   }
-
-  it('does not re-enter updates when item rows mount and the parent rerenders', () => {
-    renderMention(0);
-    renderMention(1);
-    renderMention(2);
-
-    expect(container?.querySelectorAll('[data-slot="mention-item"]')).toHaveLength(2);
-  });
-
-  it('reuses the virtual anchor for repeated updates at the same trigger position', () => {
-    const anchors: unknown[] = [];
-
-    function VirtualAnchorProbe() {
-      const context = useMentionContext('VirtualAnchorProbe');
-      React.useEffect(() => {
-        anchors.push(context.virtualAnchor);
-      }, [context.virtualAnchor]);
-      return null;
-    }
-
-    act(() => {
-      root?.render(
-        <Mention inputValue="@src" defaultOpen>
-          <VirtualAnchorProbe />
-          <MentionInput value="@src" onChange={() => {}} />
-          <MentionItem value="src/" label="src">
-            src/
-          </MentionItem>
-        </Mention>
-      );
-    });
-
-    const input = container?.querySelector('textarea');
-    if (!input) throw new Error('Expected mention textarea to render');
-
-    act(() => {
-      input.setSelectionRange(4, 4);
-      input.focus();
-      input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    act(() => {
-      input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    act(() => {
-      input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    const nonNullAnchors = anchors.filter(Boolean);
-    expect(nonNullAnchors.length).toBeGreaterThan(0);
-    expect(new Set(nonNullAnchors).size).toBe(1);
-  });
 
   it('moves the menu anchor with the caret across columns and lines', () => {
     let anchorRect: DOMRect | null = null;

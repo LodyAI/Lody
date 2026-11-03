@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { SessionId } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
-import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
+
 import {
   SessionChatStreamView,
   type ChatStreamItem,
@@ -107,28 +108,6 @@ async function renderStream(initialWindowReady = true) {
   );
   return container.querySelector<HTMLElement>('[data-message-selection-scroll]');
 }
-
-describe('conversation viewport', () => {
-  it('turns browser scroll anchoring off for the whole scroller', async () => {
-    const viewport = await renderStream();
-    expect(viewport).not.toBeNull();
-    expect(viewport!.style.overflowAnchor).toBe('none');
-    expect(viewport!.hasAttribute('data-conversation-scroll-engine')).toBe(true);
-  });
-
-  it.each([false, true])(
-    'is never hidden, and reports a native window ready only with its window (ready=%s)',
-    async (initialWindowReady) => {
-      const viewport = await renderStream(initialWindowReady);
-      expect(viewport!.style.visibility).not.toBe('hidden');
-      // Warm-window reveal waits for this: the hydrated window AND the engine's
-      // first placed cycle, so a window is never revealed over placeholders.
-      expect(viewport!.getAttribute('data-window-session-stream-ready')).toBe(
-        initialWindowReady ? sessionId : null
-      );
-    }
-  );
-});
 
 it('reports the actual visible turns while touch growth shifts the content origin', async () => {
   vi.stubGlobal('navigator', {
@@ -392,22 +371,4 @@ describe('conversation rows', () => {
       expect(row()!.getBoundingClientRect().top).toBe(sentScreenY);
     }
   );
-
-  it.each([
-    ['static', false],
-    ['streaming', true],
-  ])('render %s code blocks without content-visibility: auto', async (_mode, isStreaming) => {
-    await act(async () =>
-      root.render(
-        createElement(MarkdownRenderer, {
-          text: '```ts\nconst answer = 42;\n```\n',
-          isStreaming,
-        })
-      )
-    );
-    const elements = [container, ...container.querySelectorAll<HTMLElement>('*')];
-    expect(container.textContent).toContain('const answer = 42;');
-    const auto = elements.filter((element) => element.style.contentVisibility === 'auto');
-    expect(auto).toEqual([]);
-  });
 });

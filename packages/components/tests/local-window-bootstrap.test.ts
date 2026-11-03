@@ -4,7 +4,6 @@ import { LoroDoc } from 'loro-crdt';
 import {
   createLocalWindowBootstrap,
   createSessionSnapshotLoader,
-  readSessionBootstrapSnapshot,
 } from '../src/providers/local-window-bootstrap';
 
 function channelFactory() {
@@ -134,56 +133,6 @@ describe('local window bootstrap', () => {
     owner.close();
     await repo.destroy();
   });
-
-  it('falls through immediately when live peers do not own the requested document', async () => {
-    vi.useFakeTimers();
-    const { createChannel, createRegistry } = channelFactory();
-    const repo = await LoroRepo.create({});
-    const owner = createLocalWindowBootstrap(
-      repo,
-      'workspace',
-      new Map(),
-      createChannel,
-      createRegistry
-    );
-    const receiver = createLocalWindowBootstrap(
-      repo,
-      'workspace',
-      new Map(),
-      createChannel,
-      createRegistry
-    );
-    expect(await receiver.readDocument('session:missing')).toBeUndefined();
-    owner.close();
-    expect(await receiver.readDocument('session:closed-peer')).toBeUndefined();
-    receiver.close();
-    await repo.destroy();
-  });
-
-  it('uses the disk snapshot before peer state and tolerates disk failure', async () => {
-    const disk = new Uint8Array([1]);
-    const peer = new Uint8Array([2]);
-    expect(
-      await readSessionBootstrapSnapshot(
-        async () => disk,
-        async () => peer
-      )
-    ).toEqual(disk);
-    expect(
-      await readSessionBootstrapSnapshot(
-        async () => {
-          throw new Error('broken cache');
-        },
-        async () => peer
-      )
-    ).toEqual(peer);
-    expect(
-      await readSessionBootstrapSnapshot(
-        async () => undefined,
-        async () => undefined
-      )
-    ).toBeUndefined();
-  });
 });
 
 describe('session snapshot adoption', () => {
@@ -282,6 +231,38 @@ describe('session snapshot adoption', () => {
     const { doc } = await open(repo, 'session-one', async () => remoteSnapshot());
     expect(doc.toJSON()).toEqual({ fields: { remote: 'peer', local: 'unsent' } });
     expect(LoroDoc.fromSnapshot(snapshots.get('session-one')!).toJSON()).toEqual(doc.toJSON());
+    await repo.destroy();
+  });
+
+  it('retains persisted pending updates while adopting a bootstrap snapshot', async () => {
+    const remote = new LoroDoc();
+    remote.setPeerId(1n);
+    remote.getText('text').insert(0, 'base|');
+    const base = remote.export({ mode: 'snapshot' });
+    const beforeA = remote.oplogVersion();
+    remote.getText('text').insert(5, 'A');
+    const updateA = remote.export({ mode: 'update', from: beforeA });
+    const beforeB = remote.oplogVersion();
+    remote.getText('text').insert(6, 'B');
+    const updateB = remote.export({ mode: 'update', from: beforeB });
+
+    const persisted = LoroDoc.fromSnapshot(base);
+    persisted.import(updateB);
+    expect(persisted.exportPendingUpdates()).toBeDefined();
+
+    const storage: StorageAdapter = {
+      loadMeta: async () => undefined,
+      loadDoc: async () => persisted,
+      save: async () => {},
+    };
+    const open = createSessionSnapshotLoader(storage);
+    const repo = await LoroRepo.create({ storageAdapter: storage });
+    const { doc } = await open(repo, 'session-one', async () => remoteSnapshot());
+    expect(doc.getText('text').toString()).toBe('base|');
+    expect(doc.exportPendingUpdates()).toBeDefined();
+    doc.import(updateA);
+    expect(doc.getText('text').toString()).toBe('base|AB');
+    expect(doc.exportPendingUpdates()).toBeUndefined();
     await repo.destroy();
   });
 

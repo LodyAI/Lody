@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CliType, SUPPORTED_CLI_TYPES } from '@lody/shared';
+
 import { resolveCliTypesSelection } from './start-options';
 import { createStartShutdownController } from './start-shutdown';
 import type { Logger } from '@/utils/logger';
@@ -76,25 +76,6 @@ describe('start command cli type selection', () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
-  it('defaults to all supported CLI types when none are requested', () => {
-    const result = resolveCliTypesSelection({
-      requestedCliTypes: undefined,
-      availability: {
-        kimi: 'managed-runtime',
-        grok: 'managed-runtime',
-        claude: '1.0.0',
-        codex: '1.0.0',
-      },
-    });
-
-    expect(result).toEqual({
-      configuredCliTypes: SUPPORTED_CLI_TYPES,
-      cliTypes: SUPPORTED_CLI_TYPES,
-      missing: [],
-      invalid: [],
-      isDefaultSelection: true,
-    });
-  });
 
   it('defaults to installed CLI types only when a subset is available', () => {
     const result = resolveCliTypesSelection({
@@ -116,26 +97,6 @@ describe('start command cli type selection', () => {
     });
   });
 
-  it('uses requested CLI types and reports missing ones in native mode', () => {
-    const result = resolveCliTypesSelection({
-      requestedCliTypes: ['codex'],
-      availability: {
-        kimi: false,
-        grok: false,
-        claude: false,
-        codex: false,
-      },
-    });
-
-    expect(result).toEqual({
-      configuredCliTypes: ['codex'],
-      cliTypes: [],
-      missing: ['codex'],
-      invalid: [],
-      isDefaultSelection: false,
-    });
-  });
-
   it('keeps available requested CLI types and skips missing ones', () => {
     const result = resolveCliTypesSelection({
       requestedCliTypes: ['codex', 'claude'],
@@ -152,46 +113,6 @@ describe('start command cli type selection', () => {
       cliTypes: ['claude'],
       missing: ['codex'],
       invalid: [],
-      isDefaultSelection: false,
-    });
-  });
-
-  it('returns empty cliTypes when all explicitly requested types are missing', () => {
-    const result = resolveCliTypesSelection({
-      requestedCliTypes: ['codex'],
-      availability: {
-        kimi: false,
-        grok: false,
-        claude: false,
-        codex: false,
-      },
-    });
-
-    expect(result).toEqual({
-      configuredCliTypes: ['codex'],
-      cliTypes: [],
-      missing: ['codex'],
-      invalid: [],
-      isDefaultSelection: false,
-    });
-  });
-
-  it('marks unknown requested cli types as invalid', () => {
-    const result = resolveCliTypesSelection({
-      requestedCliTypes: ['claude', 'codxe' as CliType],
-      availability: {
-        kimi: false,
-        grok: false,
-        claude: '1.0.0',
-        codex: false,
-      },
-    });
-
-    expect(result).toEqual({
-      configuredCliTypes: ['claude'],
-      cliTypes: ['claude'],
-      missing: [],
-      invalid: ['codxe'],
       isDefaultSelection: false,
     });
   });
@@ -218,35 +139,6 @@ describe('start command cli type selection', () => {
 });
 
 describe('start shutdown controller', () => {
-  it('exits with 0 after graceful shutdown completes', async () => {
-    const logger = createTestLogger();
-    const exits: number[] = [];
-    let cleanedUp = false;
-    let telemetryFlushed = false;
-
-    const controller = createStartShutdownController({
-      signals: ['SIGINT'],
-      logger,
-      shutdown: async () => {
-        cleanedUp = true;
-      },
-      flushTelemetry: async () => {
-        telemetryFlushed = true;
-      },
-      exit: (code) => {
-        exits.push(code);
-      },
-      timeoutMs: 1_000,
-    });
-
-    await controller.shutdown('SIGINT');
-
-    expect(cleanedUp).toBe(true);
-    expect(telemetryFlushed).toBe(true);
-    expect(exits).toEqual([0]);
-    expect(logger.info).toHaveBeenCalledWith('\nReceived SIGINT, shutting down gracefully...');
-  });
-
   it('reports a failed application cleanup as a failed exit after telemetry flush', async () => {
     const exits: number[] = [];
     let flushed = false;

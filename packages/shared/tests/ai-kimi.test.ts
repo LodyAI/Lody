@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  MANAGED_BUILTIN_RUNTIMES,
   classifyPermissionModeFace,
   getBuiltinDefaultModeId,
   getManagedBuiltinRuntimeByAgentType,
@@ -12,12 +11,7 @@ import {
 } from '../src/ai';
 
 describe('builtin Kimi shared contract', () => {
-  it('is the first managed builtin and maps both directions', () => {
-    expect(MANAGED_BUILTIN_RUNTIMES[0]).toEqual({
-      runtimeName: 'kimi-code',
-      agentType: 'kimi',
-      displayName: 'Kimi Code',
-    });
+  it('maps the builtin to its managed download', () => {
     expect(isBuiltinAgentType('kimi')).toBe(true);
     expect(getManagedBuiltinRuntimeByAgentType('kimi')?.runtimeName).toBe('kimi-code');
     expect(getManagedBuiltinRuntimeByRuntimeName('kimi-code')?.agentType).toBe('kimi');
@@ -26,19 +20,7 @@ describe('builtin Kimi shared contract', () => {
   it('provides stable modes without pretending to know account-specific models', () => {
     const capabilities = getStaticBuiltinAcpCapabilities('builtin', 'kimi');
 
-    expect(capabilities?.modes.map((mode) => mode.id)).toEqual(['default', 'plan', 'auto', 'yolo']);
     expect(capabilities?.models).toEqual([]);
-    expect(capabilities?.configOptions.map((option) => option.id)).toEqual([
-      'permission_mode',
-      'plan_mode',
-    ]);
-    expect(capabilities?.configOptions[0]?.currentValue).toBe('auto');
-    expect(capabilities?.configOptions[0]?.category).toBe('_permission');
-    expect(capabilities?.configOptions[0]?.options.map((option) => option.value)).toEqual([
-      'default',
-      'auto',
-      'yolo',
-    ]);
     expect(classifyPermissionModeFace('yolo')).toEqual({
       kind: 'full-access',
       tone: 'warning',

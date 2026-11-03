@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, readFile, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -6,16 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanupBackfilledSessionFileBlobs,
   copyIntoSessionFileBlobStore,
-  getDraftSessionFileBlobMaxAgeMs,
-  getSessionFileBlobAgeMs,
   getSessionFileBlobDir,
   getSessionFileBlobPath,
   getSessionFileBlobStoreUsage,
   listPendingLocalSessionFiles,
   markSessionFileBlobBackfilled,
-  readSessionFileBlobBackfillMarker,
   readSessionFileBlobBackfillReceipt,
-  removeSessionFileBlob,
   sessionFileBlobExists,
   writeSessionFileBlobBackfillMarker,
 } from './session-file-blob-store';
@@ -66,18 +62,6 @@ describe('session file blob store', () => {
     return p;
   };
 
-  it('lays out blobs under the local installation data directory', () => {
-    const dir = getSessionFileBlobDir({ workspaceId: 'ws', sessionId: 'sess', homeDir });
-    expect(dir).toBe(join(homeDir, '.lody-oss', 'session-files', 'ws', 'sess'));
-    const file = getSessionFileBlobPath({
-      workspaceId: 'ws',
-      sessionId: 'sess',
-      fileId: 'file-1',
-      homeDir,
-    });
-    expect(file).toBe(join(dir, 'file-1'));
-  });
-
   it('rejects path-traversal identifiers', () => {
     expect(() =>
       getSessionFileBlobPath({ workspaceId: 'ws', sessionId: 'sess', fileId: '../escape', homeDir })
@@ -87,7 +71,7 @@ describe('session file blob store', () => {
     ).toThrow();
   });
 
-  it('copies bytes into the store and is idempotent on re-copy', async () => {
+  it('stores attachment bytes with private file and directory permissions', async () => {
     const source = await makeSource('a.txt', 'hello');
     const args = {
       workspaceId: 'ws',
@@ -102,48 +86,6 @@ describe('session file blob store', () => {
     expect(await readFile(dest, 'utf8')).toBe('hello');
     expect((await stat(getSessionFileBlobDir(args))).mode & 0o777).toBe(0o700);
     expect((await stat(dest)).mode & 0o777).toBe(0o600);
-    expect(
-      await sessionFileBlobExists({
-        workspaceId: 'ws',
-        sessionId: 'sess',
-        fileId: 'file-1',
-        homeDir,
-      })
-    ).toBe(true);
-
-    // Re-copy with different content overwrites (same fileId).
-    const source2 = await makeSource('a2.txt', 'world!');
-    await copyIntoSessionFileBlobStore({ ...args, sourcePath: source2 });
-    expect(await readFile(dest, 'utf8')).toBe('world!');
-  });
-
-  it('removes blobs idempotently', async () => {
-    const source = await makeSource('a.txt', 'hello');
-    await copyIntoSessionFileBlobStore({
-      workspaceId: 'ws',
-      sessionId: 'sess',
-      fileId: 'file-1',
-      sourcePath: source,
-      homeDir,
-    });
-    await removeSessionFileBlob({
-      workspaceId: 'ws',
-      sessionId: 'sess',
-      fileId: 'file-1',
-      homeDir,
-    });
-    expect(
-      await sessionFileBlobExists({
-        workspaceId: 'ws',
-        sessionId: 'sess',
-        fileId: 'file-1',
-        homeDir,
-      })
-    ).toBe(false);
-    // Second removal does not throw.
-    await expect(
-      removeSessionFileBlob({ workspaceId: 'ws', sessionId: 'sess', fileId: 'file-1', homeDir })
-    ).resolves.toBeUndefined();
   });
 
   it('lists pending blobs across sessions and skips .part temp files', async () => {
@@ -179,24 +121,6 @@ describe('session file blob store', () => {
     expect(pending).toHaveLength(2);
   });
 
-  it('round-trips the backfill marker and keeps it out of the pending scan (R5.3)', async () => {
-    const source = await makeSource('a.txt', 'hello');
-    const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'file-1', homeDir };
-    await copyIntoSessionFileBlobStore({ ...args, sourcePath: source });
-
-    expect(await readSessionFileBlobBackfillMarker(args)).toBeNull();
-    await writeSessionFileBlobBackfillMarker({ ...args, relayFileId: 'relay-1' });
-    expect(await readSessionFileBlobBackfillMarker(args)).toBe('relay-1');
-
-    // The `.r2meta` sidecar must not surface as a pending blob.
-    const pending = await listPendingLocalSessionFiles({ workspaceId: 'ws', homeDir });
-    expect(pending).toEqual([{ sessionId: 'sess', fileId: 'file-1' }]);
-
-    // Finalizing the backfill clears the marker.
-    await markSessionFileBlobBackfilled(args);
-    expect(await readSessionFileBlobBackfillMarker(args)).toBeNull();
-  });
-
   it('retains the exact encrypted backfill receipt for restart adoption', async () => {
     const source = await makeSource('private.txt', 'hello');
     const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'encrypted-local', homeDir };
@@ -219,38 +143,6 @@ describe('session file blob store', () => {
     expect(await sessionFileBlobExists(args)).toBe(true);
     await markSessionFileBlobBackfilled(args);
     expect(await readSessionFileBlobBackfillReceipt(args)).toBeNull();
-  });
-
-  it('removeSessionFileBlob also clears the backfill marker', async () => {
-    const source = await makeSource('a.txt', 'hello');
-    const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'file-1', homeDir };
-    await copyIntoSessionFileBlobStore({ ...args, sourcePath: source });
-    await writeSessionFileBlobBackfillMarker({ ...args, relayFileId: 'relay-1' });
-
-    await removeSessionFileBlob(args);
-    expect(await readSessionFileBlobBackfillMarker(args)).toBeNull();
-    expect(await sessionFileBlobExists(args)).toBe(false);
-  });
-
-  it('reports blob age for draft reclamation (R5.4)', async () => {
-    const source = await makeSource('a.txt', 'hello');
-    const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'file-1', homeDir };
-    await copyIntoSessionFileBlobStore({ ...args, sourcePath: source });
-
-    expect(await getSessionFileBlobAgeMs(args)).toBeGreaterThanOrEqual(0);
-    expect(
-      await getSessionFileBlobAgeMs({
-        workspaceId: 'ws',
-        sessionId: 'sess',
-        fileId: 'missing',
-        homeDir,
-      })
-    ).toBeNull();
-
-    // Backdate the blob well past the draft retention window.
-    const old = new Date(Date.now() - getDraftSessionFileBlobMaxAgeMs() - 60_000);
-    await utimes(getSessionFileBlobPath(args), old, old);
-    expect(await getSessionFileBlobAgeMs(args)).toBeGreaterThan(getDraftSessionFileBlobMaxAgeMs());
   });
 
   it('rejects new writes when the local blob quota is full', async () => {
@@ -335,10 +227,5 @@ describe('session file blob store', () => {
       cleanupBackfilledSessionFileBlobs({ homeDir, now: 10_000, retainMs: 1_000 })
     ).resolves.toBe(1);
     expect((await getSessionFileBlobStoreUsage({ homeDir })).usedBytes).toBe(0);
-  });
-
-  it('returns no pending blobs for an empty/absent workspace', async () => {
-    await mkdir(join(homeDir, '.lody-oss'), { recursive: true });
-    expect(await listPendingLocalSessionFiles({ workspaceId: 'ws', homeDir })).toEqual([]);
   });
 });

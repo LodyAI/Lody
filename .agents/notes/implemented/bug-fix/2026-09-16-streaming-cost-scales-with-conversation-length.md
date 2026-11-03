@@ -88,6 +88,13 @@ ordered fact list hand back their previous array when nothing changed, and
 `ConversationView` gained `structureVersion` so the accepted-history projection stops
 rebuilding a whole-conversation slot array at token rate.
 
+Configuration sources retain detached `id`, `role` and `inputConfig` records for
+hydrated turns, memoized by weak turn identity. Keeping the complete turn here would
+keep its items alive after the view evicts its body. Older user sources remain lazy
+index rows. The hydrated source keeps the complete input configuration: even a legacy
+prompt-only configuration establishes a `sourceConfigKey` in the existing resolver,
+so replacing it with the directory's smaller configuration subset changes semantics.
+
 ## Alternatives considered
 
 Reporting the dense range but letting the cache filter it was rejected: the cache

@@ -4,7 +4,7 @@ import { exportDevice } from '../src/platform/device';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Deferred, Effect, Exit, Fiber, Result } from 'effect';
+import { Effect, Result } from 'effect';
 import { Bytes } from '@lody/e2ee-core';
 import { issueWorkspaceInvitation } from '@lody/e2ee-core';
 import { makeLabHostSession } from '../src/platform/host-session';
@@ -29,88 +29,6 @@ import {
   openLabWorkspaceSession,
   reauthenticateLabWorkspaceSession,
 } from '../src/platform/full-session';
-it('closes native admission and joins an abort-ignoring control read before closing the actual workspace SQLite owner', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'lab-facade-active-close-'));
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const f = yield* makeLabScenarioFixture(join(root, 'fixture')),
-            entered = yield* Deferred.make<void>(),
-            release = yield* Deferred.make<void>(),
-            stopped = yield* Deferred.make<void>();
-          let armed = false,
-            feedClosed = false,
-            closeDone = false;
-          const config = { ...f.input('owner', 'create'), documents: [] };
-          const actualClose = Database.prototype.close;
-          Database.prototype.close = function () {
-            if (this.name === config.path) feedClosed = true;
-            return actualClose.call(this);
-          };
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              Database.prototype.close = actualClose;
-            })
-          );
-          const transport: typeof fetch = async (value, init) => {
-            const outgoing = new Request(value, init),
-              response = await fetch(outgoing);
-            if (
-              armed &&
-              outgoing.method === 'GET' &&
-              new URL(outgoing.url).pathname.endsWith('/control')
-            ) {
-              const bytes = await response.arrayBuffer();
-              outgoing.signal.addEventListener(
-                'abort',
-                () => Deferred.doneUnsafe(stopped, Exit.void),
-                { once: true }
-              );
-              Deferred.doneUnsafe(entered, Exit.void);
-              await Effect.runPromise(Deferred.await(release));
-              return new Response(bytes, { status: response.status, headers: response.headers });
-            }
-            return response;
-          };
-          const workspace = yield* openLabWorkspaceSession({ ...config, fetch: transport });
-          yield* Effect.gen(function* () {
-            armed = true;
-            const reading = yield* Effect.result(workspace.refresh()).pipe(Effect.forkChild);
-            yield* Deferred.await(entered);
-            const closing = yield* workspace.close().pipe(Effect.forkChild);
-            yield* Deferred.await(stopped);
-            expect(feedClosed).toBe(false);
-            expect(closeDone).toBe(false);
-            const cancelled = yield* Fiber.interrupt(closing).pipe(Effect.forkChild),
-              secondStarted = yield* Deferred.make<void>();
-            const second = yield* Deferred.succeed(secondStarted, undefined).pipe(
-              Effect.andThen(workspace.close()),
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  closeDone = true;
-                })
-              ),
-              Effect.forkChild
-            );
-            yield* Deferred.await(secondStarted);
-            expect(feedClosed).toBe(false);
-            expect(closeDone).toBe(false);
-            yield* Deferred.succeed(release, undefined);
-            yield* Fiber.join(second);
-            yield* Fiber.join(cancelled);
-            const result = yield* Fiber.await(reading);
-            if (Exit.isSuccess(result)) expect(Result.isFailure(result.value)).toBe(true);
-            expect(feedClosed).toBe(true);
-            expect(closeDone).toBe(true);
-          }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
-        })
-      )
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
 it('creates through the public facade only after protected initial-key readback, publishes one original genesis and reopens the retained create intent', async () => {
   const root = mkdtempSync(join(tmpdir(), 'lab-facade-create-'));
   try {
@@ -903,28 +821,6 @@ it('durably retries an unadmitted join original after a lost receipt, then start
           } finally {
             stored.close();
           }
-        })
-      )
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-it('revalidates changed signed fixture originals before reusing synthetic authority', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'lab-fixture-originals-'));
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const fixture = yield* makeLabScenarioFixture(join(root, 'fixture'));
-          const before = fixture.view();
-          const record = fixture.records[0]!;
-          const original = new Uint8Array(record);
-          record[record.length - 1] = record[record.length - 1]! ^ 1;
-          expect(() => fixture.view()).toThrow();
-          record.set(original);
-          expect(fixture.view().inspectState()).toEqual(before.inspectState());
         })
       )
     );

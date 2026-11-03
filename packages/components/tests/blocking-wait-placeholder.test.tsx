@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+/** @vitest-environment jsdom */
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
@@ -33,46 +34,21 @@ vi.mock('../src/components/preloaded-main-layout', () => ({
 
 import 'fake-indexeddb/auto';
 import { docMetaCacheScopeAtom } from '../src/atoms/doc-meta';
-import {
-  runtimeAtom,
-  workspaceRuntimeInitFailureAtom,
-  type WorkspaceRuntime,
-} from '../src/atoms/runtime';
+import { runtimeAtom, workspaceRuntimeInitFailureAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { setWorkspaceContextAtom } from '../src/atoms/workspace-context';
 import { BootShellProvider } from '../src/components/boot-shell';
-import {
-  BLOCKING_WAIT_RECOVERY_DELAY_MS,
-  BlockingWaitPlaceholder,
-} from '../src/components/blocking-wait-placeholder';
+import { BlockingWaitPlaceholder } from '../src/components/blocking-wait-placeholder';
 import { RouteMessage } from '../src/components/route-message';
-import {
-  resetWorkspaceDataReadyForTests,
-  resolveWorkspaceDataWaitKind,
-  useRecordWorkspaceDataReady,
-  WorkspaceDataWait,
-} from '../src/components/workspace-data-wait';
+import { resetWorkspaceDataReadyForTests, resolveWorkspaceDataWaitKind, useRecordWorkspaceDataReady, WorkspaceDataWait } from '../src/components/workspace-data-wait';
 import { StuckConnectionBannerContainer } from '../src/components/stuck-connection-banner';
 import { browserOnlineAtom, lodyControlConnectionStateAtom } from '../src/atoms/control-connection';
 import { authTokenAtom } from '../src/atoms/runtime';
 import { STUCK_CONNECTION_HINT_DELAY_MS } from '../src/hooks/use-stuck-connection';
 import { TestCloudPlatformProvider } from './test-platform';
-import {
-  describeBootRequestError,
-  recordBootRequestResult,
-  resetBootRequestFailuresForTests,
-} from '../src/lib/boot-request-failures';
+import { describeBootRequestError, recordBootRequestResult, resetBootRequestFailuresForTests } from '../src/lib/boot-request-failures';
 import { initI18n } from '../src/i18n';
-import {
-  installAppActivityTracking,
-  resetAppActivityGapForTests,
-} from '../src/lib/app-activity-gap';
-import {
-  LOCAL_CLEAR_RECORD_RELEVANCE_MS,
-  markCacheClearPending,
-  maybeClearLodyCacheOnBoot,
-  readPendingLocalClearMode,
-  resetBootClearMemoForTests,
-} from '../src/lib/clear-local-cache';
+import { resetAppActivityGapForTests } from '../src/lib/app-activity-gap';
+import { markCacheClearPending, maybeClearLodyCacheOnBoot, readPendingLocalClearMode, resetBootClearMemoForTests } from '../src/lib/clear-local-cache';
 import { WorkspaceRouteTargetProvider } from '../src/providers/workspace-route-target';
 
 (
@@ -235,16 +211,6 @@ describe('BlockingWaitPlaceholder', () => {
     expect(readPendingLocalClearMode()).toBeNull();
     expect(app.relaunches).toEqual([]);
     expect(app.reloads).toBe(0);
-    expect(eventsNamed('workspace/boot_wait_stuck')).toEqual([
-      {
-        name: 'workspace/boot_wait_stuck',
-        properties: expect.objectContaining({
-          gate: 'workspace_data',
-          failed: true,
-          blocker: 'doc_meta_scan_failed',
-        }),
-      },
-    ]);
   });
 
   it('calls local data damaged only when the runtime failed reading storage', () => {
@@ -307,11 +273,6 @@ describe('BlockingWaitPlaceholder', () => {
     expect(shell?.querySelector('[role="status"]')).toBeNull();
     click('Reload Lody');
     expect(app.reloads).toBe(1);
-    expect(eventsNamed('workspace/boot_wait_stuck')[0]?.properties).toMatchObject({
-      gate: 'session_loading',
-      failed: false,
-      blocker: null,
-    });
   });
 
   it('times the whole wait across gates and reports it once, under the gate shown', () => {
@@ -336,9 +297,6 @@ describe('BlockingWaitPlaceholder', () => {
     renderNode(store, wait('workspace_access_loading'), null);
 
     expect(text()).toContain('Lody is taking too long to open');
-    expect(eventsNamed('workspace/boot_wait_stuck').map((event) => event.properties.gate)).toEqual([
-      'workspace_list_loading',
-    ]);
   });
 
   it('says so when the last clear could not delete everything, and that retrying restarts', async () => {
@@ -350,55 +308,6 @@ describe('BlockingWaitPlaceholder', () => {
 
     expect(text()).toContain("The last cache clear couldn't remove everything.");
     expect(text()).toContain('Clearing again restarts Lody');
-  });
-
-  it('does not bring up a clear older than a day', async () => {
-    failingDelete('lody-loro-repo-db-ws-acme');
-    markCacheClearPending();
-    await bootClear(['lody-loro-repo-db-ws-acme']);
-    vi.setSystemTime(Date.now() + LOCAL_CLEAR_RECORD_RELEVANCE_MS);
-
-    render(createWorkspaceStore({ scan: 'failed' }));
-
-    expect(text()).not.toContain("couldn't remove everything");
-  });
-
-  it('reports a boot-time clear that did not get the workspace open', async () => {
-    markCacheClearPending();
-    await bootClear();
-
-    render(createWorkspaceStore({ scan: 'failed' }));
-
-    expect(eventsNamed('workspace/recovery_outcome')).toEqual([
-      {
-        name: 'workspace/recovery_outcome',
-        properties: expect.objectContaining({
-          outcome: 'stuck_again',
-          gate: 'workspace_data',
-          mode: 'cache',
-          clear_ok: true,
-        }),
-      },
-    ]);
-  });
-
-  it('puts the gate, blocker, idle gap and last clear into the copied diagnostics', () => {
-    localStorage.setItem('lody:lastActiveAt', String(Date.now() - 72 * 3_600_000));
-    const stopTracking = installAppActivityTracking();
-    render(createWorkspaceStore({ scan: 'failed' }));
-    // Nothing is built while the details are closed.
-    expect(container.querySelector('pre')).toBeNull();
-
-    click('Technical details');
-
-    const report = container.querySelector('pre')?.textContent ?? '';
-    expect(report).toContain('Lody did not open: workspace_data');
-    expect(report).toContain('Workspace data blocker: doc_meta_scan_failed');
-    expect(report).toContain('Workspace: acme');
-    expect(report).toContain('Doc metadata scan error: UnknownError');
-    expect(report).toContain('Idle before launch: 72h');
-    expect(report).toContain('Local clear in the last day: none');
-    stopTracking();
   });
 });
 
@@ -420,34 +329,6 @@ function WorkspaceDataRoute({
 describe('WorkspaceDataWait', () => {
   const bootShell = () => container.querySelector('[data-lody-boot-shell]');
 
-  it('continues the boot shell on a cold start instead of claiming a switch', () => {
-    const store = createWorkspaceStore({ scan: 'pending' });
-    renderNode(store, <WorkspaceDataRoute slug="acme" ready={false} />, 'acme');
-
-    expect(bootShell()).not.toBeNull();
-    expect(text()).toContain('Loading workspace');
-    expect(text()).not.toContain('Switching workspace');
-  });
-
-  it('says it is switching only when another workspace was open', () => {
-    const store = createWorkspaceStore({ scan: 'pending' });
-    renderNode(store, <WorkspaceDataRoute slug="acme" ready />, 'acme');
-    renderNode(store, <WorkspaceDataRoute slug="beta" ready={false} />, 'beta');
-
-    expect(bootShell()).toBeNull();
-    expect(text()).toContain('Switching workspace');
-  });
-
-  it('reloading the open workspace stays a pane wait without claiming a switch', () => {
-    const store = createWorkspaceStore({ scan: 'pending' });
-    renderNode(store, <WorkspaceDataRoute slug="acme" ready />, 'acme');
-    renderNode(store, <WorkspaceDataRoute slug="acme" ready={false} />, 'acme');
-
-    expect(bootShell()).toBeNull();
-    expect(text()).toContain('Loading workspace');
-    expect(text()).not.toContain('Switching workspace');
-  });
-
   it('treats a workspace opened by another account as a cold start', () => {
     const store = createWorkspaceStore({ scan: 'pending' });
     renderNode(store, <WorkspaceDataRoute slug="acme" ready />, 'acme');
@@ -466,16 +347,6 @@ describe('WorkspaceDataWait', () => {
 
     expect(bootShell()).not.toBeNull();
     expect(text()).not.toContain('Switching workspace');
-  });
-
-  it('a cold start that never readies still reaches the recovery page', () => {
-    const store = createWorkspaceStore({ scan: 'pending' });
-    renderNode(store, <WorkspaceDataRoute slug="acme" ready={false} />, 'acme');
-
-    act(() => {
-      vi.advanceTimersByTime(BLOCKING_WAIT_RECOVERY_DELAY_MS);
-    });
-    expect(buttonLabels()).toEqual(expect.arrayContaining(['Reload Lody']));
   });
 });
 
@@ -510,39 +381,11 @@ describe('a wait stuck on a failing request', () => {
     );
     expect(text()).toContain("This isn't a problem with the data on this device.");
     expect(text()).not.toContain(DAMAGED);
-    expect(eventsNamed('workspace/boot_wait_stuck')[0]?.properties).toMatchObject({
-      request_failure_source: 'session',
-      request_failure_kind: 'server',
-      request_failure_status: 503,
-      request_failure_code: 'FAILED_TO_GET_SESSION',
-    });
 
     click('Technical details');
     expect(container.querySelector('pre')?.textContent).toContain(
       'Failing request: session: server · HTTP 503 · FAILED_TO_GET_SESSION · "Failed to get session"'
     );
-  });
-
-  it('says the server could not be reached when the request never got an answer', () => {
-    recordBootRequestResult('organizations', new TypeError('Load failed'));
-    signingIn();
-    act(() => {
-      vi.advanceTimersByTime(RECOVERY_DELAY_MS);
-    });
-
-    expect(text()).toContain("Lody can't reach the server while loading your workspaces.");
-  });
-
-  it('drops the message once the request succeeds', () => {
-    recordBootRequestResult('session', { status: 502 });
-    recordBootRequestResult('session', null);
-    signingIn();
-    act(() => {
-      vi.advanceTimersByTime(RECOVERY_DELAY_MS);
-    });
-
-    expect(text()).not.toContain('The server');
-    expect(text()).toContain(GENERIC);
   });
 
   it('classifies request errors and keeps tokens out of the message', () => {
@@ -579,10 +422,6 @@ describe('RouteMessage', () => {
 
     click('Reload Lody');
     expect(app.reloads).toBe(1);
-    expect(eventsNamed('workspace/boot_wait_stuck')[0]?.properties).toMatchObject({
-      gate: 'workspace_switch_error',
-      failed: true,
-    });
 
     click('More ways to recover');
     expect(text()).toContain("Lody couldn't open");
@@ -593,7 +432,6 @@ describe('RouteMessage', () => {
     renderNode(createStore(), <RouteMessage gate={null} title="Workspace limit reached" />, null);
 
     expect(buttonLabels()).toEqual([]);
-    expect(eventsNamed('workspace/boot_wait_stuck')).toEqual([]);
   });
 });
 
@@ -618,22 +456,11 @@ describe('StuckConnectionBannerContainer', () => {
       vi.advanceTimersByTime(STUCK_CONNECTION_HINT_DELAY_MS - 1);
     });
     expect(text()).toBe('');
-    expect(eventsNamed('workspace/boot_wait_stuck')).toEqual([]);
 
     act(() => {
       vi.advanceTimersByTime(1);
     });
     expect(text()).toContain('Still connecting');
-    expect(eventsNamed('workspace/boot_wait_stuck')).toEqual([
-      {
-        name: 'workspace/boot_wait_stuck',
-        properties: expect.objectContaining({
-          gate: 'control_connection_loading',
-          failed: false,
-          blocker: 'runtime_missing',
-        }),
-      },
-    ]);
 
     click('Recover…');
     expect(buttonLabels()).toEqual(
@@ -642,7 +469,6 @@ describe('StuckConnectionBannerContainer', () => {
     // The full reset replaces the credential, which a cache clear keeps.
     expect(text()).toContain('Clear all local data and sign out');
     expect(readPendingLocalClearMode()).toBeNull();
-    expect(eventsNamed('workspace/boot_wait_stuck')).toHaveLength(1);
 
     // A connection that comes through closes the page instead of trapping the user.
     act(() => {

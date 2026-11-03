@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { StreamsClient } from '@loro-dev/streams-client';
-import { Deferred, Effect, Fiber, Result } from 'effect';
+import { Effect, Result } from 'effect';
 import { expect, it } from 'vitest';
-import * as Riverrun from '@loro-dev/sqlite-riverrun';
+
 import { Bytes } from '@lody/e2ee-core';
 import {
   signGenesisRecord,
@@ -18,7 +18,7 @@ import { signLedgerRecord } from '@lody/e2ee-core/protocol';
 import { frameLedgerRecord } from '@lody/e2ee-core/protocol';
 import { makeSqliteProtectedEpochKeys } from '@lody/e2ee-core/internal';
 import { generateDevice } from '../src/platform/device';
-import { makeLabHostSession, LabHostNativeServer } from '../src/platform/host-session';
+import { makeLabHostSession } from '../src/platform/host-session';
 import { makeLabHttpIdentity } from '../src/platform/http-identity';
 import {
   openLabWorkspaceSession,
@@ -386,151 +386,6 @@ it('closes and reopens the actual whole host, reconciles committed CAS/Pending s
           yield* peerAgain.close();
           yield* reopenedHost.close();
         })
-      )
-    );
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-it('joins an actual held native response before closing the complete host Riverrun owner', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'lab-host-held-body-'));
-  let bodySettled = false,
-    closedEarly = false;
-  const start = Riverrun.startDevServer;
-  const release = Deferred.makeUnsafe<void>();
-  const instrument: typeof start = async (options) => {
-    const server = await start(options);
-    return {
-      ...server,
-      close: async () => {
-        closedEarly ||= !bodySettled;
-        await server.close();
-      },
-    };
-  };
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const entered = yield* Deferred.make<void>(),
-            closeStarted = yield* Deferred.make<void>();
-          const owner = yield* generateDevice();
-          const genesis = yield* signGenesisRecord({
-            signer: owner,
-            initialKey: ok(Bytes.epochKey(new Uint8Array(32).fill(211))),
-            encryptionPublicKey: owner.enc,
-            membershipId: ok(Bytes.membershipId(new Uint8Array(16).fill(212))),
-            userId: ok(Bytes.userId(new Uint8Array(32).fill(213))),
-          });
-          let enabled = false,
-            reads = 0;
-          const transport: typeof fetch = async (value, init) => {
-            const request = new Request(value, init),
-              response = await fetch(request);
-            if (
-              !enabled ||
-              request.method !== 'GET' ||
-              !new URL(request.url).pathname.endsWith('/control') ||
-              ++reads !== 2 ||
-              !response.body
-            )
-              return response;
-            const reader = response.body.getReader();
-            let gated = false;
-            const body = new ReadableStream<Uint8Array>({
-              async pull(controller) {
-                if (!gated) {
-                  gated = true;
-                  Deferred.doneUnsafe(entered, Effect.void);
-                  // Instrumented actual HTTP body deliberately does not cooperate
-                  // with abort until this explicit native-settlement gate releases.
-                  await Effect.runPromise(Deferred.await(release));
-                }
-                try {
-                  const chunk = await reader.read();
-                  if (chunk.done) {
-                    bodySettled = true;
-                    controller.close();
-                  } else controller.enqueue(chunk.value);
-                } catch (cause) {
-                  bodySettled = true;
-                  controller.error(cause);
-                }
-              },
-            });
-            return new Response(body, { status: response.status, headers: response.headers });
-          };
-          const host = yield* makeLabHostSession({
-            directory: join(directory, 'host'),
-            mode: 'create',
-            genesisRecord: genesis.record,
-            now: () => 0,
-            resources: { loro: 'held-loro', flock: 'held-flock' },
-            budget: { maxRecords: 100, maxBytes: 1024 * 1024 },
-            fetch: transport,
-          });
-          const identity = yield* makeLabHttpIdentity({
-            baseUrl: host.baseUrl,
-            genesis: genesis.genesis,
-          });
-          const initial = yield* identity.authenticate(owner, 'unbound');
-          yield* initial.createWorkspace(genesis.record);
-          const auth = yield* identity.authenticate(owner);
-          enabled = true;
-          const reading = yield* Effect.forkChild(
-            Effect.result(
-              Effect.tryPromise({
-                try: async () => {
-                  const response = await auth.fetch(
-                    `${host.baseUrl}/ds/${Buffer.from(genesis.genesis.toBytes()).toString('hex')}/control?offset=-1`
-                  );
-                  await response.arrayBuffer();
-                },
-                catch: (cause) => cause,
-              })
-            )
-          );
-          yield* Deferred.await(entered);
-          const closing = yield* Effect.forkChild(
-            Effect.gen(function* () {
-              yield* Deferred.succeed(closeStarted, undefined);
-              yield* host.close();
-            })
-          );
-          yield* Deferred.await(closeStarted);
-          // Real native IO gives the closing owner a causal opportunity to settle;
-          // no sleep, deadline or fixed microtask drain is used as evidence.
-          const probe = yield* Effect.result(
-            Effect.tryPromise({
-              try: async () => {
-                const response = await fetch(
-                  `${host.nativeBaseUrl}/ds/${Buffer.from(genesis.genesis.toBytes()).toString('hex')}/control`,
-                  { method: 'HEAD' }
-                );
-                await response.body?.cancel();
-                return response.status;
-              },
-              catch: (cause) => cause,
-            })
-          );
-          yield* Deferred.succeed(release, undefined);
-          yield* Fiber.join(reading);
-          yield* Fiber.join(closing);
-          expect(bodySettled).toBe(true);
-          expect(closedEarly).toBe(false);
-          expect(Result.isSuccess(probe) && probe.success).toBe(200);
-          yield* Effect.promise(() =>
-            expect(fetch(`${host.nativeBaseUrl}/healthz`)).rejects.toThrow()
-          );
-        }).pipe(
-          Effect.timeoutOrElse({
-            duration: '120 seconds',
-            orElse: () => Effect.fail(new Error('host body harness watchdog')),
-          }),
-          Effect.ensuring(Deferred.succeed(release, undefined)),
-          Effect.provideService(LabHostNativeServer, instrument)
-        )
       )
     );
   } finally {

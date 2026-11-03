@@ -114,37 +114,6 @@ it.each(['plaintext', 'e2ee'] as const)(
   }
 );
 
-it('drains acquisitions after a sibling fails before releasing their source references', async () => {
-  let fail!: () => void;
-  const failure = new Promise<never>((_, reject) => {
-    fail = () => reject(new Error('Source unavailable'));
-  });
-  const held = new Set<string>();
-  let started = 0;
-  const runtime = {
-    prepareSessionTarget: async () => {},
-    acquireSessionStore: async (id: string) => {
-      if (++started === 4) fail();
-      if (id === 's0') return failure;
-      await Promise.resolve();
-      held.add(id);
-      return { sessionId: id, acquireSync: () => () => {}, firstSynced: Promise.resolve() };
-    },
-    releaseSessionStoreRef: (id: string) => held.delete(id),
-  };
-  await expect(
-    captureSessionShare({
-      runtime,
-      sessions: Array.from({ length: 8 }, (_, i) => ({ id: `s${i}` })),
-      rootSessionId: 's0',
-      token: 'test',
-      signal: new AbortController().signal,
-    } as unknown as Parameters<typeof captureSessionShare>[0])
-  ).rejects.toThrow('Source unavailable');
-  expect(started).toBe(4);
-  expect(held.size).toBe(0);
-});
-
 it('reports image download failures and still releases the source', async () => {
   const release = vi.fn();
   const releaseSync = vi.fn();

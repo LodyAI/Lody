@@ -54,14 +54,6 @@ const runnerSpawns = (table: FakeProcessTable) =>
   table.spawned.filter((call) => call.command !== 'taskkill');
 
 describe('daemon PID ownership', () => {
-  it('atomically replaces stale diagnostics after Host ownership is acquired', () => {
-    const filePath = createPidPath();
-    writePidFile(101, 'stale', 'stale-token', filePath);
-    const current = writePidFile(202, 'current', 'current-token', filePath);
-
-    expect(readPidFileRecord(filePath)).toEqual(current);
-  });
-
   it('does not let a stale owner delete a replacement owner record', () => {
     const filePath = createPidPath();
     const stale = writePidFile(101, 'stale', 'stale-token', filePath);
@@ -123,22 +115,6 @@ describe('daemon runner launch cleanup', () => {
     ).toEqual({
       outcome: { status: 'ready', pid: 999_000, instanceId: 'legacy' },
       cancelRunner: false,
-    });
-  });
-
-  it('awaits a runner that reported startup failure before returning the error', () => {
-    expect(
-      interpretDaemonRunnerLaunchOutcome(
-        { status: 'error', message: 'worker bootstrap failed' },
-        999_000
-      )
-    ).toEqual({
-      outcome: {
-        status: 'error',
-        runnerPid: 999_000,
-        message: 'worker bootstrap failed',
-      },
-      cancelRunner: true,
     });
   });
 

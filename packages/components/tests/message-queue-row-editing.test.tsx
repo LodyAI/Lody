@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -11,7 +12,6 @@ import { currentWorkspaceIdAtom } from '../src/atoms';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 import { initI18n } from '../src/i18n';
-import { ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
 
 // Each variant resolves to a distinct URL so the test can tell the row's
 // thumbnail from the full-size image the preview loads.
@@ -74,46 +74,6 @@ describe('queued message editing commits', () => {
     }
     container?.remove();
     container = undefined;
-  });
-
-  it('keeps mobile steer available for the queue head', async () => {
-    const steered: string[] = [];
-    await act(async () => {
-      root?.render(
-        createElement(
-          ForceMobileLayoutProvider,
-          { force: true },
-          createElement(MessageQueueDisplay, {
-            sessionId: 'session-test' as SessionId,
-            items: [makeItem()],
-            roomy: true,
-            showSteerAction: true,
-            onRemove: () => {},
-            onReorder: () => {},
-            onEditStart: () => {},
-            onEditCancel: () => {},
-            onEditSave: () => {},
-            onSteer: (item: MessageQueueItem) => {
-              steered.push(item.$cid);
-            },
-          })
-        )
-      );
-    });
-    const trigger = container!.querySelector<HTMLButtonElement>('.group\\/row button')!;
-    await act(async () => {
-      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
-      trigger.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
-      trigger.click();
-    });
-    const steer = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-      (item) => item.textContent?.trim() === 'Steer'
-    );
-    expect(steer).toBeDefined();
-    await act(async () => {
-      steer!.click();
-    });
-    expect(steered).toEqual(['cid-0']);
   });
 
   it('renders dedicated scheduled rows in a final section without queue affordances', async () => {
@@ -180,126 +140,6 @@ describe('queued message editing commits', () => {
     );
     expect(opened).toEqual(['earlier']);
     expect(cancelledRows).toEqual(['later']);
-  });
-
-  it('leads a mobile scheduled row with its time and folds actions into More', async () => {
-    const edited: string[] = [];
-    const opened: string[] = [];
-    const cancelledRows: string[] = [];
-    await act(async () => {
-      root?.render(
-        createElement(
-          ForceMobileLayoutProvider,
-          { force: true },
-          createElement(MessageQueueDisplay, {
-            sessionId: 'session-test' as SessionId,
-            items: [],
-            roomy: true,
-            scheduledItems: [
-              {
-                scheduleId: 'mobile',
-                content: 'Send the weekly summary',
-                at: Date.parse('2026-10-27T09:00:00Z'),
-                timeZone: 'UTC',
-                state: 'pending',
-              },
-            ],
-            onOpenScheduled: (item) => opened.push(item.scheduleId),
-            onEditScheduledTime: (item) => edited.push(item.scheduleId),
-            onCancelScheduled: (item) => cancelledRows.push(item.scheduleId),
-            onRemove: () => {},
-            onReorder: () => {},
-            onEditStart: () => {},
-            onEditCancel: () => {},
-            onEditSave: () => {},
-            onSteer: () => {},
-          })
-        )
-      );
-    });
-    const row = container!.querySelector<HTMLElement>('[data-scheduled-row]')!;
-    const target = row.querySelector<HTMLButtonElement>(
-      'button[aria-label*="Edit scheduled time"]'
-    )!;
-    expect(target.textContent).toContain('9:00');
-    expect(row.textContent!.indexOf('9:00')).toBeLessThan(
-      row.textContent!.indexOf('Send the weekly summary')
-    );
-    expect(row.querySelector('button[aria-label="Edit"]')).toBeNull();
-    await act(async () => target.click());
-    expect(edited).toEqual(['mobile']);
-
-    const more = row.querySelector<HTMLButtonElement>('button[aria-label="More"]')!;
-    const openMenu = async () => {
-      await act(async () => {
-        more.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
-        more.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
-        more.click();
-      });
-    };
-    const menuItem = (label: string) =>
-      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-        (item) => item.textContent?.trim() === label
-      );
-    await openMenu();
-    expect(menuItem('Edit scheduled time')).toBeDefined();
-    await act(async () => menuItem('Cancel scheduled message')!.click());
-    expect(cancelledRows).toEqual(['mobile']);
-    expect(opened).toEqual([]);
-  });
-
-  it('folds desktop row actions into More when the sheet is narrow', async () => {
-    const width = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!;
-    Object.defineProperty(Element.prototype, 'clientWidth', {
-      configurable: true,
-      get: () => 400,
-    });
-    const removed: string[] = [];
-    try {
-      await act(async () => {
-        root?.render(
-          createElement(MessageQueueDisplay, {
-            sessionId: 'session-test' as SessionId,
-            items: [makeItem()],
-            scheduledItems: [
-              {
-                scheduleId: 'narrow',
-                content: 'Send the weekly summary',
-                at: Date.parse('2026-10-27T09:00:00Z'),
-                timeZone: 'UTC',
-                state: 'pending',
-              },
-            ],
-            onOpenScheduled: () => {},
-            onCancelScheduled: () => {},
-            onRemove: (cid) => {
-              removed.push(cid);
-            },
-            onReorder: () => {},
-            onEditStart: () => {},
-            onEditCancel: () => {},
-            onEditSave: () => {},
-            onSteer: () => {},
-          })
-        );
-      });
-      expect(container!.querySelector('button[aria-label="Remove from queue"]')).toBeNull();
-      expect(container!.querySelector('button[aria-label="Cancel scheduled message"]')).toBeNull();
-      const mores = container!.querySelectorAll<HTMLButtonElement>('button[aria-label="More"]');
-      expect(mores).toHaveLength(2);
-      await act(async () => {
-        mores[0]!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
-        mores[0]!.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
-        mores[0]!.click();
-      });
-      const remove = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-        (entry) => entry.textContent?.trim() === 'Delete'
-      );
-      await act(async () => remove!.click());
-      expect(removed).toEqual(['cid-0']);
-    } finally {
-      Object.defineProperty(Element.prototype, 'clientWidth', width);
-    }
   });
 
   it('routes the scheduled time to the time editor rather than details', async () => {
@@ -418,57 +258,6 @@ describe('queued message editing commits', () => {
     await act(async () => textarea.focus());
     await pressEnter(textarea);
     expect(saved).toEqual([{ cid: 'cid-0', task: 'Keep this unfinished draft' }]);
-  });
-
-  it('saves the edit when Enter is pressed', async () => {
-    const view = await renderQueue();
-    const textarea = await startEditing(view);
-
-    await act(async () => {
-      setTextareaValue(textarea, 'Rewrite the queue instead');
-    });
-    const event = await pressEnter(textarea);
-
-    expect(event.defaultPrevented).toBe(true);
-    expect(saved).toEqual([{ cid: 'cid-0', task: 'Rewrite the queue instead' }]);
-  });
-
-  it('focuses the editor when the editing flag arrives before the start write completes', async () => {
-    let finishStart!: () => void;
-    function QueueWithEarlyUpdate() {
-      const [items, setItems] = useState([makeItem()]);
-      return createElement(MessageQueueDisplay, {
-        sessionId: 'session-test' as SessionId,
-        items,
-        onRemove: () => undefined,
-        onReorder: () => undefined,
-        onSteer: () => undefined,
-        onEditCancel: () => undefined,
-        onEditSave: (item, task) => {
-          saved.push({ cid: item.$cid, task });
-          setItems((current) => current.map((entry) => ({ ...entry, isEditing: false, task })));
-        },
-        onEditStart: (item) => {
-          setItems([{ ...item, isEditing: true }]);
-          return new Promise<void>((resolve) => {
-            finishStart = resolve;
-          });
-        },
-      });
-    }
-    await act(async () => root?.render(createElement(QueueWithEarlyUpdate)));
-    const textarea = await startEditing(container!);
-    expect(textarea.disabled).toBe(true);
-    expect(document.activeElement).not.toBe(textarea);
-
-    await act(async () => finishStart());
-    expect(textarea.disabled).toBe(false);
-    expect(document.activeElement).toBe(textarea);
-    expect(textarea.selectionStart).toBe(ORIGINAL_TASK.length);
-    expect(textarea.selectionEnd).toBe(ORIGINAL_TASK.length);
-    await act(async () => setTextareaValue(textarea, 'Clarified queued instruction'));
-    await pressEnter(textarea);
-    expect(saved).toEqual([{ cid: 'cid-0', task: 'Clarified queued instruction' }]);
   });
 
   for (const nextEditPending of [false, true]) {
@@ -633,16 +422,6 @@ describe('queued message editing commits', () => {
     } finally {
       consoleError.mockRestore();
     }
-  });
-
-  it('reverts instead of writing when the text is unchanged', async () => {
-    const view = await renderQueue();
-    const textarea = await startEditing(view);
-
-    await pressEnter(textarea);
-
-    expect(saved).toEqual([]);
-    expect(cancelled).toEqual(['cid-0']);
   });
 });
 

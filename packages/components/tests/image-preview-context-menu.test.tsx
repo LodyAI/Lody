@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { act, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +8,6 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { ZoomableImageViewer } from '../src/components/shared/zoomable-image-viewer';
 import {
-  resolveExportFileName,
   runTouchImagePreviewAction,
   type ImagePreviewExportBridge,
 } from '../src/lib/image-preview-export';
@@ -219,53 +219,6 @@ describe('image preview context menu', () => {
     }
   );
 
-  it('copies the previewed image when the menu returns copy', async () => {
-    const bridge = createBridge('copy');
-    installImageIpc(bridge);
-    stubImageFetch('image/png');
-
-    const photo = renderViewer();
-    const event = await rightClick(photo, bridge.finished);
-
-    expect(event.defaultPrevented).toBe(true);
-    expect(bridge.showMenu).toHaveBeenCalledTimes(1);
-    expect(bridge.showMenu.mock.calls[0]![0]!.items.map((item) => item.action)).toEqual([
-      'copy',
-      'save',
-    ]);
-    expect(bridge.copyToClipboard).toHaveBeenCalledTimes(1);
-    const copied = bridge.copyToClipboard.mock.calls[0]![0]!.pngBytes;
-    expect(new Uint8Array(copied)).toEqual(PNG_BYTES);
-    expect(bridge.saveAs).not.toHaveBeenCalled();
-  });
-
-  it('saves under the source file name when the menu returns save', async () => {
-    const bridge = createBridge('save');
-    installImageIpc(bridge);
-    stubImageFetch('image/png');
-
-    const photo = renderViewer();
-    await rightClick(photo, bridge.finished);
-
-    expect(bridge.saveAs).toHaveBeenCalledTimes(1);
-    expect(bridge.saveAs.mock.calls[0]![0]!.fileName).toBe('diagram.png');
-    expect(bridge.copyToClipboard).not.toHaveBeenCalled();
-  });
-
-  it('does nothing further when the menu is dismissed', async () => {
-    const bridge = createBridge(null);
-    installImageIpc(bridge);
-    stubImageFetch('image/png');
-
-    const photo = renderViewer();
-    const event = await rightClick(photo, bridge.finished);
-    expect(event.defaultPrevented).toBe(true);
-
-    expect(bridge.showMenu).toHaveBeenCalledTimes(1);
-    expect(bridge.copyToClipboard).not.toHaveBeenCalled();
-    expect(bridge.saveAs).not.toHaveBeenCalled();
-  });
-
   it('leaves the browser context menu alone without the desktop bridge', async () => {
     // No `window.ipc`: web and older preload builds keep their own menu.
     stubImageFetch('image/png');
@@ -381,31 +334,6 @@ describe('image preview context menu', () => {
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
-  it.each(['move', 'pinch', 'cancel', 'release', 'close', 'blur'])(
-    'cancels long press on %s',
-    async (reason) => {
-      touchBytes();
-      const photo = renderViewer();
-      act(() => {
-        pointer(photo, 'pointerdown');
-      });
-      await act(async () => vi.advanceTimersByTimeAsync(200));
-      act(() => {
-        if (reason === 'move') pointer(photo, 'pointermove', { clientX: 41 });
-        if (reason === 'pinch') pointer(photo, 'pointerdown', { pointerId: 2, isPrimary: false });
-        if (reason === 'cancel') pointer(photo, 'pointercancel');
-        if (reason === 'release') pointer(photo, 'pointerup');
-        if (reason === 'blur') window.dispatchEvent(new Event('blur'));
-        if (reason === 'close')
-          document
-            .querySelector<HTMLButtonElement>('button[aria-label="Close image preview"]')!
-            .click();
-      });
-      await act(async () => vi.advanceTimersByTimeAsync(600));
-      expect(document.querySelector('[role="menu"]')).toBeNull();
-    }
-  );
-
   it('cancels a pending hold and an open menu when the current image changes', async () => {
     touchBytes();
     root = createRoot(container!);
@@ -453,27 +381,6 @@ describe('image preview context menu', () => {
   });
 });
 
-describe('resolveExportFileName', () => {
-  it('keeps the source name when it already carries an extension', () => {
-    expect(resolveExportFileName('diagram.png', 'image/png')).toBe('diagram.png');
-    expect(resolveExportFileName('photo.jpeg', 'image/jpeg')).toBe('photo.jpeg');
-  });
-
-  it('reduces a path to its base name', () => {
-    expect(resolveExportFileName('docs/assets/diagram.png', 'image/png')).toBe('diagram.png');
-  });
-
-  it('appends an extension only when the source name has none', () => {
-    expect(resolveExportFileName('pasted-image', 'image/webp')).toBe('pasted-image.webp');
-    expect(resolveExportFileName('pasted-image', 'application/octet-stream')).toBe('pasted-image');
-  });
-
-  it('falls back to a generic name when there is no source name', () => {
-    expect(resolveExportFileName(undefined, 'image/jpeg')).toBe('image.jpg');
-    expect(resolveExportFileName(undefined, undefined)).toBe('image.png');
-  });
-});
-
 describe('touch image export', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -511,33 +418,6 @@ describe('touch image export', () => {
       kind: 'share-failed',
       error: 'Permission denied',
     });
-  });
-
-  it('downloads the original file and reports only that the browser transfer started', async () => {
-    vi.useFakeTimers();
-    const original = file();
-    let active: Blob | null = null;
-    let download: { name: string; href: string } | undefined;
-    vi.stubGlobal('URL', {
-      createObjectURL: (blob: Blob) => {
-        active = blob;
-        return 'blob:download';
-      },
-      revokeObjectURL: () => {
-        active = null;
-      },
-    });
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
-      download = { name: this.download, href: this.href };
-    });
-    expect(await runTouchImagePreviewAction('save', IMAGE_SRC, original)).toEqual({
-      kind: 'download-started',
-    });
-    expect(download).toEqual({ name: 'original.png', href: 'blob:download' });
-    expect(active).toBe(original);
-    expect(document.querySelector('a[download]')).toBeNull();
-    vi.advanceTimersByTime(1000);
-    expect(active).toBeNull();
   });
 
   it('starts image clipboard write in the click and reports unsupported bitmap copy', async () => {

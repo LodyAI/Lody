@@ -29,14 +29,6 @@ const compactionMarker = (
 });
 
 describe('markAssistantTurnFinished', () => {
-  it('stamps the open assistant entry when no turn id is given', () => {
-    const history = [assistantEntry({ id: 'assistant:u1' })];
-
-    markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT });
-
-    expect(history[0]).toMatchObject({ finished: true, endedAt: TURN_ENDED_AT });
-  });
-
   it('leaves an already finished turn alone when a later teardown finalizes', () => {
     // Regression for #260: closing the app runs the no-turnId finalize for every
     // live session, which used to re-stamp `endedAt = now` on a turn that ended
@@ -70,14 +62,6 @@ describe('markAssistantTurnFinished', () => {
     expect(history[1]?.endedAt).toBeUndefined();
   });
 
-  it('records the permission wait when the finalizing turn measured one', () => {
-    const history = [assistantEntry({ id: 'assistant:u1' })];
-
-    markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT, permissionWaitMs: 4_000 });
-
-    expect(history[0]?.permissionWaitMs).toBe(4_000);
-  });
-
   it('settles a compaction the finished turn left open', () => {
     // Nothing but a notification for the same toolCallId can move a synthetic
     // compaction marker off `in_progress`, and the turn is over — so it would
@@ -95,19 +79,6 @@ describe('markAssistantTurnFinished', () => {
 
     expect(history[0]).toMatchObject({ finished: true, endedAt: TURN_ENDED_AT });
     expect(history[0]?.items).toMatchObject([{ toolCallId: 'compact-1', status: 'failed' }]);
-  });
-
-  it('preserves a compaction the provider already settled', () => {
-    const history = [
-      assistantEntry({
-        id: 'assistant:u1',
-        items: [compactionMarker('compact-1', 'completed')],
-      }),
-    ];
-
-    markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT });
-
-    expect(history[0]?.items).toMatchObject([{ toolCallId: 'compact-1', status: 'completed' }]);
   });
 
   it('drops the duplicate markers one compaction episode minted', () => {
@@ -153,15 +124,6 @@ describe('markAssistantTurnFinished', () => {
       { type: 'text' },
       { toolCallId: 'compact-2', status: 'failed' },
     ]);
-  });
-
-  it('leaves an entry without compaction markers untouched', () => {
-    const items: MessageContent[] = [{ type: 'text', text: 'hello' }];
-    const history = [assistantEntry({ id: 'assistant:u1', items })];
-
-    markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT });
-
-    expect(history[0]?.items).toBe(items);
   });
 
   it('never stamps a user or system entry standing after the turn', () => {

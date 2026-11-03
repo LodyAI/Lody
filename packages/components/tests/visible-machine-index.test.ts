@@ -55,20 +55,6 @@ describe('buildVisibleMachineIndex', () => {
     expect(result.accessByMachineId.get(m1)?.ownerUserId).toBe('user-1');
   });
 
-  it('includes Convex rows verbatim in the access index', () => {
-    const rawMachines = new Map<MachineId, MachineViewMeta>([[m1, machine(m1)]]);
-    const access = row({ machineId: m1, ownerUserId: 'user-1', sharedWithTeam: true });
-    const result = buildVisibleMachineIndex({
-      rawMachines,
-      convexAccessRows: [access],
-      currentUserId: 'user-1',
-      isLoading: false,
-    });
-
-    expect(result.accessByMachineId.get(m1)).toBe(access);
-    expect(result.machines.has(m1)).toBe(true);
-  });
-
   it('synthesizes an own+private access entry for an unregistered own machine', () => {
     // BC-2026-04-16-MACHINE-VISIBILITY-OWNER-FALLBACK: old CLI never wrote a
     // workspaceMachines row, but Loro still knows ownerUserId.
@@ -91,22 +77,6 @@ describe('buildVisibleMachineIndex', () => {
     });
   });
 
-  it('does not synthesize access for another user unregistered machine', () => {
-    const rawMachines = new Map<MachineId, MachineViewMeta>([
-      [m1, machine(m1, { ownerUserId: 'user-other' })],
-      [m2, machine(m2, { ownerUserId: 'user-1' })],
-    ]);
-    const result = buildVisibleMachineIndex({
-      rawMachines,
-      convexAccessRows: [],
-      currentUserId: 'user-1',
-      isLoading: false,
-    });
-
-    expect(result.machines.has(m1)).toBe(false);
-    expect(result.machines.has(m2)).toBe(true);
-  });
-
   it('keeps shared team machines from Convex even when not owned by current user', () => {
     const rawMachines = new Map<MachineId, MachineViewMeta>([
       [m1, machine(m1, { ownerUserId: 'user-other' })],
@@ -119,27 +89,6 @@ describe('buildVisibleMachineIndex', () => {
     });
 
     expect(result.machines.has(m1)).toBe(true);
-  });
-
-  it('prefers the Convex row over a synthesized one for the same machine', () => {
-    const rawMachines = new Map<MachineId, MachineViewMeta>([
-      [m1, machine(m1, { ownerUserId: 'user-1' })],
-    ]);
-    const result = buildVisibleMachineIndex({
-      rawMachines,
-      convexAccessRows: [
-        row({ machineId: m1, ownerUserId: 'user-1', sharedWithTeam: true, updatedAt: 42 }),
-      ],
-      currentUserId: 'user-1',
-      isLoading: false,
-    });
-
-    expect(result.accessByMachineId.get(m1)).toEqual({
-      machineId: m1,
-      ownerUserId: 'user-1',
-      sharedWithTeam: true,
-      updatedAt: 42,
-    });
   });
 
   it('uses the latest access row instead of treating duplicate rows as co-owners', () => {

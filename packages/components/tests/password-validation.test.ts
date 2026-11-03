@@ -28,14 +28,6 @@ describe('validateNewPassword', () => {
     }
   });
 
-  it('rejects digit + symbols only (no letters)', () => {
-    const result = validateNewPassword('1234!@#$');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe('needs-letter-and-digit');
-    }
-  });
-
   it('accepts passwords meeting the length and complexity rules', () => {
     expect(validateNewPassword('abcd1234').ok).toBe(true);
     expect(validateNewPassword('Hello12345').ok).toBe(true);

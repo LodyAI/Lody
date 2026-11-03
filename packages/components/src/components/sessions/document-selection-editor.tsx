@@ -220,7 +220,8 @@ export function DocumentSelectionEditor({
     paint();
   }, [paint]);
   useEffect(() => {
-    if (!allowMarkup || !canvasRef.current || typeof ResizeObserver === 'undefined') return undefined;
+    if (!allowMarkup || !canvasRef.current || typeof ResizeObserver === 'undefined')
+      return undefined;
     const observer = new ResizeObserver(() => paint());
     observer.observe(canvasRef.current);
     return () => observer.disconnect();
@@ -245,7 +246,11 @@ export function DocumentSelectionEditor({
     try {
       if (allowMarkup) paint(undefined, true);
       const file = canvasRef.current
-        ? await encodeSelectionImage(canvasRef.current, selection.path)
+        ? await encodeSelectionImage(
+            canvasRef.current,
+            selection.path,
+            allowMarkup ? 'image/jpeg' : 'image/png'
+          )
         : undefined;
       if (!alive.current) return;
       const annotationNotes = marks.flatMap((mark) =>

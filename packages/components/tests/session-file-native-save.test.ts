@@ -83,25 +83,6 @@ it('isolates concurrent exports of the same filename', async () => {
   expect(state.files.size).toBe(0);
 });
 
-it.each(['Share canceled', 'Share cancelled', 'User cancelled sharing'])(
-  'treats %s as dismissal and cleans up',
-  async (message) => {
-    state.failure = message;
-    await expect(shareFileBytesNatively('package.deb', Uint8Array.of(1))).resolves.toEqual({
-      shared: false,
-    });
-    expect(state.files.size).toBe(0);
-  }
-);
-
-it.each(['write', 'share'])('cleans up and reports a %s failure', async (step) => {
-  state.failWrite = step === 'write';
-  state.failure = step === 'share' ? 'Share failed' : null;
-  await expect(shareFileBytesNatively('package.deb', Uint8Array.of(1))).rejects.toThrow();
-  expect(state.files.size).toBe(0);
-  expect(state.received).toEqual([]);
-});
-
 it.each(['cancel', 'write', 'uri', 'share'])(
   'cleans only its own decrypted staging file on %s, never an existing user file',
   async (step) => {

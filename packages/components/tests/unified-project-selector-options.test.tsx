@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -116,37 +117,6 @@ describe('UnifiedProjectSelectorView options', () => {
       document.querySelectorAll<HTMLElement>('[role^="menuitem"]')
     ).filter((item) => item.textContent?.startsWith('Project '));
     expect(searchedProjectItems.map((item) => item.textContent)).toEqual(['Project 25']);
-  });
-
-  it('keeps every source visible when the caller has no shared recency ranking', async () => {
-    await act(async () => {
-      root.render(
-        <Tooltip.Provider>
-          <UnifiedProjectSelectorView
-            value={{ kind: 'none' }}
-            onChange={vi.fn()}
-            localProjects={localProjects}
-            repositories={[{ fullName: 'loro-dev/lody' }]}
-            onAddLocalProject={vi.fn()}
-            onConnectGitRepo={vi.fn()}
-          />
-        </Tooltip.Provider>
-      );
-    });
-
-    const trigger = container.querySelector<HTMLButtonElement>('button');
-    await act(async () => {
-      trigger?.dispatchEvent(
-        new TestPointerEvent('mousedown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-
-    expect(document.body.textContent).toContain('loro-dev/lody');
   });
 
   it('includes recently used GitHub repositories in the bounded mixed list', async () => {

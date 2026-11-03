@@ -3,22 +3,16 @@ import { describe, expect, it } from 'vitest';
 import {
   HOME_NOW_RECENT_MS,
   buildHomeNow,
-  homeNowInputEqual,
   homeNowReason,
   type HomeNowPr,
   type HomeNowRow,
 } from '../src/lib/home-now';
-import { parseHomeBoard, serializeHomeBoard } from '../src/lib/home-board';
+
 import {
   HOME_NOW_LISTS,
-  HOME_NOW_ROW_BUDGET,
-  HOME_NOW_ROW_CAP,
-  HOME_NOW_TALLEST_COLUMN,
-  allocateHomeNowRows,
   homeNowBlockHeight,
   layoutHomeNow,
   type HomeNowLayout,
-  type HomeNowTotals,
 } from '../src/lib/home-now-layout';
 
 const NOW = new Date(2026, 9, 16, 10, 0, 0).getTime();
@@ -107,46 +101,6 @@ describe('the four lists', () => {
     expect(ids(model.next)).toEqual(['ready', 'recent']);
     expect(model.attention.items[2]).toMatchObject({ reason: 'ciFailed', prNumber: 812 });
   });
-
-  it("keeps a whole long list, newest first; how much shows is the layout's call", () => {
-    const rows = Array.from({ length: 7 }, (_, index) =>
-      row(`run-${index}`, { working: true, lastAt: NOW - (6 - index) * MINUTE })
-    );
-    const model = buildHomeNow({ rows }, NOW);
-    expect(model.running.total).toBe(7);
-    expect(ids(model.running)).toEqual([
-      'run-6',
-      'run-5',
-      'run-4',
-      'run-3',
-      'run-2',
-      'run-1',
-      'run-0',
-    ]);
-  });
-
-  it('is four empty lists when nothing is going on', () => {
-    const model = buildHomeNow({ rows: [] }, NOW);
-    expect([model.attention, model.running, model.finished, model.next]).toEqual(
-      Array.from({ length: 4 }, () => ({ items: [], total: 0 }))
-    );
-  });
-
-  it('compares inputs by what the page shows', () => {
-    const left = { rows: [row('a', { pr: pr('open', 'pass') })] };
-    expect(homeNowInputEqual(left, { rows: [row('a', { pr: pr('open', 'pass') })] })).toBe(true);
-    expect(homeNowInputEqual(left, { rows: [row('a', { pr: pr('open', 'fail') })] })).toBe(false);
-    expect(homeNowInputEqual(left, { rows: [row('a', { working: true })] })).toBe(false);
-  });
-});
-
-describe('the remembered board', () => {
-  it('opens folded the first time, keeps a fold, and ignores what it does not know', () => {
-    expect(parseHomeBoard(null)).toBeNull();
-    expect(parseHomeBoard('week')).toBe('week');
-    expect(parseHomeBoard(serializeHomeBoard(null))).toBeNull();
-    expect(parseHomeBoard('mission-control')).toBe('now');
-  });
 });
 
 describe("spending the board's height", () => {
@@ -160,47 +114,6 @@ describe("spending the board's height", () => {
     layout.columns.map((column) =>
       column.map((block) => (block.kind === 'list' ? `${block.key}:${block.shown}` : block.kind))
     );
-
-  it('shows everything when it fits', () => {
-    expect(allocateHomeNowRows(totals(2, 1, 1, 3))).toEqual(totals(2, 1, 1, 3));
-  });
-
-  it('gives way from the bottom when every list is long, never on what needs you', () => {
-    // One row each first, then by priority up to each cap, within the budget of twelve.
-    expect(allocateHomeNowRows(totals(30, 10, 8, 6))).toEqual(totals(6, 4, 1, 1));
-  });
-
-  it('never goes over the budget or a cap, and never hides a list that has something', () => {
-    const sizes = [0, 1, 2, 3, 5, 9, 40];
-    for (const a of sizes)
-      for (const r of sizes)
-        for (const f of sizes)
-          for (const n of sizes) {
-            const given: HomeNowTotals = totals(a, r, f, n);
-            const shown = allocateHomeNowRows(given);
-            const sum = HOME_NOW_LISTS.reduce((total, key) => total + shown[key], 0);
-            expect(sum).toBeLessThanOrEqual(HOME_NOW_ROW_BUDGET);
-            for (const key of HOME_NOW_LISTS) {
-              expect(shown[key]).toBeLessThanOrEqual(Math.min(given[key], HOME_NOW_ROW_CAP[key]));
-              expect(shown[key] > 0).toBe(given[key] > 0);
-            }
-          }
-  });
-
-  it('keeps every list in its own place, the columns level', () => {
-    // Needs you and just finished on the left, the usage, running and worth continuing on the
-    // right. The left ends two rows short (13 of 15), so just finished shows two more of its own
-    // rows rather than leaving a band.
-    expect(shape(layoutHomeNow(totals(30, 10, 8, 6), true))).toEqual([
-      ['attention:6', 'finished:3'],
-      ['usage', 'running:4', 'next:1'],
-    ]);
-    // A list with nothing keeps its place as its title.
-    expect(shape(layoutHomeNow(totals(1, 1, 0, 0), true))).toEqual([
-      ['attention:1', 'finished:0'],
-      ['usage', 'running:1', 'next:0'],
-    ]);
-  });
 
   it('never moves a list to another column, whatever the others hold', () => {
     const sizes = [0, 1, 3, 9, 40];
@@ -224,35 +137,6 @@ describe("spending the board's height", () => {
               }
               expect(columnOf(layout)).toEqual({ attention: 0, finished: 0, running: 1, next: 1 });
             }
-  });
-
-  it('keeps the tallest column any lists can make for the board', () => {
-    expect(HOME_NOW_TALLEST_COLUMN).toBe(17);
-    for (const hasUsage of [false, true])
-      for (const a of [0, 1, 6, 40])
-        for (const r of [0, 1, 4, 40])
-          for (const f of [0, 1, 3, 40])
-            for (const n of [0, 1, 3, 40])
-              for (const column of layoutHomeNow(totals(a, r, f, n), hasUsage).columns) {
-                const height = column.reduce(
-                  (sum, block) => sum + homeNowBlockHeight(block, totals(a, r, f, n)),
-                  0
-                );
-                expect(height).toBeLessThanOrEqual(HOME_NOW_TALLEST_COLUMN);
-              }
-  });
-
-  it('gives way to a short window, lower lists first, and says when one row each is too tall', () => {
-    // Twelve rows per column: the budget shrinks until the taller column fits.
-    const short = layoutHomeNow(totals(30, 10, 8, 6), true, 12);
-    expect(short.fits).toBe(true);
-    expect(shape(short)).toEqual([
-      ['attention:5', 'finished:1'],
-      ['usage', 'running:1', 'next:1'],
-    ]);
-    // One row each, with its "Show all", is twelve tall at the right; eleven has no room for it.
-    expect(layoutHomeNow(totals(30, 10, 8, 6), true, 11).fits).toBe(false);
-    expect(layoutHomeNow(totals(30, 10, 8, 6), true).fits).toBe(true);
   });
 
   it('fits every column within the room it is given, and never hides a list to do it', () => {

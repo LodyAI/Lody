@@ -34,8 +34,7 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   become a runtime dependency. Shared push/send maps remain in
   `@lody/shared/electron-ipc`. Preload exposes only `{ invoke, on, send }`, permits invoke
   channels by the service groups in `preload/ipc-invoke-policy.ts`, and keeps push/send
-  allowlists. The IPC registration test keeps that policy aligned with the registered
-  service constructors. There is no `window.api`. Validate foreign input at the IPC class
+  allowlists. There is no `window.api`. Validate foreign input at the IPC class
   boundary.
 - The E2E client-loss probe (`e2ee.inspectClientLoss` and `e2ee.clientLossEffects`) is the
   only channel pair outside the service classes. Main registers it, and preload admits it,

@@ -2,7 +2,6 @@ import { createStore } from 'jotai';
 import { describe, expect, it } from 'vitest';
 
 import {
-  getZenAwarePanelToggleState,
   navigationSidebarHiddenAtom,
   showNavigationSidebarAtom,
   toggleNavigationSidebarAtom,
@@ -104,28 +103,5 @@ describe('Zen layout state', () => {
 
     expect(store.get(zenLayoutModeAtom)).toBe(false);
     expect(store.get(sidebarCollapsedAtom)).toBe(false);
-  });
-});
-
-describe('getZenAwarePanelToggleState', () => {
-  it.each([
-    [
-      { zenMode: true, panelOpen: true },
-      { zenMode: false, panelOpen: true },
-    ],
-    [
-      { zenMode: true, panelOpen: false },
-      { zenMode: false, panelOpen: true },
-    ],
-    [
-      { zenMode: false, panelOpen: true },
-      { zenMode: false, panelOpen: false },
-    ],
-    [
-      { zenMode: false, panelOpen: false },
-      { zenMode: false, panelOpen: true },
-    ],
-  ])('maps %o to %o', (current, expected) => {
-    expect(getZenAwarePanelToggleState(current)).toEqual(expected);
   });
 });

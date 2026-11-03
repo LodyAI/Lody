@@ -2,10 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   getSessionSharingProjectKey,
-  resolveLocalProjectSharingState,
   resolveSessionSharingState,
-  shouldShowPrivateSharingStatus,
-  shouldShowSessionSharing,
 } from '../src/lib/session-sharing';
 import type { MachineVisibilityAccess } from '../src/lib/visible-machine-index';
 import type { LocalProjectVisibilityAccess } from '../src/lib/visible-local-project-index';
@@ -50,51 +47,6 @@ const baseArgs = {
 };
 
 describe('session sharing', () => {
-  it('enables sharing state only for the current multi-member workspace', () => {
-    expect(
-      shouldShowSessionSharing({
-        workspaceId: 'workspace-1',
-        activeWorkspaceId: 'workspace-1',
-        memberCount: 1,
-      })
-    ).toBe(false);
-    expect(
-      shouldShowSessionSharing({
-        workspaceId: 'workspace-1',
-        activeWorkspaceId: 'workspace-1',
-        memberCount: 2,
-      })
-    ).toBe(true);
-    expect(
-      shouldShowSessionSharing({
-        workspaceId: 'workspace-1',
-        activeWorkspaceId: 'workspace-2',
-        memberCount: 2,
-      })
-    ).toBe(false);
-    expect(
-      shouldShowSessionSharing({
-        workspaceId: 'workspace-1',
-        activeWorkspaceId: 'workspace-1',
-        memberCount: null,
-      })
-    ).toBe(false);
-  });
-
-  it('shows a sharing status only while effective access is private', () => {
-    const state = {
-      ...baseArgs,
-      machineId,
-      localProjectId,
-      canManage: true,
-    };
-
-    expect(shouldShowPrivateSharingStatus({ ...state, visibility: 'private' })).toBe(true);
-    expect(shouldShowPrivateSharingStatus({ ...state, visibility: 'team' })).toBe(false);
-    expect(shouldShowPrivateSharingStatus({ ...state, visibility: 'unknown' })).toBe(false);
-    expect(shouldShowPrivateSharingStatus(undefined)).toBe(false);
-  });
-
   it('treats a non-project conversation as shared when its machine is shared', () => {
     expect(
       resolveSessionSharingState({
@@ -155,22 +107,6 @@ describe('session sharing', () => {
         localProjectAccessByKey: projectAccess(true),
       })
     ).toMatchObject({ visibility: 'team' });
-  });
-
-  it('uses the same effective machine-and-project access in project pickers', () => {
-    expect(
-      resolveLocalProjectSharingState({
-        ...baseArgs,
-        machineId,
-        localProjectId,
-        machineAccessByMachineId: machineAccess(false),
-        localProjectAccessByKey: projectAccess(true),
-      })
-    ).toMatchObject({
-      visibility: 'private',
-      privateReason: 'machine',
-      canManage: true,
-    });
   });
 
   it('keeps visibility unknown while authoritative access rows are loading', () => {

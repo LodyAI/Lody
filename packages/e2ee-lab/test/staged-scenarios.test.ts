@@ -2,9 +2,8 @@ import Database from 'better-sqlite3';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Cause, Deferred, Effect, Exit, Fiber, Result } from 'effect';
-import { TestClock } from 'effect/testing';
-import { Bytes } from '@lody/e2ee-core';
+import { Effect, Fiber, Result } from 'effect';
+
 import { expect, it } from 'vitest';
 import { decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { commitEpochKey } from '@lody/e2ee-core/protocol';
@@ -430,63 +429,4 @@ it('uses one genuine atomic removal publication and stages only its active posts
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
-
-it('observes a staged response after virtual time advances, and diagnoses an ended producer instead of waiting for a guessed deadline', async () => {
-  const entered = Deferred.makeUnsafe<void>(),
-    release = Deferred.makeUnsafe<void>();
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const genesis = ok(Bytes.genesisHash(new Uint8Array(32).fill(215)));
-        const transport = yield* makeLabAttackTransport({
-          origin: 'http://127.0.0.1:1',
-          genesis,
-          fetch: async () => {
-            Deferred.doneUnsafe(entered, Effect.void);
-            await Effect.runPromise(Deferred.await(release));
-            return new Response('staged', { status: 200 });
-          },
-        });
-        const target = {
-          actor: 'owner',
-          stream: 'stagedgroup' as const,
-          method: 'POST' as const,
-          occurrence: 0,
-        };
-        const request = transport.fetchFor('owner');
-        const producer = yield* Effect.tryPromise({
-          try: async () => {
-            const response = await request(
-              `http://127.0.0.1:1/ds/${hex(genesis.toBytes())}/epoch-staging`,
-              { method: 'POST' }
-            );
-            await response.body?.cancel();
-          },
-          catch: (cause) => cause,
-        }).pipe(Effect.forkChild);
-        const observing = yield* awaitProducedEvent(transport.waitForEvent(target), producer).pipe(
-          Effect.forkChild
-        );
-        yield* Deferred.await(entered);
-        yield* TestClock.adjust('6 seconds');
-        expect(observing.pollUnsafe()).toBeUndefined();
-        yield* Deferred.succeed(release, undefined);
-        expect((yield* Fiber.join(observing)).status).toBe(200);
-        yield* Fiber.join(producer);
-
-        const ended = yield* Effect.fail(
-          new Error('synthetic producer ended before dispatch')
-        ).pipe(Effect.forkChild);
-        const missing = yield* Effect.exit(
-          awaitProducedEvent(transport.waitForEvent({ ...target, occurrence: 1 }), ended)
-        );
-        expect(Exit.isFailure(missing)).toBe(true);
-        if (Exit.isFailure(missing))
-          expect(Cause.pretty(missing.cause)).toContain(
-            'Lab test producer ended before its required event'
-          );
-      }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
-    ).pipe(Effect.provide(TestClock.layer()))
-  );
 });

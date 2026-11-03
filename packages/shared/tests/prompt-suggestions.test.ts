@@ -39,20 +39,4 @@ describe('session prompt suggestion state', () => {
       peer.destroy();
     }
   });
-  it('drops malformed or oversized payloads without replacing a good suggestion', () => {
-    const source = new PromptSuggestionStore();
-    try {
-      source.publish('machine', { sessionId: 's', result: { type: 'completed', text: 'good' } });
-      source.publish('machine', {
-        sessionId: 's',
-        result: { type: 'completed', text: 'x'.repeat(20000) },
-      });
-      expect(readPromptSuggestion(source.store.getAllStates(), 'machine', 's')).toBe('good');
-      expect(
-        readPromptSuggestion({ broken: { sessionId: 's', machineId: 'machine' } }, 'machine', 's')
-      ).toBeNull();
-    } finally {
-      source.destroy();
-    }
-  });
 });

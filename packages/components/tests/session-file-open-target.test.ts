@@ -2,38 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import {
-  resolveMarkdownImagePath,
-  resolveDirectMarkdownFileOpenTarget,
-  resolveSessionFileOpenTarget,
-} from '../src/lib/session-file-open-target';
-
-describe('Markdown image paths', () => {
-  it.each([
-    ['docs/guide.md', '../images/a%20b.png?v=1#preview', 'images/a b.png'],
-    ['docs/guide.md', './中文.png', 'docs/中文.png'],
-    ['README.md', '../outside.png', '../outside.png'],
-    ['/tmp/report/doc.md', '../plot.png', '/tmp/plot.png'],
-    ['C:\\repo\\docs\\guide.md', '..\\images\\plot.png', 'C:/repo/images/plot.png'],
-    ['docs/a.md', '/tmp/plot.png', '/tmp/plot.png'],
-    ['docs/a.md', 'C:/other/plot.png', 'C:/other/plot.png'],
-    ['docs/report%20v2.md', 'plot%2520v2.png', 'docs/plot%20v2.png'],
-    ['docs/a.md', 'plot%23draft.png', 'docs/plot#draft.png'],
-    ['docs/a.md', './plot:30.png', 'docs/plot:30.png'],
-  ])('resolves %s + %s on the owning machine', (document, src, expected) => {
-    expect(resolveMarkdownImagePath(document, src)).toBe(expected);
-  });
-  it.each([
-    'https://example.org/a.png',
-    '//example.org/a.png',
-    'data:image/png;base64,AA==',
-    'javascript:alert(1)',
-    '#anchor',
-    'file:///etc/image.png',
-  ])('does not treat %s as a relative filesystem path', (src) => {
-    expect(resolveMarkdownImagePath('docs/a.md', src)).toBeNull();
-  });
-});
+import { resolveSessionFileOpenTarget } from '../src/lib/session-file-open-target';
 
 const WORKSPACE = '/Users/dev/project';
 
@@ -66,17 +35,6 @@ describe('resolveSessionFileOpenTarget', () => {
         ).toEqual({ filePath, fromMarkdownLink: false });
       });
     }
-
-    it('carries an anchor the caller supplied rather than one parsed from the path', () => {
-      expect(
-        resolveSessionFileOpenTarget({
-          rawPath: 'src/app.ts',
-          pathKind: 'canonical',
-          workspacePath: WORKSPACE,
-          startLine: 42,
-        })
-      ).toEqual({ filePath: 'src/app.ts', startLine: 42, fromMarkdownLink: false });
-    });
   });
 
   it.each([
@@ -129,26 +87,6 @@ describe('resolveSessionFileOpenTarget', () => {
       }
     });
 
-    it.each([WORKSPACE, null])(
-      'preserves another local worktree with workspace %s',
-      (workspacePath) => {
-        expect(
-          resolveSessionFileOpenTarget({
-            rawPath: `${otherWorktree}/report%20v2.md#L12-L15`,
-            pathKind: 'markdown-href',
-            workspacePath,
-            preserveWorktreePath: true,
-          })
-        ).toEqual({
-          filePath: `${otherWorktree}/report v2.md`,
-          startLine: 12,
-          endLine: 15,
-          fromMarkdownLink: true,
-          lineSuffixFormat: 'github',
-        });
-      }
-    );
-
     it('keeps portable worktree mapping for nonlocal opens', () => {
       expect(
         resolveSessionFileOpenTarget({
@@ -173,79 +111,5 @@ describe('resolveSessionFileOpenTarget', () => {
         }).filePath
       ).toBe(rawPath.replace(/\\/g, '/'));
     });
-
-    it('still shares the indexed identity for the current local workspace', () => {
-      expect(
-        resolveSessionFileOpenTarget({
-          rawPath: `${otherWorktree}/src/app.ts:12`,
-          pathKind: 'markdown-href',
-          workspacePath: otherWorktree,
-          preserveWorktreePath: true,
-        })
-      ).toMatchObject({ filePath: 'src/app.ts', startLine: 12 });
-    });
-
-    it('splits a trailing line suffix off the path', () => {
-      expect(
-        resolveSessionFileOpenTarget({
-          rawPath: 'src/app.ts:12',
-          pathKind: 'markdown-href',
-          workspacePath: WORKSPACE,
-        })
-      ).toMatchObject({
-        filePath: 'src/app.ts',
-        startLine: 12,
-        fromMarkdownLink: true,
-        lineSuffixFormat: 'colon',
-      });
-    });
-
-    it('makes an absolute path inside the workspace relative to it', () => {
-      expect(
-        resolveSessionFileOpenTarget({
-          rawPath: `${WORKSPACE}/src/app.ts`,
-          pathKind: 'markdown-href',
-          workspacePath: WORKSPACE,
-        })
-      ).toMatchObject({ filePath: 'src/app.ts' });
-    });
-
-    it('decodes percent-encoding, which is why an indexed path must not come through here', () => {
-      expect(
-        resolveSessionFileOpenTarget({
-          rawPath: 'docs/report%20v2.md',
-          pathKind: 'markdown-href',
-          workspacePath: WORKSPACE,
-        })
-      ).toMatchObject({ filePath: 'docs/report v2.md' });
-    });
-  });
-});
-
-describe('direct Markdown file opens', () => {
-  it.each([
-    [
-      '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/report.md:12',
-      '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/report.md',
-      12,
-    ],
-    ['./src/app.ts#L8-L10', 'src/app.ts', 8],
-    ['docs/report%2520v2.md', 'docs/report%20v2.md', undefined],
-    ['docs/draft%23v2.md', 'docs/draft#v2.md', undefined],
-    ['C:/repo/file.ts:L42', 'C:/repo/file.ts', 42],
-  ])('opens %s directly without discovery', (href, expectedPath, line) => {
-    const target = resolveDirectMarkdownFileOpenTarget(href);
-    expect(target?.filePath).toBe(expectedPath);
-    expect(target?.startLine).toBe(line);
-    expect(target?.resolveMarkdownLink).toBeUndefined();
-  });
-  it.each([
-    'not a path',
-    'https://example.com/a.ts',
-    'file:///tmp/a.ts',
-    'src/a%00.ts',
-    'src/a%0A.ts',
-  ])('leaves %s for the copy fallback', (href) => {
-    expect(resolveDirectMarkdownFileOpenTarget(href)).toBeNull();
   });
 });

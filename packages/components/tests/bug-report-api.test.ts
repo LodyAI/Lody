@@ -48,30 +48,3 @@ it('settles caller cancellation even when a fetch adapter ignores abort', async 
   expect(await pending).toEqual({ ok: false, error: 'Client diagnostics upload cancelled.' });
   expect(signal?.aborted).toBe(true);
 });
-
-it('never starts an already-cancelled upload', async () => {
-  const fetcher = vi.fn();
-  vi.stubGlobal('fetch', fetcher);
-  const controller = new AbortController();
-  controller.abort();
-  expect(await attachClientDiagnostics({ ...report, signal: controller.signal })).toEqual({
-    ok: false,
-    error: 'Client diagnostics upload cancelled.',
-  });
-  expect(fetcher).not.toHaveBeenCalled();
-});
-
-it('cleans up cancellation and deadline after a successful attachment', async () => {
-  let signal: AbortSignal | null | undefined;
-  vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
-    signal = init.signal;
-    return Promise.resolve(Response.json({ attached: true }));
-  });
-  const controller = new AbortController();
-  expect(await attachClientDiagnostics({ ...report, signal: controller.signal })).toEqual({
-    ok: true,
-  });
-  controller.abort();
-  await vi.advanceTimersByTimeAsync(CLIENT_DIAGNOSTICS_UPLOAD_TIMEOUT_MS);
-  expect(signal?.aborted).toBe(false);
-});

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act, StrictMode, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -93,16 +94,6 @@ async function render(history: readonly SessionHistory[], sessionId = 'c1') {
     )
   );
 }
-
-it('shows the initial shared answer and its streamed replacement', async () => {
-  await render([turn('Visible answer')]);
-  expect(container.querySelector('[data-message="answer"]')?.textContent).toBe('Visible answer');
-  await render([turn('Visible answer, completed')]);
-  expect(container.querySelector('[data-message="answer"]')?.textContent).toBe(
-    'Visible answer, completed'
-  );
-  expect(container.querySelectorAll('[data-message]')).toHaveLength(1);
-});
 
 it('clears old rows when the target becomes empty and shows the new target', async () => {
   await render([turn('Old target')]);

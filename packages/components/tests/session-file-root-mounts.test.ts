@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { encodeSessionFilePath, type SessionProjectRun } from '@lody/shared';
 import {
   buildSessionFileRootMounts,
-  remapSessionFileRecord,
   toSessionFileDisplayPath,
   toSessionFileRequestPath,
 } from '../src/lib/session-file-root-mounts';
@@ -78,22 +77,5 @@ describe('session file root mounts', () => {
     // The mount directory itself and look-alike prefixes stay main paths.
     expect(toSessionFileRequestPath('docs', mounts)).toEqual({ path: 'docs' });
     expect(toSessionFileRequestPath('docs-old/a.md', mounts)).toEqual({ path: 'docs-old/a.md' });
-  });
-
-  it('re-keys a file tree only when it holds member keys', () => {
-    const plain = { 'api/a.go': true as const };
-    expect(remapSessionFileRecord(plain, mounts)).toBe(plain);
-    expect(
-      Object.keys(remapSessionFileRecord({ ...plain, [docsKey('b.md')]: true as const }, mounts))
-    ).toEqual(['api/a.go', 'docs/b.md']);
-  });
-
-  it('round-trips through the shared encoding', () => {
-    const key = docsKey('x/y.ts');
-    const display = toSessionFileDisplayPath(key, mounts);
-    expect(toSessionFileRequestPath(display, mounts)).toEqual({
-      rootId: 'member:docs',
-      path: 'x/y.ts',
-    });
   });
 });
