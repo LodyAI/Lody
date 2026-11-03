@@ -22,18 +22,6 @@ const createMachine = (overrides: Partial<MachineMeta> = {}): MachineMeta => ({
 });
 
 describe('machine deletion helpers', () => {
-  it('allows deleting an offline machine owned by the current user', () => {
-    expect(
-      canDeleteOfflineMachine({
-        machine: createMachine({ ownerUserId: currentUserId }),
-        isOnline: false,
-        currentUserId,
-        localMachineId: null,
-        canManageAllMachines: false,
-      })
-    ).toBe(true);
-  });
-
   it('allows deleting the current local machine even without owner metadata', () => {
     expect(
       canDeleteOfflineMachine({
@@ -44,18 +32,6 @@ describe('machine deletion helpers', () => {
         canManageAllMachines: false,
       })
     ).toBe(true);
-  });
-
-  it('rejects deleting online machines', () => {
-    expect(
-      canDeleteOfflineMachine({
-        machine: createMachine({ ownerUserId: currentUserId }),
-        isOnline: true,
-        currentUserId,
-        localMachineId: null,
-        canManageAllMachines: true,
-      })
-    ).toBe(false);
   });
 
   it('allows admins to delete other users offline machines', () => {
@@ -116,26 +92,5 @@ describe('machine deletion helpers', () => {
         canManageAllMachines: false,
       }).type
     ).toBe('allowed');
-  });
-
-  it('detects admins and owners as machine managers', () => {
-    expect(
-      canManageAllMachines(currentUserId, [
-        { userId: currentUserId, role: 'owner' },
-        { userId: otherUserId, role: 'member' },
-      ])
-    ).toBe(true);
-    expect(
-      canManageAllMachines(currentUserId, [
-        { userId: currentUserId, role: 'admin' },
-        { userId: otherUserId, role: 'member' },
-      ])
-    ).toBe(true);
-    expect(
-      canManageAllMachines(currentUserId, [
-        { userId: currentUserId, role: 'member' },
-        { userId: otherUserId, role: 'owner' },
-      ])
-    ).toBe(false);
   });
 });

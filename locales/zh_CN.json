@@ -1,4 +1,10 @@
 {
+  "settings.general.prImages.label": "自动加载 PR 图片",
+  "settings.general.prImages.helper": "关闭时可逐张加载。图片所在网站可能看到你的 IP 地址。",
+  "sessions.prImage.image": "图片",
+  "sessions.prImage.failed": "无法加载图片",
+  "sessions.prImage.load": "加载图片",
+  "sessions.prImage.retry": "重试",
   "export.e2ee.title": "创建解密副本？",
   "export.e2ee.disclosure": "这会在加密工作区之外创建可读副本。能访问剪贴板或所保存文件的人都能阅读；之后撤销工作区访问权限也无法收回副本。",
   "export.e2ee.confirm": "创建解密副本",
@@ -201,7 +207,7 @@
   "e2ee.mode.timedOutHelp": "请登录并连接网络后重试。此设备尚未保存该工作区的模式证明，因此暂时无法离线打开对话数据。",
   "e2ee.create.label": "加密工作区（开发者预览）",
   "e2ee.create.description": "初始化设备身份和签名权限账本。此工作区暂不支持对话、文件、协作和 Agent 执行。创建后不能切换模式。",
-  "e2ee.create.unsupported": "创建需要支持受保护设备密钥存储的桌面应用。当前平台可以读取已有工作区的历史。",
+  "e2ee.create.unsupported": "当前平台还没有可用的受保护设备密钥存储。",
   "e2ee.create.pending": "此设备保存了一次创建请求。请继续原请求以确认结果；名称、标识和设备身份保持不变。",
   "e2ee.create.paidUnavailable": "此预览需要可用的免费工作区名额，尚未接入付费工作区创建。",
   "e2ee.create.resume": "继续已保存的创建请求",
@@ -6085,5 +6091,11 @@
   "sessions.androidEmulator.quality.label": "预览画质",
   "sessions.androidEmulator.quality.saver": "省流",
   "sessions.androidEmulator.quality.balanced": "均衡",
-  "sessions.androidEmulator.quality.clear": "清晰"
+  "sessions.androidEmulator.quality.clear": "清晰",
+  "e2ee.create.mobileDescription": "密钥保存在本机受保护的存储中。创建后不能切换模式。",
+  "e2ee.create.discardPending": "放弃已保存的请求",
+  "e2ee.create.savedRequest": "正在继续上次的创建",
+  "e2ee.create.discardConfirmTitle": "放弃已保存的创建请求？",
+  "e2ee.create.discardConfirmDescription": "这会删除本机为这个工作区保存的唯一创建请求，且无法撤销。",
+  "e2ee.create.discardConfirmAction": "放弃请求"
 }

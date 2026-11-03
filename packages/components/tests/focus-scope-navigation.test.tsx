@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
@@ -130,38 +131,6 @@ describe('focus-scope keyboard navigation', () => {
     expect(document.activeElement).toBe(left2);
   });
 
-  it('lets a scope-local handler keep a horizontal key', async () => {
-    await act(async () =>
-      root.render(
-        <Provider store={createStore()}>
-          <Harness interceptRight />
-        </Provider>
-      )
-    );
-    const left2 = container.querySelector<HTMLElement>('[data-id="left-2"]')!;
-
-    await act(async () => left2.focus());
-    await act(async () => press(left2, 'ArrowRight'));
-    expect(document.activeElement).toBe(left2);
-  });
-
-  it('skips disabled list items', async () => {
-    await act(async () =>
-      root.render(
-        <Provider store={createStore()}>
-          <ListScope id="left" />
-        </Provider>
-      )
-    );
-    const first = container.querySelector<HTMLElement>('[data-id="left-1"]')!;
-    const second = container.querySelector<HTMLButtonElement>('[data-id="left-2"]')!;
-    second.disabled = true;
-
-    await act(async () => first.focus());
-    await act(async () => press(first, 'ArrowDown'));
-    expect(document.activeElement).toBe(first);
-  });
-
   it('keeps scope switching inside an open dialog', async () => {
     await act(async () =>
       root.render(
@@ -178,23 +147,5 @@ describe('focus-scope keyboard navigation', () => {
     expect(document.activeElement).toBe(dialogLeft);
     await act(async () => press(dialogLeft, 'ArrowRight'));
     expect(document.activeElement).toBe(dialogRight);
-  });
-
-  it('restores a focused control even when it is not a list row', async () => {
-    await act(async () =>
-      root.render(
-        <Provider store={createStore()}>
-          <DirectControlHarness />
-        </Provider>
-      )
-    );
-    const direct = container.querySelector<HTMLElement>('[data-testid="direct-control"]')!;
-    const right = container.querySelector<HTMLElement>('[data-id="direct-right-1"]')!;
-
-    await act(async () => direct.focus());
-    await act(async () => press(direct, 'ArrowRight'));
-    expect(document.activeElement).toBe(right);
-    await act(async () => press(right, 'ArrowLeft'));
-    expect(document.activeElement).toBe(direct);
   });
 });

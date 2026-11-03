@@ -3,7 +3,7 @@ import { own } from '../lifecycle';
 import { Context, Effect, Layer, Option, Result, Semaphore } from 'effect';
 import * as Bytes from '../foundation/bytes';
 import { bytesEqual } from '../foundation/cbor';
-import { LedgerFeedSource, LedgerViewSource } from '../../services/ledger';
+import { LedgerFeedSource, LedgerFeedInvalidation, LedgerViewSource } from '../../services/ledger';
 import { LedgerViewSourceError } from '../../services/errors';
 import { LedgerFeedStore, type LedgerFeedTail } from '../../services/stores';
 import { WorkspaceScope } from '../../services/workspace';
@@ -205,6 +205,7 @@ export class LedgerFeed extends Context.Service<
       Effect.gen(function* () {
         const anchor = (yield* WorkspaceScope).genesis;
         const store = own(yield* LedgerFeedStore);
+        const invalidation = Option.map(yield* Effect.serviceOption(LedgerFeedInvalidation), own);
         const budget = { ...options.budget };
         if (
           !Number.isSafeInteger(budget.maxRecords) ||
@@ -408,6 +409,13 @@ export class LedgerFeed extends Context.Service<
           yield* local(store.append(tailOf(observed, totalBytes), additions, tailOf(next, bytes)));
           state = next;
           totalBytes = bytes;
+          // No yield between publication and retirement of dependent RAM grants.
+          if (
+            (next.view.length !== observed.view.length ||
+              !next.view.head.equals(observed.view.head)) &&
+            Option.isSome(invalidation)
+          )
+            invalidation.value.invalidate();
           return { ...state };
         });
 

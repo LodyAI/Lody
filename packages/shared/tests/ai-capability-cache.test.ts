@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
-  ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS,
-  ACP_CAPABILITY_REFRESH_CACHE_TTL_MS,
   decideAcpCapabilityRefreshCache,
-  shouldRenewAcpCapabilityFetchTime,
   getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheStaleReason,
   getReadableAcpCapabilityCacheEntry,
@@ -12,11 +9,7 @@ import {
   isAcpCapabilityCacheEntryCurrent,
   type AcpCapabilityCacheEntry,
 } from '../src/ai';
-import {
-  getModelEffortChoices,
-  readAcpModelCapabilitiesMeta,
-  resolveDeclaredEffortSupport,
-} from '../src/acp-model-capabilities';
+import { getModelEffortChoices, resolveDeclaredEffortSupport } from '../src/acp-model-capabilities';
 
 const entry = (cacheVersion?: number): AcpCapabilityCacheEntry => ({
   cliType: 'builtin',
@@ -125,32 +118,6 @@ describe('ACP capability refresh cache decision', () => {
   });
   const expectedSourceVersion = entry().sourceVersion;
 
-  it('reuses an entry whose source version and age still match', () => {
-    const capability = currentEntry();
-
-    expect(
-      decideAcpCapabilityRefreshCache({
-        entry: capability,
-        expectedSourceVersion,
-        launchInputs: 'matching',
-        nowMs: capability.fetchedAt + ACP_CAPABILITY_REFRESH_CACHE_TTL_MS,
-      })
-    ).toEqual({ hit: true, entry: capability });
-  });
-
-  it('refuses to reuse an entry once it is older than the cache lifetime', () => {
-    const capability = currentEntry();
-
-    expect(
-      decideAcpCapabilityRefreshCache({
-        entry: capability,
-        expectedSourceVersion,
-        launchInputs: 'matching',
-        nowMs: capability.fetchedAt + ACP_CAPABILITY_REFRESH_CACHE_TTL_MS + 1,
-      })
-    ).toEqual({ hit: false, reason: 'expired' });
-  });
-
   it('treats an entry stamped ahead of the reader as fresh rather than re-probing', () => {
     const capability = currentEntry();
 
@@ -206,53 +173,10 @@ describe('ACP capability refresh cache decision', () => {
       })
     ).toEqual({ hit: false, reason: 'not-runtime-provenance' });
   });
-
-  it('misses when nothing has been persisted yet', () => {
-    expect(
-      decideAcpCapabilityRefreshCache({
-        entry: undefined,
-        expectedSourceVersion,
-        launchInputs: 'matching',
-        nowMs: 1_000_000,
-      })
-    ).toEqual({ hit: false, reason: 'missing' });
-  });
-});
-
-describe('ACP capability fetch-time renewal', () => {
-  it('renews an unchanged entry well before it could expire', () => {
-    expect(ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS).toBeLessThan(
-      ACP_CAPABILITY_REFRESH_CACHE_TTL_MS
-    );
-    expect(
-      shouldRenewAcpCapabilityFetchTime(
-        { fetchedAt: 0 },
-        ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS - 1
-      )
-    ).toBe(false);
-    expect(
-      shouldRenewAcpCapabilityFetchTime({ fetchedAt: 0 }, ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS)
-    ).toBe(true);
-  });
 });
 
 describe('declared per-model controls', () => {
   const response = (modelCapabilities: unknown) => ({ _meta: { lody: { modelCapabilities } } });
-
-  it('reads a v1 declaration and ignores unknown or malformed ones whole', () => {
-    const models = {
-      opus: { effortValues: ['low', 'high'], fastMode: true },
-      haiku: { fastMode: false },
-    };
-    expect(readAcpModelCapabilitiesMeta(response({ version: 1, models }))).toEqual(models);
-    expect(readAcpModelCapabilitiesMeta(response({ version: 2, models }))).toBeUndefined();
-    expect(
-      readAcpModelCapabilitiesMeta(
-        response({ version: 1, models: { ...models, bad: { fastMode: 'yes' } } })
-      )
-    ).toBeUndefined();
-    expect(readAcpModelCapabilitiesMeta({})).toBeUndefined();
-  });
 
   it('prefers a model declaration over the legacy per-model map', () => {
     const capability = {

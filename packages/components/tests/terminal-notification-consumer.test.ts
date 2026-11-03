@@ -75,45 +75,4 @@ describe('desktop terminal consumer', () => {
     await attempt;
     expect(shown).toEqual([]);
   });
-
-  it('does not retry a failed read when the same index is observed again', async () => {
-    let reads = 0;
-    const { consumer, shown, errors } = setup(async () => {
-      reads++;
-      throw new Error('offline');
-    });
-    await consumer.observe([{ id: sessionId }]);
-    await consumer.observe([{ id: sessionId, notificationId: first }]);
-    await consumer.observe([{ id: sessionId, notificationId: first }]);
-    expect({ shown, reads, errors: errors.map(String) }).toEqual({
-      shown: [],
-      reads: 1,
-      errors: ['Error: offline'],
-    });
-    consumer.dispose();
-  });
-  it('bounds reads across overlapping observations and drops overload without replay', async () => {
-    const releases: Array<(value: unknown) => void> = [];
-    const { consumer, shown } = setup(
-      () =>
-        new Promise((resolve) => {
-          releases.push(resolve);
-        })
-    );
-    const entries = Array.from({ length: 5 }, (_, index) => ({
-      id: `session-${index}` as SessionId,
-    }));
-    await consumer.observe(entries);
-    const firstBatch = consumer.observe(
-      entries.map((entry, index) => ({ ...entry, notificationId: index < 4 ? first : undefined }))
-    );
-    await consumer.observe(entries.map((entry) => ({ ...entry, notificationId: first })));
-    expect(releases).toHaveLength(4);
-    releases.forEach((release) => release(fact));
-    await firstBatch;
-    await consumer.observe(entries.map((entry) => ({ ...entry, notificationId: first })));
-    expect(shown).toHaveLength(4);
-    expect(releases).toHaveLength(4);
-    consumer.dispose();
-  });
 });

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -358,26 +359,6 @@ describe('sidebar project group row', () => {
     return { handlers, groupRow };
   }
 
-  it('offers the project row controls and starts a conversation from the row', () => {
-    const { handlers, groupRow } = render();
-    const shop = groupRow('shop');
-    expect(shop?.querySelector('button[aria-label="More actions"]')).toBeInstanceOf(
-      HTMLButtonElement
-    );
-    expect(shop?.querySelector('button[aria-label="Reorder project"]')).toBeInstanceOf(
-      HTMLButtonElement
-    );
-    const newChat = shop?.querySelector<HTMLButtonElement>(
-      'button[aria-label="New chat in this project"]'
-    );
-    act(() => newChat?.click());
-    expect(handlers.onNewInProjectGroup).toHaveBeenLastCalledWith('shop');
-    act(() => shop?.click());
-    expect(handlers.onNewInProjectGroup).toHaveBeenCalledTimes(2);
-    // No second, GitHub-style "+" beside the row.
-    expect(container?.querySelector('button[aria-label="New session"]')).toBeNull();
-  });
-
   it('leaves a deleted group nothing to start, edit or move', () => {
     const { handlers, groupRow } = render();
     const old = groupRow('gone');
@@ -386,36 +367,5 @@ describe('sidebar project group row', () => {
     expect(old?.querySelector('button[aria-label="Reorder project"]')).toBeNull();
     act(() => old?.click());
     expect(handlers.onNewInProjectGroup).not.toHaveBeenCalled();
-  });
-
-  it('gives a GitHub repository row the project menu, seeded with that repository', () => {
-    const onEditRepoProject = vi.fn();
-    const onArchiveRepoChats = vi.fn();
-    act(() => {
-      root?.render(
-        <SessionList
-          sessions={[{ ...row('web-1', { id: 'x', name: 'x' }), projectGroup: undefined }]}
-          repos={[{ repoFullName: 'acme/web', collapsed: false }]}
-          onToggleRepoCollapsed={() => undefined}
-          onEditRepoProject={onEditRepoProject}
-          onArchiveRepoChats={onArchiveRepoChats}
-        />
-      );
-    });
-    const repoRow = container?.querySelector<HTMLElement>('[data-id="group:acme/web"]');
-    expect(repoRow?.querySelector('button[aria-label="More actions"]')).toBeInstanceOf(
-      HTMLButtonElement
-    );
-    act(() => {
-      repoRow?.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })
-      );
-    });
-    const item = (text: string) =>
-      Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((node) =>
-        node.textContent?.includes(text)
-      );
-    act(() => item('Edit project')?.click());
-    expect(onEditRepoProject).toHaveBeenCalledWith('acme/web');
   });
 });

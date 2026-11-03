@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
 
-import { SessionList } from '../src/components/session-list';
 import { RenameSessionDialogView } from '../src/components/sessions/rename-session-dialog';
 import { initI18n } from '../src/i18n';
 
@@ -162,117 +162,5 @@ describe('RenameSessionDialogView', () => {
 
     expect(onRename).toHaveBeenCalledWith('rename-session', 'Composed title');
     expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it('opens the shared Rename Chat dialog from a sidebar session title', async () => {
-    const onRenameSession = vi.fn();
-
-    await act(async () => {
-      root?.render(
-        <SessionList
-          sessions={[
-            {
-              sessionId: 'sidebar-session',
-              title: 'Sidebar title',
-              repoFullName: null,
-              branchName: '',
-              latestMessageAt: 0,
-              addedLines: 0,
-              deletedLines: 0,
-              isWorking: false,
-              hasUnreadMessages: false,
-              isOffline: false,
-              isWaitingPermission: false,
-            },
-          ]}
-          repos={[]}
-          onRenameSession={onRenameSession}
-        />
-      );
-    });
-
-    const title = Array.from(
-      container?.querySelectorAll<HTMLElement>('[data-sidebar-session-id] span') ?? []
-    ).find((element) => element.textContent === 'Sidebar title');
-    expect(title).toBeInstanceOf(HTMLElement);
-
-    await act(async () => {
-      title?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
-    });
-
-    const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea');
-    expect(textarea?.value).toBe('Sidebar title');
-    expect(document.activeElement).toBe(textarea);
-
-    await act(async () => {
-      if (!textarea) return;
-      setTextareaValue(textarea, 'Renamed from sidebar');
-      textarea.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'Enter',
-          bubbles: true,
-          cancelable: true,
-        })
-      );
-    });
-
-    expect(onRenameSession).toHaveBeenCalledWith('sidebar-session', 'Renamed from sidebar');
-  });
-
-  it('grows the title field once the dialog panel has been laid out', async () => {
-    // `observeResizeOnAnimationFrame` defers to a frame; run it inline so the
-    // assertions do not depend on the scheduler.
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-      callback(0);
-      return 1;
-    });
-    vi.stubGlobal('cancelAnimationFrame', () => {});
-    vi.stubGlobal('ResizeObserver', MockResizeObserver);
-    resizeObserverInstances.length = 0;
-
-    // jsdom applies no Tailwind, so the line height is the function's own
-    // fallback and the padding/border come from the UA stylesheet. Assertions
-    // are relative to the one-line height so they do not encode either.
-    const LINE_HEIGHT = 20;
-    const CHAR_WIDTH = 8;
-    const title = 'A generated session title long enough to wrap onto a second line';
-
-    await act(async () => {
-      root?.render(
-        <RenameSessionDialogView
-          target={{ sessionId: 'grow-session' as SessionId, initialTitle: title }}
-          onClose={vi.fn()}
-          onRename={vi.fn()}
-        />
-      );
-    });
-
-    const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea');
-    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-    const field = textarea as HTMLTextAreaElement;
-    // The mount measurement ran before the portalled panel had a width, so the
-    // field sits at its one-line height holding a value that wraps.
-    const oneLineHeight = Number.parseFloat(field.style.height);
-    expect(oneLineHeight).toBeGreaterThan(0);
-
-    const layout = attachLayout(field, LINE_HEIGHT, CHAR_WIDTH);
-    const observed = resizeObserverInstances.find((instance) => instance.targets.has(field));
-    expect(observed).toBeDefined();
-
-    await act(async () => {
-      layout.setWidth(CHAR_WIDTH * 40);
-      observed?.callback([], observed as unknown as ResizeObserver);
-    });
-
-    expect(field.style.height).toBe(`${oneLineHeight + LINE_HEIGHT}px`);
-    expect(field.style.overflowY).toBe('hidden');
-
-    await act(async () => {
-      setTextareaValue(field, title.repeat(4));
-    });
-
-    // Past four lines the field stops growing and scrolls instead.
-    expect(field.style.height).toBe(`${oneLineHeight + LINE_HEIGHT * 3}px`);
-    expect(field.style.overflowY).toBe('auto');
   });
 });

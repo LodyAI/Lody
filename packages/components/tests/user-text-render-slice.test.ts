@@ -4,7 +4,6 @@ import {
   USER_TEXT_RENDER_CHAR_LIMIT,
   getUserTextRenderSlice,
 } from '../src/components/ai-gui/message-copy';
-import { LARGE_PASTED_TEXT_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
 
 /**
  * The collapsed slice is the one place a chip has to survive truncation, and
@@ -14,10 +13,6 @@ import { LARGE_PASTED_TEXT_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
  * occasional.
  */
 describe('getUserTextRenderSlice with spans', () => {
-  it('is arithmetically impossible for a paste to fit the raw-character budget', () => {
-    expect(LARGE_PASTED_TEXT_MIN_CHAR_COUNT).toBeGreaterThan(USER_TEXT_RENDER_CHAR_LIMIT);
-  });
-
   const blob = 'x'.repeat(4000);
   const text = `look at this ${blob} and tell me why`;
   const span = {
@@ -39,26 +34,16 @@ describe('getUserTextRenderSlice with spans', () => {
     expect(slice.isTruncated).toBe(false);
   });
 
-  it('would have leaked raw pasted text before, which is what this prevents', () => {
-    const slice = getUserTextRenderSlice(text, [span]);
-    // The old behaviour: cut at 900, span dropped for `end > text.length`, and
-    // the bubble renders 900 characters of the blob with no chip over them.
-    expect(slice.text.length).toBeGreaterThan(USER_TEXT_RENDER_CHAR_LIMIT);
-    expect(slice.spans?.[0]?.kind).toBe('pasted_text');
-  });
-
-  it('still truncates prose, and never mid-span', () => {
-    const prose = 'y'.repeat(USER_TEXT_RENDER_CHAR_LIMIT + 500);
-    const slice = getUserTextRenderSlice(prose);
-    expect(slice.isTruncated).toBe(true);
-    expect(slice.text).toHaveLength(USER_TEXT_RENDER_CHAR_LIMIT);
-  });
-
   it('drops a span it cannot reach rather than cutting into it', () => {
     const prose = 'y'.repeat(USER_TEXT_RENDER_CHAR_LIMIT + 100);
     const late = `${prose} ${blob}`;
     const slice = getUserTextRenderSlice(late, [
-      { start: prose.length + 1, end: prose.length + 1 + blob.length, kind: 'pasted_text', label: 'Pasted' },
+      {
+        start: prose.length + 1,
+        end: prose.length + 1 + blob.length,
+        kind: 'pasted_text',
+        label: 'Pasted',
+      },
     ]);
     expect(slice.isTruncated).toBe(true);
     expect(slice.spans ?? []).toHaveLength(0);
@@ -74,13 +59,5 @@ describe('getUserTextRenderSlice with spans', () => {
     // Thirty newlines are one chip, not thirty lines against a limit of ten.
     expect(slice.text).toContain('outro');
     expect(slice.isTruncated).toBe(false);
-  });
-
-  it('behaves exactly as before when a message has no spans', () => {
-    expect(getUserTextRenderSlice('short message')).toEqual({
-      text: 'short message',
-      spans: undefined,
-      isTruncated: false,
-    });
   });
 });

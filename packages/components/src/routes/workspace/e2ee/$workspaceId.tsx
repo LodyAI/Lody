@@ -25,7 +25,10 @@ import {
   E2eeAccountPairingApprove,
   E2eeAccountPairingRequest,
 } from '@/components/pages/e2ee-account-pairing';
-import { e2eeAccountPairingFeatureEnabledAtom } from '@/atoms/settings';
+import {
+  e2eeAccountPairingFeatureEnabledAtom,
+  e2eeWorkspaceCreationFeatureEnabledAtom,
+} from '@/atoms/settings';
 import { isElectronRenderer } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { E2eeDeviceApprovalGuide } from '@/components/pages/e2ee-device-approval-guide';
@@ -64,7 +67,11 @@ export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
 const retiredReaders = createWorkspaceRuntimeRetirements();
 
 function WorkspaceControlRoute() {
-  const accountPairing = useAtomValue(e2eeAccountPairingFeatureEnabledAtom);
+  // Creating an encrypted workspace on this device is the MVP path; its owner
+  // must be able to approve the desktop that joins it, without a second switch.
+  const accountPairingEnabled = useAtomValue(e2eeAccountPairingFeatureEnabledAtom);
+  const creationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
+  const accountPairing = accountPairingEnabled || creationEnabled;
   const { workspaceId } = Route.useParams();
   const platform = usePlatform();
   const { t } = useTranslation();

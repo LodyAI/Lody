@@ -20,6 +20,6 @@ Translation: current
 ## 证据
 
 - 实现：[Markdown 渲染器](../packages/components/src/components/ai-gui/markdown-renderer.tsx)、[公式定界符](../packages/components/src/lib/markdown-single-dollar-math.ts) 和 [外观设置](../packages/components/src/components/settings/appearance-setting.tsx)。
-- 验证：[渲染测试](../packages/components/tests/markdown-streaming-reparse.test.ts)、[定界符测试](../packages/components/tests/markdown-math-delimiters.test.ts) 和 [设置测试](../packages/components/tests/appearance-settings.test.tsx)。
+- 验证：[渲染测试](../packages/components/tests/markdown-streaming-reparse.test.ts)、定界符测试（实现细节测试已退役） 和 设置测试（实现细节测试已退役）。
 - 决策：[行内公式选项记录](../.agents/notes/implemented/feature/2026-09-28-inline-math-preference.zh.md)。
 - 修正：[块级公式上下文记录](../.agents/notes/implemented/bug-fix/2026-09-29-inline-display-math-block-context.zh.md)。

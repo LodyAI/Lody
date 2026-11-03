@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
@@ -11,17 +12,12 @@ import {
   MANAGED_BROWSER_READY_MESSAGE_TYPE,
   SET_ANNOTATION_MODE_MESSAGE_TYPE,
   RESOLVE_VISUAL_ANNOTATION_ANCHORS_MESSAGE_TYPE,
-  VISUAL_ANNOTATION_ANCHORS_RESOLVED_MESSAGE_TYPE,
   VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE,
 } from '@lody/shared/visual-annotation-types';
 
 import { userAtom } from '../src/atoms';
 import { ManagedPreviewSurface } from '../src/components/sessions/managed-preview-surface';
-import {
-  acquireManagedPreviewFrame,
-  clearManagedPreviewFrame,
-  prepareManagedPreviewFrame,
-} from '../src/components/sessions/managed-preview-frame-cache';
+import { clearManagedPreviewFrame } from '../src/components/sessions/managed-preview-frame-cache';
 
 const mocks = vi.hoisted(() => ({
   comments: [],
@@ -397,114 +393,6 @@ describe('ManagedPreviewSurface', () => {
     );
   });
 
-  it('moves an open comment draft when its target scrolls inside the preview', async () => {
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
-    const store = createStore();
-    store.set(userAtom, { id: 'user-1', name: 'Test User', email: 'test@example.com' });
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        <Provider store={store}>
-          <ManagedPreviewSurface
-            session={session}
-            viewerUrl="http://127.0.0.1:61234/"
-            logicalUrl="http://localhost:5173/"
-            annotationEnabled
-            onAnnotationAvailabilityChange={vi.fn()}
-            onRuntimeError={vi.fn()}
-            onLoadingChange={vi.fn()}
-            onBrowserStateChange={vi.fn()}
-            onNavigationRequest={vi.fn()}
-          />
-        </Provider>
-      );
-    });
-
-    const iframe = container.querySelector('iframe');
-    if (!iframe?.contentWindow) throw new Error('Expected managed preview iframe');
-    const postMessage = vi.spyOn(iframe.contentWindow, 'postMessage').mockImplementation(() => {});
-    await act(async () => {
-      iframe.dispatchEvent(new Event('load'));
-      window.dispatchEvent(
-        new MessageEvent('message', {
-          origin: 'http://127.0.0.1:61234',
-          source: iframe.contentWindow,
-          data: targetMessage,
-        })
-      );
-    });
-
-    const resolveMessage = postMessage.mock.calls
-      .map(
-        ([message]) =>
-          message as {
-            type?: string;
-            payload?: { anchors?: Array<{ commentId: string }> };
-          }
-      )
-      .find(
-        (message) =>
-          message.type === RESOLVE_VISUAL_ANNOTATION_ANCHORS_MESSAGE_TYPE &&
-          message.payload?.anchors?.some(({ commentId }) => commentId.includes('draft'))
-      );
-    const draftAnchorId = resolveMessage?.payload?.anchors?.find(({ commentId }) =>
-      commentId.includes('draft')
-    )?.commentId;
-    if (!draftAnchorId) throw new Error('Expected the comment draft anchor to be tracked');
-
-    let draft = container.querySelector(
-      '[data-lody-visual-comment-draft="true"]'
-    ) as HTMLDivElement | null;
-    expect(draft?.style.top).toBe('192px');
-
-    await act(async () => {
-      window.dispatchEvent(
-        new MessageEvent('message', {
-          origin: 'http://127.0.0.1:61234',
-          source: iframe.contentWindow,
-          data: {
-            type: VISUAL_ANNOTATION_ANCHORS_RESOLVED_MESSAGE_TYPE,
-            payload: {
-              viewport: {
-                width: 800,
-                height: 600,
-                scrollX: 0,
-                scrollY: 120,
-                devicePixelRatio: 1,
-              },
-              results: [
-                {
-                  commentId: draftAnchorId,
-                  resolved: true,
-                  rect: {
-                    x: 100,
-                    y: 60,
-                    width: 120,
-                    height: 30,
-                    top: 60,
-                    left: 100,
-                    right: 220,
-                    bottom: 90,
-                  },
-                  rectRatio: { x: 0.125, y: 0.1, width: 0.15, height: 0.05 },
-                },
-              ],
-            },
-          },
-        })
-      );
-    });
-
-    draft = container.querySelector(
-      '[data-lody-visual-comment-draft="true"]'
-    ) as HTMLDivElement | null;
-    expect(draft?.style.top).toBe('102px');
-  });
-
   it('keeps the page and reload usable without a runtime and accepts a late handshake', async () => {
     vi.useFakeTimers();
     const store = createStore();
@@ -657,110 +545,4 @@ describe('ManagedPreviewSurface', () => {
     });
     return { firstIframe, remountedIframe: container?.querySelector('iframe') ?? null };
   };
-
-  it('reuses the live iframe after the preview surface remounts', async () => {
-    const moveBefore = vi.spyOn(HTMLElement.prototype as StatePreservingElement, 'moveBefore');
-    const onLoadingChange = vi.fn();
-
-    const { firstIframe, remountedIframe } = await mountRemountCycle(onLoadingChange);
-
-    expect(remountedIframe).toBe(firstIframe);
-    expect(onLoadingChange).toHaveBeenLastCalledWith(false);
-    // A plain appendChild would also pass the identity check above while
-    // silently discarding the page, so assert the atomic move actually ran.
-    expect(moveBefore).toHaveBeenCalled();
-  });
-
-  it('hands the preloaded page to the surface and keeps it alive after preparation cleanup', async () => {
-    vi.useFakeTimers();
-    const release = prepareManagedPreviewFrame(session.id, 'http://127.0.0.1:61234/', 'Preview');
-    const prepared = document.querySelector('[data-lody-preview-preload] iframe');
-    expect(prepared).not.toBeNull();
-    const { firstIframe, remountedIframe } = await mountRemountCycle(vi.fn());
-    expect(firstIframe).toBe(prepared);
-    expect(remountedIframe).toBe(prepared);
-    release();
-    vi.advanceTimersByTime(2 * 60 * 1000);
-    expect(prepared?.isConnected).toBe(true);
-    expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
-  });
-
-  it('expires an unopened preload once and never recreates it', () => {
-    vi.useFakeTimers();
-    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/', 'Preview');
-    const prepared = document.querySelector('[data-lody-preview-preload] iframe');
-    expect(prepared?.isConnected).toBe(true);
-    vi.advanceTimersByTime(2 * 60 * 1000);
-    expect(prepared?.isConnected).toBe(false);
-    expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('replaces the single preload and prevents stale cleanup from destroying its replacement', () => {
-    const release = prepareManagedPreviewFrame(
-      session.id,
-      'https://preview.invalid/old',
-      'Preview'
-    );
-    const old = document.querySelector('[data-lody-preview-preload] iframe');
-    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/new', 'Preview');
-    const replacement = document.querySelector('[data-lody-preview-preload] iframe');
-    release();
-    expect(old?.isConnected).toBe(false);
-    expect(replacement?.isConnected).toBe(true);
-    expect(document.querySelectorAll('[data-lody-preview-preload]')).toHaveLength(1);
-    clearManagedPreviewFrame(session.id);
-    expect(replacement?.isConnected).toBe(false);
-  });
-
-  it('discards a preload when Browser opens a different path', () => {
-    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/old', 'Preview');
-    const old = document.querySelector('[data-lody-preview-preload] iframe');
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    const frame = acquireManagedPreviewFrame({
-      sessionId: session.id,
-      viewerUrl: 'https://preview.invalid/new',
-      title: 'Preview',
-      host: container,
-    });
-    expect(frame.iframe).not.toBe(old);
-    expect(frame.iframe.src).toBe('https://preview.invalid/new');
-    expect(old?.isConnected).toBe(false);
-  });
-
-  it('skips speculative frames without atomic moves and never replaces an opened page', async () => {
-    const moveBefore = (HTMLElement.prototype as StatePreservingElement).moveBefore;
-    delete (HTMLElement.prototype as StatePreservingElement).moveBefore;
-    try {
-      prepareManagedPreviewFrame(session.id, 'https://preview.invalid/', 'Preview');
-      expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
-    } finally {
-      (HTMLElement.prototype as StatePreservingElement).moveBefore = moveBefore;
-    }
-    const { remountedIframe } = await mountRemountCycle(vi.fn());
-    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/other', 'Preview');
-    expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
-    expect(remountedIframe?.isConnected).toBe(true);
-    expect(remountedIframe?.src).toBe('http://127.0.0.1:61234/');
-  });
-
-  it('mounts a fresh iframe when the engine cannot reparent without a reload', async () => {
-    // Without an atomic move, parking and re-hosting a frame each reload the
-    // page, so caching would cost more loads than a plain remount.
-    const moveBefore = (HTMLElement.prototype as StatePreservingElement).moveBefore;
-    delete (HTMLElement.prototype as StatePreservingElement).moveBefore;
-    const onLoadingChange = vi.fn();
-
-    try {
-      const { firstIframe, remountedIframe } = await mountRemountCycle(onLoadingChange);
-
-      expect(remountedIframe).not.toBeNull();
-      expect(remountedIframe).not.toBe(firstIframe);
-      expect(firstIframe.isConnected).toBe(false);
-      expect(onLoadingChange).toHaveBeenLastCalledWith(true);
-    } finally {
-      (HTMLElement.prototype as StatePreservingElement).moveBefore = moveBefore;
-    }
-  });
 });

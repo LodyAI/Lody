@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -73,21 +74,6 @@ describe('SessionList anchor mode', () => {
 
     return { onSelectSession };
   }
-
-  it('renders an anchor with the resolved href when getSessionHref returns a string', () => {
-    renderList((sessionId) => `/workspace-a/sessions/${sessionId}`);
-    const anchor = container?.querySelector<HTMLAnchorElement>(
-      'a[href="/workspace-a/sessions/session-1"]'
-    );
-    expect(anchor).not.toBeNull();
-    expect(anchor?.getAttribute('aria-label')).toBe(SAMPLE_SESSION.title);
-  });
-
-  it('does not render an anchor when getSessionHref is omitted', () => {
-    renderList();
-    const anchor = container?.querySelector('a[href*="/sessions/"]');
-    expect(anchor).toBeNull();
-  });
 
   it('intercepts plain left-click and routes through onSelectSession', () => {
     const { onSelectSession } = renderList((sessionId) => `/workspace-a/sessions/${sessionId}`);

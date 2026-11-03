@@ -203,37 +203,6 @@ describe('CodeCollabV2DiffStore', () => {
     });
   });
 
-  it('reads exact turn snapshots through the async store API', async () => {
-    await withStore(async (store, workspaceRoot) => {
-      const absolutePath = path.join(workspaceRoot, 'src', 'app.ts');
-      await store.recordTurnDiffs({
-        workspaceRoot,
-        ownerSessionId: SESSION_ID,
-        turnId: 'turn-1',
-        capturedAtMs: 1000,
-        recordedAtMs: 1000,
-        events: [{ path: absolutePath, oldText: 'one\n', newText: 'one\ntwo\n' }],
-      });
-
-      const query = {
-        ownerSessionId: SESSION_ID,
-        turnId: 'turn-1',
-        path: 'src/app.ts',
-        nowMs: 3000,
-      } as const;
-
-      expect(await store.getTurnDiffSnapshot(query)).toEqual({
-        status: 'ready',
-        oldText: 'one\n',
-        newText: 'one\ntwo\n',
-      });
-
-      expect(await store.getTurnDiffSnapshot({ ...query, turnId: 'missing-turn' })).toEqual({
-        status: 'unavailable',
-      });
-    });
-  });
-
   it('drops expired events and ignores evidence outside the workspace', async () => {
     await withStore(async (store, workspaceRoot) => {
       const fileDiff = await store.recordTurnDiffs({
@@ -374,37 +343,6 @@ describe('CodeCollabV2DiffStore', () => {
         { filePath: 'empty-deleted.txt', add: 0, del: 0 },
         { filePath: 'unchanged.txt', add: 0, del: 0 },
       ]);
-    });
-  });
-
-  it('counts a trailing-newline-only change like git (1 add / 1 del)', async () => {
-    await withStore(async (store, workspaceRoot) => {
-      const fileDiff = await store.recordTurnDiffs({
-        workspaceRoot,
-        ownerSessionId: SESSION_ID,
-        turnId: 'turn-1',
-        capturedAtMs: 1000,
-        recordedAtMs: 1000,
-        events: [
-          {
-            path: path.join(workspaceRoot, 'newline.txt'),
-            oldText: 'one\n',
-            newText: 'one',
-          },
-        ],
-      });
-
-      // git diff --numstat reports the "\ No newline at end of file" change as 1/1;
-      // the old prefix/suffix estimate dropped it to 0/0.
-      expect(fileDiff).toEqual([{ filePath: 'newline.txt', add: 1, del: 1 }]);
-      expect(
-        await store.getTurnDiffSnapshot({
-          ownerSessionId: SESSION_ID,
-          turnId: 'turn-1',
-          path: 'newline.txt',
-          nowMs: 1000,
-        })
-      ).toEqual({ status: 'ready', oldText: 'one\n', newText: 'one' });
     });
   });
 

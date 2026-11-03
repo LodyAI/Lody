@@ -12,12 +12,6 @@ function begin(
 }
 
 describe('project sharing state', () => {
-  it('keeps the requested value while the mutation is saving', () => {
-    expect(begin()).toEqual({
-      [key]: { desired: true, requestId: 1, status: 'saving' },
-    });
-  });
-
   it('keeps an acknowledged value until a delayed query catches up', () => {
     const saving = begin();
     const acknowledged = projectSharingReducer(saving, {

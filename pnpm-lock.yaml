@@ -211,6 +211,9 @@ patchedDependencies:
   app-builder-lib@26.15.3:
     hash: 80637977dda4ea924da866a67751774a621195429af5af0f103e9129b3bec57f
     path: patches/app-builder-lib@26.15.3.patch
+  glob@13.0.1:
+    hash: 061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484
+    path: patches/glob@13.0.1.patch
   mdast-util-gfm-autolink-literal@2.0.1:
     hash: b03e2c531618296b99e716d479b68761f6ebc6c81dcd1e9359e80b71e6b5ee8e
     path: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
@@ -662,12 +665,6 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
-      '@electron-toolkit/eslint-config-prettier':
-        specifier: ^3.0.0
-        version: 3.0.0(eslint@9.39.2(jiti@2.7.0))(prettier@3.8.1)
-      '@electron-toolkit/eslint-config-ts':
-        specifier: ^3.1.0
-        version: 3.1.0(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3)
       '@electron-toolkit/tsconfig':
         specifier: ^2.0.0
         version: 2.0.0(@types/node@24.10.12)
@@ -722,18 +719,6 @@ importers:
       electron-vite:
         specifier: 6.0.0-beta.5
         version: 6.0.0-beta.5(@swc/core@1.15.11)(vite@7.3.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2))
-      eslint:
-        specifier: ^9.39.1
-        version: 9.39.2(jiti@2.7.0)
-      eslint-plugin-react:
-        specifier: ^7.37.5
-        version: 7.37.5(eslint@9.39.2(jiti@2.7.0))
-      eslint-plugin-react-hooks:
-        specifier: ^7.0.1
-        version: 7.0.1(eslint@9.39.2(jiti@2.7.0))
-      eslint-plugin-react-refresh:
-        specifier: ^0.4.24
-        version: 0.4.26(eslint@9.39.2(jiti@2.7.0))
       oxfmt:
         specifier: ^0.65.0
         version: 0.65.0
@@ -2037,24 +2022,6 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
-
-  scripts/effect-lint:
-    devDependencies:
-      '@effect/tsgo':
-        specifier: 0.48.1
-        version: 0.48.1
-      effect-rules:
-        specifier: 0.3.5
-        version: 0.3.5
-      oxfmt:
-        specifier: ^0.65.0
-        version: 0.65.0
-      oxlint:
-        specifier: 1.86.0
-        version: 1.86.0(oxlint-tsgolint@7.0.2003)
-      oxlint-tsgolint:
-        specifier: 7.0.2003
-        version: 7.0.2003
 
   site-docs:
     dependencies:
@@ -16552,7 +16519,7 @@ snapshots:
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(typescript@5.9.3)(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))':
     dependencies:
-      glob: 13.0.1
+      glob: 13.0.1(patch_hash=061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484)
       react-docgen-typescript: 2.4.0(typescript@5.9.3)
       vite: 8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
     optionalDependencies:
@@ -16560,7 +16527,7 @@ snapshots:
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(typescript@5.9.3)(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))':
     dependencies:
-      glob: 13.0.1
+      glob: 13.0.1(patch_hash=061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484)
       react-docgen-typescript: 2.4.0(typescript@5.9.3)
       vite: 8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
     optionalDependencies:
@@ -23625,7 +23592,7 @@ snapshots:
     dependencies:
       is-glob: 4.0.3
 
-  glob@13.0.1:
+  glob@13.0.1(patch_hash=061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484):
     dependencies:
       minimatch: 10.2.5
       minipass: 7.1.2
@@ -26830,7 +26797,7 @@ snapshots:
 
   rimraf@6.1.2:
     dependencies:
-      glob: 13.0.1
+      glob: 13.0.1(patch_hash=061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484)
       package-json-from-dist: 1.0.1
 
   roarr@2.15.4:

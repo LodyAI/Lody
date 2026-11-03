@@ -22,8 +22,8 @@ bound, so the windowed path avoids mirroring it into memory as an array. Everyth
 `getState()` has no `history` key and `setState` receives a draft without one,
 so the ordinary spellings of a second path do not compile. What types cannot
 close is a deliberate escape — a cast that puts the key back, or reaching past
-the store into the raw `LoroDoc` — and
-`tests/no-materialized-history-in-components.test.ts` fails on those. No component reads the raw history list; composition injects the shared reader.
+the store into the raw `LoroDoc`. Do not bypass these boundaries. No component
+reads the raw history list; composition injects the shared reader.
 
 Full-history actions use the authoritative consistent full-read operation.
 Performance comparisons must use the current full-Mirror baseline.

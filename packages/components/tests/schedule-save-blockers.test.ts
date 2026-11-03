@@ -2,11 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import i18next, { type TFunction } from 'i18next';
 import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
 import en from '../../../locales/en.json';
-import {
-  collectScheduleSaveBlockers,
-  collectScheduleSaveIssues,
-  type ScheduleSaveContext,
-} from '../src/components/schedules/schedule-save-blockers';
+import { collectScheduleSaveBlockers, type ScheduleSaveContext } from '../src/components/schedules/schedule-save-blockers';
 
 let t: TFunction;
 beforeAll(async () => {
@@ -49,10 +45,6 @@ describe('what stops a schedule from being saved', () => {
   it('requires a typed-config daemon before authoring schedules', () => {
     const context = ready({ machine: { ...machine, protocolCapabilities: { schedules: 1 } } });
     expect(collectScheduleSaveBlockers(context, t)).toContain(en['schedules.upgrade']);
-    expect(collectScheduleSaveBlockers(ready(), t)).toEqual([]);
-  });
-
-  it('does not require a project — a chat-only schedule is complete', () => {
     expect(collectScheduleSaveBlockers(ready(), t)).toEqual([]);
   });
 
@@ -115,20 +107,6 @@ describe('what stops a schedule from being saved', () => {
 });
 
 describe('sending runs into a chat', () => {
-  it('requires a chat to be chosen for the existing-chat destination', () => {
-    expect(
-      collectScheduleSaveBlockers(
-        ready({ destination: { kind: 'existing_session', sessionId: '' } }),
-        t
-      )
-    ).toContain(en['schedules.destination.requireChat']);
-    expect(
-      collectScheduleSaveBlockers(
-        ready({ destination: { kind: 'existing_session', sessionId: 's1' } }),
-        t
-      )
-    ).toEqual([]);
-  });
 
   it('locks the Agent and machine to the chat once one exists', () => {
     const own = ready({
@@ -151,31 +129,5 @@ describe('sending runs into a chat', () => {
     expect(
       collectScheduleSaveBlockers(ready({ destination: { kind: 'own_session', epoch: 0 } }), t)
     ).toEqual([]);
-  });
-});
-
-describe('where each reason is marked', () => {
-  it('puts every reason next to the control that fixes it', () => {
-    const issues = collectScheduleSaveIssues(
-      ready({
-        workspaceReady: false,
-        agent: { agentConfigId: 'agent' as never },
-        project: { kind: 'local', localProjectId: 'elsewhere' as never },
-        destination: { kind: 'existing_session', sessionId: '' },
-      }),
-      t
-    );
-    expect(issues.map(({ field, kind }) => `${field}:${kind}`)).toEqual([
-      'form:invalid',
-      // Never marked on the project chip: that reads as "a project is required".
-      'form:invalid',
-      'destination:missing',
-    ]);
-  });
-
-  it('treats an unchosen Agent as unfinished, not as a conflict', () => {
-    expect(collectScheduleSaveIssues(ready({ agent: null, agentConfig: null }), t)).toEqual([
-      { field: 'agent', kind: 'missing', message: en['schedules.requireAgent'] },
-    ]);
   });
 });

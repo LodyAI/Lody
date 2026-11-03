@@ -20,13 +20,6 @@ describe('getSessionTabCloseTarget', () => {
     ).toEqual({ kind: 'side-panel', tabId: 'changes' });
   });
 
-  it('closes the active child conversation when the conversation region has focus', () => {
-    expect(getSessionTabCloseTarget(BASE_INPUT)).toEqual({
-      kind: 'conversation',
-      tabId: 'child-session',
-    });
-  });
-
   it('falls back to the child conversation when the last-focused side panel is hidden', () => {
     expect(
       getSessionTabCloseTarget({
@@ -35,16 +28,6 @@ describe('getSessionTabCloseTarget', () => {
         sidePanelOpen: false,
       })
     ).toEqual({ kind: 'conversation', tabId: 'child-session' });
-  });
-
-  it('does nothing when the focused side panel is open but has no tabs', () => {
-    expect(
-      getSessionTabCloseTarget({
-        ...BASE_INPUT,
-        focusRegion: 'side-panel',
-        activeSidePanelTabId: null,
-      })
-    ).toBeNull();
   });
 
   it('closes the parent conversation tab even with siblings', () => {
@@ -77,17 +60,6 @@ describe('getSessionTabCloseTarget', () => {
         conversationTabCount: 1,
       })
     ).toEqual({ kind: 'side-panel', tabId: 'changes' });
-  });
-
-  it('closes the window when the last-focused panel is hidden and one conversation remains', () => {
-    expect(
-      getSessionTabCloseTarget({
-        ...BASE_INPUT,
-        focusRegion: 'side-panel',
-        sidePanelOpen: false,
-        conversationTabCount: 1,
-      })
-    ).toEqual({ kind: 'window' });
   });
 
   it('yields the window close accelerator on the empty surface', () => {

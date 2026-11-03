@@ -167,6 +167,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       : options.credential();
   const self = hex(options.signer.publicKey.toBytes());
   const cache = new Map<string, { policy: VerifiedMachineSharingPolicy; stamp: Stamp }>();
+  // A late read may not refill a cache retired by a newer verified ledger view.
+  let invalidationToken = {};
   let closed = false;
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
@@ -383,6 +385,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     force = false,
     management = false
   ) {
+    const token = invalidationToken;
     const resource = key(binding);
     const cached = cache.get(resource);
     if (!force && cached && sharingFresh(cached.stamp, yield* sharingStamp))
@@ -463,6 +466,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         const current = row
           ? sharingReplySchemas.readHead.parse(JSON.parse(String(row.head)))
           : null;
+        if (token !== invalidationToken) throw fail('sharing_unavailable');
         if (closed || current?.status !== 'active' || !sameHead(current, policy.head))
           throw fail('sharing_conflict');
         cache.set(resource, { policy, stamp: started });
@@ -885,7 +889,10 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     authorize: (...args: Parameters<typeof authorize>) => owned(authorize(...args)),
     /** A retained verified denial, read locally; `undefined` is unknown, never permission. */
     knownDenial: (...args: Parameters<typeof knownDenial>) => owned(knownDenial(...args)),
-    invalidate: () => cache.clear(),
+    invalidate: () => {
+      invalidationToken = {};
+      cache.clear();
+    },
     stop: () => {
       closed = true;
       cache.clear();

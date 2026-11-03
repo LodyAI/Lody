@@ -53,6 +53,7 @@ import {
   KeyMailbox,
   InstalledKeyStore,
   LedgerFeedStore,
+  LedgerFeedInvalidation,
   LedgerPinStore,
   LedgerViewSource,
   LedgerViewSourceError,
@@ -594,6 +595,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               sqliteLedgerFeedStore({ path: join(directory, name), mode: 'create-or-open' })
             )
           )
+        let sharingOwner: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>> | undefined
         const openFeed = (
           name: string,
           origin: Parameters<typeof LedgerFeed.layer>[0]['origin'],
@@ -606,7 +608,15 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               origin,
               expected,
               budget: { maxRecords: 1_000_000, maxBytes: 64 * 1024 * 1024 }
-            }).pipe(Layer.provideMerge(journaledFeedStore(name)), Layer.provideMerge(base))
+            }).pipe(
+              Layer.provideMerge(journaledFeedStore(name)),
+              Layer.provideMerge(
+                Layer.succeed(LedgerFeedInvalidation, {
+                  invalidate: () => sharingOwner?.invalidate()
+                })
+              ),
+              Layer.provideMerge(base)
+            )
             const result = yield* Effect.result(Layer.buildWithScope(layer, feedScope))
             if (Result.isFailure(result)) {
               yield* Scope.close(feedScope, Exit.void)
@@ -857,7 +867,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         let manager: Effect.Success<ReturnType<typeof makeDesktopE2eeManagement>> | undefined
         let roundAgain = false
         let closing = false
-        let sharingOwner: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>> | undefined
         const networkAbort = new AbortController()
         const stop = () => {
           closing = true
@@ -1190,7 +1199,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           }
         })
         const ingest = Effect.fnUntraced(function* (page: E2eeWorkspaceHistoryPage) {
-          sharing.invalidate()
           const state = yield* feed.current()
           const start = state.bootstrap ? 0 : state.view.length
           if (

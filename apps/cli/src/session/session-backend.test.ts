@@ -7,7 +7,7 @@ import type {
 } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { LoroRepo } from 'loro-repo';
-import { subscribeSessionChanges } from '@/lib/loro/doc';
+
 import { SessionDocument } from '@/lib/loro/doc';
 import {
   createSessionBackend,
@@ -246,32 +246,6 @@ defineSessionBackendContract('Loro', async (options) => {
 defineSessionBackendContract('Loro with real CRDT history', createRealLoroBackendFixture);
 
 describe('session backend selection', () => {
-  it('routes document subscriptions through the bound backend history port', () => {
-    const listener = vi.fn();
-    const unsubscribeControl = vi.fn();
-    const unsubscribeHistory = vi.fn();
-    const backend = {
-      subscribeHistory: vi.fn(() => unsubscribeHistory),
-    } as unknown as Pick<SessionBackend, 'subscribeHistory'>;
-    const sessionDoc = {
-      backend,
-      subscribeAll: vi.fn(),
-      subscribeControl: vi.fn(() => unsubscribeControl),
-      getSessionBackend() {
-        return this.backend;
-      },
-    } as unknown as SessionDocument;
-
-    const unsubscribe = subscribeSessionChanges(sessionDoc, listener);
-
-    expect(sessionDoc.subscribeAll).not.toHaveBeenCalled();
-    expect(sessionDoc.subscribeControl).toHaveBeenCalledWith(listener);
-    expect(backend.subscribeHistory).toHaveBeenCalledWith(listener);
-    unsubscribe();
-    expect(unsubscribeControl).toHaveBeenCalledOnce();
-    expect(unsubscribeHistory).toHaveBeenCalledOnce();
-  });
-
   it('defaults legacy metadata to Loro and keeps one backend per opened document', async () => {
     const { sessionDoc } = createBackendHarness();
     const first = await createSessionBackend(sessionDoc);

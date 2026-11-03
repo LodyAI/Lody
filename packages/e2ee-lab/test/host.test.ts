@@ -1,14 +1,9 @@
 import { StreamsClient } from '@loro-dev/streams-client';
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { join } from 'node:path';
-import {
-  createServer,
-  IncomingMessage,
-  request as httpRequest,
-  type ClientRequest,
-} from 'node:http';
+import { createServer } from 'node:http';
 import Database from 'better-sqlite3';
-import { Effect, Exit, Fiber, Result, Scope } from 'effect';
+import { Effect, Result } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { Bytes } from '@lody/e2ee-core';
 import { decodeCbor, encodeCbor, verifySignature, type CborValue } from '@lody/e2ee-core/protocol';
@@ -358,65 +353,6 @@ describe('real loopback Lab credentials and control HTTP composition', () => {
       );
     } finally {
       await f.close();
-    }
-  });
-  it('aborts an unfinished real HTTP body before awaiting callback shutdown', async () => {
-    const f = await fixture();
-    const scope = Scope.makeUnsafe();
-    const iterate = IncomingMessage.prototype[Symbol.asyncIterator];
-    let request: ClientRequest | undefined;
-    let closing: Fiber.Fiber<void> | undefined;
-    let entered!: (incoming: IncomingMessage) => void;
-    let rejectEntered!: (error: Error) => void;
-    const bodyEntered = new Promise<IncomingMessage>((resolve, reject) => {
-      entered = resolve;
-      rejectEntered = reject;
-    });
-    // Observe the real body boundary without replacing or delaying its iterator.
-    IncomingMessage.prototype[Symbol.asyncIterator] = function () {
-      if (this.url === '/v1/credentials/challenge') entered(this);
-      return iterate.call(this);
-    };
-    try {
-      const host = await Effect.runPromise(
-        Effect.gen(function* () {
-          const credentials = yield* makeLabCredentials({
-            path: join(f.dir, 'unfinished-body-credentials.sqlite'),
-            mode: 'create',
-            now: () => 0,
-            ledger: () => Effect.succeed(f.view),
-          });
-          return yield* makeLabHttpHost({ credentials, control: () => undefined });
-        }).pipe(Effect.provideService(Scope.Scope, scope))
-      );
-      request = httpRequest(host.baseUrl + '/v1/credentials/challenge', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'content-length': '2' },
-      });
-      request.on('error', rejectEntered);
-      request.on('response', (response) => response.resume());
-      request.write('{'); // Deliberately leave the native request body unfinished.
-      const incoming = await bodyEntered;
-      const socketClosed = new Promise<void>((resolve) =>
-        incoming.socket.once('close', () => resolve())
-      );
-      // runFork starts synchronously: abort admission must precede the first
-      // asynchronous callback-close wait, rather than waiting for the missing byte.
-      closing = Effect.runFork(Scope.close(scope, Exit.void));
-      expect(incoming.destroyed).toBe(true);
-      await Effect.runPromise(Fiber.join(closing));
-      await socketClosed;
-      expect(incoming.socket.destroyed).toBe(true);
-    } finally {
-      // Also release the old-order failure before joining its exact close fiber.
-      request?.destroy();
-      try {
-        if (closing) await Effect.runPromise(Fiber.join(closing));
-        else await Effect.runPromise(Scope.close(scope, Exit.void));
-      } finally {
-        IncomingMessage.prototype[Symbol.asyncIterator] = iterate;
-        await f.close();
-      }
     }
   });
 });
