@@ -691,7 +691,10 @@ export const SessionChatInputArea = memo(
     const isArchived = session.isArchived === true;
     // Scoped by this composer's session id; the hook resolves its machine and
     // workspace and returns null when there is nothing displayable.
-    const promptSuggestion = useSessionPromptSuggestion(session.id);
+    const { text: promptSuggestion, markAnswered: markPromptSuggestionAnswered } =
+      useSessionPromptSuggestion(session.id);
+    const promptSuggestionRef = useRef({ text: promptSuggestion, markPromptSuggestionAnswered });
+    promptSuggestionRef.current = { text: promptSuggestion, markPromptSuggestionAnswered };
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const quoteCaretRef = useRef<{ sessionId: SessionId; position: number } | null>(null);
     useEffect(() => {
@@ -1947,6 +1950,7 @@ export const SessionChatInputArea = memo(
         };
         const submission = beginSubmission({ restoreFocusOnComplete: !usesMobileKeyboardAction });
         if (!submission) return;
+        const shownPromptSuggestion = promptSuggestionRef.current.text;
         let accepted = false;
         try {
           const images = pendingImages;
@@ -1998,6 +2002,10 @@ export const SessionChatInputArea = memo(
                 ...(mcpServerIds ? { mcpServerIds } : {}),
               });
           if (accepted) {
+            // A sent message answers the prediction shown before it; the next turn
+            // publishes its own suggestion.
+            if (!scheduled.at)
+              promptSuggestionRef.current.markPromptSuggestionAnswered(shownPromptSuggestion);
             captureAgentRoleMentionsApplied(postHog, {
               spans: trimmedSpans,
               roles: workspaceAgentRolesRef.current,
