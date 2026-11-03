@@ -470,6 +470,24 @@ describe('LoroStreamsMachineRpcClient', () => {
     client.stop();
   });
 
+  it('forwards includeDisk on machine status only when asked', async () => {
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    void client.requestMachineStatus({ timeoutMs: 5000, includeDisk: true });
+    void client.requestMachineStatus({ timeoutMs: 5000 });
+    await vi.waitFor(() => expect(fake.appended).toHaveLength(2));
+    // Older daemons reject unknown params, so the default request stays empty.
+    expect(fake.appended.map((entry) => (entry.value as { params: unknown }).params)).toEqual([
+      { includeDisk: true },
+      {},
+    ]);
+    client.stop();
+  });
+
   it('sends machine status requests and resolves matching RPC responses', async () => {
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({

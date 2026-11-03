@@ -243,6 +243,8 @@ export interface MachineStatusRequest {
   type: 'machine/status';
   machineId: MachineId;
   workspaceId: WorkspaceId;
+  /** Only for daemons advertising `machineDiskStatus`. */
+  includeDisk?: true;
 }
 
 export type MachineLifecycleLaunchMode = 'daemon' | 'foreground' | 'electron' | 'unknown';
@@ -262,6 +264,8 @@ export interface MachineStatusResponse {
   machineId: MachineId;
   success: boolean;
   resources?: MachineResourceInfo;
+  /** Sent only when the request asked with `includeDisk`. */
+  disk?: { totalGB: number; freeGB: number; usedPercent: number };
   lifecycle?: MachineLifecycleCapability;
   error?: string;
 }

@@ -347,7 +347,7 @@ const BaseRpcRequestSchema = z
 
 export const LoroMachineStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/status'),
-  params: z.object({}).strict(),
+  params: z.object({ includeDisk: z.literal(true).optional() }).strict(),
 }).strict();
 
 export const LoroMachinePreviewControlRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -2932,11 +2932,13 @@ export class LoroStreamsMachineRpcClient {
 
   async requestMachineStatus(options?: {
     timeoutMs?: number;
+    /** Only for daemons advertising `machineDiskStatus`; older ones reject it. */
+    includeDisk?: boolean;
   }): Promise<MachineStatusResponse | null> {
     return (await this.sendRequest({
       method: 'machine/status',
       timeoutMs: options?.timeoutMs ?? 30_000,
-      params: {},
+      params: options?.includeDisk ? { includeDisk: true as const } : {},
     })) as MachineStatusResponse | null;
   }
 
@@ -3845,7 +3847,12 @@ export class LoroStreamsMachineRpcClient {
   private async sendRequest(
     args:
       | {
-          method: 'machine/status' | 'machine/preview-control' | 'machine/automation-control';
+          method: 'machine/status';
+          timeoutMs: number;
+          params: { includeDisk?: true };
+        }
+      | {
+          method: 'machine/preview-control' | 'machine/automation-control';
           timeoutMs: number;
           params: {};
         }
@@ -4357,6 +4364,13 @@ export class LoroStreamsMachineRpcClient {
       let request: LoroStreamsRpcRequest;
       switch (args.method) {
         case 'machine/status':
+          // Forward only the capability-gated flag; older daemons get the empty params.
+          request = {
+            ...envelope,
+            method: args.method,
+            params: args.params.includeDisk ? { includeDisk: true } : {},
+          };
+          break;
         case 'machine/preview-control':
         case 'machine/automation-control':
           request = { ...envelope, method: args.method, params: {} };
