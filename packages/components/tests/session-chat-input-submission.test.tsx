@@ -534,6 +534,80 @@ describe('SessionChatInputArea submission feedback', () => {
     return container!.querySelector('textarea')!;
   }
 
+  it('restores an archived conversation from the composer without losing its draft', async () => {
+    let finishRestore!: () => void;
+    const restore = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRestore = resolve;
+        })
+    );
+    const onSendMessage = vi.fn(async () => true);
+    const textarea = await renderComposer({
+      sessionId: 'restore-composer-test',
+      isArchived: true,
+      onSendMessage,
+      overrides: { onRestoreSession: restore },
+    });
+    expect(textarea.disabled).toBe(true);
+    const button = [...container!.querySelectorAll('button')].find((item) =>
+      item.textContent?.includes('Restore session')
+    )!;
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button.click();
+      button.click();
+    });
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    await act(async () => {
+      finishRestore();
+    });
+    await renderComposer({
+      sessionId: 'restore-composer-test',
+      isArchived: false,
+      onSendMessage,
+      overrides: { onRestoreSession: restore },
+    });
+    expect(container!.querySelector('textarea')!.disabled).toBe(false);
+    expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
+    expect(
+      [...container!.querySelectorAll('button')].some((item) =>
+        item.textContent?.includes('Restore session')
+      )
+    ).toBe(false);
+    expect(onSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps an archived conversation recoverable when restoration fails', async () => {
+    const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const notify = vi.spyOn(toast, 'error').mockImplementation(() => '' as never);
+    try {
+      const textarea = await renderComposer({
+        sessionId: 'restore-composer-failure',
+        isArchived: true,
+        onSendMessage: async () => true,
+        overrides: {
+          onRestoreSession: async () => {
+            throw new Error('restore failed');
+          },
+        },
+      });
+      const button = [...container!.querySelectorAll('button')].find((item) =>
+        item.textContent?.includes('Restore session')
+      )!;
+      await act(async () => {
+        button.click();
+      });
+      expect(textarea.disabled).toBe(true);
+      expect(button.disabled).toBe(false);
+      expect(notify).toHaveBeenCalled();
+    } finally {
+      report.mockRestore();
+      notify.mockRestore();
+    }
+  });
+
   async function submit(source: 'keyboard' | 'button') {
     await act(async () => {
       if (source === 'keyboard') {
