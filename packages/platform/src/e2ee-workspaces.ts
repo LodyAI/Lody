@@ -18,7 +18,8 @@ import type { PlatformSessionState } from './provider';
  * Do not acquire custody or perform I/O during this factory call. The live session
  * supplies account routing only; the runtime must verify every operation itself. */
 /** Delivery of the current workspace key to an admitted member, tracked by its approver. */
-export type E2eeMemberKeyDeliveryState = 'pending' | 'delivered' | 'failed';
+/** `delivering`: a round for this member is running in the approver's main process. */
+export type E2eeMemberKeyDeliveryState = 'pending' | 'delivering' | 'delivered' | 'failed';
 export type E2eeMemberKeyDelivery = {
   requestId: string;
   state: E2eeMemberKeyDeliveryState;

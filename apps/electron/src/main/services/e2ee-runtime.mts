@@ -254,7 +254,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         keyRound: (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
           staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
-          refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
+          refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history'],
+          receiveOnly?: boolean
         ) => Effect.Effect<void, unknown>
         seal: (
           input: E2eeContentSeal
@@ -861,6 +862,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         let maintenance: Context.Context<KeyDistributor | KeyReceiver | KeyRepair> | undefined
         let maintainKeys: Effect.Success<ReturnType<typeof makeDesktopKeyMaintenance>> | undefined
         let round: Deferred.Deferred<void, unknown> | undefined
+        // A receive-only round fetches and installs this device's key without distribution.
+        let roundReceiveOnly = false
         let managing: Deferred.Deferred<void, unknown> | undefined
         let managementStores: Context.Context<EpochCandidateStore | SubmissionJournal> | undefined
         const localManagement = Effect.fnUntraced(function* () {
@@ -909,13 +912,22 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const keyRound = Effect.fnUntraced(function* (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
           staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
-          refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
+          refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history'],
+          receiveOnly = false
         ) {
           if (closing) return yield* fail('closed')
-          roundAgain = true
-          if (round) return yield* Deferred.await(round)
+          if (!receiveOnly) roundAgain = true
+          // One round at a time. Any round receives, so receive-only joins it; a full
+          // round waits out a receive-only one and then runs its own distribution.
+          while (round) {
+            const joined = round
+            if (receiveOnly || !roundReceiveOnly) return yield* Deferred.await(joined)
+            yield* Effect.exit(Deferred.await(joined))
+            if (closing) return yield* fail('closed')
+          }
           const done = Deferred.makeUnsafe<void, unknown>()
           round = done
+          roundReceiveOnly = receiveOnly
           const result = yield* Effect.exit(
             Effect.uninterruptible(
               Effect.gen(function* () {
@@ -981,13 +993,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                     scope
                   )
                 }
-                let passes = 0
-                let refreshedUnknown = false
-                do {
-                  roundAgain = false
+                const prepareReceive = Effect.fnUntraced(function* () {
                   const view = yield* verified.current()
                   const epoch = view.inspectState().epoch.number
-                  const currentReceiver = Context.get(maintenance, KeyReceiver)
+                  const currentReceiver = Context.get(maintenance!, KeyReceiver)
                   const beforeReceive = Effect.gen(function* () {
                     const checked = yield* Effect.result(keys.check(epoch))
                     if (staging && epoch > 0 && Result.isFailure(checked)) {
@@ -1009,6 +1018,25 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                     }
                     return undefined
                   })
+                  return { epoch, currentReceiver, beforeReceive }
+                })
+                if (receiveOnly) {
+                  // Only this device's own key: staged group or mailbox, then its report.
+                  // Distribution and repair stay with the next full round.
+                  const { currentReceiver, beforeReceive } = yield* prepareReceive()
+                  yield* beforeReceive
+                  yield* currentReceiver.resume(100, null)
+                  yield* currentReceiver.fetchAndInstall(null, 100)
+                  yield* currentReceiver.flushReports(100, null)
+                  for (const ended of yield* currentReceiver.results(100))
+                    yield* currentReceiver.acknowledge(ended.id)
+                  return undefined
+                }
+                let passes = 0
+                let refreshedUnknown = false
+                do {
+                  roundAgain = false
+                  const { epoch, beforeReceive } = yield* prepareReceive()
                   maintainKeys ??= yield* makeDesktopKeyMaintenance().pipe(
                     Effect.provide(maintenance)
                   )
@@ -1026,6 +1054,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             )
           )
           round = undefined
+          roundReceiveOnly = false
           yield* Deferred.done(done, result)
           return yield* result
         }, Effect.uninterruptible)
@@ -1781,6 +1810,23 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             )
           ),
           (entry) => entry.keyRound(mailbox, staging, refreshLedger)
+        ),
+      /** Fetch and install this device's current key only (no distribution or repair),
+       * under the same single-flight as keyRound. A joining member uses it to reach ready. */
+      receiveKeys: (
+        workspaceId: string,
+        mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
+        staging?: (signal: AbortSignal) => EpochStagingStore['Service']
+      ) =>
+        Effect.flatMap(
+          run(
+            Effect.suspend(() =>
+              entries.has(workspaceId)
+                ? Effect.succeed(entries.get(workspaceId)!)
+                : Effect.fail(fail('closed'))
+            )
+          ),
+          (entry) => entry.keyRound(mailbox, staging, undefined, true)
         ),
       seal: (workspaceId: string, input: E2eeContentSeal) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),

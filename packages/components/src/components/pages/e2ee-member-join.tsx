@@ -42,6 +42,11 @@ type Props = {
   onWorkspaceRequested: (workspaceSlug: string | null, workspaceId?: string) => void;
   onHomeRequested: () => void;
 };
+const CLAIM_INTERVAL_MS = 10_000;
+/** While the request is committed and the key not yet installed. */
+const KEY_WAIT_INTERVAL_MS = 3_000;
+/** Upper bound of the faster cadence, after which claims return to 10 s. */
+const KEY_WAIT_FAST_MS = 120_000;
 export function E2eeMemberJoinSurface(
   props: Pick<
     Props,
@@ -130,7 +135,11 @@ function JoinSession({
     if (!requestId || !runtime?.claimMemberJoin || ready || requestTerminal) return undefined;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Committed but not ready means the key is in flight: claim sooner, for a bounded time.
+    let committedSince: number | undefined;
+    let delay = CLAIM_INTERVAL_MS;
     const claim = async () => {
+      delay = CLAIM_INTERVAL_MS;
       try {
         const result = await runtime.claimMemberJoin!(offer.workspaceId, requestId);
         if (disposed) return;
@@ -140,10 +149,14 @@ function JoinSession({
         setReady(result.ready);
         setError(false);
         if (result.ready || ['rejected', 'cancelled'].includes(result.state)) return;
+        if (result.state === 'committed') {
+          committedSince ??= Date.now();
+          if (Date.now() - committedSince < KEY_WAIT_FAST_MS) delay = KEY_WAIT_INTERVAL_MS;
+        }
       } catch {
         if (!disposed) setError(true);
       }
-      if (!disposed) timer = setTimeout(() => void claim(), 10_000);
+      if (!disposed) timer = setTimeout(() => void claim(), delay);
     };
     const reconnect = () => {
       clearTimeout(timer);
