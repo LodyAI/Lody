@@ -135,12 +135,34 @@ function installRuntimeControls() {
     }
     return realClearTimeout(timer);
   };
-  WebAssembly.instantiate = async (...args) => {
+  WebAssembly.instantiate = (...args) => {
     instantiateCalls += 1;
-    const result = await realInstantiate(...args);
+    // Register the gate before compilation finishes. The caller's poll is a
+    // bounded number of event-loop turns, and a cold wasm compile can outlast
+    // that. release() waits for the real compile; fail() does not.
+    let compiled;
+    try {
+      compiled = Promise.resolve(realInstantiate(...args));
+    } catch (error) {
+      compiled = Promise.reject(error);
+    }
+    void compiled.then(
+      () => {},
+      () => {}
+    );
     return new Promise((resolve, reject) => {
       gates.push({
-        release: () => resolve(result),
+        release: () =>
+          compiled.then(
+            (value) => {
+              resolve(value);
+              return value;
+            },
+            (error) => {
+              reject(error);
+              throw error;
+            }
+          ),
         fail: (error) => reject(error),
       });
     });
@@ -227,7 +249,7 @@ async function checkLateSuccessReusesStartedRuntime(sourceEntry) {
       `replaying the first timeout settled a later compress (${joined.status}: ${errorText(joined.reason)})`
     );
 
-    controls.gates[0].release();
+    await controls.gates[0].release();
     await until(() => joined.settled, 'later compress after the original instantiate succeeded');
     assert(
       joined.status === 'fulfilled',
@@ -281,7 +303,7 @@ async function checkStaleAttemptDoesNotSettleReplacement(sourceEntry) {
       `a stale timeout from the failed attempt settled the replacement (${replacement.status}: ${errorText(replacement.reason)})`
     );
 
-    controls.gates[1].release();
+    await controls.gates[1].release();
     await until(() => replacement.settled, 'replacement compress');
     assert(
       replacement.status === 'fulfilled',
@@ -323,7 +345,7 @@ async function checkLateFailureStillAllowsReplacement(sourceEntry) {
       !replacement.settled,
       `the timed-out attempt settled the replacement after a late failure (${replacement.status}: ${errorText(replacement.reason)})`
     );
-    controls.gates[1].release();
+    await controls.gates[1].release();
     await until(() => replacement.settled, 'replacement compress after a late failure');
     assert(
       replacement.status === 'fulfilled',
@@ -354,7 +376,7 @@ async function checkOverlappingInstantiationSharesRuntime(sourceEntry) {
       `overlapping compress started ${controls.instantiateCount()} instantiates`
     );
     assert(!first.settled && !second.settled, 'overlapping compress settled before instantiate finished');
-    controls.gates[0].release();
+    await controls.gates[0].release();
     await until(() => first.settled && second.settled, 'overlapping compress after instantiate');
     assert(first.status === 'fulfilled', `first overlapping compress rejected: ${errorText(first.reason)}`);
     assert(second.status === 'fulfilled', `second overlapping compress rejected: ${errorText(second.reason)}`);

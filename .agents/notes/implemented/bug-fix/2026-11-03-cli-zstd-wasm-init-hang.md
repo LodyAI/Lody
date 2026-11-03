@@ -56,7 +56,9 @@ runtime check stages the zstd entry in a `chunks/` directory: missing wasm
 rejects and a document retained across that await becomes collectable; copying
 the wasm beside the module then round-trips; corrupt wasm rejects twice without
 an unhandled rejection. The same check holds `WebAssembly.instantiate` and fires
-the captured 10 second timer directly. After that timeout, a later compress
+the captured 10 second timer directly. The hold is registered when instantiate
+is called, and releasing it waits for the real compile, so a slow compile cannot
+end the check early. After that timeout, a later compress
 round-trips from the original instantiate, a second instantiate is not started,
 and the timed-out promise stays rejected. A stale timer from a failed or
 late-failing attempt does not settle its replacement, which can then round-trip.
