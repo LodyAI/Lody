@@ -40,6 +40,7 @@ export {
 export {
   EpochPublicationSource,
   LedgerFeedSource,
+  LedgerFeedInvalidation,
   LedgerLog,
   LedgerPinStore,
   LedgerSync,

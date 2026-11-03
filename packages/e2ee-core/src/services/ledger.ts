@@ -74,6 +74,22 @@ export class LedgerFeedSource extends Context.Service<
 >()('@lody/e2ee-core/LedgerFeedSource') {}
 
 /**
+ * Optional workspace-scoped RAM invalidation at a feed's verified publication boundary.
+ * No callback runs for an unchanged head/count, a rejected page or transport-only progress.
+ *
+ * @category Application ports
+ */
+export class LedgerFeedInvalidation extends Context.Service<
+  LedgerFeedInvalidation,
+  {
+    /** Synchronously retire dependent RAM grants without throwing or starting I/O.
+     * Called after durable append, in the same non-yielding segment that publishes
+     * the new verified view; it supplies no authority, keys or freshness. */
+    invalidate(): void;
+  }
+>()('@lody/e2ee-core/LedgerFeedInvalidation') {}
+
+/**
  * Supplies the newest genuine (library-verified) ledger view the application
  * has. Typically backed by a {@link LedgerFeedSource}-driven feed.
  *
