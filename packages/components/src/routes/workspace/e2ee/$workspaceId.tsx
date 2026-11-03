@@ -16,8 +16,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
-import type { E2eeRuntimeStatus, WorkspacesState } from '@lody/platform';
-import { getPreferredWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
+import type { E2eeRuntimeStatus } from '@lody/platform';
+import { getPreferredOrdinaryWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
@@ -66,22 +66,6 @@ export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
 
 // Retain actual incomplete reader owners across control-page unmounts.
 const retiredReaders = createWorkspaceRuntimeRetirements();
-
-/**
- * Where "Workspaces" returns to: the account's preferred ordinary workspace,
- * whose switcher lists every workspace. Never this one, nor another encrypted
- * one: an unopened encrypted workspace's chat route sends the device straight
- * back to a control page. Without such a workspace, the create route.
- */
-function workspacesReturnSlug(workspaces: WorkspacesState, currentId: string): string | null {
-  if (workspaces.status !== 'ready') return null;
-  const ordinary = workspaces.workspaces.filter(
-    (workspace): workspace is typeof workspace & { slug: string } =>
-      workspace.slug !== null && workspace.id !== currentId && workspace.contentMode !== 'e2ee'
-  );
-  const active = ordinary.find((workspace) => workspace.id === workspaces.activeWorkspaceId);
-  return getPreferredWorkspaceSlug(active, ordinary, readPreferredWorkspaceSlug());
-}
 
 function WorkspaceControlRoute() {
   // Creating an encrypted workspace on this device is the MVP path; its owner
@@ -444,7 +428,19 @@ function WorkspaceControlRoute() {
   }, [scope, authenticated, port, workspaceId]);
   const current = state.identity === identity ? state : null;
   const backToWorkspaces = () => {
-    const slug = workspacesReturnSlug(workspaces, workspaceId);
+    // Same choice as the create route's back exit: never an encrypted workspace,
+    // and never this one even if its display metadata lacks the content mode.
+    const others =
+      workspaces.status === 'ready'
+        ? workspaces.workspaces.filter((item) => item.id !== workspaceId)
+        : [];
+    const slug = getPreferredOrdinaryWorkspaceSlug(
+      workspaces.status === 'ready'
+        ? others.find((item) => item.id === workspaces.activeWorkspaceId)
+        : null,
+      others,
+      readPreferredWorkspaceSlug()
+    );
     void navigate(
       slug
         ? { to: '/$workspaceName/chat', params: { workspaceName: slug } }

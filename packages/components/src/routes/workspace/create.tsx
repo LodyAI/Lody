@@ -30,7 +30,11 @@ import { usePostHog } from '@posthog/react';
 import { CreateWorkspacePage } from '@/components/pages/create-workspace-page';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
-import { getPreferredWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
+import {
+  getPreferredOrdinaryWorkspaceSlug,
+  getPreferredWorkspaceSlug,
+  readPreferredWorkspaceSlug,
+} from '@/lib/workspace';
 import { RouteMessage } from '@/components/route-message';
 import { useAuthSignOut } from '@/providers/convex-provider';
 import { useStableSession } from '@/hooks/useStableSession';
@@ -308,10 +312,11 @@ function CreateWorkspaceAuthed({
     'organization.unableToResolveWorkspace',
     'Unable to find a workspace to open. Please try again or contact support.'
   );
-  const workspaceReturnSlug =
-    organizations && organizations.length > 0
-      ? getPreferredWorkspaceSlug(activeOrganization, organizations, readPreferredWorkspaceSlug())
-      : null;
+  const workspaceReturnSlug = getPreferredOrdinaryWorkspaceSlug(
+    activeOrganization,
+    organizations,
+    readPreferredWorkspaceSlug()
+  );
 
   // 检查用户是否已有组织，如果有则重定向
   useEffect(() => {

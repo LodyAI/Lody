@@ -17,6 +17,7 @@ import {
   listPendingE2eeWorkspaces,
   savePendingE2eeWorkspace,
 } from '../src/lib/e2ee-workspace-storage';
+import { writePreferredWorkspaceSlug } from '../src/lib/workspace';
 
 const fixture = vi.hoisted(() => ({
   redirect: undefined as string | undefined,
@@ -24,7 +25,13 @@ const fixture = vi.hoisted(() => ({
   mobile: false,
   signedOut: 0,
   router: undefined as AnyRouter | undefined,
-  organizations: [] as Array<{ id: string; name: string; slug: string }>,
+  organizations: [] as Array<{ id: string; name: string; slug: string; contentMode?: 'e2ee' }>,
+  activeOrganization: null as {
+    id: string;
+    name: string;
+    slug: string;
+    contentMode?: 'e2ee';
+  } | null,
   creationEnabled: false,
   referralLead: false,
   referralListeners: new Set<() => void>(),
@@ -118,7 +125,7 @@ vi.mock('@/hooks/useOrganization', () => ({
     createOrganization: (name: string, slug: string) => fixture.createOrganization(name, slug),
     organizations: fixture.organizations,
     loading: false,
-    activeOrganization: null,
+    activeOrganization: fixture.activeOrganization,
   }),
 }));
 vi.mock('@/hooks/useWorkspaceSlugField', async () => {
@@ -166,6 +173,7 @@ beforeEach(() => {
   fixture.signedOut = 0;
   fixture.router = undefined;
   fixture.organizations = [];
+  fixture.activeOrganization = null;
   fixture.creationEnabled = false;
   fixture.referralLead = false;
   stable.availability.canCreateFree = true;
@@ -333,6 +341,38 @@ describe('mobile workspace limit', () => {
     fixture.router = { navigate } as unknown as AnyRouter;
     await render();
     expect(container!.textContent).toContain('organization.mobileWorkspaceLimitReachedTitle');
+    await click('organization.backToPreviousWorkspace');
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/$workspaceName/chat',
+      params: { workspaceName: 'team' },
+      replace: true,
+    });
+  });
+
+  // useOrganization merges encrypted workspaces into the list and prefers the
+  // selected one as active; returning there loops back to its control page.
+  const vault = { id: 'w-vault', name: 'Vault', slug: 'vault', contentMode: 'e2ee' as const };
+
+  it('never returns to the selected encrypted workspace', async () => {
+    fixture.organizations = [vault];
+    fixture.activeOrganization = vault;
+    writePreferredWorkspaceSlug('vault');
+    const navigate = vi.fn(async () => {});
+    fixture.router = { navigate } as unknown as AnyRouter;
+    await render();
+    expect(container!.textContent).toContain('organization.mobileWorkspaceLimitReachedTitle');
+    expect(button('organization.backToPreviousWorkspace')).toBeUndefined();
+    expect(button('organization.signOut')).toBeDefined();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('returns to an ordinary workspace while an encrypted one is selected', async () => {
+    fixture.organizations = [vault, { id: 'w-team', name: 'Team', slug: 'team' }];
+    fixture.activeOrganization = vault;
+    writePreferredWorkspaceSlug('vault');
+    const navigate = vi.fn(async () => {});
+    fixture.router = { navigate } as unknown as AnyRouter;
+    await render();
     await click('organization.backToPreviousWorkspace');
     expect(navigate).toHaveBeenCalledWith({
       to: '/$workspaceName/chat',
