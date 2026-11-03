@@ -281,16 +281,9 @@ describe('closed legacy declaration bridge', () => {
 
   it('replaces an exact nonzero minimum with genuine native metadata and rejects unequal values', async () => {
     const alias = 'min-w-[200px]';
-    const native = compileLegacyDeclarations(
-      raw.replace(
-        "minimum: { minWidth: 'calc(var(--spacing) * 0)' }",
-        "minimum: { minWidth: '200px' }"
-      ),
-      filename
-    );
-    const declaration = native.declarations.find((entry) => entry.alias === 'min-w-0')!;
-    // Exercise replacement independently of the unchanged production alias profile.
-    const compiled = { ...native, declarations: [{ ...declaration, alias }] };
+    const native = compileLegacyDeclarations(raw, filename);
+    const declaration = native.declarations.find((entry) => entry.alias === alias)!;
+    const compiled = { ...native, declarations: [declaration] };
     const css = await originalCSS([alias]);
     const output = replaceLegacyDeclarations(css, 'nonzero-minimum.css', compiled);
     expect(output.css).toBe(css);
@@ -317,13 +310,21 @@ describe('closed legacy declaration bridge', () => {
     'rejects an equal but invalid %s body under the min-w-0 alias',
     async (value) => {
       const native = compileLegacyDeclarations(
-        raw.replace(
-          "minimum: { minWidth: 'calc(var(--spacing) * 0)' }",
-          `minimum: { minWidth: '${value}' }`
-        ),
+        value === '200px'
+          ? raw
+          : raw.replace(
+              "minimum: { minWidth: 'calc(var(--spacing) * 0)' }",
+              `minimum: { minWidth: '${value}' }`
+            ),
         filename
       );
-      const declaration = native.declarations.find((entry) => entry.alias === 'min-w-0')!;
+      // Retarget genuine nonzero metadata only at the replacement boundary, without deduplicating keys.
+      const declaration = {
+        ...native.declarations.find(
+          (entry) => entry.alias === (value === '200px' ? 'min-w-[200px]' : 'min-w-0')
+        )!,
+        alias: 'min-w-0',
+      };
       const compiled = { ...native, declarations: [declaration] };
       const css = postcss.parse(await originalCSS(['min-w-0']));
       css.walkDecls('min-width', (entry) => {

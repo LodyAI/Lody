@@ -18,6 +18,7 @@ import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
 import { Card } from '@/ui/card';
 import { Button } from '@lody/ui/button';
+import { Spinner } from '@lody/ui/spinner';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
@@ -660,4 +661,47 @@ export const QueuedTimeLeading: Story = {
 };
 export const QueuedTimeAiry: Story = {
   render: () => <QueuedScheduledMessagePreview variant="airy" />,
+};
+
+// Source-projected test input: the actual landing owner's Spinner JSX and stable
+// Button props, hosted by real ChatComposer. This does not run its controller/RPC.
+function PendingLandingSpinnerProjection({ tone }: { tone: 'light' | 'dark' }) {
+  const [unexpectedActions, setUnexpectedActions] = useState(0);
+  return (
+    <div data-landing-spinner-projection>
+      <input aria-label="Focus sentinel" />
+      <output data-landing-spinner-receipt>{unexpectedActions}</output>
+      <ChatComposer
+        tone={tone}
+        variant="session"
+        promptValue="Synthetic pending landing draft"
+        onPromptChange={() => {}}
+        promptDisabled
+        primaryAction={
+          <Button
+            type="button"
+            icon
+            variant="ghost"
+            className={cn(
+              'h-8 w-8 rounded-full shadow-xs transition-all',
+              'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
+            )}
+            disabled
+            aria-label="Submitting synthetic draft"
+            onClick={() => setUnexpectedActions((count) => count + 1)}
+          >
+            <Spinner diameter="calc(var(--spacing) * 5)" />
+          </Button>
+        }
+      />
+    </div>
+  );
+}
+export const PendingLandingSpinnerLight: Story = {
+  globals: { theme: 'light' },
+  render: () => <PendingLandingSpinnerProjection tone="light" />,
+};
+export const PendingLandingSpinnerDark: Story = {
+  globals: { theme: 'dark' },
+  render: () => <PendingLandingSpinnerProjection tone="dark" />,
 };

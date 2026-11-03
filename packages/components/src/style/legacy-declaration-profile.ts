@@ -123,6 +123,9 @@ export const legacyDeclarations = [
   { key: 'commandDialogMaximum', alias: 'max-w-2xl', js: 'maxWidth', css: 'max-width' },
   { key: 'commandDialogCorner', alias: 'rounded-xl', js: 'borderRadius', css: 'border-radius' },
   { key: 'mentionCaretRaised', alias: 'z-30', js: 'zIndex', css: 'z-index' },
+  { key: 'filterNoGap', alias: 'gap-0', js: 'gap', css: 'gap' },
+  { key: 'usagePopupPadding', alias: 'p-3', js: 'padding', css: 'padding' },
+  { key: 'filterMinimum', alias: 'min-w-[200px]', js: 'minWidth', css: 'min-width' },
 ] as const;
 
 export const legacyBindings = {
@@ -262,4 +265,7 @@ export const legacyBindings = {
     'sidebarCornerMedium',
     'acpInlineTwo',
   ],
+  sidebarFilterNoGapClass: ['filterNoGap'],
+  usagePopupPaddingClass: ['usagePopupPadding'],
+  sidebarFilterMinimumClass: ['filterMinimum'],
 } as const;

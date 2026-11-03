@@ -2608,23 +2608,25 @@ successful cells or assigning an unproved paint cause.
 
 ### Public callers and the remaining cascade boundary
 
-Accepted scoped migrations since147 remove212 source utilities, including six
+Accepted scoped migrations since147 remove220 source utilities, including six
 private spacing consumers in189,25 declarations in211/212/214, two description
 consumers in216, nine private helper SVG dimensions in220 and three private
-commit-tooltip dimensions in222. The opacity candidates in192 remain Tailwind.
+commit-tooltip dimensions in222 and eight Spinner dimensions in248/251 through the
+existing `diameter` API. The opacity candidates in192 remain Tailwind.
 Six redundant size/shrink occurrences remain separate cleanup; restored native
 compiler-trial defaults receive zero credit. The declaration bridge transfers
 ownership while retaining legacy output.
 
-The integrated246 component cut recognizes1,064 AST occurrences in140
-files and1,028 unresolved expressions across1,399 production sources. Helper222
+The integrated247/248/250/251 component cut recognizes1,051 AST occurrences in140
+files and1,036 unresolved expressions across1,399 production sources. Helper222
 remains191 occurrences/eight files/21 unresolved expressions across30 sources.
-Their v2 union is1,255 occurrences/148 files/1,049 unresolved expressions. Known
-bridge output is267 positions across nineteen source owners; five bridge-only
+Their v2 union is1,242 occurrences/148 files/1,057 unresolved expressions. Known
+bridge output is272 positions across twenty-one source owners; five bridge-only
 consumers are outside the AST utility file list. The **conservative compatibility
-lower bound remains1,522 occurrences in153 files**. This continuation transfers
-eight ownership positions through two bindings with zero net dependency removal,
-using91 keys/92 physical declarations/113 bindings. Private247/248 remain excluded.
+lower bound is1,514 occurrences in153 files**. Spinner callsites remove eight
+dependencies; five popup positions transfer declaration ownership while retaining
+legacy aliases. The bridge uses94 keys/95 physical declarations/116 bindings.
+The frozen246 lower bound remains1,522; private252/253 are excluded.
 
 The earlier240 lower bound remains frozen at1,516. The increase of six records
 previously omitted padding literals returned by two window-drag helper functions;
@@ -2632,18 +2634,29 @@ they are now explicit retained bridge outputs. Thirty-one transferred positions
 reduce the AST count by only25. The scanner method and source scope are unchanged;
 this is more complete accounting of existing dependencies, not six new utilities.
 Unresolved values include ordinary StyleX/runtime expressions and imported bindings,
-not1,049 confirmed utilities or a completion percentage.
+not1,057 confirmed utilities or a completion percentage.
 
-`inventory-source-root246-integrated-proof.json` and
-`inventory-v2-root246-integrated-fullsrc.json` own all1,399 hashed production
+`inventory-source-root247251-integrated-proof.json` and
+`inventory-v2-root247251-integrated-fullsrc.json` own all1,399 hashed production
 inputs; helper remains its frozen222 cut. Stories are excluded from inventory but
 can affect CSS scanning. Qualified243/245 has30 combined formal pairs/28 exact PNGs and two pixel OPENs
 of40 raw/40 threshold pixels; its stable620-file/6,257-test run belongs to the
 91-key/111-binding cut. Its isolated Command and Mention reports retain their
 paint and mirror differences plus the dark readonly gap. Sidebar246 adds eight
-positions and retains four isolated pixel OPENs; current Root113-binding
+positions and retains four isolated pixel OPENs; Root246's113-binding
 qualification is separate. No previous paint, focus, hover-field, cleanup or
 device limitation is closed.
+
+Popup247/250 transfers five positions without net utility removal; their18+9
+accepted PNG/RGBA pairs and complete CSS match. The nine ordinary-StyleX Usage
+frames remain rejected because later primitive rules changed actual radius,
+padding and height. Spinner248/251 removes eight utility occurrences through an
+existing physical API; its18+14 pairs match after exact API-carrier qualification.
+These are real Menu/Composer/Button/Spinner hosts with actual phase-specific owner
+JSX projected into them, not full SessionDetail/ChatLanding controllers or RPC.
+The reduced local-menu supplement samples completed size transitions at400ms;
+it does not prove their natural completion. Original transition failures, raw
+carrier changes and projected-fixture limits remain in each delivery.
 The [bridge decision](2026-10-31-stylex-cascade-compatibility.md#evidence-and-limits)
 owns the compiler/caller boundary, per-unit evidence and actual rejected candidates;
 the [font-pair decision](2026-11-03-stylex-font-writer-pair.md) owns the sole

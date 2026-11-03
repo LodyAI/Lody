@@ -6560,7 +6560,7 @@ function WorkspaceChatLanding({
                 )}
               >
                 {submitting ? (
-                  <Spinner className="h-5 w-5" />
+                  <Spinner diameter="calc(var(--spacing) * 5)" />
                 ) : (
                   <ArrowUp {...stylex.props(landingStyles.glyph20)} />
                 )}

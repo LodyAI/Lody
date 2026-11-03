@@ -1850,27 +1850,36 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 
 ### 公开调用方与剩余层叠边界
 
-自147起已接受的有界迁移移除212处源码utility，含189六处私有间距、211／212／214共25处声明、
-216两处描述、220九处helper私有SVG及222三处私有commit-tooltip尺寸。192两处opacity仍保留Tailwind。
+自147起已接受的有界迁移移除220处源码utility，含189六处私有间距、211／212／214共25处声明、
+216两处描述、220九处helper私有SVG、222三处私有commit-tooltip尺寸，以及248／251通过既有
+diameter API移除的八处Spinner尺寸。192两处opacity仍保留Tailwind。
 六处重复尺寸／shrink另列清理；恢复的native compiler试验默认值信用零。声明桥转移归属但仍保旧输出。
 
-已集成246切面的components在1,399产品源识别1,064处AST／140文件／1,028未解析。
-helper222仍为30源／191处／八文件／21未解析；v2合计1,255处／148文件／1,049未解析表达式。
-十九个源码owner的已知桥输出267处，另五个仅桥consumer不在AST utility文件列表。
-**保守兼容下界仍为1,522处／153文件**。本次以两个绑定再转移八个声明归属位置，净依赖移除零；
-91key／92物理声明／113绑定。私有247／248尚未包含。
+已集成247／248／250／251切面的components在1,399产品源识别1,051处AST／140文件／1,036未解析。
+helper222仍为30源／191处／八文件／21未解析；v2合计1,242处／148文件／1,057未解析表达式。
+二十一个源码owner的已知桥输出272处，另五个仅桥consumer不在AST utility文件列表。
+**保守兼容下界为1,514处／153文件**。Spinner调用点净移除八处依赖；五个弹层位置转移声明归属，
+仍保旧alias。桥为94key／95物理声明／116绑定。冻结246下界仍为1,522；私有252／253未包含。
 
 此前240下界1,516保持冻结。新增六是两个window-drag helper函数返回的六个padding literal
 原未被扫描器识别，现在成为明确保留的桥输出；31个转移位置只使AST减少25。扫描方法与源码范围
 均未变，这是对既有依赖的补计，不是新增六个utility。未解析含正常StyleX／runtime及import绑定，
-不是1,049个已确认utility或完成率。
+不是1,057个已确认utility或完成率。
 
-inventory-source-root246-integrated-proof.json及inventory-v2-root246-integrated-fullsrc.json
+inventory-source-root247251-integrated-proof.json及inventory-v2-root247251-integrated-fullsrc.json
 拥有全部1,399份已hash产品输入；helper仍为冻结222切面。库存排除story，但其literal可影响CSS扫描。
 已验243／245有30组合正式对／28PNG同、两像素OPEN共40raw／40threshold；620文件／6,257测试
 属于该91key／111绑定切面。其隔离Command／Mention的paint／mirror差和dark readonly缺格不关闭。
-Sidebar246再转移八位置，保四个隔离像素OPEN，当前Root113绑定另验；不关闭任何旧paint、focus、
+Sidebar246再转移八位置，保四个隔离像素OPEN，Root246的113绑定另验；不关闭任何旧paint、focus、
 hover字段、cleanup或device限制。
+
+弹层247／250转移五位置，净移除零；18＋9对已接受PNG／RGBA及完整CSS相同。
+普通StyleX Usage九帧仍拒绝，因为较晚primitive规则改变实际radius、padding及height。
+Spinner248／251通过既有物理API移除八处utility；18＋14对在逐项限定API载体后相同。
+这些是承载实际分阶段owner JSX投影的真实Menu／Composer／Button／Spinner host，
+不是完整SessionDetail／ChatLanding controller或RPC。reduced本地Menu补充对在400ms
+受控采样已完成的尺寸transition，不证明自然完成；原transition失败、raw载体变化及投影范围限制
+仍保留在各自delivery。
 [桥决定](2026-10-31-stylex-cascade-compatibility.zh.md#证据与限制)拥有compiler／调用方边界、
 各单元证据与真实拒绝候选；[字重pair决定](2026-11-03-stylex-font-writer-pair.zh.md)拥有唯一多字段例外。
 历史库存切面不回写。

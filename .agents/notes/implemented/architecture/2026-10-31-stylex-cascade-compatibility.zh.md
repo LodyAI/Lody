@@ -9,14 +9,14 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## 摘要
 
-把公开Tailwind默认值移到其他层或更换class身份，会改变受支持调用方的优先级。有限构建adapter现通过一百一十三个源码绑定，让StyleX拥有MobileInlinePicker、AdaptiveTabStrip、公开旧Sidebar、WorkspaceCard、SessionMentionDropLayer、ContextSwitch、ContainerQueryProvider、SessionMonacoTextViewer、LocalTerminalPanel、AcpSessionSelect、UnifiedProjectSelector、ChatComposer、LoroSidebar、AttachmentAddMenu、message actions、window-drag几何、CommandDialog及两个Mention field owner共二百六十七个utility位置使用的九十个单字段key与一个封闭字重pair，同时保留原selector、class与规则位置。它先移除原声明，再插入真正StyleX compiler metadata，普通StyleX收集器保持独立。真实生产、开发及当前源码组合比较保持渲染与CSS，但过渡桥仍依赖Tailwind候选保留和排序。这是迁移边界，不代表移除Tailwind，也不是通用样式API。
+把公开Tailwind默认值移到其他层或更换class身份，会改变受支持调用方的优先级。有限构建adapter现通过一百一十六个源码绑定，让StyleX拥有MobileInlinePicker、AdaptiveTabStrip、公开旧Sidebar、WorkspaceCard、SessionMentionDropLayer、ContextSwitch、ContainerQueryProvider、SessionMonacoTextViewer、LocalTerminalPanel、AcpSessionSelect、UnifiedProjectSelector、ChatComposer、LoroSidebar、AttachmentAddMenu、message actions、window-drag几何、CommandDialog、两个Mention field owner、SidebarFilterPopover及SessionUsagePopover共二百七十二个utility位置使用的九十三个单字段key与一个封闭字重pair，同时保留原selector、class与规则位置。它先移除原声明，再插入真正StyleX compiler metadata，普通StyleX收集器保持独立。真实生产、开发及当前源码组合比较保持渲染与CSS，但过渡桥仍依赖Tailwind候选保留和排序。这是迁移边界，不代表移除Tailwind，也不是通用样式API。
 
 ## 归属与编译
 
 | Owner                                                                                                          | 职责                                                                            |
 | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | 九十一个StyleX key、九十二条物理声明及一百一十三个源码scalar／group class绑定。 |
-| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | 唯一声明／属性／旧alias映射及有序绑定成员；现有源码扫描保留九十一alias。        |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | 九十四个StyleX key、九十五条物理声明及一百一十六个源码scalar／group class绑定。 |
+| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | 唯一声明／属性／旧alias映射及有序绑定成员；现有源码扫描保留九十四alias。        |
 | [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | 闭合源码编译、声明等价门禁与原CSS槽位替换。                                     |
 | [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | 真实compiler、cn、source map、拒绝及恢复行为。                                  |
 
@@ -31,7 +31,7 @@ flowchart LR
   N[普通StyleX收集器] --> P[普通StyleX产物]
 ```
 
-pre-transform在React／docgen之前校验固定AST语法，只接受literal单字段声明、封闭字重pair及一百一十三个批准的
+pre-transform在React／docgen之前校验固定AST语法，只接受literal单字段声明、封闭字重pair及一百一十六个批准的
 stylex.props绑定，以锁定原生compiler折叠后输出原有顺序的旧class字符串。动态值、条件、
 namespace逃逸、混合class构造及不安全query loader均拒绝；缺少adapter时源码模块直接抛错。
 
@@ -80,7 +80,7 @@ Babel7.29.7、StyleX0.19.0、PostCSS8.5.6，trace-mapping0.3.31核map；版本�
 StyleX、祖先及真正Radix Slot的优先级。原366px container query及冻结transition utility沿用旧路径。
 DOM、ref、事件、disabled及响应式行为不迁入adapter。
 
-二百六十七个consumer utility位置换成import绑定不等于剩余旧utility减少同样次数。九十一alias及二百六十七个编译后输出出现次数
+二百七十二个consumer utility位置换成import绑定不等于剩余旧utility减少同样次数。九十四alias及二百七十二个编译后输出出现次数
 仍是明确兼容依赖。v2 scanner仍只报告它识别的AST次数；桥的已知输出另列，并加回保守剩余边界。
 精确源码切面及数字由[迁移Note](2026-10-22-tailwind-to-stylex-migration.zh.md#公开调用方与剩余层叠边界)负责。
 
@@ -265,6 +265,19 @@ Sidebar Input／Skeleton246复用既有字段，经两个绑定再转移八位�
 原Skeleton primitive以自身StyleX style覆盖caller style。响应式Drawer采用独立iPhone-UA Chrome
 会话，不能仅凭宽度认定，也不是Safari或触控硬件。原driver／端口失败及namespace export摘要
 更正均保留。
+
+弹层247／250以三个新key／绑定再转移五位置，复用既有intrinsic-width及corner声明。
+已接受18＋9对PNG／RGBA同，各切面108份完整CSS同。普通caller StyleX并不等价：被拒Usage候选
+让primitive较晚的同层规则获胜，radius12→14，本地surface从padding18／radius19／height80
+变为12／14／68。九张差异图、原53通过／20失败门禁及CSSOM诊断仍保留为拒绝证据。
+最终桥保原层叠，没有特异性补丁；250复用已合格247 After为Before，不声称新采集。
+
+独立Spinner248／251复用既有物理diameter API，净移除八处源码utility，无新桥语法或primitive API。
+18＋14对在逐项限定原primitive新增class／inline宽高载体后相同，raw对象并非全部相同。
+fixture把各阶段实际owner JSX投影进真实Menu或Composer／Button／Spinner host，
+不等于完整SessionDetail／ChatLanding controller或RPC。reduced Menu本地spacing补充对
+在400ms受控采样已完成的0.01ms尺寸transition，不证明这些尺寸transition自然完成。
+initial spacing在computed-value失效得到300px的原结果两侧保留。最终Root组合另有冻结源码与视觉验收。
 
 完整AST checker以void callback遍历每个child，保JSX text；第二statement变异与误删Provider均拒。
 整文件逆还原保护未拥有源码字节；后置纯格式资格不是新final-source build、截图或debug map字节同。

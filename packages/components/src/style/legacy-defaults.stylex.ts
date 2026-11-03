@@ -99,6 +99,9 @@ const styles = stylex.create({
   commandDialogMaximum: { maxWidth: '42rem' },
   commandDialogCorner: { borderRadius: 'var(--radius-xl)' },
   mentionCaretRaised: { zIndex: 30 },
+  filterNoGap: { gap: 'calc(var(--spacing) * 0)' },
+  usagePopupPadding: { padding: 'calc(var(--spacing) * 3)' },
+  filterMinimum: { minWidth: 200 },
 });
 
 export const pickerSpinnerClass = legacyClass(stylex.props(styles.dimmed).className);
@@ -448,3 +451,9 @@ export const sidebarMenuSkeletonLayoutClass = legacyClass(
     styles.acpInlineTwo
   ).className
 );
+
+export const sidebarFilterNoGapClass = legacyClass(stylex.props(styles.filterNoGap).className);
+
+export const usagePopupPaddingClass = legacyClass(stylex.props(styles.usagePopupPadding).className);
+
+export const sidebarFilterMinimumClass = legacyClass(stylex.props(styles.filterMinimum).className);

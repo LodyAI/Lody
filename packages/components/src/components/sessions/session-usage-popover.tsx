@@ -28,6 +28,10 @@ import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
 import {
+  commandDialogCornerClass,
+  usagePopupPaddingClass,
+} from '../../style/legacy-defaults.stylex';
+import {
   FIVE_HOUR_WINDOW_SECONDS,
   SEVEN_DAY_WINDOW_SECONDS,
   formatAgentRateLimitWindowLabel,
@@ -168,7 +172,12 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
           align="start"
           sideOffset={8}
           aria-label={t('sessions.usage.title', 'Usage')}
-          className={cn(stylex.props(styles.content).className, 'rounded-xl p-3 shadow-lg')}
+          className={cn(
+            stylex.props(styles.content).className,
+            commandDialogCornerClass,
+            usagePopupPaddingClass,
+            'shadow-lg'
+          )}
         >
           {isContextCompacting ? (
             <div>

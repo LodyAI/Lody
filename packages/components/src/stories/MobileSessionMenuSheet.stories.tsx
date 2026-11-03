@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
+import { Spinner } from '@lody/ui/spinner';
 import { fn } from 'storybook/test';
 import {
   Archive,
@@ -140,4 +141,80 @@ export const Default: Story = {};
  */
 export const WithOwnerTransfer: Story = {
   args: { owner },
+};
+
+// Source-projected test inputs, generated from this side's three actual SessionDetail
+// Spinner JSX nodes. The production menu/Spinner hosts are real; controller/RPC is not run.
+function PendingSpinnerProjectionHarness() {
+  const [open, setOpen] = useState(false);
+  const [receipt, setReceipt] = useState('Ready');
+  return (
+    <div data-session-spinner-projection="menu">
+      <button type="button" onClick={() => setOpen(true)}>
+        Open pending session menu
+      </button>
+      <output data-session-spinner-receipt>{receipt}</output>
+      <MobileSessionMenuSheet
+        open={open}
+        onOpenChange={setOpen}
+        infoRows={[
+          {
+            id: 'visibility',
+            icon: <Spinner diameter="calc(var(--spacing) * 3.5)" />,
+            label: 'Visibility',
+            value: 'Checking sharing',
+          },
+        ]}
+        actions={[
+          {
+            id: 'fork',
+            icon: <Spinner diameter="calc(var(--spacing) * 3.5)" />,
+            label: 'Fork session',
+            disabled: true,
+            onClick: () => setReceipt('Unexpected fork'),
+          },
+          {
+            id: 'share-with-team',
+            icon: <Spinner diameter="calc(var(--spacing) * 3.5)" />,
+            label: 'Checking sharing',
+            disabled: true,
+            onClick: () => setReceipt('Unexpected sharing'),
+          },
+          {
+            id: 'complete',
+            icon: <Copy aria-hidden="true" />,
+            label: 'Close with receipt',
+            onClick: () => setReceipt('Completed synthetic action'),
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
+function PendingSpinnerStandaloneProjection() {
+  return (
+    <div data-session-spinner-projection="standalone">
+      <span>Visibility {<Spinner diameter="calc(var(--spacing) * 3.5)" />}</span>
+      <span>Pending fork {<Spinner diameter="calc(var(--spacing) * 3.5)" />}</span>
+      <span>Checking sharing {<Spinner diameter="calc(var(--spacing) * 3.5)" />}</span>
+    </div>
+  );
+}
+
+export const PendingSpinnersLight: Story = {
+  globals: { theme: 'light' },
+  render: () => <PendingSpinnerProjectionHarness />,
+};
+export const PendingSpinnersDark: Story = {
+  globals: { theme: 'dark' },
+  render: () => <PendingSpinnerProjectionHarness />,
+};
+export const PendingSpinnerSizesLight: Story = {
+  globals: { theme: 'light' },
+  render: () => <PendingSpinnerStandaloneProjection />,
+};
+export const PendingSpinnerSizesDark: Story = {
+  globals: { theme: 'dark' },
+  render: () => <PendingSpinnerStandaloneProjection />,
 };

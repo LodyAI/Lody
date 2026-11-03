@@ -11,6 +11,11 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { clsx } from 'clsx';
+import {
+  attachmentIntrinsicWidthClass,
+  sidebarFilterNoGapClass,
+  sidebarFilterMinimumClass,
+} from '../style/legacy-defaults.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { text } from '@lody/ui/tokens/scales.stylex';
 
@@ -323,7 +328,13 @@ export function SidebarFilterPopover({
         sideOffset={6}
         // A panel sets its children apart with a gap; this is a menu, whose
         // sections are set apart by their headings and separators alone.
-        className={clsx('w-max min-w-[200px] gap-0 p-0.5', className)}
+        className={clsx(
+          attachmentIntrinsicWidthClass,
+          sidebarFilterMinimumClass,
+          sidebarFilterNoGapClass,
+          'p-0.5',
+          className
+        )}
       >
         <div data-sidebar-filter-section="view">
           <SectionHeading>{merged.organizeHeading}</SectionHeading>

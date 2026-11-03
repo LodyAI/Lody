@@ -9,16 +9,16 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of ninety single-field keys and one closed font-weight pair with one hundred and thirteen authored bindings used at two hundred and sixty-seven utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard, SessionMentionDropLayer, ContextSwitch, ContainerQueryProvider, SessionMonacoTextViewer, LocalTerminalPanel, AcpSessionSelect, UnifiedProjectSelector, ChatComposer, LoroSidebar, AttachmentAddMenu, message actions, window-drag geometry, CommandDialog and the two Mention field owners, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
+Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of ninety-three single-field keys and one closed font-weight pair with one hundred and sixteen authored bindings used at two hundred and seventy-two utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard, SessionMentionDropLayer, ContextSwitch, ContainerQueryProvider, SessionMonacoTextViewer, LocalTerminalPanel, AcpSessionSelect, UnifiedProjectSelector, ChatComposer, LoroSidebar, AttachmentAddMenu, message actions, window-drag geometry, CommandDialog, the two Mention field owners, SidebarFilterPopover and SessionUsagePopover, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
 
 ## Ownership and compilation
 
-| Owner                                                                                                          | Responsibility                                                                                                                              |
-| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Ninety-one StyleX keys, ninety-two physical declarations and one hundred and thirteen authored scalar/group class bindings.                 |
-| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its ninety-one aliases. |
-| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                               |
-| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                           |
+| Owner                                                                                                          | Responsibility                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Ninety-four StyleX keys, ninety-five physical declarations and one hundred and sixteen authored scalar/group class bindings.                 |
+| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its ninety-four aliases. |
+| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                                |
+| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                            |
 
 ```mermaid
 flowchart LR
@@ -32,7 +32,7 @@ flowchart LR
 ```
 
 The pre-transform validates a fixed AST grammar before React/docgen transforms.
-It accepts literal single-field declarations, the closed font-weight pair and the one hundred and thirteen approved `stylex.props`
+It accepts literal single-field declarations, the closed font-weight pair and the one hundred and sixteen approved `stylex.props`
 bindings, folds them with the pinned native compiler, and emits their original
 class strings in the original order. Dynamic values, conditions, namespace
 escapes, mixed class construction and unsafe query loaders reject. The source
@@ -107,8 +107,8 @@ The retained 366px container query and frozen-transition utilities keep their
 existing paths. DOM, refs, events, disabled state and responsive behavior do not
 move into the compiler adapter.
 
-Two hundred and sixty-seven consumer utility positions becoming imported bindings are not that many fewer
-remaining legacy occurrences. The ninety-one aliases and two hundred and sixty-seven compiled output occurrences
+Two hundred and seventy-two consumer utility positions becoming imported bindings are not that many fewer
+remaining legacy occurrences. The ninety-four aliases and two hundred and seventy-two compiled output occurrences
 remain explicit compatibility dependencies. Scanner v2 continues to report only
 its recognized AST occurrences; the bridge's known outputs are listed separately
 and added back for the conservative remaining boundary. The
@@ -388,6 +388,27 @@ forwarding: the existing Skeleton primitive replaces the caller style with its
 own StyleX style. Responsive Drawer evidence uses an independent iPhone-UA Chrome
 session, not width alone, Safari or hardware touch. Original driver/port failures
 and the corrected namespace-export summary remain evidence.
+
+Popup247/250 transfers five more positions through three new keys/bindings,
+reusing the existing intrinsic-width and corner declarations. The accepted18+9
+pairs are PNG/RGBA exact, with108 complete CSS resources equal on each cut.
+Ordinary caller StyleX is not interchangeable: the rejected Usage candidate let
+the primitive's later same-layer rules win, changing radius12→14 and a scoped
+surface from padding18/radius19/height80 to12/14/68. Its nine changed images,
+53-passing/20-failing original gate and CSSOM diagnosis remain rejected evidence.
+The final bridge preserves the original cascade without a specificity patch;
+250 reuses qualified247 After frames as Before rather than claiming a new capture.
+
+The separate Spinner248/251 changes use the existing physical `diameter` API,
+remove eight source utilities and add no bridge grammar or primitive API.
+Their18+14 pairs are exact after individually qualifying the unchanged primitive's
+new class/inline width-height carriers; raw records are not wholly identical.
+The fixtures project actual phase-specific owner JSX into real Menu or Composer/
+Button/Spinner hosts, not full SessionDetail/ChatLanding controllers or RPC.
+The reduced Menu local-spacing supplement samples completed0.01ms size transitions
+at400ms; it does not establish natural completion of those size transitions.
+Initial spacing's300px invalid-at-computed-value result is preserved on both sides.
+The final Root combination has its own frozen source and visual acceptance.
 
 The full AST checker visits every child with a void callback and retains JSX text;
 a mutation in the second statement and the omitted Provider class both reject.

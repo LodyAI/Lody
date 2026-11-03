@@ -356,7 +356,7 @@ export function replaceLegacyDeclarations(
       'Missing or ambiguous compatibility slot: ' + alias
     );
     return found.flatMap((rule) => {
-      const context = [];
+      const context: [string, string][] = [];
       for (let p = rule.parent; p && p.type !== 'root'; p = p.parent) {
         assert(p.type === 'atrule');
         context.unshift([p.name, p.params]);
