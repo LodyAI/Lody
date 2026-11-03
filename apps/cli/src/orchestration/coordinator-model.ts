@@ -1,4 +1,5 @@
 import type { MessageContent, SessionHistoryInput, StoredLodyOperation } from '@lody/shared';
+import { readChatFailureNotice } from '@lody/shared';
 import {
   getOperationProgressTargetKey,
   type OperationProgressStatusByTarget,
@@ -62,20 +63,12 @@ const MAX_FAILURE_DETAIL_CHARS = 500;
  * notice the generic text stands; a cause is never guessed.
  */
 export const targetFailureMessage = (output: readonly SessionHistoryInput[]): string => {
-  for (const entry of output) {
-    if (entry.role !== 'system') continue;
-    for (const item of entry.items ?? []) {
-      if (item.type !== 'system_notice' || item.name !== 'chat_failed') continue;
-      const meta = (item.meta ?? {}) as { reason?: unknown; message?: unknown };
-      const reason = typeof meta.reason === 'string' ? meta.reason : 'unknown';
-      const detail =
-        typeof meta.message === 'string' && meta.message.trim()
-          ? `: ${Array.from(meta.message.trim()).slice(0, MAX_FAILURE_DETAIL_CHARS).join('')}`
-          : '';
-      return `Target Turn failed (${reason})${detail}`;
-    }
-  }
-  return 'Target Turn failed.';
+  const notice = readChatFailureNotice(output);
+  if (!notice) return 'Target Turn failed.';
+  const detail = notice.message
+    ? `: ${Array.from(notice.message).slice(0, MAX_FAILURE_DETAIL_CHARS).join('')}`
+    : '';
+  return `Target Turn failed (${notice.reason ?? 'unknown'})${detail}`;
 };
 
 export const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>
