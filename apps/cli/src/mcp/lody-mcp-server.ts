@@ -3343,7 +3343,45 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     await syncWorkspaceMetaForRead(manager, `mcp.session_chat:${ctx.sessionId}:operation`);
     args = { ...args, sessionId: await createSessionIdResolver(manager)(args.sessionId) };
-    if (args.quotes?.length)
+    const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
+    if (!currentSession) {
+      throw new LodyOperationStoreError(
+        'SESSION_NOT_FOUND',
+        `Requester Session not found: ${ctx.sessionId}`,
+        false
+      );
+    }
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
+    let canonicalCommand = {
+      sessionId: args.sessionId,
+      prompt: args.prompt,
+      ...(args.mcpServerIds !== undefined ? { mcpServerIds: args.mcpServerIds } : {}),
+      ...(args.attachments?.length ? { attachments: args.attachments } : {}),
+      ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
+    };
+    // Quotes are identified by reference, so a retry matches even after the quoted
+    // text or Session title changes; the expansion is read once, on first acceptance.
+    const quoteRefs = args.quotes?.map((quote) => ({
+      sessionId: quote.sessionId ?? ctx.sessionId,
+      messageId: quote.messageId,
+    }));
+    const fingerprintCommand = quoteRefs?.length
+      ? { ...canonicalCommand, quotes: quoteRefs }
+      : undefined;
+    const retry = await withOperationStore((store) =>
+      store.findMatchingRetry(
+        ctx.sessionId as SessionId,
+        args.operationId!,
+        'session_chat',
+        fingerprintCommand ?? canonicalCommand,
+        invoking.identity.userId,
+        invoking.identity.sourceTurnId
+      )
+    );
+    if (retry) {
+      return await withOperationStore((store) => store.snapshot(retry));
+    }
+    if (args.quotes?.length) {
       args = {
         ...args,
         prompt: await appendQuotedMessages(
@@ -3354,34 +3392,8 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           auth.machineId
         ),
       };
-    const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
-    if (!currentSession) {
-      throw new LodyOperationStoreError(
-        'SESSION_NOT_FOUND',
-        `Requester Session not found: ${ctx.sessionId}`,
-        false
-      );
-    }
-    const invoking = await resolveInvokingTurnContext(currentSession, manager);
-    const canonicalCommand = {
-      sessionId: args.sessionId,
-      prompt: args.prompt,
-      ...(args.mcpServerIds !== undefined ? { mcpServerIds: args.mcpServerIds } : {}),
-      ...(args.attachments?.length ? { attachments: args.attachments } : {}),
-      ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
-    };
-    const retry = await withOperationStore((store) =>
-      store.findMatchingRetry(
-        ctx.sessionId as SessionId,
-        args.operationId!,
-        'session_chat',
-        canonicalCommand,
-        invoking.identity.userId,
-        invoking.identity.sourceTurnId
-      )
-    );
-    if (retry) {
-      return await withOperationStore((store) => store.snapshot(retry));
+      // Stored for replay: recovery reads the frozen expanded prompt.
+      canonicalCommand = { ...canonicalCommand, prompt: args.prompt };
     }
     const senderSessionId = await readInvokingChatSender(manager, currentSession, invoking);
     if (args.sessionId === senderSessionId) throw reverseChatError();
@@ -3482,7 +3494,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           ...timing,
           items: [activeOperationItem(args.sessionId as SessionId, preallocatedUserTurnId)],
         },
-        { materializationClaimToken }
+        { materializationClaimToken, ...(fingerprintCommand ? { fingerprintCommand } : {}) }
       )
     );
     if (accepted.operation.state === 'finished') {

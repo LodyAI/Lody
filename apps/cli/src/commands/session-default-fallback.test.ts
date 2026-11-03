@@ -2372,16 +2372,18 @@ describe('MCP chat steering', () => {
       fileDiff: [],
     } as never);
 
-    await fixture.runMcp(requesterSessionId, () =>
-      __lodyMcpServerInternals.startSessionChatOperation(
-        __lodyMcpServerInternals.SessionChatToolInputSchema.parse({
-          operationId: 'chat-with-quotes',
-          sessionId,
-          prompt: 'Apply the owner rule below.',
-          quotes: [{ messageId: 'owner-rule' }, { messageId: 'missing-message' }],
-        })
-      )
-    );
+    const send = () =>
+      fixture.runMcp(requesterSessionId, () =>
+        __lodyMcpServerInternals.startSessionChatOperation(
+          __lodyMcpServerInternals.SessionChatToolInputSchema.parse({
+            operationId: 'chat-with-quotes',
+            sessionId,
+            prompt: 'Apply the owner rule below.',
+            quotes: [{ messageId: 'owner-rule' }, { messageId: 'missing-message' }],
+          })
+        )
+      );
+    const first = (await send()) as { id: string };
 
     const sent = (await fixture.history()).at(-1)!;
     expect(sent.inputConfig?.prompt).toBe(
@@ -2391,6 +2393,15 @@ describe('MCP chat steering', () => {
         `[Lody] Quoted message ${requesterSessionId}/missing-message could not be read; treat it as an unverified relay.`,
       ].join('\n\n')
     );
+
+    // A retry matches by quote reference, even after the source title changes.
+    fixture.metadata.set(getSessionRoomId(requesterSessionId), {
+      ...(fixture.metadata.get(getSessionRoomId(requesterSessionId)) as SessionMeta),
+      title: 'Renamed coordinator',
+    });
+    const historyLength = (await fixture.history()).length;
+    expect(await send()).toMatchObject({ id: first.id });
+    expect(await fixture.history()).toHaveLength(historyLength);
   });
 
   it('steers a busy target and fails the Operation when delivery is unknown', async () => {
