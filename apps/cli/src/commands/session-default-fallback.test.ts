@@ -2223,6 +2223,60 @@ describe('MCP chat steering', () => {
     }
   });
 
+  it('appends quoted messages with their recorded author to the frozen prompt', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-chat-quotes-'));
+    roots.add(root);
+    vi.stubEnv('LODY_DATA_DIR', root);
+    const fixture = createFixture('codex');
+    await fixture.seedChat({ prompt: 'Target work', cliType: 'builtin', agentType: 'codex' });
+    const requesterSessionId = 'quote-requester' as SessionId;
+    await fixture.seedChat(
+      { prompt: 'Coordinate', cliType: 'builtin', agentType: 'codex' },
+      requesterSessionId
+    );
+    const doc = await fixture.manager.getOrCreateSessionDoc(requesterSessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'owner-rule',
+      role: 'user',
+      author: { v: 1, kind: 'human', userId: 'owner-1' },
+      timestamp: '2026-11-02T14:05:00.000Z',
+      items: [{ type: 'text', text: 'Only report P0/P1.\nWrite the exact head.' }],
+      fileDiff: [],
+    } as never);
+
+    const send = () =>
+      fixture.runMcp(requesterSessionId, () =>
+        __lodyMcpServerInternals.startSessionChatOperation(
+          __lodyMcpServerInternals.SessionChatToolInputSchema.parse({
+            operationId: 'chat-with-quotes',
+            sessionId,
+            prompt: 'Apply the owner rule below.',
+            quotes: [{ messageId: 'owner-rule' }, { messageId: 'missing-message' }],
+          })
+        )
+      );
+    const first = (await send()) as { id: string };
+
+    const sent = (await fixture.history()).at(-1)!;
+    expect(sent.inputConfig?.prompt).toBe(
+      [
+        'Apply the owner rule below.',
+        `[Lody] Quoted from human user owner-1, Session (${requesterSessionId}), 2026-11-02T14:05:00.000Z:\n> Only report P0/P1.\n> Write the exact head.`,
+        `[Lody] Quoted message ${requesterSessionId}/missing-message could not be read; treat it as an unverified relay.`,
+      ].join('\n\n')
+    );
+
+    // A retry matches by quote reference, even after the source title changes.
+    fixture.metadata.set(getSessionRoomId(requesterSessionId), {
+      ...(fixture.metadata.get(getSessionRoomId(requesterSessionId)) as SessionMeta),
+      title: 'Renamed coordinator',
+    });
+    const historyLength = (await fixture.history()).length;
+    expect(await send()).toMatchObject({ id: first.id });
+    expect(await fixture.history()).toHaveLength(historyLength);
+  });
+
   it('steers a busy target and fails the Operation when delivery is unknown', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'lody-steer-chat-'));
     roots.add(root);
