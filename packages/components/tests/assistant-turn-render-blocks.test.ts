@@ -111,7 +111,7 @@ describe('buildAssistantTurnRenderBlocks', () => {
 });
 
 describe('buildAssistantTurnRenderLayout', () => {
-  it('puts finished activity and progress text into work while leaving the final reply visible', () => {
+  it('folds finished activity into work while keeping every text block visible', () => {
     const layout = buildAssistantTurnRenderLayout(
       'assistant-1',
       [
@@ -133,7 +133,7 @@ describe('buildAssistantTurnRenderLayout', () => {
     expect(layout.firstWorkBlockIndex).toBe(0);
     expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
       true,
-      true,
+      false,
       true,
       false,
     ]);
@@ -160,22 +160,22 @@ describe('buildAssistantTurnRenderLayout', () => {
     ]);
   });
 
-  it('keeps every text block in the final contiguous run outside the work group', () => {
+  it('keeps an answer visible even when more work follows it', () => {
+    // A run that answers first and keeps verifying used to have that answer
+    // folded away: only the final text run counted as the reply.
     const layout = buildAssistantTurnRenderLayout(
       'assistant-1',
       [
-        { type: 'text', text: 'Progress update.' },
+        { type: 'text', text: 'The bug is in the parser.' },
         tool('command-1', 'execute'),
-        { type: 'text', text: 'First part of the final response.' },
-        { type: 'text', text: 'Second part of the final response.' },
+        { type: 'text', text: 'Confirmed by the reproduction.' },
       ],
       true
     );
 
     expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
-      true,
-      true,
       false,
+      true,
       false,
     ]);
   });
