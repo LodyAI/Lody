@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createStore, getDefaultStore, Provider } from 'jotai';
@@ -19,6 +18,11 @@ const machineAtom = getMachineMetaByIdAtomFamily() as import('jotai').PrimitiveA
   protocolCapabilities: Record<string, number>;
 } | null>;
 
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+vi.mock('../src/lib/toast', () => ({ toast: { error: toastError } }));
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
 const automation = vi.fn();
 vi.mock('../src/lib/electron-ipc-client', () => ({
   getIpcServices: () => ({ sessionControl: { automation } }),
@@ -43,6 +47,7 @@ describe('local Session continuation', () => {
   afterEach(() => {
     act(() => root.unmount());
     automation.mockReset();
+    toastError.mockReset();
     vi.useRealTimers();
   });
   it.each([false, true])(
@@ -170,4 +175,76 @@ describe('local Session continuation', () => {
     expect(calls).toContain('machine:session:user:cancel');
     expect(automation).not.toHaveBeenCalled();
   });
+  it('retains settings on partial failures only for the same target and recovers independently', async () => {
+    vi.useFakeTimers();
+    let listFails = false;
+    let settingsFail = false;
+    automation.mockImplementation(async ({ sessionId, command }) => {
+      if (command.type === 'list') {
+        if (listFails) throw new Error('list unavailable');
+        return { type: 'list', waits: [] };
+      }
+      if (settingsFail) throw new Error('settings unavailable');
+      return { type: 'settings', settings: { recoverCapacity: sessionId === 'session' } };
+    });
+    function View({ sessionId }: { sessionId: string }) {
+      const data = useLocalSessionContinuation({ ...target, sessionId }, true);
+      return <output>{`${data.error}:${data.settingsUnavailable}:${data.recoveryEnabled}`}</output>;
+    }
+    await act(async () => root.render(<View sessionId="session" />));
+    expect(container.textContent).toBe('false:false:true');
+    settingsFail = true;
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(container.textContent).toBe('false:true:true');
+    await act(async () => root.render(<View sessionId="other" />));
+    expect(container.textContent).toBe('false:true:null');
+    settingsFail = false;
+    listFails = true;
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(container.textContent).toBe('true:false:false');
+    listFails = false;
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(container.textContent).toBe('false:false:false');
+  });
+  it.each(['cancel', 'configure'] as const)(
+    'reports a failed %s and reconciles the owner state',
+    async (operation) => {
+      let changed = false;
+      automation.mockImplementation(async ({ command }) => {
+        if (command.type === 'list')
+          return {
+            type: 'list',
+            waits: changed ? [] : [{ id: 'one', state: 'waiting', nextCheckAt: 1 }],
+          };
+        if (command.type === 'settings')
+          return { type: 'settings', settings: { recoverCapacity: changed } };
+        changed = true;
+        throw new Error('response lost');
+      });
+      function View() {
+        const data = useLocalSessionContinuation(target, true);
+        return (
+          <>
+            <output>{`${data.views.length}:${data.recoveryEnabled}:${data.error}:${data.settingsUnavailable}`}</output>
+            <button
+              onClick={() =>
+                operation === 'cancel' ? data.cancel('one') : data.setTweak('recoverCapacity', true)
+              }
+            >
+              Change
+            </button>
+          </>
+        );
+      }
+      await act(async () => root.render(<View />));
+      expect(container.querySelector('output')?.textContent).toBe('1:false:false:false');
+      await act(async () => container.querySelector('button')?.click());
+      expect(toastError).toHaveBeenCalledWith(
+        operation === 'cancel'
+          ? 'sessions.continuation.cancelUnknown'
+          : 'sessions.continuation.settingsUnknown'
+      );
+      expect(container.querySelector('output')?.textContent).toBe('0:true:false:false');
+    }
+  );
 });
