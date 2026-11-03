@@ -201,7 +201,7 @@
   "e2ee.mode.timedOutHelp": "请登录并连接网络后重试。此设备尚未保存该工作区的模式证明，因此暂时无法离线打开对话数据。",
   "e2ee.create.label": "加密工作区（开发者预览）",
   "e2ee.create.description": "初始化设备身份和签名权限账本。此工作区暂不支持对话、文件、协作和 Agent 执行。创建后不能切换模式。",
-  "e2ee.create.unsupported": "创建需要支持受保护设备密钥存储的桌面应用。当前平台可以读取已有工作区的历史。",
+  "e2ee.create.unsupported": "当前平台还没有可用的受保护设备密钥存储。",
   "e2ee.create.pending": "此设备保存了一次创建请求。请继续原请求以确认结果；名称、标识和设备身份保持不变。",
   "e2ee.create.paidUnavailable": "此预览需要可用的免费工作区名额，尚未接入付费工作区创建。",
   "e2ee.create.resume": "继续已保存的创建请求",
@@ -6081,5 +6081,6 @@
   "sessions.androidEmulator.quality.label": "预览画质",
   "sessions.androidEmulator.quality.saver": "省流",
   "sessions.androidEmulator.quality.balanced": "均衡",
-  "sessions.androidEmulator.quality.clear": "清晰"
+  "sessions.androidEmulator.quality.clear": "清晰",
+  "e2ee.create.mobileDescription": "使用本机受保护的密钥存储；签名后的密钥账本之后不能改为普通工作区。"
 }

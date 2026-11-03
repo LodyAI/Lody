@@ -52,7 +52,10 @@ vi.mock('jotai', () => ({
   // The account pairing beta stays off; every other read is the cached user.
   useAtomValue: (atom: unknown) => (atom === 'accountPairing' ? false : fixture.cachedUser),
 }));
-vi.mock('@/atoms/settings', () => ({ e2eeAccountPairingFeatureEnabledAtom: 'accountPairing' }));
+vi.mock('@/atoms/settings', () => ({
+  e2eeAccountPairingFeatureEnabledAtom: 'accountPairing',
+  e2eeWorkspaceCreationFeatureEnabledAtom: 'creationEnabled',
+}));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('@/atoms', () => ({ setWorkspaceContextAtom: 'workspace', userAtom: 'user' }));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));

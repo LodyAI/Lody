@@ -22,6 +22,8 @@ export {
   type PersonalPairingRequest,
 } from './pairing';
 export { verifyPersonalHistory } from './admission';
+/** Local custody payload construction only; the packet never crosses the UI. */
+export { credentialPacket } from './identity';
 export { personalLedgerControl, type PersonalLedgerOrigin } from './ledger';
 
 export {

@@ -3,13 +3,19 @@ import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-vi
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
+import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, usePlatform } from '@lody/platform/react';
+import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
+import { useE2eeAccountId } from '@/lib/e2ee-account';
+import { createPreparedE2eeWorkspace } from '@/lib/create-e2ee-workspace';
+import { savePendingE2eeWorkspace } from '@/lib/e2ee-workspace-storage';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
+import { Switch } from '@lody/ui/switch';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
 import { cn } from '@/lib/utils';
@@ -18,8 +24,10 @@ export type MobileCreateWorkspaceSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Fired with the new workspace's slug after a successful create.
-     Caller is expected to navigate the user into the new workspace. */
-  onCreated?: (slug: string) => void;
+     Caller is expected to navigate the user into the new workspace.
+     `workspaceId` is present for an encrypted create so the caller can open
+     its device/ledger control page instead of an ordinary chat route. */
+  onCreated?: (slug: string, workspaceId?: string) => void;
 };
 
 /**
@@ -49,13 +57,18 @@ export function MobileCreateWorkspaceSheet({
   const keyboard = useKeyboardAwareSheet({ chromeHeight: '9rem' });
   const maxHeight = useFoldAwareSheetHeight(92, true);
   const { createOrganization } = useOrganization();
+  const platform = usePlatform();
+  const creationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
+  const accountId = useE2eeAccountId(creationEnabled);
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [encrypted, setEncrypted] = useState(false);
   const creationAvailability = useCloudQuery(
     cloudOperations.billing.getWorkspaceCreationAvailability
   );
   const creationAvailable = creationAvailability?.canCreateFree === true;
   const creationBlocked = creationAvailability?.canCreateFree === false;
+  const encryptionSupported = Boolean(platform.e2eeWorkspaces?.prepareCreation);
   const { slug, setSlug, resetSlug, canReset, isChecking, isAvailable, error } =
     useWorkspaceSlugField(name);
 
@@ -66,7 +79,8 @@ export function MobileCreateWorkspaceSheet({
     !error &&
     !isChecking &&
     isAvailable &&
-    !creating;
+    !creating &&
+    (!encrypted || encryptionSupported);
 
   /* While the create mutation is in flight (and during the close
      animation right after success), suppress the slug field's error
@@ -93,6 +107,7 @@ export function MobileCreateWorkspaceSheet({
          previously-typed name would still be there. The slug field's
          own reset is wired separately so it follows the name. */
       setName('');
+      setEncrypted(false);
       resetSlug();
     }
   };
@@ -101,6 +116,23 @@ export function MobileCreateWorkspaceSheet({
     if (!canSubmit) return;
     setCreating(true);
     try {
+      if (encrypted) {
+        const port = platform.e2eeWorkspaces;
+        if (!port?.prepareCreation || !accountId) throw new Error('e2ee_creation_unavailable');
+        const intent = {
+          accountId,
+          requestId: crypto.randomUUID(),
+          name: name.trim(),
+          slug,
+        };
+        // Persist before producing a device identity or sending a request. A lost
+        // response retries these exact fields on this device.
+        savePendingE2eeWorkspace(localStorage, intent);
+        const created = await createPreparedE2eeWorkspace(port, localStorage, intent);
+        handleClose(false);
+        onCreated?.(created.slug, created.workspaceId);
+        return;
+      }
       const created = await createOrganization(name.trim(), slug);
       const targetSlug = created?.slug ?? slug;
       handleClose(false);
@@ -229,6 +261,37 @@ export function MobileCreateWorkspaceSheet({
                     </p>
                   ) : null}
                 </div>
+
+                {creationEnabled ? (
+                  <div className="flex items-start justify-between gap-4 rounded-xl border border-border/60 p-3">
+                    <div className="min-w-0 space-y-1">
+                      <label
+                        htmlFor="mobile-create-workspace-encrypted"
+                        className="text-[0.78rem] font-medium"
+                      >
+                        {t('e2ee.create.label', 'Encrypted workspace (developer preview)')}
+                      </label>
+                      <p className="text-[0.72rem] leading-snug text-muted-foreground">
+                        {encryptionSupported
+                          ? t(
+                              'e2ee.create.mobileDescription',
+                              'Uses this device’s protected key storage. Its signed key ledger cannot be switched to a regular workspace later.'
+                            )
+                          : t(
+                              'e2ee.create.unsupported',
+                              'This platform has no protected device key storage yet.'
+                            )}
+                      </p>
+                    </div>
+                    <Switch
+                      id="mobile-create-workspace-encrypted"
+                      data-testid="mobile-create-workspace-encrypted"
+                      checked={encrypted}
+                      disabled={creating || !encryptionSupported || !accountId}
+                      onCheckedChange={setEncrypted}
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}
