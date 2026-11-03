@@ -2,6 +2,10 @@
 
 Binding guidelines live in [AGENTS.md](AGENTS.md).
 
+PR review Markdown offers per-image HTTPS loading; automatic loading is a
+device-local preference, off by default. The isolated desktop image document
+keeps the main renderer's image policy unchanged. [Decision](../../../../../.agents/notes/implemented/feature/2026-11-02-pr-remote-images.md).
+
 ## Usage range transitions
 
 `usage-calendar-visualization.tsx` keeps a positioned view frame across hourly and
