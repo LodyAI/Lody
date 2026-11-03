@@ -2764,8 +2764,10 @@ const projectNativeFailure = (error) =>
     ? new Error('e2ee_member_removed')
     : error instanceof E2eeDeviceRevokedError
       ? new Error('e2ee_device_revoked')
-      : typeof error?.code === 'string'
-        ? new Error(`e2ee_${error.code}`)
+      : error?.code === 'restart-required'
+        ? new Error('e2ee_restart-required: Restart Lody to finish releasing encrypted resources.')
+        : typeof error?.code === 'string'
+          ? new Error(`e2ee_${error.code}`)
         : error instanceof Error && /^e2ee_/.test(error.message)
           ? error
           : new Error('e2ee_host_operation_failed')
@@ -2819,6 +2821,13 @@ async function memberApprovalFixture(keyRound, ledger = { relayHasAdmission: tru
         }),
       keyDeliveryTarget: (_workspace, device) =>
         Effect.sync(() => ingested && device === approvalDevice),
+      // Positive evidence of a stored envelope; `ledger.evidence` can withhold it.
+      keyDeliveryEvidence: (_workspace, device) =>
+        Effect.sync(() =>
+          !ingested || device !== approvalDevice
+            ? 'e2ee_admission_not_ingested'
+            : (ledger.evidence?.() ?? 'delivered')
+        ),
       ...(keyRound ? { keyRound } : {})
     }
   })
@@ -2915,7 +2924,7 @@ for (const [name, nested] of [
   ['member removal', () => new E2eeMemberRemovedError()],
   ['device revocation', () => new E2eeDeviceRevokedError()],
   ['a missing binding', () => Object.assign(new Error('synthetic'), { code: 'missing-binding' })],
-  ['a closed workspace', () => Object.assign(new Error('synthetic'), { code: 'closed' })]
+  ['a restart-required owner', () => Object.assign(new Error('synthetic'), { code: 'restart-required' })]
 ])
   void test(
     `${name} nested in a key-round failure ends delivery from this device without retries`,
@@ -2946,6 +2955,52 @@ for (const [name, nested] of [
       assert.equal(rounds, 1)
     }
   )
+
+void test('a successful key round without a stored envelope for the member stays retryable', { timeout: 5000 }, async () => {
+  // A blocked target, an ineligible sender or a joined round all end the round in success.
+  const ledger = { relayHasAdmission: true, evidence: () => 'e2ee_key_not_sent' }
+  const f = await memberApprovalFixture(() => Effect.void, ledger)
+  let now = 1_000
+  f.ipc.keyDeliveryNow = () => now
+  await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
+    { requestId: approvalRequest, state: 'failed', code: 'e2ee_key_not_sent' }
+  ])
+  ledger.evidence = () => 'delivered'
+  now += 10_000
+  await f.ipc.memberJoinRequests('team')
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
+    { requestId: approvalRequest, state: 'delivered' }
+  ])
+})
+void test('a workspace closed during a key round is reopened and delivered by the next due poll', { timeout: 5000 }, async () => {
+  const outcomes = [
+    Effect.fail(
+      new WorkspaceKeyRoundFailure({
+        receive: Result.succeed({}),
+        distribution: Result.fail(Object.assign(new Error('synthetic'), { code: 'closed' })),
+        reportsAfterSend: Result.succeed({}),
+        cursors: {}
+      })
+    ),
+    Effect.void
+  ]
+  const f = await memberApprovalFixture(() => outcomes.shift() ?? Effect.die('unexpected round'))
+  let now = 1_000
+  f.ipc.keyDeliveryNow = () => now
+  await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  const [closed] = plain((await f.ipc.memberKeyDeliveries('team')).items)
+  assert.equal(closed.state, 'failed')
+  now += 10_000
+  await f.ipc.memberJoinRequests('team')
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
+    { requestId: approvalRequest, state: 'delivered' }
+  ])
+})
 
 void test('passive cache inspection stays account/product-window bound without opening a reader or cloud call', async () => {
   const f = await memberIpcFixture()
