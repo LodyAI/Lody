@@ -40,8 +40,20 @@ note tools or change result delivery timing.
 An orchestrating Agent sends corrections or new information to a Session that is
 still working. `lody_session_chat` and `lody_session_chat_many` steer that input
 into the running turn on either Machine when its agent accepts steering, regardless
-of the human's queue or guide preference and of who started the running turn. The steered input gets its own reply, which
-becomes the Operation result; an earlier turn it interrupts ends at that point.
+of the human's queue or guide preference and of who started the running turn. A
+target whose agent cannot acknowledge a steer queues the input as its next ordinary
+turn. The steered input gets its own reply, which becomes its Operation result.
+
+Steering hands off the running work; it does not fail it. A delegated input whose
+running turn is handed off to a steered input continues through that successor.
+Its Operation completes when the work completes, with the successor's final reply,
+and never reports `TARGET_FAILED` merely because it was steered.
+
+A chat that sends its input returns a delivery receipt saying what actually
+happened: `steered`, `queued` behind the running turn, or `dispatched` to an idle
+target. A steer that falls back to the queue reports `queued`. The receipt is
+response-only and never persisted, so older readers are unaffected. It is absent
+when the outcome is uncertain or was decided by an earlier attempt or replay.
 
 On the calling Machine, a steer that is provably not delivered becomes the next
 ordinary turn, as it does for a human. An uncertain delivery is never replayed: the item fails with
@@ -61,6 +73,63 @@ Idle targets and missing active-turn evidence keep ordinary dispatch. Evidence: 
 `apps/cli/src/commands/session.ts`, its suite `session-default-fallback.test.ts`,
 and item reconciliation in `apps/cli/src/orchestration/coordinator-workflow.ts`.
 Remote fallback rationale: [decision note](../.agents/notes/implemented/feature/2026-11-02-cross-machine-agent-steer.md).
+
+## Coordinating many Sessions
+
+One Agent coordinates a dozen long-running Sessions across Machines. It must tell
+what each Session is doing and why delegated work stopped, without reading full
+transcripts or inspecting processes on the Machine. Lody makes this state observable.
+Judging whether two pieces of work overlap is left to the coordinating Agent,
+because tasks cannot be enumerated as fixed keys. Lody does not claim tasks,
+lock tasks or reject sends as duplicates.
+
+- **Pull request lookup.** `lody_session_list` filters by pull request URL or
+  number using Session metadata `pullRequests`, without opening Session rooms.
+- **Identity, not content.** List and status items carry the title, associated
+  pull requests and branch. They carry no message text: previews of message
+  content must not enter Session metadata.
+- **Live activity.** `lody_session_status_many` asks the Machine that owns a busy
+  Session for turn start, last output time, the current action and queued inputs
+  at query time. The data is not published on presence channels. When the Machine
+  cannot answer, status keeps the existing `idle`/`busy` value with activity
+  `unknown`.
+- **Sender provenance.** An Agent-authored input reaches the target agent with
+  a Lody header naming the source Session and stating it is not human input.
+  Human inputs are unchanged. The header is derived from the recorded author at
+  execution time and is not written to history.
+- **Quoted authority.** An Agent relaying a human instruction may cite the
+  original message. Lody appends the original text with its recorded author,
+  checked against history. An unresolvable citation is delivered marked as an
+  unverified relay rather than rejected. No delegation token exists.
+- **Failure causes.** A failed target keeps its top-level code and adds a typed
+  cause: quota exhausted with its reset time from the existing capacity
+  observation, Machine offline, user stopped, or agent error with the original
+  message. An unclassifiable failure is an agent error, never a guessed cause.
+- **Result timing.** Completion results carry when the input was sent and how
+  many later inputs the target received meanwhile. Lody does not mark results
+  as superseded; the coordinating Agent judges staleness.
+- **History reads.** `lody_session_history` accepts `direction` (`backward`, the
+  default newest-first paging, or `forward` from the oldest), `role`, `since` and
+  `maxChars`. Cursors keep absolute positions, so later inputs never shift a page.
+  Text over `maxChars` is truncated with `truncated` and the original length,
+  never dropped.
+- **Short Session ids.** A unique prefix of a Session id in the workspace
+  resolves to that Session. An ambiguous prefix fails with
+  `SESSION_ID_AMBIGUOUS` listing at most eight candidates with id and title.
+- **Queued inputs.** A requester may list, withdraw or replace its own queued
+  inputs that have not started. A started input returns `ALREADY_STARTED` and is
+  never cancelled by this path.
+- **Machine resources.** `lody_machine_list` reports agent quota with reset times
+  and disk usage. Lody does not manage or report agent-held locks.
+
+These additions avoid errors by design rather than adding gates. Uncertain
+observations degrade to `unknown` or an informational field; only an impossible
+request fails. New failure causes are tagged Effect errors, serialized to
+`{code, cause, retryable}` only at the MCP boundary.
+
+Out of scope: Lody-managed resource locks, review prompt templates (Agent Roles
+already carry fixed instructions), a checkpoint-before-cancel API, and changing
+completion output, which already omits tool calls.
 
 ## Session creation configuration
 
@@ -259,6 +328,14 @@ Consumption and retention are implemented in
 `apps/cli/src/session/session-execution-service.ts`, and reconciliation in
 `apps/cli/src/orchestration/operation-coordinator.ts`. Their owning suites cover
 transport failure, claim/settlement races, restart and result expiry.
+
+Steer handoff completion follows applied records in the Session's
+`steerOperationLedger` (`findSteerSuccessor` in `coordinator-model.ts`), covered by
+the `steer handoff` cases in `operation-coordinator.test.ts`. Delivery receipts are
+mapped by `deliveryFromSteerResponse` in `apps/cli/src/commands/session.ts` and
+covered by `session-default-fallback.test.ts`. The Coordinating many Sessions
+section is intended behavior not yet implemented; status still exposes only
+`idle`/`busy`.
 
 This draft records the requested limit of 16. Runtime and deployed-client
 acceptance remain to be verified after dependencies are installed.

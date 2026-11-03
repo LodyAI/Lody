@@ -45,7 +45,7 @@ import {
   type UploadedSessionFile,
 } from './session-attachment-transfer';
 import { handleMemoryProviderRequest } from './memory-providers';
-import { readMessageAuthor } from '@lody/shared';
+import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
 import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
@@ -2442,9 +2442,39 @@ export class MessageHandler {
     return promptBlocks;
   }
 
+  /**
+   * Provenance header for an agent-authored input. Best effort: any read failure
+   * omits the header and the turn proceeds with its unchanged text.
+   */
+  private async readAgentSenderHeader(
+    sessionId: SessionId,
+    userTurnId: string | undefined
+  ): Promise<string | undefined> {
+    if (!userTurnId) return undefined;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      const input = await backend.history.readTurn(userTurnId);
+      if (input.state !== 'ready' || input.turn.role !== 'user') return undefined;
+      const author = readMessageAuthor(input.turn.author);
+      if (author?.kind !== 'agent') return undefined;
+      const source = await this.workspaceDocument.repo
+        .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
+        .catch(() => undefined);
+      const title = (source?.meta as SessionMeta | undefined)?.title;
+      return formatAgentSenderHeader(author, title);
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Omitting sender provenance for ${userTurnId}: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   private async buildAcpPromptBlocks(args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
+    userTurnId?: string;
     inputBlocks: SessionInputBlock[];
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
@@ -2514,7 +2544,13 @@ export class MessageHandler {
     });
 
     // Build the full text prompt: comment references first, then user text
-    const allTextParts = [...commentRefTexts, ...visualAnnotationRefTexts, ...textParts];
+    const senderHeader = await this.readAgentSenderHeader(args.sessionId, args.userTurnId);
+    const allTextParts = [
+      ...(senderHeader ? [senderHeader] : []),
+      ...commentRefTexts,
+      ...visualAnnotationRefTexts,
+      ...textParts,
+    ];
     const textPrompt = appendIssuePrMentionsToPrompt(
       allTextParts.join('\n\n'),
       args.issuePRMentions

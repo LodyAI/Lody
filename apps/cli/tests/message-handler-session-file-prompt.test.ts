@@ -36,6 +36,7 @@ type PromptBlockBuilder = {
   buildAcpPromptBlocks: (args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
+    userTurnId?: string;
     inputBlocks: SessionInputBlock[];
   }) => Promise<ContentBlock[]>;
   fetchSessionImageForPrompt: (args: {
@@ -204,6 +205,67 @@ describe('MessageHandler session file ACP prompt blocks', () => {
     }
   });
 
+  describe('sender provenance', () => {
+    const agentAuthor = {
+      v: 1,
+      kind: 'agent',
+      sessionId: 'coordinator-session',
+      turnId: 'coordinator-turn',
+      name: 'Codex',
+      role: { id: 'role-1', revision: 1, name: 'Executor', emoji: '' },
+    } as const;
+    const build = async (readTurn: () => Promise<unknown>) => {
+      const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
+      const internals = handler as unknown as {
+        workspaceDocument: { repo: { getDocMeta: unknown }; getOrCreateSessionDoc: unknown };
+      };
+      internals.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({}));
+      internals.workspaceDocument.repo.getDocMeta = vi.fn(async () => ({
+        meta: { title: 'E2EE coordinator' },
+      }));
+      vi.spyOn(
+        handler as unknown as { getSessionBackend: () => Promise<unknown> },
+        'getSessionBackend'
+      ).mockResolvedValue({ history: { readTurn } });
+      return await handler.buildAcpPromptBlocks({
+        workspaceId,
+        sessionId,
+        userTurnId: 'input-turn',
+        inputBlocks: [{ type: 'text', text: 'Only report P0/P1.' }],
+      });
+    };
+
+    it('prefixes an agent-authored input with its source Session', async () => {
+      expect(
+        await build(async () => ({ state: 'ready', turn: { role: 'user', author: agentAuthor } }))
+      ).toEqual([
+        {
+          type: 'text',
+          text:
+            '[Lody] This message was sent by another agent, not by a human.\n' +
+            'Source Session: "E2EE coordinator" (coordinator-session), Codex · Agent Role "Executor"\n\n' +
+            'Only report P0/P1.',
+        },
+      ]);
+    });
+
+    it('leaves human input unchanged', async () => {
+      expect(
+        await build(async () => ({
+          state: 'ready',
+          turn: { role: 'user', author: { v: 1, kind: 'human', userId: 'user-1' } },
+        }))
+      ).toEqual([{ type: 'text', text: 'Only report P0/P1.' }]);
+    });
+
+    it('still delivers the input when its author cannot be read', async () => {
+      expect(
+        await build(async () => {
+          throw new Error('Synthetic history read failure');
+        })
+      ).toEqual([{ type: 'text', text: 'Only report P0/P1.' }]);
+    });
+  });
   describe('live activity', () => {
     const rows = [
       { id: 'u1', role: 'user', status: 'handled', timestamp: '2026-11-03T01:00:00.000Z' },
