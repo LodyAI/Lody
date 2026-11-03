@@ -16,7 +16,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
-import type { E2eeRuntimeStatus } from '@lody/platform';
+import type { E2eeRuntimeStatus, WorkspacesState } from '@lody/platform';
+import { getPreferredWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
@@ -65,6 +66,22 @@ export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
 
 // Retain actual incomplete reader owners across control-page unmounts.
 const retiredReaders = createWorkspaceRuntimeRetirements();
+
+/**
+ * Where "Workspaces" returns to: the account's preferred ordinary workspace,
+ * whose switcher lists every workspace. Never this one, nor another encrypted
+ * one: an unopened encrypted workspace's chat route sends the device straight
+ * back to a control page. Without such a workspace, the create route.
+ */
+function workspacesReturnSlug(workspaces: WorkspacesState, currentId: string): string | null {
+  if (workspaces.status !== 'ready') return null;
+  const ordinary = workspaces.workspaces.filter(
+    (workspace): workspace is typeof workspace & { slug: string } =>
+      workspace.slug !== null && workspace.id !== currentId && workspace.contentMode !== 'e2ee'
+  );
+  const active = ordinary.find((workspace) => workspace.id === workspaces.activeWorkspaceId);
+  return getPreferredWorkspaceSlug(active, ordinary, readPreferredWorkspaceSlug());
+}
 
 function WorkspaceControlRoute() {
   // Creating an encrypted workspace on this device is the MVP path; its owner
@@ -426,6 +443,14 @@ function WorkspaceControlRoute() {
     };
   }, [scope, authenticated, port, workspaceId]);
   const current = state.identity === identity ? state : null;
+  const backToWorkspaces = () => {
+    const slug = workspacesReturnSlug(workspaces, workspaceId);
+    void navigate(
+      slug
+        ? { to: '/$workspaceName/chat', params: { workspaceName: slug } }
+        : { to: '/workspace/create', search: { allowExisting: true } }
+    );
+  };
   const workspaceSlug =
     workspaces.status === 'ready'
       ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.slug
@@ -546,9 +571,7 @@ function WorkspaceControlRoute() {
         reason={current?.failure?.code === 'device-revoked' ? 'revoked' : 'new'}
         onRefresh={refresh}
         onShowDetails={() => setShowDetails(true)}
-        onBack={() => {
-          void navigate({ to: '/workspace/create', search: { allowExisting: true } });
-        }}
+        onBack={backToWorkspaces}
       >
         {accountPairing && (
           <E2eeAccountPairingRequest
@@ -643,9 +666,7 @@ function WorkspaceControlRoute() {
               }
             : undefined
         }
-        onBack={() => {
-          void navigate({ to: '/workspace/create', search: { allowExisting: true } });
-        }}
+        onBack={backToWorkspaces}
       >
         {port?.runtime && accountId && current?.history?.locallyPinned && (
           <>

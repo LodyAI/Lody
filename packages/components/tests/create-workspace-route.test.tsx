@@ -20,6 +20,9 @@ import {
 
 const fixture = vi.hoisted(() => ({
   redirect: undefined as string | undefined,
+  allowExisting: undefined as boolean | undefined,
+  mobile: false,
+  signedOut: 0,
   router: undefined as AnyRouter | undefined,
   organizations: [] as Array<{ id: string; name: string; slug: string }>,
   creationEnabled: false,
@@ -33,7 +36,7 @@ vi.mock('@tanstack/react-router', async (original) => ({
   ...(await original<object>()),
   createFileRoute: () => (options: unknown) => ({
     options,
-    useSearch: () => ({ redirect: fixture.redirect }),
+    useSearch: () => ({ redirect: fixture.redirect, allowExisting: fixture.allowExisting }),
   }),
   useNavigate: () => fixture.router?.navigate ?? (async () => {}),
   Navigate: () => null,
@@ -136,7 +139,12 @@ vi.mock('@/hooks/useWorkspaceSlugField', async () => {
     },
   };
 });
-vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }));
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => fixture.mobile }));
+vi.mock('@/providers/convex-provider', () => ({
+  useAuthSignOut: () => async () => {
+    fixture.signedOut += 1;
+  },
+}));
 vi.mock('@/lib/native-platform', () => ({ isNativeAppShell: () => false }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => false }));
 vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => false }));
@@ -153,6 +161,9 @@ let container: HTMLDivElement | undefined;
 beforeEach(() => {
   localStorage.clear();
   fixture.redirect = undefined;
+  fixture.allowExisting = undefined;
+  fixture.mobile = false;
+  fixture.signedOut = 0;
   fixture.router = undefined;
   fixture.organizations = [];
   fixture.creationEnabled = false;
@@ -304,6 +315,38 @@ describe('create workspace with an account referral from another device', () => 
     await click('referral.remove');
     expect(fixture.referralLead).toBe(false);
     expect(container!.textContent).not.toContain('referral.offerTitle');
+  });
+});
+
+// The mobile app cannot sell a workspace, so the limit replaces the whole form,
+// including its way back; the message itself must not become a dead end.
+describe('mobile workspace limit', () => {
+  beforeEach(() => {
+    fixture.mobile = true;
+    fixture.allowExisting = true;
+    stable.availability.canCreateFree = false;
+  });
+
+  it('returns an account with workspaces to its previous workspace', async () => {
+    fixture.organizations = [{ id: 'w-team', name: 'Team', slug: 'team' }];
+    const navigate = vi.fn(async () => {});
+    fixture.router = { navigate } as unknown as AnyRouter;
+    await render();
+    expect(container!.textContent).toContain('organization.mobileWorkspaceLimitReachedTitle');
+    await click('organization.backToPreviousWorkspace');
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/$workspaceName/chat',
+      params: { workspaceName: 'team' },
+      replace: true,
+    });
+  });
+
+  it('still offers the account a way out when it has no workspace to return to', async () => {
+    await render();
+    expect(container!.textContent).toContain('organization.mobileWorkspaceLimitReachedTitle');
+    expect(button('organization.backToPreviousWorkspace')).toBeUndefined();
+    await click('organization.signOut');
+    expect(fixture.signedOut).toBe(1);
   });
 });
 
