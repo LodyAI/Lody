@@ -38,6 +38,9 @@ export const usePlatformSession = () => ({
   user: { id: fixture.accountId },
 });
 export const usePlatformWorkspaces = () => ({ status: 'ready', workspaces: [] });
+// No other workspace here, so "Workspaces" has no ordinary workspace to return to.
+export const getPreferredOrdinaryWorkspaceSlug = () => null;
+export const readPreferredWorkspaceSlug = () => null;
 export const useTranslation = () => ({ t: (key: string) => key });
 export const readWorkspaceModeEvidence = () => ({});
 export const readE2eeGenesisPin = () => fixture.genesisHash;
