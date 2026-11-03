@@ -459,7 +459,14 @@ export const SessionWithdrawInputResponseSchema = z
     type: z.literal('session/withdraw-input_response'),
     sessionId: z.string().trim().min(1),
     userTurnId: z.string().trim().min(1),
-    outcome: z.enum(['withdrawn', 'already_started', 'not_found', 'not_owner', 'error']),
+    outcome: z.enum([
+      'withdrawn',
+      'already_withdrawn',
+      'already_started',
+      'not_found',
+      'not_owner',
+      'error',
+    ]),
     error: z.string().optional(),
   })
   .strict();

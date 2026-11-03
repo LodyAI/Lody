@@ -3697,7 +3697,8 @@ const withdrawQueuedSessionInputForMcp = async (
   manager: LoroDocumentManager,
   session: SessionMeta,
   userTurnId: string,
-  requesterSessionId: SessionId
+  requesterSessionId: SessionId,
+  requesterUserId: string
 ): Promise<SessionWithdrawInputResponse> => {
   const auth = getCliAuthContextOrThrow('mcp');
   const environment = getSessionCommandEnvironment();
@@ -3731,7 +3732,8 @@ const withdrawQueuedSessionInputForMcp = async (
         sessionId: session.id,
         userTurnId,
         requesterSessionId,
-        userId: auth.userId,
+        // The invoking Turn's user, already checked locally; the target re-checks it.
+        userId: requesterUserId,
       })
   );
   return response ?? unsupported('Target machine did not answer');
@@ -3752,17 +3754,38 @@ const runSessionQueueTool = async (args: SessionQueueToolInput): Promise<unknown
       );
     if (args.action === 'list')
       return await listQueuedSessionInputs(manager, session, ctx.sessionId, auth.machineId);
+    // Act as the invoking Turn's user, never the daemon owner: a collaborator without
+    // access to the target must not withdraw through the owner's identity.
+    const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
+    if (!currentSession)
+      throw new LodyOperationStoreError(
+        'SESSION_NOT_FOUND',
+        `Requester Session not found: ${ctx.sessionId}`,
+        false
+      );
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
+    const requester = toDelegatedSessionRequester(invoking.identity);
+    await validateSessionChatTarget({
+      auth,
+      workspace,
+      manager,
+      sessionId,
+      delegatedRequester: requester,
+    });
     return await withdrawQueuedSessionInputForMcp(
       manager,
       session,
       args.userTurnId!,
-      ctx.sessionId as SessionId
+      ctx.sessionId as SessionId,
+      requester.userId
     );
   });
   if (args.action !== 'replace') return result;
   const withdrawal = result as SessionWithdrawInputResponse;
-  // Replace only sends when the old input was withdrawn; otherwise nothing changes.
-  if (withdrawal.outcome !== 'withdrawn') return { withdrawal };
+  // Replace sends only once the old input will not run. A retry after a failed send
+  // finds it already withdrawn and resends under the same idempotent operationId.
+  if (withdrawal.outcome !== 'withdrawn' && withdrawal.outcome !== 'already_withdrawn')
+    return { withdrawal };
   return {
     withdrawal,
     chat: await startSessionChatOperation({
@@ -5098,7 +5121,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Manage queued inputs of a Lody session',
       description:
-        'list shows inputs a target Session has not started (sender, own, status, 100-char preview). withdraw cancels one of your own still-pending inputs; replace withdraws it and, only if that succeeded, sends prompt as a new session_chat with operationId. Withdrawal is best effort: outcome withdrawn means it was still pending, but a dispatch already under way may still run it; already_started, not_owner and not_found change nothing. Targets on older daemons return an error outcome.',
+        'list shows inputs a target Session has not started (sender, own, status, 100-char preview). withdraw cancels one of your own still-pending inputs; replace withdraws it and, only if that succeeded, sends prompt as a new session_chat with operationId. Withdrawal is best effort: outcome withdrawn means it was still pending, but a dispatch already under way may still run it; already_withdrawn means it was already canceled (a retried replace then sends its new chat); already_started, not_owner and not_found change nothing. You act as the invoking user and need access to the target. Targets on older daemons return an error outcome.',
       inputSchema: SessionQueueToolInputSchema,
     },
     async (args: SessionQueueToolInput) => {
