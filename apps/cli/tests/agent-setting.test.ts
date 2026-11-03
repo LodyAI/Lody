@@ -324,7 +324,7 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
-  it('launches the pinned Sorbet ACP package with additional arguments', async () => {
+  it('launches the floating Sorbet ACP package with bounded registry requests', async () => {
     const launch = await resolveACPProcessLaunchAsync({
       cliType: 'builtin',
       agentType: 'sorbet',
@@ -332,20 +332,19 @@ describe('resolveBuiltinACPSetting', () => {
     });
     expect(launch).toEqual({
       command: 'npx',
-      args: [
-        '--prefer-offline',
-        '-y',
-        '@sorbetai/acp@0.1.0-alpha.6',
-        '--no-session-title',
-        '--example',
-      ],
+      args: ['-y', '@sorbetai/acp@alpha', '--no-session-title', '--example'],
       env: {
+        npm_config_fetch_retries: '0',
+        npm_config_fetch_timeout: '5000',
         SORBET_DATA_DIR: join(getLodyDataDir(), 'sorbet'),
         SORBET_OBSERVABILITY_RECORDING: 'false',
         SORBET_OBSERVABILITY_CONFIG: '',
       },
-      capabilitySourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.6+auth-discovery:1',
+      capabilitySourceVersion: 'builtin-sorbet:@sorbetai/acp@alpha+auth-discovery:1',
     });
+    expect(
+      await resolveExpectedAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'sorbet' })
+    ).toBeUndefined();
   });
 
   it('shares Sorbet state across launches within the selected Lody data directory', async () => {

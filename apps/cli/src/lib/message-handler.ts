@@ -142,6 +142,7 @@ import {
   type LocalProjectControlRequest,
   type LocalProjectControlResponse,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
+  SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
   type LocalMachineRpcRequestValidated,
   type LocalMachineRpcResponse,
   type LocalMachineRpcResult,
@@ -3877,7 +3878,12 @@ export class MessageHandler {
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
           ...(this.sorbetCredentials
-            ? { sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION }
+            ? {
+                sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
+                ...(this.encryptedAttachments
+                  ? { sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION }
+                  : {}),
+              }
             : {}),
           ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
         },
@@ -6234,7 +6240,12 @@ export class MessageHandler {
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
           ...(this.sorbetCredentials
-            ? { sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION }
+            ? {
+                sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
+                ...(this.encryptedAttachments
+                  ? { sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION }
+                  : {}),
+              }
             : {}),
           ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
         },

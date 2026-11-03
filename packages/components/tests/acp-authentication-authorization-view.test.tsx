@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 
 import { act } from 'react';
+import { Provider, createStore } from 'jotai';
+import { localProbeAttemptedAtom, localProbeResultAtom } from '../src/atoms/local-probe';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 
 import {
+  AcpAuthenticationPanel,
   AcpAuthenticationAuthorizationView,
   AcpAuthenticationInteractionView,
   areAcpAuthenticationTargetsEqual,
@@ -30,6 +33,63 @@ describe('AcpAuthenticationAuthorizationView', () => {
     container.remove();
     document.body.innerHTML = '';
     vi.restoreAllMocks();
+  });
+
+  it('shows remote guidance only for remote builtin Sorbet', async () => {
+    const store = createStore();
+    store.set(localProbeAttemptedAtom, true);
+    store.set(localProbeResultAtom, { ok: true, machineId: 'local' });
+    Object.defineProperty(window, '__LODY_ELECTRON__', { configurable: true, value: true });
+    const renderPanel = async (machineId: string, agentType: string) => {
+      await act(async () => {
+        root.render(
+          <Provider store={store}>
+            <AcpAuthenticationPanel
+              machineId={machineId as MachineId}
+              cliType="builtin"
+              agentType={agentType}
+            />
+          </Provider>
+        );
+      });
+    };
+    try {
+      await renderPanel('remote', 'sorbet');
+      expect(container.textContent).toContain('choose device sign-in');
+      expect(container.textContent).toContain('localhost callback points to the remote machine');
+      expect(container.textContent).toContain('Radius supports device sign-in');
+      await renderPanel('local', 'sorbet');
+      expect(container.textContent).not.toContain('choose device sign-in');
+      await renderPanel('remote', 'codex');
+      expect(container.textContent).not.toContain('choose device sign-in');
+    } finally {
+      Reflect.deleteProperty(window, '__LODY_ELECTRON__');
+    }
+  });
+
+  it('explains the remote return value when a code can be submitted', async () => {
+    await act(async () => {
+      root.render(
+        <AcpAuthenticationAuthorizationView
+          provider="Lody Agent"
+          authorization={{
+            authorizationUrl: 'https://example.test',
+            acceptsAuthorizationCode: true,
+          }}
+          authorizationCode=""
+          authorizationCodeSubmitted={false}
+          submittingAuthorizationCode={false}
+          userCodeCopied={false}
+          onOpenAuthorization={vi.fn()}
+          onCopyUserCode={vi.fn()}
+          onAuthorizationCodeChange={vi.fn()}
+          onSubmitAuthorizationCode={vi.fn()}
+          remoteSorbet
+        />
+      );
+    });
+    expect(container.textContent).toContain('Paste the code or return URL');
+    expect(container.textContent).not.toContain('returning automatically');
   });
 
   it('allows only HTTP(S) authorization pages', () => {

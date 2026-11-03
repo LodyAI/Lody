@@ -3,7 +3,6 @@ import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { localMachineIdAtom } from '@/atoms/local-probe';
 import { LodyAgentAccounts, type LodyAgentCredential } from './lody-agent-accounts';
 
 export function LodyAgentAccountsController({
@@ -18,9 +17,8 @@ export function LodyAgentAccountsController({
   refreshVersion: number;
 }) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const localMachineId = useAtomValue(localMachineIdAtom);
   const { t } = useTranslation();
-  const available = supported && !!runtime && localMachineId === machineId;
+  const available = supported && !!runtime;
   const [state, setState] = useState<{
     status: 'loading' | 'error' | 'unsupported' | 'ready';
     credentials: readonly LodyAgentCredential[];
@@ -70,7 +68,7 @@ export function LodyAgentAccountsController({
         setState((previous) => ({
           ...previous,
           removing: undefined,
-          error: t('lodyAgentAccounts.error'),
+          error: t('lodyAgentAccounts.removeUnknown'),
         }));
     }
   };

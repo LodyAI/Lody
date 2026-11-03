@@ -1211,9 +1211,64 @@ describe('local MCP discovery routing', () => {
           }),
         ]);
       } else {
-        await expect(promise).rejects.toThrow('supported local daemon');
+        await expect(promise).rejects.toThrow('unsupported on this machine');
         expect(sent).toEqual([]);
       }
+    }
+  );
+  it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
+    'routes remote %s only through encrypted feature RPC',
+    async (method) => {
+      const received: unknown[] = [];
+      const base = {
+        workspaceId,
+        getMachineProtocolCapabilities: async () => ({ sorbetCredentialsRemote: 1 }),
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud' as const,
+          resolvePlaneForMachine: async () => 'cloud' as const,
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('plaintext RPC forbidden');
+        },
+      };
+      const request =
+        method === 'sorbet/credentials-list'
+          ? ({ method, params: { configId: 'config' } } as const)
+          : ({ method, params: { configId: 'config', providerId: 'openai' } } as const);
+      const facade = createWorkspaceMachineRpcFacade({
+        ...base,
+        requestEncryptedFeature: async (value) => {
+          received.push(value);
+          return {
+            ok: true,
+            result:
+              method === 'sorbet/credentials-list'
+                ? { type: method, credentials: [] }
+                : { type: method },
+          };
+        },
+      });
+      expect(await facade.requestLocalSorbetCredentials(remoteMachineId, request)).toMatchObject({
+        type: method,
+      });
+      expect(received).toEqual([
+        expect.objectContaining({ ...request, machineId: remoteMachineId, workspaceId }),
+      ]);
+      await expect(
+        createWorkspaceMachineRpcFacade(base).requestLocalSorbetCredentials(
+          remoteMachineId,
+          request
+        )
+      ).rejects.toThrow('transport unavailable');
+      await expect(
+        createWorkspaceMachineRpcFacade({
+          ...base,
+          getMachineProtocolCapabilities: async () => ({ sorbetCredentials: 1 }),
+          requestEncryptedFeature: async () => {
+            throw new Error('should not send');
+          },
+        }).requestLocalSorbetCredentials(remoteMachineId, request)
+      ).rejects.toThrow('unsupported');
     }
   );
   const server = {

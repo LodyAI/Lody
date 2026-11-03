@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -14,6 +14,7 @@ import type { NodeProcessApi } from '@lody/shared/node/process';
 
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
+import { getLodyNpmCacheDir } from './npx-cache';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
 import { acquireSorbetCredentialMutation } from './sorbet-credential-mutation';
 import * as profileUsage from './codex-profile-process-usage';
@@ -567,17 +568,87 @@ describe('AcpAuthenticationManager', () => {
     });
   });
 
+  it('retries Sorbet login offline only after npm fails before ACP output', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'lody-sorbet-offline-auth-'));
+    vi.stubEnv('LODY_DATA_DIR', root);
+    const install = path.join(getLodyNpmCacheDir(), '_npx', 'aa11');
+    const pkg = path.join(install, 'node_modules', '@sorbetai', 'acp');
+    await mkdir(pkg, { recursive: true });
+    await writeFile(
+      path.join(install, 'package.json'),
+      JSON.stringify({ _npx: { packages: ['@sorbetai/acp@alpha'] } })
+    );
+    await writeFile(
+      path.join(pkg, 'package.json'),
+      JSON.stringify({ version: '0.1.0', bin: 'index.js' })
+    );
+    await writeFile(path.join(pkg, 'index.js'), '');
+    const attempts: string[][] = [];
+    let authenticated = 0;
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      resolveLoginShellEnv: async () => ({}),
+      nodeProcess: fakeNodeProcess(((_command: string, args: string[]) => {
+        attempts.push(args);
+        const child = createFakeChild();
+        const stdin = new PassThrough();
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        child.stdin = stdin;
+        child.stdout = stdout;
+        child.stderr = stderr;
+        if (attempts.length === 1) {
+          queueMicrotask(() => {
+            stderr.write('npm error code ENOTFOUND\n');
+            child.exitCode = 1;
+            child.emit('exit', 1, null);
+          });
+        } else {
+          const agent = acp
+            .agent({ name: 'fixture' })
+            .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+              protocolVersion: params.protocolVersion,
+              authMethods: [{ id: 'oauth', name: 'OAuth' }],
+            }))
+            .onRequest(acp.methods.agent.authenticate, async () => {
+              authenticated++;
+              return {};
+            });
+          agent.connect(
+            acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+          );
+        }
+        return child;
+      }) as never),
+    });
+    try {
+      expect(
+        await manager.authenticate({
+          requestId: 'offline-auth',
+          cliType: 'builtin',
+          agentType: 'sorbet',
+        })
+      ).toEqual({ success: true, disposition: 'authenticated' });
+      expect(attempts).toHaveLength(2);
+      expect(attempts[1]).toContain('--offline');
+      expect(authenticated).toBe(1);
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('preserves the authentication failure and the cleanup failure while retaining the Sorbet lease', async () => {
     vi.useFakeTimers();
     const child = createFakeChild();
     // Neither termination signal succeeds until the test explicitly confirms exit.
     child.kill = vi.fn(() => true);
     const spawned = createDeferred<void>();
+    const spawnProcess = vi.fn(() => {
+      spawned.resolve();
+      return child;
+    });
     const manager = new AcpAuthenticationManager(createSilentLogger(), {
-      nodeProcess: fakeNodeProcess(() => {
-        spawned.resolve();
-        return child;
-      }),
+      nodeProcess: fakeNodeProcess(spawnProcess),
       resolveLoginShellEnv: async () => ({}),
       terminationGraceMs: 2,
     });
@@ -594,6 +665,7 @@ describe('AcpAuthenticationManager', () => {
       error:
         'sorbet ACP authentication streams are unavailable; Sorbet authentication process cleanup is unconfirmed',
     });
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
     const retry = expect(acquireSorbetCredentialMutation()).rejects.toThrow(
       'cleanup is unconfirmed'
     );

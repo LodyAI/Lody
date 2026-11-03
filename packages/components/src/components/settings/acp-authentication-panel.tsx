@@ -22,6 +22,7 @@ import {
 } from '@lody/shared';
 
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
+import { localMachineIdAtom, localProbeAttemptedAtom } from '@/atoms/local-probe';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { useAtomValue } from 'jotai';
@@ -224,6 +225,13 @@ export function AcpAuthenticationPanel({
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const machine = useAtomValue(getMachineMetaByIdAtomFamily(machineId ?? undefined));
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const localProbeAttempted = useAtomValue(localProbeAttemptedAtom);
+  const remoteSorbet =
+    cliType === 'builtin' &&
+    agentType === 'sorbet' &&
+    !!machineId &&
+    (!isElectronRenderer() || (localProbeAttempted && machineId !== localMachineId));
   const interactiveProtocolSupported =
     machineSupportsAcpAuthenticationInteractionsProtocol(machine);
   /** The agent's `initialize` response owns the list; a pick is only a hint. */
@@ -873,6 +881,14 @@ export function AcpAuthenticationPanel({
           )}
         </p>
       ) : null}
+      {remoteSorbet ? (
+        <p {...stylex.props(styles.hint)}>
+          {t(
+            'agents.authentication.remoteSorbetHelp',
+            'This Lody Agent runs on a remote machine. If offered, choose device sign-in or a method that lets you copy a code or return URL into Lody. A localhost callback points to the remote machine, not this device; it will not complete in your local browser. Radius supports device sign-in or a callback on the remote machine.'
+          )}
+        </p>
+      ) : null}
       {runtimeDownloadText ? (
         <p className="text-xs text-muted-foreground">{runtimeDownloadText}</p>
       ) : null}
@@ -905,6 +921,7 @@ export function AcpAuthenticationPanel({
           onAuthorizationCodeChange={setAuthorizationCode}
           onSubmitAuthorizationCode={() => void handleSubmitAuthorizationCode()}
           authorizationConsentPending={submittingInteraction}
+          remoteSorbet={remoteSorbet}
         />
       ) : null}
       {phase === 'running' && interaction ? (
@@ -933,6 +950,7 @@ export function AcpAuthenticationAuthorizationView({
   onAuthorizationCodeChange,
   onSubmitAuthorizationCode,
   authorizationConsentPending = false,
+  remoteSorbet = false,
 }: {
   provider: string;
   authorization: AcpAuthorizationDetails;
@@ -945,6 +963,7 @@ export function AcpAuthenticationAuthorizationView({
   onAuthorizationCodeChange: (value: string) => void;
   onSubmitAuthorizationCode: () => void;
   authorizationConsentPending?: boolean;
+  remoteSorbet?: boolean;
 }) {
   const { t } = useTranslation();
   const authorizationCodeInputId = useId();
@@ -1070,10 +1089,15 @@ export function AcpAuthenticationAuthorizationView({
             </Button>
           </div>
           <p {...stylex.props(styles.hint)}>
-            {t(
-              'agents.authentication.authorizationCodeHelp',
-              'Only needed if the browser shows a code instead of returning automatically.'
-            )}
+            {remoteSorbet
+              ? t(
+                  'agents.authentication.remoteSorbetCodeHelp',
+                  'Paste the code or return URL provided by the sign-in page or requested by the agent.'
+                )
+              : t(
+                  'agents.authentication.authorizationCodeHelp',
+                  'Only needed if the browser shows a code instead of returning automatically.'
+                )}
           </p>
         </div>
       ) : null}

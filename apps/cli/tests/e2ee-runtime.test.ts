@@ -6665,6 +6665,13 @@ describe('machine execution authorization freshness', () => {
           );
           const shared = yield* gate.authorizeExecution('workspace', key);
           expect(shared).toMatchObject({ _tag: 'Authorized' });
+          expect(yield* gate.authorizeOwnedExecution('workspace', key)).toEqual({
+            _tag: 'Denied',
+            reason: 'e2ee_machine_not_owned',
+          });
+          expect(yield* gate.authorizeOwnedExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
           removeDuringCheck = true;
           const raced = yield* gate.authorizeExecution('workspace', key);
           expect(raced).toMatchObject({ _tag: 'Denied', reason: 'not-authorized' });

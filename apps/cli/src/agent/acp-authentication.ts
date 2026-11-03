@@ -987,6 +987,7 @@ export class AcpAuthenticationManager {
     delete env.TERM;
     running.abortController.signal.throwIfAborted();
     let lastStderrTail = '';
+    let safeOfflineFailure = false;
     await withAcpSessionStartSlot(
       {
         label: `acp-auth:${options.agentType}`,
@@ -996,6 +997,9 @@ export class AcpAuthenticationManager {
       async () =>
         await runNpxStartupWithRecovery({
           maxAttempts: running.sorbetLease ? 1 : undefined,
+          canRetryOfflineAfterFailure: running.sorbetLease
+            ? () => safeOfflineFailure && !running.abortController.signal.aborted
+            : undefined,
           command: launch.command,
           args: launch.args,
           env,
@@ -1005,6 +1009,10 @@ export class AcpAuthenticationManager {
           attempt: async ({ args }) => {
             running.abortController.signal.throwIfAborted();
             lastStderrTail = '';
+            safeOfflineFailure = false;
+            let initializationCompleted = false;
+            let interactionStarted = false;
+            let sawProtocolOutput = false;
             options.onProgress?.({ status: 'starting' });
             const child = spawnAcpProcess({
               cliType: options.cliType,
@@ -1020,6 +1028,9 @@ export class AcpAuthenticationManager {
             });
             running.child = child;
             running.terminating = false;
+            child.stdout?.on('data', () => {
+              sawProtocolOutput = true;
+            });
             child.stderr?.setEncoding('utf8');
             const authorizationParser = new AcpAgentAuthorizationOutputParser();
             child.stderr?.on('data', (chunk: string) => {
@@ -1029,6 +1040,7 @@ export class AcpAuthenticationManager {
               lastStderrTail = appendStderrTail(lastStderrTail, chunk);
               const authorization = authorizationParser.push(chunk);
               if (authorization && isAllowedAuthorizationUrl(authorization.authorizationUrl)) {
+                interactionStarted = true;
                 options.onProgress?.({ status: 'authorization', ...authorization });
               }
             });
@@ -1066,6 +1078,7 @@ export class AcpAuthenticationManager {
               const app = acp
                 .client({ name: 'lody-authentication' })
                 .onRequest(acp.methods.client.elicitation.create, async ({ params }) => {
+                  interactionStarted = true;
                   const raw = asRecord(params);
                   if (raw?.mode === 'url') {
                     if (typeof raw.url !== 'string' || !isAllowedAuthorizationUrl(raw.url)) {
@@ -1145,6 +1158,7 @@ export class AcpAuthenticationManager {
                         `${options.agentType} ACP initialization failed. Check the agent configuration and try again.`
                       );
                     });
+                  initializationCompleted = true;
                   const advertisedMethods = [...(initialized.authMethods ?? [])];
                   const methods = advertisedMethods.filter(
                     (method) => getAuthMethodType(method) === 'agent'
@@ -1285,6 +1299,17 @@ export class AcpAuthenticationManager {
               }
               if (running.child === child) running.child = undefined;
             }
+            safeOfflineFailure =
+              operationFailed &&
+              !cleanupFailed &&
+              !initializationCompleted &&
+              !interactionStarted &&
+              !sawProtocolOutput &&
+              child.exitCode !== null &&
+              child.exitCode !== 0 &&
+              /npm (?:error|ERR!) code (?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH)/i.test(
+                lastStderrTail
+              );
             if (operationFailed && cleanupFailed) {
               throw new AggregateError(
                 [operationError, cleanupError],

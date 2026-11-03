@@ -48,8 +48,9 @@ export class MachineRuntime {
     context?: EncryptedFeatureContext
   ) {
     if (
-      request.method === 'sorbet/credentials-list' ||
-      request.method === 'sorbet/credentials-logout'
+      (request.method === 'sorbet/credentials-list' ||
+        request.method === 'sorbet/credentials-logout') &&
+      !context
     )
       throw new Error('e2ee_feature_unavailable');
     const config = this.options.handlerConfig;
@@ -65,7 +66,7 @@ export class MachineRuntime {
       if (!context) throw new Error('e2ee_rpc_unavailable');
       return this.requireHandler().readEncryptedMachineRequest(request, context);
     }
-    return this.dispatchLocalMachineRpc(request);
+    return this.dispatchLocalMachineRpc(request, context?.signal);
   }
   private handler: MessageHandler | null = null;
   private clientLossHandler: MessageHandler | null = null;

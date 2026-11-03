@@ -1943,24 +1943,34 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         >
   ) => {
     const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+    const local = await canUseLocalMachineRpc(machineId);
+    if (!local && targetRouter.getPlaneForMachine(machineId) !== 'cloud') {
+      throw new Error('Local Machine RPC is not available.');
+    }
+    const capability = local
+      ? MACHINE_PROTOCOL_CAPABILITIES.sorbetCredentials
+      : 'sorbetCredentialsRemote';
     if (
       !machineSupportsProtocolCapability(
         { protocolCapabilities },
-        MACHINE_PROTOCOL_CAPABILITIES.sorbetCredentials,
+        capability,
         SORBET_CREDENTIALS_PROTOCOL_VERSION
-      ) ||
-      !(await canUseLocalMachineRpc(machineId))
+      )
     ) {
-      throw new Error('Sorbet credentials require a supported local daemon.');
+      throw new Error('Sorbet credentials are unsupported on this machine.');
     }
-    const result = SorbetCredentialsResultSchema.parse(
-      await sendLocalMachineRpcRequest({
-        ...request,
-        machineId,
-        workspaceId,
-        timeoutMs: 35_000,
-      })
-    );
+    const rpcRequest = { ...request, machineId, workspaceId, timeoutMs: 35_000 };
+    let rawResult: unknown;
+    if (local) {
+      rawResult = await sendLocalMachineRpcRequest(rpcRequest);
+    } else {
+      if (!deps.requestEncryptedFeature)
+        throw new Error('Protected Sorbet credentials transport unavailable.');
+      const response = await deps.requestEncryptedFeature(rpcRequest);
+      if (!response.ok) throw new Error(response.error);
+      rawResult = response.result;
+    }
+    const result = SorbetCredentialsResultSchema.parse(rawResult);
     if (result.type !== request.method) throw new Error('Unexpected Sorbet credentials response.');
     return result;
   };

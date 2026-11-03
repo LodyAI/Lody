@@ -60,14 +60,14 @@ describe('LodyAgentAccounts', () => {
     expect(container.textContent).toContain('unsupported');
     expect(button('Refresh').disabled).toBe(true);
     await render({ credentials: [] });
-    expect(container.textContent).toContain('No locally saved credentials');
+    expect(container.textContent).toContain('No credentials saved on this machine');
   });
   it('requires confirmation and removes the selected credential only', async () => {
     await render();
     expect(container.textContent).toContain('does not verify authentication');
     await click(button('Remove beta (api-key)'));
     expect(document.body.textContent).toContain(
-      'Remove the locally saved api-key credential for beta?'
+      'Remove the api-key credential for beta from this machine?'
     );
     await click(button('Cancel'));
     expect(remove).not.toHaveBeenCalled();

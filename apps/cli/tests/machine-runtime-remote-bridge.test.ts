@@ -161,6 +161,23 @@ it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
       'e2ee_feature_unavailable'
     );
     expect(dispatched).toEqual([]);
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    Object.assign(handler, {
+      handleLocalMachineRpc: async (_request: unknown, signal?: AbortSignal) => {
+        receivedSignal = signal;
+        return { ok: true };
+      },
+    });
+    await expect(
+      runtime.handleEncryptedFeatureRpc(request, {
+        requestId: 'request',
+        expiresAt: 1,
+        signal: controller.signal,
+      })
+    ).resolves.toEqual({ ok: true });
+    controller.abort();
+    expect(receivedSignal?.aborted).toBe(true);
   }
 );
 

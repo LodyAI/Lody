@@ -277,6 +277,25 @@ describe('inspectNpxInstallState', () => {
     }
   });
 
+  it('preserves a healthy tag install whose installed version differs from the tag', async () => {
+    const tagged = healthyInstall(root, 'aa11', pkg, '0.50.0');
+    tagged.files[rootPackageJson] = JSON.stringify({ _npx: { packages: [`${pkg}@alpha`] } });
+    const io = makeIo(tagged);
+    expect(inspectNpxInstallState(pkg, 'alpha', { io, roots: [root] }).kind).toBe('ready');
+    await runNpxStartupWithRecovery({
+      command: 'npx',
+      args: ['-y', `${pkg}@alpha`],
+      env: { npm_config_cache: '/home/u/.npm' },
+      logger,
+      logPrefix: '[test]',
+      npxCacheIo: io,
+      npxCacheRoots: [root],
+      getStderrTail: () => '',
+      attempt: async () => 'ok',
+    });
+    expect(io.removed).toEqual([]);
+  });
+
   it('returns missing when no candidate install exists', () => {
     const io = makeIo({ dirs: { [root]: ['other'] } });
 
@@ -365,6 +384,73 @@ describe('inspectNpxInstallState', () => {
 });
 
 describe('runNpxStartupWithRecovery', () => {
+  it('retries a ready tagged install offline after a registry network failure', async () => {
+    const root = '/cache/_npx';
+    const pkg = '@sorbetai/acp';
+    const tagged = healthyInstall(root, 'aa11', pkg, '0.1.0-alpha.6');
+    tagged.files[join(root, 'aa11', 'package.json')] = JSON.stringify({
+      _npx: { packages: [`${pkg}@alpha`] },
+    });
+    const io = makeIo(tagged);
+    const attempts: NpxStartupAttemptInput[] = [];
+    let cleaned = false;
+    const result = await runNpxStartupWithRecovery({
+      command: 'npx',
+      args: ['-y', `${pkg}@alpha`],
+      env: { npm_config_cache: '/cache' },
+      logger,
+      logPrefix: '[test]',
+      npxCacheIo: io,
+      npxCacheRoots: [root],
+      getStderrTail: () => 'npm error code ENOTFOUND',
+      cleanupFailedAttempt: async () => {
+        cleaned = true;
+      },
+      attempt: async (input) => {
+        attempts.push(input);
+        if (attempts.length === 1) throw new Error('ACP connection closed');
+        expect(cleaned).toBe(true);
+        return 'cached';
+      },
+    });
+    expect(result).toBe('cached');
+    expect(attempts[1]?.args).toEqual(['--offline', '-y', `${pkg}@alpha`]);
+    expect(io.removed).toEqual([]);
+  });
+
+  it('does not retry an offline fallback when cleanup rejects', async () => {
+    const root = '/cache/_npx';
+    const tagged = healthyInstall(root, 'aa11', '@sorbetai/acp', '0.1.0');
+    tagged.files[join(root, 'aa11', 'package.json')] = JSON.stringify({
+      _npx: { packages: ['@sorbetai/acp@alpha'] },
+    });
+    const io = makeIo(tagged);
+    const attempts: string[][] = [];
+    await expect(
+      runNpxStartupWithRecovery({
+        command: 'npx',
+        args: ['-y', '@sorbetai/acp@alpha'],
+        env: { npm_config_cache: '/cache' },
+        logger,
+        logPrefix: '[test]',
+        npxCacheIo: io,
+        npxCacheRoots: [root],
+        maxAttempts: 1,
+        canRetryOfflineAfterFailure: () => true,
+        getStderrTail: () => 'npm error code ENOTFOUND',
+        cleanupFailedAttempt: async () => {
+          throw new Error('cleanup unconfirmed');
+        },
+        attempt: async ({ args }) => {
+          attempts.push([...args]);
+          throw new Error('startup failed');
+        },
+      })
+    ).rejects.toThrow('cleanup unconfirmed');
+    expect(attempts).toEqual([['-y', '@sorbetai/acp@alpha']]);
+    expect(io.removed).toEqual([]);
+  });
+
   it('uses the cold npx init timeout when the install is missing', async () => {
     const attempts: NpxStartupAttemptInput[] = [];
     const io = makeIo({});

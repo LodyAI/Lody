@@ -38,9 +38,12 @@ context/message-flow.md "Upstream".
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
   `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
-- `setting.ts` — launch resolution for every agent kind, including Sorbet's pinned
-  `@sorbetai/acp` alpha package through the isolated npx cache and the user-installed
-  `dimcode acp` builtin. Users manage Dimcode installation and versions; Lody disables
+- `setting.ts` — launch resolution for every agent kind, including Sorbet's floating
+  `@sorbetai/acp@alpha` through the isolated npx cache. npm revalidates its tag with
+  a five-second fetch timeout and no fetch retries; network errors can retry a ready
+  tagged install offline. A cold offline install can still fail. The tag is not a
+  capability version: capability refresh probes again because the version is unknown.
+  The `dimcode acp` builtin is user-installed. Users manage Dimcode installation and versions; Lody disables
   upstream auto-update in its child process and never downloads a fallback. Credentials
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
@@ -50,8 +53,11 @@ context/message-flow.md "Upstream".
   terminal; the daemon verifies the local Provider identity and does not use stored
   launch overrides. Socket disconnect cancels the operation. Authentication and logout
   share a daemon-wide mutation owner across workspaces; unconfirmed process cleanup is
-  retried before a later mutation. Account management is local-only and lists saved
-  credential types, not account identities, remote validity or environment-provided credentials.
+  retried before a later mutation. Account management is also available through signed E2EE
+  owned execution when the target advertises `sorbetCredentialsRemote`: the target verifies
+  the signer belongs to its owner's membership. List and logout use the execution journal;
+  an interrupted logout can have an unknown result. Metadata lists saved credential types,
+  not account identities, remote validity or environment-provided credentials.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
   a supported standalone Node from the final launch PATH in the target working directory.

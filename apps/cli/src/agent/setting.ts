@@ -177,7 +177,7 @@ const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
 // User-managed version; refresh capabilities explicitly after upgrading.
 const BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION = 'builtin-dimcode:local-acp';
-const SORBET_ACP_PACKAGE = '@sorbetai/acp@0.1.0-alpha.6';
+const SORBET_ACP_PACKAGE = '@sorbetai/acp@alpha';
 
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are
@@ -375,6 +375,10 @@ const MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS = {
 export async function resolveExpectedAcpCapabilitySourceVersion(
   input: ResolveACPSettingInput
 ): Promise<string | undefined> {
+  if (input.cliType === 'builtin' && input.agentType === 'sorbet') {
+    // The tag may move without changing the launch spec. Always probe on refresh.
+    return undefined;
+  }
   if (input.cliType !== 'builtin' || !isManagedBuiltinAgentType(input.agentType)) {
     return getAcpCapabilitySourceVersion(input);
   }
@@ -576,14 +580,11 @@ async function resolveBuiltinACPProcessLaunch(
   if (input.agentType === 'sorbet') {
     return {
       command: 'npx',
-      args: [
-        NPX_CACHE_MODE_ARG,
-        '-y',
-        SORBET_ACP_PACKAGE,
-        '--no-session-title',
-        ...(input.extraArgs ?? []),
-      ],
+      args: ['-y', SORBET_ACP_PACKAGE, '--no-session-title', ...(input.extraArgs ?? [])],
       env: {
+        // Bound npm's registry requests; npm can use cached metadata when offline.
+        npm_config_fetch_retries: '0',
+        npm_config_fetch_timeout: '5000',
         SORBET_DATA_DIR: join(getLodyDataDir(), 'sorbet'),
         SORBET_OBSERVABILITY_RECORDING: 'false',
         SORBET_OBSERVABILITY_CONFIG: '',

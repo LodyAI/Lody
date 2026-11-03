@@ -93,4 +93,49 @@ describe('LodyAgentAccountsController', () => {
     );
     expect(container.textContent).toContain('signed-in');
   });
+  it('reports an uncertain remote logout without retrying', async () => {
+    await initI18n();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    cleanup = async () => {
+      await act(async () => root.unmount());
+      container.remove();
+    };
+    mocks.runtime.requestLocalSorbetCredentials.mockResolvedValueOnce({
+      type: 'sorbet/credentials-list',
+      credentials: [{ providerId: 'remote', type: 'oauth' }],
+    });
+    mocks.runtime.requestLocalSorbetCredentials.mockRejectedValueOnce(new Error('timeout'));
+    await act(async () =>
+      root.render(
+        <LodyAgentAccountsController
+          machineId={'remote' as MachineId}
+          configId={configId}
+          supported
+          refreshVersion={0}
+        />
+      )
+    );
+    const remove = [...container.querySelectorAll('button')].find(
+      (b) => b.getAttribute('aria-label') === 'Remove remote (oauth)'
+    )!;
+    await act(async () => remove.click());
+    const dialog = document.querySelector('[role="alertdialog"]')!;
+    await act(async () =>
+      [...dialog.querySelectorAll('button')]
+        .find((b) => b.textContent?.trim() === 'Remove')!
+        .click()
+    );
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('may have succeeded');
+    expect(
+      mocks.runtime.requestLocalSorbetCredentials.mock.calls.map(([requestMachine, request]) => [
+        requestMachine,
+        request.method,
+      ])
+    ).toEqual([
+      ['remote', 'sorbet/credentials-list'],
+      ['remote', 'sorbet/credentials-logout'],
+    ]);
+  });
 });

@@ -499,7 +499,14 @@ export function inspectNpxInstallState(
       continue;
     }
 
-    if (packageRead.value.version !== version) {
+    // A dist-tag names the requested install, not the installed semver. Only
+    // accept it when the root metadata identifies this exact requested tag.
+    const isTaggedInstall =
+      rootReferencesPackage &&
+      /^[A-Za-z][A-Za-z0-9._-]*$/.test(version) &&
+      typeof packageRead.value.version === 'string' &&
+      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(packageRead.value.version);
+    if (packageRead.value.version !== version && !isTaggedInstall) {
       if (rootReferencesPackage) {
         problems.push({
           dir,

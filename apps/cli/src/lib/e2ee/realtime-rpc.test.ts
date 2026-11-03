@@ -438,6 +438,121 @@ effectIt.effect(
     })
 );
 
+for (const method of ['sorbet/credentials-list', 'sorbet/credentials-logout'] as const) {
+  effectIt.effect(
+    `journals encrypted ${method} and replays the outcome without another execution`,
+    () =>
+      Effect.gen(function* () {
+        const { makeEncryptedFeatureReceiver } = yield* Effect.promise(
+          () => import('./feature-rpc')
+        );
+        const f = fixture();
+        const streams = memoryStreams();
+        const input = {
+          requestId: (method === 'sorbet/credentials-list' ? 'a1' : 'a2').repeat(16),
+          request: {
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            ...(method === 'sorbet/credentials-list'
+              ? { method, params: { configId: 'config' } }
+              : { method, params: { configId: 'config', providerId: 'provider' } }),
+          },
+        };
+        const original = yield* f.sender.prepareFeature(input);
+        const calls: string[] = [];
+        let authorized = false;
+        let revokeDuringExecution = false;
+        const checked = yield* Deferred.make<void>();
+        let checkCount = 0;
+        const receiveOptions = {
+          workspaceId: f.workspaceId,
+          genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+          machineId: f.machineId,
+          native: f.nativeReceiver,
+          journal: () => f.receipts,
+          authorize: () =>
+            Effect.gen(function* () {
+              checkCount++;
+              if (!authorized) yield* Deferred.succeed(checked, undefined);
+              return authorized
+                ? { _tag: 'Authorized' as const }
+                : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_owned' as const };
+            }),
+          authorizeRead: () => Effect.die('credentials must not use read authority'),
+          isOpen: () => true,
+          client: streams.client,
+          handle: async (
+            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+          ) => {
+            calls.push(request.method);
+            if (revokeDuringExecution) authorized = false;
+            return { ok: false as const, error: 'synthetic outcome' };
+          },
+        };
+        const envelope = { id: original.requestId, frame: original.frameHex };
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+            yield* receive(envelope);
+            yield* Deferred.await(checked);
+          })
+        );
+        expect(calls).toEqual([]);
+        expect(streams.writes.filter((write) => write.stream.includes(':res:'))).toEqual([]);
+        authorized = true;
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+            yield* receive(envelope);
+            yield* streams.waitResponse(original.requestId, 1);
+          })
+        );
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+            yield* receive(envelope);
+            yield* streams.waitResponse(original.requestId, 2);
+          })
+        );
+        expect(calls).toEqual([method]);
+        const replies = streams.writes.filter((write) => write.stream.includes(':res:'));
+        expect(replies[1]).toEqual(replies[0]);
+        const reply = replies[0]?.value as { frame: string };
+        expect(yield* f.sender.acceptFeatureResponse(input, reply.frame)).toEqual({
+          ok: false,
+          error: 'synthetic outcome',
+        });
+        const changed = {
+          ...input,
+          requestId: (method === 'sorbet/credentials-list' ? 'b1' : 'b2').repeat(16),
+        };
+        const changedOriginal = yield* f.sender.prepareFeature(changed);
+        const before = checkCount;
+        const revoked = yield* Deferred.make<void>();
+        revokeDuringExecution = true;
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver({
+              ...receiveOptions,
+              authorize: () =>
+                Effect.gen(function* () {
+                  checkCount++;
+                  if (checkCount === before + 2) yield* Deferred.succeed(revoked, undefined);
+                  return authorized
+                    ? { _tag: 'Authorized' as const }
+                    : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_owned' as const };
+                }),
+            });
+            yield* receive({ id: changedOriginal.requestId, frame: changedOriginal.frameHex });
+            yield* Deferred.await(revoked);
+          })
+        );
+        expect(calls).toEqual([method, method]);
+        expect(streams.writes.filter((write) => write.stream.includes(':res:'))).toEqual(replies);
+      })
+  );
+}
+
 it('connects the renderer feature facade to the CLI listener with large encrypted request and response chunks', async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(1000);

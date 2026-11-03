@@ -28,9 +28,11 @@ export type E2eeDispatchAck = {
 import { z } from 'zod';
 import { LocalMachineRpcRequestSchema, type LocalMachineRpcRequest } from './local-machine-rpc';
 
-/** Network access stays restricted to the existing file and preview product surfaces. */
+/** Network access stays restricted to the existing feature surfaces and owner credentials. */
 export const isE2eeFeatureMethod = (method: string): boolean =>
   method.startsWith('code-collab/') ||
+  method === 'sorbet/credentials-list' ||
+  method === 'sorbet/credentials-logout' ||
   method === 'file/preview' ||
   method === 'session/preview-create' ||
   method === 'session/preview-revoke' ||

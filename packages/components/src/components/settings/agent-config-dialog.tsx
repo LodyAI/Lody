@@ -3215,7 +3215,10 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 key={JSON.stringify([machine.id, agentConfigId])}
                 machineId={machine.id}
                 configId={agentConfigId}
-                supported={machineSupportsProtocolCapability(machine, 'sorbetCredentials', 1)}
+                supported={
+                  machineSupportsProtocolCapability(machine, 'sorbetCredentials', 1) ||
+                  machineSupportsProtocolCapability(machine, 'sorbetCredentialsRemote', 1)
+                }
                 refreshVersion={accountsRefreshVersion}
               />
             )}
