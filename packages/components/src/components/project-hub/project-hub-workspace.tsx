@@ -1,23 +1,14 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useMemo, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from '@tanstack/react-router';
-import {
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  GitPullRequest,
-  PanelLeft,
-  Plus,
-  SendHorizontal,
-} from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, GitPullRequest, Plus, SendHorizontal } from 'lucide-react';
 import type { SessionId, WorkspaceProject } from '@lody/shared';
+import { CuidaSidebarExpandOutline } from '@lody/ui';
 import { Button } from '@lody/ui/button';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
-import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
-import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
 import { sessionSendStatesAtom } from '@/atoms/session-send-status';
 import type { SessionSendState } from '@/lib/session-send-status';
 import type { SessionListRow } from '@/components/session-list';
@@ -30,13 +21,12 @@ import {
   useWorkspaceSessionRows,
 } from '@/hooks/use-project-session-rows';
 import { useWorkspaceProjects } from '@/hooks/use-workspace-projects';
-import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
-import { isNativeAppShell } from '@/lib/native-platform';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { withClassName } from '@/lib/stylex';
+import { cn } from '@/lib/utils';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
-  useMacTrafficLightRowPadClass,
   useWindowDragRegionClass,
   useWindowsCaptionPadClass,
   useWindowsCaptionRowPadClass,
@@ -50,46 +40,6 @@ const styles = stylex.create({
     minHeight: 0,
     backgroundColor: colors.background,
   },
-  header: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    flexShrink: 0,
-    alignItems: 'center',
-    columnGap: space[2],
-    height: '52px',
-    paddingInline: space[4],
-    borderBottomWidth: 1,
-    borderBottomStyle: 'solid',
-    borderBottomColor: colors.separator,
-  },
-  headerBesideTrafficLights: { paddingLeft: '100px' },
-  glyph: { width: '16px', height: '16px' },
-  title: {
-    fontSize: text.headlineSize,
-    lineHeight: text.headlineLeading,
-    fontWeight: 600,
-    color: colors.label,
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  subtitle: {
-    fontSize: text.footnoteSize,
-    color: colors.secondaryLabel,
-    whiteSpace: 'nowrap',
-  },
-  badge: {
-    marginInlineStart: 'auto',
-    paddingInline: space[2],
-    paddingBlock: 2,
-    borderRadius: radius.full,
-    cornerShape: corner.round,
-    backgroundColor: colors.trayBackground,
-    color: colors.secondaryLabel,
-    fontSize: text.captionSize,
-    lineHeight: text.captionLeading,
-    whiteSpace: 'nowrap',
-  },
   body: {
     display: 'flex',
     flexGrow: 1,
@@ -98,6 +48,8 @@ const styles = stylex.create({
   bodyStacked: { flexDirection: 'column', overflowY: 'auto' },
   // Left: the coordinator conversation.
   main: {
+    position: 'relative',
+    height: '100%',
     display: 'flex',
     flexDirection: 'column',
     flexGrow: 1,
@@ -214,32 +166,49 @@ const styles = stylex.create({
     fontSize: text.captionSize,
     color: colors.tertiaryLabel,
   },
-  // Right: the sub-conversation board.
+  // Floating "show panel" control while the board is folded away; the page
+  // has no header row to hold it.
+  panelReveal: {
+    position: 'absolute',
+    top: space[2],
+    right: space[2],
+    zIndex: 1,
+  },
+  glyph: { width: '16px', height: '16px' },
+  glyphMirrored: { rotate: '180deg' },
+  // Right: the sub-conversation board, in the conversation page's side panel
+  // shell (same hairline, same 44px header as its tab bar).
   panel: {
     display: 'flex',
     flexDirection: 'column',
-    flexShrink: 0,
-    width: '360px',
+    height: '100%',
+    minWidth: 0,
     minHeight: 0,
-    borderLeftWidth: 1,
+    overflow: 'hidden',
+    borderLeftWidth: '1px',
     borderLeftStyle: 'solid',
-    borderLeftColor: colors.separator,
+    borderLeftColor: 'hsl(var(--border) / 0.7)',
     backgroundColor: colors.secondaryBackground,
   },
   panelStacked: {
-    width: '100%',
+    height: 'auto',
     borderLeftWidth: 0,
     borderTopWidth: 1,
     borderTopStyle: 'solid',
     borderTopColor: colors.separator,
   },
   panelHeader: {
+    boxSizing: 'border-box',
     display: 'flex',
+    flexShrink: 0,
     alignItems: 'center',
-    gap: space[2],
-    paddingInline: space[4],
-    paddingTop: space[3],
-    paddingBottom: space[2],
+    gap: space[1],
+    height: '44px',
+    paddingInlineStart: space[4],
+    paddingInlineEnd: space[2],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border) / 0.5)',
   },
   panelTitle: {
     fontSize: text.subheadlineSize,
@@ -251,6 +220,7 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
+    paddingTop: space[3],
     paddingInline: space[3],
     paddingBottom: space[4],
     display: 'flex',
@@ -379,16 +349,6 @@ export function ProjectHubWorkspace({
     [projectId, rows, sendStates]
   );
 
-  // Entering a project hands the whole window to it: the navigation sidebar
-  // folds once per project entered, and the header's toggle brings it back.
-  const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
-  const collapsedForProject = useRef<string | null>(null);
-  useEffect(() => {
-    if (isMobile || collapsedForProject.current === projectId) return;
-    collapsedForProject.current = projectId;
-    setSidebarCollapsed(true);
-  }, [isMobile, projectId, setSidebarCollapsed]);
-
   const openSession = (sessionId: string) =>
     void navigate({
       to: '/$workspaceName/sessions/$sessionId',
@@ -412,7 +372,12 @@ export function ProjectHubWorkspace({
   );
 }
 
-/** The hub without data wiring: what the route renders and Storybook shows. */
+/**
+ * The hub without data wiring: what the route renders and Storybook shows.
+ * On desktop it is the conversation page's layout — the coordinator in the
+ * conversation column and the sub-conversation board in the resizable side
+ * panel — with no header row of its own.
+ */
 export function ProjectHubView({
   project,
   rows,
@@ -427,92 +392,75 @@ export function ProjectHubView({
   onNewSubConversation: () => void;
 }) {
   const { t } = useTranslation();
-  return (
-    <div {...stylex.props(styles.page)} data-testid="project-hub">
-      <ProjectHubHeader project={project} rowCount={rows.length} />
-      {project ? (
-        <div {...stylex.props(styles.body, stacked && styles.bodyStacked)}>
+  const [panelOpen, setPanelOpen] = useState(true);
+  if (!project) {
+    return (
+      <div {...stylex.props(styles.page)} data-testid="project-hub">
+        <p {...stylex.props(styles.missing)}>
+          {t('projectHub.missing', 'This project no longer exists or is still syncing.')}
+        </p>
+      </div>
+    );
+  }
+  if (stacked) {
+    return (
+      <div {...stylex.props(styles.page)} data-testid="project-hub">
+        <div {...stylex.props(styles.body, styles.bodyStacked)}>
           <CoordinatorPane project={project} rows={rows} onOpenSession={onOpenSession} />
           <SubConversationBoard
             rows={rows}
-            stacked={stacked}
+            stacked
             onOpenSession={onOpenSession}
             onNew={onNewSubConversation}
           />
         </div>
-      ) : (
-        <p {...stylex.props(styles.missing)}>
-          {t('projectHub.missing', 'This project no longer exists or is still syncing.')}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function ProjectHubHeader({
-  project,
-  rowCount,
-}: {
-  project: WorkspaceProject | null;
-  rowCount: number;
-}) {
-  const { t } = useTranslation();
-  const isMobile = useIsMobile();
-  const sidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
-  const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
-  const isElectronFullscreen = useElectronFullscreen();
-  const windowDrag = useWindowDragRegionClass();
-  const windowsCaptionPadClass = useWindowsCaptionPadClass();
-  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
-    insideWorkspaceFrame: true,
-    includeDesktopWeb: !isMobile,
-  });
-  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
-  const showSidebarToggle = !isMobile && sidebarHidden;
-  const besideTrafficLights =
-    showSidebarToggle && !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;
-  const chrome = [
-    windowDrag,
-    windowsCaptionPadClass,
-    windowsCaptionRowPadClass,
-    macTrafficLightRowPadClass,
-  ]
-    .filter(Boolean)
-    .join(' ');
-  return (
-    <header
-      {...withClassName(
-        stylex.props(styles.header, besideTrafficLights && styles.headerBesideTrafficLights),
-        chrome
-      )}
+      </div>
+    );
+  }
+  const reveal = panelOpen ? null : (
+    <Button
+      type="button"
+      variant="ghost"
+      size="small"
+      icon
+      onClick={() => setPanelOpen(true)}
+      aria-label={t('sessions.sidebar.show', 'Show sidebar')}
+      className={cn(stylex.props(styles.panelReveal).className, WINDOW_DRAG_EXEMPT_CLASS)}
     >
-      {showSidebarToggle ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="small"
-          icon
-          onClick={() => showNavigationSidebar()}
-          aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-          className={WINDOW_DRAG_EXEMPT_CLASS}
-        >
-          <PanelLeft {...stylex.props(styles.glyph)} />
-        </Button>
-      ) : null}
-      <span {...stylex.props(styles.title)}>{project?.name ?? ''}</span>
-      {project ? (
-        <span {...stylex.props(styles.subtitle)}>
-          {project.members.length > 1
-            ? t('projectHub.sidebar.members', '{{count}} repositories', {
-                count: project.members.length,
-              })
-            : t('projectHub.sidebar.single', 'Single repository')}
-          {' · '}
-          {t('projectHub.sidebar.conversations', { count: rowCount })}
-        </span>
-      ) : null}
-      <span {...stylex.props(styles.badge)}>{t('projectHub.prototype', 'Prototype')}</span>
-    </header>
+      <CuidaSidebarExpandOutline
+        {...stylex.props(styles.glyph, styles.glyphMirrored)}
+        aria-hidden="true"
+      />
+    </Button>
+  );
+  return (
+    <div {...stylex.props(styles.page)} data-testid="project-hub">
+      <DesktopSessionDetailLayout
+        defaultSizes={{ main: 70, sidebar: 30 }}
+        topBar={null}
+        chatSurfaces={
+          <CoordinatorPane
+            project={project}
+            rows={rows}
+            onOpenSession={onOpenSession}
+            overlay={reveal}
+          />
+        }
+        terminalDock={null}
+        secondaryPanel={
+          <SubConversationBoard
+            rows={rows}
+            stacked={false}
+            onOpenSession={onOpenSession}
+            onNew={onNewSubConversation}
+            onHide={() => setPanelOpen(false)}
+          />
+        }
+        sidebarOpen={panelOpen}
+        onSidebarCollapse={() => setPanelOpen(false)}
+        deleteConfirmDialog={null}
+      />
+    </div>
   );
 }
 
@@ -525,10 +473,13 @@ function CoordinatorPane({
   project,
   rows,
   onOpenSession,
+  overlay,
 }: {
   project: WorkspaceProject;
   rows: SessionListRow[];
   onOpenSession: (sessionId: string) => void;
+  /** Floats over the pane's top-right corner (the board's reveal control). */
+  overlay?: ReactNode;
 }) {
   const { t } = useTranslation();
   const relative = useRelativeTime();
@@ -548,6 +499,7 @@ function CoordinatorPane({
   const coordinatorName = t('projectHub.coordinator.name', 'Project coordinator');
   return (
     <section {...stylex.props(styles.main)} aria-label={coordinatorName}>
+      {overlay}
       <div {...stylex.props(styles.feed)}>
         <div {...stylex.props(styles.feedInner)}>
           <div {...stylex.props(styles.message)}>
@@ -672,13 +624,24 @@ function SubConversationBoard({
   stacked,
   onOpenSession,
   onNew,
+  onHide,
 }: {
   rows: SessionListRow[];
   stacked: boolean;
   onOpenSession: (sessionId: string) => void;
   onNew: () => void;
+  /** Folds the side panel away; absent where the board is not in one. */
+  onHide?: () => void;
 }) {
   const { t } = useTranslation();
+  const windowDrag = useWindowDragRegionClass();
+  const windowsCaptionPadClass = useWindowsCaptionPadClass();
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass({ bottomBorder: true });
+  // The panel header sits at the window's top edge like the side panel tab
+  // bar: it drags the window and clears the Windows caption buttons.
+  const headerChrome = stacked
+    ? ''
+    : [windowDrag, windowsCaptionPadClass, windowsCaptionRowPadClass].filter(Boolean).join(' ');
   const [collapsed, setCollapsed] = useState<Partial<Record<ProjectHubBucket, boolean>>>({
     idle: true,
   });
@@ -709,7 +672,7 @@ function SubConversationBoard({
       {...stylex.props(styles.panel, stacked && styles.panelStacked)}
       aria-label={t('projectHub.board.title', 'Sub-conversations')}
     >
-      <div {...stylex.props(styles.panelHeader)}>
+      <div {...withClassName(stylex.props(styles.panelHeader), headerChrome)}>
         <span {...stylex.props(styles.panelTitle)}>
           {t('projectHub.board.title', 'Sub-conversations')}
         </span>
@@ -720,9 +683,26 @@ function SubConversationBoard({
           icon
           aria-label={t('projectHub.board.new', 'New sub-conversation')}
           onClick={onNew}
+          className={WINDOW_DRAG_EXEMPT_CLASS}
         >
           <Plus className="h-4 w-4" strokeWidth={1.5} />
         </Button>
+        {onHide ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="small"
+            icon
+            onClick={onHide}
+            aria-label={t('sessions.sidebar.hide', 'Hide sidebar')}
+            className={WINDOW_DRAG_EXEMPT_CLASS}
+          >
+            <CuidaSidebarExpandOutline
+              {...stylex.props(styles.glyph, styles.glyphMirrored)}
+              aria-hidden="true"
+            />
+          </Button>
+        ) : null}
       </div>
       <div {...stylex.props(styles.panelBody)}>
         {rows.length === 0 ? (

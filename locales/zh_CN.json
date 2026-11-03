@@ -6096,7 +6096,6 @@
   "projectHub.sidebar.conversations_other": "{{count}} 个对话",
   "projectHub.sidebar.needsYou": "{{count}} 个需要你",
   "projectHub.missing": "该项目已不存在或仍在同步中。",
-  "projectHub.prototype": "原型",
   "projectHub.coordinator.name": "项目主对话",
   "projectHub.coordinator.intro": "我是 {{name}} 的主对话。告诉我你要做什么，我会创建子对话去执行、持续跟进，只把需要你处理的事情带给你。",
   "projectHub.coordinator.needsYou": "有个子对话需要你处理：",
