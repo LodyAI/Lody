@@ -353,8 +353,23 @@ export const __test__ = {
   withTitleAgentCodexConfig,
 };
 
+type LocalAcpProtocolOptions = Omit<
+  StartLocalAcpAgentOptions,
+  'terminalManager' | 'terminalEnabled' | 'onUpdateMessage' | 'onRequestPermission'
+>;
+type LocalAcpConnectionOptions = Pick<
+  CreateAcpClientOptions,
+  'stream' | 'startupAbort' | 'launcher' | 'startupTimeouts'
+>;
+
 export const startLocalAcpAgent = (options: StartLocalAcpAgentOptions) =>
-  startLocalAcpProtocol(options, createAcpClient);
+  startLocalAcpProtocol(options, (connection) =>
+    createAcpClient({
+      ...options,
+      ...connection,
+      agentConfig: { cliType: options.cliType, agentType: options.agentType },
+    })
+  );
 
 export class AcpQuotaCleanupError extends Error {
   constructor(
@@ -417,6 +432,82 @@ export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions
   return started.snapshot;
 }
 
+export type SessionArchiveResult = 'native' | 'title-marker' | 'unsupported' | 'superseded';
+
+/** Negotiates only Core, with no session creation, permissions, filesystem or MCP access. */
+export async function initializeAndSetAcpSessionArchived(
+  stream: Stream,
+  options: {
+    nativeSessionId: string;
+    archived: boolean;
+    shouldApply: () => Promise<boolean>;
+    signal?: AbortSignal;
+  }
+): Promise<SessionArchiveResult> {
+  const connection = new ClientSideConnection(
+    () => ({
+      requestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
+      sessionUpdate: async () => {},
+    }),
+    stream
+  );
+  const initialized = await connection.initialize({
+    protocolVersion: PROTOCOL_VERSION,
+    clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
+  });
+  const capability = parseLodyExtensionCapabilities(
+    initialized.agentCapabilities?._meta
+  ).sessionArchive;
+  if (!capability) return 'unsupported';
+  if (!(await options.shouldApply())) return 'superseded';
+  options.signal?.throwIfAborted();
+  z.object({})
+    .strict()
+    .parse(
+      await connection.request(
+        options.archived
+          ? LODY_EXTENSION_METHODS.sessionArchive
+          : LODY_EXTENSION_METHODS.sessionUnarchive,
+        { sessionId: options.nativeSessionId }
+      )
+    );
+  return capability.mode;
+}
+
+export async function setLocalAcpSessionArchived(
+  options: Omit<LocalAcpProtocolOptions, 'workdir'> & {
+    nativeSessionId: string;
+    archived: boolean;
+    shouldApply: () => Promise<boolean>;
+  }
+): Promise<SessionArchiveResult> {
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)])
+    : AbortSignal.timeout(30_000);
+  signal.throwIfAborted();
+  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-session-archive-'));
+  try {
+    const started = await startLocalAcpProtocol(
+      { ...options, workdir, signal },
+      async ({ stream, startupAbort }) => ({
+        result: await Promise.race([
+          initializeAndSetAcpSessionArchived(stream, { ...options, signal }),
+          ...(startupAbort ? [startupAbort] : []),
+        ]),
+      }),
+      true
+    );
+    await terminateAcpProcessTree(started.agentProcess, {
+      logger: options.logger,
+      sessionLabel: 'session-archive',
+      exitTimeoutMs: 3000,
+    });
+    return started.result;
+  } finally {
+    fs.rmSync(workdir, { recursive: true, force: true });
+  }
+}
+
 /** Complete builtin DSH runtime selection after each caller's environment merge. */
 export async function prepareAcpProcessEnvironmentLegacy(
   launch: Omit<ResolvedACPProcessLaunch, 'env'> & { env?: NodeJS.ProcessEnv },
@@ -433,8 +524,8 @@ export async function prepareAcpProcessEnvironmentLegacy(
 }
 
 async function startLocalAcpProtocol<T>(
-  options: StartLocalAcpAgentOptions,
-  startClient: (options: CreateAcpClientOptions) => Promise<T>,
+  options: LocalAcpProtocolOptions,
+  startClient: (options: LocalAcpConnectionOptions) => Promise<T>,
   retainCleanupFailure = false
 ) {
   options.signal?.throwIfAborted();
@@ -675,17 +766,7 @@ async function startLocalAcpProtocol<T>(
       options.logger.debug('[acp-startup] creating ACP client');
       const started = await startClient({
         stream,
-        workdir: options.workdir,
-        logger: options.logger,
-        terminalManager: options.terminalManager,
-        agentConfig: {
-          cliType: options.cliType,
-          agentType: options.agentType,
-        },
         launcher,
-        terminalEnabled: options.terminalEnabled,
-        onUpdateMessage: options.onUpdateMessage,
-        onRequestPermission: options.onRequestPermission,
         startupTimeouts,
         startupAbort: signalAbort
           ? Promise.race([startupMonitor.abortPromise, signalAbort])

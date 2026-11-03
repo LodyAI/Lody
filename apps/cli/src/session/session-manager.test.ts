@@ -64,10 +64,10 @@ const createLogger = (): Logger => {
 const createTestCloudPort = () =>
   createLocalCloudPort({ identity: { userId: 'user-1' }, workspaces: [] });
 
-describe('SessionManager native Codex archive (#1537)', () => {
+describe('SessionManager agent archive (#1537)', () => {
   const sessionId = 'native-archive' as SessionId;
   function fixture(
-    sync: NonNullable<ConstructorParameters<typeof SessionManager>[5]['syncCodexThreadArchive']>
+    sync: NonNullable<ConstructorParameters<typeof SessionManager>[5]['syncAgentSessionArchive']>
   ) {
     const meta: SessionMeta = {
       id: sessionId,
@@ -104,7 +104,7 @@ describe('SessionManager native Codex archive (#1537)', () => {
       'machine-1' as MachineId,
       'workspace-1' as WorkspaceId,
       workspace,
-      { cloudPort: createTestCloudPort(), syncCodexThreadArchive: sync }
+      { cloudPort: createTestCloudPort(), syncAgentSessionArchive: sync }
     );
     return { manager, meta, provider, cleaned: () => clean };
   }
@@ -113,14 +113,45 @@ describe('SessionManager native Codex archive (#1537)', () => {
     let archived: string | undefined;
     const state = fixture(async (input) => {
       expect(state.cleaned()).toBe(false);
-      expect(input.env.CODEX_HOME).toBe('/synthetic/codex-account');
+      expect(input.env?.CODEX_HOME).toBe('/synthetic/codex-account');
       expect(await input.shouldApply?.()).toBe(true);
-      archived = input.threadId;
+      archived = input.nativeSessionId;
+      return 'native';
     });
     await state.manager.archiveSession(sessionId);
     expect(archived).toBe('exact-native-id');
     expect(state.cleaned()).toBe(true);
   });
+
+  it.each(['builtin', 'custom', 'registry'] as const)(
+    'negotiates archives for a %s provider',
+    async (cliType) => {
+      let nativeId: string | undefined;
+      const state = fixture(async (input) => {
+        expect(input.cliType).toBe(cliType);
+        expect(input.agentType).toBe('claude');
+        nativeId = input.nativeSessionId;
+        return 'native';
+      });
+      state.provider.cliType = cliType;
+      state.provider.agentType = 'claude';
+      await expect(state.manager.archiveSession(sessionId)).resolves.toBeUndefined();
+      expect(nativeId).toBe('exact-native-id');
+      expect(state.cleaned()).toBe(true);
+    }
+  );
+
+  it.each(['unsupported', 'title-marker'] as const)(
+    'reports %s separately from native archive success',
+    async (result) => {
+      const state = fixture(async () => result);
+      const warning = await state.manager.archiveSession(sessionId);
+      expect(state.cleaned()).toBe(true);
+      expect(warning?.message).toContain(
+        result === 'unsupported' ? 'Lody only' : 'native history picker'
+      );
+    }
+  );
 
   it('still releases the Lody document and exposes a warning after a native failure', async () => {
     const state = fixture(async () => {
@@ -128,7 +159,7 @@ describe('SessionManager native Codex archive (#1537)', () => {
     });
     const warning = await state.manager.archiveSession(sessionId);
     expect(state.cleaned()).toBe(true);
-    expect(warning?.message).toContain('Codex archive synchronization failed');
+    expect(warning?.message).toContain('Agent archive synchronization failed');
   });
 
   it('serializes restore behind archive and applies the newest committed state', async () => {
@@ -141,6 +172,7 @@ describe('SessionManager native Codex archive (#1537)', () => {
         await release.promise;
       }
       states.push(input.archived);
+      return 'native';
     });
     const archive = state.manager.syncNativeSessionArchive(sessionId, true);
     await started.promise;
@@ -152,7 +184,7 @@ describe('SessionManager native Codex archive (#1537)', () => {
     expect(states).toEqual([true, false]);
   });
 
-  it.each(['foreign-machine', 'missing-id', 'other-provider', 'stale-state'] as const)(
+  it.each(['foreign-machine', 'missing-id', 'different-provider', 'stale-state'] as const)(
     'does not change a native thread for %s',
     async (reason) => {
       const state = fixture(async () => {
@@ -160,7 +192,7 @@ describe('SessionManager native Codex archive (#1537)', () => {
       });
       if (reason === 'foreign-machine') state.meta.machineId = 'machine-2' as MachineId;
       if (reason === 'missing-id') state.meta.acpSessionId = undefined;
-      if (reason === 'other-provider') state.provider.agentType = 'claude';
+      if (reason === 'different-provider') state.provider.id = 'different-id' as AgentConfigId;
       if (reason === 'stale-state') state.meta.isArchived = false;
       await expect(
         state.manager.syncNativeSessionArchive(sessionId, true)
