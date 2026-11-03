@@ -22,7 +22,8 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => state.navigate,
   Outlet: () => null,
 }));
-vi.mock('jotai', () => ({
+vi.mock('jotai', async (original) => ({
+  ...(await original<typeof import('jotai')>()),
   useSetAtom: (key: string) => (value: unknown) => {
     state.atoms.set(key, value);
   },
@@ -32,6 +33,12 @@ vi.mock('../src/atoms', () => ({
   settingsDialogOpenAtom: 'open',
   settingsSelectedMachineIdAtom: 'machine',
   settingsSelectedProjectKeyAtom: 'project',
+}));
+// The route fixture represents an admitted ordinary workspace; admission behavior
+// is exercised by workspace-legacy-queries.test.tsx, not the OAuth handoff assertions.
+vi.mock('../src/hooks/use-workspace-feature', () => ({
+  useLegacyWorkspaceQueryStatus: () => 'allowed',
+  useAssertLegacyWorkspaceAccess: () => () => 'synthetic-ordinary-admission',
 }));
 vi.mock('../src/hooks/use-mobile', () => ({ useIsMobile: () => false }));
 vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: () => false }));

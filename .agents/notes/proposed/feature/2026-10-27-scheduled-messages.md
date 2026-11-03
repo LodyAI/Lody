@@ -41,11 +41,12 @@ blocks and the selected execution configuration. New-chat scheduling is excluded
   so retries reuse reservation/activity identities. Clear only the captured composer
   draft after acceptance. At the due time, the existing prepared-input handoff takes
   frozen blocks/configuration and stable Session/Turn IDs through retries/restarts.
-- The queue's dedicated Scheduled section edits a reservation's time in place and
-  opens Schedule details or cancels from the row; reservations never enter executable `mq`. Complete-message details retain the
-  once/current-chat target and edit the full payload; generic manual-run/resume
-  controls are hidden. Ownership, machine capabilities and workspace content gates
-  remain required. Cancellation disables the reservation; show waiting-for-machine
+- The queue's dedicated Scheduled section edits a reservation's time in place,
+  opens the full message editor in the conversation, or cancels from the row;
+  reservations never enter executable `mq`. The in-chat editor retains the
+  once/current-chat target and edits the full payload without leaving the chat;
+  generic manual-run/resume controls are hidden. Ownership, machine capabilities
+  and workspace content gates remain required. Cancellation disables the reservation; show waiting-for-machine
   until the engine reconciles dispatch. A committed dispatch wins and shows sent;
   otherwise acknowledge cancellation after skipping prehandoff work. Agent outcome
   remains separate from handing a message to the conversation.
@@ -191,10 +192,17 @@ share a 16px gutter (index, or empty for a reservation) aligned with the chevron
 Scheduled label; phones keep #1989's index-free single line. When the sheet is
 narrower than 520px, or on phones, every row folds its actions into one More
 button: queued rows keep Steer, move-to-top, edit and delete; scheduled rows offer
-Edit scheduled time, Edit (details) and Cancel. Phone rows are dense: 32px header,
+Edit scheduled time, Edit message and Cancel. The row shows the message's own
+text, never its Schedule title. Phone rows are dense: 32px header,
 13/18 text, 36px rows and a real 40 × 36px More box (the touch-actions Spec was
 revised from 44 × 44 at the owner's request; WCAG 2.2 AA asks for 24 × 24). Data path, ordering and
 callbacks are unchanged.
+
+List and queue text read the scheduled-message document locally first. A missing
+body is pulled with one bounded batch of one-shot document syncs
+(`retainLoadedDocs: false`), never a room join or continuing subscription; a
+fingerprint-keyed cache avoids re-reading on Registry runtime updates. Failures
+keep the stored title and retry on reconnect.
 
 Presentation ordering is now specified: ordinary rows retain manual order, local attachment-preparation rows follow them, and scheduled rows always form the final section sorted by ascending send instant (ties retain input order). A time edit re-sorts the view. Scheduled rows are excluded from sortable IDs, drag sources/targets, move-to-top and steer. The display uses an explicit scheduled-time accessor; it does not infer scheduling from rendered text or add reservations to durable mq. Component tests cover sorting, changed times and the absence of scheduled drag handles. Backend reservation synchronization remains separate and unimplemented for this queue proposal.
 

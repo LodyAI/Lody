@@ -7,11 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as processCommands from '@lody/shared/node/process';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LodyOperationStore } from '../operation-store';
 import { inboxRepositoryLayer } from '../platform/inbox-repository';
-import { ExecutionJournal, makeExecutionOwner } from './execution-owner';
+import { ExecutionMembers, makeExecutionOwner } from './execution-owner';
 import {
   batchDepth,
   batchPreview,
@@ -86,10 +85,25 @@ async function runInboxChild(root: string, source: string): Promise<string> {
       env: { ...process.env, TSX_TSCONFIG_PATH: path.join(cliRoot, 'tsconfig.json') },
     }
   );
-  return stdout;
+  return stdout.trim().split('\n').at(-1)!;
 }
 
 describe('durable Operation inbox', () => {
+  it('automation cannot clear Stop or outrun a newly accepted human input', () => {
+    const f = fixture();
+    f.start();
+    expect(f.sql.pause(f.input, 'execution-1')).toBe(true);
+    const automated: InboxInput = { ...f.input, inputId: 'event-1', kind: 'automation' };
+    expect(f.sql.accept(automated)).toBe(false);
+    f.release('user_stop');
+    const human = { ...f.input, inputId: 'user-2' };
+    expect(f.sql.accept(human)).toBe(true);
+    expect(f.sql.accept(automated)).toBe(true);
+    expect(f.sql.begin(automated, 'event-execution')).toBe(false);
+    expect(f.sql.begin(human, 'human-execution')).toBe(true);
+    f.sql.release({ ...human, executionId: 'human-execution', outcome: 'normal' });
+    expect(f.sql.begin(automated, 'event-execution')).toBe(true);
+  });
   it('an idle wakeable receipt survives reopen and duplicate release creates no second intent', () => {
     const f = fixture();
     f.start();
@@ -164,8 +178,8 @@ describe('durable Operation inbox', () => {
     ).toEqual(['after-claim']);
     db.close();
   });
-  it.each(['user_stop', 'unreleased'] as const)(
-    'late wakeable receipts cannot bypass %s, including restart',
+  it.each(['user_stop', 'failed'] as const)(
+    'late wakeable receipts respect Stop and continue after a failed release (%s)',
     (outcome) => {
       const f = fixture();
       f.start();
@@ -175,10 +189,10 @@ describe('durable Operation inbox', () => {
       const other = new LodyOperationStore(f.filename);
       stores.push(other);
       other.inbox.activate('workspace', 'replacement');
-      expect(other.inbox.pending('workspace')).toEqual([]);
+      expect(other.inbox.pending('workspace')).toHaveLength(outcome === 'user_stop' ? 0 : 1);
     }
   );
-  it('withdraws only an unsubmitted, resource-free execution and keeps its input admissible', () => {
+  it('withdraws only an unsubmitted execution and keeps its input admissible', () => {
     const f = fixture();
     f.add('result');
     f.start();
@@ -188,9 +202,7 @@ describe('durable Operation inbox', () => {
     // The same execution id begins again and keeps the prepared claim.
     expect(f.sql.begin(f.input, 'execution-1')).toBe(true);
     expect(f.sql.prepare(f.input, 'owner')?.batchId).toBe(batch.batchId);
-    // Acquired resources or a fenced submission make withdrawal impossible.
-    f.sql.registerResources(f.input, 'execution-1', undefined);
-    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
+    // A fenced submission makes withdrawal impossible.
     expect(f.sql.fence(batch, 'execution-1')).toBe(true);
     expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
     f.sql.settle(batch, 'settled');
@@ -328,15 +340,12 @@ describe('durable Operation inbox', () => {
         .get()
     ).toEqual({ consumed: 1 });
   });
-  it('retains failed and unreleased state without granting automatic continuation', () => {
-    for (const outcome of ['failed', 'unreleased'] as const) {
-      const f = fixture();
-      f.start();
-      f.add('one');
-      f.release(outcome);
-      expect(f.sql.pending('workspace')).toEqual([]);
-      if (outcome === 'unreleased') expect(f.sql.begin(f.input, 'successor')).toBe(false);
-    }
+  it('a failed release grants no automatic continuation', () => {
+    const f = fixture();
+    f.start();
+    f.add('one');
+    f.release('failed');
+    expect(f.sql.pending('workspace')).toEqual([]);
   });
   it('denies foreign batch lookup and has no per-result execution tables', () => {
     const f = fixture();
@@ -545,32 +554,57 @@ describe('durable Operation inbox', () => {
 });
 
 describe('Inbox recovery and retained settlement', () => {
-  it('keeps an unreleased immutable execution blocked across human acceptance and reopen', () => {
+  it.each(['active', 'orphan', 'receipt-outage'])(
+    'retires legacy active input and unlocks restart (%s)',
+    (kind) => {
+      const orphan = kind === 'orphan';
+      const f = fixture(() => 0);
+      f.start();
+      f.add('submitted');
+      const batch = f.sql.prepare(f.input, 'owner')!;
+      expect(f.sql.fence(batch, 'execution-1')).toBe(true);
+      const queued = { ...f.input, inputId: 'queued-human' };
+      f.sql.accept(queued);
+      const db = new Database(f.filename);
+      db.exec(`UPDATE inbox_sessions SET blocked=1${orphan ? ',active_execution=NULL' : ''}`);
+      if (kind === 'receipt-outage')
+        db.exec(
+          "CREATE TRIGGER fail_diagnostic BEFORE INSERT ON inbox_releases BEGIN SELECT RAISE(ABORT,'diagnostic outage'); END;"
+        );
+      const reopened = new LodyOperationStore(f.filename, () => 0);
+      stores.push(reopened);
+      reopened.inbox.activate('workspace', 'replacement');
+      expect(reopened.inbox.state(f.input)).toMatchObject({
+        active_execution: null,
+        active_input: null,
+      });
+      expect(db.prepare('SELECT blocked FROM inbox_sessions').get()).toEqual({ blocked: 0 });
+      // Crossed fences are permanently unknown, including orphan legacy blocks.
+      expect(reopened.inbox.getBatch(batch.batchId, f.input)?.state).toBe('unknown');
+      expect(reopened.inbox.inputEnded('workspace', 'A', f.input.inputId)).toBe(true);
+      expect(reopened.inbox.begin(f.input, 'old-replay', 'replacement')).toBe(false);
+      expect(reopened.inbox.inputEnded('workspace', 'A', queued.inputId)).toBe(false);
+      expect(reopened.inbox.begin(queued, 'successor', 'replacement')).toBe(true);
+      expect(reopened.inbox.prepare(queued, 'replacement')).toBeUndefined();
+      db.close();
+    }
+  );
+
+  it('failed retirement keeps its receipt and admits another requester', () => {
     const f = fixture();
     f.start();
-    f.sql.registerResources(f.input, 'execution-1', { platform: 'darwin', roots: [123] });
-    f.add('saved');
     f.sql.release({
       ...f.input,
       executionId: 'execution-1',
-      outcome: 'unreleased',
+      outcome: 'failed',
       cause: 'termination failed',
     });
-    const reopened = new LodyOperationStore(f.filename);
-    stores.push(reopened);
-    reopened.inbox.activate('workspace', 'next-owner');
-    const fresh = { ...f.input, inputId: 'new-human' };
-    expect(reopened.inbox.accept(fresh)).toBe(true);
-    expect(reopened.inbox.begin(fresh, 'successor', 'next-owner')).toBe(false);
-    expect(reopened.inbox.pending('workspace')).toEqual([]);
-    expect(reopened.inbox.unreleased('workspace')).toMatchObject([
-      { executionId: 'execution-1', identity: { roots: [123] } },
-    ]);
-    reopened.inbox.confirmReleased(fresh, 'wrong-execution');
-    expect(reopened.inbox.begin(fresh, 'successor', 'next-owner')).toBe(false);
-    reopened.inbox.confirmReleased(fresh, 'execution-1');
-    expect(reopened.inbox.begin(fresh, 'successor', 'next-owner')).toBe(true);
-    expect(reopened.inbox.prepare(fresh, 'next-owner')?.memberCount).toBe(1);
+    const fresh = { ...f.input, userId: 'other-human', inputId: 'fresh' };
+    f.sql.accept(fresh);
+    expect(f.sql.begin(fresh, 'successor')).toBe(true);
+    const db = new Database(f.filename);
+    expect(db.prepare('SELECT outcome FROM inbox_releases').get()).toEqual({ outcome: 'failed' });
+    db.close();
   });
 
   it('applied human steer transfers authority without changing the actual execution identity', () => {
@@ -689,121 +723,6 @@ describe('Inbox recovery and retained settlement', () => {
   });
 });
 
-it('requires proof of resource disappearance and never treats PID reuse or empty roots as release', async () => {
-  const { provesResourcesGone } = await import('./recovery');
-  const snapshot = { sampledAtMs: 0, memoryKind: 'rss-sum' as const, entries: [], warnings: [] };
-  expect(provesResourcesGone({ platform: 'darwin', roots: [123], complete: true }, snapshot)).toBe(
-    true
-  );
-  expect(provesResourcesGone({ platform: 'darwin', roots: [], complete: true }, snapshot)).toBe(
-    false
-  );
-  expect(provesResourcesGone({ platform: 'win32', roots: [123], complete: true }, snapshot)).toBe(
-    false
-  );
-  expect(provesResourcesGone({ platform: 'darwin', roots: [123] }, snapshot)).toBe(false);
-  expect(provesResourcesGone({ platform: 'darwin', roots: [123], complete: false }, snapshot)).toBe(
-    false
-  );
-  const child = {
-    pid: 456,
-    parentPid: 1,
-    processGroupId: 123,
-    startedAtMs: 99,
-    cpuTimeMicros: 0,
-    memoryBytes: 1,
-  };
-  expect(
-    provesResourcesGone(
-      { platform: 'darwin', roots: [123], complete: true },
-      { ...snapshot, entries: [child] }
-    )
-  ).toBe(false);
-  expect(
-    provesResourcesGone(
-      { platform: 'darwin', roots: [456], complete: true },
-      { ...snapshot, entries: [child] }
-    )
-  ).toBe(false);
-});
-
-it.skipIf(process.platform === 'win32')(
-  'persists terminal groups added after prompt start and blocks reopen until all groups are gone',
-  async () => {
-    const { createSessionSandboxFactory } = await import('@/session/session-sandbox');
-    const { provesResourcesGone } = await import('./recovery');
-    const sandbox = await createSessionSandboxFactory({
-      logger: { debug: () => {}, warn: () => {} } as import('@/utils/logger').Logger,
-      // Exercise the same POSIX noop groups on macOS/Linux without depending on
-      // whether the test machine grants cgroup administration.
-      deps: { platform: 'darwin', configureExecutionProcess: async () => {} },
-    })('resource-reopen' as SessionId);
-    const launch = async () => {
-      const handle = await sandbox.spawn(
-        process.execPath,
-        ['-e', 'process.stdin.resume();process.stdout.write("ready")'],
-        { captureOutput: true }
-      );
-      await new Promise<void>((resolve) => handle.onStdout(() => resolve()));
-      return handle;
-    };
-    const f = fixture();
-    f.start();
-    const acp = await launch();
-    const detach = await sandbox.watchRecoveryResources!((identity) =>
-      f.sql.registerResources(f.input, 'execution-1', {
-        platform: process.platform,
-        ...identity,
-        roots: [process.pid, ...identity.roots],
-      })
-    );
-    try {
-      const terminal = await launch();
-      const exited = new Promise<void>((resolve) => acp.onExit(() => resolve()));
-      acp.child.stdin!.end();
-      await exited;
-      const second = new LodyOperationStore(f.filename);
-      stores.push(second);
-      second.inbox.activate('workspace', 'replacement');
-      const [handle] = second.inbox.unreleased('workspace');
-      expect(handle!.identity).toMatchObject({ complete: true });
-      expect(handle!.identity.roots).toEqual(
-        expect.arrayContaining([acp.child.pid, terminal.child.pid])
-      );
-      // A real independently spawned group remains after the ACP leader exits.
-      expect(process.kill(-terminal.child.pid!, 0)).toBe(true);
-      const snapshot = {
-        sampledAtMs: 0,
-        memoryKind: 'rss-sum' as const,
-        warnings: [],
-        entries: [
-          {
-            pid: terminal.child.pid!,
-            parentPid: process.pid,
-            processGroupId: terminal.child.pid!,
-            startedAtMs: 0,
-            cpuTimeMicros: 0,
-            memoryBytes: 0,
-          },
-        ],
-      };
-      expect(provesResourcesGone(handle!.identity, snapshot)).toBe(false);
-      const fresh = { ...f.input, inputId: 'successor-input' };
-      second.inbox.accept(fresh);
-      expect(second.inbox.begin(fresh, 'successor', 'replacement')).toBe(false);
-      await sandbox.terminate(true);
-      const host = { ...snapshot.entries[0]!, pid: process.pid, processGroupId: process.pid };
-      expect(provesResourcesGone(handle!.identity, { ...snapshot, entries: [host] })).toBe(false);
-      expect(provesResourcesGone(handle!.identity, { ...snapshot, entries: [] })).toBe(true);
-      second.inbox.confirmReleased(handle!.scope, handle!.executionId);
-      expect(second.inbox.begin(fresh, 'successor', 'replacement')).toBe(true);
-    } finally {
-      detach();
-      await sandbox.cleanup();
-    }
-  }
-);
-
 it('reads an oversized member in bounded fragments without dropping any result bytes', async () => {
   const { batchPage, INBOX_READ_BYTES } = await import('./batch-page');
   const member = {
@@ -850,34 +769,19 @@ it('a fresh human can clear pause without reviving the execution canceled by Sto
   expect(f.sql.canSubmit(f.input, 'execution-1', 'owner')).toBe(false);
 });
 
-it('execution owner retains resources and serializes recovery without resubmitting the batch', async () => {
+it('execution owner retains cleanup handles and serializes recovery without resubmitting the batch', async () => {
   const f = fixture();
   f.add('owned');
   f.sql.accept(f.input);
   const received: string[] = [];
   let alive = true;
-  let detached = false;
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         const terminating = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
-        let emit:
-          | ((identity: {
-              roots: readonly number[];
-              complete: boolean;
-            }) => Effect.Effect<void, unknown>)
-          | undefined;
-        const journal = Layer.succeed(ExecutionJournal, {
-          record: (input, id, identity) =>
-            Effect.try(() => f.sql.registerResources(input, id, identity)),
-          confirm: (input, id) => Effect.try(() => f.sql.confirmReleased(input, id)),
+        const journal = Layer.succeed(ExecutionMembers, {
           members: (batch) => Effect.try(() => f.sql.members(batch)),
-          identity: (resourceRoots, complete) => ({
-            platform: 'darwin',
-            roots: [77, ...resourceRoots],
-            complete,
-          }),
         });
         const dependencies = Layer.mergeAll(
           inboxRepositoryLayer(f.sql),
@@ -893,14 +797,6 @@ it('execution owner retains resources and serializes recovery without resubmitti
           const owner = yield* makeExecutionOwner(f.input, 'owned-execution');
           yield* owner.register({
             key: {},
-            observesAcquisitions: true,
-            observe: (update) =>
-              Effect.sync(() => {
-                emit = update;
-                return Effect.sync(() => {
-                  detached = true;
-                });
-              }),
             terminate: Deferred.succeed(terminating, undefined).pipe(
               Effect.andThen(Deferred.await(release)),
               Effect.andThen(
@@ -910,28 +806,9 @@ it('execution owner retains resources and serializes recovery without resubmitti
               )
             ),
           });
-          expect(
-            JSON.parse(
-              (f.store as unknown as { db: Database.Database }).db
-                .prepare('SELECT identity_json FROM inbox_resources')
-                .get().identity_json
-            ).complete
-          ).toBe(false);
-          yield* emit!({ roots: [91], complete: true });
-          expect(
-            JSON.parse(
-              (f.store as unknown as { db: Database.Database }).db
-                .prepare('SELECT identity_json FROM inbox_resources')
-                .get().identity_json
-            )
-          ).toEqual({
-            platform: 'darwin',
-            roots: [77, 91],
-            complete: true,
-          });
           yield* owner.submit(() => received.push(owner.batch!.batchId));
           yield* owner.finish('user_stop', new Error('resource release failed'));
-          expect(owner.phase).toBe('blocked');
+          expect(owner.phase).toBe('failed');
           const first = yield* owner
             .recover(Effect.void, Effect.void)
             .pipe(Effect.forkScoped({ startImmediately: true }));
@@ -941,14 +818,15 @@ it('execution owner retains resources and serializes recovery without resubmitti
             .pipe(Effect.forkScoped({ startImmediately: true }));
           expect(second.pollUnsafe()).toBeUndefined();
           expect(alive).toBe(true);
-          expect(detached).toBe(false);
-          expect(f.sql.begin({ ...f.input, inputId: 'successor' }, 'successor')).toBe(false);
+          // A failed release returns the slot; cleanup never gates a successor.
+          const successor = { ...f.input, inputId: 'successor' };
+          f.sql.accept(successor);
+          expect(f.sql.begin(successor, 'successor')).toBe(true);
           yield* Deferred.succeed(release, undefined);
           yield* Fiber.join(first);
           yield* Fiber.join(second);
           yield* owner.awaitReleased;
           expect(alive).toBe(false);
-          expect(detached).toBe(true);
           expect(owner.phase).toBe('released');
           expect(f.sql.getBatch(owner.batch!.batchId, owner.input)?.state).toBe('unknown');
           expect(received).toEqual([owner.batch!.batchId]);
@@ -999,61 +877,6 @@ it('keeps the original shared failed shutdown receipt and recovers settlement th
   expect(db.prepare('SELECT state FROM inbox_batches').get()).toEqual({ state: 'settled' });
   expect(received).toEqual([batch.batchId]);
   db.close();
-});
-
-it('post-restart admission waits for the startup release probe instead of reporting a stale block', async () => {
-  const { operationInboxLegacy } = await import('./legacy');
-  const { InboxExecutionBlocked, InboxExecutionRejected } = await import('./admission-failure');
-  const { InboxRecoveryProbe } = await import('./recovery');
-  const f = fixture();
-  f.start();
-  f.sql.registerResources(f.input, 'execution-1', {
-    platform: 'linux',
-    roots: [4242],
-    complete: true,
-  });
-  f.release('unreleased');
-  const restarted = new LodyOperationStore(f.filename);
-  stores.push(restarted);
-  restarted.inbox.activate('workspace', 'replacement');
-  const probed = Effect.runSync(Deferred.make<boolean>());
-  const bridge = operationInboxLegacy({
-    workspaceId: 'workspace',
-    owner: 'replacement',
-    sql: restarted.inbox,
-    ownsConnection: false,
-    ready: () => false,
-    admit: () => true,
-    launch: async () => {},
-    report: () => {},
-    recoveryProbe: Layer.succeed(InboxRecoveryProbe, { released: () => Deferred.await(probed) }),
-  });
-  // The interrupted turn is redispatched before the probe has read the process table.
-  const redispatch = bridge.openExecution(f.input, 'execution-1');
-  const fresh = { ...f.input, inputId: 'fresh-human' };
-  await bridge.accept(fresh);
-  const successor = bridge.openExecution(fresh, 'successor');
-  Effect.runSync(Deferred.succeed(probed, true));
-  // The interrupted input ends without replay rather than demanding manual recovery.
-  const rejected = await redispatch.then(
-    () => undefined,
-    (cause: unknown) => cause
-  );
-  expect(rejected).toBeInstanceOf(InboxExecutionRejected);
-  expect(rejected).not.toBeInstanceOf(InboxExecutionBlocked);
-  expect((await successor).input.inputId).toBe('fresh-human');
-  expect(restarted.inbox.blockedExecutions('workspace')).toEqual([]);
-});
-
-it('physical release clears inherited recovery blocking for another requester in the same session', () => {
-  const f = fixture();
-  f.start();
-  f.release('unreleased');
-  const next = { ...f.input, userId: 'other-human', inputId: 'fresh-other-human' };
-  f.sql.accept(next);
-  expect(f.sql.begin(next, 'next')).toBe(false);
-  f.sql.confirmReleased(f.input, 'execution-1');
-  expect(f.sql.begin(next, 'next')).toBe(true);
 });
 
 it('Stop at the normal-release gap supersedes the fixed intent before an extra execution', () => {
@@ -1215,7 +1038,6 @@ it('owner replacement settles a crossed fence as unknown without making its memb
       .prepare("SELECT consumed FROM inbox_results WHERE session_id='A' AND operation_id='one'")
       .get()
   ).toEqual({ consumed: 1 });
-  other.inbox.confirmReleased(f.input, 'execution-1');
   const next = { ...f.input, inputId: 'fresh' };
   other.inbox.accept(next);
   expect(other.inbox.prepare(next, 'replacement')).toBeUndefined();
@@ -1304,20 +1126,28 @@ it('an OS child recovers the wake intent and claims all nine queued receipts', a
   expect(reopened.inbox.prepare(fresh, 'parent')).toBeUndefined();
 });
 
-it('persists recovery blocking when a repeated release contradicts its original receipt', () => {
+it('keeps the first conflicting receipt and admits the next input', () => {
   const f = fixture();
   f.start();
-  f.add('one');
   f.release();
-  expect(() => f.release('failed')).toThrow('Conflicting release');
-  const other = new LodyOperationStore(f.filename);
-  stores.push(other);
-  other.inbox.activate('workspace', 'next-owner');
-  const intent = other.inbox.pending('workspace')[0]!;
-  expect(other.inbox.prepare(intent.input, 'next-owner', intent.intentId)).toBeUndefined();
+  expect(() => f.release('failed')).not.toThrow();
+  expect(() =>
+    f.sql.release({
+      ...f.input,
+      userId: 'other',
+      executionId: 'execution-1',
+      outcome: 'user_stop',
+    })
+  ).not.toThrow();
   const fresh = { ...f.input, inputId: 'fresh' };
-  other.inbox.accept(fresh);
-  expect(other.inbox.begin(fresh, 'successor', 'next-owner')).toBe(false);
+  f.sql.accept(fresh);
+  expect(f.sql.begin(fresh, 'successor')).toBe(true);
+  const db = new Database(f.filename);
+  expect(db.prepare('SELECT outcome,user_id FROM inbox_releases').get()).toEqual({
+    outcome: 'normal',
+    user_id: 'human',
+  });
+  db.close();
 });
 
 it.each(['check', 'fence'] as const)(
@@ -1467,650 +1297,6 @@ it('includes the header and omission footer in the complete 64 KiB preview budge
   expect(Buffer.byteLength(preview, 'utf8')).toBeLessThanOrEqual(INBOX_PREVIEW_BYTES);
   expect(preview).toContain('Shown 0/1.');
   expect(f.sql.members(batch)).toHaveLength(1);
-});
-
-function operatorEndpoint(root: string) {
-  return {
-    kind: 'pipe' as const,
-    path:
-      process.platform === 'win32'
-        ? String.raw`\\.\pipe\lody-inbox-${path.basename(root)}`
-        : path.join(root, 'operator.sock'),
-  };
-}
-
-// Native workflow coverage independent of OS socket permissions. Host/process adapters
-// retain their separate integration cases below; this does not prove a real Host lease.
-const recoveryPorts = (f: ReturnType<typeof fixture>) => ({
-  blocked: Effect.sync(() => f.sql.blockedExecutions('workspace')),
-  exclusive: <A, E, R>(work: Effect.Effect<A, E, R>) => work,
-  knownResourcesGone: () => Effect.succeed(true),
-  confirm: (record: import('./recovery').BlockedInboxExecution) =>
-    Effect.sync(() =>
-      record.executionId === null
-        ? f.sql.recoverOrphanedBlock(record.scope, record.snapshotToken)
-        : f.sql.recoverBlocked(record.scope, record.executionId, record.snapshotToken)
-    ),
-});
-
-describe('blocked execution operator recovery', () => {
-  beforeEach(() => {
-    vi.spyOn(processCommands, 'runCommandTextLegacy').mockImplementation(async (spec) => {
-      let stdout: string;
-      if (spec.command === 'ps') {
-        stdout = `${process.pid} 1 ${process.pid} 1024 00:00:00 Sat Oct 17 04:00:00 2026\n`;
-      } else if (spec.command === 'top') {
-        stdout = `PID MEM\n${process.pid} 1M\n`;
-      } else if (spec.command === 'powershell.exe') {
-        stdout = JSON.stringify([
-          {
-            ProcessId: process.pid,
-            ParentProcessId: 1,
-            CreationDateMs: 0,
-            KernelModeTime: 0,
-            UserModeTime: 0,
-            WorkingSetSize: 0,
-          },
-        ]);
-      } else {
-        throw new Error('Optional memory sampling is unavailable');
-      }
-      return { code: 0, signal: null, stdout, stderr: '' };
-    });
-  });
-  it.each(['missing', 'incomplete'] as const)(
-    'recovers %s identity after reopen, paused and without replay',
-    async (kind) => {
-      const f = fixture();
-      f.start();
-      f.add('saved-result');
-      if (kind === 'incomplete')
-        f.sql.registerResources(f.input, 'execution-1', {
-          platform: process.platform,
-          roots: [],
-          complete: false,
-        });
-      f.store.close();
-      const reopened = new LodyOperationStore(f.filename);
-      stores.push(reopened);
-      reopened.inbox.activate('workspace', 'replacement');
-      expect(reopened.inbox.blockedExecutions('workspace')).toMatchObject([
-        {
-          executionId: 'execution-1',
-          reason: kind === 'missing' ? 'missing_identity' : 'incomplete_identity',
-        },
-      ]);
-      const fresh = { ...f.input, inputId: 'fresh' };
-      expect(reopened.inbox.begin(fresh, 'successor')).toBe(false);
-      const { recoverBlockedInboxExecution } = await import('./operator-recovery');
-      const { makeInboxOperatorRecovery } = await import('../platform/operator-recovery');
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const ports = yield* makeInboxOperatorRecovery('machine', 'workspace', {
-              filename: f.filename,
-              endpoint: operatorEndpoint(f.root),
-            });
-            yield* recoverBlockedInboxExecution(ports, 'A', 'execution-1', true);
-          })
-        )
-      );
-      expect(reopened.inbox.state(fresh)).toMatchObject({
-        blocked: 0,
-        paused: 1,
-        active_execution: null,
-      });
-      expect(reopened.inbox.pending('workspace')).toEqual([]);
-      expect(reopened.inbox.begin(f.input, 'replay')).toBe(false);
-      expect(reopened.inbox.accept(fresh)).toBe(true);
-      expect(reopened.inbox.prepare(fresh, 'replacement')).toMatchObject({ memberCount: 1 });
-      expect(reopened.inbox.begin(fresh, 'successor')).toBe(true);
-    }
-  );
-  it('requires confirmation and exact execution identity, and never replays unknown submission', async () => {
-    const f = fixture();
-    f.start();
-    f.add('saved');
-    f.release();
-    const [intent] = f.sql.pending('workspace');
-    if (!intent) throw Error('missing intent');
-    const batch = f.sql.prepare(intent.input, 'owner', intent.intentId);
-    if (!batch) throw Error('missing batch');
-    f.sql.begin(batch, 'uncertain');
-    f.sql.fence(batch, 'uncertain');
-    f.sql.registerResources(batch, 'uncertain', {
-      platform: process.platform,
-      roots: [],
-      complete: false,
-    });
-    f.store.close();
-    const reopened = new LodyOperationStore(f.filename);
-    stores.push(reopened);
-    reopened.inbox.activate('workspace', 'replacement');
-    const { recoverBlockedInboxExecution } = await import('./operator-recovery');
-    const { makeInboxOperatorRecovery } = await import('../platform/operator-recovery');
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const ports = yield* makeInboxOperatorRecovery('machine', 'workspace', {
-            filename: f.filename,
-            endpoint: operatorEndpoint(f.root),
-          });
-          expect(
-            (yield* Effect.exit(recoverBlockedInboxExecution(ports, 'A', 'uncertain', false)))._tag
-          ).toBe('Failure');
-          expect(
-            (yield* Effect.exit(recoverBlockedInboxExecution(ports, 'A', 'wrong', true)))._tag
-          ).toBe('Failure');
-          expect(reopened.inbox.state(batch).blocked).toBe(1);
-          yield* recoverBlockedInboxExecution(ports, 'A', 'uncertain', true);
-        })
-      )
-    );
-    expect(reopened.inbox.getBatch(batch.batchId, batch)?.state).toBe('unknown');
-    expect(reopened.inbox.fence(batch, 'retry')).toBe(false);
-    expect(reopened.inbox.pending('workspace')).toEqual([]);
-    const fresh = { ...f.input, inputId: 'fresh' };
-    reopened.inbox.accept(fresh);
-    expect(reopened.inbox.prepare(fresh, 'replacement')).toBeUndefined();
-    expect(reopened.inbox.begin(fresh, 'new')).toBe(true);
-  });
-  it('recovers absent known roots after confirmation without replay', async () => {
-    const f = fixture();
-    f.start();
-    f.add('saved');
-    f.sql.registerResources(f.input, 'execution-1', {
-      platform: process.platform,
-      roots: [123_456_789],
-      complete: false,
-    });
-    f.store.close();
-    const reopened = new LodyOperationStore(f.filename);
-    stores.push(reopened);
-    reopened.inbox.activate('workspace', 'replacement');
-    const { makeInboxOperatorRecovery } = await import('../platform/operator-recovery');
-    const { recoverBlockedInboxExecution } = await import('./operator-recovery');
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const ports = yield* makeInboxOperatorRecovery('machine', 'workspace', {
-            filename: f.filename,
-            endpoint: operatorEndpoint(f.root),
-          });
-          yield* recoverBlockedInboxExecution(ports, 'A', 'execution-1', true);
-        })
-      )
-    );
-    expect(reopened.inbox.state(f.input)).toMatchObject({
-      blocked: 0,
-      paused: 1,
-      active_execution: null,
-    });
-    expect(reopened.inbox.pending('workspace')).toEqual([]);
-    expect(reopened.inbox.begin(f.input, 'replay')).toBe(false);
-  });
-  it('keeps known roots blocked after an unavailable process probe', async () => {
-    const f = fixture();
-    f.start();
-    f.sql.registerResources(f.input, 'execution-1', {
-      platform: process.platform,
-      roots: [123_456_789],
-      complete: false,
-    });
-    f.store.close();
-    const reopened = new LodyOperationStore(f.filename);
-    stores.push(reopened);
-    reopened.inbox.activate('workspace', 'replacement');
-    vi.mocked(processCommands.runCommandTextLegacy).mockImplementation(async () => {
-      throw new Error('Process probe unavailable');
-    });
-    const { makeInboxOperatorRecovery } = await import('../platform/operator-recovery');
-    const { recoverBlockedInboxExecution } = await import('./operator-recovery');
-    await expect(
-      Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const ports = yield* makeInboxOperatorRecovery('machine', 'workspace', {
-              filename: f.filename,
-              endpoint: operatorEndpoint(f.root),
-            });
-            yield* recoverBlockedInboxExecution(ports, 'A', 'execution-1', true);
-          })
-        )
-      )
-    ).rejects.toThrow();
-    expect(reopened.inbox.state(f.input)).toMatchObject({
-      blocked: 1,
-      paused: 0,
-      active_execution: 'execution-1',
-    });
-    expect(reopened.inbox.begin({ ...f.input, inputId: 'new' }, 'successor')).toBe(false);
-    const { acquireLocalCliHostLease } = await import('@lody/shared/node/local-cli-host-lease');
-    const next = await acquireLocalCliHostLease({
-      instanceId: 'next',
-      mode: 'foreground',
-      endpoint: operatorEndpoint(f.root),
-    });
-    expect(next.status).toBe('acquired');
-    if (next.status === 'acquired') await next.lease.close();
-  });
-  it.skipIf(process.platform !== 'darwin')(
-    'retains blocking when optional memory sampling makes the snapshot uncertain',
-    async () => {
-      const f = fixture();
-      f.start();
-      f.sql.registerResources(f.input, 'execution-1', {
-        platform: process.platform,
-        roots: [123_456_789],
-        complete: false,
-      });
-      f.store.close();
-      const reopened = new LodyOperationStore(f.filename);
-      stores.push(reopened);
-      reopened.inbox.activate('workspace', 'replacement');
-      const sample = vi.mocked(processCommands.runCommandTextLegacy).getMockImplementation();
-      if (!sample) throw new Error('Missing process fixture');
-      vi.mocked(processCommands.runCommandTextLegacy).mockImplementation((spec, options) => {
-        if (spec.command === 'top') return Promise.reject(new Error('Memory probe unavailable'));
-        return sample(spec, options);
-      });
-      const { makeInboxOperatorRecovery } = await import('../platform/operator-recovery');
-      const { recoverBlockedInboxExecution } = await import('./operator-recovery');
-      await expect(
-        Effect.runPromise(
-          Effect.scoped(
-            Effect.gen(function* () {
-              const ports = yield* makeInboxOperatorRecovery('machine', 'workspace', {
-                filename: f.filename,
-                endpoint: operatorEndpoint(f.root),
-              });
-              yield* recoverBlockedInboxExecution(ports, 'A', 'execution-1', true);
-            })
-          )
-        )
-      ).rejects.toThrow('Known resources are still running or cannot be verified');
-      expect(reopened.inbox.state(f.input)).toMatchObject({
-        blocked: 1,
-        paused: 0,
-        active_execution: 'execution-1',
-      });
-      expect(reopened.inbox.begin({ ...f.input, inputId: 'new' }, 'successor')).toBe(false);
-    }
-  );
-  it('refuses a live Host and known live roots, retaining blocking and releasing the operator lease', async () => {
-    const f = fixture();
-    f.start();
-    f.sql.registerResources(f.input, 'execution-1', {
-      platform: process.platform,
-      roots: [process.pid],
-      complete: false,
-    });
-    f.store.close();
-    const reopened = new LodyOperationStore(f.filename);
-    stores.push(reopened);
-    reopened.inbox.activate('workspace', 'replacement');
-    const { makeInboxOperatorRecovery } = await import('../platform/operator-recovery');
-    const { recoverBlockedInboxExecution } = await import('./operator-recovery');
-    const { acquireLocalCliHostLease } = await import('@lody/shared/node/local-cli-host-lease');
-    const endpoint = operatorEndpoint(f.root);
-    const lease = await acquireLocalCliHostLease({
-      instanceId: 'worker',
-      mode: 'foreground',
-      endpoint,
-    });
-    if (lease.status !== 'acquired') throw Error('fixture lease unavailable');
-    try {
-      await expect(
-        Effect.runPromise(
-          Effect.scoped(
-            makeInboxOperatorRecovery('machine', 'workspace', { filename: f.filename, endpoint })
-          )
-        )
-      ).rejects.toThrow('Stop the local daemon');
-    } finally {
-      await lease.lease.close();
-    }
-    await expect(
-      Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const ports = yield* makeInboxOperatorRecovery('machine', 'workspace', {
-              filename: f.filename,
-              endpoint,
-            });
-            yield* recoverBlockedInboxExecution(ports, 'A', 'execution-1', true);
-          })
-        )
-      )
-    ).rejects.toThrow('Known resources are still running');
-    expect(reopened.inbox.state(f.input).blocked).toBe(1);
-    const next = await acquireLocalCliHostLease({
-      instanceId: 'next',
-      mode: 'foreground',
-      endpoint,
-    });
-    expect(next.status).toBe('acquired');
-    if (next.status === 'acquired') await next.lease.close();
-  });
-  it('inspects orphaned blocks read-only, including resource records not joined to an active execution', async () => {
-    const f = fixture();
-    f.start();
-    f.sql.registerResources(f.input, 'execution-1', {
-      platform: process.platform,
-      roots: [123_456_789],
-      complete: false,
-    });
-    const db = new Database(f.filename);
-    try {
-      db.exec(
-        'UPDATE inbox_sessions SET active_execution=NULL,blocked=1; DROP TABLE inbox_recoveries;'
-      );
-      const before = db.serialize();
-      const { openInboxInspection } = await import('../platform/operator-recovery');
-      const inspection = openInboxInspection(f.filename);
-      let records: import('./recovery').BlockedInboxExecution[];
-      try {
-        records = inspection.inbox.blockedExecutions('workspace');
-      } finally {
-        inspection.close();
-      }
-      expect(records).toMatchObject([
-        {
-          executionId: null,
-          reason: 'missing_active_execution',
-          resources: [{ executionId: 'execution-1', identity: { roots: [123_456_789] } }],
-        },
-      ]);
-      expect(records[0]?.snapshotToken).toMatch(/^[a-f0-9]{64}$/);
-      expect(db.serialize()).toEqual(before);
-      expect(
-        db.prepare("SELECT 1 FROM sqlite_master WHERE name='inbox_recoveries'").get()
-      ).toBeUndefined();
-      db.exec("UPDATE orchestration_meta SET value='999' WHERE key='schema_version'");
-      const unsupported = db.serialize();
-      expect(() => openInboxInspection(f.filename)).toThrow('does not support this store schema');
-      expect(db.serialize()).toEqual(unsupported);
-    } finally {
-      db.close();
-    }
-  });
-  it('preserves an inspected legacy v2 snapshot through additive recovery migration', () => {
-    const f = fixture();
-    f.start();
-    f.add('held');
-    f.sql.registerResources(f.input, 'execution-1', {
-      platform: process.platform,
-      roots: [],
-      complete: false,
-    });
-    const db = new Database(f.filename);
-    try {
-      db.exec(
-        'UPDATE inbox_sessions SET blocked=1; DROP TABLE inbox_recoveries; ALTER TABLE inbox_resources DROP COLUMN generation;'
-      );
-      const before = f.sql.blockedExecutions('workspace')[0];
-      if (!before) throw new Error('missing legacy block');
-      const reopened = new LodyOperationStore(f.filename, undefined, { maintenance: false });
-      stores.push(reopened);
-      expect(reopened.inbox.blockedExecutions('workspace')[0]?.snapshotToken).toBe(
-        before.snapshotToken
-      );
-      expect(reopened.inbox.recoverBlocked(f.input, 'execution-1', before.snapshotToken)).toBe(
-        true
-      );
-      expect(db.prepare('SELECT consumed FROM inbox_results').all()).toEqual([{ consumed: 0 }]);
-      expect(db.prepare('SELECT generation FROM inbox_resources').all()).toEqual([
-        { generation: 0 },
-      ]);
-    } finally {
-      db.close();
-    }
-  });
-  it('recovers a snapshot-matched orphan without replay, losing queued input, or waking held results', async () => {
-    const f = fixture();
-    f.start();
-    f.release();
-    f.add('submitted');
-    const [intent] = f.sql.pending('workspace');
-    if (!intent) throw new Error('missing intent');
-    const batch = f.sql.prepare(intent.input, 'owner', intent.intentId);
-    if (!batch) throw new Error('missing batch');
-    expect(f.sql.begin(batch, 'uncertain')).toBe(true);
-    expect(f.sql.fence(batch, 'uncertain')).toBe(true);
-    f.sql.registerResources(batch, 'uncertain', {
-      platform: process.platform,
-      roots: [],
-      complete: false,
-    });
-    f.add('held');
-    const queued = {
-      ...f.input,
-      inputId: 'queued-before-recovery',
-      config: { prompt: 'preserve this text' },
-    };
-    f.sql.accept(queued);
-    const db = new Database(f.filename);
-    try {
-      db.exec('UPDATE inbox_sessions SET active_execution=NULL,blocked=1');
-      const record = f.sql.blockedExecutions('workspace')[0];
-      if (!record) throw new Error('missing block');
-      const { recoverBlockedInboxExecution } = await import('./operator-recovery');
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const ports = recoveryPorts(f);
-            expect(
-              (yield* Effect.exit(recoverBlockedInboxExecution(ports, 'A', null, true)))._tag
-            ).toBe('Failure');
-            expect(
-              (yield* Effect.exit(recoverBlockedInboxExecution(ports, 'A', null, true, 'stale')))
-                ._tag
-            ).toBe('Failure');
-            yield* recoverBlockedInboxExecution(ports, 'A', null, true, record.snapshotToken);
-            expect(
-              (yield* Effect.exit(
-                recoverBlockedInboxExecution(ports, 'A', null, true, record.snapshotToken)
-              ))._tag
-            ).toBe('Failure');
-          })
-        )
-      );
-      expect(f.sql.state(f.input)).toMatchObject({
-        blocked: 0,
-        paused: 1,
-        active_execution: null,
-        active_input: null,
-      });
-      expect(f.sql.pending('workspace')).toEqual([]);
-      expect(f.sql.getBatch(batch.batchId, batch)?.state).toBe('unknown');
-      expect(f.sql.fence(batch, 'replay')).toBe(false);
-      expect(f.sql.begin(batch, 'replay')).toBe(false);
-      expect(f.sql.inputEnded('workspace', 'A', queued.inputId)).toBe(false);
-      expect(f.sql.begin(queued, 'queued')).toBe(false);
-      expect(db.prepare('SELECT execution_id FROM inbox_recoveries').all()).toEqual([
-        { execution_id: null },
-      ]);
-      const freshTask = { ...f.input, kind: 'task' as const, inputId: 'fresh-agent-chat' };
-      expect(f.sql.accept(freshTask)).toBe(true);
-      const nextBatch = f.sql.prepare(freshTask, 'owner');
-      if (!nextBatch) throw new Error('missing held result');
-      expect(f.sql.members(nextBatch, 0, 10).map((member) => member.operationId)).toEqual(['held']);
-      expect(f.sql.begin(batch, 'old-after-unpause')).toBe(false);
-      expect(f.sql.inputEnded('workspace', 'A', queued.inputId)).toBe(false);
-      expect(f.sql.begin(freshTask, 'fresh')).toBe(true);
-    } finally {
-      db.close();
-    }
-  });
-  it.each(['execution', 'resources', 'input', 'owner'] as const)(
-    'rejects a %s change after resource verification instead of clearing new ownership',
-    async (change) => {
-      const f = fixture();
-      f.start();
-      const db = new Database(f.filename);
-      try {
-        db.exec('UPDATE inbox_sessions SET blocked=1');
-        const { recoverBlockedInboxExecution } = await import('./operator-recovery');
-        await expect(
-          Effect.runPromise(
-            Effect.scoped(
-              Effect.gen(function* () {
-                const ports = recoveryPorts(f);
-                yield* recoverBlockedInboxExecution(
-                  {
-                    ...ports,
-                    knownResourcesGone: (record) =>
-                      ports.knownResourcesGone(record).pipe(
-                        Effect.tap(() =>
-                          Effect.sync(() => {
-                            if (change === 'execution')
-                              db.exec("UPDATE inbox_sessions SET active_execution='new-execution'");
-                            if (change === 'resources')
-                              f.sql.registerResources(f.input, 'late-resource', {
-                                platform: process.platform,
-                                roots: [process.pid],
-                                complete: false,
-                              });
-                            if (change === 'input')
-                              f.sql.accept({ ...f.input, inputId: 'new-input' });
-                            if (change === 'owner')
-                              db.exec("UPDATE inbox_modes SET owner='new-owner'");
-                          })
-                        )
-                      ),
-                  },
-                  'A',
-                  'execution-1',
-                  true
-                );
-              })
-            )
-          )
-        ).rejects.toThrow('changed during recovery');
-        expect(f.sql.state(f.input).blocked).toBe(1);
-        expect(db.prepare('SELECT * FROM inbox_recoveries').all()).toEqual([]);
-      } finally {
-        db.close();
-      }
-    }
-  );
-  it.each(['execution', 'orphan'] as const)(
-    'rejects owner and resource ABA for a %s snapshot',
-    (kind) => {
-      const f = fixture();
-      f.start();
-      const identity = { platform: process.platform, roots: [123_456_789], complete: false };
-      f.sql.registerResources(f.input, 'execution-1', identity);
-      const db = new Database(f.filename);
-      try {
-        db.exec(
-          `UPDATE inbox_sessions SET blocked=1${kind === 'orphan' ? ',active_execution=NULL' : ''}`
-        );
-        f.sql.deactivate('workspace', 'owner');
-        const original = f.sql.blockedExecutions('workspace')[0];
-        if (!original) throw new Error('missing block');
-        f.sql.activate('workspace', 'new-owner');
-        f.sql.deactivate('workspace', 'new-owner');
-        const recover = (token: string) =>
-          kind === 'orphan'
-            ? f.sql.recoverOrphanedBlock(f.input, token)
-            : f.sql.recoverBlocked(f.input, 'execution-1', token);
-        expect(recover(original.snapshotToken)).toBe(false);
-        const beforeAcquisition = f.sql.blockedExecutions('workspace')[0];
-        if (!beforeAcquisition) throw new Error('missing block');
-        f.sql.registerResources(f.input, 'execution-1', { ...identity, complete: true });
-        f.sql.registerResources(f.input, 'execution-1', identity);
-        expect(recover(beforeAcquisition.snapshotToken)).toBe(false);
-        expect(f.sql.state(f.input).blocked).toBe(1);
-      } finally {
-        db.close();
-      }
-    }
-  );
-  it('rejects ambiguous active ownership without clearing either owner', async () => {
-    const f = fixture();
-    f.start();
-    const db = new Database(f.filename);
-    try {
-      db.exec(
-        "UPDATE inbox_sessions SET blocked=1; INSERT INTO inbox_sessions(workspace_id,session_id,user_id,active_execution,blocked) VALUES('workspace','A','other','other-execution',1)"
-      );
-      const record = f.sql.blockedExecutions('workspace')[0];
-      expect(record?.reason).toBe('ambiguous_ownership');
-      const { recoverBlockedInboxExecution } = await import('./operator-recovery');
-      await expect(
-        Effect.runPromise(recoverBlockedInboxExecution(recoveryPorts(f), 'A', 'execution-1', true))
-      ).rejects.toThrow('Multiple execution owners');
-      expect(
-        db.prepare('SELECT active_execution FROM inbox_sessions ORDER BY user_id').all()
-      ).toEqual([{ active_execution: 'execution-1' }, { active_execution: 'other-execution' }]);
-    } finally {
-      db.close();
-    }
-  });
-  it('does not treat a missing active execution as proof that its known resources are gone', async () => {
-    const f = fixture();
-    f.start();
-    f.sql.registerResources(f.input, 'orphan-resource', {
-      platform: process.platform,
-      roots: [process.pid],
-      complete: false,
-    });
-    const db = new Database(f.filename);
-    try {
-      db.exec('UPDATE inbox_sessions SET active_execution=NULL,blocked=1');
-    } finally {
-      db.close();
-    }
-    const record = f.sql.blockedExecutions('workspace')[0];
-    if (!record) throw new Error('missing block');
-    const { knownOperatorResourcesGone } = await import('./recovery');
-    const { readProcessTable } = await import('@/monitor/process-table');
-    // Exercise the real sampler/predicate with the synthetic process table, without OS lease acquisition.
-    const snapshot = await readProcessTable(process.platform);
-    expect(knownOperatorResourcesGone(record, process.platform, snapshot)).toBe(false);
-    expect(knownOperatorResourcesGone(record, process.platform, { ...snapshot, entries: [] })).toBe(
-      true
-    );
-    expect(
-      knownOperatorResourcesGone(record, process.platform, {
-        ...snapshot,
-        entries: [],
-        warnings: ['unverified'],
-      })
-    ).toBe(false);
-    expect(
-      knownOperatorResourcesGone(record, process.platform === 'win32' ? 'linux' : 'win32', {
-        ...snapshot,
-        entries: [],
-      })
-    ).toBe(false);
-    expect(f.sql.state(f.input).blocked).toBe(1);
-  });
-  it('atomically rolls back pause and release if audit persistence fails', () => {
-    const f = fixture();
-    f.start();
-    f.sql.registerResources(f.input, 'execution-1', {
-      platform: 'darwin',
-      roots: [],
-      complete: false,
-    });
-    const db = new Database(f.filename);
-    try {
-      db.prepare('UPDATE inbox_sessions SET blocked=1').run();
-      db.exec(
-        "CREATE TRIGGER fail_operator_audit BEFORE UPDATE OF cause ON inbox_resources WHEN NEW.cause='Operator confirmed all resources released' BEGIN SELECT RAISE(ABORT,'audit-failure'); END;"
-      );
-      expect(() => f.sql.recoverBlocked(f.input, 'execution-1')).toThrow('audit-failure');
-      expect(f.sql.state(f.input)).toMatchObject({
-        blocked: 1,
-        paused: 0,
-        active_execution: 'execution-1',
-      });
-    } finally {
-      db.close();
-    }
-  });
 });
 
 describe('manual Stop receipts', () => {

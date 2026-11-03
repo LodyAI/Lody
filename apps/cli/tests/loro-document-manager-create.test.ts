@@ -1017,6 +1017,58 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     await manager.cleanUp({ fast: true });
   });
 
+  it('closes sibling documents and stores after a document fails, and retries remain possible', async () => {
+    const events: string[] = [];
+    const repo = {
+      destroy: async () => {
+        events.push('repo');
+      },
+    } as unknown as LoroDocumentManager['repo'];
+    const manager = new LoroDocumentManager({
+      repo,
+      workspaceId: 'cleanup-failure' as WorkspaceId,
+      userId: 'user-1',
+      metaSub: createMetaSubscription(),
+      logger: createSilentLogger(),
+      initialTransportStatus: 'connected',
+      initialMetaSyncPromise: Promise.resolve(true),
+      initialMetaSyncCompleted: true,
+    });
+    const failed = 'unsaved-session' as SessionId;
+    manager.sessions.set(failed, {
+      destroy: async () => {
+        events.push('failed');
+        throw new Error('disk full');
+      },
+    } as never);
+    manager.sessions.set(
+      'sibling' as SessionId,
+      {
+        destroy: async () => {
+          events.push('sibling');
+        },
+      } as never
+    );
+    manager.machine = {
+      destroy: async () => {
+        events.push('machine');
+      },
+    } as never;
+    Object.assign(manager, {
+      encryptedWorkspace: {
+        close: async () => {
+          events.push('encrypted');
+        },
+      },
+    });
+    const failure = await manager.cleanUp({ fast: true }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors[0].message).toContain(failed);
+    expect(events).toEqual(['failed', 'sibling', 'machine', 'repo', 'encrypted']);
+    await manager.cleanUp({ fast: true });
+    expect(manager.getConnectedRoomCount()).toBe(0);
+  });
+
   it('settles a queued manual reconnect when cleanup runs first', async () => {
     process.env.LODY_LORO_AUTO_RECONNECT_INTERVAL_MS = '0';
 

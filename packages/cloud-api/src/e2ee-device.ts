@@ -2,11 +2,15 @@
 export type E2eeDeviceAccess = { workspaceId: string; credential: string; cliToken?: string };
 export type E2eeContentTokenRequest = E2eeDeviceAccess & {
   rejectedToken?: string;
+  /** Separate RPC-only stream grant; never permits document or snapshot writes. */
+  rpcOnly?: true;
   /** Ask the existing action to append a fixed, short-lived repair hint for this
    * workspace stream. This grants no content write right, including to Guests. */
   requestSnapshotFor?: string;
 };
 export type E2eeContentToken = {
+  /** Short-lived attachment-only grant; device credentials remain in the host. */
+  attachmentToken?: string;
   token: string;
   bucketId: string;
   gatewayBaseUrl: string;

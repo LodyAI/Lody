@@ -190,6 +190,8 @@ export class ElectronHarness {
         MAIN_ENTRY,
         `--user-data-dir=${this.electronUserDataDir}`,
         '--lang=en-US',
+        // macOS system-language detection is independent of Chromium's --lang.
+        ...(process.platform === 'darwin' ? ['-AppleLanguages', '(en-US)'] : []),
       ],
       cwd: ELECTRON_DIR,
       env,

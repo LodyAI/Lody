@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Exit, Fiber, Queue, Schedule, Stream } from 'effect';
+import { Cause, Clock, Deferred, Effect, Exit, Fiber, Queue, Schedule, Stream } from 'effect';
 import type { LoroRepo, RepoFlockDocLease, RepoRoomSubscription } from 'loro-repo';
 import { getWorkspaceFlockDocId, type WorkspaceId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
@@ -105,7 +105,17 @@ const firstBaseline = (room: RepoRoomSubscription, workspaceId: WorkspaceId, log
   );
 };
 
+/**
+ * Metadata and the workspace Flock stay joined for the process. Any other
+ * catalog, such as another Machine's Flock, serves request-scoped reads and is
+ * released once no read touched it for this long. Holding those rooms forever
+ * kept a room that never finished its initial sync retrying for the life of the
+ * daemon (#2194).
+ */
+export const TRANSIENT_CATALOG_IDLE_MS = 5 * 60_000;
+
 export interface WorkspaceCatalogSync {
+  /** Every hold or ready call on a transient catalog extends its idle lease. */
   hold: (flockDocId: string) => Effect.Effect<void>;
   /** Undefined selects metadata. Timeout affects only this waiter. */
   ready: (flockDocId: string | undefined, timeoutMs: number) => Effect.Effect<boolean>;
@@ -122,14 +132,41 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
     baseline: boolean;
     ready: Deferred.Deferred<boolean>;
     fiber?: Fiber.Fiber<void, unknown>;
+    lastUsedMs: number;
+    /** Set once idle; its room may still be releasing, so reads start a new reader. */
+    retiring?: boolean;
   };
   const held = new Map<string | undefined, Entry>();
+  /** Latest released transient reader per id whose release failed; reported at shutdown. */
+  const releaseFailures = new Map<string | undefined, Entry>();
+  /** Replaced retiring readers whose release is still running; shutdown awaits them. */
+  const retiringReaders = new Set<Entry>();
+  const permanent = new Set<string | undefined>([undefined, getWorkspaceFlockDocId(workspaceId)]);
+  const idleExpired = (entry: Entry) =>
+    Effect.map(Clock.currentTimeMillis, (now) => {
+      if (now - entry.lastUsedMs < TRANSIENT_CATALOG_IDLE_MS) return false;
+      entry.retiring = true;
+      return true;
+    });
+  /** Completes once no hold or ready call has touched the entry for the idle window. */
+  const untilIdle = Effect.fnUntraced(function* (entry: Entry) {
+    while (true) {
+      const now = yield* Clock.currentTimeMillis;
+      const remaining = entry.lastUsedMs + TRANSIENT_CATALOG_IDLE_MS - now;
+      if (remaining <= 0) {
+        entry.retiring = true;
+        return;
+      }
+      yield* Effect.sleep(remaining);
+    }
+  });
   // Registered before reader fibers: Scope interrupts every sibling first, then
   // this receipt observes their actual exits. forkIn alone discards those exits.
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
-      const exits = yield* Effect.forEach(held.values(), (entry) =>
-        entry.fiber ? Fiber.await(entry.fiber) : Effect.succeed(Exit.void)
+      const exits = yield* Effect.forEach(
+        [...held.values(), ...retiringReaders, ...releaseFailures.values()],
+        (entry) => (entry.fiber ? Fiber.await(entry.fiber) : Effect.succeed(Exit.void))
       );
       const reasons = exits.flatMap((exit) =>
         Exit.isFailure(exit)
@@ -146,18 +183,39 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
     })
   );
   const ensure = Effect.fnUntraced(function* (id: string | undefined) {
+    const now = yield* Clock.currentTimeMillis;
     const prior = held.get(id);
-    if (prior) return prior;
-    const entry: Entry = { baseline: false, ready: Deferred.makeUnsafe<boolean>() };
+    if (prior && !prior.retiring) {
+      prior.lastUsedMs = now;
+      return prior;
+    }
+    if (prior) retiringReaders.add(prior);
+    const transient = !permanent.has(id);
+    const entry: Entry = {
+      baseline: false,
+      ready: Deferred.makeUnsafe<boolean>(),
+      lastUsedMs: now,
+    };
     held.set(id, entry);
     const reader = Effect.scoped(
       Effect.gen(function* () {
         const room = yield* acquireCatalogRoom(repo, id, workspaceId, logger);
         if (!room) return;
-        if (requireRemoteBaseline) yield* firstBaseline(room, workspaceId, logger);
+        if (requireRemoteBaseline) {
+          const baseline = firstBaseline(room, workspaceId, logger);
+          if (!transient) yield* baseline;
+          // An idle transient catalog stops waiting and releases its room.
+          else if (
+            !(yield* Effect.raceFirst(
+              Effect.as(baseline, true),
+              Effect.as(untilIdle(entry), false)
+            ))
+          )
+            return;
+        }
         entry.baseline = true;
         yield* Deferred.succeed(entry.ready, true);
-        yield* Effect.never;
+        yield* transient ? untilIdle(entry) : Effect.never;
       })
     ).pipe(
       Effect.tapError(() => Effect.sync(() => reportFailure(logger, workspaceId))),
@@ -165,9 +223,25 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
       // Release defects remain defects and never start a replacement reader.
       Effect.retry({
         schedule: Schedule.min([Schedule.exponential('1 second'), Schedule.spaced('30 seconds')]),
+        // A transient catalog nobody reads any more stops retrying.
+        while: () => (transient ? Effect.map(idleExpired(entry), (idle) => !idle) : true),
       })
     );
-    entry.fiber = yield* Effect.forkIn(reader, scope);
+    const owned = transient
+      ? reader.pipe(
+          Effect.onExit((exit) =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(entry.ready, false);
+              // Shutdown still reports a release defect, but it is never a cached
+              // result: the next read starts a fresh reader with its own leases.
+              if (Exit.isFailure(exit) && Cause.hasDies(exit.cause)) releaseFailures.set(id, entry);
+              retiringReaders.delete(entry);
+              if (held.get(id) === entry) held.delete(id);
+            })
+          )
+        )
+      : reader;
+    entry.fiber = yield* Effect.forkIn(owned, scope);
     return entry;
   });
   const hold = (id: string) => ensure(id).pipe(Effect.asVoid);

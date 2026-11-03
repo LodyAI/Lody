@@ -11,6 +11,13 @@ this page is the full text of the rules summarised there.
   attachment-rich list case is `SessionChatStream` → `HumanAndAgentAttachments`;
   shared full-page session conversation coverage is `SessionConversationPage.stories.tsx`
   using `session-conversation-page.tsx`.
+- `SessionHistoryReader` uses the real read-only view inside `WorkspaceCard` with
+  the shell's `WindowDragStrip`. Mac window and 390px compact-window states cover
+  English and Chinese, including the real header menu and Copy submenu. The narrow
+  story resizes the actual manager iframe while retaining the desktop layout family.
+  `tests/e2e/session-history-header.spec.ts` checks pointer clicks, hit testing and
+  computed no-drag regions without forced clicks or injected CSS; native Electron
+  window dragging still needs shell acceptance.
 - `SessionConversationPage` → `DesktopReadingReview` combines synthetic thinking,
   tool calls and results, inline diffs, edited-file summaries, comment references,
   visual annotation references, and Markdown in the real conversation renderers.

@@ -1,3 +1,4 @@
+import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
 import { E2eeIdentityRecovery } from './e2ee-identity-recovery';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -36,6 +37,8 @@ export function E2eePersonalPairing(props: {
   workspaceId: string;
   runtime: Runtime;
   canApprove: boolean;
+  /** Display only: a successful host read-open already admitted this device. */
+  approved?: boolean;
   onJoined: () => void;
 }) {
   // A workspace owns its pending originals and async UI results. Never carry
@@ -47,15 +50,18 @@ function PersonalPairingSession({
   workspaceId,
   runtime,
   canApprove,
+  approved,
   onJoined,
 }: {
   workspaceId: string;
   runtime: Runtime;
   canApprove: boolean;
+  approved?: boolean;
   onJoined: () => void;
 }) {
   const { t } = useTranslation();
   const [recoveryError, setRecoveryError] = useState('');
+  const [custodyMessage, setCustodyMessage] = useState<string>();
   const [offer, setOffer] = useState<E2eePersonalPairingOffer | null>(null);
   const [input, setInput] = useState('');
   const [joining, setJoining] = useState<{
@@ -101,6 +107,7 @@ function PersonalPairingSession({
         (error) => {
           if (cancelled) return;
           setRecoveryError(error instanceof Error ? error.message : '');
+          setCustodyMessage(custodyFailureMessage(classifyE2eeControlFailure(error).kind));
           setPhase('error');
           setRecovering(false);
         }
@@ -114,26 +121,30 @@ function PersonalPairingSession({
     if (busy.current || recovering) return;
     busy.current = true;
     setPhase('busy');
+    setCustodyMessage(undefined);
     try {
       await operation();
     } catch (error) {
       if (isLive()) {
         setRecoveryError(error instanceof Error ? error.message : '');
+        setCustodyMessage(custodyFailureMessage(classifyE2eeControlFailure(error).kind));
         setPhase('error');
       }
     } finally {
       busy.current = false;
     }
   };
-  if (
-    !runtime.preparePersonalJoin ||
-    !runtime.personalPairingOffer ||
-    !runtime.inspectPersonalJoin ||
-    !runtime.approvePersonalJoin ||
-    !runtime.claimPersonalJoin ||
-    !runtime.cancelPersonalJoin
-  )
-    return null;
+  const canRequest = Boolean(
+    runtime.preparePersonalJoin && runtime.claimPersonalJoin && runtime.cancelPersonalJoin
+  );
+  const canEndorse = Boolean(
+    canApprove &&
+    runtime.personalPairingOffer &&
+    runtime.inspectPersonalJoin &&
+    runtime.approvePersonalJoin &&
+    runtime.cancelPersonalJoin
+  );
+  if ((!canRequest && !canEndorse) || (approved && !canEndorse)) return null;
   const createOffer = () =>
     work(async () => {
       const value = await runtime.personalPairingOffer!(workspaceId);
@@ -235,11 +246,13 @@ function PersonalPairingSession({
         />
       )}
       <Card.Header>
-        <Card.Title>{t('e2ee.pair.title')}</Card.Title>
+        <Card.Title>
+          {t(canEndorse ? 'e2ee.pair.title' : 'e2ee.pair.desktopApprovalRequired')}
+        </Card.Title>
         <Card.Description>{t('e2ee.pair.help')}</Card.Description>
       </Card.Header>
       <div {...stylex.props(styles.actions)}>
-        {canApprove && !offer && (
+        {canEndorse && !offer && (
           <Button
             variant="secondary"
             disabled={phase === 'busy' || recovering}
@@ -272,7 +285,7 @@ function PersonalPairingSession({
           </Button>
         </>
       )}
-      {!canApprove && !joining && (
+      {canRequest && !canEndorse && !joining && (
         <>
           <Textarea
             aria-label={t('e2ee.pair.code')}
@@ -292,7 +305,7 @@ function PersonalPairingSession({
       {preview && (
         <>
           <p>{t('e2ee.pair.compare')}</p>
-          <p {...stylex.props(styles.code)}>{preview.signingPublicKey}</p>
+          <p data-testid="e2ee-pair-preview-key" {...stylex.props(styles.code)}>{preview.signingPublicKey}</p>
           <Button
             disabled={phase === 'busy' || phase === 'published'}
             onClick={() => void approve()}
@@ -304,7 +317,7 @@ function PersonalPairingSession({
       {joining && (
         <>
           {joining.signingPublicKey && (
-            <p {...stylex.props(styles.code)}>{joining.signingPublicKey}</p>
+            <p data-testid="e2ee-pair-joining-key" {...stylex.props(styles.code)}>{joining.signingPublicKey}</p>
           )}
           <div {...stylex.props(styles.actions)}>
             <Button
@@ -332,7 +345,7 @@ function PersonalPairingSession({
       )}
       {phase !== 'idle' && phase !== 'busy' && (
         <p role={phase === 'error' ? 'alert' : 'status'} {...stylex.props(styles.error)}>
-          {t(`e2ee.pair.${phase}`)}
+          {t(phase === 'error' && custodyMessage ? custodyMessage : `e2ee.pair.${phase}`)}
         </p>
       )}
     </Card.Root>

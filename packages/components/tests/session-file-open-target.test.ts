@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   resolveMarkdownImagePath,
+  resolveDirectMarkdownFileOpenTarget,
   resolveSessionFileOpenTarget,
 } from '../src/lib/session-file-open-target';
 
@@ -218,5 +219,33 @@ describe('resolveSessionFileOpenTarget', () => {
         })
       ).toMatchObject({ filePath: 'docs/report v2.md' });
     });
+  });
+});
+
+describe('direct Markdown file opens', () => {
+  it.each([
+    [
+      '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/report.md:12',
+      '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/report.md',
+      12,
+    ],
+    ['./src/app.ts#L8-L10', 'src/app.ts', 8],
+    ['docs/report%2520v2.md', 'docs/report%20v2.md', undefined],
+    ['docs/draft%23v2.md', 'docs/draft#v2.md', undefined],
+    ['C:/repo/file.ts:L42', 'C:/repo/file.ts', 42],
+  ])('opens %s directly without discovery', (href, expectedPath, line) => {
+    const target = resolveDirectMarkdownFileOpenTarget(href);
+    expect(target?.filePath).toBe(expectedPath);
+    expect(target?.startLine).toBe(line);
+    expect(target?.resolveMarkdownLink).toBeUndefined();
+  });
+  it.each([
+    'not a path',
+    'https://example.com/a.ts',
+    'file:///tmp/a.ts',
+    'src/a%00.ts',
+    'src/a%0A.ts',
+  ])('leaves %s for the copy fallback', (href) => {
+    expect(resolveDirectMarkdownFileOpenTarget(href)).toBeNull();
   });
 });

@@ -23,6 +23,22 @@ import {
   safeParseLocalSessionControlRequest,
 } from '../src/message-schemas';
 
+it('admits local Session automation only when the daemon advertises it', () => {
+  for (const machine of [
+    undefined,
+    { protocolCapabilities: {} },
+    { protocolCapabilities: { schedules: 3, remoteAutomationControl: 1 } },
+  ]) {
+    expect(machineSupportsProtocolCapability(machine, 'sessionAutomations')).toBe(false);
+  }
+  expect(
+    machineSupportsProtocolCapability(
+      { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+      'sessionAutomations'
+    )
+  ).toBe(true);
+});
+
 it('negotiates content patches independently and keeps old history requests valid', () => {
   for (const machine of [
     undefined,

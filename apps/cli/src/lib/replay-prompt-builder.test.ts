@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildReplayPromptFromHistory,
+  createReplayPromptBuilder,
   hasRecentResumeNotice,
   type SessionHistoryInput,
 } from '@lody/shared';
@@ -1053,5 +1054,71 @@ describe('hasRecentResumeNotice', () => {
     // Should return false - there's no notice before the LAST user message
     // This allows adding a new notice for the second resume
     expect(hasRecentResumeNotice(history)).toBe(false);
+  });
+});
+
+describe('streamed replay equivalence', () => {
+  it('preserves every pass, exact budget boundary, path order and omission statistic', () => {
+    const history: SessionHistoryInput[] = Array.from({ length: 18 }, (_, index) => ({
+      id: `entry-${index}`,
+      role: index % 5 === 0 ? 'system' : index % 3 === 0 ? 'user' : 'assistant',
+      timestamp: 'synthetic',
+      items: [
+        { type: 'thought', text: '思考🙂'.repeat(index * 9) },
+        { type: 'text', text: 'answer\n'.repeat(index * 11) },
+        {
+          type: 'tool_call',
+          toolCallId: `tool-${index}`,
+          status: 'completed',
+          kind: index % 2 ? 'edit' : 'read',
+          locations: [{ path: `file-${index % 4}.ts` }],
+          content: [
+            {
+              type: 'terminal_output',
+              output: 'stdout ghp_abcdefghijklmnopqrstuvwxyz1234567890 '.repeat(90),
+            },
+            { type: 'diff', path: `file-${index % 3}.ts`, newText: 'changed' },
+            { type: 'text', text: 'tool text' },
+          ],
+        },
+      ],
+    }));
+    for (const excludeTurnId of [undefined, 'entry-3'])
+      for (const maxChars of [
+        0,
+        1,
+        80,
+        81,
+        100,
+        299.5,
+        300,
+        999,
+        1500,
+        3000,
+        6000,
+        10000,
+        100000,
+        Infinity,
+        NaN,
+      ]) {
+        const options = { maxChars, excludeTurnId, terminalTailChars: 109 };
+        const builder = createReplayPromptBuilder(options);
+        for (const entry of history) builder.add(entry);
+        expect(builder.finish()).toEqual(buildReplayPromptFromHistory({ history, ...options }));
+      }
+    for (const terminalTailChars of [0, 1, 1024]) {
+      const result = buildReplayPromptFromHistory({ history, terminalTailChars });
+      for (const maxChars of [
+        result.stats.usedChars - 1,
+        result.stats.usedChars,
+        result.stats.usedChars + 1,
+      ]) {
+        const builder = createReplayPromptBuilder({ maxChars, terminalTailChars });
+        for (const entry of history) builder.add(entry);
+        expect(builder.finish()).toEqual(
+          buildReplayPromptFromHistory({ history, maxChars, terminalTailChars })
+        );
+      }
+    }
   });
 });

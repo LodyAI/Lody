@@ -1,6 +1,7 @@
 import { own } from '../lifecycle';
-import { Context, Effect, Layer, Result, Schema, Semaphore } from 'effect';
+import { Clock, Context, Effect, Layer, Result, Schema, Semaphore } from 'effect';
 import { LedgerPinStore, LedgerViewSource } from '../../services/ledger';
+import { makeEpochWriteGrace } from './epoch-write-grace';
 import { WorkspaceScope } from '../../services/workspace';
 import { hasVerifiedCheckpoint, requireLedgerContinuation, type LedgerView } from './index';
 
@@ -49,6 +50,9 @@ export class VerifiedLedger extends Context.Service<
     current(): Effect.Effect<LedgerView, VerifiedLedgerError>;
     /** Reject a view superseded by this process's observed history; performs no source read or pin write. */
     ensureCurrent(view: LedgerView): Effect.Effect<void, VerifiedLedgerError>;
+    /** Local, durable <=15 minute budget after observing a newer published epoch. No source/network read
+     * and no write permission; missing storage/clock continuity refuses retained-key writes. */
+    readonly canWriteRetainedEpoch?: (epoch: number) => Effect.Effect<boolean>;
   }
 >()('@lody/e2ee-core/VerifiedLedger') {
   /** Requires {@link WorkspaceScope}, {@link LedgerViewSource} and {@link LedgerPinStore}. */
@@ -59,7 +63,9 @@ export class VerifiedLedger extends Context.Service<
       const source = own(yield* LedgerViewSource);
       const pins = own(yield* LedgerPinStore);
       const serial = yield* Semaphore.make(1);
+      const grace = makeEpochWriteGrace(pins, yield* Clock.Clock);
       let observed: LedgerView | undefined;
+      let firstPinRead = true;
 
       const continues = (view: LedgerView) =>
         Result.isSuccess(requireLedgerContinuation(view, view)) &&
@@ -73,6 +79,7 @@ export class VerifiedLedger extends Context.Service<
 
       const accept = Effect.fnUntraced(function* (view: LedgerView) {
         if (!continues(view)) return yield* reject('rollback');
+        yield* grace.capture(view.inspectState().epoch.number);
         // Keep genuine knowledge even if persisting the pin fails below.
         observed = view;
         const pin = yield* pins
@@ -85,8 +92,10 @@ export class VerifiedLedger extends Context.Service<
         if (pin) {
           const contained = hasVerifiedCheckpoint(view, pin);
           if (Result.isFailure(contained) || !contained.success) return yield* reject('rollback');
-          if (pin.length === view.length && pin.head.equals(view.head)) return undefined;
         }
+        yield* grace.observe(view.inspectState().epoch.number, firstPinRead && pin !== null);
+        firstPinRead = false;
+        if (pin && pin.length === view.length && pin.head.equals(view.head)) return undefined;
         yield* pins
           .write({ head: view.head, length: view.length })
           .pipe(
@@ -98,10 +107,25 @@ export class VerifiedLedger extends Context.Service<
       });
 
       return VerifiedLedger.of({
+        canWriteRetainedEpoch: Effect.fn('@lody/e2ee-core/VerifiedLedger.canWriteRetainedEpoch')(
+          (epoch: number) =>
+            serial.withPermit(
+              Effect.suspend(() =>
+                !Number.isSafeInteger(epoch) ||
+                epoch < 0 ||
+                !observed ||
+                epoch >= observed.inspectState().epoch.number
+                  ? Effect.succeed(false)
+                  : grace.allowed(epoch)
+              )
+            )
+        ),
         current: Effect.fn('@lody/e2ee-core/VerifiedLedger.current')(function* () {
           const view = yield* source
             .current()
             .pipe(Effect.mapError((cause) => reject('source', cause)));
+          // Start at genuine observation, before waiting for another local pin operation.
+          if (continues(view)) yield* grace.capture(view.inspectState().epoch.number);
           yield* serial.withPermit(accept(view));
           return view;
         }),

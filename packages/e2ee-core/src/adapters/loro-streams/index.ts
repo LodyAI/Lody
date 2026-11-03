@@ -27,3 +27,4 @@ export {
   streamsDocumentBinding,
   type StreamsDocumentBindingOptions,
 } from './document-binding';
+export { makeRealtimeContentBinding } from './realtime-binding';

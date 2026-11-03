@@ -122,6 +122,7 @@ export function useSessionDoc(
       session: { id: sessionId },
       mq: [],
       humanInputReceipts: {},
+      rpcDispatchOriginals: {},
       cancelRequest: undefined,
       forkOperation: undefined,
       notification: undefined,

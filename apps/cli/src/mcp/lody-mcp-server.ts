@@ -1,10 +1,15 @@
+import { registerAndroidEmulatorPreviewTool } from './android-emulator-tool';
 import { resolveSessionPullRequests } from '@lody/shared';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { registerAgentRoleTools } from './agent-role-tools';
 import { proposeAgentRole } from '@/lib/agent-role-proposal';
 import { batchPage } from '@/orchestration/inbox/batch-page';
 import { isSessionCollaborationStopped } from '@lody/shared';
-import { MACHINE_CATALOG_RETRY_GUIDANCE } from '@/commands/session-catalog-read';
+import {
+  assertMachineFlockCacheSufficient,
+  MACHINE_CATALOG_RETRY_GUIDANCE,
+  type MachineFlockFreshness,
+} from '@/commands/session-catalog-read';
 import { getMachineRoomId } from '@lody/shared';
 import { getLogger } from '@/utils/logger';
 import { machineSupportsProtocolCapability, MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
@@ -94,13 +99,14 @@ import {
   WorkspaceSyncUnavailableError,
   classifyLocalDaemonIpcError,
 } from '@/lib/command-runtime';
+import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import {
   bindAgentRoleCreateOptions,
   composeAgentRolePrompt,
   loadWorkspaceAgentRoleCatalog,
 } from '@/lib/agent-role-create';
-import type { LoroDocumentManager } from '@/lib/loro/doc';
+import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
 import { listWorkspaceGitHubRepositoriesForCliToken } from '@/lib/workspace';
 import {
@@ -138,6 +144,8 @@ import {
   OperationListQuerySchema,
 } from '@/orchestration/operation-store';
 import { registerScheduleTools } from './schedule-tools';
+import { registerAutomationTools } from './automation-tools';
+import { LODY_SKILL_INSTRUCTIONS, registerLodySkills } from './skills/server';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
 import { createSessionBackend } from '@/session/session-backend';
@@ -170,6 +178,16 @@ const IMAGE_UPLOAD_TOOL_NAME = 'lody_upload_images';
 const FILE_UPLOAD_TOOL_NAME = 'lody_upload_files';
 const FEEDBACK_TOOL_NAME = 'lody_feedback';
 const MCP_CONFIGURE_TOOL_NAME = 'lody_mcp_configure';
+const SessionShareToolInputSchema = z
+  .object({
+    requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+    purpose: z.string().trim().min(1).max(280),
+    sessionIds: z
+      .array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/))
+      .max(31)
+      .optional(),
+  })
+  .strict();
 const SESSION_CREATE_OPTIONS_TOOL_NAME = 'lody_session_create_options';
 const SESSION_CREATE_TOOL_NAME = 'lody_session_create';
 const SESSION_CHAT_TOOL_NAME = 'lody_session_chat';
@@ -825,6 +843,13 @@ const SessionChatManyToolInputSchema = z
 
 const OperationGetToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
 const OperationCancelToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
+const OperationBatchGetToolInputSchema = z
+  .object({
+    batchId: z.string().uuid(),
+    cursor: z.string().max(2048).optional(),
+    limit: z.number().int().min(1).max(50).default(20),
+  })
+  .strict();
 
 const SessionArchiveToolInputSchema = z.object({ sessionId: z.string().trim().min(1) }).strict();
 
@@ -992,6 +1017,8 @@ const readRequiredEnv = (...names: string[]): string => {
 };
 
 export interface McpSessionContext {
+  /** Daemon-local readiness check; never serialized or supplied by callers. */
+  assertOperationInboxAvailable?: () => void;
   machineId: string;
   workspaceId: string;
   sessionId: SessionId;
@@ -1037,6 +1064,7 @@ const resolveOperationStorePathForContext = (): string =>
   getLodyOperationStorePath(getSessionContext().machineId);
 
 const getSharedOperationStore = (): LodyOperationStore => {
+  getSessionContext().assertOperationInboxAvailable?.();
   const storePath = resolveOperationStorePathForContext();
   let store = sharedOperationStores.get(storePath);
   if (!store) {
@@ -1304,7 +1332,12 @@ const resolveMcpSessionCreate = (
   input: SessionCreateCommandInput,
   invoking: InvokingTurnContext | undefined,
   requester: Pick<SessionMeta, 'machineId' | 'project'>,
-  catalogRole: AgentRole | undefined
+  catalogRole: AgentRole | undefined,
+  /**
+   * The requester Local Project's linked GitHub repository, present only when
+   * it is enabled in this workspace (`resolveRoleCloneableRepo`).
+   */
+  cloneableRepo?: string
 ): ResolvedMcpSessionCreate => {
   if (!input.agentRoleId) {
     return {
@@ -1345,7 +1378,9 @@ const resolveMcpSessionCreate = (
   }
   // A Role may run on any Machine the requester can access; the shared create
   // path enforces that access. Only a Local Project child is filesystem-bound,
-  // so a Role on another Machine starts as an independent Session there.
+  // so a Role on another Machine starts as an independent Session there — in
+  // the Local Project's linked GitHub repository when the workspace enables
+  // it, since that Machine can clone it; otherwise as a plain chat.
   const project = requester.project;
   let useCurrentSessionAsParent = input.useCurrentSessionAsParent;
   let workContext = input.workContext;
@@ -1366,6 +1401,17 @@ const resolveMcpSessionCreate = (
     workContext === undefined
   ) {
     useCurrentSessionAsParent = true;
+  } else if (
+    project?.kind === 'local' &&
+    cloneableRepo &&
+    role.machineId !== requester.machineId &&
+    useCurrentSessionAsParent !== true &&
+    workContext === undefined
+  ) {
+    // A local branch may exist only on the requester's Machine, so the remote
+    // checkout starts from the repository's default branch; the caller names
+    // any pushed branch in the prompt or an explicit workContext.
+    workContext = { kind: 'github', repo: cloneableRepo };
   }
 
   const { agentRoleMachineId: _agentRoleMachineId, ...withoutTarget } =
@@ -1389,6 +1435,34 @@ const resolveMcpSessionCreate = (
     },
     role,
   };
+};
+
+/**
+ * The requester Local Project's linked GitHub repository, when a Role create
+ * may need it and the workspace enables it. Remote identity is not
+ * authorization, so an unlisted repository keeps the plain-chat placement.
+ */
+const roleRunsElsewhere = (role: AgentRole | undefined, machineId: string): boolean =>
+  role !== undefined && getAgentRoleTargets(role).some((target) => target.machineId !== machineId);
+
+const resolveRoleCloneableRepo = async (
+  auth: AuthContext,
+  workspaceId: WorkspaceId,
+  requester: Pick<SessionMeta, 'project'>,
+  requesterUserId: string,
+  needed: boolean
+): Promise<string | undefined> => {
+  const linked = resolveProjectGitHubRepo(requester.project);
+  if (!needed || requester.project?.kind !== 'local' || !linked || getSessionCommandEnvironment())
+    return undefined;
+  const repos = await listWorkspaceGitHubRepositoriesForCliToken({
+    token: auth.token,
+    workspaceId,
+    requesterUserId,
+    enabledOnly: true,
+  });
+  const normalized = linked.toLowerCase();
+  return repos.find((repo) => repo.fullName.toLowerCase() === normalized)?.fullName;
 };
 
 const buildResolvedMcpCreateCanonicalCommand = (
@@ -1604,26 +1678,53 @@ const resolveSessionLiveWorkingFromSignals = (
   });
 };
 
+/** Bounded first-sync wait for reading another Machine's transcript once. */
+const REMOTE_SESSION_HISTORY_SYNC_WAIT_MS = 8_000;
+
+/**
+ * Reads another Machine's Session doc without keeping its cloud room joined.
+ * This Machine's own Sessions keep the shared cached doc that execution uses.
+ */
+const readSessionDocForMcp = async <T>(
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  localMachineId: string,
+  read: (sessionDoc: SessionDocument) => Promise<T>,
+  remoteSyncTimeoutMs: number
+): Promise<T> =>
+  session.machineId === localMachineId
+    ? await read(await manager.getOrCreateSessionDoc(session.id))
+    : await manager.readSessionDocTransiently(session.id, read, { remoteSyncTimeoutMs });
+
 const readSessionExecutionSnapshot = async (
   manager: LoroDocumentManager,
   session: SessionMeta,
-  live: SessionLiveWorking
-): Promise<SessionExecutionSnapshot> => {
-  const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
-  const backend = await createSessionBackend(sessionDoc, session);
-  const [directory, queue] = await Promise.all([
-    backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
-    backend.getMessageQueue(),
-  ]);
-  const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
-  const queuedTurnCount =
-    queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
-  return resolveSessionExecutionSnapshot({
-    live,
-    ...(activeTurnId ? { activeTurnId } : {}),
-    queuedTurnCount,
-  });
-};
+  live: SessionLiveWorking,
+  localMachineId: string
+): Promise<SessionExecutionSnapshot> =>
+  await readSessionDocForMcp(
+    manager,
+    session,
+    localMachineId,
+    async (sessionDoc) => {
+      const backend = await createSessionBackend(sessionDoc, session);
+      const [directory, queue] = await Promise.all([
+        backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+        backend.getMessageQueue(),
+      ]);
+      const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
+      const queuedTurnCount =
+        queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
+      return resolveSessionExecutionSnapshot({
+        live,
+        ...(activeTurnId ? { activeTurnId } : {}),
+        queuedTurnCount,
+      });
+    },
+    // Status does not wait: presence and RPC carry liveness, and the briefly
+    // retained room refreshes the replica for the next read.
+    0
+  );
 
 /**
  * Resolve whether a session is "currently working" by fusing, in precedence order:
@@ -1832,7 +1933,6 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_list:${ctx.sessionId}`);
     const fingerprint = sessionListFingerprint(input, ctx);
     const cursor = parseSessionListCursor(input.cursor, fingerprint);
     const presence = manager.getPresenceStates() ?? {};
@@ -1859,7 +1959,8 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
     const matches: Array<{
       session: SessionMeta;
       live: SessionLiveWorking;
-      execution: SessionExecutionSnapshot;
+      /** Undefined when the doc could not be read; the summary uses `live`. */
+      execution: SessionExecutionSnapshot | undefined;
     }> = [];
     const readChunkSize = MAX_MCP_STATUS_BATCH_SIZE;
     for (let offset = 0; offset < candidates.length && matches.length <= limit;) {
@@ -1878,13 +1979,22 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
           nowMs,
           rpc: liveStatuses.get(session.id),
         });
-        const execution = await readSessionExecutionSnapshot(manager, session, live);
+        // One unreadable Session doc must not fail the whole page. Its summary
+        // falls back to the live presence/RPC signal, as without a doc read.
+        const execution = await readSessionExecutionSnapshot(
+          manager,
+          session,
+          live,
+          auth.machineId
+        ).catch(() => undefined);
         return { session, live, execution };
       });
       matches.push(
         ...entries.filter(
           (entry) =>
-            !input.executionState || entry.execution.executionState === input.executionState
+            !input.executionState ||
+            (entry.execution?.executionState ?? (entry.live.working ? 'busy' : 'idle')) ===
+              input.executionState
         )
       );
     }
@@ -1895,7 +2005,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
         sessionSummaryForMcp(session, {
           currentUserId: auth.userId,
           live,
-          executionState: execution.executionState,
+          ...(execution ? { executionState: execution.executionState } : {}),
         })
       ),
       ...(matches.length > page.length && last
@@ -1937,7 +2047,6 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_status_many:${ctx.sessionId}`);
     const targets = await readMcpSessionStatusTargets(input.sessionIds, ctx, (id) =>
       readCurrentSessionMeta(manager, id)
     );
@@ -1969,7 +2078,19 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
           nowMs,
           rpc: live,
         });
-        const execution = await readSessionExecutionSnapshot(manager, session, liveWorking);
+        let execution: SessionExecutionSnapshot;
+        try {
+          execution = await readSessionExecutionSnapshot(
+            manager,
+            session,
+            liveWorking,
+            auth.machineId
+          );
+        } catch (error) {
+          // Items are independently fallible: report this one with its original
+          // classification instead of failing every sibling.
+          return { sessionId, ok: false as const, error: normalizeMcpError(error) };
+        }
         return {
           sessionId,
           ok: true as const,
@@ -2026,17 +2147,24 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
         false
       );
     }
-    const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-    const backend = await createSessionBackend(sessionDoc, session);
-    // Bounded business paging: `limit` counts displayable turns, the cursor is a
-    // raw position, and entries removed by the 128 KiB byte cap stay reachable.
-    return await buildSessionHistoryForReader({
-      sessionId,
-      history: backend.history,
-      limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
-      ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
-      maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
-    });
+    return await readSessionDocForMcp(
+      manager,
+      session,
+      auth.machineId,
+      async (sessionDoc) => {
+        const backend = await createSessionBackend(sessionDoc, session);
+        // Bounded business paging: `limit` counts displayable turns, the cursor is a
+        // raw position, and entries removed by the 128 KiB byte cap stay reachable.
+        return await buildSessionHistoryForReader({
+          sessionId,
+          history: backend.history,
+          limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
+          ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
+          maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
+        });
+      },
+      REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
+    );
   });
 };
 
@@ -2130,19 +2258,23 @@ const filterAuthorizedLocalProjectsForOptions = async (
   return rows.filter((row) => row.allowed).map((row) => row.project);
 };
 
-const syncMachineFlockDocsForOptions = async (
+/**
+ * Daemon-hosted catalog reads use the replica the daemon is already syncing.
+ * They do not start a request-scoped Streams round trip. A ready baseline makes
+ * absence a local fact; an unready baseline cannot prove a missing row is invalid.
+ */
+const readDaemonCatalogFreshness = async (
   manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machines: readonly MachineMeta[]
-): Promise<void> => {
-  await Promise.all(
-    machines.map(
-      async (machine) =>
-        await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machine.id), {
-          reason: `mcp.session_create_options:${machine.id}`,
-        })
-    )
-  );
+  docId: string | undefined
+): Promise<MachineFlockFreshness> => {
+  if (await manager.catalogBaselineReady(docId, 0)) return { confirmed: true };
+  return {
+    confirmed: false,
+    error: new FlockSyncUnavailableError({
+      message: 'The daemon catalog baseline is not ready.',
+      reason: 'no-route',
+    }),
+  };
 };
 
 const readCurrentSessionMeta = async (
@@ -2181,6 +2313,7 @@ type InvokingTurnContext = {
   frozenInputConfig: SessionTurnInputConfig;
   notificationOriginTurnIds: string[];
   identity: InvocationIdentity;
+  sender?: Extract<SessionActiveInvocationContextResult, { active: true }>['sender'];
 };
 
 const buildInvocationIdentity = (source: InvokingTurnSource): InvocationIdentity => {
@@ -2204,6 +2337,7 @@ type InvokingTurnSource = {
   inputConfig: SessionTurnInputConfig;
   notificationOriginTurnIds: string[];
   notificationProvenancePending?: boolean;
+  sender?: Extract<SessionActiveInvocationContextResult, { active: true }>['sender'];
 };
 
 const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
@@ -2231,6 +2365,7 @@ const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
     inputConfig,
     notificationOriginTurnIds: active.notificationOriginTurnIds ?? [],
     notificationProvenancePending: active.notificationProvenancePending,
+    sender: active.sender,
   };
 };
 
@@ -2298,6 +2433,7 @@ const resolveInvokingTurnContext = async (
   return {
     chainDepth,
     identity: buildInvocationIdentity(source),
+    sender: source.sender,
     notificationOriginTurnIds: [...new Set(notificationOriginTurnIds)],
     frozenInputConfig: {
       ...source.inputConfig,
@@ -2390,12 +2526,14 @@ const reverseChatError = (): LodyOperationStoreError =>
     false
   );
 
-/** Read only the exact input owned by the active invocation, never earlier conversation turns. */
+/** Prefer the frozen sender; only unresolved provenance needs the exact input history. */
 const readInvokingChatSender = async (
   manager: LoroDocumentManager,
   session: SessionMeta,
   invoking: InvokingTurnContext
 ): Promise<string | undefined> => {
+  if (invoking.sender?.kind === 'agent') return invoking.sender.sessionId;
+  if (invoking.sender?.kind === 'user') return undefined;
   const doc = await manager.getOrCreateSessionDoc(session.id);
   const backend = await createSessionBackend(doc);
   const input = await backend.history.readTurn(invoking.identity.sourceTurnId);
@@ -2431,7 +2569,9 @@ const readMachineAcpCapabilities = async (
 const buildSessionWorkContext = async (
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
-  session: SessionMeta
+  session: SessionMeta,
+  /** Freshness for `session.machineId` when the caller already observed that catalog. */
+  knownMachineFreshness?: MachineFlockFreshness
 ): Promise<
   | { kind: 'chat' }
   | { kind: 'github'; repo: string }
@@ -2446,15 +2586,25 @@ const buildSessionWorkContext = async (
 > => {
   const project = session.project;
   if (project?.kind === 'local') {
-    await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, session.machineId), {
-      reason: `mcp.session_current.local_project:${session.machineId}`,
-    });
+    const freshness =
+      knownMachineFreshness ??
+      (await readDaemonCatalogFreshness(
+        manager,
+        getMachineFlockDocId(workspaceId, session.machineId)
+      ));
     const localProjects = await readMachineLocalProjects(
       manager.repo,
       workspaceId,
       session.machineId
     );
     const localProject = localProjects[project.localProjectId];
+    if (!localProject) {
+      assertMachineFlockCacheSufficient(
+        freshness,
+        `Local project is absent from the local replica: ${project.localProjectId}.`,
+        { kind: 'project', id: project.localProjectId }
+      );
+    }
     const githubRepo = resolveProjectGitHubRepo(project);
     return {
       kind: 'local',
@@ -2477,7 +2627,8 @@ const buildSessionWorkContext = async (
 const buildSessionCurrentInfo = async (
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
-  session: SessionMeta
+  session: SessionMeta,
+  knownMachineFreshness?: MachineFlockFreshness
 ): Promise<Record<string, unknown>> => {
   return {
     workspaceId,
@@ -2488,7 +2639,12 @@ const buildSessionCurrentInfo = async (
     ...(session.openedByRootSessionId
       ? { openedByRootSessionId: session.openedByRootSessionId }
       : {}),
-    workContext: await buildSessionWorkContext(manager, workspaceId, session),
+    workContext: await buildSessionWorkContext(
+      manager,
+      workspaceId,
+      session,
+      knownMachineFreshness
+    ),
     git: {
       ...(session.branchName ? { branchName: session.branchName } : {}),
       ...(session.baseBranch ? { baseBranch: session.baseBranch } : {}),
@@ -2544,15 +2700,27 @@ const buildSessionCreateOptions = async (
   const workspace = await resolveWorkspaceOrThrow(auth, ctx.workspaceId);
   const workspaceId = workspace.id as WorkspaceId;
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_create_options:${workspaceId}`);
+    const metaFreshness = await readDaemonCatalogFreshness(manager, undefined);
     const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!currentSession) {
+      assertMachineFlockCacheSufficient(
+        metaFreshness,
+        `Requester session is absent from the local replica: ${ctx.sessionId}.`
+      );
       throw new Error(`Session not found: ${ctx.sessionId}`);
     }
     const invoking = await resolveInvokingTurnContext(currentSession, manager);
     const requesterUserId = invoking.identity.userId;
     const delegatedRequester = toDelegatedSessionRequester(invoking.identity);
     const machineEntries = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
+    const requestedMachineId = normalizeCliValue(input.machineId);
+    const machineIdToResolve = (requestedMachineId ?? currentSession.machineId) as MachineId;
+    if (!machineEntries.some((entry) => entry.meta.id === machineIdToResolve)) {
+      assertMachineFlockCacheSufficient(
+        metaFreshness,
+        `Machine is absent from the local replica: ${machineIdToResolve}.`
+      );
+    }
     // Null here is "presence unavailable", so liveness is UNKNOWN for every remote
     // Machine; see makeMachineLivenessLookupForMcp. Treating that as offline used to
     // drop healthy Machines out of the candidate list with no warning at all.
@@ -2579,11 +2747,20 @@ const buildSessionCreateOptions = async (
       input.machineId,
       currentSession.machineId
     );
-    await syncMachineFlockDocsForOptions(manager, workspaceId, [selectedMachine]);
+    const flockFreshness = await readDaemonCatalogFreshness(
+      manager,
+      getMachineFlockDocId(workspaceId, selectedMachine.id)
+    );
     const allAgentConfigs = await listMergedAgentConfigs(manager.repo, workspaceId, [
       selectedMachine.id,
     ]);
     const agentConfigQuery = normalizeCliValue(input.agentConfigQuery)?.toLowerCase();
+    if (allAgentConfigs.length === 0) {
+      assertMachineFlockCacheSufficient(flockFreshness, 'Agent config catalog is unavailable.', {
+        kind: 'agent config',
+        id: agentConfigQuery,
+      });
+    }
     const defaultAgentConfigId = selectDefaultAgentConfigForCreate(
       allAgentConfigs,
       selectedMachine.id,
@@ -2599,6 +2776,13 @@ const buildSessionCreateOptions = async (
         return defaultAgentConfigId ? config.id === defaultAgentConfigId : false;
       })
       .slice(0, MAX_MCP_CREATE_OPTION_MATCHES);
+    if (agentConfigQuery && agentConfigs.length === 0) {
+      assertMachineFlockCacheSufficient(
+        flockFreshness,
+        `Agent config is absent from the local replica: ${agentConfigQuery}.`,
+        { kind: 'agent config', id: agentConfigQuery }
+      );
+    }
     const acpCapabilities = await readMachineAcpCapabilities(
       manager,
       workspaceId,
@@ -2609,9 +2793,10 @@ const buildSessionCreateOptions = async (
       currentSession.machineId === selectedMachine.id && currentSession.project?.kind === 'local'
         ? currentSession.project.localProjectId
         : undefined;
-    const localProjectCandidates = Object.values(
+    const allLocalProjects = Object.values(
       await readMachineLocalProjects(manager.repo, workspaceId, selectedMachine.id)
-    ).filter((project) => {
+    );
+    const localProjectCandidates = allLocalProjects.filter((project) => {
       if (localProjectQuery) {
         return [project.id, project.name, project.rootPath].some((value) =>
           value.toLowerCase().includes(localProjectQuery)
@@ -2619,6 +2804,23 @@ const buildSessionCreateOptions = async (
       }
       return currentLocalProjectId !== undefined && project.id === currentLocalProjectId;
     });
+    if (localProjectQuery && localProjectCandidates.length === 0) {
+      assertMachineFlockCacheSufficient(
+        flockFreshness,
+        `Local project is absent from the local replica: ${localProjectQuery}.`,
+        { kind: 'project', id: localProjectQuery }
+      );
+    }
+    if (
+      currentLocalProjectId !== undefined &&
+      !allLocalProjects.some((project) => project.id === currentLocalProjectId)
+    ) {
+      assertMachineFlockCacheSufficient(
+        flockFreshness,
+        `Local project is absent from the local replica: ${currentLocalProjectId}.`,
+        { kind: 'project', id: currentLocalProjectId }
+      );
+    }
     const localProjects = (
       await filterAuthorizedLocalProjectsForOptions(
         auth,
@@ -2656,7 +2858,12 @@ const buildSessionCreateOptions = async (
         : [];
     return {
       ok: true,
-      current: await buildSessionCurrentInfo(manager, workspaceId, currentSession),
+      current: await buildSessionCurrentInfo(
+        manager,
+        workspaceId,
+        currentSession,
+        currentSession.machineId === selectedMachine.id ? flockFreshness : undefined
+      ),
       defaultMachineId: currentSession.machineId,
       ...(defaultAgentConfigId ? { defaultAgentConfigId } : {}),
       machines: machines.map((machine) => ({
@@ -2715,11 +2922,19 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     const roleCatalog = args.agentRoleId
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
+    const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
     const resolved = resolveMcpSessionCreate(
       args,
       invoking,
       currentSession,
-      args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined
+      catalogRole,
+      await resolveRoleCloneableRepo(
+        auth,
+        workspace.id as WorkspaceId,
+        currentSession,
+        invoking.identity.userId,
+        roleRunsElsewhere(catalogRole, currentSession.machineId)
+      )
     );
     const canonicalCommand = buildResolvedMcpCreateCanonicalCommand(resolved, args.deadlineSeconds);
     const retry = await withOperationStore((store) =>
@@ -3069,6 +3284,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           {
             userTurnId: pendingItem.target.userTurnId,
             chainDepth: invoking.chainDepth + 1,
+            steerActiveTurn: true,
           },
           toDelegatedSessionRequester(invoking.identity),
           { attachments: accepted.operation.targetInputAttachments?.[0] }
@@ -3261,6 +3477,18 @@ const startSessionCreateManyOperation = async (
     const roleCatalog = expanded.some((item) => Boolean(item.agentRoleId))
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
+    const cloneableRepo = await resolveRoleCloneableRepo(
+      auth,
+      workspace.id as WorkspaceId,
+      requester,
+      invoking.identity.userId,
+      expanded.some((item) =>
+        roleRunsElsewhere(
+          item.agentRoleId ? roleCatalog?.get(item.agentRoleId) : undefined,
+          requester.machineId
+        )
+      )
+    );
     const resolvedItems = expanded.map((item) => {
       if (!item.prompt) return { resolved: undefined, error: undefined };
       try {
@@ -3283,7 +3511,8 @@ const startSessionCreateManyOperation = async (
             single,
             invoking,
             requester,
-            item.agentRoleId ? roleCatalog?.get(item.agentRoleId) : undefined
+            item.agentRoleId ? roleCatalog?.get(item.agentRoleId) : undefined,
+            cloneableRepo
           ),
           error: undefined,
         };
@@ -3733,6 +3962,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
               userTurnId: storedItem.target.userTurnId,
               chainDepth: invoking.chainDepth + 1,
               bypassSessionQuota: shouldBypassSessionQuota('session_chat_many'),
+              steerActiveTurn: true,
             },
             toDelegatedSessionRequester(invoking.identity)
           );
@@ -3842,9 +4072,11 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         'To read that conversation, pass the full URI as sessionId to lody_session_history. The workspace must match this tool context. Bare session IDs are also accepted; use the exact child session ID to read a child conversation.',
         'Paginate with nextCursor when you need older turns.',
         SESSION_COLLABORATION_GUIDANCE,
+        LODY_SKILL_INSTRUCTIONS,
       ].join(' '),
     }
   );
+  registerLodySkills(server);
   registerScheduleTools(server, {
     execute: async (command) => {
       const ctx = getSessionContext();
@@ -3856,6 +4088,17 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         socketPath: ctx.localControlSocketPath,
       });
     },
+  });
+
+  registerAutomationTools(server, async (command) => {
+    const ctx = getSessionContext();
+    const { sendDaemonAutomationCommand } = await import('@/automations/control/client');
+    return sendDaemonAutomationCommand(command, {
+      machineId: ctx.machineId,
+      workspaceId: ctx.workspaceId,
+      requesterSessionId: ctx.sessionId,
+      socketPath: ctx.localControlSocketPath,
+    });
   });
 
   const registerSessionTool = createSessionToolRegistrar(
@@ -3984,16 +4227,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       title: 'Request a conversation share',
       description:
         'Request a static share only when the user asks to share. Supply a short purpose for the consent card. The user approves once in Lody; the client then automatically publishes and returns the complete bearer URL to you. The card explicitly discloses this. Supply a stable requestId; repeat this call with the same requestId, purpose and targets while pending or confirmed to receive the result, including after a timeout. shareRequestId is a server record ID, never a retry key. The current conversation is always included. Do not retry cancelled or expired requests with a new ID without a new user request. This tool cannot approve, upload, reset or revoke shares.',
-      inputSchema: z
-        .object({
-          requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
-          purpose: z.string().trim().min(1).max(280),
-          sessionIds: z
-            .array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/))
-            .max(31)
-            .optional(),
-        })
-        .strict(),
+      inputSchema: SessionShareToolInputSchema,
     },
     async (args, extra) => {
       try {
@@ -4075,6 +4309,22 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       makeLocalControlClientAuto({ socketPath: ctx.localControlSocketPath }).machineRpc(
         {
           method: 'ios-simulator/agent-control',
+          machineId: ctx.machineId,
+          workspaceId: ctx.workspaceId,
+          params: { sessionId: ctx.sessionId, command },
+        },
+        { timeoutMs: SESSION_CONTROL_TIMEOUT_MS }
+      )
+    );
+    if (!response.ok) throw new Error('Simulator control unavailable.');
+    return response.result;
+  });
+  registerAndroidEmulatorPreviewTool(server, async (command) => {
+    const ctx = getSessionContext();
+    const response = await Effect.runPromise(
+      makeLocalControlClientAuto({ socketPath: ctx.localControlSocketPath }).machineRpc(
+        {
+          method: 'android-emulator/agent-control',
           machineId: ctx.machineId,
           workspaceId: ctx.workspaceId,
           params: { sessionId: ctx.sessionId, command },
@@ -4252,7 +4502,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create a Lody session',
       description:
-        'Start durable asynchronous work that creates a Lody session. By default, explicitly set useCurrentSessionAsParent=false to create a sub-conversation shown in the sidebar. Set true only when the user explicitly requests a Tab in the current conversation. Supply operationId; results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. A Role that runs on several machines also needs agentRoleMachineId naming the target machine. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. If a call times out or fails, retry with the same operationId; a fresh id for the same work risks a duplicate Session. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
+        'Start durable asynchronous work that creates a Lody session. By default, explicitly set useCurrentSessionAsParent=false to create a sub-conversation shown in the sidebar. Set true only when the user explicitly requests a Tab in the current conversation. Supply operationId; results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. A Role that runs on several machines also needs agentRoleMachineId naming the target machine. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts in the current local project linked GitHub repository (default branch) when the workspace enables that repository, else as a plain chat there; name any pushed branch in the prompt or pass workContext. To recover an already accepted create without resending its prompt, send only operationId with resume=true. If a call times out or fails, retry with the same operationId; a fresh id for the same work risks a duplicate Session. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -4283,11 +4533,19 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           const roleCatalog = args.agentRoleId
             ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
             : undefined;
+          const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
           const resolved = resolveMcpSessionCreate(
             args,
             invoking,
             currentSession,
-            args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined
+            catalogRole,
+            await resolveRoleCloneableRepo(
+              auth,
+              workspace.id as WorkspaceId,
+              currentSession,
+              invoking.identity.userId,
+              roleRunsElsewhere(catalogRole, currentSession.machineId)
+            )
           );
           await freezeInvokingAuthor(manager, currentSession, invoking);
           const options = buildMcpCreateOptions(resolved.input, ctx);
@@ -4350,7 +4608,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Send a prompt to a Lody session',
       description:
-        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. The wait field is temporary legacy compatibility only. ' +
+        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. A target already running a turn, including on another Machine, receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn; a failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. The wait field is temporary legacy compatibility only. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -4443,7 +4701,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Chat multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
+        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. A target already running a turn, including on another Machine, receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn; a failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -4522,13 +4780,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       description:
         'Read a fixed batch of completed Operation results for the invoking Session and user. Page omitted results without starting another task. Oversized members are returned as member-json fragments; concatenate jsonChunk in offset order and parse once complete.',
       annotations: { readOnlyHint: true },
-      inputSchema: z
-        .object({
-          batchId: z.string().uuid(),
-          cursor: z.string().max(2048).optional(),
-          limit: z.number().int().min(1).max(50).default(20),
-        })
-        .strict(),
+      inputSchema: OperationBatchGetToolInputSchema,
     },
     async (args) => {
       try {

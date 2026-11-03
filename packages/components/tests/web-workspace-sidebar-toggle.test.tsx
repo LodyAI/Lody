@@ -40,6 +40,7 @@ describe('desktop sidebar toggle', () => {
     container?.remove();
     container = undefined;
     layout.compact = false;
+    delete window.__LODY_VERTICAL_DIVISION__;
   });
 
   function render(node: React.ReactNode) {
@@ -198,6 +199,44 @@ describe('desktop sidebar toggle', () => {
     expect(wrapper.style.marginRight).toBe('-240px');
     expect(wrapper.style.transform).toBe('translateX(-240px)');
     flushSync(() => store.set(sidebarCollapsedAtom, false));
+    expect(container!.querySelector('[data-sidebar-identity]')).toBe(sidebar);
+  });
+
+  it('keeps workspace panes on opposite sides of a changing fold without saving its width', async () => {
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, false);
+    store.set(sidebarLastWidthAtom, 300);
+    await act(async () =>
+      render(
+        <Provider store={store}>
+          <WebWorkspaceLayout>
+            <div data-content="" />
+          </WebWorkspaceLayout>
+        </Provider>
+      )
+    );
+    const sidebar = container!.querySelector<HTMLElement>('[data-sidebar-identity]')!;
+    const wrapper = sidebar.parentElement!;
+    const content = container!.querySelector<HTMLElement>(
+      `[data-focus-scope="${WORKSPACE_FOCUS_SCOPES.content}"]`
+    )!;
+    await act(async () => {
+      window.__LODY_VERTICAL_DIVISION__ = { left: 455.5, width: 40, viewportWidth: 867 };
+      window.dispatchEvent(new Event('lody:division-change'));
+    });
+    expect(wrapper.style.width).toBe('455.5px');
+    expect(wrapper.style.marginRight).toBe('40px');
+    expect(store.get(sidebarLastWidthAtom)).toBe(300);
+    await act(async () => store.set(sidebarCollapsedAtom, true));
+    expect(wrapper.style.marginRight).toBe('-455.5px');
+    expect(content.style.marginLeft).toBe('495.5px');
+    await act(async () => {
+      window.__LODY_VERTICAL_DIVISION__ = null;
+      window.dispatchEvent(new Event('lody:division-change'));
+    });
+    expect(wrapper.style.width).toBe('');
+    expect(wrapper.style.marginRight).toBe('-300px');
+    expect(content.style.marginLeft).toBe('');
     expect(container!.querySelector('[data-sidebar-identity]')).toBe(sidebar);
   });
 

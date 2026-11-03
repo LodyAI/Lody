@@ -125,6 +125,7 @@ export function WebArchiveScreen({
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
     insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
   });
   const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   // Traffic lights auto-hide in native fullscreen — no inset to reserve then.

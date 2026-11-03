@@ -118,7 +118,7 @@ export function E2eeSecurityPanel({
               }
             >
               {device.mayRevoke && (
-                <Button variant="secondary" disabled={busy} onClick={() => onRevoke(device.key)}>
+                <Button data-testid="e2ee-device-revoke" data-device-key={device.key} variant="secondary" disabled={busy} onClick={() => onRevoke(device.key)}>
                   {t('e2ee.security.revoke')}
                 </Button>
               )}

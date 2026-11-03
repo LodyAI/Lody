@@ -81,6 +81,23 @@ unhandled rejection at background entries. When possible, carry the
 precondition (a version or write receipt) to the owner that can wait for it
 locally, instead of making the caller wait on a second channel.
 
+**A failure is never a cached result.** A shared start, probe or load promise may
+share the in-flight attempt and may cache success. When it fails, the next call or a
+bounded retry starts a new attempt; do not keep the rejected promise, a failed fiber
+or a "started" flag that makes every later call return the same failure until
+restart. The 2026-10-29 availability audit found this shape in the credential
+broker, login-shell probe, workspace catalog room, built-in Provider registration,
+Codex authentication slot and Supervisor OOM fatal state.
+
+**A local proof must not become a global gate.** When a check cannot establish a
+local fact (resources released, defaults read, a cache valid), degrade the dependent
+action and report it; do not turn the uncertainty into a durable block, an unbounded
+wait or a startup failure for unrelated work. Keep only the protection that prevents
+concrete damage, such as never replaying an unknown submission or never prompting a
+busy Agent. Every wait on a user path has an upper bound. The
+[availability decision](../notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md)
+records the incident that made this explicit.
+
 **Diagnostic collections are bounded.** Background failure buffers have a size
 limit or a lifetime. A stream failure observed and recovered an hour ago must not
 make an unrelated later close fail. Keep necessary full failures private with the

@@ -8,7 +8,9 @@ PR: [#1652](https://github.com/LodyAI/Lody/pull/1652)
 
 ## 摘要
 
-一个 Session 永久不再响应：一轮经 Inbox 投递的 turn 失败后，失败处理本身又抛出了异常。第二个异常跳过了 Inbox 释放，turn 登记随之泄漏，而且没有记录任何释放失败。此后每条输入都以 `active-session` 被拒，live status 一直显示 `initializing`，也没有任何恢复路径接管这个占用槽。现在，visible turn 的 owner 在分类完失败后一定会执行释放。yielded turn 的 finalization 慢时改为等待，不再记为释放失败。确实无法确认的释放会显示为忙碌的 `waiting` 状态，下一条等待这个 Session 的输入会请求恢复。释放 turn 从不终止 agent 进程。引发这次事故的"空闲 GC 销毁正在使用的文档"竞态，留给 Session residency 工作处理。
+当前释放与超时策略由[可用性决定](2026-10-29-inbox-no-durable-block.zh.md)管理。以下事故、原决定和验证保留为历史；工作区统计现在在有上限的预算内于释放前完成；无限等待和以释放证明阻断后继的策略已被取代。
+
+一个 Session 永久不再响应：一轮经 Inbox 投递的 turn 失败后，失败处理本身又抛出了异常。第二个异常跳过了 Inbox 释放，turn 登记随之泄漏，而且没有记录任何释放失败。此后每条输入都以 `active-session` 被拒，live status 一直显示 `initializing`，也没有任何恢复路径接管这个占用槽。现在，visible turn 的 owner 在分类完失败后一定会执行释放。yielded turn 的 finalization 慢时改为等待，不再记为释放失败。确实无法确认的释放会显示为忙碌的 `waiting` 状态，下一条等待这个 Session 的输入会请求恢复。释放 turn 从不终止 agent 进程。引发这次事故的"空闲 GC 销毁正在使用的文档"竞态，由后续的 [Session residency 工作](https://github.com/LodyAI/Lody/pull/1670)单独处理。
 
 ## 事故经过
 
@@ -22,6 +24,10 @@ PR: [#1652](https://github.com/LodyAI/Lody/pull/1652)
 - **由等待中的输入驱动恢复。** dispatch 检查遇到 `release-blocked`，或 Inbox 为阻断中的 Session 做就绪检查时，都会调用 `requestReleaseRecovery`。它对每个 Session 单飞，内部复用现有的 `recoverInboxExecution`。失败的尝试保留占用槽，由下一条等待的输入重试；成功则释放占用槽并重新检查 dispatch。服务没有新增定时器或后台任务。
 
 ## agent 进程会被保留
+
+Stop 也会持久化[控制异常诊断](2026-10-29-session-stop-failure-notices.zh.md)，覆盖取消
+请求失败、排空超时和终止失败。这些警告补充 `releaseBlocked`，不会释放资源，也不因
+提示写入阻塞清理。
 
 释放 turn 指的是：在途 ACP 请求已经结束、Inbox 执行记录已经写入之后，交还占用槽。它不终止 agent 进程，进程保持存活，供下一轮复用。只有空闲 GC（`LODY_SESSION_GC_IDLE_TIMEOUT_MS`，默认 20 分钟）、内存压力驱逐、归档或异常路径才会结束进程。异常路径包括：agent 在 Stop 后 5 秒仍不停止、连接丢失，以及阻断释放的恢复（它通过终止进程来证明释放已结束）。
 
@@ -43,4 +49,4 @@ PR: [#1652](https://github.com/LodyAI/Lody/pull/1652)
 
 ## 限制与后续
 
-这个修复并不阻止 GC 销毁正在使用的文档。GC 仍然对一个没有引用计数的文档缓存执行"先检查后执行"，它的活动 turn 判断也看不到 prompt 之前的启动阶段。Session residency 工作会用带 lease、有引用计数的分代资源替换这两者；它堆叠在 native Repo 的接入之上，并遵循[turn 执行与 ACP 进程所有权](../../proposed/architecture/2026-09-27-effect-turn-execution-and-acp-process-ownership.zh.md)的目标设计。那份 Note 中完整的 `TurnRegistry`（以 Effect `acquireRelease` 完成登记）仍未实现：失败分类目前还是 Promise 代码，所以这里的释放靠 owner 的控制流保证，而不是靠 Scope finalizer。
+原来的 GC／文档缓存竞争现在由[带租约的 Session 文档与原子退役实现](https://github.com/LodyAI/Lody/pull/1670)负责；本文继续拥有失败分类与释放顺序的决策。相关工作遵循[turn 执行与 ACP 进程所有权](../../proposed/architecture/2026-09-27-effect-turn-execution-and-acp-process-ownership.zh.md)的目标设计。那份 Note 中完整的 `TurnRegistry`（以 Effect `acquireRelease` 完成登记）仍未实现：失败分类目前还是 Promise 代码，所以这里的释放靠 owner 的控制流保证，而不是靠 Scope finalizer。

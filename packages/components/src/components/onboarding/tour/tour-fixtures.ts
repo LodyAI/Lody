@@ -1,3 +1,4 @@
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { createStore } from 'jotai';
 import {
   getAgentConfigRoomId,
@@ -784,6 +785,12 @@ export function createTourStore(identity: TourIdentity) {
   const store = createStore();
   const session = buildTourSession(identity);
   const agentConfig = buildTourAgentConfig(identity);
+  store.set(workspaceContentModeAtom, {
+    accountId: TOUR_USER_ID,
+    workspaceId: TOUR_WORKSPACE_ID,
+    workspaceSlug: TOUR_WORKSPACE_SLUG,
+    descriptor: { workspaceId: TOUR_WORKSPACE_ID, contentMode: 'plaintext', contentModeVersion: 1 },
+  });
   store.set(currentWorkspaceIdAtom, TOUR_WORKSPACE_ID);
   store.set(currentWorkspaceSlugAtom, TOUR_WORKSPACE_SLUG);
   store.set(authTokenAtom, 'onboarding-tour-token');

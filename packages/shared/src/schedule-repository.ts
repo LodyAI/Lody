@@ -1,3 +1,4 @@
+import { recordScheduleAuthorization } from './schedule-authorization';
 import type { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 
@@ -10,6 +11,7 @@ import {
   getScheduleRoomId,
   readScheduleRegistryRows,
   scheduleRegistryKeys,
+  manualScheduleRunKey,
 } from './schedule-registry';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
@@ -118,7 +120,8 @@ const CID_KEY = '$cid';
 export class ScheduleRepository {
   constructor(
     readonly repo: ScheduleRepositoryPort,
-    readonly workspaceId: WorkspaceId
+    readonly workspaceId: WorkspaceId,
+    private readonly options: { protectedContent?: boolean } = {}
   ) {}
 
   async list() {
@@ -166,6 +169,8 @@ export class ScheduleRepository {
           requesterSessionId: entry.requesterSessionId,
         })),
       });
+      if (this.options.protectedContent)
+        recordScheduleAuthorization(handle.doc as LoroDoc, document);
       await this.repo.flush();
       // This publication is the execution gate. An interrupted first flush
       // leaves an orphan definition; no discovery/repair may enable it.
@@ -436,6 +441,15 @@ export class ScheduleRepository {
       )
         throw new Error('Idempotency key conflict');
       return;
+    }
+    if (this.options.protectedContent) {
+      const handle = await this.repo.openPersistedDoc(getScheduleRoomId(args.scheduleId));
+      recordScheduleAuthorization(
+        handle.doc as LoroDoc,
+        document,
+        manualScheduleRunKey(args.scheduleId, args.manualRunId)
+      );
+      await this.repo.flush();
     }
     registry.flock.set(key, request as never);
     await this.repo.flush();

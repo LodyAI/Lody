@@ -1,7 +1,10 @@
+import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
+import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
 import { requireWorkspaceFeature } from './workspace-feature';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   getMachineRoomId,
+  normalizeSessionInputBlocks,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   machineSupportsSessionInputDispatch,
@@ -35,6 +38,9 @@ export async function acceptSessionUserTurn(
   attachments?: SessionAttachmentDraft[],
   onAccepted?: () => void
 ): Promise<'written' | 'pending'> {
+  // Do not consume a draft into a provisional plaintext namespace that may be
+  // retired when the workspace is classified as encrypted.
+  await runtime.waitForContentAdmission?.();
   if (
     attachments?.some(
       (attachment) =>
@@ -43,10 +49,19 @@ export async function acceptSessionUserTurn(
         attachment.ready.transport !== 'local'
     )
   ) {
+    if (runtime.contentMode !== 'e2ee')
+      await authorizePlaintextAttachmentPreparation(runtime.workspaceId, undefined, entry.userId);
     requireWorkspaceFeature(
       { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
       'attachments'
     );
+  }
+  if (runtime.contentMode === 'e2ee') {
+    const blocks = normalizeSessionInputBlocks(entry.inputConfig?.inputBlocks, '');
+    assertProtectedAttachmentReferences([
+      ...blocks,
+      ...(attachments?.flatMap((item) => (item.ready ? [item.ready] : [])) ?? []),
+    ]);
   }
   const pending = runtime.pendingSends;
   const unprepared = attachments?.some((attachment) => !attachment.ready) ?? false;

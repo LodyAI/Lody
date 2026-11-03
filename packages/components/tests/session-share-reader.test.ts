@@ -8,7 +8,7 @@ import {
 } from '../src/lib/session-share-reader';
 import { resolveSessionShareTab, resolveSharePanes } from '../src/lib/session-share-navigation';
 
-async function fixture() {
+async function fixture(unavailableStatus?: number) {
   const prepared = await prepareSharePackage({
     rootSourceId: 'source',
     capturedAt: '2026-09-12T00:00:00.000Z',
@@ -40,12 +40,21 @@ async function fixture() {
       throw new Error('Unexpected source read');
     },
   });
-  const fetcher = vi.fn<typeof fetch>(async (input) => {
+  const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+    expect(init).toMatchObject({
+      credentials: 'omit',
+      redirect: 'error',
+      referrerPolicy: 'no-referrer',
+    });
+    expect([...new Headers(init?.headers)]).toEqual([
+      ['authorization', `Bearer ${'a'.repeat(64)}`],
+    ]);
     const url = String(input);
     if (url.endsWith('/api/shares/share'))
       return Response.json({ shareId: 'share', deploymentId: 'v1', manifest: prepared.manifest });
     const id = url.split('/').at(-1)!;
     expect(url).toBe(`https://api.example.test/api/shares/share/deployments/v1/objects/${id}`);
+    if (unavailableStatus) return new Response(null, { status: unavailableStatus });
     const bytes = prepared.objects.get(id);
     return bytes ? new Response(bytes.slice().buffer) : new Response(null, { status: 404 });
   });
@@ -59,6 +68,24 @@ async function fixture() {
 }
 
 describe('anonymous static conversation reader', () => {
+  it.each([403, 410])(
+    'shows no source content after revoked/expired access (%s)',
+    async (status) => {
+      const { share } = await fixture(status);
+      const snapshots: SessionShareReaderSnapshot[] = [];
+      const reader = createSessionShareReader({
+        share,
+        conversationId: 'c1',
+        onChange: (snapshot) => snapshots.push(snapshot),
+      });
+      await reader.start();
+      expect(snapshots).toEqual([
+        { status: 'loading', history: [] },
+        { status: 'unavailable', history: [] },
+      ]);
+      reader.close();
+    }
+  );
   it('reads once, renders stored history and never subscribes on repeated start', async () => {
     const { share, fetcher } = await fixture();
     const changed = vi.fn<(value: SessionShareReaderSnapshot) => void>();

@@ -386,7 +386,7 @@ describe('chat landing draft persistence', () => {
   });
 });
 
-it('retains encrypted attachment drafts and the reserved identity after refused admission', async () => {
+it('retains encrypted attachment drafts and the reserved identity after storage admission fails', async () => {
   await i18next.init({ lng: 'en', resources: {} });
   mountLanding(WORKSPACE_A_KEY);
   const file = textFile('private.txt');
@@ -407,7 +407,7 @@ it('retains encrypted attachment drafts and the reserved identity after refused 
   const reserved = before.sessionId!;
   await expect(
     acceptSessionUserTurn(
-      { contentMode: 'e2ee' } as WorkspaceRuntime,
+      { contentMode: 'e2ee', repo: { getDocMeta: async () => { throw new Error('Workspace storage unavailable'); } } } as unknown as WorkspaceRuntime,
       reserved,
       {} as never,
       { kind: 'dispatch' },
@@ -416,7 +416,7 @@ it('retains encrypted attachment drafts and the reserved identity after refused 
       before.attachments,
       before.clearDraft
     )
-  ).rejects.toThrow('Encrypted workspaces do not yet support attachments.');
+  ).rejects.toThrow('Workspace storage unavailable');
   unmountLanding();
   mountLanding(WORKSPACE_A_KEY);
   const restored = readHarness();

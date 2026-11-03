@@ -487,33 +487,99 @@ describe('application-owned login-shell cache', () => {
     }
   );
 
-  it.effect('keeps a late native failure for all later readers without restarting the probe', () =>
-    Effect.gen(function* () {
-      const failure = new Error('probe infrastructure failed');
-      const result = yield* Deferred.make<never, Error>();
-      yield* Effect.gen(function* () {
-        const cache = yield* LoginShellCache;
-        const early = yield* cache.get(3000).pipe(Effect.forkChild);
-        yield* TestClock.adjust(3000);
-        expect(yield* Fiber.join(early)).toBeNull();
-        yield* Deferred.fail(result, failure);
-        for (const read of [cache.get(), cache.peek, cache.get()]) {
-          const exit = yield* read.pipe(Effect.exit);
-          expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(failure);
-        }
-      }).pipe(
-        Effect.provide(
-          LoginShellCacheLive.pipe(
-            Layer.provide(
-              Layer.succeed(LoginShellEnvironment, {
-                probe: () => Deferred.await(result).pipe(Effect.orDie),
-              })
+  it.effect(
+    'retries a completed failure after five seconds and caches the recovered environment',
+    () =>
+      Effect.gen(function* () {
+        const cleaning = yield* Deferred.make<void>();
+        const released = yield* Deferred.make<void>();
+        const failure = new SpawnFailed({
+          command: '/bin/sh',
+          cause: new Error('temporary failure'),
+          message: 'failed',
+        });
+        const env = { PATH: '/recovered/bin' };
+        let attempts = 0;
+        yield* Effect.gen(function* () {
+          const cache = yield* LoginShellCache;
+          const first = yield* cache.get().pipe(Effect.exit, Effect.forkChild);
+          yield* Deferred.await(cleaning);
+          yield* TestClock.adjust(10_000);
+          const pending = yield* cache.get(1).pipe(Effect.forkChild);
+          yield* TestClock.adjust(1);
+          expect(yield* Fiber.join(pending)).toBeNull();
+          expect(attempts).toBe(1);
+          yield* Deferred.succeed(released, undefined);
+          expect(Exit.isFailure(yield* Fiber.join(first))).toBe(true);
+          yield* TestClock.adjust(4_999);
+          expect(Exit.isFailure(yield* cache.get().pipe(Effect.exit))).toBe(true);
+          const retry = yield* cache.get().pipe(Effect.forkChild);
+          yield* TestClock.adjust(1);
+          // A new read drives recovery; the earlier reader keeps its own result.
+          expect(Exit.isFailure(yield* Fiber.await(retry))).toBe(true);
+          const readers = yield* Effect.all([cache.get(), cache.get()]);
+          expect(readers).toEqual([env, env]);
+          expect(yield* cache.peek).toBe(env);
+          expect(attempts).toBe(2);
+        }).pipe(
+          Effect.provide(
+            LoginShellCacheLive.pipe(
+              Layer.provide(
+                Layer.succeed(LoginShellEnvironment, {
+                  probe: () =>
+                    Effect.suspend(() => {
+                      attempts += 1;
+                      return attempts === 1
+                        ? Effect.fail(failure).pipe(
+                            Effect.ensuring(
+                              Deferred.succeed(cleaning, undefined).pipe(
+                                Effect.andThen(Deferred.await(released))
+                              )
+                            )
+                          )
+                        : Effect.succeed(env);
+                    }),
+                })
+              )
             )
           )
-        )
-      );
-    })
+        );
+      })
   );
+
+  it.effect('retains an unconfirmed process release instead of spawning another probe', () => {
+    const table = new FakeProcessTable();
+    table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
+    return Effect.gen(function* () {
+      const cache = yield* LoginShellCache;
+      const first = yield* cache.get().pipe(Effect.exit, Effect.forkChild);
+      yield* TestClock.adjust(30_000);
+      const failed = yield* Fiber.join(first);
+      expect(Exit.isFailure(failed)).toBe(true);
+      yield* TestClock.adjust(60_000);
+      expect(yield* cache.get().pipe(Effect.exit)).toEqual(failed);
+      expect(table.spawned.length).toBe(1);
+      table.exitOnItsOwn(1000);
+    }).pipe(
+      Effect.provide(
+        LoginShellCacheLive.pipe(Layer.provide(loginShellEnvLayer({ nodeProcess: table.api })))
+      ),
+      Effect.exit,
+      Effect.tap((exit) =>
+        Effect.sync(() => {
+          expect(
+            Exit.isFailure(exit) &&
+              exit.cause.reasons.every(
+                (reason) =>
+                  Cause.isDieReason(reason) &&
+                  reason.defect instanceof LoginShellCacheShutdownFailed
+              )
+          ).toBe(true);
+        })
+      ),
+      Effect.asVoid
+    );
+  });
 
   it.effect(
     'application concurrent disposal joins one receipt and failed recovery keeps the original owner',

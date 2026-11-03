@@ -7,6 +7,8 @@ import {
   type WorkspaceId,
   type SessionId,
   type SessionActiveInvocationContextResult,
+  type SessionSteerResponse,
+  type SessionTurnInputConfig,
 } from '@lody/shared';
 import type { AuthContext } from './command-runtime';
 import type { LoroDocumentManager } from './loro/doc';
@@ -17,6 +19,16 @@ import type { SessionLiveStatusBatchItem } from '@/commands/session';
 export interface SessionCommandHost {
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
   readLiveStatus(sessionId: SessionId): Promise<SessionLiveStatusBatchItem>;
+  /** The running turn an Agent chat may steer; undefined unless it runs on this daemon. */
+  readActiveTurnId(sessionId: SessionId): string | undefined;
+  steerSession(input: {
+    sessionId: SessionId;
+    expectedTurnId: string;
+    userTurnId: string;
+    userId: string;
+    timestamp: string;
+    inputConfig: SessionTurnInputConfig;
+  }): Promise<SessionSteerResponse>;
   cancelSession(
     sessionId: SessionId,
     turnId?: string
@@ -26,7 +38,7 @@ export interface SessionCommandHost {
     input?: {
       inputId: string;
       userId: string;
-      config: import('@lody/shared').SessionTurnInputConfig;
+      config: SessionTurnInputConfig;
       inputOrigin: 'human' | 'agent';
     }
   ): Promise<void>;
@@ -76,6 +88,16 @@ export interface DaemonWorkspace {
   manager: LoroDocumentManager;
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
   readAccess?(): DaemonWorkspaceAccess;
+  /**
+   * Encrypted only: classify an Agent-delegated input by its verified driving Turn.
+   * `owner` keeps today's behavior; `member` must be written with `derivedFrom` and
+   * may target only this machine. Rejects when the origin cannot be verified, is
+   * itself derived, has exhausted its derivations or targets another machine.
+   */
+  classifyEncryptedDerivation?(
+    origin: { sessionId: string; userTurnId: string },
+    target: { machineId: string }
+  ): Promise<'owner' | 'member'>;
 }
 
 const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();

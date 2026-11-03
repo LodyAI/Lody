@@ -113,9 +113,9 @@ const responseTable = `CREATE TABLE realtime_responses (
 ) WITHOUT ROWID`;
 
 /**
- * Host-only persistence leaf; intentionally unconnected to RPC and agent execution.
- * A started row is never made runnable again, including after crash/reopen. This
- * cannot replace fencing the dispatch watcher and its durable Meta fallback.
+ * Host-only persistence leaf shared by transport receipts and the userTurnId
+ * execution gate. A started row is never made runnable again, including after
+ * crash/reopen. Callers establish authority independently before claiming.
  */
 export class RealtimeJournal {
   private readonly permits = new WeakMap<
@@ -419,7 +419,15 @@ export class RealtimeJournal {
       db.prepare(`SELECT genesis, workspace_id, target_machine_id, request_id,
       position, frame, digest FROM realtime_responses LIMIT 0`).all();
     } catch (cause) {
-      throw new RealtimeJournalError('unsupported_schema', cause);
+      if (
+        cause instanceof Error &&
+        'code' in cause &&
+        cause.code === 'SQLITE_ERROR' &&
+        (cause.message.startsWith('no such table: ') ||
+          cause.message.startsWith('no such column: '))
+      )
+        throw new RealtimeJournalError('unsupported_schema', cause);
+      throw cause;
     }
   }
 

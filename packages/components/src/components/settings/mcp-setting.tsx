@@ -7,7 +7,7 @@ import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settin
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, Settings } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
@@ -16,6 +16,7 @@ import {
   type McpServerId,
   type McpToolListResult,
   type WorkspaceMcpServerMeta,
+  type McpAuthenticationResult,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
 import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
@@ -33,6 +34,7 @@ import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
+import { McpAuthenticationPanel } from './mcp-authentication-panel';
 import {
   SETTINGS_EDITOR_DIALOG_LAYOUT,
   SETTINGS_EDITOR_DIALOG_WIDTH,
@@ -83,6 +85,8 @@ export function McpSetting() {
   const [error, setError] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<WorkspaceMcpServerMeta | null>(null);
   const [removing, setRemoving] = useState(false);
+  const draftId = useRef<McpServerId | undefined>(undefined);
+  const [authentication, setAuthentication] = useState<Record<string, McpAuthenticationResult>>({});
 
   const [toolLists, setToolLists] = useState<
     Record<string, { connection: WorkspaceMcpServerMeta['connection']; state: McpToolListState }>
@@ -90,10 +94,14 @@ export function McpSetting() {
   const scope = useRef(0);
   useEffect(() => {
     setToolLists({});
+    setAuthentication({});
+    setEditor(null);
+    setSubmitting(false);
+    setError(undefined);
     return () => {
       scope.current += 1;
     };
-  }, [runtime, localMachineId]);
+  }, [runtime, localMachineId, user?.id]);
 
   const discoverTools = async (entry: WorkspaceMcpServerMeta) => {
     if (!runtime || !localMachineId || !entry.connection) return;
@@ -101,7 +109,7 @@ export function McpSetting() {
     const pending = { connection: entry.connection, state: { status: 'loading' } as const };
     setToolLists((current) => ({ ...current, [entry.id]: pending }));
     try {
-      const { tools } = await runtime.requestLocalMcpTools(localMachineId, entry);
+      const { tools } = await runtime.requestLocalMcpTools(localMachineId, entry, user?.id);
       if (requestScope === scope.current)
         setToolLists((current) =>
           current[entry.id] === pending
@@ -109,6 +117,17 @@ export function McpSetting() {
             : current
         );
     } catch {
+      try {
+        const status = await runtime.requestLocalMcpAuthentication(localMachineId, {
+          requesterUserId: user?.id ?? '',
+          action: 'status',
+          server: entry,
+        });
+        if (requestScope === scope.current)
+          setAuthentication((current) => ({ ...current, [entry.id]: status }));
+      } catch {
+        /* Old daemons still report the connection failure. */
+      }
       if (requestScope === scope.current)
         setToolLists((current) =>
           current[entry.id] === pending
@@ -119,11 +138,13 @@ export function McpSetting() {
   };
 
   const openEditor = (next: EditorState) => {
+    draftId.current = next.mode === 'add' ? (crypto.randomUUID() as McpServerId) : next.entry.id;
     setError(undefined);
     setEditor(next);
   };
 
   const save = async (value: McpConnectionFormValue) => {
+    const requestScope = scope.current;
     const duplicate = servers.find(
       (server) =>
         server.name.localeCompare(value.name, undefined, { sensitivity: 'accent' }) === 0 &&
@@ -139,7 +160,7 @@ export function McpSetting() {
     const now = getServerNow();
     const existing = editor?.mode === 'edit' ? editor.entry : undefined;
     const entry: WorkspaceMcpServerMeta = {
-      id: existing?.id ?? (crypto.randomUUID() as McpServerId),
+      id: existing?.id ?? draftId.current ?? (crypto.randomUUID() as McpServerId),
       name: value.name,
       transport: value.transport,
       ...(value.description ? { description: value.description } : {}),
@@ -153,6 +174,21 @@ export function McpSetting() {
       // Resolves on durability: the row exists, so the editor is done. The
       // upload runs on its own and is deliberately not reported.
       await upsert(entry);
+      if (requestScope !== scope.current) return;
+      if (value.localAuthentication) {
+        setEditor({ mode: 'edit', entry });
+        if (!runtime || !localMachineId)
+          throw new Error(t('settings.mcp.authentication.localRequired'));
+        const result = await runtime.requestLocalMcpAuthentication(localMachineId, {
+          requesterUserId: user?.id ?? '',
+          action: 'configure',
+          server: entry,
+          authentication: value.localAuthentication,
+        });
+        if (requestScope !== scope.current) return;
+        if (result.status === 'error') throw new Error(t('settings.mcp.authentication.error'));
+        setAuthentication((current) => ({ ...current, [entry.id]: result }));
+      }
       if (editor?.mode === 'add') {
         capturePostHogEvent(postHog, 'workspace/mcp_created', {
           source: 'settings',
@@ -164,9 +200,10 @@ export function McpSetting() {
       setEditor(null);
       if (entry.connection) void discoverTools(entry);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (requestScope === scope.current)
+        setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setSubmitting(false);
+      if (requestScope === scope.current) setSubmitting(false);
     }
   };
 
@@ -224,6 +261,7 @@ export function McpSetting() {
                     : undefined
                 }
                 server={server}
+                authentication={authentication[server.id]}
                 onDiscoverTools={() => void discoverTools(server)}
                 canDiscoverTools={Boolean(runtime && localMachineId && server.connection)}
                 onEdit={() => openEditor({ mode: 'edit', entry: server })}
@@ -264,6 +302,37 @@ export function McpSetting() {
               submitting={submitting}
               error={error}
               onSubmit={save}
+              authentication={(dirty, transport) =>
+                shownEditor.mode === 'edit' ? (
+                  <McpAuthenticationPanel
+                    server={shownEditor.entry}
+                    httpControls={transport === 'http'}
+                    disabled={dirty || submitting || editor === null}
+                    onEnable={async (entry) => {
+                      if (!entry.connection) throw new Error('MCP connection is missing.');
+                      const next: WorkspaceMcpServerMeta = {
+                        ...entry,
+                        connection: { ...entry.connection, authentication: 'local' },
+                        updatedAt: getServerNow(),
+                      };
+                      await upsert(next);
+                      setEditor({ mode: 'edit', entry: next });
+                      return next;
+                    }}
+                    onConnected={(entry) => void discoverTools(entry)}
+                    onStatus={(status) =>
+                      setAuthentication((current) => ({
+                        ...current,
+                        [shownEditor.entry.id]: status,
+                      }))
+                    }
+                  />
+                ) : (
+                  <p {...stylex.props(catalog.blockHint)}>
+                    {t('settings.mcp.authentication.saveFirst')}
+                  </p>
+                )
+              }
               onCancel={() => {
                 setError(undefined);
                 setEditor(null);
@@ -316,8 +385,10 @@ export function McpServerRow({
   onDiscoverTools,
   canDiscoverTools,
   toolList,
+  authentication,
 }: {
   toolList?: McpToolListState;
+  authentication?: McpAuthenticationResult;
   onDiscoverTools: () => void;
   canDiscoverTools: boolean;
   server: WorkspaceMcpServerMeta;
@@ -357,6 +428,10 @@ export function McpServerRow({
           </span>
         </button>
         <div {...stylex.props(catalog.actions, styles.actions)}>
+          <Button type="button" size="small" variant="ghost" onClick={onEdit}>
+            <Settings {...stylex.props(catalog.icon)} />
+            {t('settings.mcp.authentication.settings')}
+          </Button>
           {server.connection ? (
             <Button
               type="button"
@@ -405,7 +480,16 @@ export function McpServerRow({
             <Spinner size="small" aria-label={t('common.loading')} />
           ) : null}
           {toolList.status === 'error' ? (
-            <span {...stylex.props(styles.error)}>{t('settings.mcp.tools.failed')}</span>
+            authentication?.reason === 'oauth_required' ? (
+              <div {...stylex.props(catalog.actions)}>
+                <span>{t('settings.mcp.authentication.required')}</span>
+                <Button type="button" size="small" variant="secondary" onClick={onEdit}>
+                  {t('settings.mcp.authentication.authorize')}
+                </Button>
+              </div>
+            ) : (
+              <span {...stylex.props(styles.error)}>{t('settings.mcp.tools.failed')}</span>
+            )
           ) : null}
           {toolList?.status === 'success' && toolList.tools.length > 0 ? (
             <div {...stylex.props(styles.toolList)} aria-label={t('settings.mcp.tools.label')}>

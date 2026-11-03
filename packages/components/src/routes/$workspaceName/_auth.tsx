@@ -38,7 +38,7 @@ import {
   useRecordWorkspaceDataReady,
   WorkspaceDataWait,
 } from '@/components/workspace-data-wait';
-import { useBillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
+import { BillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
 
 const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
 
@@ -101,7 +101,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
   const [sessionSettled, setSessionSettled] = useState(!isPending);
   const postHog = usePostHog();
   const authRouteStartMsRef = useRef(getPerformanceNowMs());
-  const fireAccountReadyOnce = useFireOncePerKey();
   const fireAuthReadyOnce = useFireOncePerKey();
   const fireCliReadyOnce = useFireOncePerKey();
   const onlineMachineCount = useMemo(() => {
@@ -150,19 +149,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     identifyPostHogUser(postHog, currentUser);
     identifyPostHogWorkspace(postHog, currentWorkspaceId);
   }, [currentUser, currentWorkspaceId, postHog]);
-
-  useEffect(() => {
-    if (!currentUser || !analyticsUserWorkspaceKey) {
-      return;
-    }
-    if (!fireAccountReadyOnce(analyticsUserWorkspaceKey)) {
-      return;
-    }
-    capturePostHogEvent(postHog, 'onboarding/account_ready', {
-      user_id: currentUser.id,
-      workspace_id: currentWorkspaceId ?? null,
-    });
-  }, [analyticsUserWorkspaceKey, currentUser, currentWorkspaceId, fireAccountReadyOnce, postHog]);
 
   useEffect(() => {
     if (!currentUser || !analyticsUserWorkspaceKey) {
@@ -326,6 +312,13 @@ function LodyLiveActivityHost({ workspaceName }: { workspaceName: string }) {
   return null;
 }
 
+/** Billing preload is latency-only; its leaf contains a rejected query. */
+function BillingOverviewPreloadHost() {
+  const user = useAtomValue(userAtom);
+  const { workspaceId } = useResolvedWorkspaceScope();
+  return <BillingOverviewPreload workspaceId={user ? workspaceId : null} />;
+}
+
 function AuthedLayoutContent({
   hasLocalToken,
   workspaceName,
@@ -337,6 +330,7 @@ function AuthedLayoutContent({
     <>
       <LodyLiveActivityHost workspaceName={workspaceName} />
       <WorkspaceSyncStuckReporter />
+      <BillingOverviewPreloadHost />
       <AuthedLayoutRoutes hasLocalToken={hasLocalToken} workspaceName={workspaceName} />
     </>
   );
@@ -359,7 +353,6 @@ function AuthedLayoutRoutes({
   } = useOrganization({ targetSlug: workspaceName });
   const user = useAtomValue(userAtom);
   const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();
-  useBillingOverviewPreload(user ? currentWorkspaceId : null);
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
   const [userSettled, setUserSettled] = useState(Boolean(user) && Boolean(currentWorkspaceId));
   useRecordWorkspaceDataReady(currentWorkspaceId ? workspaceName : null, user?.id ?? null);

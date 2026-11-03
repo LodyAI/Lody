@@ -68,12 +68,17 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   default/plan only for agents that advertise the legacy option; planning must not
   change permission policy.
 
+- Session automation readers require `sessionAutomations` locally or `remoteAutomationControl` remotely; unsupported machines expose no controls, polling or connection warning.
 - Daemon workflows gate on `MachineMeta.protocolCapabilities`, never CLI version.
   Missing means unsupported. Full-message schedules require v3 and `messageVersion: 1`.
-- ACP capability `cacheVersion` controls refresh freshness, never readability. Consumers
-  preserve understood fields from parsed older or newer entries during mixed-version
-  operation, adapting only fields with known incompatible semantics; runtime-override source
-  matching remains a separate applicability gate.
+- An ACP capability entry may carry the agent's advertised `authMethods`; absence means no probe
+  has asked, and an empty list records that the agent advertises none. The same list is returned
+  by a capability refresh. `methodId` on an authenticate `start` request is negotiated by
+  `acpAuthenticationMethodSelection`, because the strict request schema rejects an unknown field
+  on older daemons.
+- ACP `cacheVersion` gates freshness, not readability. Preserve understood fields across
+  versions and runtime-override matching; omit known-incompatible fields. Pre-v11 commands
+  can contain project data: Machine Flock owns probe previews, Sessions own actual lists.
 - Quota: share `src/subscription-quota.ts`; key `agentConfigId + limitId`.
   Bound Providers ignore legacy; delete scoped rows.
 
@@ -91,10 +96,10 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 ## Workspace MCP / Roles
 
-- MCP catalog/project defaults live in workspace Flock; selections live in turns.
-  Absent project rows inherit workspace defaults; `[]` disables all. Resolve defaults
-  at authoring only. No MCP machine bindings.
-  Preserve explicit `mcpServerIds: []`; dispatch the driving turn's selection to ACP,
+- MCP/UI: read [auth contracts](src/AGENTS.md).
+  Catalog/defaults: workspace Flock; selections: turns. Missing project rows inherit
+  workspace defaults; `[]` disables all. Resolve defaults only at authoring; no machine
+  bindings. Preserve `mcpServerIds: []`; send the driving turn's selection to ACP,
   never reread history.
 - MCP/Role catalog writes resolve on local Flock durability, followed by explicit
   upload. Settings neither await nor report upload; its failure never fails or rolls
@@ -119,3 +124,5 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 Presence: E2EE requires UUID session IDs and bounded plaintext allowlists on publish/receive;
 ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-presence.md).
+
+Encrypted attachment manifests contain secret per-file keys and belong only in protected conversation content or local recovery receipts. Relay requests use opaque metadata and attachment-only grants; never publish a manifest or key in a URL. Format and recovery rationale: [attachment decision](../../.agents/notes/implemented/architecture/2026-10-28-encrypted-attachments.md).

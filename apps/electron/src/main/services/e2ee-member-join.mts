@@ -1,3 +1,5 @@
+import { verifyPersonalHistory } from '@lody/e2ee-client/history'
+import { PersonalHostError } from '@lody/e2ee-client/errors'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { Effect, Result } from 'effect'
@@ -77,45 +79,16 @@ export function decodeMemberKeyPackage(source: string) {
   return { ...value, request }
 }
 
-/** Authenticate every permission record from the independently retained genesis.
- * This permits another current administrator to finish an invitation while its issuer is offline. */
+/** Shared fixed full-history verification, preserving the native host's public error vocabulary. */
 export const verifyMemberHistory = Effect.fnUntraced(function* (
   offer: Pick<E2eeMemberOffer, 'workspaceId' | 'genesisHash' | 'genesisRecordHex'>,
   pages: readonly E2eeWorkspaceHistoryPage[]
 ) {
-  if (!pages.length || pages.length > 256) return yield* Effect.fail(fail('invalid-ledger'))
-  const endpoint = pages[0]!.checkpoint
-  const records: Uint8Array[] = []
-  let total = 0
-  for (const page of pages) {
-    if (
-      page.workspaceId !== offer.workspaceId ||
-      page.genesisHash !== offer.genesisHash ||
-      page.startIndex !== records.length ||
-      page.checkpoint.length !== endpoint.length ||
-      page.checkpoint.headHash !== endpoint.headHash ||
-      page.recordsHex.length > 64
+  return yield* verifyPersonalHistory(offer, pages).pipe(
+    Effect.mapError((error) =>
+      error instanceof PersonalHostError ? fail('invalid-ledger') : error
     )
-      return yield* Effect.fail(fail('invalid-ledger'))
-    for (const record of page.recordsHex) {
-      if (!bytes.max(32768).safeParse(record).success)
-        return yield* Effect.fail(fail('invalid-ledger'))
-      total += record.length / 2
-      if (total > 32 * 1024 * 1024) return yield* Effect.fail(fail('invalid-ledger'))
-      records.push(raw(record))
-    }
-  }
-  if (
-    pages.at(-1)!.nextCursor !== null ||
-    records.length !== endpoint.length ||
-    hex(records[0]!) !== offer.genesisRecordHex
   )
-    return yield* Effect.fail(fail('invalid-ledger'))
-  return yield* verifyLedgerEffect({
-    anchor: ok(Bytes.genesisHash(raw(offer.genesisHash))),
-    records,
-    checkpoint: { length: endpoint.length, head: ok(Bytes.recordHash(raw(endpoint.headHash))) }
-  })
 })
 
 type JoinRow = { offer: string; key_package: string | null; history: string | null }

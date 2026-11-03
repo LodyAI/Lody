@@ -14,11 +14,12 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
-import { getLoroMetaStreamId, type WorkspaceId } from '@lody/shared';
+import { getLoroMetaStreamId, getWorkspaceFlockDocId, type WorkspaceId } from '@lody/shared';
 import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { LoroRepo } from 'loro-repo';
 import {
   createCliSqliteRepoStore,
+  hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
   type CliSqliteRepoStore,
   type DocumentCursorScope,
@@ -215,6 +216,28 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
       expect(complete.oplogVersion().encode()).toEqual(remote.oplogVersion().encode());
     }
   );
+
+  it('recognizes remote catalog history only after real Streams persistence, across restart and purge', async () => {
+    const daemon = await openCliProcess();
+    const docId = getWorkspaceFlockDocId(workspaceId);
+    const local = await daemon.repo.openFlockDoc(docId);
+    local.flock.set(['project', 'locally-authored'], 'local');
+    await daemon.repo.flush();
+    expect(hasPersistedFlockRemoteState(daemon.store.dbPath, docId)).toBe(false);
+    const remote = new Flock('remote');
+    remote.set(['project', 'remote-project'], 'remote');
+    createStreamsServer(remote.exportFile());
+    expect(
+      (await withTransport(daemon, (adapter) => adapter.syncFlockDoc(docId, local.flock))).ok
+    ).toBe(true);
+    expect(local.flock.get(['project', 'remote-project'])).toBe('remote');
+    expect(hasPersistedFlockRemoteState(daemon.store.dbPath, docId)).toBe(true);
+    await closeCliProcess(daemon);
+    const restarted = await openCliProcess();
+    expect(hasPersistedFlockRemoteState(restarted.store.dbPath, docId)).toBe(true);
+    await restarted.store.storageAdapter.deleteFlockDoc?.(docId);
+    expect(hasPersistedFlockRemoteState(restarted.store.dbPath, docId)).toBe(false);
+  });
 
   it('bootstraps a process that hydrated before another process advanced the shared file', async () => {
     const server = createStreamsServer(metaSnapshotWithA());

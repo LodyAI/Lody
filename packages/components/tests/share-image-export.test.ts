@@ -78,6 +78,169 @@ afterEach(() => {
 });
 
 describe('share image export', () => {
+  it.each(['download', 'native', 'desktop-save', 'desktop-copy', 'web-copy'] as const)(
+    'rechecks scope synchronously at the final %s handoff',
+    async (destination) => {
+      const received: unknown[] = [];
+      mocks.native.mockReturnValue(destination === 'native');
+      mocks.toBlob.mockResolvedValue({
+        type: 'image/png',
+        size: 4,
+        arrayBuffer: async () => Uint8Array.of(137, 80, 78, 71).buffer,
+      } as Blob);
+      if (destination.startsWith('desktop'))
+        mocks.bridge.mockReturnValue({
+          saveAs: async (value: unknown) => {
+            received.push(value);
+            return { saved: true };
+          },
+          copyToClipboard: async (value: unknown) => {
+            received.push(value);
+            return { copied: true };
+          },
+        });
+      class TestClipboardItem {
+        constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+      }
+      vi.stubGlobal('ClipboardItem', TestClipboardItem);
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          write: async (items: TestClipboardItem[]) => {
+            received.push(await items[0]!.items['image/png']!);
+          },
+        },
+      });
+      vi.stubGlobal(
+        'URL',
+        class extends URL {
+          static createObjectURL(blob: Blob) {
+            received.push(blob);
+            return 'blob:copy';
+          }
+          static revokeObjectURL() {}
+        }
+      );
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      let current = true;
+      let admitted = false;
+      const guard = () => {
+        if (!current) throw new DOMException('Copy source changed', 'AbortError');
+      };
+      const admitOutput = async () => {
+        admitted = true;
+        await Promise.resolve();
+        current = false;
+      };
+      const element = document.createElement('div');
+      const output = destination.endsWith('copy')
+        ? copyShareImage(element, guard, admitOutput)
+        : exportShareImage(element, 'Selected', 'conversation', guard, admitOutput);
+      await expect(output).rejects.toThrow('Copy source changed');
+      expect(admitted).toBe(true);
+      expect(received).toEqual([]);
+      expect(mocks.shared).toEqual([]);
+      expect([...mocks.files]).toEqual([]);
+    }
+  );
+
+  it.each([false, true])(
+    'rejects a late capture after its source changes (native: %s)',
+    async (native) => {
+      mocks.native.mockReturnValue(native);
+      const started = Promise.withResolvers<void>();
+      const captured = Promise.withResolvers<Blob>();
+      mocks.toBlob.mockImplementation(() => {
+        started.resolve();
+        return captured.promise;
+      });
+      const downloads: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
+        downloads.push(this.download);
+      });
+      vi.stubGlobal('URL', {
+        createObjectURL: () => 'blob:late-copy',
+        revokeObjectURL: () => {},
+      });
+      let current = true;
+      const pending = exportShareImage(
+        document.createElement('div'),
+        'Source A',
+        'conversation',
+        () => {
+          if (!current) throw new DOMException('Copy scope changed', 'AbortError');
+        }
+      );
+      await started.promise;
+      current = false;
+      captured.resolve(new Blob(['approved-source-sentinel'], { type: 'image/png' }));
+      await expect(pending).rejects.toThrow('Copy scope changed');
+      expect(downloads).toEqual([]);
+      expect(mocks.shared).toEqual([]);
+      expect([...mocks.files]).toEqual([]);
+    }
+  );
+
+  it('never hands a late image capture to the desktop clipboard', async () => {
+    const started = Promise.withResolvers<void>();
+    const captured = Promise.withResolvers<Blob>();
+    mocks.toBlob.mockImplementation(() => {
+      started.resolve();
+      return captured.promise;
+    });
+    const clipboard: unknown[] = [];
+    mocks.bridge.mockReturnValue({
+      copyToClipboard: async (copy: unknown) => {
+        clipboard.push(copy);
+        return { copied: true };
+      },
+    });
+    let current = true;
+    const pending = copyShareImage(document.createElement('div'), () => {
+      if (!current) throw new DOMException('Copy scope changed', 'AbortError');
+    });
+    await started.promise;
+    current = false;
+    captured.resolve({
+      type: 'image/png',
+      size: 4,
+      arrayBuffer: async () => new ArrayBuffer(4),
+    } as Blob);
+    await expect(pending).rejects.toThrow('Copy scope changed');
+    expect(clipboard).toEqual([]);
+  });
+
+  it('rejects the pending WebKit clipboard item when its capture scope retires', async () => {
+    const started = Promise.withResolvers<void>();
+    const captured = Promise.withResolvers<Blob>();
+    mocks.toBlob.mockImplementation(() => {
+      started.resolve();
+      return captured.promise;
+    });
+    class TestClipboardItem {
+      constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+    }
+    const received: Blob[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        write: async (items: TestClipboardItem[]) => {
+          received.push(await items[0]!.items['image/png']!);
+        },
+      },
+    });
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
+    let current = true;
+    const pending = copyShareImage(document.createElement('div'), () => {
+      if (!current) throw new DOMException('Copy scope changed', 'AbortError');
+    });
+    await started.promise;
+    current = false;
+    captured.resolve(new Blob(['retired-source'], { type: 'image/png' }));
+    await expect(pending).rejects.toThrow('Copy scope changed');
+    expect(received).toEqual([]);
+  });
+
   it('pins ordinary, nested, and explicitly restarted list numbers during capture', async () => {
     const card = document.createElement('div');
     card.innerHTML =

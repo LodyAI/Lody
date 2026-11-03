@@ -33,6 +33,8 @@ function toDaemonUnavailableError(error: unknown): Error {
 }
 
 export class TerminalRelay {
+  private readonly socketPath: string
+  private readonly createSocket: (socketPath: string) => net.Socket
   private socket: net.Socket | null = null
   private connecting: Promise<void> | null = null
   private buffer = ''
@@ -41,7 +43,13 @@ export class TerminalRelay {
   private readonly senders = new Set<WebContents>()
   private readonly senderTerminalIds = new Map<WebContents, Set<string>>()
 
-  constructor(private readonly socketPath: string) {}
+  constructor(
+    socketPath: string,
+    createSocket: (socketPath: string) => net.Socket = (path) => net.createConnection(path)
+  ) {
+    this.socketPath = socketPath
+    this.createSocket = createSocket
+  }
 
   attachSender(sender: WebContents | undefined): void {
     if (!sender || sender.isDestroyed()) return
@@ -159,28 +167,32 @@ export class TerminalRelay {
     }
 
     this.connecting = new Promise<void>((resolve, reject) => {
-      const socket = net.createConnection(this.socketPath)
+      const socket = this.createSocket(this.socketPath)
       this.socket = socket
       this.buffer = ''
+      // Events of a destroyed or replaced socket must not reject requests or
+      // feed bytes into its successor.
+      const current = (): boolean => this.socket === socket
 
       socket.once('connect', () => {
-        this.connecting = null
+        if (current()) this.connecting = null
         resolve()
       })
       socket.once('error', (error) => {
-        this.connecting = null
-        this.rejectAllPending(error)
+        if (current()) {
+          this.connecting = null
+          this.rejectAllPending(error)
+        }
         reject(error)
       })
       socket.on('close', () => {
-        if (this.socket === socket) {
-          this.socket = null
-        }
+        if (!current()) return
+        this.socket = null
         this.connecting = null
         this.rejectAllPending(new Error('terminal_socket_closed'))
       })
       socket.on('data', (chunk) => {
-        this.handleData(chunk.toString('utf8'))
+        if (current() && !socket.destroyed) this.handleData(chunk.toString('utf8'))
       })
     })
 

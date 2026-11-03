@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,7 +8,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { usePlatform } from '@lody/platform/react';
 import { E2eeTeamSettingsHost } from './e2ee-team-settings';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery } from '@lody/platform/react';
 import { Invitation } from 'better-auth/plugins';
 import { toast } from '@/lib/toast';
 import type { AvatarKind, CliApiKeyRecord, WorkspaceId } from '@lody/shared';
@@ -84,7 +85,9 @@ export function AccountSettingsComponent({
 function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) {
   const { t } = useTranslation();
   const authClient = useAuthClient();
-  const transferOwnership = useCloudMutation(cloudOperations.auth.transferWorkspaceOwnership);
+  const transferOwnership = useLegacyWorkspaceMutation(
+    cloudOperations.auth.transferWorkspaceOwnership
+  );
   const signOut = useAuthSignOut();
   const router = useRouter();
   const {

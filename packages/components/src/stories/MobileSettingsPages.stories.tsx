@@ -158,7 +158,7 @@ function StoryProviders({ children }: { children: ReactNode }) {
 function PhoneFrame({ title, children }: { title: string; children: ReactNode }) {
   return (
     <StoryProviders>
-      <RoutedStory>
+      <RoutedStory initialPath={title === 'Settings' ? '/lody/settings' : '/'}>
         <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
           <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
             <MobileSettingsLayout

@@ -102,7 +102,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 function RootComponent() {
-  const { authClient } = useRouter().options.context;
+  const { authClient, createE2eeRuntime } = useRouter().options.context;
   useLayoutEffect(() => keepAppRootOffBodyTail(), []);
 
   // Local (open-source) platform: same inner app shell, but the auth/Convex
@@ -123,7 +123,7 @@ function RootComponent() {
     <ConvexProvider authClient={authClient}>
       <StableSessionProvider>
         <AuthenticatedConvexProvider>
-          <CloudPlatformProvider>
+          <CloudPlatformProvider createE2eeRuntime={createE2eeRuntime}>
             <RootApp />
           </CloudPlatformProvider>
         </AuthenticatedConvexProvider>

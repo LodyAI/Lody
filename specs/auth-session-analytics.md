@@ -17,8 +17,13 @@ OSS telemetry; this specification does not enable any client or transport.
 
 - Auth readiness emits `app/active`, retaining `active_context: authenticated_app`,
   identity, workspace, OS, `auth_route_ready_ms`, and launch performance properties.
-  Remove `app/auth_ready`; its funnel step migrates to `app/active` filtered by
-  `active_context: authenticated_app`. CLI `app/active` remains unchanged.
+  Remove `app/auth_ready` and the duplicate `onboarding/account_ready`; their
+  consumers migrate before rollout to a union of historical `onboarding/account_ready`
+  and `app/active` filtered by `active_context: authenticated_app` from a fixed
+  cutover timestamp. Preserve first-occurrence history, cohort windows, conversion
+  windows, and internal-user filters; compare historical results before saving.
+  CLI `app/active` and the later
+  `onboarding/cli_ready` transition remain unchanged.
 - Remove `session/stop_requested`; retain `stop_blocked`,
   `stop_request_succeeded`, and `stop_request_failed` under `session/`.
   Success means the request helper resolved, normally after writing the cancel
@@ -45,5 +50,6 @@ Public owners: `packages/components/src/routes/$workspaceName/_auth.tsx`,
 `components/sessions/session-chat-interface.tsx`, `session-detail.tsx`, and
 `hooks/use-session-actions.ts` / `use-session-doc.ts` under the same source root.
 CLI activity lives in `apps/cli/src/commands/analytics-events.ts`.
-No raw production events or dashboard configuration were available for validation;
-existing consumers of retired event names need migration when the host adopts this.
+Hosted dashboard and cohort configuration is managed outside this public repository.
+Client tests establish event delivery and suppression, not hosted migration or
+released-client adoption. Verify those separately before rollout.

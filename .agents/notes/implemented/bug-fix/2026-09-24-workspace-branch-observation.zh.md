@@ -35,6 +35,9 @@ GitHub PR 检测继续作为独立的可选消费者。
 [约定](../../../../specs/workspace-branch-state.zh.md)记录观测时机与最近已知分支语义。
 尚无提交的分支也是有效分支；Detached HEAD、不可读或非 Git 目录不覆盖已有元数据。
 
+观察命令现在在 15 秒后终止自己的进程并记 warn；失败保留旧值，有界清理后 owner 队列继续。
+读取与发布仍串行，旧结果不能覆盖新分支。
+
 ## 验证
 
 分支观测、执行、后处理、Code Collab 和 MessageHandler 集成套件初次验证共 200 项通过。真实临时 Git

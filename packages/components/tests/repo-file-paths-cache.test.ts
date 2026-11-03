@@ -101,7 +101,7 @@ describe('shared file download failures', () => {
     vi.useRealTimers();
   });
 
-  it('reports one failed attempt to the first observer, rejects every caller, then retries', async () => {
+  it('rejects every concurrent caller with the original failure, then permits a new attempt', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1000);
     const error = new Error('GitHub API error: 503 unavailable');
@@ -111,46 +111,30 @@ describe('shared file download failures', () => {
         reject = r;
       })
     );
-    const reports: unknown[] = [];
-    // A file browser can start the operation before any mention observer joins.
     const browser = fetchRepoFilePaths('ws', 'org/repo');
-    const first = fetchRepoFilePaths('ws', 'org/repo', undefined, (err, duration) => {
-      reports.push({ err, duration });
-    });
-    const second = fetchRepoFilePaths('ws', 'org/repo', undefined, () => {
-      reports.push('duplicate');
-    });
+    const first = fetchRepoFilePaths('ws', 'org/repo');
+    const second = fetchRepoFilePaths('ws', 'org/repo');
     const settled = Promise.allSettled([browser, first, second]);
     vi.setSystemTime(1250);
     reject(error);
     expect(await settled).toEqual(
       Array.from({ length: 3 }, () => ({ status: 'rejected', reason: error }))
     );
-    expect(reports).toEqual([{ err: error, duration: 250 }]);
     expect(await readCachedRepoFilePaths(getRepoFilePathsCacheKey('ws', 'org/repo'))).toBeNull();
 
-    // Another genuine attempt with the SAME error object must still be reported.
+    // Even the same error object must not poison later requests.
     fetchFilePaths.mockRejectedValueOnce(error);
-    await expect(
-      fetchRepoFilePaths('ws', 'org/repo', undefined, (err) => {
-        reports.push(err);
-      })
-    ).rejects.toBe(error);
-    expect(reports).toEqual([{ err: error, duration: 250 }, error]);
+    await expect(fetchRepoFilePaths('ws', 'org/repo')).rejects.toBe(error);
     fetchFilePaths.mockResolvedValueOnce(tree(['recovered.ts']));
     expect((await loadRepoFilePaths('ws', 'org/repo')).paths).toEqual(['recovered.ts']);
   });
 
-  it('preserves a stale tree and the original failure even if the observer throws', async () => {
+  it('preserves a stale tree after a failed refresh', async () => {
     fetchFilePaths.mockResolvedValueOnce(tree(['cached.ts']));
     const cached = await loadRepoFilePaths('ws', 'org/repo');
     const error = new Error('403');
     fetchFilePaths.mockRejectedValueOnce(error);
-    await expect(
-      fetchRepoFilePaths('ws', 'org/repo', undefined, () => {
-        throw new Error('observer');
-      })
-    ).rejects.toBe(error);
+    await expect(fetchRepoFilePaths('ws', 'org/repo')).rejects.toBe(error);
     expect(await readCachedRepoFilePaths(getRepoFilePathsCacheKey('ws', 'org/repo'))).toBe(cached);
   });
 });

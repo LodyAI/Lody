@@ -51,6 +51,8 @@ files:
   - '!node_modules/better-auth/dist/test-utils/**'
 asarUnpack:
   - resources/**
+  # Main E2EE storage loads prebuilds relative to the installed JS package.
+  - '**/node_modules/better-sqlite3/**'
   - '**/node_modules/electron-sparkle-updater/native/build/Release/*.node'
 # Keep only the app locales we actually ship to reduce Chromium locale payload.
 # Both naming forms are required: macOS resources use the underscore form

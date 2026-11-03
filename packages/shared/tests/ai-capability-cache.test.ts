@@ -30,6 +30,18 @@ const entry = (cacheVersion?: number): AcpCapabilityCacheEntry => ({
 });
 
 describe('ACP capability cache compatibility', () => {
+  it('discards project-contaminated pre-v11 commands while retaining models and modes', () => {
+    const legacy = { ...entry(10), availableCommands: [{ name: 'other-project' }] };
+    const { availableCommands: _commands, ...rest } = legacy;
+    expect(getReadableAcpCapabilityCacheEntry(legacy)).toEqual(rest);
+    const preview = {
+      ...legacy,
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      availableCommands: [],
+    };
+    expect(getReadableAcpCapabilityCacheEntry(preview)).toBe(preview);
+  });
+
   it('invalidates Pi plugin catalogs when selections change or become empty', () => {
     const capability: AcpCapabilityCacheEntry = {
       ...entry(ACP_CAPABILITY_CACHE_VERSION),

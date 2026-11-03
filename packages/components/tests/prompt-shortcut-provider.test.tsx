@@ -16,7 +16,7 @@ const fixture = vi.hoisted(() => {
     makePlatform,
     platform: makePlatform(),
     workspaceId: 'workspace-a',
-    mode: null as unknown,
+    status: 'allowed' as 'allowed' | 'pending' | 'blocked',
     directory: [],
     createRepo: vi.fn(),
     openStore: vi.fn(),
@@ -25,10 +25,17 @@ const fixture = vi.hoisted(() => {
   };
 });
 
-vi.mock('jotai', () => ({
-  useAtomValue: (atom: string) => atom === 'content-mode' ? fixture.mode : ({ workspaceId: fixture.workspaceId }),
+vi.mock('jotai', async (original) => ({
+  ...(await original<typeof import('jotai')>()),
+  useAtomValue: () => ({ workspaceId: fixture.workspaceId }),
 }));
-vi.mock('@/atoms/workspace-content-mode', () => ({ workspaceContentModeAtom: 'content-mode' }));
+vi.mock('@/hooks/use-workspace-feature', () => ({
+  useLegacyWorkspaceQueryStatus: () => fixture.status,
+  useLegacyWorkspaceQueriesEnabled: () => fixture.status === 'allowed',
+  useAssertLegacyWorkspaceAccess: () => () => {
+    if (fixture.status !== 'allowed') throw new Error('legacy admission pending');
+  },
+}));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'workspace' }));
 vi.mock('@/hooks/use-resolved-workspace-scope', () => ({
   useResolvedWorkspaceScope: ({ enabled }: { enabled: boolean }) => ({
@@ -106,7 +113,7 @@ describe('PromptShortcutProvider lifecycle', () => {
 
   beforeEach(() => {
     fixture.workspaceId = 'workspace-a';
-    fixture.mode = null;
+    fixture.status = 'allowed';
     fixture.platform = fixture.makePlatform();
     fixture.records = [];
     fixture.closeStore.mockReset().mockResolvedValue(undefined);
@@ -249,13 +256,27 @@ describe('PromptShortcutProvider lifecycle', () => {
     expect(prefetch.mock.calls[0]?.[0]).toEqual([entry]);
     expect(prefetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
   });
-  it('keeps ordinary shortcuts active when another workspace has encrypted evidence', async () => {
-    fixture.mode = { accountId: 'user-a', workspaceId: 'other-workspace', descriptor: { contentMode: 'e2ee' } };
+  it('retires cloud shortcuts while admission is pending or encrypted and reopens after ordinary admission', async () => {
+    fixture.status = 'allowed';
     await render();
     expect(container.textContent).toBe('workspace-a');
-    fixture.mode = { accountId: 'user-a', workspaceId: 'workspace-a', descriptor: { contentMode: 'e2ee' } };
+    fixture.status = 'pending';
     await render();
     expect(current).toBeNull();
+    expect(container.textContent).toBe('loading');
+    fixture.status = 'blocked';
+    await render();
+    expect(current).toBeNull();
+    fixture.status = 'allowed';
+    await render();
+    expect(current).not.toBeNull();
   });
 
+  it('keeps the local shortcut store available without cloud admission', async () => {
+    fixture.platform.capabilities.clear();
+    fixture.status = 'pending';
+    await render();
+    expect(current?.workspaceId).toBe('workspace-a');
+    expect(container.textContent).toBe('workspace-a');
+  });
 });

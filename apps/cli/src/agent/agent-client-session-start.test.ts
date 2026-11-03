@@ -2,10 +2,24 @@ import { reconcileProjectMemberLink } from '@/session/worktree/project-member-ac
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RequestError } from '@agentclientprotocol/sdk';
-import type { MachineId, SessionId, WorkspaceId } from '@lody/shared';
+import {
+  getWorkspaceFlockDocId,
+  writeWorkspaceMcpServerToFlock,
+  type McpServerId,
+  type MachineId,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
+import { LoroRepo, type TransportAdapter } from 'loro-repo';
+import { LoroDocumentManager } from '@/lib/loro/doc';
+import { bindTestPresenceApplication } from '../../tests/presence-application-fixture';
 import type { Logger } from '@/utils/logger';
+import { WorkspaceCatalogSyncLegacy } from '@/lib/loro/workspace-catalog-sync-legacy';
+import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
+import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
+import { loadSessionMcpCatalog } from './session-mcp-resolver';
 
 const connectionMocks = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -64,10 +78,307 @@ function createLogger(): Logger {
 }
 
 describe('AgentClient session startup', () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     vi.clearAllMocks();
     connectionMocks.initialize.mockResolvedValue({ agentCapabilities: {} });
     connectionMocks.newSession.mockResolvedValue({ sessionId: 'acp-session-1' });
+  });
+
+  it.each([true, false])(
+    'retains selected MCPs through a cold baseline and recovers initialization (ready during handshake=%s)',
+    async (readyDuringHandshake) => {
+      vi.useFakeTimers();
+      const workspaceId = 'synthetic-cold-start' as WorkspaceId;
+      const selectedId = 'selected-mcp' as McpServerId;
+      const docId = getWorkspaceFlockDocId(workspaceId);
+      const first = deferred<void>();
+      const initialize = deferred<{ agentCapabilities: object }>();
+      const repo = await LoroRepo.create({});
+      const handle = await repo.openFlockDoc(docId);
+      const seedSelected = () =>
+        writeWorkspaceMcpServerToFlock(handle.flock, {
+          id: selectedId,
+          name: 'Selected MCP',
+          transport: 'stdio',
+          connection: { transport: 'stdio', command: 'synthetic-command' },
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      await repo.flush();
+      const logger = createLogger();
+      const catalog = new WorkspaceCatalogSyncLegacy(repo, workspaceId, logger, true);
+      const subscription = (ready: Promise<void>) => ({
+        status: 'joined' as const,
+        firstSyncedWithRemote: ready,
+        waitUntilSynced: () => ready,
+        onStatusChange: () => () => {},
+        unsubscribe() {},
+      });
+      const transport: TransportAdapter = {
+        async connect() {},
+        async close() {},
+        isConnected: () => true,
+        getStatus: () => 'connected',
+        onStatusChange: () => () => {},
+        syncMeta: async () => ({ ok: true }),
+        syncDoc: async () => ({ ok: true }),
+        joinMetaRoom: () => subscription(Promise.resolve()),
+        joinFlockDocRoom: () => subscription(first.promise),
+        joinDocRoom: () => subscription(Promise.resolve()),
+      };
+      await repo.addTransport('streams', transport);
+      connectionMocks.initialize.mockImplementation(() => initialize.promise);
+      const requests: { mcpServers: { name: string; command?: string }[] }[] = [];
+      connectionMocks.newSession.mockImplementation(async (request) => {
+        requests.push(request);
+        return { sessionId: 'acp-session-1' };
+      });
+      const options = {
+        logger,
+        sessionId: 'cold-session' as SessionId,
+        terminalManager: {} as never,
+        onUpdateMessage: vi.fn(),
+        onRequestPermission: vi.fn(),
+        loadExternalMcpServers: () =>
+          loadSessionMcpCatalog({
+            repo,
+            workspaceId,
+            sessionId: 'cold-session' as SessionId,
+            selectedIds: [selectedId],
+            logger,
+            waitForCatalogBaseline: () =>
+              waitForMcpCatalogBaseline(
+                {
+                  catalogBaselineReady: (id, timeout) => catalog.ready(id, timeout),
+                },
+                workspaceId
+              ),
+          }),
+      };
+      const client = new AgentClient(options);
+      try {
+        const starting = client.startSession({} as never, '/synthetic-workdir');
+        const outcome = starting.then(
+          () => undefined,
+          (error: unknown) => error
+        );
+        await vi.advanceTimersByTimeAsync(1_000);
+        if (readyDuringHandshake) {
+          await vi.advanceTimersByTimeAsync(200);
+          seedSelected();
+          first.resolve();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(await catalog.ready(docId, 0)).toBe(true);
+        }
+        initialize.resolve({ agentCapabilities: {} });
+        await vi.advanceTimersByTimeAsync(1_000);
+        if (readyDuringHandshake) {
+          expect(await outcome).toBeUndefined();
+          expect(client.isCreated()).toBe(true);
+        } else {
+          expect(await outcome).toBeInstanceOf(WorkspaceSyncUnavailableError);
+          expect(requests).toEqual([]);
+          seedSelected();
+          first.resolve();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(await catalog.ready(docId, 0)).toBe(true);
+          const nextClient = new AgentClient(options);
+          await nextClient.startSession({} as never, '/synthetic-workdir');
+          expect(nextClient.isCreated()).toBe(true);
+        }
+        expect(requests).toEqual([
+          expect.objectContaining({
+            mcpServers: [
+              expect.objectContaining({ name: 'Selected MCP', command: 'synthetic-command' }),
+            ],
+          }),
+        ]);
+      } finally {
+        await catalog.close();
+        await repo.destroy();
+      }
+    }
+  );
+
+  it.each([false, true])(
+    'starts from persisted selected MCPs or preserves missing-row uncertainty before any Streams sync (missing=%s)',
+    async (missing) => {
+      const logger = createLogger();
+      const presence = bindTestPresenceApplication(logger);
+      const directory = await mkdtemp(join(tmpdir(), 'lody-cold-mcp-start-'));
+      const originalDataDir = process.env.LODY_DATA_DIR;
+      process.env.LODY_DATA_DIR = directory;
+      const workspaceId = 'persisted-cold-workspace' as WorkspaceId;
+      const docId = getWorkspaceFlockDocId(workspaceId);
+      const selectedId = 'persisted-selected-mcp' as McpServerId;
+      const missingId = 'not-yet-received-mcp' as McpServerId;
+      let manager: LoroDocumentManager | undefined;
+      try {
+        manager = await LoroDocumentManager.create(workspaceId, 'synthetic-owner', logger);
+        const handle = await manager.repo.openFlockDoc(docId);
+        const entry = {
+          id: selectedId,
+          name: 'Persisted MCP',
+          transport: 'stdio' as const,
+          connection: { transport: 'stdio' as const, command: 'synthetic-command' },
+          createdAt: 1,
+          updatedAt: 1,
+        };
+        writeWorkspaceMcpServerToFlock(handle.flock, entry);
+        await manager.repo.flush();
+        await manager.cleanUp({ fast: true });
+        manager = await LoroDocumentManager.create(workspaceId, 'synthetic-owner', logger, {
+          keepWorkspaceCatalogJoined: true,
+          // Remote authority is required, but no transport is attached at startup.
+          streamsTokens: {} as never,
+        });
+        const activeManager = manager;
+        expect(await activeManager.catalogBaselineReady(docId, 0)).toBe(false);
+        const requests: { mcpServers: { name: string; command?: string }[] }[] = [];
+        const warnings: { message: string; source?: string }[] = [];
+        const errors: unknown[] = [];
+        const prepared = new Set<string>();
+        connectionMocks.newSession.mockImplementation(async (request) => {
+          requests.push(request);
+          return { sessionId: 'acp-session-1' };
+        });
+        const load = () =>
+          loadSessionMcpCatalog({
+            repo: activeManager.repo,
+            workspaceId,
+            sessionId: 'persisted-session' as SessionId,
+            selectedIds: missing ? [selectedId, missingId] : [selectedId],
+            logger,
+            waitForCatalogBaseline: async () => {
+              try {
+                await waitForMcpCatalogBaseline(activeManager, workspaceId);
+              } catch (error) {
+                errors.push(error);
+                throw error;
+              }
+            },
+            prepare: async (row, resolved) => {
+              if (prepared.has(row.id)) throw new Error('Duplicate credential preparation');
+              prepared.add(row.id);
+              return { ...resolved, name: `Prepared ${row.name}` };
+            },
+          });
+        const client = new AgentClient({
+          logger,
+          sessionId: 'persisted-session' as SessionId,
+          terminalManager: {} as never,
+          onUpdateMessage: vi.fn(),
+          onRequestPermission: vi.fn(),
+          onAgentWarning: (warning) => warnings.push(warning),
+          loadExternalMcpServers: load,
+        });
+        vi.useFakeTimers();
+        const outcome = client.startSession({} as never, '/synthetic-workdir').then(
+          (response) => response,
+          (error: unknown) => error
+        );
+        await vi.advanceTimersByTimeAsync(2_000);
+        if (missing) {
+          expect(await outcome).toBe(errors.at(-1));
+          expect(await outcome).toBeInstanceOf(WorkspaceSyncUnavailableError);
+          expect(requests).toEqual([]);
+          expect([...prepared]).toEqual([]);
+        } else {
+          expect(await outcome).toMatchObject({ sessionId: 'acp-session-1' });
+          expect(requests).toEqual([
+            expect.objectContaining({
+              mcpServers: [
+                expect.objectContaining({
+                  name: 'Prepared Persisted MCP',
+                  command: 'synthetic-command',
+                }),
+              ],
+            }),
+          ]);
+          expect(warnings).toEqual([
+            {
+              source: 'configWarning',
+              message: expect.stringContaining('not been confirmed with the remote'),
+            },
+          ]);
+        }
+        expect(await activeManager.catalogBaselineReady(docId, 0)).toBe(false);
+        // The waiter did not cancel the shared reader. It can still catch up.
+        const subscription = () => ({
+          status: 'joined' as const,
+          firstSyncedWithRemote: Promise.resolve(),
+          waitUntilSynced: async () => {},
+          onStatusChange: () => () => {},
+          unsubscribe() {},
+        });
+        const transport: TransportAdapter = {
+          async connect() {},
+          async close() {},
+          isConnected: () => true,
+          getStatus: () => 'connected',
+          onStatusChange: () => () => {},
+          syncMeta: async () => ({ ok: true }),
+          syncDoc: async () => ({ ok: true }),
+          joinMetaRoom: subscription,
+          joinFlockDocRoom: subscription,
+          joinDocRoom: subscription,
+        };
+        const recovered = await activeManager.repo.openFlockDoc(docId);
+        if (missing)
+          writeWorkspaceMcpServerToFlock(recovered.flock, {
+            ...entry,
+            id: missingId,
+            name: 'Recovered MCP',
+          });
+        await activeManager.repo.addTransport('streams', transport);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(await activeManager.catalogBaselineReady(docId, 0)).toBe(true);
+        prepared.clear();
+        const select = await load();
+        expect(select(undefined)).toMatchObject({
+          servers: missing
+            ? [
+                expect.objectContaining({ name: 'Prepared Persisted MCP' }),
+                expect.objectContaining({ name: 'Prepared Recovered MCP' }),
+              ]
+            : [expect.objectContaining({ name: 'Prepared Persisted MCP' })],
+          problems: [],
+        });
+        expect(select(undefined).warnings).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+        await manager?.cleanUp({ fast: true });
+        await presence.closeLegacy();
+        if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
+        else process.env.LODY_DATA_DIR = originalDataDir;
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('keeps unrelated MCP loader failures best effort without a readiness retry', async () => {
+    const warnings: string[] = [];
+    const failure = new Error('Synthetic configuration failure');
+    let attempts = 0;
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'mcp-invalid-config' as SessionId,
+      terminalManager: {} as never,
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+      onAgentWarning: (warning) => warnings.push(warning.message),
+      loadExternalMcpServers: async () => {
+        attempts++;
+        throw failure;
+      },
+    });
+    await expect(client.startSession({} as never, '/workdir')).resolves.toMatchObject({
+      sessionId: 'acp-session-1',
+    });
+    expect(connectionMocks.newSession).toHaveBeenCalledWith({ cwd: '/workdir', mcpServers: [] });
+    expect(warnings).toEqual([expect.stringContaining(failure.message)]);
+    expect(attempts).toBe(1);
   });
 
   it('returns ACP resource-not-found for missing files while preserving reads and other failures', async () => {

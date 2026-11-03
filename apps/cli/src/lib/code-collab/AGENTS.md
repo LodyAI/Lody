@@ -8,7 +8,7 @@ File-by-file responsibilities: [README.md](README.md).
 
 ## Invariants
 
-- Turn-end refresh runs here without blocking Turn release.
+- Turn-end filesystem refresh runs before Turn release within the execution owner's statistics budget.
   Refresh/publication attempts have configurable deadlines and cancellation;
   worker cancellation drains Git children. Late results cannot resume snapshot writes.
   Cancelling an attempt never destroys the shared Repo or its rooms.

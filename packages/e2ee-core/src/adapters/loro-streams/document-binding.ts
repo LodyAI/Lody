@@ -25,6 +25,9 @@ export interface StreamsDocumentBindingOptions {
  * signing; every open verifies the historical signature before requesting a
  * key and the AEAD after. Snapshot reads additionally require the signer to be
  * a current writer, including after decryption; old update reads remain valid.
+ * `openAuthenticated` additionally returns the verified historical author; its
+ * owned plaintext must be cleared by the caller. Neither open grants execution
+ * authority, and a snapshot signer is not the origin of every embedded turn.
  * Lives in the caller's Scope, which awaits active
  * operations on close. See {@link makeStreamsUpdateBinding} for the callback form.
  *

@@ -142,7 +142,7 @@ an explicit host recovery capability, not transparent SDK re-encryption/retry.
 
 The one resource/model gateway must own serialized native writes through actual
 settlement before another owner opens the same journal. It does not provide
-multi-host fencing or a transaction across Riverrun and SQLite. Historical
+multi-host fencing or a transaction across Riverrun and the local journal. Historical
 signature verification still authenticates an exact Accepted retry; new writes
 need current permission and the first persisted credential window. A fresh token
 cannot extend an unconfirmed attempt. Exact native bytes can be confirmed later
@@ -154,3 +154,9 @@ opaque offset exists at a native record boundary no later than head; neither str
 ordering nor an SDK HEAD echo proves this. The Lab's read-only Riverrun adapter
 checks actual row boundaries. Boundary validation is additional to signature/current
 permission; it never establishes independent snapshot trust.
+
+The platform-neutral `SnapshotPublicationJournal` port now exposes the same local
+reserve/readback/accept contract. `indexedDbSnapshotPublication` supplies the opt-in
+browser implementation; the SQLite reference retains its previous public API.
+Neither implementation performs native PUT, verifies approval or provides a
+cross-network transaction. The host owns actual publication and writer admission.

@@ -21,7 +21,10 @@
 
 ## Dispatch
 
+- Metadata reconciliation keeps four global slots and fills each free slot without waiting for siblings.
 - Queue promotion preserves frozen fields; remove only after history+activation succeed.
+- Queue dispatch uses the same normalized input config as history dispatch. JavaScript-only
+  undefined fields must not make an unchanged encrypted original fail equality.
 - Absent meta is unknown, not foreign: hold the TTL-bounded RPC stash until meta lands or
   a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
@@ -42,8 +45,9 @@
 
 - Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination, then clear
-  presence before reuse. [Inbox admission](../orchestration/AGENTS.md); execution IDs stay fixed.
+- Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before
+  reusing an Agent. If release fails, detach that Agent, return the turn slot and report
+  bounded background cleanup; the next input creates a new ACP. [Inbox admission](../orchestration/AGENTS.md); execution IDs stay fixed.
   Assistant ids use `userTurnId`; `invocation` owns source/requester/config; steer replaces it.
 - Only dispatch producers publish `latestUserMsgId`, with history in `appendUserTurn`
   or Roost's `accept_input_and_dispatch` writer queue. Save human provenance first;
@@ -69,6 +73,9 @@
   semantics; `session-diff-stats-target.ts` skips, never overwrites, a good total.
 
 ## Lifecycle
+
+- Workspace-reading turn results finish before release within one bounded budget; timeout or shutdown cancels remaining statistics and prevents late result writes. Presentation and turn-bound image uploads may follow release with bounded owned waits. Shutdown prioritizes active release receipts; its final second bypasses stuck finalizers with failed Inbox releases and clears live execution IDs. Never force this release during normal operation.
+  Every release/shutdown wait comes from `turn-budgets.ts`; keep its tested ordering and Desktop's larger quit grace. A turn frees its slot only through `freeTurnSlot`.
 
 - [Roost](README.md#roost-history-paging): gate owner/backend. No keyring/rotation/fallback,
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;

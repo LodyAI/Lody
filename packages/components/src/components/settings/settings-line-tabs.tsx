@@ -279,7 +279,11 @@ export function SettingsLineTabs<Id extends string>({
             ) : null}
             <div {...stylex.props(styles.menuList)}>
               {heldMatches.map((tab) => (
-                <Menu.Item key={tab.id} onClick={() => onChange(tab.id)}>
+                <Menu.Item
+                  key={tab.id}
+                  data-settings-tab-overflow-id={tab.id}
+                  onClick={() => onChange(tab.id)}
+                >
                   <span {...stylex.props(styles.menuItem)}>
                     <TabFace tab={tab} />
                   </span>

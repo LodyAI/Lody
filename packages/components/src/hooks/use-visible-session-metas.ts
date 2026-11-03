@@ -3,10 +3,15 @@ import { useAtomValue } from 'jotai';
 import type { MachineId, SessionMeta, WorkspaceId } from '@lody/shared';
 import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { allActiveSessionsAtom, archivedSessionListAtom, sessionListAtom } from '@/atoms/doc-meta';
-import { filterSessionsByVisibility, type SessionListEntry } from '@/lib/session-visibility';
+import {
+  filterSessionsByVisibility,
+  isSessionVisibleToUser,
+  type SessionListEntry,
+} from '@/lib/session-visibility';
 import { useVisibleLocalProjects } from './use-visible-local-projects';
 import { useVisibleMachineMetas } from './use-visible-machine-metas';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
+import { useWorkspaceHistoryAccess } from './use-workspace-history-access';
 
 function areSetsEqual<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
   if (left === right) return true;
@@ -18,6 +23,8 @@ function areSetsEqual<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
 }
 
 type VisibleSessionMetasResult = {
+  workspaceHistoryReadable: boolean;
+  historyOnlySessionIds: ReadonlySet<string>;
   sessions: SessionListEntry[];
   allActiveSessions: SessionMeta[];
   visibleMachineIds: Set<MachineId>;
@@ -26,6 +33,8 @@ type VisibleSessionMetasResult = {
 };
 
 type VisibleArchivedSessionMetasResult = {
+  workspaceHistoryReadable: boolean;
+  historyOnlySessionIds: ReadonlySet<string>;
   archivedSessions: SessionListEntry[];
   visibleMachineIds: Set<MachineId>;
   visibleLocalProjectKeys: Set<string>;
@@ -36,6 +45,29 @@ type WorkspaceVisibilityOptions = {
   workspaceId?: WorkspaceId | null;
   enabled?: boolean;
 };
+
+/** Only the new workspace-history read permission; retain pre-existing author management. */
+function useHistoryOnlySessionIds(
+  sessions: readonly SessionMeta[],
+  machines: ReadonlySet<MachineId>,
+  projects: ReadonlySet<string>,
+  accountId: string | null,
+  readable: boolean
+) {
+  const previous = useRef(new Set<string>());
+  return useMemo(() => {
+    const next = new Set(
+      readable
+        ? sessions
+            .filter((session) => !isSessionVisibleToUser(session, machines, projects, accountId))
+            .map((session) => session.id)
+        : []
+    );
+    if (areSetsEqual(previous.current, next)) return previous.current;
+    previous.current = next;
+    return next;
+  }, [sessions, machines, projects, accountId, readable]);
+}
 
 export function useVisibleMachineIdSet(options: WorkspaceVisibilityOptions = {}): {
   visibleMachineIds: Set<MachineId>;
@@ -89,6 +121,7 @@ export function useVisibleSessionMetas(
   options: WorkspaceVisibilityOptions = {}
 ): VisibleSessionMetasResult {
   const scope = useResolvedWorkspaceScope(options);
+  const workspaceHistoryReadable = useWorkspaceHistoryAccess(scope);
   const sessions = useAtomValue(sessionListAtom);
   const allActiveSessions = useAtomValue(allActiveSessionsAtom);
   const { visibleMachineIds, isLoading: machineLoading } = useVisibleMachineIdSet(scope);
@@ -98,6 +131,13 @@ export function useVisibleSessionMetas(
   const currentUserIdValue = useWorkspaceLocalAccountId();
   const currentUserId = enabled ? currentUserIdValue : null;
   const isLoading = machineLoading || localProjectLoading;
+  const historyOnlySessionIds = useHistoryOnlySessionIds(
+    allActiveSessions,
+    visibleMachineIds,
+    visibleLocalProjectKeys,
+    currentUserId,
+    workspaceHistoryReadable
+  );
 
   const visibleSessions = useMemo(
     () =>
@@ -107,10 +147,19 @@ export function useVisibleSessionMetas(
             visibleMachineIds,
             visibleLocalProjectKeys,
             machineLoading,
-            currentUserId
+            currentUserId,
+            workspaceHistoryReadable
           )
         : [],
-    [currentUserId, enabled, machineLoading, sessions, visibleLocalProjectKeys, visibleMachineIds]
+    [
+      currentUserId,
+      enabled,
+      machineLoading,
+      sessions,
+      visibleLocalProjectKeys,
+      visibleMachineIds,
+      workspaceHistoryReadable,
+    ]
   );
   const visibleAllActiveSessions = useMemo(
     () =>
@@ -120,7 +169,8 @@ export function useVisibleSessionMetas(
             visibleMachineIds,
             visibleLocalProjectKeys,
             machineLoading,
-            currentUserId
+            currentUserId,
+            workspaceHistoryReadable
           )
         : [],
     [
@@ -130,10 +180,13 @@ export function useVisibleSessionMetas(
       machineLoading,
       visibleLocalProjectKeys,
       visibleMachineIds,
+      workspaceHistoryReadable,
     ]
   );
 
   return {
+    workspaceHistoryReadable,
+    historyOnlySessionIds,
     sessions: visibleSessions,
     allActiveSessions: visibleAllActiveSessions,
     visibleMachineIds,
@@ -146,6 +199,7 @@ export function useVisibleArchivedSessionMetas(
   options: WorkspaceVisibilityOptions = {}
 ): VisibleArchivedSessionMetasResult {
   const scope = useResolvedWorkspaceScope(options);
+  const workspaceHistoryReadable = useWorkspaceHistoryAccess(scope);
   const archivedSessions = useAtomValue(archivedSessionListAtom);
   const { visibleMachineIds, isLoading: machineLoading } = useVisibleMachineIdSet(scope);
   const { visibleLocalProjectKeys, isLoading: localProjectLoading } =
@@ -153,6 +207,13 @@ export function useVisibleArchivedSessionMetas(
   const currentUserIdValue = useWorkspaceLocalAccountId();
   const currentUserId = scope.enabled ? currentUserIdValue : null;
   const isLoading = machineLoading || localProjectLoading;
+  const historyOnlySessionIds = useHistoryOnlySessionIds(
+    archivedSessions,
+    visibleMachineIds,
+    visibleLocalProjectKeys,
+    currentUserId,
+    workspaceHistoryReadable
+  );
 
   const visibleArchivedSessions = useMemo(
     () =>
@@ -162,7 +223,8 @@ export function useVisibleArchivedSessionMetas(
             visibleMachineIds,
             visibleLocalProjectKeys,
             machineLoading,
-            currentUserId
+            currentUserId,
+            workspaceHistoryReadable
           )
         : [],
     [
@@ -172,10 +234,13 @@ export function useVisibleArchivedSessionMetas(
       scope.enabled,
       visibleLocalProjectKeys,
       visibleMachineIds,
+      workspaceHistoryReadable,
     ]
   );
 
   return {
+    workspaceHistoryReadable,
+    historyOnlySessionIds,
     archivedSessions: visibleArchivedSessions,
     visibleMachineIds,
     visibleLocalProjectKeys,

@@ -348,7 +348,19 @@ function DemoComposer({
   );
 }
 
-function PromptSuggestionPreview({ mobile = false }: { mobile?: boolean }) {
+const LONG_PROMPT_SUGGESTION =
+  'Add a regression test for the reconnect path that drops the socket mid-turn, ' +
+  'verify the queued prompt is replayed exactly once after the session resumes, ' +
+  'then run the focused suite and summarize any flaky timing assumptions you find ' +
+  'in the transport fixtures.';
+
+function PromptSuggestionPreview({
+  mobile = false,
+  suggestion = 'Add a regression test for the reconnect path, then run the focused suite.',
+}: {
+  mobile?: boolean;
+  suggestion?: string;
+}) {
   const [prompt, setPrompt] = useState('');
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const composer = (
@@ -358,7 +370,7 @@ function PromptSuggestionPreview({ mobile = false }: { mobile?: boolean }) {
       promptRef={promptRef}
       promptValue={prompt}
       onPromptChange={setPrompt}
-      promptSuggestion="Add a regression test for the reconnect path, then run the focused suite."
+      promptSuggestion={suggestion}
       primaryAction={
         <Button icon aria-label="Send">
           <ArrowUp size={16} />
@@ -387,6 +399,14 @@ export const SessionPromptSuggestion: Story = {
 
 export const SessionPromptSuggestionMobile: Story = {
   render: () => <PromptSuggestionPreview mobile />,
+};
+
+export const SessionPromptSuggestionLong: Story = {
+  render: () => <PromptSuggestionPreview suggestion={LONG_PROMPT_SUGGESTION} />,
+};
+
+export const SessionPromptSuggestionLongMobile: Story = {
+  render: () => <PromptSuggestionPreview mobile suggestion={LONG_PROMPT_SUGGESTION} />,
 };
 
 export const LandingDark: Story = {

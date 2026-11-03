@@ -13,6 +13,11 @@ import {
   type E2eeRpcResponseBody,
 } from '../src/index';
 import vector from './fixtures/e2ee-wire-v0.json';
+import {
+  E2EE_FEATURE_CHUNK_BYTES,
+  encodeFeatureResponsePage,
+  decodeFeatureResponsePage,
+} from '../src/e2ee-feature-parts';
 
 const fromHex = (value: string) => Uint8Array.from(Buffer.from(value, 'hex'));
 const hex = (value: Uint8Array) => Buffer.from(value).toString('hex');
@@ -259,5 +264,57 @@ describe('candidate E2EE realtime body profile', () => {
     // Method schema/JSON validation belongs after authentication in the integration.
     const opaque = { ...request(), params: new Uint8Array([255, 0]) };
     expect(decodeE2eeRpcRequestBody(encodeE2eeRpcRequestBody(opaque))).toEqual(opaque);
+  });
+});
+
+describe('common encrypted machine response pages', () => {
+  it('retains exact byte/count metadata within the signed frame budget', () => {
+    const result = new Uint8Array(1024 * 1024 + 19).fill(65);
+    const count = Math.ceil(result.length / E2EE_FEATURE_CHUNK_BYTES);
+    const chunks: Uint8Array[] = [];
+    for (let sequence = 0; sequence < count; sequence++) {
+      const body = {
+        ...response(sequence === count - 1 ? 'success' : 'progress'),
+        sequence,
+        payload: encodeFeatureResponsePage(result, sequence),
+      };
+      const wire = encodeE2eeRpcResponseBody(body);
+      expect(wire.length + 143).toBeLessThanOrEqual(E2EE_RPC_MAX_FRAME_BYTES);
+      const decoded = decodeFeatureResponsePage(decodeE2eeRpcResponseBody(wire));
+      expect(decoded.totalPages).toBe(count);
+      expect(decoded.totalBytes).toBe(result.length);
+      chunks.push(decoded.bytes);
+    }
+    expect(Buffer.concat(chunks)).toEqual(Buffer.from(result));
+  });
+
+  it('refuses inconsistent counts, byte lengths, sequence and terminal position', () => {
+    const payload = new Uint8Array(E2EE_FEATURE_CHUNK_BYTES + 3).fill(97);
+    const first = { ...response(), sequence: 0, payload: encodeFeatureResponsePage(payload, 0) };
+    const last = {
+      ...response('success'),
+      sequence: 1,
+      payload: encodeFeatureResponsePage(payload, 1),
+    };
+    for (const [body, offset, value] of [
+      [first, 0, 0],
+      [first, 0, 3],
+      [first, 4, 0],
+      [first, 4, 16 * 1024 * 1024 + 1],
+      [last, 4, payload.length + 1],
+    ] as const) {
+      const changed = body.payload.slice();
+      new DataView(changed.buffer).setUint32(offset, value);
+      expect(() => decodeFeatureResponsePage({ ...body, payload: changed })).toThrow();
+    }
+    for (const changed of [
+      { ...first, sequence: 1 },
+      { ...first, kind: 'success' as const },
+      { ...last, kind: 'progress' as const },
+      { ...last, payload: last.payload.subarray(0, -1) },
+      { ...last, payload: Uint8Array.from([...last.payload, 0]) },
+      { ...first, payload: utf8('{"old":"unframed result"}') },
+    ])
+      expect(() => decodeFeatureResponsePage(changed)).toThrow();
   });
 });

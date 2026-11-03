@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceJoinRequestsSettings } from '../src/components/settings/workspace-join-requests-settings';
+import { TestOrdinaryWorkspaceProvider } from './test-platform';
 import { initI18n } from '../src/i18n';
 
 const mocks = vi.hoisted(() => ({
@@ -12,7 +13,8 @@ const mocks = vi.hoisted(() => ({
   action: vi.fn(),
 }));
 
-vi.mock('@lody/platform/react', () => ({
+vi.mock('@lody/platform/react', async (original) => ({
+  ...(await original<typeof import('@lody/platform/react')>()),
   useCloudMutation: () => mocks.mutation,
   useCloudAction: () => mocks.action,
   useCloudQuery: (...args: unknown[]) => mocks.useQuery(...args),
@@ -56,7 +58,11 @@ describe('WorkspaceJoinRequestsSettings', () => {
     });
 
     await act(async () => {
-      root.render(<WorkspaceJoinRequestsSettings workspaceId="workspace_1" />);
+      root.render(
+        <TestOrdinaryWorkspaceProvider workspaceId="workspace_1">
+          <WorkspaceJoinRequestsSettings workspaceId="workspace_1" />
+        </TestOrdinaryWorkspaceProvider>
+      );
     });
 
     const formattedDate = new Intl.DateTimeFormat(undefined, {

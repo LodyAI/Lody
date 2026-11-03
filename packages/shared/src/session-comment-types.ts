@@ -166,6 +166,20 @@ export interface GitHubPullRequestDetails {
   mergeable: boolean | null;
   /** See `GitHubMergeableState`. Normalized to `'unknown'` when absent. */
   mergeableState: GitHubMergeableState;
+  /** GitHub's explicit stack membership, when provided by the API. */
+  stack?: {
+    number: number;
+    position: number;
+    size: number;
+    baseRef: string;
+    pullRequests?: Array<{
+      number: number;
+      title: string;
+      state: 'open' | 'closed';
+      draft: boolean;
+      merged: boolean;
+    }>;
+  } | null;
 }
 
 /** A commit exposed by the pull request commits endpoint. */

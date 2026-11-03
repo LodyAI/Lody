@@ -1,10 +1,12 @@
-import type { MessageContent } from '@lody/shared';
+import { applyTextRewrites, formatMessageQuote, type MessageContent } from '@lody/shared';
+import { buildPastedTextRewrites } from '../src/lib/pasted-text-draft';
 import { describe, expect, it } from 'vitest';
 import {
   collapseMentionSpansForCopy,
   getCopyTextFromMessageItems,
   getUserTextRenderSlice,
   getTextContentFromMessageItems,
+  getMessageQuoteEditDraft,
   getVisibleAssistantTextContent,
   hasTextContentFromMessageItems,
   USER_TEXT_RENDER_CHAR_LIMIT,
@@ -15,6 +17,34 @@ import {
 const text = (value: string): MessageContent => ({ type: 'text', text: value });
 
 describe('getTextContentFromMessageItems', () => {
+  it('restores quote atoms across several text blocks without changing execution text', () => {
+    const quote = formatMessageQuote('Source\n\n```ts\nconst n = 1;\n```');
+    const items: MessageContent[] = [
+      text('Question before'),
+      {
+        type: 'text',
+        text: quote + '\n\nQuestion after',
+        spans: [
+          {
+            start: 0,
+            end: quote.length,
+            kind: 'message_quote',
+            quoteVersion: 1,
+            label: '[Quote]',
+            target: 'source-quote',
+          },
+        ],
+      },
+    ];
+    const restored = getMessageQuoteEditDraft(items);
+    expect(restored.drafts).toHaveLength(1);
+    expect(restored.text.slice(restored.drafts[0]!.start, restored.drafts[0]!.end)).toContain(
+      '[Quote]'
+    );
+    expect(
+      applyTextRewrites(restored.text, buildPastedTextRewrites(restored.drafts, restored.text)).text
+    ).toBe(getTextContentFromMessageItems(items));
+  });
   it('joins non-empty text items and keeps non-blank text intact', () => {
     expect(
       getTextContentFromMessageItems([text('hidden progress'), text('   '), text('final reply')])

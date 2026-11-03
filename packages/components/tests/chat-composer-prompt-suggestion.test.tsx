@@ -134,6 +134,46 @@ describe('ChatComposer prompt suggestion', () => {
     expect(getSuggestionHint(container)?.textContent).toContain(SUGGESTION);
   });
 
+  it('hides the hint during IME composition before the draft value commits', async () => {
+    const promptRef = createRef<HTMLTextAreaElement>();
+    const changes: string[] = [];
+    await act(async () => {
+      root.render(
+        createElement(Harness, { promptRef, onPromptChange: (value) => changes.push(value) })
+      );
+    });
+    const textarea = promptRef.current!;
+    expect(getSuggestionHint(container)).not.toBeNull();
+
+    // The mention input holds preedit text locally and commits only at
+    // compositionend, so the owner's value is still empty here.
+    await act(async () => {
+      textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      textarea.value = 'ni';
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(changes).toEqual([]);
+    expect(getSuggestionHint(container)).toBeNull();
+
+    // A cancelled composition leaves the draft empty, so the hint returns.
+    await act(async () => {
+      textarea.value = '';
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    });
+    expect(getSuggestionHint(container)?.textContent).toContain(SUGGESTION);
+
+    // A committed composition becomes the draft and keeps the hint hidden.
+    await act(async () => {
+      textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      textarea.value = '你好';
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    });
+    expect(changes.at(-1)).toBe('你好');
+    expect(getSuggestionHint(container)).toBeNull();
+  });
+
   it('accepts with Tab as an editable draft, places the caret at the end, and does not consume the suggestion', async () => {
     const promptRef = createRef<HTMLTextAreaElement>();
     const onChange = vi.fn();

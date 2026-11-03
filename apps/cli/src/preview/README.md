@@ -7,12 +7,23 @@ SameSite=None, Partitioned cookie on both local and remote endpoints. Chromium
 accepts Secure cookies on the literal loopback listener. SameSite=Lax cannot
 bootstrap cookies inside cross-site preview frames: first-level resources may
 authenticate through a token-bearing Referer, but nested module imports lack it.
-Local cookie names include the endpoint ID because cookies ignore TCP ports;
-opening another Session must not overwrite the first Session's credential.
+Each local Session and target origin uses a stable `lody-<scope>.localhost`
+viewer hostname. Chromium resolves it to loopback and gives it a separate
+partitioned-cookie quota, so one preview cannot evict another preview’s token.
+It may connect to IPv6 first, so the proxy reserves the same port on 127.0.0.1
+and ::1 before publishing the URL. Port conflicts retry with a new port; only an
+unavailable IPv6 stack permits IPv4-only operation. Closing joins both listeners.
+Reopening the target reuses the hostname and cookie names, but generates a new
+token. When an application sets cookies the proxy reissues the capability last;
+under Chromium quota pressure application cookies may be evicted. Chromium limits
+partitioned cookies to about 10 KiB per embedded site and partition. Local headers
+remain limited to 1 MiB for clients with larger cookie jars, not as a browser quota.
 
 Every HTTP request and WebSocket upgrade still requires that endpoint's token.
-Matching Origin or a tokenless Referer cannot unlock the listener. Proxy cookies
-are stripped before forwarding to the development server. A 502 is a separate
+Matching Origin or a tokenless Referer cannot unlock the listener. Application cookies
+are scoped by Session and target origin locally and forwarded to the development
+server; capability cookies
+are never forwarded. The [cookie decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-preview-app-cookies.md) explains the attribute changes and limits. A 502 is a separate
 forwarding/upstream failure; inspect its response body instead of disabling
 authentication or the development server's origin checks.
 
@@ -92,6 +103,8 @@ executable with `THIRD_PARTY_NOTICES.txt`. The notices come from a static JSON
 import in `cloudflared-binary.ts`, so source, bundled CLI and embedded CLI use the
 same text without a second asset-copy pipeline. Existing incomplete installations
 are errors, not repair or migration inputs.
+The [security release decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-cloudflared-emudhra-update.md)
+records the current pin and its distribution prerequisites.
 
 ## Updating notices with the pinned release
 
@@ -127,11 +140,11 @@ the binary helper rejects mismatched release metadata.
 
 | GOOS    | GOARCH | CGO_ENABLED | Artifact Go version | Module dependencies |
 | ------- | ------ | ----------- | ------------------- | ------------------- |
-| darwin  | arm64  | 1           | 1.26.2              | 66                  |
-| darwin  | amd64  | 1           | 1.26.2              | 66                  |
-| linux   | amd64  | 0           | 1.26.8              | 67                  |
-| linux   | arm64  | 0           | 1.26.8              | 67                  |
-| windows | amd64  | 1           | 1.26.8              | 66                  |
+| darwin  | arm64  | 1           | 1.27.3              | 66                  |
+| darwin  | amd64  | 1           | 1.27.3              | 66                  |
+| linux   | amd64  | 0           | 1.27.3              | 67                  |
+| linux   | arm64  | 0           | 1.27.3              | 67                  |
+| windows | amd64  | 1           | 1.27.3              | 66                  |
 
 Windows ARM64 uses the same pinned Windows AMD64 artifact; it does not introduce
 another dependency graph. Native execution on supported platforms is a separate
@@ -139,23 +152,23 @@ acceptance requirement.
 
 ## Current evidence and limits
 
-The 2026.9.1 collection merges 100 notice files from the five platform selections
-and both Go source roots. A cross-platform metadata audit corrected the original
-single-Go-version assumption and Windows CGO setting; Windows notices were
-recollected with CGO enabled. Module collection used Go 1.26.2; exact runtime/vendor
-texts also come from checksum-verified Go 1.26.8 source.
+The 2026.10.4 collection merges 91 notice files from five platform selections
+and checksum-verified Go 1.27.3 source. The same Go version is embedded in all five
+distinct upstream artifacts. Windows notices were collected with CGO enabled.
 
 All five distinct artifact checksums, module versions/checksums/replacements and
 at least one collected notice's exact source bytes per compiled module were
-verified against the tag's 159-module graph. `go-licenses` labels some inherited
+verified against the tagged source's module graph. `go-licenses` labels some inherited
 root licenses by package import path; replacements retain the original import
 path label but must match the replacement source's license text.
 
-All five report dirty main-module revision `f11dea9cb7079e90a982c1a2d5548ab40847fdcf`,
-different from the source tag: dependency agreement does not prove an identical
-source build. Non-Go warnings and native linkage still need review before
-publication. The generated text is not a claim that every distribution obligation
-has been independently verified.
+All five report main-module revision `dc3b264da64a801bc3a8d5301a6db21401910ad5`
+matching the source tag, but also report `vcs.modified=true`; this does not prove
+an identical source build. The macOS Release body labels executable hashes with
+archive names; the manifest instead pins the actual `.tgz` asset hashes independently
+verified against GitHub's asset metadata. Non-Go warnings and native linkage still
+need review before publication. The generated text is not a claim that every
+distribution obligation has been independently verified.
 
 Behavioral tests check deterministic collection, platform conflicts, source
 license mismatch, installed text, cache reuse and explicit rejection of missing

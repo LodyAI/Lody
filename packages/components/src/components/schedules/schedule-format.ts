@@ -9,6 +9,8 @@ import {
   type ScheduleRecurrence,
   type ScheduleTrigger,
   type ScheduleWeekday,
+  type ScheduleRegistryRow,
+  type ScheduleRuntimeRow,
 } from '@lody/shared';
 
 /**
@@ -26,18 +28,28 @@ import {
  */
 const intl = toIntlLocaleOrEn;
 
+// Intl formatters are expensive to build and the list formats every row on
+// every render; keep one per locale + options.
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+const dateFormat = (locale: string, options: Intl.DateTimeFormatOptions) => {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let format = dateFormats.get(key);
+  if (!format) dateFormats.set(key, (format = new Intl.DateTimeFormat(locale, options)));
+  return format;
+};
+
 /** Locale weekday names, narrow for toggles and short for summaries. */
 export function weekdayNames(
   locale: string | undefined,
   width: 'narrow' | 'short' | 'long'
 ): string[] {
-  const format = new Intl.DateTimeFormat(intl(locale), { weekday: width, timeZone: 'UTC' });
+  const format = dateFormat(intl(locale), { weekday: width, timeZone: 'UTC' });
   // 2023-01-01 was a Sunday, which is index 0 in the cron convention.
   return Array.from({ length: 7 }, (_, day) => format.format(new Date(Date.UTC(2023, 0, 1 + day))));
 }
 
 export function formatTimeOfDay(hour: number, minute: number, locale?: string): string {
-  return new Intl.DateTimeFormat(intl(locale), {
+  return dateFormat(intl(locale), {
     hour: 'numeric',
     minute: '2-digit',
     timeZone: 'UTC',
@@ -155,8 +167,23 @@ export function triggerTimeZone(
   return trigger.kind === 'cron' ? trigger.timeZone : machineTimeZone;
 }
 
+/**
+ * A list row's display clock. A one-time scheduled message is personal, so its
+ * instant reads on the viewer's current clock; other schedules keep the target
+ * machine's clock (and calendar rules keep their authored zone).
+ */
+export function scheduleRowTimeZone(
+  row: Pick<ScheduleRegistryRow, 'scheduledMessage' | 'trigger'>,
+  machineTimeZone = getDeviceTimeZone(),
+  viewerTimeZone?: string
+): string {
+  return row.scheduledMessage
+    ? (viewerTimeZone ?? getDeviceTimeZone(machineTimeZone))
+    : triggerTimeZone(row.trigger, machineTimeZone);
+}
+
 export function formatInstant(at: number, timeZone: string, locale?: string): string {
-  return new Intl.DateTimeFormat(intl(locale), {
+  return dateFormat(intl(locale), {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone,
@@ -165,12 +192,12 @@ export function formatInstant(at: number, timeZone: string, locale?: string): st
 
 /** A clock time with its zone, for a compact "send at 2:31 PM UTC" action. */
 export function formatClockWithZone(at: number, timeZone: string, locale?: string): string {
-  const time = new Intl.DateTimeFormat(intl(locale), {
+  const time = dateFormat(intl(locale), {
     hour: 'numeric',
     minute: '2-digit',
     timeZone,
   }).format(new Date(at));
-  const zone = new Intl.DateTimeFormat(intl(locale), {
+  const zone = dateFormat(intl(locale), {
     timeZone,
     timeZoneName: 'short',
   })
@@ -184,8 +211,8 @@ export function formatUpcoming(at: number, timeZone: string, now: number, locale
   const language = intl(locale);
   // `en-CA` is a fixed ISO-shaped calendar key for comparing days, never shown.
   const day = (value: number) =>
-    new Intl.DateTimeFormat('en-CA', { timeZone, dateStyle: 'short' }).format(new Date(value));
-  const time = new Intl.DateTimeFormat(language, {
+    dateFormat('en-CA', { timeZone, dateStyle: 'short' }).format(new Date(value));
+  const time = dateFormat(language, {
     timeZone,
     hour: 'numeric',
     minute: '2-digit',
@@ -194,7 +221,7 @@ export function formatUpcoming(at: number, timeZone: string, now: number, locale
   const target = day(at);
   if (target === today) return time;
   const tomorrow = day(now + 86_400_000);
-  const relative = new Intl.DateTimeFormat(language, {
+  const relative = dateFormat(language, {
     timeZone,
     ...(target === tomorrow
       ? {}
@@ -209,39 +236,157 @@ export function formatUpcoming(at: number, timeZone: string, now: number, locale
   return `${prefix} ${time}`;
 }
 
-export type ScheduleStatusTone = 'active' | 'attention' | 'muted' | 'progress';
-export type ScheduleStatus = { label: string; tone: ScheduleStatusTone };
+export type ScheduleStatusTone = 'normal' | 'muted' | 'progress' | 'attention';
+/** Glyph beside a status that needs a second look; the happy path has none. */
+export type ScheduleStatusIcon = 'due' | 'paused' | 'attention' | 'sent' | 'cancelled';
+/**
+ * What a schedule is doing, in words: a main line and an optional detail.
+ * Colour and a glyph only mark states that need a look, so the list needs no
+ * legend.
+ */
+export type ScheduleStatus = {
+  label: string;
+  detail?: string;
+  tone: ScheduleStatusTone;
+  icon?: ScheduleStatusIcon;
+  /**
+   * Bucket for the list's status filter. `ended` is finished for good: a sent,
+   * cancelled or failed message, or a Once task that ran.
+   */
+  group: 'running' | 'paused' | 'attention' | 'ended';
+};
 
 /**
- * The one status a row shows. Paused wins over every queue state, because a
- * paused schedule's leftover runtime row is history, not a live plan.
+ * The one status every surface shows. Paused wins over every queue state,
+ * because a paused schedule's leftover runtime row is history, not a live plan.
  */
-export function describeStatus(
+export function describeScheduleState(
   t: TFunction,
-  enabled: boolean,
-  queueState?: 'due' | 'waiting_for_agent' | 'retrying' | 'blocked',
-  messageState?: 'pending' | 'sent' | 'cancelled' | 'failed'
+  row: Pick<ScheduleRegistryRow, 'enabled' | 'trigger' | 'scheduledMessage'>,
+  runtime: ScheduleRuntimeRow | undefined,
+  options: { timeZone: string; now: number; locale?: string }
 ): ScheduleStatus {
-  if (messageState) {
-    if (messageState === 'sent') return { label: t('scheduledMessage.sent'), tone: 'muted' };
-    if (messageState === 'cancelled')
-      return { label: t('scheduledMessage.cancelled'), tone: 'muted' };
-    if (messageState === 'failed')
-      return { label: t('scheduledMessage.failed'), tone: 'attention' };
-    return {
-      label: enabled
-        ? t('scheduledMessage.pending', { count: 1 })
-        : t('scheduledMessage.cancelPending'),
-      tone: 'progress',
-    };
+  const { timeZone, now, locale } = options;
+  const at = (value: number) => formatUpcoming(value, timeZone, now, locale);
+  const blockedDetail =
+    (runtime?.blockedCode && t(`schedules.errors.${runtime.blockedCode}`, '')) || undefined;
+  if (row.scheduledMessage) {
+    const planned = row.trigger.kind === 'once' ? Date.parse(row.trigger.at) : undefined;
+    switch (runtime?.messageState ?? 'pending') {
+      case 'sent':
+        return {
+          label: t('schedules.status.sent', 'Sent'),
+          detail: runtime?.lastDispatch ? at(runtime.lastDispatch.dispatchedAt) : undefined,
+          tone: 'muted',
+          icon: 'sent',
+          group: 'ended',
+        };
+      case 'cancelled':
+        return {
+          label: t('schedules.status.cancelled', 'Cancelled'),
+          detail:
+            planned !== undefined
+              ? t('schedules.status.wasPlanned', 'Was due {{time}}', { time: at(planned) })
+              : undefined,
+          tone: 'muted',
+          icon: 'cancelled',
+          group: 'ended',
+        };
+      case 'failed':
+        return {
+          label: t('schedules.status.notSent', 'Not sent'),
+          detail: blockedDetail,
+          tone: 'attention',
+          icon: 'attention',
+          group: 'ended',
+        };
+      default:
+        if (!row.enabled)
+          return {
+            label: t('schedules.status.cancelling', 'Cancelling…'),
+            tone: 'muted',
+            group: 'paused',
+          };
+        if (runtime?.queueState === 'blocked')
+          return {
+            label: t('schedules.state.blocked', 'Needs attention'),
+            detail: blockedDetail,
+            tone: 'attention',
+            icon: 'attention',
+            group: 'attention',
+          };
+        return {
+          label:
+            planned !== undefined
+              ? t('schedules.status.sendsAt', 'Sends {{time}}', { time: at(planned) })
+              : t('schedules.status.waiting', 'Waiting to send'),
+          tone: 'normal',
+          group: 'running',
+        };
+    }
   }
-  if (!enabled) return { label: t('schedules.paused', 'Paused'), tone: 'muted' };
-  if (queueState === 'blocked')
-    return { label: t('schedules.state.blocked', 'Needs attention'), tone: 'attention' };
-  if (queueState === 'retrying')
-    return { label: t('schedules.state.retrying', 'Retrying dispatch'), tone: 'attention' };
-  if (queueState === 'due') return { label: t('schedules.state.due', 'Due'), tone: 'progress' };
-  if (queueState === 'waiting_for_agent')
-    return { label: t('schedules.state.waiting_for_agent', 'Waiting for Agent'), tone: 'progress' };
-  return { label: t('schedules.enabled', 'Enabled'), tone: 'active' };
+  if (!row.enabled)
+    return {
+      label: t('schedules.paused', 'Paused'),
+      tone: 'muted',
+      icon: 'paused',
+      group: 'paused',
+    };
+  if (runtime?.queueState === 'blocked')
+    return {
+      label: t('schedules.state.blocked', 'Needs attention'),
+      detail: blockedDetail,
+      tone: 'attention',
+      icon: 'attention',
+      group: 'attention',
+    };
+  if (runtime?.queueState === 'retrying')
+    return {
+      label: t('schedules.state.retrying', 'Retrying dispatch'),
+      tone: 'attention',
+      icon: 'attention',
+      group: 'attention',
+    };
+  const next = runtime?.nextScheduledAt;
+  if (runtime?.queueState === 'due' || runtime?.queueState === 'waiting_for_agent')
+    return {
+      label:
+        runtime.queueState === 'due'
+          ? t('schedules.state.due', 'Due')
+          : t('schedules.state.waiting_for_agent', 'Waiting for Agent'),
+      detail: next != null ? at(next) : undefined,
+      tone: 'progress',
+      icon: 'due',
+      group: 'running',
+    };
+  const last = runtime?.lastDispatch;
+  if (row.trigger.kind === 'manual')
+    return {
+      label: t('schedules.status.manual', 'Run manually'),
+      detail: last
+        ? t('schedules.status.lastRan', 'Last ran {{time}}', { time: at(last.dispatchedAt) })
+        : undefined,
+      tone: 'muted',
+      group: 'running',
+    };
+  if (next != null)
+    return {
+      label: t('schedules.status.runsAt', 'Runs {{time}}', { time: at(next) }),
+      tone: 'normal',
+      group: 'running',
+    };
+  if (row.trigger.kind === 'once' && last)
+    return {
+      label: t('schedules.status.done', 'Done'),
+      detail: at(last.dispatchedAt),
+      tone: 'muted',
+      icon: 'sent',
+      group: 'ended',
+    };
+  return {
+    label: t('schedules.notScheduledYet', 'Not scheduled yet'),
+    detail: t('schedules.awaitingMachine', 'Waiting for the machine to check the schedule'),
+    tone: 'muted',
+    group: 'running',
+  };
 }

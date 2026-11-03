@@ -45,9 +45,8 @@ import type { Mention as MentionRange } from '@/ui/mention/index';
  * expand-sessions, each re-reading a string the previous one had already
  * resized. Now nothing depends on who runs first.
  *
- * Composed in one place on purpose: there are exactly two send paths (chat
- * landing and the session composer), and before this hook each of them wired
- * every expandable type by hand, so adding one meant editing both.
+ * Shared by chat landing, the session composer, and scheduled task authoring,
+ * so each surface uses the same transformations when it freezes agent-facing text.
  */
 export type MentionPromptExpansionInput = {
   source: MentionProjectSource | undefined;
@@ -86,6 +85,7 @@ const REWRITTEN_SPAN_KINDS = [
   'session',
   'agent_role',
   'pasted_text',
+  'message_quote',
 ] satisfies MessageTextSpanKind[];
 
 /** Kinds whose composer text is already what the agent should read. */
@@ -141,7 +141,7 @@ export function buildMentionPromptRewrites({
   agentRoleItems: readonly AgentRoleMentionItem[];
 }): TextRewrite[] {
   return [
-    ...buildPastedTextRewrites(pastedTextDrafts),
+    ...buildPastedTextRewrites(pastedTextDrafts, text),
     ...skillRewrites(text),
     ...buildSessionMentionRewrites(text, mentions, { items: sessionItems, workspaceId }),
     ...buildAgentRoleMentionRewrites(text, mentions, agentRoleItems),

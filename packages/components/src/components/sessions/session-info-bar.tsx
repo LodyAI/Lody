@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { LockKeyhole, MonitorPlay, Smartphone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@lody/ui/button';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import type {
   PendingScheduledTask,
   SessionGoalCommand,
@@ -14,7 +16,7 @@ import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { cn } from '@/lib/utils';
 import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
-import { ActionChip } from './info-chip';
+import { ActionChip, PopoverActionChip } from './info-chip';
 import {
   ContextChip,
   GoalChip,
@@ -85,6 +87,7 @@ export type SessionInfoBarProps = {
    *  plain action chip in the cluster zone (no stage form). */
   onOpenBrowser?: () => void;
   onOpenIosSimulator?: () => void;
+  onOpenAndroidEmulator?: () => void;
   /** Mobile team workspace: persistent effective privacy status. */
   privateAccessStatus?: { label: string; description: string; onAction?: () => void };
   diffStat?: { add: number; del: number } | null;
@@ -138,6 +141,7 @@ export type SessionInfoBarProps = {
 const QUEUE_SHEET_INSET_CLASS = 'mx-3';
 
 const styles = stylex.create({
+  simulatorChoices: { display: 'flex', flexDirection: 'column', gap: space[1], padding: space[2] },
   compactPrivateLabel: {
     display: {
       default: 'inline',
@@ -171,6 +175,7 @@ export function SessionInfoBar({
   projectMembers,
   onOpenBrowser,
   onOpenIosSimulator,
+  onOpenAndroidEmulator,
   privateAccessStatus,
   diffStat,
   syncing = false,
@@ -264,6 +269,7 @@ export function SessionInfoBar({
     relations ||
     onOpenBrowser ||
     onOpenIosSimulator ||
+    onOpenAndroidEmulator ||
     ambientSync ||
     privateAccessStatus
   );
@@ -349,7 +355,8 @@ export function SessionInfoBar({
     !!projectMembers ||
     !!relations ||
     !!onOpenBrowser ||
-    !!onOpenIosSimulator;
+    !!onOpenIosSimulator ||
+    !!onOpenAndroidEmulator;
 
   const surfaceProps = {
     className: cn(
@@ -413,6 +420,7 @@ export function SessionInfoBar({
             relations ||
             onOpenBrowser ||
             onOpenIosSimulator ||
+            onOpenAndroidEmulator ||
             stagedKey) ? (
             <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
           ) : null}
@@ -428,12 +436,43 @@ export function SessionInfoBar({
               onAction={onOpenBrowser}
             />
           ) : null}
-          {onOpenIosSimulator ? (
+          {onOpenIosSimulator && onOpenAndroidEmulator ? (
+            <PopoverActionChip
+              icon={Smartphone}
+              label={`${t('sessions.detailTabs.iosSimulator', 'iOS Simulator')} / ${t('sessions.detailTabs.androidEmulator', 'Android Emulator')}`}
+              content={(close) => (
+                <div {...stylex.props(styles.simulatorChoices)}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      close();
+                      onOpenIosSimulator();
+                    }}
+                  >
+                    {t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      close();
+                      onOpenAndroidEmulator();
+                    }}
+                  >
+                    {t('sessions.detailTabs.androidEmulator', 'Android Emulator')}
+                  </Button>
+                </div>
+              )}
+            />
+          ) : onOpenIosSimulator || onOpenAndroidEmulator ? (
             <ActionChip
               icon={Smartphone}
-              label={t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
+              label={
+                onOpenIosSimulator
+                  ? t('sessions.detailTabs.iosSimulator', 'iOS Simulator')
+                  : t('sessions.detailTabs.androidEmulator', 'Android Emulator')
+              }
               textClassName="text-emerald-600 dark:text-emerald-400"
-              onAction={onOpenIosSimulator}
+              onAction={(onOpenIosSimulator ?? onOpenAndroidEmulator)!}
             />
           ) : null}
           {/* The divider is what marks the staged item as active (the stage

@@ -37,6 +37,11 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   allowlists. The IPC registration test keeps that policy aligned with the registered
   service constructors. There is no `window.api`. Validate foreign input at the IPC class
   boundary.
+- The E2E client-loss probe (`e2ee.inspectClientLoss` and `e2ee.clientLossEffects`) is the
+  only channel pair outside the service classes. Main registers it, and preload admits it,
+  only for unpackaged `LODY_E2E=1` windows through the main-supplied argument. It stays
+  read-only and returns counts, booleans and sequences without content, tokens or error text.
+  [Decision](../../../.agents/notes/implemented/testing/2026-10-30-e2ee-client-loss-probe.md).
 - Preload runs under the renderer CSP. Zod schemas used there must pass
   `{ jitless: true }`; do not add `unsafe-eval` to accommodate Zod's JIT path.
 

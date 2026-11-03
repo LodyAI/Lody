@@ -38,6 +38,28 @@ const projectRun = {
 } as unknown as NonNullable<SessionMeta['projectRun']>;
 
 describe('buildSessionProjectMemberRows', () => {
+  it('attaches a PR to the repository in its URL, not a stale legacy repository field', () => {
+    const rows = buildSessionProjectMemberRows({
+      projectRun,
+      pullRequests: [
+        {
+          url: 'https://github.com/acme/api/pull/7',
+          status: 'open',
+          repository: 'acme/web',
+          number: 99,
+        },
+      ] as unknown as SessionMeta['pullRequests'],
+    });
+    const api = rows.find((row) => row.id === ('api' as ProjectMemberId));
+    const web = rows.find((row) => row.id === ('web' as ProjectMemberId));
+    expect(api?.pr).toEqual({
+      url: 'https://github.com/acme/api/pull/7',
+      status: 'open',
+      number: 7,
+    });
+    expect(web?.pr).toBeUndefined();
+  });
+
   it('lists members in snapshot order, each with its own current PR and CI', () => {
     const rows = buildSessionProjectMemberRows({
       projectRun,

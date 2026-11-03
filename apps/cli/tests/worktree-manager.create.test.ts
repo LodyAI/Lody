@@ -1,3 +1,5 @@
+import { CommandTimedOut } from '@lody/shared/node/process';
+import { worktreeGitLegacy } from '../src/session/worktree/git-execution-legacy';
 import { checkoutProjectSubmodule, inspectProjectSubmodule, persistProjectSubmoduleBranch } from '../src/session/worktree/project-submodules';
 import { worktreeGitLayer } from '../src/session/worktree/git-execution';
 import { describe, expect, it, vi } from 'vitest';
@@ -573,6 +575,29 @@ describe('WorktreeManager', () => {
       expect(restored.branch).toBe(created.branch);
       expect(restored.headSha).toBe(created.headSha);
       expect(fs.existsSync(restored.hostPath)).toBe(true);
+    });
+
+    it('restores local refs after a released fetch timeout and retries fetch on the next restore', async () => {
+      const { remoteBareDir } = createRemoteRepo(testDir, 'main');
+      manager.updateRepoUrl(toFileUrl(remoteBareDir));
+      const id = 'bounded-fetch' as SessionId;
+      const created = await manager.createWorktree(id);
+      const remove = () => runGit(created.hostPath, ['worktree', 'remove', '--force', created.hostPath]);
+      remove();
+      const realRun = worktreeGitLegacy.run;
+      const fetch = vi.spyOn(worktreeGitLegacy, 'run').mockImplementation(async (command, options) => {
+        if (command.args[0] === 'fetch') {
+          expect(command.timeout).toBe(30_000);
+          throw new WorktreeGitExecutionFailed({ message: 'released timeout', cause: new CommandTimedOut({ command: 'git', message: 'timed out' }) });
+        }
+        return realRun(command, options);
+      });
+      try {
+        const restored = await manager.createWorktree(id, undefined, created.branch);
+        expect(restored.headSha).toBe(created.headSha);
+      } finally { fetch.mockRestore(); }
+      remove();
+      expect((await manager.createWorktree(id, undefined, created.branch)).headSha).toBe(created.headSha);
     });
 
     it('should still require a reachable origin when cutting a fresh worktree', async () => {

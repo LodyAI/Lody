@@ -33,6 +33,7 @@ import {
 import nowledgeLogo from '@/assets/nowledge-mem.png';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+import { withoutEncryptedSharedMachines } from '@/lib/visible-machine-index';
 import { useMachineOnlineStatus, useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useMemoryProvider } from '@/hooks/use-memory-provider';
 import { useOpenSettings } from '@/hooks/use-open-settings';
@@ -390,7 +391,13 @@ export function MemoryIdentityList({
 
 export function MemorySetting() {
   const { t } = useTranslation();
-  const { machines, accessByMachineId } = useVisibleMachineMetas();
+  const visibleMachineIndex = useVisibleMachineMetas();
+  const { accessByMachineId } = visibleMachineIndex;
+  // Memory provider configuration uses machine RPC, fenced for encrypted shared machines.
+  const machines = useMemo(
+    () => withoutEncryptedSharedMachines(visibleMachineIndex.machines, visibleMachineIndex),
+    [visibleMachineIndex]
+  );
   const localId = useAtomValue(localMachineIdAtom);
   const onlineIds = useOnlineMachineIds();
   const remote = useAppCapability('remoteMachines');

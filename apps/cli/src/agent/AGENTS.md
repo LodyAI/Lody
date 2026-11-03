@@ -33,8 +33,11 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   `LODY_SERVER_URL` so cloud MCP orchestration uses the daemon's deployment, let local platform
   assembly clear them before agent startup, and never add CLI credentials or secrets.
 - Pass the same MCP config on initial and replacement DeepSeek Harness sessions.
-- Workspace MCP resolution stays TWO phases: call `loadExternalMcpServers` BEFORE `initialize`,
-  never between `initialize` and `newSession`.
+- Workspace MCP resolution starts before `initialize` to overlap the handshake.
+  Before the first remote baseline, complete selected rows may start locally with a
+  config warning. Missing selected rows preserve the typed cold error and may reload
+  once before provider-session establishment; still missing fails initialization.
+  Check completeness before preparing local authentication so a recheck cannot repeat it.
 - Acknowledged steer ends `applied`, `not-applied`, or `unknown`. Only adapter proof maps
   `not-applied`; transport/process ambiguity stays `unknown`. Await the request answer even
   after the turn response; Session execution never classifies provider errors.
@@ -47,6 +50,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtins use `setting.ts`'s `resolveACPProcessLaunchAsync()`. [Codex profiles](../../../../specs/codex-account-profiles.md)
   forbid upstream keys in shared/child env. Process records delay deletion, never
   restrict same-profile concurrency.
+  Catalog scans skip unreadable profiles with one warning per file; selected-account validation stays strict.
 - `deepseek-harness-runtime.ts` is not managed: no download/prefetch/override/auth.
   Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
   npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.
@@ -64,6 +68,12 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.
   `LODY_RUNTIME_BASE_URL` is an explicit mirror override only.
+- Invalid caches remain unlaunchable; status reports absence with a warning. Repairs publish
+  verified generations without moving existing paths. Status, install and launch share selection:
+  filter base and completed generations by current pins and host compatibility, then rank them.
+  Cleanup preserves unreadable originals and generation trees while reader lifetimes are unknown.
+  Downloads stop after 60 seconds idle;
+  progressing transfers have no total deadline, and later calls resume retained partial bytes.
 - Install cancellation, here and in `acp-binary-manager.ts`: concurrent installs share one
   download but keep independent consumer leases; cancelling one caller must not stop others, and
   only the last aborts fetch, checksum, and extraction. An immediate retry waits for an aborted
@@ -74,7 +84,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtin Dimcode is user-installed.
 - `npx-cache.ts`: ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE` to the active
   profile's `npm-cache`. Automatic `_npx`/`_cacache` cleanup is allowed ONLY for that Lody-owned
-  cache.
+  cache. Cold initialize timeout never authorizes clearing `_cacache`; whole-cache
+  recovery requires a corruption signature. [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 
 ## `acp-authentication.ts`
 
@@ -91,15 +102,18 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   Replies carry interaction ids and use encrypted remote authentication-input. Bound URL schemes, sizes,
   ids, labels, options, and defaults before they enter progress, under a shared serialized-byte
   budget for the form.
+- A protocol agent's `initialize` methods are the sign-in entry point; record them on the
+  Provider's capability row and let the reader pick one.
 - Machine RPC may name only a persisted Provider `configId`; the daemon freezes
   machine/CLI/agent/launch/env/runtime fields before spawning, capability refresh included, and
   later replies can never replace that launch target.
 
 ## Capabilities and titles
 
-- Static capabilities: builtins without overrides only. Refresh probes the runtime,
-  cached by `agentConfigId` + launched version; requests/responses carry that id. Aborted
-  probes never update cache. Updates never hot-swap ACP; Flock ignores `fetchedAt`.
+- Static builtin capabilities exclude runtime overrides. Cache probes by `agentConfigId`
+  and launched version; requests/responses carry that id. Only probes replace Provider
+  command previews; actual lists stay in Session control state. Aborted probes never
+  write, and updates never hot-swap ACP. Flock ignores `fetchedAt`.
 - Capability probes own unique temporary workdirs, never inherited cwd/projects. Remove
   after shutdown even on failure/cancellation; removal errors never replace probe
   outcomes. Keep provider homes unchanged.

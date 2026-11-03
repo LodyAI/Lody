@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { machineSupportsLocalProjectRemovalProtocol, type MachineId } from '@lody/shared';
@@ -19,6 +19,7 @@ import {
 } from '@/components/mobile/mobile-settings-row';
 import { MobileAcpHistorySheet } from '@/components/mobile/mobile-acp-history-sheet';
 import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-config-sheet';
+import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
 import { MobileProjectSkillsRow } from '@/components/mobile/mobile-project-skills-sheet';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { getHistoryProviderLabel } from '@/components/settings/project-settings';
@@ -29,6 +30,7 @@ export type MobileLocalProjectSettingsProps = {
   machineId: string;
   /** Local-project id within that machine. */
   projectId: string;
+  intro?: ReactNode;
   /** Called after the project is removed so the screen can navigate away
      (the project no longer exists). */
   onRemoved?: () => void;
@@ -56,6 +58,7 @@ export function MobileLocalProjectSettings({
   machineId,
   projectId,
   onRemoved,
+  intro,
 }: MobileLocalProjectSettingsProps) {
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -96,24 +99,30 @@ export function MobileLocalProjectSettings({
 
   if (isLoading && !row) {
     return (
-      <MobileSettingsSection title={t('workspace.projects.title', 'Project')}>
-        <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-          <Spinner className="h-4 w-4" />
-          {t('workspace.projects.loading', 'Loading local projects')}
-        </div>
-      </MobileSettingsSection>
+      <>
+        {intro}
+        <MobileSettingsSection title={t('workspace.projects.title', 'Project')}>
+          <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground">
+            <Spinner className="h-4 w-4" />
+            {t('workspace.projects.loading', 'Loading local projects')}
+          </div>
+        </MobileSettingsSection>
+      </>
     );
   }
 
   if (!row) {
     return (
-      <MobileSettingsSection title={t('workspace.projects.title', 'Project')}>
-        <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
-          <p className="text-sm text-muted-foreground">
-            {t('workspace.projects.notAvailable', '此项目在当前机器上不可用')}
-          </p>
-        </div>
-      </MobileSettingsSection>
+      <>
+        {intro}
+        <MobileSettingsSection title={t('workspace.projects.title', 'Project')}>
+          <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+            <p className="text-sm text-muted-foreground">
+              {t('workspace.projects.notAvailable', '此项目在当前机器上不可用')}
+            </p>
+          </div>
+        </MobileSettingsSection>
+      </>
     );
   }
 
@@ -129,107 +138,120 @@ export function MobileLocalProjectSettings({
 
   return (
     <Tooltip.Provider delay={200}>
-      {teamSharingAvailable && (
-        <MobileSettingsSection
-          title={t('workspace.projects.workspaceShareTitle', '工作区共享')}
-          description={
-            row.canUpdateSharing
-              ? undefined
-              : t(
-                  'workspace.projects.sharePreparing',
-                  'Sharing will be available when this machine finishes connecting.'
-                )
-          }
-        >
-          <MobileSettingsRow label={t('workspace.projects.shareToggle', '与团队共享')}>
-            <div className="flex items-center gap-2">
-              {row.isUpdating ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null}
-              <Switch
-                checked={row.sharedWithTeam}
-                disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}
-                aria-label={t('workspace.projects.shareToggle', '与团队共享')}
-                onCheckedChange={(checked) => {
-                  void onSharedWithTeamChange?.(row, checked);
-                }}
-              />
-            </div>
-          </MobileSettingsRow>
-        </MobileSettingsSection>
-      )}
+      <MobileSettingsFoldPanels
+        lowerClassName="pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]"
+        upper={
+          <>
+            {intro}
+            {teamSharingAvailable && (
+              <MobileSettingsSection
+                title={t('workspace.projects.workspaceShareTitle', '工作区共享')}
+                description={
+                  row.canUpdateSharing
+                    ? undefined
+                    : t(
+                        'workspace.projects.sharePreparing',
+                        'Sharing will be available when this machine finishes connecting.'
+                      )
+                }
+              >
+                <MobileSettingsRow label={t('workspace.projects.shareToggle', '与团队共享')}>
+                  <div className="flex items-center gap-2">
+                    {row.isUpdating ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null}
+                    <Switch
+                      checked={row.sharedWithTeam}
+                      disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}
+                      aria-label={t('workspace.projects.shareToggle', '与团队共享')}
+                      onCheckedChange={(checked) => {
+                        void onSharedWithTeamChange?.(row, checked);
+                      }}
+                    />
+                  </div>
+                </MobileSettingsRow>
+              </MobileSettingsSection>
+            )}
 
-      <MobileSettingsSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
-        <MobileSettingsRow
-          label={
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Wrench className="h-[1.05rem] w-[1.05rem]" />
-              </div>
-              <span className="truncate text-[0.95rem] font-medium leading-tight">
-                {t('workspace.projects.worktreeConfigRow', 'Worktree setup & cleanup')}
-              </span>
-            </div>
-          }
-          onClick={() => setWorktreeSheetOpen(true)}
-          trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
-        />
-      </MobileSettingsSection>
-
-      <MobileProjectSkillsRow source={skillsSource} />
-
-      {visibleHistoryImports.length > 0 ? (
-        <MobileSettingsSection
-          title={t('workspace.projects.historySyncSection', '对话同步')}
-          description={t(
-            'workspace.projects.historySyncSectionHelper',
-            '从其他 ACP agent 中导入该项目的历史对话。'
-          )}
-        >
-          <MobileSettingsRowGroup>
-            {visibleHistoryImports.map((state) => (
+            <MobileSettingsSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
               <MobileSettingsRow
-                key={state.providerKey}
                 label={
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <AgentIcon
-                        cliType={state.provider.cliType}
-                        agentType={state.provider.agentType}
-                        className="h-[1.05rem] w-[1.05rem]"
-                      />
+                      <Wrench className="h-[1.05rem] w-[1.05rem]" />
                     </div>
                     <span className="truncate text-[0.95rem] font-medium leading-tight">
-                      {state.providerLabel ?? getHistoryProviderLabel(state.provider)}
+                      {t('workspace.projects.worktreeConfigRow', 'Worktree setup & cleanup')}
                     </span>
                   </div>
                 }
-                onClick={() => setSelectedProviderKey(state.providerKey)}
+                onClick={() => setWorktreeSheetOpen(true)}
                 trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
               />
-            ))}
-          </MobileSettingsRowGroup>
-        </MobileSettingsSection>
-      ) : null}
+            </MobileSettingsSection>
+          </>
+        }
+        lower={
+          <>
+            <MobileProjectSkillsRow source={skillsSource} />
 
-      {machineSupportsLocalProjectRemovalProtocol(machineMeta) ? (
-        <MobileSettingsSection>
-          <button
-            type="button"
-            onClick={() => {
-              void removeLocalProject({
-                machineId: row.machineId,
-                localProjectId: row.project.id,
-                projectName: row.project.name,
-                originalRootPath: projectPath ?? undefined,
-              }).then((removed) => {
-                if (removed) onRemoved?.();
-              });
-            }}
-            className="block w-full px-4 py-3 text-center text-[0.95rem] font-medium text-destructive transition-colors active:bg-destructive/10"
-          >
-            {t('workspace.projects.delete', 'Delete project')}
-          </button>
-        </MobileSettingsSection>
-      ) : null}
+            {visibleHistoryImports.length > 0 ? (
+              <MobileSettingsSection
+                title={t('workspace.projects.historySyncSection', '对话同步')}
+                description={t(
+                  'workspace.projects.historySyncSectionHelper',
+                  '从其他 ACP agent 中导入该项目的历史对话。'
+                )}
+              >
+                <MobileSettingsRowGroup>
+                  {visibleHistoryImports.map((state) => (
+                    <MobileSettingsRow
+                      key={state.providerKey}
+                      label={
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                            <AgentIcon
+                              cliType={state.provider.cliType}
+                              agentType={state.provider.agentType}
+                              className="h-[1.05rem] w-[1.05rem]"
+                            />
+                          </div>
+                          <span className="truncate text-[0.95rem] font-medium leading-tight">
+                            {state.providerLabel ?? getHistoryProviderLabel(state.provider)}
+                          </span>
+                        </div>
+                      }
+                      onClick={() => setSelectedProviderKey(state.providerKey)}
+                      trailing={
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />
+                      }
+                    />
+                  ))}
+                </MobileSettingsRowGroup>
+              </MobileSettingsSection>
+            ) : null}
+
+            {machineSupportsLocalProjectRemovalProtocol(machineMeta) ? (
+              <MobileSettingsSection>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void removeLocalProject({
+                      machineId: row.machineId,
+                      localProjectId: row.project.id,
+                      projectName: row.project.name,
+                      originalRootPath: projectPath ?? undefined,
+                    }).then((removed) => {
+                      if (removed) onRemoved?.();
+                    });
+                  }}
+                  className="block w-full px-4 py-3 text-center text-[0.95rem] font-medium text-destructive transition-colors active:bg-destructive/10"
+                >
+                  {t('workspace.projects.delete', 'Delete project')}
+                </button>
+              </MobileSettingsSection>
+            ) : null}
+          </>
+        }
+      />
 
       <MobileWorktreeConfigSheet
         open={worktreeSheetOpen}

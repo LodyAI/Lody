@@ -91,6 +91,7 @@ and file responsibilities: [../README.md](../README.md).
 - A fresh local/GitHub worktree always owns a newly allocated branch from its selected base
   ref; suffix collisions instead of attaching to an existing ref. Reattaching an existing
   branch is reserved for an explicit `restoreBranchName` from the same Session.
+- Script history callbacks wait at most 1s and warn on failure; only script execution determines success.
 - Worktree setup scripts are per worktree-directory lifetime: session runtime restore after
   idle GC must skip setup when the session's worktree directory already exists, but setup still
   runs when a missing worktree directory is materialized again.
@@ -111,4 +112,7 @@ and file responsibilities: [../README.md](../README.md).
 - Project roots use registrations. Repair links, never removing a correct one (tabs share
   it); archive unlinks without following targets.
   Submodule init uses actual gitlinks; backup requires its own checkout. Only complete,
-  standalone, non-shallow repositories may lend objects.
+  standalone, non-shallow repositories may lend objects. Unselected references must
+  match the effective submodule URL, stay inside the local source tree without
+  symlinks, and have no alternates. Always dissociate borrowed objects before
+  descending; selected Members retain their own initialization owner.

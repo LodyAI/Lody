@@ -12,6 +12,7 @@ const runtime = vi.hoisted(() => {
 
 vi.mock('../src/lib/native-platform', () => ({
   isNativeAppShell: () => runtime.native,
+  isNativeIOSAppShell: () => runtime.native,
 }));
 
 import {

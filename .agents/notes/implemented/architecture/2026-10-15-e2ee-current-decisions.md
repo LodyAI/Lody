@@ -34,8 +34,9 @@ Current permission and known-prefix checks repeat after asynchronous work.
 
 Host upload admission and honest sealing are different gates. Previously sealed
 original bytes may upload under current document-write permission when their epoch
-is published in the genuine ledger, including while rotation is required. Only
-new seals require the current epoch and cleared rotation flag. The workspace
+is published in the genuine ledger, including while rotation is required. New
+seals may also use a retained published epoch with current write permission;
+rotationRequired advises administrators and does not block sealing. The workspace
 facade exposes the verified epoch/rotation requirement and personal-manager
 eligibility without publishing; Lab uses that signal for a required-rotation round.
 Failed vault candidates have no cleanup API and remain permanently retained in
@@ -169,8 +170,7 @@ Owner-personal-signed transition. The original candidate and P09 paths are reuse
 retired member/device facts and history remain, while distribution excludes the
 removed devices. The existing snapshot auth state already represents that exact
 post-state; no old-client capability negotiation or second decoder is introduced.
-The encoding remains experimental. Related protocol Specs remain drafts for review;
-implementation and tests do not grant approval.
+The encoding remains experimental. The [atomic removal Spec](../../../../specs/e2ee/atomic-removal.md) is approved; implementation and tests alone do not grant approval.
 
 Snapshot content v0 carries a u16be byte length and raw ASCII continuation offset
 immediately after the signing public key; the complete field enters signature/AEAD.
@@ -254,4 +254,4 @@ the Lab's native SQLite boundary implementation is not that production API.
 
 ## Workspace, vault and desktop round
 
-The user selected vault-v1, per-workspace encrypted R entries plus index CAS, inviter-pinned snapshot joining and desktop-only safeStorage-wrapped KEK custody. Corresponding Specs remain draft for revision approval; product E2EE remains disabled. Web/mobile/CLI custody and strict deadline B are not enabled. The public workspace facade owns common workflows and Lab is its first consumer. Staging deletion checks its original signer and deletes in one transaction; absence succeeds. Streams boundary queries are content blind. Manual model exploration counts replay-confirmed measured violations; benchmarks have no CI thresholds.
+The user selected vault-v1, per-workspace encrypted R entries plus index CAS, inviter-pinned snapshot joining and desktop safeStorage-wrapped KEK custody. The snapshot join and desktop custody Specs are approved, while recovery vault remains draft; product E2EE remains disabled. The [later Web/mobile authorization](2026-10-28-e2ee-spec-approval.md#web-and-mobile-custody-authorization) extends the intended custody direction through the approved client custody Spec; it does not enable Web/mobile/CLI custody or strict deadline B. The public workspace facade owns common workflows and Lab is its first consumer. Staging deletion checks its original signer and deletes in one transaction; absence succeeds. Streams boundary queries are content blind. Manual model exploration counts replay-confirmed measured violations; benchmarks have no CI thresholds.

@@ -13,6 +13,7 @@ import { prepareSessionInputAttachments } from './session-input-attachments';
 import { buildCommandInputBlocks } from './session-input-content';
 import { SessionAttachmentTransfer } from './session-attachment-transfer';
 import { getSessionFileBlobPath } from './session-file-blob-store';
+import { readEncryptedAttachment, type EncryptedAttachment } from '@lody/shared';
 
 let root: string;
 const scope = {
@@ -32,6 +33,53 @@ afterEach(async () => {
 });
 
 describe('session input attachment preparation', () => {
+  it('uploads only opaque encrypted parts and preserves the secret manifest through command input', async () => {
+    await fs.writeFile(path.join(root, 'private.txt'), 'synthetic private file');
+    const stored = new Map<string, Uint8Array>();
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      expect(url).toContain('/session-encrypted-files/upload');
+      const headers = new Headers(init.headers);
+      expect(headers.get('Authorization')).toBe('Bearer attachment-grant');
+      expect(headers.get('x-file-name')).toBe('attachment.bin');
+      expect(headers.get('x-file-text-preview')).toBe('false');
+      const bytes = new Uint8Array(init.body as ArrayBuffer);
+      const fileId = `opaque-${stored.size}`;
+      stored.set(fileId, bytes);
+      expect(Buffer.from(bytes).toString()).not.toContain('synthetic private file');
+      return Response.json({
+        file: {
+          type: 'file',
+          fileId,
+          fileName: 'attachment.bin',
+          mimeType: 'application/octet-stream',
+          sizeBytes: bytes.length,
+          sha256: headers.get('x-file-sha256'),
+          textPreview: false,
+          transport: 'r2',
+          uploadedAt: 1,
+        },
+      });
+    });
+    const blocks = await prepareSessionInputAttachments({
+      ...scope,
+      paths: ['private.txt'],
+      cwd: root,
+      relay: new SessionAttachmentTransfer('account-token', 'https://relay.test', {
+        token: async () => 'attachment-grant',
+      }),
+    });
+    const [file] = buildCommandInputBlocks('', blocks);
+    expect(file).toMatchObject({ type: 'file', fileName: 'private.txt', encryption: { v: 1 } });
+    const encryption = (file as { encryption: EncryptedAttachment }).encryption;
+    const parts: Uint8Array[] = [];
+    for await (const bytes of readEncryptedAttachment({
+      ...scope,
+      encryption,
+      fetchPart: async (id) => new Response(stored.get(id) as Uint8Array<ArrayBuffer>),
+    }))
+      parts.push(bytes);
+    expect(Buffer.concat(parts).toString()).toBe('synthetic private file');
+  });
   it('freezes local bytes, supports attachment-only input, and never uses the target cwd', async () => {
     await fs.writeFile(path.join(root, 'report.txt'), 'original');
     const blocks = await prepareSessionInputAttachments({

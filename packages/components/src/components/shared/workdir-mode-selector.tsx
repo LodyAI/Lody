@@ -2,7 +2,7 @@ import { ChevronDown, Folder, GitBranch } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 
 import { withClassName } from '@/lib/stylex';
 import { Button } from '@lody/ui/button';
@@ -24,8 +24,8 @@ const styles = stylex.create({
       default: 'hsl(var(--hover))',
       ':hover': 'color-mix(in oklab, hsl(var(--hover)) 80%, transparent)',
     },
-    fontSize: '12px',
-    lineHeight: '16px',
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
     fontWeight: 400,
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     userSelect: 'none',

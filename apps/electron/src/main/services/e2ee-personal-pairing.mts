@@ -2,12 +2,22 @@ import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { Effect, Result } from 'effect'
-import { z } from 'zod'
 import {
-  verifyWorkspaceInvitationSnapshot,
-  type WorkspaceInvitation,
-  type WorkspaceInvitationSnapshot
-} from '@lody/e2ee-core'
+  PersonalPairingOfferSchema,
+  decodePersonalRequest as decodeRequest,
+  encodePersonalInvitation,
+  decodePersonalInvitation,
+  personalInvitationPin as invitationPin,
+  type PersonalPairingOffer,
+  type PersonalPairingRequest
+} from '@lody/e2ee-client/pairing'
+export {
+  PersonalPairingOfferSchema,
+  encodePersonalInvitation,
+  decodePersonalInvitation
+} from '@lody/e2ee-client/pairing'
+export type { PersonalPairingOffer, PersonalPairingRequest } from '@lody/e2ee-client/pairing'
+import { verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core'
 import {
   Bytes,
   hashRecordBytes,
@@ -30,35 +40,6 @@ import { verifyMemberHistory } from './e2ee-member-join.mjs'
 
 const hex = (value: Uint8Array): string => Buffer.from(value).toString('hex')
 const raw = (value: string): Uint8Array => new Uint8Array(Buffer.from(value, 'hex'))
-const hash = z.string().regex(/^[0-9a-f]{64}$/)
-const session = z.string().regex(/^[0-9a-f]{32}$/)
-const signature = z.string().regex(/^[0-9a-f]{128}$/)
-const workspace = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
-export const PersonalPairingOfferSchema = z
-  .object({
-    version: z.literal(1),
-    workspaceId: workspace,
-    genesisHash: hash,
-    genesisRecordHex: z
-      .string()
-      .regex(/^(?:[0-9a-f]{2})+$/)
-      .max(16384),
-    endorser: hash,
-    membershipId: session,
-    pairingSessionId: session
-  })
-  .strict()
-/** Independently transferred by the approving desktop; mailbox data never chooses these pins. */
-export type PersonalPairingOffer = z.infer<typeof PersonalPairingOfferSchema>
-const requestSchema = PersonalPairingOfferSchema.extend({
-  signingPublicKey: hash,
-  encryptionPublicKey: hash,
-  credentialHash: hash,
-  possessionSignature: signature,
-  bindingSignature: signature,
-  protection: z.literal('os-keystore')
-}).strict()
-export type PersonalPairingRequest = z.infer<typeof requestSchema>
 const fail = (code: string): Error & { code: string } =>
   Object.assign(new Error(`e2ee_${code}`), { code })
 function sql<A>(work: () => A): Effect.Effect<A, unknown> {
@@ -69,76 +50,6 @@ function sql<A>(work: () => A): Effect.Effect<A, unknown> {
       return error instanceof Error && 'code' in error ? error : fail('storage')
     }
   })
-}
-function decodeRequest(value: string): PersonalPairingRequest {
-  if (typeof value !== 'string' || value.length > 16384 || !/^(?:[0-9a-f]{2})+$/.test(value))
-    throw fail('invalid-input')
-  const parsed = requestSchema.safeParse(JSON.parse(Buffer.from(value, 'hex').toString('utf8')))
-  if (!parsed.success) throw fail('invalid-input')
-  return parsed.data
-}
-/** Versioned public transport bundle; signatures cover the original core bytes. */
-export function encodePersonalInvitation(
-  receipt: Parameters<typeof verifyWorkspaceInvitationSnapshot>[1]
-): string {
-  return hex(
-    new TextEncoder().encode(
-      JSON.stringify({
-        version: 1,
-        workspaceId: receipt.workspaceId,
-        snapshot: Buffer.from(receipt.snapshot).toString('base64'),
-        head: hex(receipt.head.toBytes()),
-        length: receipt.length,
-        headSignature: hex(receipt.headSignature.toBytes()),
-        offset: receipt.offset
-      })
-    )
-  )
-}
-const invitationSchema = z
-  .object({
-    version: z.literal(1),
-    workspaceId: workspace,
-    snapshot: z
-      .string()
-      .min(4)
-      .max(2796204)
-      .regex(/^[A-Za-z0-9+/]*={0,2}$/),
-    head: hash,
-    length: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-    headSignature: signature,
-    offset: z.string().min(1).max(1024)
-  })
-  .strict()
-export function decodePersonalInvitation(value: string): WorkspaceInvitationSnapshot {
-  if (
-    typeof value !== 'string' ||
-    value.length > 6 * 1024 * 1024 ||
-    value.length % 2 !== 0 ||
-    !/^[0-9a-f]+$/.test(value)
-  )
-    throw fail('invalid-input')
-  const parsed = invitationSchema.safeParse(JSON.parse(Buffer.from(value, 'hex').toString('utf8')))
-  if (!parsed.success) throw fail('invalid-input')
-  const data = parsed.data,
-    snapshot = Buffer.from(data.snapshot, 'base64')
-  if (snapshot.length > 2 * 1024 * 1024 || snapshot.toString('base64') !== data.snapshot)
-    throw fail('invalid-input')
-  return {
-    workspaceId: data.workspaceId,
-    snapshot: new Uint8Array(snapshot),
-    head: Result.getOrThrow(Bytes.recordHash(raw(data.head))),
-    length: data.length,
-    headSignature: Result.getOrThrow(Bytes.signature(raw(data.headSignature))),
-    offset: data.offset
-  }
-}
-function invitationPin(pin: PersonalPairingOffer): WorkspaceInvitation {
-  return {
-    workspaceId: pin.workspaceId,
-    genesis: Result.getOrThrow(Bytes.genesisHash(raw(pin.genesisHash))),
-    endorser: Result.getOrThrow(Bytes.signingPublicKey(raw(pin.endorser)))
-  }
 }
 
 interface PersonalJoinPrepared {
@@ -156,7 +67,18 @@ interface PersonalJoinOrigin {
   invitationHex?: string
   historyPages?: E2eeWorkspaceHistoryPage[]
 }
+export interface AccountIdentity {
+  signingPublicKey: Uint8Array
+  encryptionPublicKey: Uint8Array
+  possessionProof: Uint8Array
+  credentialHash: Uint8Array
+}
 interface PersonalJoins {
+  accountIdentity(pin: {
+    genesisHash: string
+    genesisRecordHex: string
+    membershipId: string
+  }): Effect.Effect<AccountIdentity, unknown>
   pending(workspaceId: string): Effect.Effect<
     {
       offer: PersonalPairingOffer
@@ -184,7 +106,7 @@ interface PersonalPairing {
       signingPublicKey: string
       encryptionPublicKey: string
       credentialHash: string
-      protection: 'os-keystore'
+      protection: 'os-keystore' | 'web-crypto'
     },
     unknown
   >
@@ -199,6 +121,16 @@ interface PersonalPairing {
     unknown
   >
   invitation(session: string): Effect.Effect<{ invitationHex: string } | null, unknown>
+  /** Account-wide pairing: sign one personal admission for an authenticated request
+   * row. No journaling here; the account journal retains the original first. */
+  signAccount(row: {
+    signingPublicKey: Uint8Array
+    encryptionPublicKey: Uint8Array
+    possessionProof: Uint8Array
+  }): Effect.Effect<{ requestId: string; record: Uint8Array }, unknown>
+  /** The snapshot invitation for an admission this device signed, once it is in the
+   * verified ledger; `null` for a Member signer, which cannot endorse a snapshot. */
+  accountInvitation(record: Uint8Array): Effect.Effect<Uint8Array | null, unknown>
   retire(session: string): Effect.Effect<void, unknown>
   /** Only after the main process reconciles the service's terminal non-reservation response. */
   cancel(session: string): Effect.Effect<void, unknown>
@@ -346,6 +278,35 @@ export function makeDesktopPersonalJoins(input: {
       requestHex: original
     }
   })
+  /** Account-wide pairing: create or reuse this workspace's retained personal identity
+   * and its credential, and prove possession for `membershipId`. Both custody calls
+   * return the retained originals on repeat, so every later request reuses them. */
+  const accountIdentity = Effect.fnUntraced(function* (pin: {
+    genesisHash: string
+    genesisRecordHex: string
+    membershipId: string
+  }) {
+    if (custody.protection !== 'os-keystore') return yield* Effect.fail(fail('invalid-input'))
+    const genesis = Result.getOrThrow(Bytes.genesisHash(raw(pin.genesisHash)))
+    const originalGenesis = raw(pin.genesisRecordHex)
+    if (hex(hashRecordBytes(originalGenesis).toBytes()) !== pin.genesisHash)
+      return yield* Effect.fail(fail('invalid-input'))
+    const device = yield* custody.createDevice(genesis)
+    const credential = yield* custody.prepareDeviceCredential(genesis, device.publicKey)
+    const admission = yield* prepareDeviceAdmission({
+      genesis,
+      membershipId: Result.getOrThrow(Bytes.membershipId(raw(pin.membershipId))),
+      encryptionPublicKey: device.enc,
+      kind: 'personal',
+      signer: device
+    })
+    return {
+      signingPublicKey: device.publicKey.toBytes(),
+      encryptionPublicKey: device.enc.toBytes(),
+      possessionProof: admission.possessionSignature.toBytes(),
+      credentialHash: raw(credential.credentialHash)
+    }
+  })
   const origin = Effect.fnUntraced(function* (workspaceId: string, supplied?: string) {
     const row = yield* sql(() => rowFor(workspaceId))
     const retainedHistory = yield* sql(() =>
@@ -422,6 +383,7 @@ export function makeDesktopPersonalJoins(input: {
     }
   })
   return {
+    accountIdentity,
     pending: (workspaceId: string) =>
       sql(() => {
         const row = rowFor(workspaceId)
@@ -817,11 +779,85 @@ export function makeDesktopPersonalPairing(input: {
     }
     return { invitationHex: yield* sql(() => rowFor(pairingSessionId)!.invitation_hex!) }
   })
+  const signAccount = Effect.fnUntraced(function* (row: {
+    signingPublicKey: Uint8Array
+    encryptionPublicKey: Uint8Array
+    possessionProof: Uint8Array
+  }) {
+    const view = yield* input.current()
+    yield* sql(() => manager(view))
+    const proposal = yield* Effect.fromResult(
+      prepareLedgerCommand(view, input.signer.publicKey, {
+        _tag: 'AdmitDevice',
+        kind: 'personal',
+        signingPublicKey: yield* Effect.fromResult(Bytes.signingPublicKey(row.signingPublicKey)),
+        encryptionPublicKey: yield* Effect.fromResult(
+          Bytes.encryptionPublicKey(row.encryptionPublicKey)
+        ),
+        possessionSignature: yield* Effect.fromResult(Bytes.signature(row.possessionProof))
+      })
+    )
+    const record = yield* signLedgerRecord(proposal, input.signer)
+    return { requestId: `account-device-${randomUUID()}`, record }
+  })
+  const accountInvitation = Effect.fnUntraced(function* (record: Uint8Array) {
+    const view = yield* input.current()
+    const signed = yield* Effect.fromResult(decodeRecord(record))
+    if (
+      signed.body.type !== 'ordinary' ||
+      signed.body.operation.type !== 'admitDevice' ||
+      signed.body.operation.kind !== 'personal' ||
+      !signed.body.signer.equals(input.signer.publicKey)
+    )
+      return yield* Effect.fail(fail('invalid-input'))
+    const target = hex(signed.body.operation.signingPublicKey.toBytes())
+    yield* sql(() => {
+      const membershipId = manager(view)
+      const admitted = view.inspectState().devices.get(target)
+      const originals = db.prepare('SELECT record FROM records WHERE position < ?').all(view.length)
+      if (
+        !admitted ||
+        admitted.kind !== 'personal' ||
+        !admitted.membershipId.equals(membershipId) ||
+        !originals.some(
+          (r) => r.record instanceof Uint8Array && Buffer.from(r.record).equals(Buffer.from(record))
+        )
+      )
+        throw fail('local-evidence-conflict')
+    })
+    const own = view.inspectState().devices.get(hex(input.signer.publicKey.toBytes()))
+    const role = own && view.inspectState().members.get(hex(own.membershipId.toBytes()))?.role
+    // Same rule as the per-workspace flow: a Member admits its own device but cannot
+    // endorse a manager snapshot, so that workspace stays awaiting delivery.
+    if (role !== 'owner' && role !== 'admin') return null
+    const snapshot = yield* signLedgerSnapshot({ signer: input.signer, ledger: input.current })
+    const receipt = {
+      workspaceId: input.workspaceId,
+      snapshot: snapshot.snapshot,
+      head: snapshot.head,
+      length: snapshot.length,
+      headSignature: snapshot.headSignature,
+      offset: yield* input.offset()
+    }
+    yield* Effect.fromResult(
+      verifyWorkspaceInvitationSnapshot(
+        {
+          workspaceId: input.workspaceId,
+          genesis: input.genesis,
+          endorser: input.signer.publicKey
+        },
+        receipt
+      )
+    )
+    return raw(encodePersonalInvitation(receipt))
+  })
   return {
     offer,
     preview,
     approve,
     invitation,
+    signAccount,
+    accountInvitation,
     retire: Effect.fnUntraced(function* (pairingSessionId: string) {
       const view = yield* input.current()
       yield* sql(() => {

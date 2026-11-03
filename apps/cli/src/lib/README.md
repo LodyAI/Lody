@@ -42,12 +42,30 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   Standalone CLI calls synchronize unless `--offline`. Authorization and cloud presence
   remain online-aware independently of the catalog read policy.
   Intent and limits: [resource discovery](../../../../specs/resource-discovery.md).
+- `workspace-mcp-store.ts` — workspace MCP persistence, default selection reads and
+  the shared first-baseline wait. Daemon-hosted default resolution waits up to one
+  second for that reader. Reader ownership is detected on the manager, including
+  Schedule validation outside Session ALS. If still cold, a persisted remote checkpoint for the same
+  workspace Flock permits empty or nonempty cached defaults; locally authored rows
+  alone do not establish remote history. No evidence returns retryable
+  `SYNC_UNAVAILABLE` before Operation acceptance. These are authoring preferences,
+  not authorization verdicts; accepted Operations freeze their selected IDs.
+  Startup separately waits briefly for the shared baseline, then may use
+  complete selected rows locally with a config warning. Missing selected rows retain
+  the typed cold error for one recheck at provider-session establishment; continued
+  uncertainty rejects initialization rather than silently omitting selected tools.
+  Request timeout never cancels the reader. Explicit selections bypass default
+  resolution, and standalone CLI synchronization retains its existing behavior.
 - `agent-role-create.ts` — Agent Role catalog read and create-path resolution
   shared by the MCP create tools and CLI `session create --agent-role`: the Role
   row is authoritative for machine, agent config, run config and prompt prefix,
   and the create freezes Role id/revision/snapshot as provenance.
 
 ## Message hub and transports
+
+`message-processor.ts` separates health reads, cancellation, per-provider refreshes
+and per-agent installs from slow probes; restart/upgrade share one lifecycle lane.
+Unlisted requests retain their existing ordering. [Local control lane decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 
 - `github-git-transport.ts` — generated Git wrapper and HTTP credential adapters.
   HTTP helper redispatch preserves the parent operation's read/write context;
@@ -56,7 +74,9 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   native transfer. The one-time `git --exec-path` probe result is recorded in a
   `lody-git-transport.json` marker: matching markers skip the probe, transient
   spawn errors retry with bounded backoff, and a probe that still fails reuses
-  any usable recorded layout rather than blocking session startup.
+  any usable recorded layout rather than blocking session startup. Materialization
+  replaces confirmed dangling helper links while preserving usable entries and
+  reporting other filesystem errors.
 
 - `gh-pr-create-script.ts` — REST creation for managed `gh pr create/new` with
   explicit title and body/body-file; retains the selected credential for metadata.
@@ -94,6 +114,9 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   Streams token factory requires the caller's Scope; it retains Legacy token
   providers until cloud disposal and reports failed cleanup. Existing durable and
   Machine RPC consumers keep the visible Legacy token port until their owners migrate.
+  Epoch staging reads project native locators onto the four-field wire key
+  (`genesis`, `epoch`, `commitment`, `recordHash`); local publication signer metadata
+  stays outside the request. The receiver still verifies the returned originals and HPKE.
 - `cloud-pr-association.ts` — hosted PR association HTTP requests and shared failure
   cooldowns; independent of GitHub observation and publication.
 - `local-loro-data-plane-server.ts` — Electron renderer ↔ CLI local Loro data plane
@@ -120,6 +143,8 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   ([decision](../../../../.agents/notes/implemented/bug-fix/2026-10-18-gc-respects-native-agent-work.md)). Per-OS
   measurement rationale:
   [`.agents/docs/cli-lib-memory-pressure.md`](../../../../.agents/docs/cli-lib-memory-pressure.md).
+  GC inspects the latest goal through local storage queries. See the
+  [goal-query decision and measurements](../../../../.agents/notes/implemented/architecture/2026-10-30-application-memory-attribution.md).
 - `session-transient-store.ts` — buffered ACP updates and their turn ownership;
   each active epoch retains independent event/content facts through flush. The
   image owner drains before content is read and records successful history writes. Classification: [ACP rules](acp/AGENTS.md).

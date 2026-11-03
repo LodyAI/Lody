@@ -3,9 +3,9 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
 Machine PR discovery, lifecycle, CI and merge/conflict reconciliation.
-Local authorization contract: [Spec](../../../../../specs/local-github-pr-observation.md).
+[Authorization](../../../../../specs/local-github-pr-observation.md).
 
-## Architecture: pure decisions, thin effects
+## Architecture
 
 Pure modules own policy; `pr-poll-scheduler.ts` wires facts → decisions → effects. Do not add priority/quota/selection/write-back
 logic to the scheduler, the GraphQL client, or the workspace adapter.
@@ -105,6 +105,7 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   cadence so gating never delays a login or account switch;
   scope-wide skips log once per gate window; and a metadata write counts as a
   change only when `computePrPollMetaSignature` moves.
+- CI demand follows [Automations](../../automations/AGENTS.md).
 - **No turn-end hook.** `lastMessageAt` wakes terminal discovery. Persist the
   dispatched activity snapshot only after success; later activity remains due.
   Checkpoints outlive pruned targets. Never stamp fresh writeback activity.

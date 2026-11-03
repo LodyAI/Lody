@@ -164,6 +164,24 @@ describe('maybeClearLodyCacheOnBoot', () => {
     expect(readPendingLocalClearMode()).toBeNull();
   });
 
+  it('retains unknown durable databases through enumerated and late explicit cache clearing', async () => {
+    const originals = [
+      'lody-client-custody',
+      'lody-client-installations',
+      'lody-client-submission-originals',
+      'lody-unregistered-durable-data',
+    ];
+    presentDatabases = [...originals, 'lody:github-review-comments', 'lody-loro-repo-db-ws1'];
+    markCacheClearPending();
+    await maybeClearLodyCacheOnBoot();
+    await maybeClearLodyCacheOnBoot(originals);
+    expect(presentDatabases).toEqual(originals);
+    resetBootClearMemoForTests();
+    await startHardReset();
+    await maybeClearLodyCacheOnBoot();
+    expect(presentDatabases).toEqual([]);
+  });
+
   it('keeps the only saved input through cache recovery, and erases it only on explicit full reset', async () => {
     const factory = new IDBFactory();
     const original = globalThis.indexedDB;

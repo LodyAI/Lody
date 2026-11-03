@@ -69,6 +69,9 @@ Ownership: [README.md](README.md).
   row shares one rail: prose, process labels/steps, live status and the mobile
   footer sit at `conversation.railInset`; thought prose aligns with its label.
   Footer bleed is trailing-only (`-mr-[7px]`). See `AssistantTurnAlignment.stories`.
+- The trailing row (`trailingContent`: pending sends, continuation notes) is
+  full-bleed like the scroller, so each item mounts its own `ConversationColumn`.
+  Stream rows never rely on the row shell for width or gutter.
 - Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
   User rows own `responseGap`; assistant tails own `roundGap` (desktop: including
   footer/metadata; mobile: below the footer).
@@ -81,6 +84,11 @@ Ownership: [README.md](README.md).
   group toggles never scroll, and each jump issues once; the engine holds its row at top.
 
 ## Content Contracts
+
+- Conversation file-path candidates become interactive only for an absolute path
+  or an exact match in the owning Session's file index. Unconfirmed relative paths
+  keep their text/code presentation. Open known targets directly; copy actions use
+  the authored path without file resolution or a worktree picker.
 
 - Child cancel requires subagentCancellation/subagentEvents v1, `support.cancel`
   and an exact parent turn; never Stop the parent or invent state. Dialogs reuse

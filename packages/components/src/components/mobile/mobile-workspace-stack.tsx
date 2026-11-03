@@ -154,7 +154,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
       {/* Enable the shared Drawer's native keyboard handling. ui/drawer.tsx
          uses a live viewport bottom inset on non-iOS side drawers, supporting
          both resizing WebViews and overlay keyboards without caching a shrunk
-         height. iOS retains Vaul repositioning. Mobile web leaves layout to the
+         height. iOS keeps CSS sizing and its native composer offset. Mobile web leaves layout to the
          browser (`interactive-widget=resizes-content`); Vaul's cached height
          previously left the composer lifted after keyboard dismissal (#2761). */}
       <Drawer
@@ -178,6 +178,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
           skipOpenAnimation={open && composerPresentation.skipOpenAnimation}
           className="safe-areas w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
           data-sidebar-swipe-open-disabled
+          data-lody-session-drawer
         >
           <DrawerTitle className="sr-only">
             {t('sessions.prTab.conversation', 'Conversation')}

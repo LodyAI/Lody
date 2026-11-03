@@ -46,6 +46,16 @@ const styles = stylex.create({
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
   },
+  mobileHero: {
+    height: '100%',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    textAlign: 'center',
+    paddingBlock: space[6],
+  },
+  mobileHeroText: { flexGrow: 0, width: '100%' },
+  mobileHeroName: { fontSize: '1.1em' },
+  mobileEmbedded: { boxShadow: 'none', borderRadius: 0 },
   mobileText: { flexGrow: 1, minWidth: 0 },
   mobileName: {
     display: 'block',
@@ -79,11 +89,15 @@ export function SettingsAccountEntry({
   user,
   active = false,
   mobile = false,
+  hero = false,
+  embedded = false,
   onSelect,
 }: {
   user: SettingsAccountUser | null | undefined;
   active?: boolean;
   mobile?: boolean;
+  hero?: boolean;
+  embedded?: boolean;
   onSelect: () => void;
 }) {
   const { t } = useTranslation();
@@ -98,14 +112,19 @@ export function SettingsAccountEntry({
         onClick={onSelect}
         aria-pressed={active}
         aria-label={t('settings.account.open', 'Open account settings')}
-        {...stylex.props(surface.card, styles.mobile)}
+        {...stylex.props(
+          surface.card,
+          styles.mobile,
+          hero && styles.mobileHero,
+          embedded && styles.mobileEmbedded
+        )}
       >
-        <UserAvatar user={user} size="large" />
-        <span {...stylex.props(styles.mobileText)}>
-          <span {...stylex.props(styles.mobileName)}>{name}</span>
+        <UserAvatar user={user} size={hero ? 'xlarge' : 'large'} />
+        <span {...stylex.props(styles.mobileText, hero && styles.mobileHeroText)}>
+          <span {...stylex.props(styles.mobileName, hero && styles.mobileHeroName)}>{name}</span>
           {user.email ? <span {...stylex.props(styles.mobileEmail)}>{user.email}</span> : null}
         </span>
-        <ChevronRight {...stylex.props(styles.chevron)} aria-hidden="true" />
+        {!hero ? <ChevronRight {...stylex.props(styles.chevron)} aria-hidden="true" /> : null}
       </button>
     );
   }

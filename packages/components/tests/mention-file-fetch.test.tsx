@@ -40,7 +40,7 @@ afterEach(async () => {
   state.fetch.mockReset();
   state.client = { capture: vi.fn() };
 });
-it('shows failure in both consumers, counts once after an observer unmounts, and ignores client churn', async () => {
+it('keeps shared failures visible and retryable without analytics, including after unmount', async () => {
   let reject!: (error: unknown) => void;
   state.fetch.mockReturnValue(
     new Promise((_, r) => {
@@ -60,9 +60,7 @@ it('shows failure in both consumers, counts once after an observer unmounts, and
     reject(new GitHubAuthError());
   });
   expect(container.textContent).toBe('error:error:');
-  expect(state.client.capture.mock.calls.map(([name, props]) => [name, props.error_code])).toEqual([
-    ['mention/file/fetch_error', 'auth_failed'],
-  ]);
+  expect(state.client.capture.mock.calls).toEqual([]);
   state.client = { capture: vi.fn() };
   await act(async () =>
     root.render(
@@ -86,10 +84,18 @@ it('shows failure in both consumers, counts once after an observer unmounts, and
   await act(async () => {
     reject(new Error('GitHub API error: 429'));
   });
-  expect(state.client.capture.mock.calls.map(([name, props]) => [name, props.error_code])).toEqual([
-    ['mention/file/fetch_error', 'rate_limited'],
-  ]);
+  expect(state.client.capture.mock.calls).toEqual([]);
   expect(container.textContent).toBe('');
+
+  state.fetch.mockResolvedValueOnce({
+    defaultBranch: 'main',
+    headSha: 'b',
+    paths: ['recovered.ts'],
+    truncated: false,
+  });
+  await act(async () => root.render(<Probe key="recovered" />));
+  expect(container.textContent).toBe('ready:recovered.ts');
+  expect(state.client.capture.mock.calls).toEqual([]);
 });
 it('does not retain another repository paths when the next repository fails', async () => {
   state.fetch.mockResolvedValueOnce({

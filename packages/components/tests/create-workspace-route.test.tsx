@@ -1,6 +1,15 @@
 // @vitest-environment jsdom
 
 import { act } from 'react';
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  createHashHistory,
+  Outlet,
+  RouterProvider,
+  type AnyRouter,
+} from '@tanstack/react-router';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlatformE2eeWorkspaces } from '@lody/platform';
@@ -10,6 +19,9 @@ import {
 } from '../src/lib/e2ee-workspace-storage';
 
 const fixture = vi.hoisted(() => ({
+  redirect: undefined as string | undefined,
+  router: undefined as AnyRouter | undefined,
+  organizations: [] as Array<{ id: string; name: string; slug: string }>,
   creationEnabled: false,
   referralLead: false,
   referralListeners: new Set<() => void>(),
@@ -17,9 +29,13 @@ const fixture = vi.hoisted(() => ({
   create: undefined as unknown as PlatformE2eeWorkspaces['create'],
 }));
 
-vi.mock('@tanstack/react-router', () => ({
-  createFileRoute: () => (options: unknown) => ({ options, useSearch: () => ({}) }),
-  useNavigate: () => async () => {},
+vi.mock('@tanstack/react-router', async (original) => ({
+  ...(await original<object>()),
+  createFileRoute: () => (options: unknown) => ({
+    options,
+    useSearch: () => ({ redirect: fixture.redirect }),
+  }),
+  useNavigate: () => fixture.router?.navigate ?? (async () => {}),
   Navigate: () => null,
 }));
 // Stable references: the page's effects depend on them.
@@ -97,7 +113,7 @@ vi.mock('@/hooks/useStableSession', () => ({
 vi.mock('@/hooks/useOrganization', () => ({
   useOrganization: () => ({
     createOrganization: (name: string, slug: string) => fixture.createOrganization(name, slug),
-    organizations: [],
+    organizations: fixture.organizations,
     loading: false,
     activeOrganization: null,
   }),
@@ -136,6 +152,9 @@ let container: HTMLDivElement | undefined;
 
 beforeEach(() => {
   localStorage.clear();
+  fixture.redirect = undefined;
+  fixture.router = undefined;
+  fixture.organizations = [];
   fixture.creationEnabled = false;
   fixture.referralLead = false;
   stable.availability.canCreateFree = true;
@@ -286,4 +305,42 @@ describe('create workspace with an account referral from another device', () => 
     expect(fixture.referralLead).toBe(false);
     expect(container!.textContent).not.toContain('referral.offerTitle');
   });
+});
+
+it('follows an in-app post-creation redirect through the desktop hash router', async () => {
+  fixture.redirect = '/alpha/chat?from=create';
+  fixture.organizations = [{ id: 'workspace-a', name: 'Alpha', slug: 'alpha' }];
+  const pathname = window.location.pathname;
+  window.location.hash = '#/workspace/create';
+  const rootRoute = createRootRoute({ component: Outlet });
+  const Component = (Route as unknown as { options: { component: () => JSX.Element } }).options
+    .component;
+  const router = createRouter({
+    history: createHashHistory(),
+    routeTree: rootRoute.addChildren([
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: '/workspace/create',
+        component: Component,
+      }),
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: '/alpha/chat',
+        component: () => <div>Workspace chat</div>,
+      }),
+    ]),
+  });
+  fixture.router = router;
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => {
+    await router.load();
+    root!.render(<RouterProvider router={router} />);
+  });
+  expect(window.location.pathname).toBe(pathname);
+  expect(window.location.hash).toBe('#/alpha/chat?from=create');
+  expect(container.textContent).toBe('Workspace chat');
+  router.history.destroy();
+  window.location.hash = '';
 });

@@ -3,22 +3,32 @@ import { E2eeIdentityRecovery } from '@/components/pages/e2ee-identity-recovery'
 
 import { E2eeTeamSettingsHost } from '@/components/settings/e2ee-team-settings';
 import { desktopWindowId } from '@/lib/desktop-window';
+import { createWorkspaceRuntimeRetirements } from '../../../providers/workspace-runtime-retirements';
 import { readEncryptedLocalIdentity, type E2eeLocalDataScope } from '@/lib/e2ee-local-data';
 import {
+  e2eeAccessLoss,
   isE2eeMemberRemoved,
   retainEncryptedWorkspaceCleanup,
   resumeEncryptedWorkspaceCleanup,
 } from '@/lib/e2ee-member-removal';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { usePlatform, usePlatformSession } from '@lody/platform/react';
+import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
 import type { E2eeRuntimeStatus } from '@lody/platform';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
+import {
+  E2eeAccountPairingApprove,
+  E2eeAccountPairingRequest,
+} from '@/components/pages/e2ee-account-pairing';
+import { e2eeAccountPairingFeatureEnabledAtom } from '@/atoms/settings';
+import { isElectronRenderer } from '@/lib/electron';
+import { isNativeAppShell } from '@/lib/native-platform';
+import { E2eeDeviceApprovalGuide } from '@/components/pages/e2ee-device-approval-guide';
 import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
 import {
   E2eeWorkspaceControlPage,
@@ -41,6 +51,7 @@ import {
 } from '@/lib/e2ee-workspace-storage';
 import {
   classifyE2eeControlFailure,
+  personalHostFailureCode,
   e2eeControlDiagnostics,
   type E2eeControlFailure,
 } from '@/lib/e2ee-control-failure';
@@ -49,11 +60,16 @@ export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
   component: WorkspaceControlRoute,
 });
 
+// Retain actual incomplete reader owners across control-page unmounts.
+const retiredReaders = createWorkspaceRuntimeRetirements();
+
 function WorkspaceControlRoute() {
+  const accountPairing = useAtomValue(e2eeAccountPairingFeatureEnabledAtom);
   const { workspaceId } = Route.useParams();
   const platform = usePlatform();
   const { t } = useTranslation();
   const session = usePlatformSession();
+  const workspaces = usePlatformWorkspaces();
   const accountId = useE2eeAccountId();
   const port = platform.e2eeWorkspaces;
   const navigate = useNavigate();
@@ -62,6 +78,8 @@ function WorkspaceControlRoute() {
     clearWorkspace({ slug: null, workspaceId: null });
   }, [clearWorkspace]);
   const [generation, setGeneration] = useState(0);
+  // The joining device starts on the approval guide; details reveal the full ledger page.
+  const [showDetails, setShowDetails] = useState(false);
   useEffect(() => {
     const reconnect = () => setGeneration((value) => value + 1);
     window.addEventListener('online', reconnect);
@@ -70,7 +88,7 @@ function WorkspaceControlRoute() {
   const identity = JSON.stringify([accountId, workspaceId]);
   const scope = JSON.stringify([accountId, workspaceId, generation]);
   const scopeRef = useRef(scope);
-  const readOwner = useRef<object | null>(null);
+  const readOwner = useRef<{ publish?: () => Promise<void> } | null>(null);
   scopeRef.current = scope;
   const [state, setState] = useState<{
     scope: string;
@@ -86,15 +104,43 @@ function WorkspaceControlRoute() {
   }>({ scope, identity, descriptor: null, history: null, loading: true, failure: null });
   useEffect(() => {
     let disposed = false;
+    let hostAccessStarted = false;
     let hostOpened = false;
+    let nativeAcquisition: Promise<E2eeRuntimeStatus | undefined> | undefined;
+    let readerOwner: string | undefined;
+    let readerPreallocated = false;
+    let readerGenesis: string | undefined;
     let cleanup: E2eeLocalDataScope | null = null;
     let nativeFailure: E2eeControlFailure | null = null;
-    const closeHost = () => {
-      if (hostOpened && port?.runtime) {
+    const retirement = retiredReaders.create(
+      () => ({
+        native:
+          hostAccessStarted && accountId
+            ? { accountId, workspaceId, genesisHash: readerGenesis }
+            : undefined,
+      }),
+      async () => {
+        // Fence a preallocated cold open before joining its actual settlement.
+        if (hostOpened) {
+          await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+          // A legacy host counts every settled open once per window; closing it
+          // again would release another reader of this window and workspace.
+          if (!readerPreallocated) hostOpened = false;
+        }
+        // Join only actual native acquisition. Public describe/history can stay
+        // offline after this reader is confirmed closed; they own no host lease.
+        await nativeAcquisition?.then(
+          () => undefined,
+          () => undefined
+        );
+        if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
         hostOpened = false;
-        void port.runtime.close(workspaceId).catch(() => undefined);
       }
-    };
+    );
+    const closeHost = () => retiredReaders.retire(retirement);
+    // Keep the full failure in its retirement owner, never serialize its opaque
+    // custody/cleanup cause into browser diagnostics.
+    const reportClose = () => console.error('E2EE control reader close incomplete');
     setState((previous) =>
       previous.identity === identity
         ? { ...previous, scope, loading: Boolean(port && accountId), failure: null }
@@ -108,7 +154,7 @@ function WorkspaceControlRoute() {
           }
     );
     if (!port || !accountId) return undefined;
-    const owner = {};
+    const owner: NonNullable<typeof readOwner.current> = {};
     readOwner.current = owner;
     void (async () => {
       try {
@@ -128,29 +174,57 @@ function WorkspaceControlRoute() {
             });
           }
           const pin = readE2eeGenesisPin(localStorage, accountId, workspaceId);
+          readerGenesis = pin ?? undefined;
+          await retiredReaders.drain({
+            native: { accountId, workspaceId, genesisHash: readerGenesis },
+          });
+          if (disposed) return;
+          hostAccessStarted = true;
           let status;
           try {
-            if (pin) await runtime.recordCreated({ workspaceId, genesisHash: pin });
-            status = await runtime.open(
-              workspaceId,
-              readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined
-            );
+            nativeAcquisition = (async () => {
+              if (pin) {
+                try {
+                  await runtime.recordCreated({ workspaceId, genesisHash: pin });
+                } catch (error) {
+                  // Portable read-open does not implement desktop creation repair.
+                  // All binding/custody failures still stop this read.
+                  if (personalHostFailureCode(error) !== 'unsupported') throw error;
+                }
+              }
+              if (disposed) return undefined;
+              readerOwner =
+                runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
+              if (readerOwner) hostOpened = readerPreallocated = true;
+              const opened = await runtime.open(
+                workspaceId,
+                readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined,
+                accountId,
+                readerOwner
+              );
+              hostOpened = true;
+              if (readerOwner && opened.readerOwner !== readerOwner)
+                throw new Error('e2ee_reader_owner_mismatch');
+              readerOwner = opened.readerOwner;
+              readerGenesis = opened.genesisHash;
+              return opened;
+            })();
+            status = await nativeAcquisition;
           } catch (error) {
             // Availability failures retain the original read-only verification path,
             // including its genesis pin and observed-checkpoint checks.
             if (
-              !(error instanceof Error) ||
-              !/\be2ee_(?:missing-binding|custody_unavailable|account_unavailable|closed)\b/.test(
-                error.message
-              )
+              classifyE2eeControlFailure(error).kind !== 'approval-required' &&
+              (!(error instanceof Error) ||
+                !/\be2ee_(?:missing-binding|custody_unavailable|account_unavailable|closed)\b/.test(
+                  error.message
+                ))
             )
               throw error;
             nativeFailure = classifyE2eeControlFailure(error);
           }
           if (status) {
-            hostOpened = true;
             if (disposed) {
-              closeHost();
               return;
             }
             const descriptor = {
@@ -161,8 +235,12 @@ function WorkspaceControlRoute() {
               genesisHash: status.genesisHash,
               cryptoOrgId: status.genesisHash,
             };
+            let publication = 0;
             const publish = async () => {
+              if (disposed) return;
+              const revision = ++publication;
               const exported = await runtime.ledgerView(workspaceId);
+              if (disposed || revision !== publication) return;
               const history = hostLedgerHistory(exported);
               if (!history.continuityPending)
                 retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
@@ -177,6 +255,7 @@ function WorkspaceControlRoute() {
                   failure: null,
                 });
             };
+            owner.publish = publish;
             await publish();
             // A saved local view is visible before the first network request.
             try {
@@ -196,6 +275,7 @@ function WorkspaceControlRoute() {
               for (;;) {
                 if (disposed) break;
                 status = await runtime.ingestLedgerRecords(workspaceId, page);
+                if (disposed) break;
                 if (page.nextCursor === null || status.upgradeRequiredAt !== undefined) {
                   await publish();
                   break;
@@ -214,7 +294,7 @@ function WorkspaceControlRoute() {
                 try {
                   await runtime.refresh(workspaceId, { installKeys: false });
                 } catch (checked) {
-                  if (isE2eeMemberRemoved(checked)) throw checked;
+                  if (e2eeAccessLoss(checked)) throw checked;
                 }
               }
               if (classifyE2eeControlFailure(error).kind !== 'network') throw error;
@@ -258,18 +338,36 @@ function WorkspaceControlRoute() {
           descriptor,
           history,
           loading: false,
-          failure: null,
+          failure: nativeFailure?.kind === 'approval-required' ? nativeFailure : null,
           custodyFailure: nativeFailure?.kind === 'local-identity' ? nativeFailure.code : undefined,
         });
       } catch (error) {
-        if (!disposed && isE2eeMemberRemoved(error)) {
+        if (!disposed && e2eeAccessLoss(error)) {
           try {
             if (cleanup) retainEncryptedWorkspaceCleanup(cleanup);
           } catch {
             /* Native receipt still retries local cleanup on the next open. */
           }
-          closeHost();
+          try {
+            // Unmount joins this same retirement instead of releasing the reader again.
+            if (hostOpened) await closeHost();
+          } catch (closeError) {
+            // The retained retirement keeps the full reader owner and never erases
+            // borrowed stores before the actual host close can finish.
+            setState((previous) =>
+              previous.scope === scope
+                ? { ...previous, loading: false, failure: classifyE2eeControlFailure(closeError) }
+                : previous
+            );
+            return;
+          }
           if (cleanup) await resumeEncryptedWorkspaceCleanup(cleanup, true).catch(() => undefined);
+          // A revoked device keeps its membership: reopen without this identity,
+          // which lands in the existing re-pairing guidance instead of removal.
+          if (!isE2eeMemberRemoved(error)) {
+            if (!disposed) setGeneration((value) => value + 1);
+            return;
+          }
           if (!disposed)
             setState((previous) =>
               previous.scope === scope
@@ -288,7 +386,7 @@ function WorkspaceControlRoute() {
     })();
     return () => {
       disposed = true;
-      closeHost();
+      if (hostAccessStarted) void closeHost().catch(reportClose);
       if (readOwner.current === owner) readOwner.current = null;
     };
   }, [scope, identity, port, workspaceId, accountId]);
@@ -321,6 +419,18 @@ function WorkspaceControlRoute() {
     };
   }, [scope, authenticated, port, workspaceId]);
   const current = state.identity === identity ? state : null;
+  const workspaceSlug =
+    workspaces.status === 'ready'
+      ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.slug
+      : null;
+  const canOpen = Boolean(
+    workspaceSlug &&
+    current?.scope === scope &&
+    !current.loading &&
+    !current.failure &&
+    current.nativeStatus?.workspaceId === workspaceId &&
+    current.nativeStatus.deviceKind === 'personal'
+  );
   const loadMore = async () => {
     const owner = readOwner.current;
     if (
@@ -362,6 +472,27 @@ function WorkspaceControlRoute() {
     }
   };
   const refresh = () => setGeneration((value) => value + 1);
+  const manageMember = async (work: () => Promise<void>) => {
+    const owner = readOwner.current;
+    if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
+    await work();
+    if (scopeRef.current !== scope || readOwner.current !== owner) return;
+    // A management result already advanced the native ledger. Read and verify it
+    // on this reader; rebuilding the effect creates an unnecessary no-reader gap.
+    setState((previous) => ({ ...previous, loading: true, failure: null }));
+    try {
+      await owner.publish();
+    } catch (error) {
+      if (scopeRef.current === scope && readOwner.current === owner)
+        setState((previous) => ({
+          ...previous,
+          loading: false,
+          failure: classifyE2eeControlFailure(error),
+          nativeStatus: undefined,
+        }));
+      throw error;
+    }
+  };
   const diagnostics = () => {
     let localPin: string | null = null;
     let observed: { length: number; headHash: string } | null = null;
@@ -388,6 +519,49 @@ function WorkspaceControlRoute() {
     });
   };
   if (current?.removed) return <p role="status">{t('e2ee.members.removed')}</p>;
+  // A signed-in device without an approved identity here sees the next step first;
+  // the ledger, diagnostics and failures stay one click away in the full page.
+  const awaitingApproval = Boolean(
+    port?.runtime &&
+    accountId &&
+    current?.scope === scope &&
+    !current.loading &&
+    // Only "this device needs approval" (new, lost or revoked identity); every other
+    // failure keeps the full page with its repair actions.
+    (!current.failure || current.failure.kind === 'approval-required') &&
+    !current.custodyFailure &&
+    !current.history?.locallyPinned &&
+    current.nativeStatus?.deviceKind !== 'personal'
+  );
+  if (awaitingApproval && !showDetails && port?.runtime && accountId)
+    return (
+      <E2eeDeviceApprovalGuide
+        reason={current?.failure?.code === 'device-revoked' ? 'revoked' : 'new'}
+        onRefresh={refresh}
+        onShowDetails={() => setShowDetails(true)}
+        onBack={() => {
+          void navigate({ to: '/workspace/create', search: { allowExisting: true } });
+        }}
+      >
+        {accountPairing && (
+          <E2eeAccountPairingRequest
+            key={identity + ':account-pairing'}
+            runtime={port.runtime}
+            // Web asks first: a browser is often shared or public.
+            autoStart={isElectronRenderer() || isNativeAppShell()}
+            onJoined={refresh}
+          />
+        )}
+        <E2eePersonalPairing
+          key={identity}
+          workspaceId={workspaceId}
+          runtime={port.runtime}
+          canApprove={false}
+          approved={false}
+          onJoined={refresh}
+        />
+      </E2eeDeviceApprovalGuide>
+    );
   return (
     <>
       {current?.offline && (
@@ -395,32 +569,33 @@ function WorkspaceControlRoute() {
           {t('sessions.offline')}
         </p>
       )}
-      {port?.runtime && (current?.custodyFailure || current?.failure) && (
-        <E2eeIdentityRecovery
-          key={scope}
-          workspaceId={workspaceId}
-          runtime={port.runtime}
-          error={current.custodyFailure ?? current.failure?.code ?? ''}
-          onReset={refresh}
-        />
-      )}
+      {port?.runtime &&
+        (current?.custodyFailure || current?.failure?.kind === 'local-identity') && (
+          <E2eeIdentityRecovery
+            key={scope}
+            workspaceId={workspaceId}
+            runtime={port.runtime}
+            error={current.custodyFailure ?? current.failure?.code ?? ''}
+            onReset={refresh}
+          />
+        )}
       <E2eeWorkspaceControlPage
         memberManagement={
-          current?.nativeStatus?.deviceKind === 'personal' &&
+          current?.scope === scope &&
+          !current.loading &&
+          !current.failure &&
+          current.nativeStatus?.deviceKind === 'personal' &&
+          current.nativeStatus.hasDeviceCredential === true &&
           (current.nativeStatus.memberRole === 'owner' ||
             current.nativeStatus.memberRole === 'admin') &&
           port?.runtime?.removeMember &&
           port.runtime.setMemberRole
             ? {
                 actorRole: current.nativeStatus.memberRole,
-                remove: async (membershipId) => {
-                  await port.runtime!.removeMember!(workspaceId, membershipId);
-                  if (scopeRef.current === scope) refresh();
-                },
-                setRole: async (membershipId, role) => {
-                  await port.runtime!.setMemberRole!(workspaceId, membershipId, role);
-                  if (scopeRef.current === scope) refresh();
-                },
+                remove: (membershipId) =>
+                  manageMember(() => port.runtime!.removeMember!(workspaceId, membershipId)),
+                setRole: (membershipId, role) =>
+                  manageMember(() => port.runtime!.setMemberRole!(workspaceId, membershipId, role)),
               }
             : undefined
         }
@@ -448,6 +623,19 @@ function WorkspaceControlRoute() {
           void loadMore();
         }}
         onRefresh={refresh}
+        onOpen={
+          canOpen
+            ? () => {
+                // Navigation is only an entry point. RuntimeProvider reopens this
+                // approved identity and acquires purpose-bound grants before content.
+                if (scopeRef.current === scope && readOwner.current && workspaceSlug)
+                  void navigate({
+                    to: '/$workspaceName/chat',
+                    params: { workspaceName: workspaceSlug },
+                  });
+              }
+            : undefined
+        }
         onBack={() => {
           void navigate({ to: '/workspace/create', search: { allowExisting: true } });
         }}
@@ -463,12 +651,20 @@ function WorkspaceControlRoute() {
             />
           </>
         )}
+        {accountPairing && port?.runtime && accountId && current?.history?.locallyPinned && (
+          <E2eeAccountPairingApprove key={identity + ':account-pairing'} runtime={port.runtime} />
+        )}
         {port?.runtime && accountId && (
           <E2eePersonalPairing
             key={identity}
             workspaceId={workspaceId}
             runtime={port.runtime}
             canApprove={Boolean(current?.history?.locallyPinned)}
+            approved={Boolean(
+              current?.scope === scope &&
+              !current.failure &&
+              current.nativeStatus?.deviceKind === 'personal'
+            )}
             onJoined={refresh}
           />
         )}

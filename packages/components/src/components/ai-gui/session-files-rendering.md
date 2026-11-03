@@ -68,6 +68,11 @@ File attachments use `file` blocks; the product contract is in
   for screens. Tiles keep `shrink-0` (flex shrinks before it wraps) and hug the
   speaker's side. Decision:
   [image attachment row](../../../../../.agents/notes/implemented/bug-fix/2026-09-15-image-attachment-row-wraps.md).
+- In an editable session, the image viewer offers markup for its current loaded image.
+  Markup uses a full-window lightbox; cancel returns to the same image preview.
+  The session composer accepts the annotated PNG and its notes through the same
+  validation and draft path as document selections; a failed handoff leaves the editor
+  open. Static and read-only image viewers do not offer this action.
 
 ## Codex file citations
 
@@ -79,7 +84,10 @@ Filename punctuation is URL-encoded for transport through the existing href reso
 Windows drive prefixes stay unescaped and backslash separators normalize to slashes,
 so absolute artifact targets retain their drive. The citation walk leaves non-container
 Markdown nodes untouched, including inline/display math.
-Without a session opener, clicking copies the path. Invalid/incomplete citations and
+In conversations, relative citations stay path text until the owning index confirms
+the file; absolute citations render immediately. Clicking a legal target opens it
+directly; without an opener or with an invalid target it copies the original path
+and reports success. Copy menus never resolve a path before copying. Invalid/incomplete citations and
 code examples do not become cards. The inline card uses a span frame to keep paragraph
 markup valid. Coverage lives in the Markdown file-link and streaming renderer suites;
 `MarkdownCodexFileCitations` provides the visual states.

@@ -1,3 +1,5 @@
+import { ClientCustodyError } from '@lody/e2ee-core/services';
+import { classifyE2eeControlFailure } from '../src/lib/e2ee-control-failure';
 import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
 // @vitest-environment jsdom
 
@@ -51,6 +53,30 @@ const button = (label: string) =>
   [...container!.querySelectorAll('button')].find((item) => item.textContent === label);
 
 describe('encrypted workspace control page recovery', () => {
+  it('guides an unapproved portable device without offering destructive identity recovery', () => {
+    render({ failure: { kind: 'approval-required', code: 'approval-required' } });
+    expect(container!.textContent).toContain('e2ee.pair.desktopApprovalRequired');
+    expect(container!.textContent).toContain('e2ee.pair.help');
+    expect(button('e2ee.control.repairLocal')).toBeUndefined();
+    expect(button('e2ee.control.resetProgress')).toBeUndefined();
+  });
+  it.each(['locked', 'indeterminate', 'unavailable'] as const)(
+    'shows explicit %s custody guidance without destructive recovery',
+    (reason) => {
+      const props = render({
+        failure: classifyE2eeControlFailure(new ClientCustodyError({ reason })),
+      });
+      expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
+        `e2ee.custody.${reason}.title`
+      );
+      expect(container!.textContent).toContain(`e2ee.custody.${reason}.help`);
+      expect(container!.textContent).not.toContain('e2ee.control.status.unreachable');
+      expect(button('e2ee.control.repairLocal')).toBeUndefined();
+      expect(button('e2ee.control.resetProgress')).toBeUndefined();
+      expect(props.onRepairLocal).not.toHaveBeenCalled();
+      expect(props.onResetProgress).not.toHaveBeenCalled();
+    }
+  );
   it('always marks the workspace as an encrypted developer preview', () => {
     render({});
     expect(container!.textContent).toContain('e2ee.control.badge');
@@ -252,8 +278,10 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
       (node) => node.textContent === key
     ) as HTMLElement;
   expect(action('e2ee.members.promote')).toBeDefined();
+  expect(document.querySelector('[data-testid="e2ee-member-role"]')?.getAttribute('data-membership-id')).toBe(member.membershipId);
   await act(async () => action('e2ee.members.remove').click());
   expect(remove).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="e2ee-member-remove-dialog"]')?.getAttribute('data-membership-id')).toBe(member.membershipId);
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
     'e2ee.members.removeDescription'
   );

@@ -17,9 +17,16 @@ syncs through Loro / Durable Streams or a comparable append-only log.
 
 The service architecture is reusable, but this is currently a private workspace
 package (`private: true`, version `0.0.0`), not a published SDK. Production E2EE
-composition is not enabled. Node SQLite and Loro Streams adapters are provided;
-other runtimes need their own storage and platform adapters. Backend ports and
+composition is not enabled. Node SQLite, Loro Streams and opt-in browser ledger/original IndexedDB adapters
+are provided, together with opt-in browser custody and key/snapshot journals. Platform qualification remains a host responsibility. Backend ports and
 `/host` define what another backend must implement; they do not deploy a server.
+
+Web/mobile custody has an [approved contract](../../specs/e2ee/client-custody.md) and
+opt-in client protection/installation ports in the services entry. Optional adapters implement browser protection; no product host or native implementation is enabled by those declarations. The opt-in browser crypto
+adapter imports independent raw Ed25519/X25519 secrets into Scope-owned capabilities;
+it supplies no persistent protection or host admission. The IndexedDB adapter retains
+ledger origins/suffixes, pins, submission results and pairing/approval/claim originals.
+A separate client database retains installation and key/snapshot journals; browser-custody supplies nonextractable AES-GCM protection. Approval verification and network orchestration remain host responsibilities.
 
 ## Start here
 
@@ -45,12 +52,34 @@ machine binding, ledger permissions or freshness. Keep those gates in the truste
 host before enabling a channel. Retain the returned original frame for retries;
 running a seal again creates a new encryption. No product transport is enabled.
 
+The protocol entry also provides an owner-signed complete machine-sharing codec,
+resource binding, version verification and pure execution gate.
+`readMachineSharingHistoryStep` returns authenticated historical full state for
+fresh owner intent, including after its personal signer is revoked; it grants no
+execution authority. The backend
+entry admits opaque owner frames; platform/cloud-api define the matching CAS
+DTOs. These are inert primitives, with no network, UI or execution integration.
+The [sharing proposal](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md)
+records the pending Spec increment and remaining host responsibilities.
+
+The signed sharing format is current-only v2. Every scope includes a generation:
+the initial machine signing key of its uninterrupted atomic-replacement chain.
+`verifyMachineSharingGeneration` qualifies that chain's original admission records
+at their genuine ledger positions. Supply its opaque `machineGeneration` evidence
+to seal/open/history/admission/execution calls. Removal/readmission starts a new
+resource at revision 1 with private defaults; atomic replacement retains the root.
+A compact view without those ledger checkpoints needs qualification against a
+full verified endpoint; server hints or removed-policy high waters are insufficient.
+
 | Import | Contents | Stability |
 | --- | --- | --- |
 | `@lody/e2ee-core` | workflows (`KeyReceiver`, `EpochPublisher`, …), their errors and results, `E2eeWorkflows` | public |
 | `@lody/e2ee-core/services` | ports to implement or provide, port errors | public |
 | `@lody/e2ee-core/protocol` | the pure protocol: bytes, CBOR, ledger verification, envelopes, content format | public |
 | `@lody/e2ee-core/host` | what a backend must enforce, staging wire schemas (no Node APIs) | public |
+| `@lody/e2ee-core/adapters/browser-crypto` | Scope-owned JS Ed25519 signer and opaque X25519 handles; no storage or host enablement | public |
+| `@lody/e2ee-core/adapters/indexeddb` | scoped ledger/original stores, installation and key/snapshot journals | public |
+| `@lody/e2ee-core/adapters/browser-custody` | single-writer, nonextractable AES-GCM KEK and wrapped originals; no host approval | public |
 | `@lody/e2ee-core/adapters/node-sqlite` | SQLite implementation of every local store, reference mailbox backend | public |
 | `@lody/e2ee-core/adapters/loro-streams` | `LedgerLog` / `LedgerFeedSource` over a Loro / Durable Streams control stream | public |
 | `@lody/e2ee-core/cloudflare` | Imported once in a Cloudflare Worker so strict Ed25519 runs in WebAssembly (workerd forbids runtime compilation); other runtimes need nothing | public |
@@ -104,6 +133,8 @@ src/
   services/                "/services" ports
   protocol/                "/protocol" pure protocol barrel
   host/                    "/host"     backend contract
+  adapters/indexeddb/      Browser ledger/original, installation, key/snapshot journals
+  adapters/browser-custody/ Scoped Web Locks and persistent AES-GCM protection
   adapters/node-sqlite/    SQLite stores, reference mailbox backend
   adapters/loro-streams/   Streams ledger log and feed source
   internal/                implementation: foundation, crypto, ledger, keys, submission
@@ -195,3 +226,15 @@ processes; the `test/generate-*.py` scripts regenerate vectors (optional).
 
 Streams adapters and the Lab use the workspace catalog version. Node hosts can share
 [KEK custody](docs/surface.md#lodye2ee-coreadaptersnode-custody) while supplying their own OS wrapper.
+
+The [pre-freeze format review](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-format-freeze-review.md) records unresolved ledger format decisions and the current-only format inventory.
+
+```sh
+pnpm --filter @lody/e2ee-core test:browser-custody
+```
+
+The optional [`@lody/e2ee-client`](../e2ee-client/README.md) package composes personal
+device approval/open/key delivery/management/RPC over these ports. Its paged
+public approval evidence and encrypted RPC originals use the stable client
+layout; stores still grant no permission. This does not enable product runtime
+assembly or native mobile custody.

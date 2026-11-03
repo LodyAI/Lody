@@ -14,28 +14,33 @@ The package owns:
 - The web RPC client.
 - The CLI RPC server.
 
-## Candidate E2EE body codecs
+## Encrypted dispatch
 
-`src/e2ee-wire.ts` implements the candidate M5 request, response, nested error
-and presence plaintext layouts from [the wire draft](https://github.com/LodyAI/Lody/pull/1894).
-The codecs are pure and introduce no transport, keys, persistence or execution.
-Normal workspace RPC keeps its existing envelopes. The exact profile still
-requires owner review before product adoption; see the
-[decision and integration limits](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-realtime-body-codecs.md).
+The encrypted workspace channel implements `session/dispatch-turn` using the
+approved [E2EE foundations](../../specs/e2ee-foundations.md). Native hosts retain
+signed purpose-8 requests and purpose-9 receipt ACKs before sending. Bodies and
+ACKs are encrypted; only random correlation IDs and ciphertext enter Streams.
+Complete sealed frames are limited to 1 MiB, including 143 bytes of overhead.
+The resource is `rpc:<base64url(machineId)>`, with strict UTF-8 machine IDs.
 
-RPC bodies reserve content v0's 143-byte overhead inside a complete 1 MiB frame.
-Presence bodies have a 64 KiB limit and positive TTL at most 60 seconds. These
-limits are checked before output allocation or copying decoded byte fields.
-Lengths and integers use unsigned big endian; unsafe u64 values, unsupported
-versions/kinds, truncation, trailing bytes and invalid ASCII fields are rejected.
-Method bytes stay opaque and are never parsed or reserialized here.
+`./e2ee-client` owns portable crypto and the complete-response assembler over an
+effectful immutable `E2eeRpcStore`; `./e2ee-native` supplies the existing SQLite
+adapter. The fixed DTOs, closed method list and wire bytes are shared;
+`./e2ee-streams` owns bounded shared readers and request correlation. The browser
+uses narrow host preparation/response methods and never receives signing keys.
+Preparation and ACK verification compare the parsed DTO's JSON wire representation,
+so omitted optional fields reuse the saved original without changing its ID/frame.
+An 800 ms acceleration deadline falls back to the encrypted history/Meta path.
+Both paths use the same user turn and original frame; the CLI's existing
+`agent-start:<userTurnId>` journal and current membership authorization decide
+whether execution can start. A progress ACK confirms receipt, not execution.
 
-Use decoders only after authenticating the content frame. The caller owns and
-wipes returned bytes and separately verifies the workspace/target/signer/epoch,
-method DTO, current permissions, execution freshness, request digest and response
-sequence state. Presence additionally needs room binding, replay checks and
-`issuedAt <= now < expiresAt`. Retry sends the retained sealed frame; encoding
-another body never supplies permission to re-sign or repeat an action.
+Scope close aborts and drains raw reads before releasing tokens. One rejected
+request does not stop the workspace. Originals and execution evidence are not
+automatically collected. See the [implementation decision and validation limits](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-streams-dispatch.md).
+
+The pure codecs in `src/e2ee-wire.ts` also define nested error and presence
+bodies; those codecs do not enable additional RPC methods or presence transport.
 
 ## Request deadlines
 
@@ -48,6 +53,14 @@ Browser response readers using the live-mode policy renew their connection once
 if an appended Roost input has no receipt after two seconds. This retains the
 request and its deadline, works with existing daemons, and still requires a real
 owner response before confirming delivery. Explicit transport pins disable it.
+
+## Manual latency comparison
+
+The synthetic [loopback benchmark](../../apps/cli/scripts/benchmark-e2ee-rpc.ts)
+compares existing ordinary RPC with encrypted dispatch through real Streams,
+crypto and SQLite journals. It records every send/append/receive/verify/claim stage.
+Its final handler and authorization are fixtures; it does not measure real ACP
+startup. Run it against an explicitly started HTTP/1 local dev gateway.
 
 ## Development
 
@@ -68,3 +81,21 @@ pnpm test:integration
 
 The integration command starts a local server through `loro dev --db-path ...` and
 then runs the transport tests against it.
+
+## Encrypted file and preview features
+
+Encrypted workspaces route Code Collab, restricted file preview and preview controls
+through the existing signed workspace RPC domain. The native host retains request
+and response originals and validates all result pages before returning a complete DTO;
+the renderer shares dispatch's response owner. Audited machine/file reads use that same
+codec with read authority and no execution journal. See the
+[read boundary](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-read-queries.md). The format,
+room boundaries and acceptance limits are recorded in the
+[availability decision](../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md).
+
+The optional personal-device host in [`@lody/e2ee-client`](../e2ee-client/README.md)
+uses `ClientRpcOriginalStore`/IndexedDB for the same encrypted RPC implementation.
+A sent-original race returns the first winner; changed incoming or response bytes
+conflict. Batch response pages commit atomically. Owned copies, native completion
+and close/drain remain adapter obligations. No receipt grants execution authority,
+and this optional composition does not enable a public cloud connection.

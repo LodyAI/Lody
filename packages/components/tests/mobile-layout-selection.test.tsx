@@ -56,6 +56,9 @@ describe('mobile layout selection', () => {
     Reflect.deleteProperty(window.navigator, 'userAgent');
     Reflect.deleteProperty(window.navigator, 'userAgentData');
     Reflect.deleteProperty(window, '__LODY_ELECTRON__');
+    Reflect.deleteProperty(window, '__LODY_NATIVE__');
+    Reflect.deleteProperty(document.documentElement, 'clientWidth');
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -95,6 +98,35 @@ describe('mobile layout selection', () => {
     setViewportWidth(932);
     flushSync(() => window.dispatchEvent(new Event('resize')));
 
+    expect(container?.textContent).toBe('desktop:full');
+  });
+
+  it('uses the resized iOS document when innerWidth lags during a fold', () => {
+    setNavigatorIdentity('Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X) Mobile/15E148');
+    Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
+    setViewportWidth(594);
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      value: 594,
+    });
+    const observers: ResizeObserverCallback[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          observers.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+    renderLayoutProbe();
+    expect(container?.textContent).toBe('mobile:full');
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      value: 867,
+    });
+    flushSync(() => observers.forEach((callback) => callback([], {} as ResizeObserver)));
     expect(container?.textContent).toBe('desktop:full');
   });
 

@@ -1,3 +1,4 @@
+import type { AndroidEmulatorResponse } from '@lody/shared';
 import {
   machineSupportsIosSimulatorProtocol,
   type IosSimulatorDevice,
@@ -560,4 +561,16 @@ export function buildIosSimulatorDiagnostics(input: IosSimulatorDiagnosticsInput
       break;
   }
   return redactIosSimulatorText(lines.join('\n'));
+}
+
+/** Compatibility presentation shape only; Android lifecycle RPC always uses `id`. */
+export function androidEmulatorResponseForPanel(
+  result: AndroidEmulatorResponse
+): IosSimulatorResponse {
+  return {
+    ...result,
+    type: 'ios-simulator/control_response',
+    devices: result.devices?.map(({ id, ...device }) => ({ ...device, udid: id })),
+    preview: result.preview && (({ id, ...preview }) => ({ ...preview, udid: id }))(result.preview),
+  };
 }
