@@ -91,21 +91,43 @@ lock tasks or reject sends as duplicates.
   at query time. The data is not published on presence channels. When the Machine
   cannot answer, status keeps the existing `idle`/`busy` value with activity
   `unknown`.
+- **Sender provenance.** An Agent-authored input reaches the target agent with
+  a Lody header naming the source Session and stating it is not human input.
+  Human inputs are unchanged. The header is derived from the recorded author at
+  execution time and is not written to history.
 - **Quoted authority.** An Agent relaying a human instruction may cite the
-  original message. Lody delivers the original text with its recorded author.
-  An unresolvable citation is delivered as an unverified relay rather than
-  rejected. No delegation token exists.
+  original message. Lody appends the original text with its recorded author,
+  checked against history. An unresolvable citation is delivered marked as an
+  unverified relay rather than rejected. No delegation token exists.
 - **Failure causes.** A failed target keeps its top-level code and adds a typed
-  cause, such as quota exhausted with its reset time, Machine offline, agent
-  exited or user stopped.
+  cause: quota exhausted with its reset time from the existing capacity
+  observation, Machine offline, user stopped, or agent error with the original
+  message. An unclassifiable failure is an agent error, never a guessed cause.
+- **Result timing.** Completion results carry when the input was sent and how
+  many later inputs the target received meanwhile. Lody does not mark results
+  as superseded; the coordinating Agent judges staleness.
+- **History reads.** `lody_session_history` accepts `direction` (`backward`, the
+  default newest-first paging, or `forward` from the oldest), `role`, `since` and
+  `maxChars`. Cursors keep absolute positions, so later inputs never shift a page.
+  Text over `maxChars` is truncated with `truncated` and the original length,
+  never dropped.
+- **Short Session ids.** A unique prefix of a Session id in the workspace
+  resolves to that Session. An ambiguous prefix fails with
+  `SESSION_ID_AMBIGUOUS` listing at most eight candidates with id and title.
+- **Queued inputs.** A requester may list, withdraw or replace its own queued
+  inputs that have not started. A started input returns `ALREADY_STARTED` and is
+  never cancelled by this path.
+- **Machine resources.** `lody_machine_list` reports agent quota with reset times
+  and disk usage. Lody does not manage or report agent-held locks.
 
 These additions avoid errors by design rather than adding gates. Uncertain
 observations degrade to `unknown` or an informational field; only an impossible
 request fails. New failure causes are tagged Effect errors, serialized to
 `{code, cause, retryable}` only at the MCP boundary.
 
-Not decided here: structured completion reports, history filters, and visibility
-of Machine resources such as disk, locks and quota.
+Out of scope: Lody-managed resource locks, review prompt templates (Agent Roles
+already carry fixed instructions), a checkpoint-before-cancel API, and changing
+completion output, which already omits tool calls.
 
 ## Session creation configuration
 
