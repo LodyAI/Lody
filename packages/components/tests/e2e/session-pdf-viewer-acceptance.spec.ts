@@ -181,6 +181,11 @@ test('existing screenshot attachments can be marked up without capturing the des
   await expect(page.getByRole('dialog', { name: 'Mark up image' })).toBeVisible();
   const canvas = page.getByLabel('Draw on selected screenshot');
   await expect(canvas).toBeVisible();
+  expect(
+    await canvas.evaluate(
+      (element) => (element as HTMLCanvasElement).getContext('2d')!.getImageData(0, 0, 1, 1).data[3]
+    )
+  ).toBe(0);
   const original = await canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
   const box = await canvas.boundingBox();
   if (!box) throw new Error('Missing image canvas');
@@ -209,17 +214,191 @@ test('existing screenshot attachments can be marked up without capturing the des
   await page.mouse.up();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Mark up image' })).toHaveCount(0);
-  expect(
-    await page.evaluate(async () => {
-      const selection = (
-        window as Window & { documentSelection?: { image: File; comment: string } }
-      ).documentSelection!;
-      const image = await createImageBitmap(selection.image);
-      const size = { width: image.width, height: image.height };
-      image.close();
-      return { comment: selection.comment, type: selection.image.type, ...size };
-    })
-  ).toEqual({ comment: 'Change the blue header', type: 'image/png', width: 800, height: 400 });
+  const accepted = await page.evaluate(async () => {
+    const selection = (window as Window & { documentSelection?: { image: File; comment: string } })
+      .documentSelection!;
+    const image = await createImageBitmap(selection.image);
+    const size = { width: image.width, height: image.height };
+    const output = document.createElement('canvas');
+    output.width = image.width;
+    output.height = image.height;
+    const context = output.getContext('2d')!;
+    context.drawImage(image, 0, 0);
+    const background = Array.from(context.getImageData(0, 0, 1, 1).data);
+    const pixels = context.getImageData(0, 0, output.width, output.height).data;
+    const hasMarkup = pixels.some(
+      (value, index) =>
+        index % 4 === 0 && value > 170 && pixels[index + 1] < 170 && pixels[index + 2] < 160
+    );
+    image.close();
+    return {
+      comment: selection.comment,
+      type: selection.image.type,
+      background,
+      hasMarkup,
+      ...size,
+    };
+  });
+  expect(accepted).toMatchObject({
+    comment: 'Change the blue header',
+    type: 'image/jpeg',
+    hasMarkup: true,
+    width: 800,
+    height: 400,
+  });
+  expect(accepted.background[3]).toBe(255);
+  expect(accepted.background.slice(0, 3).every((value) => value >= 245)).toBe(true);
+});
+
+test('finishing image markup without drawing still stages a JPEG', async ({ page }) => {
+  await page.goto(
+    '/iframe.html?id=sessions-sessionfilebinarypreview--attached-image-markup&viewMode=story'
+  );
+  await expect(page.getByLabel('Draw on selected screenshot')).toBeVisible();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Mark up image' })).toHaveCount(0);
+  const result = await page.evaluate(() => {
+    const file = (window as Window & { documentSelection: { image: File } }).documentSelection
+      .image;
+    return { name: file.name, type: file.type };
+  });
+  expect(result).toEqual({ name: 'screenshot.png-selection.jpg', type: 'image/jpeg' });
+});
+
+test('animated image markup exports the decoded frame as a JPEG', async ({ page }) => {
+  await page.goto(
+    '/iframe.html?id=sessions-sessionfilebinarypreview--animated-attached-image-markup&viewMode=story'
+  );
+  await expect(page.getByLabel('Draw on selected screenshot')).toBeVisible();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Mark up image' })).toHaveCount(0);
+  const result = await page.evaluate(async () => {
+    const file = (window as Window & { documentSelection: { image: File } }).documentSelection
+      .image;
+    const image = await createImageBitmap(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(image, 0, 0);
+    image.close();
+    return { type: file.type, pixel: Array.from(context.getImageData(0, 0, 1, 1).data) };
+  });
+  expect(result.type).toBe('image/jpeg');
+  expect(result.pixel[0]).toBeGreaterThan(220);
+  expect(result.pixel[1]).toBeLessThan(40);
+  expect(result.pixel[2]).toBeLessThan(40);
+});
+
+test('image markup retries JPEG encoding when the first result is too large', async ({ page }) => {
+  await page.addInitScript(() => {
+    const encode = HTMLCanvasElement.prototype.toBlob;
+    let oversize = true;
+    HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+      if (type === 'image/jpeg' && oversize) {
+        oversize = false;
+        encode.call(
+          this,
+          (blob) => callback(blob && new Blob([blob, new Uint8Array(5 * 1024 * 1024)], { type })),
+          type,
+          quality
+        );
+      } else encode.call(this, callback, type, quality);
+    };
+  });
+  await page.goto(
+    '/iframe.html?id=sessions-sessionfilebinarypreview--attached-image-markup&viewMode=story'
+  );
+  await expect(page.getByLabel('Draw on selected screenshot')).toBeVisible();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Mark up image' })).toHaveCount(0);
+  const result = await page.evaluate(async () => {
+    const file = (window as Window & { documentSelection: { image: File } }).documentSelection
+      .image;
+    const bitmap = await createImageBitmap(file);
+    const dimensions = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return { type: file.type, size: file.size, ...dimensions };
+  });
+  expect(result).toMatchObject({ type: 'image/jpeg', width: 800, height: 400 });
+  expect(result.size).toBeLessThanOrEqual(5 * 1024 * 1024);
+});
+
+test('image markup retains its preview when JPEG encoding fails', async ({ page }) => {
+  await page.addInitScript(() => {
+    const encode = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+      if (type === 'image/jpeg') callback(null);
+      else encode.call(this, callback, type, quality);
+    };
+  });
+  await page.goto(
+    '/iframe.html?id=sessions-sessionfilebinarypreview--attached-image-markup&viewMode=story'
+  );
+  const canvas = page.getByLabel('Draw on selected screenshot');
+  await expect(canvas).toBeVisible();
+  const original = await canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(canvas).toBeVisible();
+  expect(await canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(
+    original
+  );
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Mark up image' })).toHaveCount(0);
+});
+
+test('large image markup stays within the image attachment limit', async ({ page }) => {
+  await page.goto(
+    '/iframe.html?id=sessions-sessionfilebinarypreview--large-attached-image-markup&viewMode=story'
+  );
+  const canvas = page.getByLabel('Draw on selected screenshot');
+  await expect(canvas).toBeVisible({ timeout: 30000 });
+  const source = await page.evaluate(
+    () => (window as Window & { markupSourceFile: File }).markupSourceFile.size
+  );
+  expect(source).toBeGreaterThan(1024 * 1024);
+  expect(source).toBeLessThanOrEqual(5 * 1024 * 1024);
+  const pngSize = await canvas.evaluate(
+    (element) =>
+      new Promise<number>((complete) =>
+        (element as HTMLCanvasElement).toBlob((blob) => complete(blob!.size), 'image/png')
+      )
+  );
+  expect(pngSize).toBeGreaterThan(5 * 1024 * 1024);
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('Missing image canvas');
+  for (const offset of [30, 80]) {
+    await page.mouse.move(box.x + offset, box.y + offset);
+    await page.mouse.down();
+    await page.mouse.move(box.x + offset + 100, box.y + offset + 60, { steps: 4 });
+    await page.mouse.up();
+  }
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Mark up image' })).toHaveCount(0);
+  const result = await page.evaluate(async () => {
+    const file = (window as Window & { documentSelection: { image: File } }).documentSelection
+      .image;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const bitmap = await createImageBitmap(file);
+    const dimensions = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return {
+      type: file.type,
+      name: file.name,
+      size: file.size,
+      signature: Array.from(bytes.slice(0, 3)),
+      ...dimensions,
+    };
+  });
+  expect(result).toMatchObject({
+    type: 'image/jpeg',
+    name: 'large.jpg-selection.jpg',
+    signature: [0xff, 0xd8, 0xff],
+    width: 2048,
+    height: 2048,
+  });
+  expect(result.size).toBeLessThanOrEqual(5 * 1024 * 1024);
 });
 
 for (const width of [390, 1280]) {
