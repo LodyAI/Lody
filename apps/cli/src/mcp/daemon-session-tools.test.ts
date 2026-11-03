@@ -1239,6 +1239,13 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
     vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
     vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const targetAccess = vi
+      .spyOn(sessionCommands, 'validateSessionChatTarget')
+      .mockImplementation(async (args) => {
+        if (args.delegatedRequester?.userId !== 'synthetic-collaborator')
+          throw new Error('Withdraw must check the invoking user');
+        return {} as never;
+      });
     const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
     const call = async (name: string, args: Record<string, unknown>) => {
       const result = await runWithDaemonWorkspace(
@@ -1282,6 +1289,42 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(read.state === 'ready' ? read.turn.status : undefined).toBe(
       JSON.parse(listed.text).items[0].status
     );
+
+    // A capable remote daemon is asked as the invoking Turn's user, never the owner.
+    await manager.repo.upsertDocMeta(getMachineRoomId(machineId), {
+      protocolCapabilities: { sessionInputWithdraw: 1 },
+    } as never);
+    const asked: Array<Record<string, unknown>> = [];
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockImplementation(async (_args, run) =>
+      run({
+        requestSessionWithdrawInput: async (request: Record<string, unknown>) => {
+          asked.push(request);
+          return {
+            type: 'session/withdraw-input_response',
+            sessionId: targetId,
+            userTurnId: 'queued-1',
+            outcome: 'withdrawn',
+          };
+        },
+      } as never)
+    );
+    const remote = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(JSON.parse(remote.text)).toMatchObject({ outcome: 'withdrawn' });
+    expect(asked).toEqual([expect.objectContaining({ userId: 'synthetic-collaborator' })]);
+
+    // A user without access to the target is refused before anything is sent.
+    targetAccess.mockRejectedValue(new Error('Machine access denied for target'));
+    const denied = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(denied.isError).toBe(true);
+    expect(asked).toHaveLength(1);
   });
 
   it('binds daemon workspace resolution to the daemon identity and workspace', async () => {
