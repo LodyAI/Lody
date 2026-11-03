@@ -136,6 +136,8 @@ describe('resource discovery across MCP and CLI', () => {
                     },
                   ],
                 },
+                // A legacy synced row without scope/windows must not break the list.
+                legacy: { limitId: 'legacy', usedPercent: 80, resetsAt: 1 } as never,
               }
             : Promise.reject(new Error('Synthetic flock read failure')),
         onlineMachineIds: async () => new Set(['one', 'two'] as MachineId[]),

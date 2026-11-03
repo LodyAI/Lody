@@ -410,8 +410,21 @@ const MACHINE_DETAIL_CONCURRENCY = 4;
  * Most-used quota windows first, with reset times, so a coordinator sees an
  * exhausted agent account before dispatching to it.
  */
-export function summarizeMachineQuota(rateLimits: Record<string, RateLimit>) {
+/** Synced rows may predate the current shape; such rows are skipped, not fatal. */
+const isCurrentRateLimit = (value: unknown): value is RateLimit => {
+  const limit = value as Partial<RateLimit> | null;
+  return (
+    typeof limit?.scope?.providerId === 'string' &&
+    Array.isArray(limit.windows) &&
+    limit.windows.every(
+      (window) => typeof window?.usedPercent === 'number' && Number.isFinite(window.usedPercent)
+    )
+  );
+};
+
+export function summarizeMachineQuota(rateLimits: Record<string, unknown>) {
   return Object.values(rateLimits)
+    .filter(isCurrentRateLimit)
     .flatMap((limit) =>
       limit.windows.map((window) => ({
         provider: limit.scope.providerId,
@@ -420,7 +433,8 @@ export function summarizeMachineQuota(rateLimits: Record<string, RateLimit>) {
         ...(window.label ? { label: window.label } : {}),
         usedPercent: window.usedPercent,
         exhausted: window.usedPercent >= 100,
-        ...(window.resetsAtEpochSeconds !== null
+        ...(typeof window.resetsAtEpochSeconds === 'number' &&
+        Number.isFinite(window.resetsAtEpochSeconds)
           ? { resetsAt: new Date(window.resetsAtEpochSeconds * 1000).toISOString() }
           : {}),
       }))
