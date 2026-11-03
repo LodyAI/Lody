@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { ProjectId, ProjectMemberId, WorkspaceProject } from '@lody/shared';
 import { Tooltip } from '@lody/ui/tooltip';
 import type { SidebarPrimaryView } from '@/atoms/sidebar-state';
-import { ProjectHubView } from '@/components/project-hub/project-hub-workspace';
+import { ThreadsPanel } from '@/components/project-hub/project-hub-workspace';
 import {
   SidebarPrimaryViewSwitcher,
   SidebarProjectList,
@@ -12,8 +12,8 @@ import type { SessionListRow } from '@/components/session-list';
 
 /**
  * Project hub prototype: the sidebar's 项目 / 对话 capsule with its project
- * cards, and the hub a project opens — the coordinator conversation on the
- * left, its sub-conversations grouped by what they need on the right.
+ * cards, and the Threads panel a project's page shows beside its main
+ * conversation, most urgent first.
  */
 const meta = {
   title: 'Components/Project Hub',
@@ -145,31 +145,25 @@ export const SidebarEmpty: Story = {
   ),
 };
 
-export const Hub: Story = {
+export const Threads: Story = {
   render: () => (
     <Tooltip.Provider>
-      <div className="h-[760px] w-full">
-        <ProjectHubView
-          project={PROJECTS[1]!}
+      <div className="h-[760px] w-[380px]">
+        <ThreadsPanel
           rows={ROWS.filter((candidate) => candidate.projectGroup?.id === 'p-platform')}
           onOpenSession={() => {}}
-          onNewSubConversation={() => {}}
+          onNew={() => {}}
         />
       </div>
     </Tooltip.Provider>
   ),
 };
 
-export const HubEmpty: Story = {
+export const ThreadsEmpty: Story = {
   render: () => (
     <Tooltip.Provider>
-      <div className="h-[560px] w-full">
-        <ProjectHubView
-          project={PROJECTS[2]!}
-          rows={[]}
-          onOpenSession={() => {}}
-          onNewSubConversation={() => {}}
-        />
+      <div className="h-[560px] w-[380px]">
+        <ThreadsPanel rows={[]} onOpenSession={() => {}} onNew={() => {}} />
       </div>
     </Tooltip.Provider>
   ),

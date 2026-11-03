@@ -82,11 +82,13 @@ export const PROJECT_HUB_BUCKETS: readonly ProjectHubBucket[] = [
 
 /**
  * "Needs you" is anything blocked on the user: a permission or question
- * waiting. "Done" is a finished run the user has not read yet. Everything
+ * waiting, or a message that failed to send. "Done" is a finished run the user has not read yet. Everything
  * else at rest is idle.
  */
-export function classifyProjectHubRow(row: SessionListRow): ProjectHubBucket {
-  if (row.isWaitingPermission) return 'needsYou';
+export function classifyProjectHubRow(
+  row: SessionListRow & { sendState?: string | null }
+): ProjectHubBucket {
+  if (row.isWaitingPermission || row.sendState === 'failed') return 'needsYou';
   if (row.isWorking) return 'running';
   if (row.hasUnreadMessages) return 'done';
   return 'idle';

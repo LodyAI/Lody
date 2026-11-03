@@ -1125,6 +1125,7 @@ const SessionDetail = ({
   urlSimulator,
   onMobileBack,
   onMobilePresented,
+  sidePanelOverride,
 }: {
   sessionId: SessionId;
   urlTab?: string;
@@ -1133,6 +1134,12 @@ const SessionDetail = ({
   urlSimulator?: boolean;
   onMobileBack?: () => void;
   onMobilePresented?: (sessionId: string) => void;
+  /**
+   * Project hub prototype (desktop only): replaces the side panel's tabs with
+   * this content and keeps the panel open. The conversation column, composer
+   * and tab bar are unchanged.
+   */
+  sidePanelOverride?: ReactNode;
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
@@ -1182,6 +1189,7 @@ const SessionDetail = ({
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => initialTabState.sidePanel.open);
   const isSidebarVisible = isSidebarOpen && !isZenLayoutMode;
+  const hasSidePanelOverride = sidePanelOverride != null;
   const revealRightSidebar = useCallback(() => {
     setZenLayoutMode(false);
     setIsSidebarOpen(true);
@@ -5779,7 +5787,7 @@ const SessionDetail = ({
       endSlot: (
         <>
           <TerminalDockToggleButton />
-          {!isSidebarVisible ? sidebarToggleButton : null}
+          {!isSidebarVisible && !hasSidePanelOverride ? sidebarToggleButton : null}
         </>
       ),
       actions: {
@@ -5821,6 +5829,7 @@ const SessionDetail = ({
     };
   }, [
     desktopToolbarContainer,
+    hasSidePanelOverride,
     isSidebarVisible,
     sidebarToggleButton,
     handleArchiveCurrentSession,
@@ -7506,9 +7515,9 @@ const SessionDetail = ({
         topBar={tabBar}
         chatSurfaces={desktopChatSurfaces}
         terminalDock={<TerminalDockHost />}
-        secondaryPanel={desktopSecondaryPanel}
-        sidebarOpen={isSidebarVisible}
-        onSidebarCollapse={handleToggleSidebar}
+        secondaryPanel={sidePanelOverride ?? desktopSecondaryPanel}
+        sidebarOpen={hasSidePanelOverride || isSidebarVisible}
+        onSidebarCollapse={hasSidePanelOverride ? noopSidebarCollapse : handleToggleSidebar}
         deleteConfirmDialog={deleteConfirmDialog}
         sidebarMinWidthRequest={sidebarWidthRequest}
         sidebarRestoreSeq={sidebarRestoreSeq}
@@ -7551,6 +7560,8 @@ const SessionDetail = ({
     </div>
   );
 };
+
+const noopSidebarCollapse = () => {};
 
 export default function SessionDetailWithHistoryAccess(props: Parameters<typeof SessionDetail>[0]) {
   return (

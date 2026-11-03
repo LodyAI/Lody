@@ -457,6 +457,11 @@ interface ChatLandingProps {
    * chat route only; mobile keeps its base-context model.
    */
   onSelectionUrlSync?: (search: ChatLandingSearch) => void;
+  /**
+   * Project hub prototype: when set, a successful start hands the new Session
+   * to the caller instead of navigating to its conversation page.
+   */
+  onSessionStarted?: (sessionId: SessionId) => void;
 }
 
 const getGitHubOwnerHandle = (fullName: string): string => {
@@ -626,6 +631,7 @@ function WorkspaceChatLanding({
   preSelectedRepo,
   preSelectedGroup,
   onSelectionUrlSync,
+  onSessionStarted,
 }: ChatLandingProps) {
   // A Project group runs on top of the plain chat context: every existing
   // local/GitHub branch below sees `chat`, and the group overrides only the
@@ -3527,6 +3533,10 @@ function WorkspaceChatLanding({
       // be misattributed.
       startFailureReason = 'unknown';
 
+      if (onSessionStarted) {
+        onSessionStarted(sessionId);
+        return;
+      }
       // The mobile host acknowledges its committed session surface before
       // dismissing the new-chat page; navigation may resolve before portals paint.
       await navigate(

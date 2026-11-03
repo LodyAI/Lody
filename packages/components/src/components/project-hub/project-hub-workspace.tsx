@@ -1,17 +1,20 @@
-import { memo, useMemo, useState, type ReactNode } from 'react';
+import { memo, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from '@tanstack/react-router';
-import { Bot, ChevronDown, ChevronRight, GitPullRequest, Plus, SendHorizontal } from 'lucide-react';
-import type { SessionId, WorkspaceProject } from '@lody/shared';
-import { CuidaSidebarExpandOutline } from '@lody/ui';
+import { GitPullRequest, MessagesSquare, Plus } from 'lucide-react';
+import type { SessionId } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { projectHubCoordinatorsAtom } from '@/atoms/project-hub';
 import { sessionSendStatesAtom } from '@/atoms/session-send-status';
-import type { SessionSendState } from '@/lib/session-send-status';
+import { AppThemeShell } from '@/components/app-theme-shell';
+import { ChatLanding } from '@/components/chat/chat-landing';
 import type { SessionListRow } from '@/components/session-list';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
+import SessionDetail from '@/components/sessions/session-detail';
 import { SessionRowStatusIndicator } from '@/components/sidebar-row-shared';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
@@ -20,11 +23,9 @@ import {
   type ProjectHubBucket,
   useWorkspaceSessionRows,
 } from '@/hooks/use-project-session-rows';
-import { useWorkspaceProjects } from '@/hooks/use-workspace-projects';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import type { SessionSendState } from '@/lib/session-send-status';
 import { withClassName } from '@/lib/stylex';
-import { cn } from '@/lib/utils';
-import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
   useWindowDragRegionClass,
@@ -40,144 +41,9 @@ const styles = stylex.create({
     minHeight: 0,
     backgroundColor: colors.background,
   },
-  body: {
-    display: 'flex',
-    flexGrow: 1,
-    minHeight: 0,
-  },
-  bodyStacked: { flexDirection: 'column', overflowY: 'auto' },
-  // Left: the coordinator conversation.
-  main: {
-    position: 'relative',
-    height: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    flexGrow: 1,
-    minWidth: 0,
-    minHeight: 0,
-  },
-  feed: {
-    flexGrow: 1,
-    minHeight: 0,
-    overflowY: 'auto',
-    paddingInline: space[6],
-    paddingBlock: space[6],
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space[4],
-  },
-  feedInner: {
-    width: '100%',
-    maxWidth: '720px',
-    marginInline: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space[3],
-  },
-  message: {
-    display: 'flex',
-    gap: space[3],
-    alignItems: 'flex-start',
-  },
-  avatar: {
-    flexShrink: 0,
-    width: '28px',
-    height: '28px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.small,
-    cornerShape: corner.shape,
-    backgroundColor: colors.trayBackground,
-    color: colors.label,
-  },
-  bubble: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space[1],
-    minWidth: 0,
-    color: colors.label,
-    fontSize: text.bodySize,
-    lineHeight: text.bodyLeading,
-  },
-  author: {
-    fontSize: text.footnoteSize,
-    fontWeight: 600,
-    color: colors.secondaryLabel,
-  },
-  notice: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    width: '100%',
-    textAlign: 'start',
-    paddingInline: space[3],
-    paddingBlock: space[2],
-    borderWidth: 0,
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
-    backgroundColor: { default: colors.raisedBackground, ':hover': colors.hoverFill },
-    boxShadow: shadow.raised,
-    color: colors.label,
-    cursor: 'pointer',
-  },
-  noticeText: {
-    flexGrow: 1,
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  noticeMeta: { color: colors.secondaryLabel, fontSize: text.footnoteSize, flexShrink: 0 },
-  composerWrap: {
-    flexShrink: 0,
-    paddingInline: space[6],
-    paddingBottom: space[4],
-  },
-  composer: {
-    maxWidth: '720px',
-    marginInline: 'auto',
-    display: 'flex',
-    alignItems: 'flex-end',
-    gap: space[2],
-    paddingInline: space[3],
-    paddingBlock: space[2],
-    borderRadius: radius.large,
-    cornerShape: corner.shape,
-    backgroundColor: colors.wellBackground,
-    boxShadow: shadow.inset,
-  },
-  composerInput: {
-    flexGrow: 1,
-    minHeight: '44px',
-    resize: 'none',
-    borderWidth: 0,
-    outline: 'none',
-    backgroundColor: 'transparent',
-    color: colors.label,
-    fontFamily: 'inherit',
-    fontSize: text.bodySize,
-    lineHeight: text.bodyLeading,
-  },
-  composerHint: {
-    maxWidth: '720px',
-    marginInline: 'auto',
-    paddingTop: space[1.5],
-    fontSize: text.captionSize,
-    color: colors.tertiaryLabel,
-  },
-  // Floating "show panel" control while the board is folded away; the page
-  // has no header row to hold it.
-  panelReveal: {
-    position: 'absolute',
-    top: space[2],
-    right: space[2],
-    zIndex: 1,
-  },
-  glyph: { width: '16px', height: '16px' },
-  glyphMirrored: { rotate: '180deg' },
-  // Right: the sub-conversation board, in the conversation page's side panel
-  // shell (same hairline, same 44px header as its tab bar).
+  landing: { height: '100%', minHeight: 0 },
+  // The Threads panel, in the conversation page's side panel shell (same
+  // hairline, same 44px header as its tab bar).
   panel: {
     display: 'flex',
     flexDirection: 'column',
@@ -190,13 +56,7 @@ const styles = stylex.create({
     borderLeftColor: 'hsl(var(--border) / 0.7)',
     backgroundColor: colors.secondaryBackground,
   },
-  panelStacked: {
-    height: 'auto',
-    borderLeftWidth: 0,
-    borderTopWidth: 1,
-    borderTopStyle: 'solid',
-    borderTopColor: colors.separator,
-  },
+  panelStacked: { borderLeftWidth: 0 },
   panelHeader: {
     boxSizing: 'border-box',
     display: 'flex',
@@ -233,9 +93,6 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[1],
     paddingInline: space[1],
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
     color: colors.secondaryLabel,
     fontSize: text.footnoteSize,
     fontWeight: 600,
@@ -287,23 +144,46 @@ const styles = stylex.create({
     lineHeight: text.captionLeading,
     color: colors.secondaryLabel,
     minWidth: 0,
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
   },
-  pr: { display: 'inline-flex', alignItems: 'center', gap: 2 },
+  pr: { display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 },
   prMerged: { color: 'hsl(var(--primary))' },
-  bubbleGrow: { flexGrow: 1 },
-  emptyBoard: {
-    paddingInline: space[2],
-    paddingBlock: space[6],
+  empty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: space[2],
+    marginBlock: 'auto',
+    paddingInline: space[4],
+    paddingBottom: space[8],
     textAlign: 'center',
-    fontSize: text.footnoteSize,
+  },
+  emptyIcon: {
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: colors.trayBackground,
     color: colors.secondaryLabel,
   },
-  missing: {
-    margin: 'auto',
-    padding: space[6],
+  emptyTitle: {
+    fontSize: text.subheadlineSize,
+    fontWeight: 600,
+    color: colors.label,
+  },
+  emptyBody: {
+    maxWidth: '260px',
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
   },
 });
+
+const noop = () => {};
 
 /** Short relative time in the product language ("3 min ago", "3 分钟前"). */
 function useRelativeTime() {
@@ -325,6 +205,15 @@ function useRelativeTime() {
   }, [i18n.resolvedLanguage]);
 }
 
+/**
+ * A project's page. The project's coordinator ("main conversation") is an
+ * ordinary Session in the project, shown with the conversation page itself;
+ * its side panel is replaced by Threads, the project's other Sessions. Before
+ * the coordinator exists, the conversation column is the new-chat composer
+ * scoped to the project, and its first message creates the coordinator.
+ *
+ * Prototype: which Session is the coordinator is remembered on this device.
+ */
 export function ProjectHubWorkspace({
   workspaceName,
   projectId,
@@ -332,12 +221,15 @@ export function ProjectHubWorkspace({
   workspaceName: string;
   projectId: string;
 }) {
+  const { t } = useTranslation();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
-  const { projects } = useWorkspaceProjects();
-  const project = projects.find((candidate) => candidate.id === projectId) ?? null;
-  const { rows } = useWorkspaceSessionRows();
+  const { rows, loading } = useWorkspaceSessionRows();
   const sendStates = useAtomValue(sessionSendStatesAtom);
+  const [coordinators, setCoordinators] = useAtom(projectHubCoordinatorsAtom);
+  const [startedHere, setStartedHere] = useState<string | null>(null);
+
+  const storedCoordinatorId = coordinators[projectId] ?? null;
   const projectRows = useMemo(
     () =>
       rows
@@ -348,238 +240,94 @@ export function ProjectHubWorkspace({
         }),
     [projectId, rows, sendStates]
   );
+  // A remembered coordinator that is no longer listed (archived, deleted)
+  // stops being one once the list has loaded; one started on this page is
+  // trusted until its row arrives.
+  const coordinatorId =
+    storedCoordinatorId &&
+    (loading ||
+      startedHere === storedCoordinatorId ||
+      projectRows.some((row) => row.sessionId === storedCoordinatorId))
+      ? storedCoordinatorId
+      : null;
+  const threads = useMemo(
+    () => projectRows.filter((row) => row.sessionId !== coordinatorId),
+    [coordinatorId, projectRows]
+  );
 
   const openSession = (sessionId: string) =>
     void navigate({
       to: '/$workspaceName/sessions/$sessionId',
       params: { workspaceName, sessionId: sessionId as SessionId },
     });
-  const startSubConversation = () =>
+  const startThread = () =>
     void navigate({
       to: '/$workspaceName/chat',
       params: { workspaceName },
       search: { context: 'group' as const, group: projectId },
     });
+  const handleCoordinatorStarted = (sessionId: SessionId) => {
+    setStartedHere(sessionId);
+    setCoordinators((prev) => ({ ...prev, [projectId]: sessionId }));
+  };
 
-  return (
-    <ProjectHubView
-      project={project}
-      rows={projectRows}
+  const threadsPanel = (
+    <ThreadsPanel
+      rows={threads}
       stacked={isMobile}
       onOpenSession={openSession}
-      onNewSubConversation={startSubConversation}
+      onNew={startThread}
     />
   );
-}
 
-/**
- * The hub without data wiring: what the route renders and Storybook shows.
- * On desktop it is the conversation page's layout — the coordinator in the
- * conversation column and the sub-conversation board in the resizable side
- * panel — with no header row of its own.
- */
-export function ProjectHubView({
-  project,
-  rows,
-  stacked = false,
-  onOpenSession,
-  onNewSubConversation,
-}: {
-  project: WorkspaceProject | null;
-  rows: SessionListRow[];
-  stacked?: boolean;
-  onOpenSession: (sessionId: string) => void;
-  onNewSubConversation: () => void;
-}) {
-  const { t } = useTranslation();
-  const [panelOpen, setPanelOpen] = useState(true);
-  if (!project) {
+  if (isMobile) {
     return (
       <div {...stylex.props(styles.page)} data-testid="project-hub">
-        <p {...stylex.props(styles.missing)}>
-          {t('projectHub.missing', 'This project no longer exists or is still syncing.')}
-        </p>
+        {threadsPanel}
       </div>
     );
   }
-  if (stacked) {
+  if (coordinatorId) {
     return (
-      <div {...stylex.props(styles.page)} data-testid="project-hub">
-        <div {...stylex.props(styles.body, styles.bodyStacked)}>
-          <CoordinatorPane project={project} rows={rows} onOpenSession={onOpenSession} />
-          <SubConversationBoard
-            rows={rows}
-            stacked
-            onOpenSession={onOpenSession}
-            onNew={onNewSubConversation}
-          />
-        </div>
-      </div>
+      <AppThemeShell>
+        <SessionDetail
+          key={coordinatorId}
+          sessionId={coordinatorId as SessionId}
+          sidePanelOverride={threadsPanel}
+        />
+      </AppThemeShell>
     );
   }
-  const reveal = panelOpen ? null : (
-    <Button
-      type="button"
-      variant="ghost"
-      size="small"
-      icon
-      onClick={() => setPanelOpen(true)}
-      aria-label={t('sessions.sidebar.show', 'Show sidebar')}
-      className={cn(stylex.props(styles.panelReveal).className, WINDOW_DRAG_EXEMPT_CLASS)}
-    >
-      <CuidaSidebarExpandOutline
-        {...stylex.props(styles.glyph, styles.glyphMirrored)}
-        aria-hidden="true"
-      />
-    </Button>
-  );
   return (
     <div {...stylex.props(styles.page)} data-testid="project-hub">
       <DesktopSessionDetailLayout
         defaultSizes={{ main: 70, sidebar: 30 }}
         topBar={null}
         chatSurfaces={
-          <CoordinatorPane
-            project={project}
-            rows={rows}
-            onOpenSession={onOpenSession}
-            overlay={reveal}
-          />
+          <div
+            {...stylex.props(styles.landing)}
+            aria-label={t('projectHub.coordinator.name', 'Project coordinator')}
+          >
+            <ChatLanding
+              workspaceSlug={workspaceName}
+              preSelectedContext="group"
+              preSelectedGroup={projectId}
+              onSessionStarted={handleCoordinatorStarted}
+            />
+          </div>
         }
         terminalDock={null}
-        secondaryPanel={
-          <SubConversationBoard
-            rows={rows}
-            stacked={false}
-            onOpenSession={onOpenSession}
-            onNew={onNewSubConversation}
-            onHide={() => setPanelOpen(false)}
-          />
-        }
-        sidebarOpen={panelOpen}
-        onSidebarCollapse={() => setPanelOpen(false)}
+        secondaryPanel={threadsPanel}
+        sidebarOpen
+        onSidebarCollapse={noop}
         deleteConfirmDialog={null}
       />
     </div>
   );
 }
 
-/**
- * The project's one assistant. The Harness Agent is not wired yet: this pane
- * shows the shape — its introduction, then the notices it would post when a
- * sub-conversation needs the user or finishes — derived from live rows.
- */
-function CoordinatorPane({
-  project,
-  rows,
-  onOpenSession,
-  overlay,
-}: {
-  project: WorkspaceProject;
-  rows: SessionListRow[];
-  onOpenSession: (sessionId: string) => void;
-  /** Floats over the pane's top-right corner (the board's reveal control). */
-  overlay?: ReactNode;
-}) {
-  const { t } = useTranslation();
-  const relative = useRelativeTime();
-  const [draft, setDraft] = useState('');
-  const notices = useMemo(
-    () =>
-      rows
-        .map((row) => ({ row, bucket: classifyProjectHubRow(row) }))
-        .filter(({ bucket }) => bucket === 'needsYou' || bucket === 'done')
-        .sort(
-          (left, right) =>
-            new Date(right.row.latestMessageAt).getTime() -
-            new Date(left.row.latestMessageAt).getTime()
-        ),
-    [rows]
-  );
-  const coordinatorName = t('projectHub.coordinator.name', 'Project coordinator');
-  return (
-    <section {...stylex.props(styles.main)} aria-label={coordinatorName}>
-      {overlay}
-      <div {...stylex.props(styles.feed)}>
-        <div {...stylex.props(styles.feedInner)}>
-          <div {...stylex.props(styles.message)}>
-            <span {...stylex.props(styles.avatar)}>
-              <Bot className="h-4 w-4" strokeWidth={1.75} />
-            </span>
-            <div {...stylex.props(styles.bubble)}>
-              <span {...stylex.props(styles.author)}>{coordinatorName}</span>
-              <span>
-                {t(
-                  'projectHub.coordinator.intro',
-                  "I'm the coordinator for {{name}}. Tell me what you need; I'll start sub-conversations to do the work, watch them, and only bring you what needs your attention.",
-                  { name: project.name }
-                )}
-              </span>
-            </div>
-          </div>
-          {notices.map(({ row, bucket }) => (
-            <div key={row.sessionId} {...stylex.props(styles.message)}>
-              <span {...stylex.props(styles.avatar)}>
-                <Bot className="h-4 w-4" strokeWidth={1.75} />
-              </span>
-              <div {...stylex.props(styles.bubble, styles.bubbleGrow)}>
-                <span {...stylex.props(styles.author)}>{coordinatorName}</span>
-                <span>
-                  {bucket === 'needsYou'
-                    ? t('projectHub.coordinator.needsYou', 'A sub-conversation needs your input:')
-                    : t('projectHub.coordinator.done', 'A sub-conversation finished its run:')}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onOpenSession(row.sessionId)}
-                  {...stylex.props(styles.notice)}
-                >
-                  <SessionRowStatusIndicator
-                    isWaitingPermission={row.isWaitingPermission}
-                    isWorking={row.isWorking}
-                    hasUnreadMessages={row.hasUnreadMessages}
-                  />
-                  <span {...stylex.props(styles.noticeText)}>{row.title}</span>
-                  <span {...stylex.props(styles.noticeMeta)}>{relative(row.latestMessageAt)}</span>
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div {...stylex.props(styles.composerWrap)}>
-        <div {...stylex.props(styles.composer)}>
-          <textarea
-            {...stylex.props(styles.composerInput)}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={t('projectHub.coordinator.placeholder', 'Ask the coordinator…')}
-            aria-label={t('projectHub.coordinator.placeholder', 'Ask the coordinator…')}
-            rows={2}
-          />
-          <Button
-            type="button"
-            variant="primary"
-            size="small"
-            icon
-            disabled
-            aria-label={t('projectHub.coordinator.send', 'Send')}
-          >
-            <SendHorizontal className="h-4 w-4" strokeWidth={1.75} />
-          </Button>
-        </div>
-        <p {...stylex.props(styles.composerHint)}>
-          {t(
-            'projectHub.coordinator.pending',
-            'Prototype: the coordinator agent is not connected yet.'
-          )}
-        </p>
-      </div>
-    </section>
-  );
-}
 
-const SubConversationRow = memo(function SubConversationRow({
+const ThreadRow = memo(function ThreadRow({
   row,
   ruled,
   onOpen,
@@ -619,19 +367,21 @@ const SubConversationRow = memo(function SubConversationRow({
   );
 });
 
-function SubConversationBoard({
+/**
+ * Threads: every Session the project runs besides its coordinator, always
+ * shown in full, most urgent first — what needs the user, then what is
+ * running, what finished unread, and what is idle; newest first within each.
+ */
+export function ThreadsPanel({
   rows,
-  stacked,
+  stacked = false,
   onOpenSession,
   onNew,
-  onHide,
 }: {
-  rows: SessionListRow[];
-  stacked: boolean;
+  rows: (SessionListRow & { sendState?: SessionSendState })[];
+  stacked?: boolean;
   onOpenSession: (sessionId: string) => void;
   onNew: () => void;
-  /** Folds the side panel away; absent where the board is not in one. */
-  onHide?: () => void;
 }) {
   const { t } = useTranslation();
   const windowDrag = useWindowDragRegionClass();
@@ -642,9 +392,6 @@ function SubConversationBoard({
   const headerChrome = stacked
     ? ''
     : [windowDrag, windowsCaptionPadClass, windowsCaptionRowPadClass].filter(Boolean).join(' ');
-  const [collapsed, setCollapsed] = useState<Partial<Record<ProjectHubBucket, boolean>>>({
-    idle: true,
-  });
   const grouped = useMemo(() => {
     const result: Record<ProjectHubBucket, SessionListRow[]> = {
       needsYou: [],
@@ -667,87 +414,72 @@ function SubConversationBoard({
     done: t('projectHub.bucket.done', 'Finished'),
     idle: t('projectHub.bucket.idle', 'Idle'),
   };
+  const title = t('projectHub.board.title', 'Threads');
+  const newLabel = t('projectHub.board.new', 'New thread');
   return (
     <aside
       {...stylex.props(styles.panel, stacked && styles.panelStacked)}
-      aria-label={t('projectHub.board.title', 'Sub-conversations')}
+      aria-label={title}
+      data-testid="project-hub-threads"
     >
       <div {...withClassName(stylex.props(styles.panelHeader), headerChrome)}>
-        <span {...stylex.props(styles.panelTitle)}>
-          {t('projectHub.board.title', 'Sub-conversations')}
-        </span>
+        <span {...stylex.props(styles.panelTitle)}>{title}</span>
         <Button
           type="button"
           variant="ghost"
-          size="mini"
+          size="small"
           icon
-          aria-label={t('projectHub.board.new', 'New sub-conversation')}
+          aria-label={newLabel}
           onClick={onNew}
           className={WINDOW_DRAG_EXEMPT_CLASS}
         >
           <Plus className="h-4 w-4" strokeWidth={1.5} />
         </Button>
-        {onHide ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="small"
-            icon
-            onClick={onHide}
-            aria-label={t('sessions.sidebar.hide', 'Hide sidebar')}
-            className={WINDOW_DRAG_EXEMPT_CLASS}
-          >
-            <CuidaSidebarExpandOutline
-              {...stylex.props(styles.glyph, styles.glyphMirrored)}
-              aria-hidden="true"
-            />
-          </Button>
-        ) : null}
       </div>
       <div {...stylex.props(styles.panelBody)}>
         {rows.length === 0 ? (
-          <p {...stylex.props(styles.emptyBoard)}>
-            {t(
-              'projectHub.board.empty',
-              'No sub-conversations yet. The coordinator will start them as work comes in.'
-            )}
-          </p>
+          <div {...stylex.props(styles.empty)}>
+            <span {...stylex.props(styles.emptyIcon)}>
+              <MessagesSquare className="h-5 w-5" strokeWidth={1.5} />
+            </span>
+            <span {...stylex.props(styles.emptyTitle)}>
+              {t('projectHub.board.emptyTitle', 'No threads yet')}
+            </span>
+            <span {...stylex.props(styles.emptyBody)}>
+              {t(
+                'projectHub.board.empty',
+                'Tell the main conversation what to do; it starts threads to carry out the work. Threads that need you are listed first.'
+              )}
+            </span>
+            <Button type="button" variant="secondary" size="small" onClick={onNew}>
+              {newLabel}
+            </Button>
+          </div>
         ) : (
           PROJECT_HUB_BUCKETS.map((bucket) => {
             const bucketRows = grouped[bucket];
             if (bucketRows.length === 0) return null;
-            const isCollapsed = collapsed[bucket] ?? false;
             return (
               <section key={bucket} {...stylex.props(styles.group)} data-bucket={bucket}>
-                <button
-                  type="button"
-                  aria-expanded={!isCollapsed}
-                  onClick={() => setCollapsed((prev) => ({ ...prev, [bucket]: !isCollapsed }))}
+                <h3
                   {...stylex.props(
                     styles.groupHeader,
                     bucket === 'needsYou' && styles.groupHeaderNeedsYou
                   )}
                 >
-                  {isCollapsed ? (
-                    <ChevronRight className="h-3 w-3" strokeWidth={2} />
-                  ) : (
-                    <ChevronDown className="h-3 w-3" strokeWidth={2} />
-                  )}
                   {labels[bucket]}
                   <span {...stylex.props(styles.groupCount)}>{bucketRows.length}</span>
-                </button>
-                {isCollapsed ? null : (
-                  <div {...stylex.props(styles.card)}>
-                    {bucketRows.map((row, index) => (
-                      <SubConversationRow
-                        key={row.sessionId}
-                        row={row}
-                        ruled={index > 0}
-                        onOpen={onOpenSession}
-                      />
-                    ))}
-                  </div>
-                )}
+                </h3>
+                <div {...stylex.props(styles.card)}>
+                  {bucketRows.map((row, index) => (
+                    <ThreadRow
+                      key={row.sessionId}
+                      row={row}
+                      ruled={index > 0}
+                      onOpen={onOpenSession}
+                    />
+                  ))}
+                </div>
               </section>
             );
           })
