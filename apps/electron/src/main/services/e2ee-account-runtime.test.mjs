@@ -12,6 +12,7 @@ import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
 import { Effect, Scope, Exit, Result } from 'effect'
+import { WorkspaceKeyRoundFailure } from '@lody/e2ee-core'
 import {
   Bytes,
   hashRecordBytes,
@@ -2666,11 +2667,14 @@ async function memberIpcFixture(options = {}) {
       releaseDesktopE2eeReader: () => {},
       runDesktopE2eeOperation: async (accountId, work) => {
         if (identity.userId !== accountId) throw new Error('e2ee_account_mismatch')
-        const result = await Effect.runPromise(work)
+        const result = await Effect.runPromise(work).catch((error) => {
+          throw options.projectFailure ? options.projectFailure(error) : error
+        })
         if (identity.userId !== accountId) throw new Error('e2ee_account_mismatch')
         return result
       }
-    }
+    },
+    ...options.deps
   })
   const ipc = new E2eeIpc()
   ipc.permissionHistory = async () => []
@@ -2750,11 +2754,36 @@ void test('a background reader closes only the namespace returned by its own ope
 const approvalRequest = '55'.repeat(16)
 // IPC results come from the service's separate VM realm.
 const plain = (value) => JSON.parse(JSON.stringify(value))
-/** Real approval, ledger refresh and delivery paths over a synthetic relay and host. */
-async function memberApprovalFixture(keyRound) {
+const approvalDevice = '77'.repeat(32)
+/** Mirrors runDesktopE2eeOperation's public projection: only top-level typed access loss
+ * and allow-listed codes survive; nested key-round causes become a generic failure. */
+const projectNativeFailure = (error) =>
+  error instanceof E2eeMemberRemovedError
+    ? new Error('e2ee_member_removed')
+    : error instanceof E2eeDeviceRevokedError
+      ? new Error('e2ee_device_revoked')
+      : typeof error?.code === 'string'
+        ? new Error(`e2ee_${error.code}`)
+        : error instanceof Error && /^e2ee_/.test(error.message)
+          ? error
+          : new Error('e2ee_host_operation_failed')
+/** Real approval, ledger refresh and delivery paths over a synthetic relay and host.
+ * `ledger` controls whether relay history carries the admission; the local verified
+ * ledger makes the device a target only after ingesting it, like KeyDistributor. */
+async function memberApprovalFixture(keyRound, ledger = { relayHasAdmission: true }) {
   let committed = false
+  let ingested = false
   return memberIpcFixture({
     realRefresh: true,
+    projectFailure: projectNativeFailure,
+    deps: {
+      '../../services/e2ee-member-join.mjs': {
+        MemberOfferSchema: memberJoining.MemberOfferSchema,
+        decodeMemberKeyPackage: () => ({
+          request: { signingPublicKey: { toBytes: () => Buffer.from(approvalDevice, 'hex') } }
+        })
+      }
+    },
     client: {
       memberRead: ({ requestId }) =>
         Effect.succeed({
@@ -2762,18 +2791,28 @@ async function memberApprovalFixture(keyRound) {
           requestId,
           source: 'email',
           keyPackageHex: 'abcd',
+          signingPublicKey: approvalDevice,
           state: committed ? 'committed' : 'pending'
         }),
       appendRecord: () =>
         Effect.sync(() => {
           committed = true
         }),
-      history: () => Effect.succeed({ checkpoint: {}, nextCursor: null }),
+      history: () =>
+        ledger.historyFails
+          ? Effect.fail(new Error('synthetic relay history unavailable'))
+          : Effect.succeed({ checkpoint: {}, nextCursor: null, admission: ledger.relayHasAdmission }),
       memberPending: () =>
         Effect.succeed({ invitations: [], items: [], hasMore: false, seatPreview: null })
     },
     host: {
       prepareMemberAdmission: () => Effect.succeed({ workspaceId: 'team', recordHex: 'ab' }),
+      ingestLedgerRecords: (_workspace, page) =>
+        Effect.sync(() => {
+          if (page.admission) ingested = true
+        }),
+      keyDeliveryTarget: (_workspace, device) =>
+        Effect.sync(() => ingested && device === approvalDevice),
       ...(keyRound ? { keyRound } : {})
     }
   })
@@ -2830,6 +2869,69 @@ void test(
     ])
   }
 )
+
+void test('a committed admission missing from the local verified ledger is never reported delivered; a later poll ingests it first', { timeout: 5000 }, async () => {
+  // Distribution selects targets from the local verified ledger: without the
+  // admission a key round succeeds with zero recipients.
+  const ledger = { relayHasAdmission: false, historyFails: true }
+  let rounds = 0
+  const f = await memberApprovalFixture(
+    () =>
+      Effect.sync(() => {
+        rounds++
+      }),
+    ledger
+  )
+  let now = 1_000
+  f.ipc.keyDeliveryNow = () => now
+  const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+  assert.equal(approved.admitted, true)
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  const lagging = plain((await f.ipc.memberKeyDeliveries('team')).items)
+  assert.equal(lagging.length, 1)
+  assert.notEqual(lagging[0].state, 'delivered')
+  // The relay now serves the admission; the next due poll ingests before distributing.
+  ledger.historyFails = false
+  ledger.relayHasAdmission = true
+  now += 10_000
+  await f.ipc.memberJoinRequests('team')
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
+    { requestId: approvalRequest, state: 'delivered' }
+  ])
+  assert.ok(rounds >= 1)
+})
+for (const [name, nested] of [
+  ['member removal', () => new E2eeMemberRemovedError()],
+  ['device revocation', () => new E2eeDeviceRevokedError()],
+  ['a missing binding', () => Object.assign(new Error('synthetic'), { code: 'missing-binding' })],
+  ['a closed workspace', () => Object.assign(new Error('synthetic'), { code: 'closed' })]
+])
+  void test(`${name} nested in a key-round failure ends delivery from this device without retries`, { timeout: 5000 }, async () => {
+    let rounds = 0
+    const f = await memberApprovalFixture(() =>
+      Effect.suspend(() => {
+        rounds++
+        return Effect.fail(
+          new WorkspaceKeyRoundFailure({
+            receive: Result.succeed({}),
+            distribution: Result.fail(nested()),
+            reportsAfterSend: Result.succeed({}),
+            cursors: {}
+          })
+        )
+      })
+    )
+    let now = 1_000
+    f.ipc.keyDeliveryNow = () => now
+    await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [])
+    now += 10 * 60_000
+    await f.ipc.memberJoinRequests('team')
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(rounds, 1)
+  })
 
 void test('passive cache inspection stays account/product-window bound without opening a reader or cloud call', async () => {
   const f = await memberIpcFixture()
