@@ -168,6 +168,8 @@ const TERMINAL_KEY_DELIVERY = new Set([
 const TERMINAL_KEY_DELIVERY_CODES = new Set(['missing-binding', 'restart-required'])
 /** The admission is not in this device's verified ledger yet, so no round targets it. */
 const KEY_DELIVERY_NOT_INGESTED = 'e2ee_admission_not_ingested'
+/** The delivery round ended by an unexpected exception before recording an outcome. */
+const KEY_DELIVERY_INTERRUPTED = 'e2ee_key_delivery_interrupted'
 type MemberKeyDelivery = {
   state: 'pending' | 'delivering' | 'delivered' | 'failed'
   /** Signing key from the verified KeyPackage; '' if it could not be decoded. */
@@ -360,6 +362,34 @@ export class E2eeIpc extends IpcService {
       })
       .finally(() => {
         slot.running = undefined
+        // An unexpected exception must not leave a request shown as sending forever:
+        // anything still delivering becomes retryable on the next due poll.
+        let now = 0
+        try {
+          now = this.keyDeliveryNow()
+        } catch {
+          /* A broken clock makes the retry due at once rather than never. */
+        }
+        for (const [requestId, delivery] of slot.requests) {
+          if (delivery.state !== 'delivering') continue
+          delivery.attempts += 1
+          delivery.state = 'failed'
+          delivery.code = KEY_DELIVERY_INTERRUPTED
+          delivery.retryAt =
+            now +
+            Math.min(
+              KEY_DELIVERY_RETRY_MS * 2 ** (delivery.attempts - 1),
+              KEY_DELIVERY_RETRY_MAX_MS
+            )
+          try {
+            logMemberKeys('key-delivery', requestId, {
+              state: 'failed',
+              code: KEY_DELIVERY_INTERRUPTED
+            })
+          } catch {
+            /* Diagnostics never block the reset. */
+          }
+        }
       })
     slot.running = running
     return running

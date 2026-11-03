@@ -3025,6 +3025,39 @@ void test(
   }
 )
 
+void test(
+  'a delivery round ended by an unexpected exception is not left shown as delivering',
+  { timeout: 5000 },
+  async (t) => {
+    const f = await memberApprovalFixture(() => Effect.void)
+    let now = 1_000
+    f.ipc.keyDeliveryNow = () => now
+    // The daily-log sink fails once, right after the request was marked delivering.
+    const info = console.info
+    t.after(() => {
+      console.info = info
+    })
+    let broken = true
+    console.info = (event, fields) => {
+      if (broken && fields?.state === 'delivering') {
+        broken = false
+        throw new Error('synthetic log sink failure')
+      }
+    }
+    await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
+      { requestId: approvalRequest, state: 'failed', code: 'e2ee_key_delivery_interrupted' }
+    ])
+    // Retryable with the usual backoff: the next due poll delivers it.
+    now += 10_000
+    await f.ipc.memberJoinRequests('team')
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
+      { requestId: approvalRequest, state: 'delivered' }
+    ])
+  }
+)
 void test('passive cache inspection stays account/product-window bound without opening a reader or cloud call', async () => {
   const f = await memberIpcFixture()
   const owner = f.makeOwner('A', 'passive-A')
