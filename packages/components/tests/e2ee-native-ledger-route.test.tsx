@@ -335,16 +335,62 @@ it.each([
       'missing-binding',
       'closed',
     ].includes(code);
+    // No binding on this device means it never joined: the page asks for approval.
     expect(container.querySelector('[data-control-state]')?.textContent).toBe(
-      availability && !mismatch ? '1' : 'failed'
+      availability && !mismatch
+        ? code === 'missing-binding'
+          ? 'approval-required'
+          : '1'
+        : 'failed'
     );
-    if (!mismatch && ['custody_unavailable', 'missing-binding', 'corrupt'].includes(code))
+    if (code === 'missing-binding')
+      expect(container.textContent).not.toContain('e2ee.identity.lostTitle');
+    if (!mismatch && ['custody_unavailable', 'corrupt'].includes(code))
       expect(container.textContent).toContain(
         code === 'custody_unavailable' ? 'e2ee.identity.lockedTitle' : 'e2ee.identity.lostTitle'
       );
     expect(fetched).toEqual(availability ? ['describe'] : []);
   }
 );
+
+// A desktop that never joined this workspace (the phone created it) has no local
+// identity binding here. Its next step is approval from another device, never the
+// "local identity is unavailable" recovery with its archive-and-reset actions.
+it('guides a desktop that never joined this workspace to approval instead of identity recovery', async () => {
+  fixture.port = {
+    create: async () => {
+      throw new Error('unused');
+    },
+    describe: async () => ({
+      workspaceId,
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash,
+      cryptoOrgId: genesisHash,
+      activation: 'control-only',
+    }),
+    history: async () => ({
+      workspaceId,
+      genesisHash,
+      checkpoint: { headHash: genesisHash, length: 1 },
+      startIndex: 0,
+      recordsHex: [raw],
+      position: local.status.position!,
+      nextCursor: null,
+    }),
+    runtime: {
+      open: async () => {
+        throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
+      },
+      close: async () => {},
+      status: async () => local.status,
+    },
+  } as unknown as PlatformE2eeWorkspaces;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
+  expect(container.textContent).not.toContain('e2ee.identity.lostTitle');
+});
 
 it('opens the local ledger with an expired renderer snapshot and offline main identity, then reconnects', async () => {
   fixture.session.status = 'loading';

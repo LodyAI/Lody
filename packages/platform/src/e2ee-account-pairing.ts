@@ -15,18 +15,26 @@ export type E2eeAccountPairingErrorCode =
   /** This host already used or finished this pairing secret. */
   | 'pairing-used'
   /** Another tab of this browser owns the account pairing; it runs only there. */
-  | 'pairing-elsewhere';
+  | 'pairing-elsewhere'
+  /** The service refuses account pairing: it is switched off on this deployment. */
+  | 'pairing-unavailable'
+  /** The service refuses new requests for this account until its hourly limit resets. */
+  | 'pairing-rate-limited';
 
 const ERROR_CODES: readonly E2eeAccountPairingErrorCode[] = [
   'pairing-tampered',
   'pairing-expired',
   'pairing-used',
   'pairing-elsewhere',
+  'pairing-unavailable',
+  'pairing-rate-limited',
 ];
 /** Reads the typed refusal from a host error; anything else is an ordinary failure. */
 export function accountPairingErrorCode(error: unknown): E2eeAccountPairingErrorCode | null {
   const code =
-    error && typeof error === 'object' && 'code' in error ? (error as { code: unknown }).code : null;
+    error && typeof error === 'object' && 'code' in error
+      ? (error as { code: unknown }).code
+      : null;
   return ERROR_CODES.find((known) => known === code) ?? null;
 }
 
@@ -70,7 +78,9 @@ export type E2eeAccountPairingApproval = {
 export interface E2eeAccountPairingRuntime {
   /** Start, or return the still-open, request of this device. Without a string the
    * host draws a new secret and shows it; with one it answers the approver's code. */
-  requestAccountPairing?(input: { pairingString?: string }): Promise<E2eeAccountPairingRequestState>;
+  requestAccountPairing?(input: {
+    pairingString?: string;
+  }): Promise<E2eeAccountPairingRequestState>;
   /** The retained request and its latest verified progress; never creates one. */
   accountPairingRequest?(): Promise<E2eeAccountPairingRequestState | null>;
   /** Abandons and destroys the secret; a later request starts fresh. */
