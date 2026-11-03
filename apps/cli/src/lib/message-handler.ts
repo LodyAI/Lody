@@ -10504,12 +10504,16 @@ export class MessageHandler {
       this.workspaceId,
       this.machineId
     );
-    return Object.fromEntries(
-      Object.entries(projects).map(([localProjectId, project]) => [
-        localProjectId as LocalProjectId,
-        project.rootPath,
-      ])
-    ) as Record<LocalProjectId, string>;
+    const rootPaths: Record<string, string> = {};
+    for (const [localProjectId, project] of Object.entries(projects)) {
+      // Legacy machine meta is not validated on read, so a row can omit rootPath.
+      const rootPath = (project as { rootPath?: unknown } | undefined)?.rootPath;
+      if (typeof rootPath !== 'string') continue;
+      const trimmed = rootPath.trim();
+      if (!trimmed) continue;
+      rootPaths[localProjectId] = trimmed;
+    }
+    return rootPaths as Record<LocalProjectId, string>;
   }
 
   private async upsertLocalProjectMetaInCurrentWorkspace(entry: {
