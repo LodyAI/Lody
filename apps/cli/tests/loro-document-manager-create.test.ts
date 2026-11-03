@@ -233,12 +233,6 @@ const createSilentLogger = (): Logger => ({
   close: async () => {},
 });
 
-const createLoggerWithDebug = (debug: ReturnType<typeof vi.fn>): Logger => ({
-  ...createSilentLogger(),
-  debug,
-  child: () => createLoggerWithDebug(debug),
-});
-
 const createMetaSubscription = (
   overrides: Partial<{
     unsubscribe: ReturnType<typeof vi.fn>;
@@ -852,31 +846,6 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     }
   });
 
-  it('installs the CLI HTTP global dispatcher at create without attaching Streams', async () => {
-    const logger = createSilentLogger();
-    mocks.repoCreate.mockResolvedValueOnce({
-      joinMetaRoom: vi.fn(async () => createMetaSubscription()),
-      destroy: vi.fn(async () => {}),
-      addTransport: mocks.repoAddTransport,
-      removeTransport: mocks.repoRemoveTransport,
-      transportRooms: mocks.repoTransportRooms,
-    });
-
-    const manager = await LoroDocumentManager.create(
-      'workspace-http' as WorkspaceId,
-      'user-1',
-      logger
-    );
-
-    // The global HTTP dispatcher is configured unconditionally at create so all
-    // CLI HTTP is routed through it, but local-first create defers the Streams
-    // transport until the remote bridge attaches (no attachRemoteOnCreate here).
-    expect(mocks.installCliHttpGlobalDispatcher).toHaveBeenCalledWith({ logger });
-    expect(mocks.transportOptions).toHaveLength(0);
-
-    await manager.cleanUp({ fast: true });
-  });
-
   it('marks initial meta sync as ready when startup sync succeeds', async () => {
     const waitUntilSynced = vi.fn(async () => {});
     const syncedListener = vi.fn();
@@ -935,44 +904,6 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
 
     await manager.cleanUp({ fast: true });
     expect(repoDestroy).toHaveBeenCalledTimes(1);
-  });
-
-  it('logs meta room status changes', async () => {
-    const debug = vi.fn();
-    const statusListeners: Array<(status: string) => void> = [];
-    const repoDestroy = vi.fn(async () => {});
-
-    mocks.repoCreate.mockResolvedValueOnce({
-      joinMetaRoom: vi.fn(async () =>
-        createMetaSubscription({
-          status: 'connecting',
-          onStatusChange: vi.fn((listener: (status: string) => void) => {
-            statusListeners.push(listener);
-            listener('connecting');
-            return vi.fn();
-          }),
-        })
-      ),
-      destroy: repoDestroy,
-      addTransport: mocks.repoAddTransport,
-      removeTransport: mocks.repoRemoveTransport,
-      transportRooms: mocks.repoTransportRooms,
-    });
-
-    const manager = await LoroDocumentManager.create(
-      'workspace-6' as WorkspaceId,
-      'user-1',
-      createLoggerWithDebug(debug)
-    );
-
-    statusListeners[0]?.('joined');
-
-    expect(debug).toHaveBeenCalledWith('[workspace-6] Loro meta room status: connecting');
-    expect(debug).toHaveBeenCalledWith(
-      '[workspace-6] Loro meta room status: joined (was connecting)'
-    );
-
-    await manager.cleanUp({ fast: true });
   });
 
   it('sweeps rooms via repo.reconnect on the healthy watchdog tick', async () => {

@@ -92,6 +92,10 @@ async function workspaceFixture(
   const repo = {
     getDocMeta: async (room: string) =>
       room === getSessionRoomId(meta.id as SessionId) ? { meta } : undefined,
+    upsertDocMeta: async (room: string, patch: Record<string, unknown>) => {
+      if (room !== getSessionRoomId(meta.id as SessionId)) throw new Error('Unknown session');
+      Object.assign(meta, patch);
+    },
     flush: async () => {},
   };
   const doc = new SessionDocument(repo as never, meta.id as SessionId, async () => {}, logger);
@@ -549,6 +553,12 @@ describe('Automation control authority', () => {
     expect(queue[0]).toMatchObject({ operationId: invocationId });
     expect(queue[0]?.task).toContain('Original build completed');
     expect(queue[0]?.task).toContain('"build":"original"');
+    expect(meta).toMatchObject({
+      messageQueueUpdateVersion: {
+        updatedAt: expect.any(Number),
+        frontiers: expect.any(Array),
+      },
+    });
   });
   it('keeps Stop out of condition errors and retains one blocked continuation until cancel', async () => {
     vi.useFakeTimers();

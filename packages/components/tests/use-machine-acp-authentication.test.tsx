@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { createElement } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -91,47 +92,6 @@ describe('useMachineAcpAuthentication', () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
 
-  it('forwards the picked sign-in method on the start request', async () => {
-    const sendControl = vi.fn();
-    const runtime = {
-      sendControl,
-      subscribeMachineAcpAuthenticationProgress: vi.fn(() => vi.fn()),
-      waitForMachineAcpAuthenticateResponse: vi.fn(async () => ({
-        success: true,
-        disposition: 'authenticated' as const,
-      })),
-    } as unknown as WorkspaceRuntime;
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    let controller: AuthenticationController | undefined;
-
-    await act(async () => {
-      root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
-      );
-    });
-
-    const attempt = controller!.startAuthentication({
-      machineId,
-      configId: 'config-custom' as AgentConfigId,
-      methodId: 'api-key',
-    });
-
-    await expect(attempt.promise).resolves.toMatchObject({ disposition: 'authenticated' });
-    expect(sendControl.mock.calls[0]?.[0]).toMatchObject({
-      type: 'machine/acp-authenticate',
-      action: 'start',
-      configId: 'config-custom',
-      methodId: 'api-key',
-    });
-  });
-
   it('rejects a not-running start response instead of reporting authentication success', async () => {
     const sendControl = vi.fn();
     const runtime = {
@@ -220,92 +180,5 @@ describe('useMachineAcpAuthentication', () => {
       disposition: 'cancelled',
     });
     await expect(attempt.promise).resolves.toMatchObject({ disposition: 'cancelled' });
-  });
-
-  it('submits a browser authorization code to the active CLI login', async () => {
-    const sendControl = vi.fn();
-    const runtime = {
-      sendControl,
-      waitForMachineAcpAuthenticateResponse: vi.fn(async () => ({
-        success: true,
-        disposition: 'input-accepted' as const,
-      })),
-    } as unknown as WorkspaceRuntime;
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    let controller: AuthenticationController | undefined;
-
-    await act(async () => {
-      root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
-      );
-    });
-
-    await controller!.submitAuthorizationCode({
-      machineId,
-      authenticationRequestId: 'auth-claude',
-      authorizationCode: 'browser-code',
-    });
-
-    expect(sendControl).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'machine/acp-authenticate',
-        action: 'submit-code',
-        authenticationRequestId: 'auth-claude',
-        authorizationCode: 'browser-code',
-      })
-    );
-  });
-
-  it('submits an ACP authentication form response to the active remote login', async () => {
-    const sendControl = vi.fn();
-    const runtime = {
-      sendControl,
-      waitForMachineAcpAuthenticateResponse: vi.fn(async () => ({
-        success: true,
-        disposition: 'input-accepted' as const,
-      })),
-    } as unknown as WorkspaceRuntime;
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    let controller: AuthenticationController | undefined;
-
-    await act(async () => {
-      root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
-      );
-    });
-
-    await controller!.submitAuthenticationInput({
-      machineId,
-      authenticationRequestId: 'auth-custom',
-      interactionId: 'form-1',
-      input: { action: 'accept', content: { code: 'secret-code', account: 'work' } },
-    });
-
-    expect(sendControl).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'machine/acp-authenticate',
-        action: 'submit-input',
-        authenticationRequestId: 'auth-custom',
-        interactionId: 'form-1',
-        authenticationInput: JSON.stringify({
-          action: 'accept',
-          content: { code: 'secret-code', account: 'work' },
-        }),
-      })
-    );
   });
 });

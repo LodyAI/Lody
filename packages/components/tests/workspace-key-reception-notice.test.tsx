@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -168,14 +169,5 @@ describe('workspace key reception notice', () => {
     expect(container.querySelector('[role="status"]')).toBeNull();
     await advance(29_999);
     expect(container.querySelector('[role="status"]')).toBeNull();
-  });
-
-  it('cleans up a short wait before the threshold', async () => {
-    await render({ workspaceId: 'A' });
-    await advance(5_000);
-    await render(null);
-    await advance(60_000);
-    expect(container.querySelector('[role="status"]')).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
   });
 });

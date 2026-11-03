@@ -2,6 +2,16 @@
 
 [English](README.md)
 
+审批连续性：提供 `PersonalHostRemote.history` 的装配会在 claim 成功返回前，使用完整签名
+原件补齐审批快照之前的证明。公开账本页存入现有按身份和配对 session 绑定的审批证据库；
+每次重开都重新验签，并核对原快照的 head、数量和同位状态。审批原件、快照字节和 offset、
+feed 与回滚 pin 均不改变。旧快照安装首次接入该能力时需要联网补证一次，之后可用保存的
+证明离线重开。坏证明不保存，也不触发重置。未提供此可选能力的 host 保留既有快照合同。
+runtime 导出合并已保存的审批原件和本地后缀，每个绝对位置都对照 host 的真实 view 核验。
+保留状态序列化不含旧哈希，因此原件齐全时，页面在相同导出 head 和 state digest 下重放
+原件以恢复前缀证明；稀疏导出不虚构前缀。Reset history position 只清页面观察位置，既不
+补证，也不删除 host 的持久 pin。
+
 `@lody/e2ee-client` 是可选的平台中立产品组合，使用现有 `@lody/e2ee-core`。
 包内没有 Node、Electron、文件系统、SQLite、默认账号或云端地址。桌面消费共享的
 配对编解码、完整历史验证和有限收钥维护流程，保留既有原生存储与产品装配。
@@ -123,6 +133,7 @@ receive/report/distribution 原件；共享有限维护流程只确认已观察�
 ## 账号级配对流程
 
 `@lody/e2ee-client/account-pairing` 是各宿主共用的账号级个人设备配对流程（[基础规范](../../specs/e2ee-foundations.zh.md#账号级个人设备配对owner-于-2026-11-01-批准)）。它负责标签和有效期检查、单次签名的接纳日志，以及本地终态。宿主需要提供四样东西：
+
 - `AccountPairingStore`，保存持久状态，其中不含任何密钥或私钥；
 - 中继；
 - 按工作区的端口；
@@ -131,8 +142,30 @@ receive/report/distribution 原件；共享有限维护流程只确认已观察�
 配对密钥只保存在内存里。桌面端使用 SQLite 存储，浏览器端的存储另行实现。身份保护方式由按工作区的端口决定，不在这个流程里决定。
 
 `@lody/e2ee-client/account-pairing/browser` 提供浏览器端的组件：
+
 - `makeIndexedDbAccountPairingStore` 为每个账号维护一个数据库。每次修改都要等事务完成后才返回；事务中止或超出存储配额时，状态不会前进。
 - `makeAccountPairingTabOwnership` 与 `withAccountPairingTabOwnership` 通过 Web Locks 保证同一时间只有一个标签页负责该账号的配对，因为配对密钥只保存在那个标签页的内存里。其他标签页会收到 `pairing-elsewhere`；标签页关闭后锁会自动释放。
+
+`@lody/e2ee-client/account-requester` 是便携宿主上新设备一侧的实现：
+
+- **`AccountPairingIdentityHost`** 是按工作区的宿主端口。它负责以下几件事：
+  - 根据已验证的 genesis 记录和成员身份，生成或复用该工作区的身份；
+  - 报告未完成的按工作区配对；
+  - 按给定的背书者安装快照邀请；
+  - 可选地从已验证的完整历史安装（`acceptAccountHistory`，用于 Member 批准、不带邀请的行）；
+  - 可选地激活工作区。
+- **`makePortableAccountPairingRequester`** 把这类宿主转换成共享流程需要的新设备端口：
+  - 它校验完整历史，并找出本账号唯一的成员身份。
+  - 安装时，批准标签认证了准入记录的账本哈希；它找到这条记录，把记录的签名者当作背书者。
+  - 遇到无关的待完成配对时，它报告 `pairing-journal-busy`，流程会把该工作区显示为 `blocked`。
+- **`makePortableAccountPairingApprover`** 是批准方一侧。在某个工作区有已打开、已接纳会话（`session.accountApproval`）的设备，可以在该工作区批准：
+  - 在本地签名个人 `AdmitDevice`，不走网络；
+  - 通过注入的账号认证 `appendRecord` 追加已记录的原件，并绑定新设备的凭据哈希，然后从已验证账本判定结果（已提交、已失效或尚未确定）；
+  - Owner 或 Admin 交付签名的快照邀请；Member 返回 `null`，批准行因此不带邀请，新设备改为验证完整历史；
+  - 给中继用的设备访问凭据只留在这个组装内部。
+- **`makeAccountE2eeRuntime`** 把账号级 `E2eeWorkspaceRuntime` 的调用分发到各工作区的运行时。它只暴露列出的方法，因此“按方法是否存在判断能力”的做法依然准确。
+
+身份保护方式由各宿主的平台决定（`PersonalHostPlatform.protection`）。
 
 ## 验证与限制
 

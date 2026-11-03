@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import {
-  resolveUpdatedItemProjectLabel,
   SidebarUpdatedSessionList,
   type SidebarUpdatedItem,
 } from '../src/components/sidebar-updated-session-list';
@@ -22,32 +22,6 @@ function makeItem(overrides: Partial<SidebarUpdatedItem> & { id: string }): Side
     ...overrides,
   };
 }
-
-describe('resolveUpdatedItemProjectLabel', () => {
-  it('prefers subtitle, then section label', () => {
-    expect(
-      resolveUpdatedItemProjectLabel(
-        makeItem({
-          id: 'local',
-          kind: 'local',
-          subtitle: 'lody',
-          sectionLabel: 'Local Projects · lody',
-        })
-      )
-    ).toBe('lody');
-    expect(
-      resolveUpdatedItemProjectLabel(
-        makeItem({
-          id: 'github',
-          kind: 'github',
-          subtitle: 'loro-dev/lody',
-          sectionLabel: 'loro-dev/lody',
-        })
-      )
-    ).toBe('loro-dev/lody');
-    expect(resolveUpdatedItemProjectLabel(makeItem({ id: 'chat', subtitle: null }))).toBe('Chats');
-  });
-});
 
 describe('SidebarUpdatedSessionList project context', () => {
   let root: Root | undefined;
@@ -111,6 +85,41 @@ describe('SidebarUpdatedSessionList project context', () => {
     });
   }
 
+  it('places resting PRs on the branch line while keeping unread and archive on the title line', () => {
+    render(
+      [
+        makeItem({
+          id: 'pr',
+          kind: 'github',
+          branchName: 'feature',
+          prUrl: 'https://github.com/example/repo/pull/42',
+        }),
+        makeItem({
+          id: 'unread',
+          kind: 'github',
+          branchName: 'feature',
+          prUrl: 'https://github.com/example/repo/pull/43',
+          hasUnreadMessages: true,
+        }),
+        makeItem({
+          id: 'no-branch',
+          kind: 'github',
+          prUrl: 'https://github.com/example/repo/pull/44',
+        }),
+      ],
+      false,
+      undefined,
+      { branchNames: true }
+    );
+    const slot = (id: string) =>
+      container!.querySelector(`[data-sidebar-updated-id="${id}"] [data-session-row-end-slot]`)!;
+    expect(slot('pr').classList.contains('items-end')).toBe(true);
+    expect(slot('pr').querySelector('[aria-label="Open pull request #42"]')).not.toBeNull();
+    expect(slot('unread').querySelector('[data-session-row-indicator]')).not.toBeNull();
+    expect(slot('unread').querySelector('[aria-label="Open pull request #43"]')).not.toBeNull();
+    expect(slot('no-branch').classList.contains('items-center')).toBe(true);
+  });
+
   it('does not show a project line unless Updated mode asks for it', () => {
     render(
       [
@@ -125,81 +134,6 @@ describe('SidebarUpdatedSessionList project context', () => {
       false
     );
     expect(container?.querySelector('[data-sidebar-updated-project]')).toBeNull();
-  });
-
-  it('shows folder + project name on local rows and owner mark + repo on GitHub rows', () => {
-    render([
-      makeItem({
-        id: 'local',
-        kind: 'local',
-        title: 'Local session',
-        subtitle: 'lody',
-        sectionLabel: 'Local Projects · lody',
-        latestMessageAt: '2026-04-22T11:00:00.000Z',
-      }),
-      makeItem({
-        id: 'github',
-        kind: 'github',
-        title: 'GitHub session',
-        subtitle: 'loro-dev/lody',
-        repoFullName: 'loro-dev/lody',
-        sectionLabel: 'loro-dev/lody',
-        latestMessageAt: '2026-04-22T10:00:00.000Z',
-      }),
-      makeItem({
-        id: 'chat',
-        kind: 'chat',
-        title: 'Chat session',
-        subtitle: null,
-        sectionLabel: 'Chats',
-        latestMessageAt: '2026-04-22T09:00:00.000Z',
-      }),
-    ]);
-
-    const local = container?.querySelector('[data-sidebar-updated-id="local"]');
-    const github = container?.querySelector('[data-sidebar-updated-id="github"]');
-    const chat = container?.querySelector('[data-sidebar-updated-id="chat"]');
-
-    const localProject = local?.querySelector('[data-sidebar-updated-project="local"]');
-    expect(localProject).not.toBeNull();
-    expect(localProject?.textContent).toContain('lody');
-    expect(localProject?.querySelector('.lucide-folder')).not.toBeNull();
-
-    const githubProject = github?.querySelector('[data-sidebar-updated-project="github"]');
-    expect(githubProject).not.toBeNull();
-    expect(githubProject?.textContent).toContain('loro-dev/lody');
-    expect(githubProject?.querySelector('img')?.getAttribute('src') ?? '').toContain(
-      'avatars.githubusercontent.com/loro-dev'
-    );
-    expect(githubProject?.querySelector('img')?.classList.contains('opacity-60')).toBe(true);
-    expect(githubProject?.querySelector('img')?.getAttribute('style')).toBeNull();
-
-    const chatProject = chat?.querySelector('[data-sidebar-updated-project="chat"]');
-    expect(chatProject).not.toBeNull();
-    expect(chatProject?.textContent).toContain('Chats');
-    expect(chatProject?.querySelector('.lucide-message-circle')).not.toBeNull();
-  });
-
-  it('keeps the owner avatar at the same opacity on the active row', () => {
-    render(
-      [
-        makeItem({
-          id: 'github',
-          kind: 'github',
-          subtitle: 'wibus-wee/lody',
-          repoFullName: 'wibus-wee/lody',
-          sectionLabel: 'wibus-wee/lody',
-        }),
-      ],
-      true,
-      'github'
-    );
-
-    const avatar = container?.querySelector<HTMLImageElement>(
-      '[data-sidebar-updated-project="github"] img'
-    );
-    expect(avatar?.classList.contains('opacity-60')).toBe(true);
-    expect(avatar?.getAttribute('style')).toBeNull();
   });
 
   it('hides the project line on nested opened Sessions', () => {

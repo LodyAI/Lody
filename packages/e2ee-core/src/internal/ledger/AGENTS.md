@@ -23,6 +23,8 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   prefixes. A separately trusted endpoint is required, not inferred from remote
   position. Persist records and cursor atomically; no progress on failure.
   Local retention budgets fail closed, without deleting committed history.
+  Optional `LedgerFeedInvalidation` retires RAM grants synchronously with a changed
+  verified head/count publication; it performs no I/O and supplies no authority.
 - Borrowed SDK reads propagate abort and are retained/awaited until settlement.
   Close this Scope before destroying the SDK owner. ACK/CAS and snapshot bootstrap
   remain separate contracts; no fallback append or new snapshot header.

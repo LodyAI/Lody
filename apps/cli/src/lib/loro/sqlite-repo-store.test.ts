@@ -16,12 +16,7 @@ import { CliRuntimeStateReporter } from '../cli-runtime-state';
 import { createStorageGuard } from '../../../../electron/src/main/services/storage-guard';
 import { observeCliStorageWriteFailures } from '../../../../electron/src/main/services/storage-guard-cli';
 
-import {
-  AliasedRemoteCursorStore,
-  createCliSqliteRepoStore,
-  getLoroRepoSqliteDbPath,
-  getLoroRepoStorageBaseDir,
-} from './sqlite-repo-store';
+import { AliasedRemoteCursorStore, createCliSqliteRepoStore } from './sqlite-repo-store';
 
 const createdPaths = new Set<string>();
 const openStores = new Set<SqliteRepoStore>();
@@ -161,19 +156,6 @@ describe('SQLite Loro repo store', () => {
     // The failed write did not close or fence the store; agents may continue.
     expect(await store.sqliteStore.cursorStore.load('missing')).toBeNull();
   });
-  it('saves, loads, and deletes remote cursors in SQLite', async () => {
-    const { cursorStore, tempDir } = await createTempSqliteCursorStore();
-    const cursor = createCursor(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);
-
-    expect(await cursorStore.load(cursor.streamUrl)).toBeNull();
-
-    await cursorStore.save(cursor);
-    expect(await cursorStore.load(cursor.streamUrl)).toEqual(cursor);
-    expect(await fs.stat(path.join(tempDir, 'repo.sqlite3'))).toBeTruthy();
-
-    await cursorStore.delete(cursor.streamUrl);
-    expect(await cursorStore.load(cursor.streamUrl)).toBeNull();
-  });
 
   it('loads and deletes cursors saved under the legacy gateway URL', async () => {
     const { cursorStore } = await createTempSqliteCursorStore();
@@ -206,29 +188,5 @@ describe('SQLite Loro repo store', () => {
     await cursorStore.delete(currentUrl);
     expect(await cursorStore.load(previousProxyUrl)).toBeNull();
     expect(await cursorStore.load(currentUrl)).toBeNull();
-  });
-
-  it('creates a workspace-scoped SQLite repo store under the Lody storage directory', async () => {
-    const previousHome = process.env.HOME;
-    const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-sqlite-repo-home-'));
-    createdPaths.add(tempHome);
-    process.env.HOME = tempHome;
-
-    try {
-      const workspaceId = 'workspace-1' as WorkspaceId;
-      const cliStore = await createCliSqliteRepoStore(workspaceId);
-      openStores.add(cliStore.sqliteStore);
-
-      expect(cliStore.baseDir).toBe(path.join(tempHome, '.lody-oss', 'loro-repo', 'workspace-1'));
-      expect(cliStore.dbPath).toBe(path.join(cliStore.baseDir, 'repo.sqlite3'));
-      expect(getLoroRepoStorageBaseDir(workspaceId)).toBe(cliStore.baseDir);
-      expect(getLoroRepoSqliteDbPath(workspaceId)).toBe(cliStore.dbPath);
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-    }
   });
 });

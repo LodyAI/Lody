@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-Owner Zixuan Chen (zxch3n) approved the listed E2EE Spec revisions on 2026-10-28 and the exact client custody Spec revision below on 2026-10-29. The permission ledger approval covers only confirmed or implemented portions; unresolved format details require separate review before ledger v1 is frozen. Desktop custody requires real-device acceptance before product activation. Client custody approval establishes intent, not platform acceptance. On 2026-10-31 the owner approved the recovery vault Spec revision recorded below, and on 2026-11-01 the account-wide personal device pairing increments.
+Owner Zixuan Chen (zxch3n) approved the listed E2EE Spec revisions on 2026-10-28 and the exact client custody Spec revision below on 2026-10-29. The permission ledger approval covers only confirmed or implemented portions; unresolved format details require separate review before ledger v1 is frozen. Desktop custody requires real-device acceptance before product activation. Client custody approval establishes intent, not platform acceptance. On 2026-10-31 the owner approved the recovery vault Spec revision recorded below, on 2026-11-01 the account-wide personal device pairing increments, and on 2026-11-02 the machine sharing Spec.
 
 ## Decision
 
@@ -105,3 +105,7 @@ The scope covers these points:
 - **Client custody.** Mobile may start automatically and Web requires explicit confirmation. Any personal device may approve.
 
 Approval records intent only, not implementation, deployment or real-device acceptance. Revocation and removal semantics are unchanged.
+
+## Machine sharing
+
+On 2026-11-02, owner Zixuan Chen (zxch3n) approved the [machine sharing Spec](../../../../specs/e2ee/machine-sharing.md) by merging [PR #2228](https://github.com/LodyAI/Lody/pull/2228) as merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`. The approved [English text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md) has Git blob `37ce21f8e5a3db433b38ac0d2701fcacf6408080`; the approved [Chinese text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md) has Git blob `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`. Later changes that only record this approval are editorial. The scope includes the owner's decision that withdrawal blocks new starts and further authorized actions without forcibly terminating running commands, and the 2026-10-28 acceptance that withdrawal has no strict upper bound if the server keeps withholding newer policies. Approval records intent, not deployment or two-member product acceptance.

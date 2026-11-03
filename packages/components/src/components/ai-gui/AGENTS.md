@@ -69,6 +69,9 @@ Ownership: [README.md](README.md).
   row shares one rail: prose, process labels/steps, live status and the mobile
   footer sit at `conversation.railInset`; thought prose aligns with its label.
   Footer bleed is trailing-only (`-mr-[7px]`). See `AssistantTurnAlignment.stories`.
+- The trailing row (`trailingContent`: pending sends, continuation notes) is
+  full-bleed like the scroller, so each item mounts its own `ConversationColumn`.
+  Stream rows never rely on the row shell for width or gutter.
 - Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
   User rows own `responseGap`; assistant tails own `roundGap` (desktop: including
   footer/metadata; mobile: below the footer).

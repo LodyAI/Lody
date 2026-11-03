@@ -7,33 +7,12 @@ Translation: current
 
 ## Abstract
 
-Share images with shadows were blurry on WebKit because SnapDOM 2.24.15 draws
-its SVG at natural size into an intermediate canvas before enlarging it. The
-shared export now asks SnapDOM for an SVG at the target pixel dimensions on
-WebKit, then encodes that image as PNG. The layout, native share handoff and
-2x target remain unchanged. A Playwright WebKit comparison of a synthetic card
-shows sharper text at the same pixel dimensions; a real iOS photo-library save
-has not been verified.
+SnapDOM 2.24.15 rasterizes WebKit share images with shadows at natural size before enlarging them, making text blurry. The shared exporter renders a shadow-processed SVG at the target resolution, but keeps its viewBox at output size and scales the HTML with `zoom`: WebKit otherwise paints positioned HTML inside an enlarged `foreignObject` at the wrong size and location. Browser tests cover geometry, shadow and text detail; saving through the iOS photo library has not been verified.
 
 ## Decision and verification
 
-The [native share handoff](2026-10-07-native-share-image-save.md) sends the
-captured PNG bytes to the system sheet. It does not control destination processing.
-The [fixed card](../feature/2026-09-14-chat-share-card-fixed-template.md) includes
-a shadow on its default ground. SnapDOM's WebKit shadow workaround uses a
-natural-size canvas before scaling; increasing the final canvas scale alone
-cannot recover its lost detail.
+The [native share handoff](2026-10-07-native-share-image-save.md) sends PNG bytes to the system sheet and does not control destination processing. The [fixed card](../feature/2026-09-14-chat-share-card-fixed-template.md) has a shadow on its default ground. SnapDOM's WebKit shadow workaround rasterizes at natural size before scaling, so increasing the final canvas scale alone cannot recover text detail.
 
-Render the SVG at the output dimensions before drawing it into the PNG canvas.
-Keep SnapDOM's SVG path so its WebKit shadow compatibility handling remains in
-place. Preserve its 16,384-pixel side and area bounds for long captures, and
-report failure rather than accept its PNG fallback as a high-resolution SVG.
-Other engines retain their existing PNG path. The shared helper also serves usage
-cards, so both share surfaces use the fix on WebKit.
+The exporter retains SnapDOM's shadow-processed SVG, makes the SVG viewBox match the output pixel dimensions, and applies the output scale to its `foreignObject` bounds and HTML wrapper. WebKit otherwise drops the SVG scale for positioned HTML ([WebKit bug 23113](https://bugs.webkit.org/show_bug.cgi?id=23113)), leaving the card at roughly half size on the background. The shared helper also serves usage cards. Other engines keep the PNG path; long images retain the 16,384-pixel side and area bounds, and an SVG fallback to PNG is rejected.
 
-The [WebKit browser regression](../../../../packages/components/tests/e2e/interface-typography.spec.ts)
-checks actual PNG dimensions, text detail against a downsampled copy, and the
-effect of removing the shadow. The
-standalone Playwright comparison used the locked SnapDOM version and the real
-export helper with a synthetic card; it did not exercise the native share sheet,
-the complete product component, or a physical iPhone.
+The [WebKit browser regression](../../../../packages/components/tests/e2e/interface-typography.spec.ts) checks exported PNG geometry with and without preview scaling, shadow pixels and text sharpness. It uses a synthetic card and does not exercise the native share sheet or a physical iPhone.

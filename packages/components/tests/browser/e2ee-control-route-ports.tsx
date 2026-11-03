@@ -24,9 +24,10 @@ export const createFileRoute = () => (options: { component: () => ReactNode }) =
 });
 export const useNavigate = () => noop;
 export const useSetAtom = () => noop;
-// The only atom the route reads is the account pairing beta, which stays off here.
+// The route reads the account-pairing and creation betas; both stay off here.
 export const useAtomValue = () => false;
 export const e2eeAccountPairingFeatureEnabledAtom = 'accountPairing';
+export const e2eeWorkspaceCreationFeatureEnabledAtom = 'creationEnabled';
 export const isElectronRenderer = () => false;
 export const isNativeAppShell = () => false;
 export const setWorkspaceContextAtom = {};

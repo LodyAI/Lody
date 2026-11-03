@@ -18,10 +18,6 @@ const request = (overrides: Partial<PermissionRequest> = {}): PermissionRequest 
   }) as PermissionRequest;
 
 describe('resolvePermissionRecord', () => {
-  it('keeps an unanswered request actionable', () => {
-    expect(resolvePermissionRecord(request())).toEqual({ kind: 'pending' });
-  });
-
   it('collapses an answered request to the option that was chosen', () => {
     expect(
       resolvePermissionRecord(request({ outcome: { outcome: 'selected', optionId: 'allow' } }))

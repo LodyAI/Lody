@@ -46,6 +46,13 @@ import { fromHex, toHex } from './bytes';
 const hex = toHex;
 const raw = fromHex;
 const sha256 = (value: Uint8Array): Uint8Array => nobleSha256(value);
+/** An approval row whose invitation digest is all zeros carries no snapshot: the new
+ * device installs from full verified history instead. The genesis and admission
+ * record stay covered by the approval tag. */
+const NO_INVITATION_DIGEST = new Uint8Array(32);
+/** Placeholder relay body for such a row; the new device never reads it. */
+const NO_INVITATION = new Uint8Array([0]);
+const isHistoryRow = (digest: Uint8Array) => digest.every((byte) => byte === 0);
 /** Typed refusals the UI explains (`@lody/platform` `E2eeAccountPairingErrorCode`). */
 export type AccountPairingRefusal = 'pairing-tampered' | 'pairing-expired' | 'pairing-used';
 const fail = (code: AccountPairingRefusal | 'invalid-input' | 'storage' | 'corrupt') =>
@@ -120,6 +127,9 @@ export interface AccountPairingRequesterWorkspace {
   identity(): Effect.Effect<Omit<PairingRequestRow, 'genesis'>, unknown>;
   /** Verifies the invitation against the approved admission record and installs it. */
   accept(invitation: Uint8Array, admissionRecordHash: Uint8Array): Effect.Effect<void, unknown>;
+  /** Installs from the workspace's complete verified history, for an approval row that
+   * carries no invitation (a Member approver cannot endorse a snapshot). */
+  acceptHistory?(admissionRecordHash: Uint8Array): Effect.Effect<void, unknown>;
 }
 
 type Terminal = 'approved' | 'declined' | 'expired' | 'cancelled';
@@ -487,16 +497,21 @@ export function makeAccountPairing(input: {
             )
               continue;
             if ((yield* sql(joinedSet(row.lookup_id))).has(workspace.workspaceId)) continue;
-            const invitation = published.invitations.find(
-              (item) => item.genesisHash === hex(approved.genesis)
-            );
-            if (!invitation) continue;
-            const bytes = raw(invitation.invitationHex);
-            if (hex(sha256(bytes)) !== hex(approved.invitationDigest)) continue;
+            let install: Effect.Effect<void, unknown>;
+            if (isHistoryRow(approved.invitationDigest)) {
+              if (!workspace.acceptHistory) continue;
+              install = workspace.acceptHistory(approved.admissionRecordHash);
+            } else {
+              const invitation = published.invitations.find(
+                (item) => item.genesisHash === hex(approved.genesis)
+              );
+              if (!invitation) continue;
+              const bytes = raw(invitation.invitationHex);
+              if (hex(sha256(bytes)) !== hex(approved.invitationDigest)) continue;
+              install = workspace.accept(bytes, approved.admissionRecordHash);
+            }
             // A failure here affects only this workspace; the next poll retries it.
-            const accepted = yield* Effect.result(
-              workspace.accept(bytes, approved.admissionRecordHash)
-            );
+            const accepted = yield* Effect.result(install);
             if (Result.isFailure(accepted)) {
               rememberDesktopE2eeFailure('account-pairing-accept', accepted.failure);
               const code =
@@ -723,7 +738,8 @@ export function makeAccountPairing(input: {
           const deliverable: {
             workspace: AccountPairingApproverWorkspace;
             journaled: AdmissionRow;
-            invitation: Uint8Array;
+            /** `null`: delivered through full history (Member approver). */
+            invitation: Uint8Array | null;
           }[] = [];
           for (const item of selected) {
             const { workspace, row } = item!;
@@ -761,11 +777,15 @@ export function makeAccountPairing(input: {
             let invitation: Uint8Array | null = journaled.invitation
               ? new Uint8Array(journaled.invitation)
               : null;
+            let history = false;
             if (!invitation) {
-              invitation = yield* Effect.orElseSucceed(
-                workspace.invitation(new Uint8Array(journaled.record)),
-                () => null
+              const issued = yield* Effect.result(
+                workspace.invitation(new Uint8Array(journaled.record))
               );
+              // A successful `null` means this signer cannot endorse a snapshot (a
+              // Member): deliver through history. A failure stays awaiting delivery.
+              invitation = Result.isSuccess(issued) ? issued.success : null;
+              history = Result.isSuccess(issued) && issued.success === null;
               if (invitation)
                 yield* sql(
                   store.setAdmissionInvitation(
@@ -775,7 +795,8 @@ export function makeAccountPairing(input: {
                   )
                 );
             }
-            if (!invitation) outcomes.set(workspace.workspaceId, 'awaiting-delivery');
+            if (history) deliverable.push({ workspace, journaled, invitation: null });
+            else if (!invitation) outcomes.set(workspace.workspaceId, 'awaiting-delivery');
             else deliverable.push({ workspace, journaled, invitation });
           }
           if (deliverable.length > 0) {
@@ -791,7 +812,7 @@ export function makeAccountPairing(input: {
                 admissionRecordHash: hashRecordBytes(
                   new Uint8Array(item.journaled.record)
                 ).toBytes(),
-                invitationDigest: sha256(item.invitation),
+                invitationDigest: item.invitation ? sha256(item.invitation) : NO_INVITATION_DIGEST,
               })),
             };
             const bytes = yield* fromResult(encodePairingApproval(approval), 'invalid-input');
@@ -804,7 +825,7 @@ export function makeAccountPairing(input: {
               invitations.push({
                 ...(yield* item.workspace.access()),
                 genesisHash: item.journaled.genesis,
-                invitationHex: hex(item.invitation),
+                invitationHex: hex(item.invitation ?? NO_INVITATION),
               });
             const published = yield* Effect.result(
               relay.publish({

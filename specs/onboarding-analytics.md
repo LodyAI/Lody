@@ -12,6 +12,9 @@ or `project_source_ready`. These legacy landing events are retired, without
 replacement traffic. Desktop setup continues to use its flow, step and operation
 contract, gated by the platform telemetry capability; OSS local emits nothing.
 
+The [boundary decision](../.agents/notes/implemented/bug-fix/2026-10-09-onboarding-analytics-boundaries.md)
+explains why ordinary restored chat state is not onboarding progress.
+
 ## Completion stages
 
 | Event                             | Meaning                                                                                                          |

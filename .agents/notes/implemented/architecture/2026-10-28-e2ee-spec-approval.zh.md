@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-Owner Zixuan Chen（zxch3n）于 2026-10-28 批准所列 E2EE Spec 修订，并于 2026-10-29 批准下述 client custody Spec 确切修订。权限账本仅批准已确认或已实现部分；账本 v1 冻结前，未定格式细节须单独审查。桌面保管在产品启用前须完成真机验收。Client custody 批准确立意图，不代表平台验收。2026-10-31 owner 批准了下述恢复保险库 Spec 修订，2026-11-01 批准了账号级个人设备配对增量。
+Owner Zixuan Chen（zxch3n）于 2026-10-28 批准所列 E2EE Spec 修订，并于 2026-10-29 批准下述 client custody Spec 确切修订。权限账本仅批准已确认或已实现部分；账本 v1 冻结前，未定格式细节须单独审查。桌面保管在产品启用前须完成真机验收。Client custody 批准确立意图，不代表平台验收。2026-10-31 owner 批准了下述恢复保险库 Spec 修订，2026-11-01 批准了账号级个人设备配对增量，2026-11-02 批准了机器共享 Spec。
 
 ## 决定
 
@@ -105,3 +105,7 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 - **客户端保管。** 移动端可以自动发起，网页端需要显式确认；任意个人设备都可以批准。
 
 批准只记录意图，不代表已实现、已部署或真机验收。撤销和移除的语义不变。
+
+## 机器共享
+
+2026-11-02，owner Zixuan Chen（zxch3n）通过合入 [PR #2228](https://github.com/LodyAI/Lody/pull/2228)（merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`）批准[机器共享 Spec](../../../../specs/e2ee/machine-sharing.zh.md)。获批[英文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md)的 Git blob 为 `37ce21f8e5a3db433b38ac0d2701fcacf6408080`；获批[中文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md)的 Git blob 为 `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`。之后仅记录本次批准的修改属于编辑性修改。范围包括 owner 的决定：撤回后不能启动新任务、不能做需要授权的后续动作，但不强制终止已在运行的命令；以及 2026-10-28 接受的风险：服务端持续扣住更新策略时，撤回生效没有严格上限。批准只记录意图，不代表部署或双成员产品验收。

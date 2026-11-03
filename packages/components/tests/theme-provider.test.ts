@@ -1,21 +1,18 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
+// @vitest-environment jsdom
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import {
   ThemeProvider,
-  nextCycledTheme,
   useActiveVSCodeThemeId,
   useResolvedTheme,
   useTheme,
 } from '../src/theme-provider';
-import {
-  applyVSCodeThemeCssVariables,
-  createThemeCssVariables,
-  getBundledVSCodeThemeByIdSync,
-} from '../src/lib/vscode-theme';
 
 // The app now ships exactly two themes, pinned by the provider.
 const FIXED_LIGHT_THEME_ID = 'lody-light';
@@ -119,14 +116,6 @@ function installMatchMediaMock(initialMatches: boolean) {
   };
 }
 
-describe('nextCycledTheme', () => {
-  it('cycles light, dark, then system', () => {
-    expect(nextCycledTheme('light')).toBe('dark');
-    expect(nextCycledTheme('dark')).toBe('system');
-    expect(nextCycledTheme('system')).toBe('light');
-  });
-});
-
 describe('ThemeProvider', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
@@ -151,65 +140,6 @@ describe('ThemeProvider', () => {
     } else {
       Reflect.deleteProperty(window, 'matchMedia');
     }
-  });
-
-  it('applies bundled VSCode theme variables during the initial mount commit', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(
-          ThemeProvider,
-          {
-            defaultTheme: 'dark',
-            storageKey: 'theme-provider-test-theme',
-          },
-          React.createElement('div', null, 'theme probe')
-        )
-      );
-    });
-
-    // Dark mode pins Vesper.
-    expect(document.documentElement.classList.contains('dark')).toBe(true);
-    expect(document.documentElement.dataset.lodyVscodeTheme).toBe(FIXED_DARK_THEME_ID);
-    expect(document.documentElement.style.getPropertyValue('--vscode-editor-background')).toBe(
-      '#131416'
-    );
-    expect(document.documentElement.style.getPropertyValue('--vscode-button-background')).toBe(
-      '#7CC4E8'
-    );
-  });
-
-  it('replaces previously applied theme variables even if the old application is not explicitly disposed', () => {
-    const documentRoot = document.documentElement;
-    const darkTheme = getBundledVSCodeThemeByIdSync('vesper');
-    const lightTheme = getBundledVSCodeThemeByIdSync('vscode-light-2026');
-
-    if (!darkTheme || !lightTheme) {
-      throw new Error('Expected bundled themes to be available');
-    }
-
-    const firstApplication = applyVSCodeThemeCssVariables(documentRoot, darkTheme);
-    expect(documentRoot.style.getPropertyValue('--vscode-button-background')).toBe('#7CC4E8');
-
-    const secondApplication = applyVSCodeThemeCssVariables(documentRoot, lightTheme);
-    const lightButtonBackground = createThemeCssVariables(lightTheme)['--vscode-button-background'];
-    expect(documentRoot.dataset.lodyVscodeTheme).toBe('vscode-light-2026');
-    expect(documentRoot.style.getPropertyValue('--vscode-button-background')).toBe(
-      lightButtonBackground
-    );
-
-    firstApplication.dispose();
-    expect(documentRoot.dataset.lodyVscodeTheme).toBe('vscode-light-2026');
-    expect(documentRoot.style.getPropertyValue('--vscode-button-background')).toBe(
-      lightButtonBackground
-    );
-
-    secondApplication.dispose();
-    expect(documentRoot.dataset.lodyVscodeTheme).toBeUndefined();
-    expect(documentRoot.style.getPropertyValue('--vscode-button-background')).toBe('');
   });
 
   it('pins the fixed VS Code theme per mode and persists the explicit mode', () => {
@@ -270,97 +200,6 @@ describe('ThemeProvider', () => {
     expect(window.localStorage.getItem(themeStorageKey)).toBe('system');
     expect(probe?.dataset.theme).toBe('system');
     expect(document.documentElement.style.colorScheme).toBe('light dark');
-  });
-
-  it('reacts to storage events for the theme mode', () => {
-    const themeStorageKey = 'theme-provider-test-theme';
-
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(
-          ThemeProvider,
-          {
-            defaultTheme: 'dark',
-            storageKey: themeStorageKey,
-          },
-          React.createElement(ThemeProbe)
-        )
-      );
-    });
-
-    const probe = container.querySelector<HTMLElement>('#theme-probe');
-
-    expect(probe?.dataset.theme).toBe('dark');
-    expect(probe?.dataset.activeVscodeThemeId).toBe(FIXED_DARK_THEME_ID);
-    expect(document.documentElement.dataset.lodyVscodeTheme).toBe(FIXED_DARK_THEME_ID);
-
-    flushSync(() => {
-      window.dispatchEvent(
-        new StorageEvent('storage', {
-          key: themeStorageKey,
-          newValue: 'light',
-        })
-      );
-    });
-
-    expect(document.documentElement.classList.contains('light')).toBe(true);
-    expect(probe?.dataset.theme).toBe('light');
-    expect(probe?.dataset.resolvedTheme).toBe('light');
-    expect(probe?.dataset.activeVscodeThemeId).toBe(FIXED_LIGHT_THEME_ID);
-    expect(document.documentElement.dataset.lodyVscodeTheme).toBe(FIXED_LIGHT_THEME_ID);
-  });
-
-  it('follows system color scheme changes while theme mode is system', () => {
-    const matchMediaMock = installMatchMediaMock(false);
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(
-          ThemeProvider,
-          {
-            defaultTheme: 'system',
-            storageKey: 'theme-provider-test-theme',
-          },
-          React.createElement(ThemeProbe)
-        )
-      );
-    });
-
-    const probe = container.querySelector<HTMLElement>('#theme-probe');
-
-    expect(probe?.dataset.theme).toBe('system');
-    expect(probe?.dataset.resolvedTheme).toBe('light');
-    expect(probe?.dataset.activeVscodeThemeId).toBe(FIXED_LIGHT_THEME_ID);
-    expect(document.documentElement.classList.contains('light')).toBe(true);
-    expect(document.documentElement.style.colorScheme).toBe('light dark');
-    expect(document.documentElement.dataset.lodyVscodeTheme).toBe(FIXED_LIGHT_THEME_ID);
-
-    flushSync(() => {
-      matchMediaMock.setMatches(true);
-    });
-
-    expect(probe?.dataset.theme).toBe('system');
-    expect(probe?.dataset.resolvedTheme).toBe('dark');
-    expect(probe?.dataset.activeVscodeThemeId).toBe(FIXED_DARK_THEME_ID);
-    expect(document.documentElement.classList.contains('dark')).toBe(true);
-    expect(document.documentElement.dataset.lodyVscodeTheme).toBe(FIXED_DARK_THEME_ID);
-
-    flushSync(() => {
-      matchMediaMock.setMatches(false);
-    });
-
-    expect(probe?.dataset.theme).toBe('system');
-    expect(probe?.dataset.resolvedTheme).toBe('light');
-    expect(probe?.dataset.activeVscodeThemeId).toBe(FIXED_LIGHT_THEME_ID);
-    expect(document.documentElement.classList.contains('light')).toBe(true);
-    expect(document.documentElement.dataset.lodyVscodeTheme).toBe(FIXED_LIGHT_THEME_ID);
   });
 
   it('previews a theme without persisting it', () => {

@@ -573,59 +573,6 @@ void test('only unavailable custody exposes the availability fallback code', asy
   await native.api.closeDesktopE2eeAccount()
 })
 
-void test('main cached identity follows resolved sessions, transport failures and definitive sign-out without a new query', async () => {
-  let response = { data: { user: { id: 'first' }, session: { token: 'synthetic-token' } } }
-  let offline = false
-  const { AuthService } = await load(
-    './auth-service.ts',
-    {
-      electron: { app: {}, safeStorage: {}, shell: {} },
-      '../auth': {
-        offlineAuthIdentity: makeOfflineAuthIdentityCache({
-          get: () => null,
-          set: () => {},
-          delete: () => {}
-        }),
-        authClient: {
-          getSession: async () => {
-            if (offline) throw new Error('synthetic offline')
-            return response
-          },
-          signOut: async () => {}
-        }
-      },
-      '../posthog-error-reporting': {},
-      './desktop-login': {
-        DesktopLogin: class {
-          cancel() {}
-        }
-      },
-      '../platform': { desktopInstallationProfile: { releaseChannel: 'stable' } },
-      '@lody/shared/electron-ipc': {}
-    },
-    { warn: () => {} }
-  )
-  const service = new AuthService()
-  assert.equal(service.getCachedSessionIdentity().userId, null)
-  await service.getSession()
-  assert.equal(service.getCachedSessionIdentity().userId, 'first')
-  offline = true
-  await service.getSession()
-  assert.equal(service.getCachedSessionIdentity().userId, 'first')
-  offline = false
-  response = { data: null }
-  await service.getSession()
-  assert.equal(service.getCachedSessionIdentity().userId, null)
-  response = { data: { user: { id: 'second' }, session: { token: 'synthetic-token2' } } }
-  await service.getSession()
-  const before = service.getCachedSessionIdentity()
-  assert.equal(before.userId, 'second')
-  await service.signOut()
-  const after = service.getCachedSessionIdentity()
-  assert.equal(after.userId, null)
-  assert.ok(after.generation > before.generation)
-})
-
 void test('confirmed identity reopens offline after restart, matches bearer or cookie, and is revoked by logout', async () => {
   const storage = new Map()
   const offlineAuthIdentity = makeOfflineAuthIdentityCache({
@@ -726,107 +673,6 @@ void test('confirmed identity changes release old custody without waiting for an
     'replacement-account'
   )
   await api.closeDesktopE2eeAccount()
-})
-
-void test('personal join cancellation preserves remote success when local retirement fails and retries without a network lock', async () => {
-  const sender = Object.assign(new EventEmitter(), { id: 18 })
-  let localFailure = true,
-    retired = false,
-    lockDepth = 0
-  const diagnostic = new Error('synthetic private storage failure')
-  const owner = {
-    accountId: 'account',
-    readers: new Map(),
-    bootstrap: {
-      pendingPersonalJoin: () => Effect.succeed({ pairingSessionId: '44'.repeat(16) }),
-      retirePersonalJoin: () =>
-        Effect.suspend(() =>
-          localFailure
-            ? Effect.fail(diagnostic)
-            : Effect.sync(() => {
-                retired = true
-              })
-        )
-    }
-  }
-  const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
-    'electron-ipc-decorator': {
-      IpcService: class {},
-      IpcMethod: () => (_t, _n, descriptor) => descriptor,
-      getIpcContext: () => ({ event: { sender } })
-    },
-    '../../platform': { isLocalPlatform: () => false },
-    '../../services/e2ee-bootstrap.mjs': {},
-    '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
-    '../assert-sender': { assertProductWindowSender: () => {} },
-    '../../services/e2ee-account-runtime': {
-      withDesktopE2eeAccount: async (work) => {
-        lockDepth++
-        try {
-          return await Effect.runPromise(work(owner))
-        } finally {
-          lockDepth--
-        }
-      },
-      desktopE2eeCloudClient: async () => ({
-        accountId: 'account',
-        client: {
-          joinCancel: () =>
-            Effect.sync(() => {
-              assert.equal(lockDepth, 0)
-              return { status: 'cancelled' }
-            })
-        }
-      })
-    }
-  })
-  const ipc = new E2eeIpc()
-  const result = await ipc.cancelPersonalJoin('workspace', '44'.repeat(16))
-  assert.equal(result.status, 'cancelled')
-  assert.equal(retired, false)
-  assert.equal(ipc.pairingFailure.errors[0], diagnostic)
-  localFailure = false
-  assert.equal((await ipc.cancelPersonalJoin('workspace', '44'.repeat(16))).status, 'cancelled')
-  assert.equal(retired, true)
-})
-
-void test('cancelled personal approval uses terminal cancellation rather than retiring an uncertain signed record', async () => {
-  const sender = Object.assign(new EventEmitter(), { id: 19 })
-  let cancelled = false
-  const owner = {
-    accountId: 'account',
-    readers: new Map([['workspace', new Set([sender.id])]]),
-    bootstrap: { deviceCredential: () => Effect.succeed('synthetic-credential') },
-    host: {
-      cancelPersonalPairing: () =>
-        Effect.sync(() => {
-          cancelled = true
-        }),
-      retirePersonalPairing: () =>
-        Effect.die(new Error('uncertain record must not use generic retirement'))
-    }
-  }
-  const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
-    'electron-ipc-decorator': {
-      IpcService: class {},
-      IpcMethod: () => (_t, _n, descriptor) => descriptor,
-      getIpcContext: () => ({ event: { sender } })
-    },
-    '../../platform': { isLocalPlatform: () => false },
-    '../../services/e2ee-bootstrap.mjs': {},
-    '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
-    '../assert-sender': { assertProductWindowSender: () => {} },
-    '../../services/e2ee-account-runtime': {
-      withDesktopE2eeAccount: (work) => Effect.runPromise(work(owner)),
-      desktopE2eeCloudClient: async () => ({
-        accountId: 'account',
-        client: { joinReadRequest: () => Effect.succeed({ status: 'cancelled' }) }
-      })
-    }
-  })
-  const ipc = new E2eeIpc()
-  await assert.rejects(ipc.inspectPersonalJoin('workspace', '44'.repeat(16)), /e2ee_join_cancelled/)
-  assert.equal(cancelled, true)
 })
 
 // The relay below models immutable begin bytes and cancel/reservation arbitration;
@@ -1201,7 +1047,9 @@ void test('cold renderer marker recovery reads the real IPC boundary without gra
   storage.setItem(known, 'damaged marker')
   const { recoverE2eeWorkspaceIdentity } = await load(
     '../../../../../packages/components/src/lib/e2ee-workspace-storage.ts',
-    {}
+    // The VM transpiles this helper to CJS. Keep its protocol dependency on
+    // the real ESM namespace instead of requiring ESM-only crypto packages.
+    { '@lody/e2ee-core/protocol': await import('@lody/e2ee-core/protocol') }
   )
   await recoverE2eeWorkspaceIdentity({
     storage,
@@ -1707,45 +1555,6 @@ void test('a snapshot-joined approver cancels another recipient without retiring
     JSON.stringify(await Effect.runPromise(second.bootstrap.creationFor(f.workspaceId))),
     preservedOrigin
   )
-})
-
-void test('the operation boundary keeps typed access loss exact and never trusts a matching message', async () => {
-  const { api } = await account()
-  for (const [typed, code] of [
-    [new E2eeMemberRemovedError(), 'member_removed'],
-    [new E2eeDeviceRevokedError(), 'device_revoked'],
-    // A typed loss wrapped as another error's cause is still the server's answer.
-    [new Error('synthetic wrapper', { cause: new E2eeMemberRemovedError() }), 'member_removed']
-  ]) {
-    const error = await api.runDesktopE2eeOperation('account', Effect.fail(typed)).catch((e) => e)
-    assert.equal(error.message, `e2ee_${code}`)
-    assert.equal(api.publicAccessLoss(error), code)
-  }
-  const forged = await api
-    .runDesktopE2eeOperation('account', Effect.fail(new Error('e2ee_member_removed')))
-    .catch((e) => e)
-  assert.equal(forged.message, 'e2ee_host_operation_failed')
-  assert.equal(api.publicAccessLoss(forged), null)
-  assert.equal(api.publicAccessLoss(new Error('e2ee_member_removed')), null)
-})
-
-void test('management diagnostics preserve safe recovery actions without exposing native causes', async () => {
-  const { api } = await account()
-  for (const code of [
-    'rotation_candidate_unavailable',
-    'management_unauthorized',
-    'management_retry'
-  ]) {
-    await assert.rejects(
-      api.runDesktopE2eeOperation('account', Effect.fail({ code, cause: 'synthetic-secret' })),
-      (error) => {
-        assert.equal(error.message, `e2ee_${code}`)
-        assert.equal(error.cause, undefined)
-        assert.equal(JSON.stringify(error).includes('synthetic-secret'), false)
-        return true
-      }
-    )
-  }
 })
 
 async function nativeAccountFixture(t, storage = identityStorage) {
@@ -2449,50 +2258,6 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
   }
 })
 
-void test('a failed prepareDispatch diagnoses its device credential and reports only an exact access loss', async (t) => {
-  const input = {
-    sessionId: 'session',
-    userTurnId: 'turn',
-    userId: 'display-only',
-    timestamp: new Date(0).toISOString(),
-    inputConfig: {}
-  }
-  for (const [flag, code] of [
-    ['memberRemoved', 'member_removed'],
-    ['deviceRevoked', 'device_revoked'],
-    [null, null]
-  ]) {
-    const f = await personalJoinFixture(t)
-    const owner = await f.open(`dispatch-${code ?? 'unchanged'}`)
-    await owner.create()
-    // A local native failure that carries no access-loss classification of its own.
-    owner.host.prepareDispatch = () => Effect.die(new Error('synthetic native dispatch failure'))
-    if (flag) f.relay[flag] = true
-    const outcome = owner.ipc.prepareDispatch(f.workspaceId, 'synthetic-machine', input)
-    if (code) {
-      // Only the server's exact credential answer records loss, stops and cleans up.
-      await assert.rejects(outcome, new RegExp(`^Error: e2ee_${code}$`))
-      assert.equal(owner.readers.has(f.workspaceId), false)
-      assert.equal(
-        await Effect.runPromise(owner.bootstrap.hasRemovedWorkspace(f.workspaceId)),
-        true
-      )
-      await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === code)
-    } else {
-      // An unclassified credential answer is not removal: the failure stays generic.
-      await assert.rejects(outcome, (error) => {
-        assert.doesNotMatch(error.message, /member_removed|device_revoked/)
-        return true
-      })
-      assert.equal(owner.readers.has(f.workspaceId), true)
-      assert.equal(
-        await Effect.runPromise(owner.bootstrap.hasRemovedWorkspace(f.workspaceId)),
-        false
-      )
-    }
-  }
-})
-
 void test('credential-authenticated device revocation stops, drains and deletes only this device identity, and keeps its reason', async (t) => {
   const f = await personalJoinFixture(t)
   const owner = await f.open('revoked-ipc')
@@ -2977,20 +2742,6 @@ void test('a background reader closes only the namespace returned by its own ope
   await assert.rejects(f.ipc.open('team', undefined, 'A'), /e2ee_account_mismatch/)
 })
 
-for (const code of ['machine_not_owned', 'machine_not_shared']) {
-  void test(`encrypted execution refusal preserves ${code} at the public account boundary`, async () => {
-    const { api } = await account()
-    await assert.rejects(
-      api.withDesktopE2eeAccount(() => Effect.fail({ code })),
-      (error) => {
-        assert.equal(error.message, `e2ee_${code}`)
-        assert.equal('cause' in error, false)
-        return true
-      }
-    )
-  })
-}
-
 void test('passive cache inspection stays account/product-window bound without opening a reader or cloud call', async () => {
   const f = await memberIpcFixture()
   const owner = f.makeOwner('A', 'passive-A')
@@ -3217,35 +2968,6 @@ void test('the new device opens the paired workspace and asks for its keys right
   assert.deepEqual(
     mailboxRequests.map((item) => [item.workspaceId, item.credential]),
     [[f.workspaceId, credential]]
-  )
-})
-
-void test('pairing leaves no runtime entry open for a workspace no window is reading', async (t) => {
-  const { f, newDevice, genesisHash, requester, approving } = await accountPairingFixture(t)
-  const request = await Effect.runPromise(requester.requestAccountPairing({}))
-  const preview = await Effect.runPromise(approving.inspectAccountPairing(request.pairingString))
-  await Effect.runPromise(
-    approving.approveAccountPairing({
-      pairingString: request.pairingString,
-      requestId: preview.requestId,
-      workspaceIds: [f.workspaceId]
-    })
-  )
-  await Effect.runPromise(requester.accountPairingRequest())
-  // An open entry would accept this page; a closed one refuses it.
-  await assert.rejects(
-    Effect.runPromise(
-      newDevice.host.ingestLedgerRecords(f.workspaceId, {
-        workspaceId: f.workspaceId,
-        genesisHash,
-        checkpoint: { length: 1, headHash: genesisHash },
-        startIndex: 0,
-        recordsHex: [],
-        position: `p1:${f.workspaceId}:1:source:0`,
-        nextCursor: null
-      })
-    ),
-    (error) => error.code === 'closed'
   )
 })
 

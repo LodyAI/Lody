@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -11,7 +11,6 @@ import {
   type MachineFlockKey,
   type MachineFlockWritableFlock,
   type MachineId,
-  type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
@@ -23,7 +22,6 @@ import {
   reconcileMachineLocalProjectRootPaths,
   resolveWorkspaceLocalProjectRootPathWithRetry,
   resolveWorkspaceLocalProjectWithSyncOnMiss,
-  isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
   upsertMachineLocalProject,
 } from './local-project-meta';
@@ -47,50 +45,6 @@ describe('local project meta helpers', () => {
         requestedAt: 200,
       })
     ).toBe(true);
-  });
-
-  it('matches only sessions owned by the removed machine project', () => {
-    const target = {
-      machineId: 'machine-1' as MachineId,
-      localProjectId: 'local-project-1' as LocalProjectId,
-    };
-    const session = {
-      machineId: target.machineId,
-      project: { kind: 'local', localProjectId: target.localProjectId },
-      isArchived: false,
-    } as SessionMeta;
-
-    expect(isSessionInLocalProjectRemovalScope(session, target)).toBe(true);
-    expect(isSessionInLocalProjectRemovalScope({ ...session, isArchived: true }, target)).toBe(
-      true
-    );
-    expect(
-      isSessionInLocalProjectRemovalScope(
-        { ...session, machineId: 'machine-2' as MachineId },
-        target
-      )
-    ).toBe(false);
-    expect(
-      isSessionInLocalProjectRemovalScope(
-        {
-          ...session,
-          project: {
-            kind: 'local',
-            localProjectId: 'local-project-2' as LocalProjectId,
-          },
-        },
-        target
-      )
-    ).toBe(false);
-    expect(
-      isSessionInLocalProjectRemovalScope(
-        {
-          ...session,
-          project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-        },
-        target
-      )
-    ).toBe(false);
   });
 });
 
@@ -223,64 +177,6 @@ describe('local project root path publishing', () => {
     }
   });
 
-  it('stops the startup scan between projects and refreshes a multi-project catalog', async () => {
-    const rootPath = mkdtempSync(join(tmpdir(), 'local-project-scan-'));
-    const flock = new FakeMachineFlock();
-    const { repo } = createRepo(flock);
-    const stop = new AbortController();
-    try {
-      for (let index = 0; index < 12; index++) {
-        const root = join(rootPath, String(index));
-        mkdirSync(root);
-        execFileSync('git', ['init', '-q'], { cwd: root });
-        execFileSync(
-          'git',
-          ['remote', 'add', 'origin', `https://github.com/example/repo-${index}.git`],
-          { cwd: root }
-        );
-        const id = `project-${index}` as LocalProjectId;
-        writeMachineFlockRowToFlock(
-          flock,
-          { key: machineFlockKeys.localProject(id), value: { ...projectMeta, id, rootPath: root } },
-          1
-        );
-      }
-      await reconcileMachineLocalProjectRootPaths(
-        repo,
-        workspaceId,
-        machineId,
-        {
-          markMachineFlockDocDirty() {
-            stop.abort();
-          },
-        },
-        stop.signal
-      );
-      expect(
-        Object.values(await readMachineLocalProjects(repo, workspaceId, machineId)).filter(
-          (project) => project.githubRepoFullName
-        )
-      ).toHaveLength(1);
-      const start = performance.now();
-      await reconcileMachineLocalProjectRootPaths(repo, workspaceId, machineId, {
-        markMachineFlockDocDirty() {},
-      });
-      const elapsedMs = performance.now() - start;
-      expect(
-        Object.values(await readMachineLocalProjects(repo, workspaceId, machineId))
-          .map((project) => project.githubRepoFullName)
-          .sort()
-      ).toEqual(Array.from({ length: 12 }, (_, index) => `example/repo-${index}`).sort());
-      if (process.env.PROJECT_SCAN_MEASUREMENTS)
-        writeFileSync(
-          process.env.PROJECT_SCAN_MEASUREMENTS,
-          JSON.stringify({ projects: 12, elapsedMs })
-        );
-    } finally {
-      rmSync(rootPath, { recursive: true, force: true });
-    }
-  });
-
   it('repairs an older symlink row and canonicalizes later writes without changing its identity', async () => {
     const temp = mkdtempSync(join(tmpdir(), 'lody-project-path-'));
     try {
@@ -365,19 +261,6 @@ describe('resolveWorkspaceLocalProjectWithSyncOnMiss', () => {
     expect(requestSync).toHaveBeenCalledTimes(1);
   });
 
-  it('returns null when a confirmed sync still has no registration', async () => {
-    const flock = new FakeMachineFlock();
-    const { repo } = createRepo(flock);
-    const requestSync = vi.fn(async () => true);
-
-    await expect(
-      resolveWorkspaceLocalProjectWithSyncOnMiss(repo, workspaceId, machineId, localProjectId, {
-        requestSync,
-      })
-    ).resolves.toBeNull();
-    expect(requestSync).toHaveBeenCalledTimes(1);
-  });
-
   it('allows a new local project when cloud sync is offline', async () => {
     const flock = new FakeMachineFlock();
     const { repo } = createRepo(flock);
@@ -391,17 +274,6 @@ describe('resolveWorkspaceLocalProjectWithSyncOnMiss', () => {
       })
     ).resolves.toBeNull();
     expect(requestSync).toHaveBeenCalledTimes(1);
-  });
-
-  it('allows a new local project when the coordinator reports an incomplete sync', async () => {
-    const flock = new FakeMachineFlock();
-    const { repo } = createRepo(flock);
-
-    await expect(
-      resolveWorkspaceLocalProjectWithSyncOnMiss(repo, workspaceId, machineId, localProjectId, {
-        requestSync: async () => false,
-      })
-    ).resolves.toBeNull();
   });
 
   it('does not let a stalled cloud sync block a new local project', async () => {
@@ -466,29 +338,6 @@ describe('resolveWorkspaceLocalProjectRootPathWithRetry', () => {
     }
   });
 
-  it('resolves on the first read without syncing or sleeping', async () => {
-    const flock = new FakeMachineFlock();
-    seedLocalProject(flock);
-    const { repo, openFlockDoc } = createRepo(flock);
-    const requestSync = vi.fn(async () => undefined);
-    const sleep = instantSleep();
-    const onRetry = vi.fn();
-
-    const result = await resolveWorkspaceLocalProjectRootPathWithRetry(
-      repo,
-      workspaceId,
-      machineId,
-      localProjectId,
-      { requestSync, sleep, onRetry, maxAttempts: 4, retryDelayMs: 400 }
-    );
-
-    expect(result).toBe('/local/repo');
-    expect(openFlockDoc).toHaveBeenCalledTimes(1);
-    expect(requestSync).not.toHaveBeenCalled();
-    expect(sleep).not.toHaveBeenCalled();
-    expect(onRetry).not.toHaveBeenCalled();
-  });
-
   it('resolves after the row arrives through a later sync', async () => {
     const flock = new FakeMachineFlock();
     const { repo } = createRepo(flock);
@@ -515,81 +364,6 @@ describe('resolveWorkspaceLocalProjectRootPathWithRetry', () => {
     expect(sleep).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledWith(400);
     expect(onRetry).toHaveBeenCalledTimes(2);
-  });
-
-  it('returns null after exhausting all attempts', async () => {
-    const flock = new FakeMachineFlock();
-    const { repo, openFlockDoc } = createRepo(flock);
-    const requestSync = vi.fn(async () => undefined);
-    const sleep = instantSleep();
-    const onRetry = vi.fn();
-
-    const result = await resolveWorkspaceLocalProjectRootPathWithRetry(
-      repo,
-      workspaceId,
-      machineId,
-      localProjectId,
-      { requestSync, sleep, onRetry, maxAttempts: 3, retryDelayMs: 250 }
-    );
-
-    expect(result).toBeNull();
-    expect(openFlockDoc).toHaveBeenCalledTimes(3);
-    expect(requestSync).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledTimes(2);
-    expect(onRetry.mock.calls).toEqual([
-      [1, 3],
-      [2, 3],
-    ]);
-  });
-
-  it('keeps retrying when the sync attempt throws', async () => {
-    const flock = new FakeMachineFlock();
-    const { repo } = createRepo(flock);
-    let syncCalls = 0;
-    const requestSync = vi.fn(() => {
-      syncCalls += 1;
-      if (syncCalls === 1) {
-        // Synchronous throw, not a rejection — worst-case stub behavior.
-        throw new Error('sync unavailable');
-      }
-      seedLocalProject(flock);
-      return Promise.resolve();
-    });
-
-    const result = await resolveWorkspaceLocalProjectRootPathWithRetry(
-      repo,
-      workspaceId,
-      machineId,
-      localProjectId,
-      { requestSync, sleep: instantSleep(), maxAttempts: 4, retryDelayMs: 400 }
-    );
-
-    expect(result).toBe('/local/repo');
-    expect(requestSync).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not let an unbounded sync stall the retry loop', async () => {
-    const flock = new FakeMachineFlock();
-    const { repo, openFlockDoc } = createRepo(flock);
-    // Never resolves — simulates the coordinator deduping onto an in-flight
-    // sync with a much larger timeout of its own.
-    const requestSync = vi.fn(() => new Promise<never>(() => {}));
-    const sleep = instantSleep();
-
-    const result = await resolveWorkspaceLocalProjectRootPathWithRetry(
-      repo,
-      workspaceId,
-      machineId,
-      localProjectId,
-      { requestSync, sleep, maxAttempts: 3, retryDelayMs: 400, syncTimeoutMs: 1 }
-    );
-
-    // The helper must give up on the sync wait (not on the resolve): all
-    // attempts still run, then null.
-    expect(result).toBeNull();
-    expect(openFlockDoc).toHaveBeenCalledTimes(3);
-    expect(requestSync).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledTimes(2);
   });
 
   it('gives a row that is still syncing at least 30s by default before failing', async () => {

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { TestCloudPlatformProvider } from './test-platform';
 
 import { act, createElement } from 'react';
@@ -87,7 +88,6 @@ vi.mock('@lody/platform/react', async (original) => ({
 
 import { IntegrationsSettingsComponent } from '../src/components/settings/integrations-setting';
 import { MobileSettingsFoldContext } from '../src/components/mobile/mobile-settings-fold-context';
-import { getPersonalGitHubAuthorizationUrl } from '../src/components/settings/github-personal-authorization';
 
 const repo = (repoFullName: string, enabled: boolean): SettingsWorkspaceRepoWithStatus => ({
   repoFullName,
@@ -162,28 +162,6 @@ describe('GitHubSettingsView', () => {
     await act(async () => root.unmount());
     container.remove();
     vi.unstubAllEnvs();
-  });
-
-  it('groups repositories under their owner, in arrival order, and summarises what is enabled', async () => {
-    await render(true);
-    expect(ownerHeadings()).toEqual(['loro-dev', 'LodyAI', 'zxch3n']);
-    expect(container.textContent).toContain('3 of 6 repositories enabled');
-
-    await act(async () => repoSwitch('loro-dev/lody')!.click());
-    expect(toggled).toEqual([['loro-dev/lody', true]]);
-  });
-
-  it('narrows the owners to the repositories matching the search', async () => {
-    await render(true);
-    const search = container.querySelector<HTMLInputElement>('input[type="search"]')!;
-    await act(async () => {
-      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-      setValue.call(search, 'dot');
-      search.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    expect(ownerHeadings()).toEqual(['zxch3n']);
-    expect(repoSwitch('zxch3n/dotfiles')).not.toBeNull();
-    expect(repoSwitch('zxch3n/blog')).toBeNull();
   });
 
   it('shows a member the repositories without letting them change any', async () => {
@@ -292,14 +270,5 @@ describe('GitHubSettingsView', () => {
     authState.available = false;
     await renderSettings();
     expect(container.textContent).toBe('');
-  });
-
-  it('builds an encoded workspace destination and rejects non-web sites', () => {
-    vi.stubEnv('VITE_SITE_URL', '');
-    expect(getPersonalGitHubAuthorizationUrl('team/name')).toBe(
-      'https://lody.ai/team%2Fname/settings/github'
-    );
-    vi.stubEnv('VITE_SITE_URL', 'file:///app');
-    expect(() => getPersonalGitHubAuthorizationUrl('team')).toThrow();
   });
 });

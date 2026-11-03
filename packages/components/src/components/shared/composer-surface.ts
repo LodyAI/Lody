@@ -63,7 +63,7 @@ export const composerSurface = stylex.create({
     outlineStyle: 'none',
     fontFamily: 'inherit',
     fontSize: text.subheadlineSize,
-    fontWeight: 550,
+    fontWeight: 400,
     fontVariationSettings: "'opsz' 18",
     lineHeight: text.subheadlineLeading,
     whiteSpace: 'nowrap',
@@ -98,6 +98,13 @@ export const composerSurface = stylex.create({
     gap: { default: space[1.5], [COMPACT_FACE]: 0 },
     paddingInline: { default: space[2], [COMPACT_FACE]: 0 },
     justifyContent: { default: 'flex-start', [COMPACT_FACE]: 'center' },
+  },
+
+  /** Text shared by peer controls in the context row above the composer. */
+  contextLabel: {
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 400,
   },
 
   /* ── Context pill (above the composer) ───────────────────────────────── */

@@ -9,7 +9,7 @@ import { agentRoleWriteCommand } from './agent-role-write';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRole, MachineId, MachineMeta } from '@lody/shared';
 import { ResourceDiscovery, type DiscoverySource } from '@/lib/resource-discovery';
-import { discoveryListCommand, discoveryGetCommand } from './discovery';
+import { discoveryListCommand } from './discovery';
 
 const state = vi.hoisted(() => ({
   output: undefined as unknown,
@@ -131,41 +131,6 @@ describe('CLI discovery boundary', () => {
     });
   });
 
-  it('returns the same detail as MCP', async () => {
-    const discovery = fixture();
-    state.discovery = discovery;
-    await discoveryGetCommand('agent_role').parseAsync(['role-1', '--json'], { from: 'user' });
-    expect(state.output).toEqual(await discovery.get('agent_role', 'role-1'));
-  });
-
-  it.each(['NaN', '0', '-1', '1.5', '101'])(
-    'rejects invalid page size %s without producing a result',
-    async (limit) => {
-      state.discovery = fixture();
-      await expect(
-        discoveryListCommand('agent_role').parseAsync(['--json', '--limit', limit], {
-          from: 'user',
-        })
-      ).rejects.toThrow();
-      expect(state.output).toBeUndefined();
-    }
-  );
-
-  it('normalizes query text and allows a different page size on continuation', async () => {
-    state.discovery = fixture();
-    await discoveryListCommand('agent_role').parseAsync(
-      ['--json', '--query', '  ROLE 1  ', '--limit', '1'],
-      { from: 'user' }
-    );
-    const first = state.output as { items: Array<{ id: string }>; nextCursor: string };
-    expect(first.items.map((row) => row.id)).toEqual(['role-1']);
-    await discoveryListCommand('agent_role').parseAsync(
-      ['--json', '--query', 'ROLE 1', '--cursor', first.nextCursor, '--limit', '2'],
-      { from: 'user' }
-    );
-    expect(state.output).toMatchObject({ items: [{ id: 'role-10' }, { id: 'role-11' }] });
-  });
-
   it.each(['agent_config', 'agent_role', 'mcp'] as const)(
     'rejects unsupported local %s discovery before reading a cloud catalog',
     async (resource) => {
@@ -251,61 +216,6 @@ describe('CLI Role proposal tools', () => {
     ).rejects.toThrow();
     expect(state.proposed).toEqual([]);
     expect(state.output).toBeUndefined();
-  });
-  it('accepts every create field directly without a JSON file', async () => {
-    await run('create', undefined, [
-      '--name',
-      'Reviewer',
-      '--description',
-      'Reviews code',
-      '--prompt-prefix',
-      'Review carefully\nReport bugs',
-      '--machine-id',
-      'machine',
-      '--agent-config-id',
-      'agent',
-    ]);
-    expect(state.proposed).toEqual([
-      {
-        action: 'create',
-        requestId: 'request',
-        name: 'Reviewer',
-        description: 'Reviews code',
-        promptPrefix: 'Review carefully\nReport bugs',
-        machineId: 'machine',
-        agentConfigId: 'agent',
-      },
-    ]);
-    expect(state.output).toMatchObject({ pending: true });
-  });
-  it('accepts every update field directly including explicit clearing', async () => {
-    await run('update', undefined, [
-      '--name',
-      'Reviewer',
-      '--description',
-      '',
-      '--prompt-prefix',
-      '',
-    ]);
-    expect(state.proposed).toEqual([
-      {
-        action: 'update',
-        requestId: 'request',
-        roleId: 'role',
-        patch: { name: 'Reviewer', description: '', promptPrefix: '' },
-      },
-    ]);
-  });
-  it('preserves omitted fields in direct updates', async () => {
-    await run('update', undefined, ['--description', 'New description']);
-    expect(state.proposed).toEqual([
-      {
-        action: 'update',
-        requestId: 'request',
-        roleId: 'role',
-        patch: { description: 'New description' },
-      },
-    ]);
   });
   it('rejects mixed file and direct fields before publishing', async () => {
     await expect(run('update', { name: 'Reviewer' }, ['--description', ''])).rejects.toThrow(

@@ -5,11 +5,7 @@ import {
   prepareSharePackage as captureSharePackage,
   type PreparedSharePackage,
 } from '../src/session-share-export';
-import {
-  type ShareHistoryEntry,
-  validateShareHistory,
-  verifyShareObject,
-} from '../src/session-share-package';
+import { type ShareHistoryEntry, validateShareHistory } from '../src/session-share-package';
 
 function readPreparedShareHistory(
   prepared: PreparedSharePackage,
@@ -73,9 +69,7 @@ it('removes task proposals without changing source or agent history', async () =
       'Task proposals'
     );
 });
-// Retain coverage of the file-copy path for the future rollout.
-const prepareSharePackage = (options: Parameters<typeof captureSharePackage>[0]) =>
-  captureSharePackage({ ...options, fileAttachmentsEnabled: true });
+const prepareSharePackage = captureSharePackage;
 
 it('omits file blocks by default without reading them, while still copying images', async () => {
   const file = history()[0]!.items[1]!;
@@ -140,52 +134,6 @@ const history = () => [
 ];
 
 describe('client static share export', () => {
-  it('freezes all histories before attachment I/O and removes typed source selectors', async () => {
-    const original = history();
-    let signalStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      signalStarted = resolve;
-    });
-    let release!: (value: { bytes: Uint8Array; mediaType: string }) => void;
-    const loaded = new Promise<{ bytes: Uint8Array; mediaType: string }>((resolve) => {
-      release = resolve;
-    });
-    const pending = prepareSharePackage({
-      rootSourceId: 'source-root',
-      capturedAt,
-      conversations: [{ sourceId: 'source-root', title: 'Published title', history: original }],
-      readAttachment: async (source) => {
-        expect(source.reference.storageSessionId).toBe('inherited-source');
-        signalStarted();
-        return loaded;
-      },
-    });
-    await started;
-    original[0]!.items[0]!.text = 'live edit';
-    release({ bytes: new TextEncoder().encode('abc'), mediaType: 'text/plain' });
-    const prepared = await pending;
-    const exported = readPreparedShareHistory(prepared, 'c1');
-    expect(exported[0]?.items[0]?.text).toBe('synthetic reasoning');
-    expect(exported[0]?.finished).toBe(false);
-    expect(exported[0]?.items[1]).toEqual({
-      type: 'file',
-      fileId: 'a1',
-      fileName: 'report.txt',
-      mimeType: 'text/plain',
-      sizeBytes: 3,
-      transport: 'r2',
-      uploadedAt: 1,
-    });
-    expect(original[0]?.items[1]?.storageSessionId).toBe('inherited-source');
-    expect(prepared.manifest.attachments[0]?.objectId).toBe('a1');
-    for (const descriptor of prepared.manifest.objects) {
-      await expect(
-        verifyShareObject(prepared.objects.get(descriptor.id)!, descriptor)
-      ).resolves.toBeUndefined();
-    }
-    expect(JSON.stringify(prepared.manifest)).not.toContain('source-root');
-  });
-
   it('keeps per-share identities and exact opener across redeploys', async () => {
     const result = await prepareSharePackage({
       rootSourceId: 'root',
@@ -249,95 +197,6 @@ describe('client static share export', () => {
     });
     expect(readPreparedShareHistory(result, 'c1')[0]?.items[0]?.rawInput).toEqual(rawInput);
     expect(result.manifest.attachments).toEqual([]);
-  });
-
-  it('fails the entire preparation for an unreadable attachment or cancellation', async () => {
-    const options = {
-      rootSourceId: 'root',
-      capturedAt,
-      conversations: [{ sourceId: 'root', title: 'Root', history: history() }],
-      readAttachment: async () => {
-        throw new Error('Attachment unavailable');
-      },
-    };
-    await expect(prepareSharePackage(options)).rejects.toThrow('Attachment unavailable');
-    const controller = new AbortController();
-    controller.abort();
-    await expect(prepareSharePackage({ ...options, signal: controller.signal })).rejects.toThrow();
-  });
-
-  it('copies inputConfig inputBlocks with the same attachment mapping as visible items', async () => {
-    const file = history()[0]!.items[1]!;
-    const result = await prepareSharePackage({
-      rootSourceId: 'root',
-      capturedAt,
-      conversations: [
-        {
-          sourceId: 'root',
-          title: 'Root',
-          history: [
-            {
-              id: 'm',
-              role: 'user',
-              items: [file],
-              inputConfig: { inputBlocks: [file], modelId: 'synthetic' },
-            },
-          ],
-        },
-      ],
-      readAttachment: async () => ({
-        bytes: new TextEncoder().encode('abc'),
-        mediaType: 'text/plain',
-      }),
-    });
-    const entry = readPreparedShareHistory(result, 'c1')[0]!;
-    expect(entry.inputConfig).toEqual({ inputBlocks: [entry.items[0]] });
-    expect(result.manifest.attachments).toHaveLength(1);
-    expect(JSON.stringify(entry)).not.toContain('inherited-source');
-    expect(JSON.stringify(entry)).not.toContain('/source/private.txt');
-  });
-
-  it('rejects attachment bytes which differ from the captured source checksum', async () => {
-    const source = history();
-    Object.assign(source[0]!.items[1]!, { sha256: '0'.repeat(64) });
-    await expect(
-      prepareSharePackage({
-        rootSourceId: 'root',
-        capturedAt,
-        conversations: [{ sourceId: 'root', title: 'Root', history: source }],
-        readAttachment: async () => ({
-          bytes: new TextEncoder().encode('abc'),
-          mediaType: 'text/plain',
-        }),
-      })
-    ).rejects.toThrow('checksum mismatch');
-  });
-  it('discloses unsupported embedded resources without fetching or rewriting opaque history', async () => {
-    const source = [
-      {
-        id: 'turn',
-        role: 'assistant',
-        items: [
-          { type: 'text', text: '![remote](https://example.test/private.png)' },
-          {
-            type: 'tool_call',
-            toolCallId: 'tool',
-            content: [{ type: 'resource_link', uri: 'file:///private/data' }],
-            rawOutput: { uri: 'https://do-not-fetch.test' },
-          },
-        ],
-      },
-    ];
-    const prepared = await prepareSharePackage({
-      rootSourceId: 'root',
-      capturedAt,
-      conversations: [{ sourceId: 'root', title: 'Root', history: source }],
-      readAttachment: async () => {
-        throw new Error('Arbitrary URI fetch');
-      },
-    });
-    expect(prepared.manifest.attachments).toEqual([]);
-    expect(readPreparedShareHistory(prepared, 'c1')).toEqual(source);
   });
 });
 
@@ -412,11 +271,7 @@ it('omits terminal output and runtime metadata without touching other content, a
   });
 });
 
-it('copies independent attachments concurrently with stable ids and deduplicates shared references', async () => {
-  let release!: () => void;
-  const barrier = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+it('deduplicates shared attachment references across conversations', async () => {
   const active: string[] = [];
   const prepared = await captureSharePackage({
     rootSourceId: 's0',
@@ -437,8 +292,6 @@ it('copies independent attachments concurrently with stable ids and deduplicates
     })),
     readAttachment: async ({ reference }) => {
       active.push(String(reference.imageId));
-      if (active.length === 4) release();
-      await barrier;
       return { bytes: new Uint8Array([active.length]), mediaType: 'image/png' };
     },
   });

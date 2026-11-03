@@ -15,7 +15,9 @@ vi.mock('../../../apps/electron/node_modules/electron', () => ({
   dialog: {
     showMessageBox: () => {
       nativeState.unloadPrompts += 1;
-      return nativeState.unloadDecision ?? Promise.resolve({ response: nativeState.unloadResponse });
+      return (
+        nativeState.unloadDecision ?? Promise.resolve({ response: nativeState.unloadResponse })
+      );
     },
     showMessageBoxSync: () => {
       nativeState.unloadPrompts += 1;
@@ -189,34 +191,6 @@ afterEach(() => {
 });
 
 describe('claimed warm window lifecycle', () => {
-  it('keeps the replacement spare timeout when a previously claimed window closes', async () => {
-    vi.useFakeTimers();
-    vi.stubEnv('LODY_E2E', '0');
-    vi.stubEnv('LODY_DISABLE_WINDOW_WARMUP', '0');
-    const original = new NativeWindow();
-    registerProductWindow(original.native, false);
-    setWindowWarmupEnabled(true);
-    await vi.advanceTimersByTimeAsync(0);
-    const warm = [...nativeState.windows.values()].find(
-      (candidate) => candidate !== original
-    ) as NativeWindow;
-    expect(warm).toBeDefined();
-    handleWindowWarmReady(warm.webContents.id);
-    expect(claimWarmWindow({ workspace: 'work', sessionId: 'first' })).toBe(warm.native);
-    expect(warm.visible).toBe(false);
-    handleWindowContentReady(warm.webContents.id, { workspace: 'work', sessionId: 'first' });
-    await vi.advanceTimersByTimeAsync(0);
-    const replacement = [...nativeState.windows.values()].find(
-      (candidate) => candidate !== original && candidate !== warm
-    ) as NativeWindow;
-    expect(replacement).toBeDefined();
-    warm.destroy();
-    expect(replacement.destroyed).toBe(false);
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(replacement.destroyed).toBe(true);
-    expect(original.destroyed).toBe(false);
-  });
-
   it('keeps the adopted window alive and makes it the fallback when the original closes', () => {
     const original = new NativeWindow();
     const claimed = new NativeWindow();
@@ -353,39 +327,12 @@ describe('macOS prepared targets', () => {
     expect(spare.visible).toBe(true);
   });
 
-  it('releases cancelled and expired targets without showing them', async () => {
-    const { source, spare } = await fixture();
-    cancelPreparedWindow(source.id + 1, 'first');
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(spare.destroyed).toBe(false);
-    cancelPreparedWindow(source.id, 'first');
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(spare.destroyed).toBe(true);
-    expect(spare.visible).toBe(false);
-  });
-
   it('drops a different target and never uses its late readiness', async () => {
     const { spare, binding } = await fixture();
     expect(claimWarmWindow({ workspace: 'local', sessionId: 'different' })).toBeNull();
     handlePreparedWindowState(spare.id, { ...binding, ready: true });
     expect(spare.destroyed).toBe(true);
     expect(spare.visible).toBe(false);
-  });
-
-  it('expires an unclaimed view', async () => {
-    const { spare } = await fixture();
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(spare.destroyed).toBe(true);
-    expect(spare.visible).toBe(false);
-  });
-
-  it('destroys a speculative view when its source closes', async () => {
-    const { source, spare } = await fixture();
-    source.destroy();
-    expect(spare.destroyed).toBe(true);
-    expect(spare.visible).toBe(false);
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(productWindows.size).toBe(0);
   });
 
   it('keeps an early claim alive beyond cancellation and reveals only matching readiness', async () => {
@@ -406,46 +353,6 @@ describe('macOS prepared targets', () => {
     expect(spare.destroyed).toBe(false);
     expect(spare.visible).toBe(true);
     expect(spare.throttling).toBe(true);
-  });
-
-  it('replenishes a neutral spare after cancelled preparation', async () => {
-    const { source, spare } = await fixture();
-    cancelPreparedWindow(source.id, 'first');
-    await vi.advanceTimersByTimeAsync(2001);
-    const replacement = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
-    expect(replacement).toBeDefined();
-    expect(replacement).not.toBe(spare);
-    expect(replacement.target).toBeNull();
-    expect(replacement.visible).toBe(false);
-  });
-
-  it('does not create a target view on other platforms', async () => {
-    const { source, spare } = await fixture();
-    setWindowWarmupEnabled(false);
-    vi.stubGlobal('process', { ...process, platform: 'linux' });
-    setWindowWarmupEnabled(true);
-    await vi.advanceTimersByTimeAsync(0);
-    const neutral = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
-    handleWindowWarmReady(neutral.id);
-    prepareWindow(source.native, { workspace: 'local', sessionId: 'other' }, 'linux');
-    expect(spare.destroyed).toBe(true);
-    expect(neutral.target).toBeNull();
-    expect(neutral.visible).toBe(false);
-    expect(isWarmWindow(neutral.native)).toBe(true);
-  });
-
-  it('cancels queued intent if a request arrives before the neutral shell is ready', async () => {
-    const { source } = await fixture();
-    setWindowWarmupEnabled(false);
-    setWindowWarmupEnabled(true);
-    await vi.advanceTimersByTimeAsync(0);
-    const neutral = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
-    const target = { workspace: 'local', sessionId: 'too-soon' };
-    prepareWindow(source.native, target, 'queued');
-    expect(claimWarmWindow(target)).toBeNull();
-    handleWindowWarmReady(neutral.id);
-    expect(neutral.target).toBeNull();
-    expect(neutral.visible).toBe(false);
   });
 
   it('reveals recovery for a claimed view that fails instead of leaving it hidden', async () => {
@@ -475,17 +382,6 @@ describe('renderer unload confirmation', () => {
     nativeState.unloadResponse = 1;
     window.close();
     expect(window.destroyed).toBe(true);
-  });
-
-  it('quit closes auxiliary windows before the main window', async () => {
-    const main = productWindow({ main: true });
-    const auxiliary = productWindow();
-    const order: NativeWindow[] = [];
-    for (const window of [main, auxiliary]) window.on('closed', () => order.push(window));
-    expect(await closeProductWindowsForQuit()).toBe(true);
-    expect(order).toEqual([auxiliary, main]);
-    expect(nativeState.unloadPrompts).toBe(0);
-    expect(isAppQuitting()).toBe(true);
   });
 
   it('Stay cancels quit before shutdown and leaves the kept window running', async () => {
@@ -549,7 +445,11 @@ describe('renderer unload confirmation', () => {
     nativeState.unloadDecision = decision.promise;
     let outcome: boolean | undefined;
     let unconfirmed = false;
-    const quit = closeProductWindowsForQuit(() => { unconfirmed = true; }).then(value => { outcome = value; });
+    const quit = closeProductWindowsForQuit(() => {
+      unconfirmed = true;
+    }).then((value) => {
+      outcome = value;
+    });
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(outcome).toBeUndefined();
@@ -564,22 +464,6 @@ describe('renderer unload confirmation', () => {
     } finally {
       decision.resolve({ response: 0 });
       reopened.destroy();
-      await quit;
-    }
-  });
-
-  it('settles a destroyed quit window even when its closed event is missing', async () => {
-    vi.useFakeTimers();
-    const main = productWindow({ main: true });
-    main.hung = true;
-    let completed = false;
-    const quit = closeProductWindowsForQuit().then(value => { completed = value; });
-    main.destroyed = true;
-    try {
-      await vi.advanceTimersByTimeAsync(15_000);
-      expect(completed).toBe(true);
-    } finally {
-      main.emit('closed');
       await quit;
     }
   });

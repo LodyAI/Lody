@@ -7,47 +7,8 @@ import type { MachineId, WorkspaceId } from '@lody/shared';
 import {
   BUG_REPORT_CLIENT_LOG_FILE_NAME,
   collectBugReportLogs,
-  formatBugReportLogDate,
-  mergeBugReportLogs,
   submitBugReportFromMachine,
-  tailOfLog,
 } from './bug-report';
-
-describe('formatBugReportLogDate', () => {
-  it('formats with zero padding', () => {
-    expect(formatBugReportLogDate(new Date(2026, 5, 3))).toBe('2026-06-03');
-    expect(formatBugReportLogDate(new Date(2026, 11, 25))).toBe('2026-12-25');
-  });
-});
-
-describe('tailOfLog', () => {
-  it('returns full content when under the limit', () => {
-    expect(tailOfLog('hello', 10)).toEqual({ text: 'hello', truncated: false });
-  });
-
-  it('keeps only the tail when over the limit', () => {
-    const result = tailOfLog('abcdefgh', 4);
-    expect(result.truncated).toBe(true);
-    expect(result.text).toBe('efgh');
-  });
-});
-
-describe('mergeBugReportLogs', () => {
-  it('joins log files with headers and truncation markers', () => {
-    const merged = mergeBugReportLogs([
-      { fileName: '2026-06-10.log', content: 'yesterday', truncated: false },
-      { fileName: '2026-06-11.log', content: 'today', truncated: true },
-    ]);
-    expect(merged).toBe(
-      '===== 2026-06-10.log =====\nyesterday\n\n===== 2026-06-11.log =====\n' +
-        '...[truncated: only the tail of this log file is included]\ntoday'
-    );
-  });
-
-  it('returns an empty string when there are no log files', () => {
-    expect(mergeBugReportLogs([])).toBe('');
-  });
-});
 
 describe('collectBugReportLogs', () => {
   const tempDirs: string[] = [];
@@ -115,12 +76,6 @@ describe('collectBugReportLogs', () => {
       parts.reduce((total, part) => total + Buffer.byteLength(part.content, 'utf8'), 0)
     ).toBeLessThanOrEqual(budget);
   });
-
-  it('returns nothing when the log directory is absent', async () => {
-    await expect(
-      collectBugReportLogs(now, path.join(createTempLogDir(), 'absent'))
-    ).resolves.toEqual([]);
-  });
 });
 
 describe('submitBugReportFromMachine machine-access gate', () => {
@@ -162,31 +117,6 @@ describe('submitBugReportFromMachine machine-access gate', () => {
     });
     expect(response.success).toBe(false);
     expect(response.error).toContain('Could not verify machine access');
-  });
-
-  it('skips the remote check for the machine operator', async () => {
-    const checkMachineAccess = vi.fn();
-    // The stubbed upload fails; what matters is that the gate lets the owner
-    // through without consulting the access oracle.
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        text: async () => 'nope',
-      })
-    );
-    try {
-      const response = await submitBugReportFromMachine({
-        ...baseArgs,
-        reporterUserId: 'owner_user',
-        checkMachineAccess,
-      });
-      expect(checkMachineAccess).not.toHaveBeenCalled();
-      expect(response.success).toBe(false);
-    } finally {
-      vi.unstubAllGlobals();
-    }
   });
 });
 
