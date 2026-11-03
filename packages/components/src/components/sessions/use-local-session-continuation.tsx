@@ -134,16 +134,20 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
         execute({ type: 'settings' }),
       ]);
       if (active) {
-        const listOk = waits.status === 'fulfilled' && waits.value.type === 'list';
-        const settingsOk = settings.status === 'fulfilled' && settings.value.type === 'settings';
+        const list =
+          waits.status === 'fulfilled' && waits.value.type === 'list' ? waits.value : null;
+        const loadedSettings =
+          settings.status === 'fulfilled' && settings.value.type === 'settings'
+            ? settings.value.settings
+            : null;
         setSnapshot((previous) => {
           const sameTarget = previous?.key === key ? previous : null;
           return {
             key,
-            views: listOk ? waits.value.waits.map(toView) : (sameTarget?.views ?? []),
-            settings: settingsOk ? settings.value.settings : (sameTarget?.settings ?? null),
-            listError: !listOk,
-            settingsUnavailable: !settingsOk,
+            views: list ? list.waits.map(toView) : (sameTarget?.views ?? []),
+            settings: loadedSettings ?? sameTarget?.settings ?? null,
+            listError: !list,
+            settingsUnavailable: !loadedSettings,
           };
         });
         timer = setTimeout(() => void read(), 15_000);
