@@ -36,6 +36,7 @@ type PromptBlockBuilder = {
   buildAcpPromptBlocks: (args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
+    userTurnId?: string;
     inputBlocks: SessionInputBlock[];
   }) => Promise<ContentBlock[]>;
   fetchSessionImageForPrompt: (args: {
@@ -202,5 +203,148 @@ describe('MessageHandler session file ACP prompt blocks', () => {
     } finally {
       await handler.cleanup();
     }
+  });
+
+  describe('sender provenance', () => {
+    const agentAuthor = {
+      v: 1,
+      kind: 'agent',
+      sessionId: 'coordinator-session',
+      turnId: 'coordinator-turn',
+      name: 'Codex',
+      role: { id: 'role-1', revision: 1, name: 'Executor', emoji: '' },
+    } as const;
+    const build = async (readTurn: () => Promise<unknown>) => {
+      const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
+      const internals = handler as unknown as {
+        workspaceDocument: { repo: { getDocMeta: unknown }; getOrCreateSessionDoc: unknown };
+      };
+      internals.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({}));
+      internals.workspaceDocument.repo.getDocMeta = vi.fn(async () => ({
+        meta: { title: 'E2EE coordinator' },
+      }));
+      vi.spyOn(
+        handler as unknown as { getSessionBackend: () => Promise<unknown> },
+        'getSessionBackend'
+      ).mockResolvedValue({ history: { readTurn } });
+      return await handler.buildAcpPromptBlocks({
+        workspaceId,
+        sessionId,
+        userTurnId: 'input-turn',
+        inputBlocks: [{ type: 'text', text: 'Only report P0/P1.' }],
+      });
+    };
+
+    it('prefixes an agent-authored input with its source Session', async () => {
+      expect(
+        await build(async () => ({ state: 'ready', turn: { role: 'user', author: agentAuthor } }))
+      ).toEqual([
+        {
+          type: 'text',
+          text:
+            '[Lody] This message was sent by another agent, not by a human.\n' +
+            'Source Session: "E2EE coordinator" (coordinator-session), Codex · Agent Role "Executor"\n\n' +
+            'Only report P0/P1.',
+        },
+      ]);
+    });
+
+    it('leaves human input unchanged', async () => {
+      expect(
+        await build(async () => ({
+          state: 'ready',
+          turn: { role: 'user', author: { v: 1, kind: 'human', userId: 'user-1' } },
+        }))
+      ).toEqual([{ type: 'text', text: 'Only report P0/P1.' }]);
+    });
+
+    it('still delivers the input when its author cannot be read', async () => {
+      expect(
+        await build(async () => {
+          throw new Error('Synthetic history read failure');
+        })
+      ).toEqual([{ type: 'text', text: 'Only report P0/P1.' }]);
+    });
+  });
+  describe('live activity', () => {
+    const rows = [
+      { id: 'u1', role: 'user', status: 'handled', timestamp: '2026-11-03T01:00:00.000Z' },
+      { id: 'assistant:u1', role: 'assistant', timestamp: '2026-11-03T01:00:01.000Z' },
+      { id: 'u2', role: 'user', status: 'pending', timestamp: '2026-11-03T01:05:00.000Z' },
+      { id: 'u3', role: 'user', status: 'pending', timestamp: '2026-11-03T01:06:00.000Z' },
+    ];
+    const daemon = (history: {
+      count: () => Promise<number>;
+      readAt: unknown;
+      readDirectory?: unknown;
+    }) => {
+      const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
+      const internals = handler as unknown as Record<string, unknown> & {
+        workspaceDocument: { getOrCreateSessionDoc: unknown };
+      };
+      internals.executionService = {
+        getExecutionSnapshot: () => ({ hasActiveTurn: true, activeTurnId: 'assistant:u1' }),
+      };
+      internals.sessionActivePresence = { getStatus: () => undefined };
+      internals.sessionDispatchWatcher = { hasPendingDispatch: () => true };
+      internals.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({}));
+      vi.spyOn(
+        handler as unknown as { getSessionBackend: () => Promise<unknown> },
+        'getSessionBackend'
+      ).mockResolvedValue({ history });
+      return handler as unknown as {
+        recordLiveActivity: (id: SessionId, update: unknown) => void;
+        readSessionLiveStatus: (
+          id: SessionId,
+          includeActivity?: boolean
+        ) => Promise<Record<string, unknown>>;
+      };
+    };
+    const history = {
+      count: async () => rows.length,
+      readAt: async () => {
+        throw new Error('Activity must not materialize turn bodies');
+      },
+      readDirectory: async (from: number, to: number) =>
+        rows
+          .slice(from, to)
+          .map((scalars, offset) => ({ position: from + offset, state: 'ready', scalars })),
+    };
+
+    it('answers requested activity from the running turn and queued inputs', async () => {
+      const handler = daemon(history);
+      handler.recordLiveActivity(sessionId, {
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tool-1',
+          title: 'shell: flock heavy.lock make test',
+          status: 'in_progress',
+        },
+      });
+      expect((await handler.readSessionLiveStatus(sessionId, true)).activity).toMatchObject({
+        turnStartedAt: Date.parse('2026-11-03T01:00:01.000Z'),
+        lastOutputAt: expect.any(Number),
+        currentAction: 'shell: flock heavy.lock make test',
+        queuedInputs: 2,
+      });
+      handler.recordLiveActivity(sessionId, {
+        update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed' },
+      });
+      expect((await handler.readSessionLiveStatus(sessionId, true)).activity).not.toHaveProperty(
+        'currentAction'
+      );
+    });
+
+    it('omits activity unless requested, and when local history cannot be read', async () => {
+      expect(await daemon(history).readSessionLiveStatus(sessionId)).not.toHaveProperty('activity');
+      const failing = await daemon({
+        count: async () => {
+          throw new Error('Synthetic history failure');
+        },
+        readAt: async () => undefined,
+      }).readSessionLiveStatus(sessionId, true);
+      expect(failing).toMatchObject({ success: true });
+      expect(failing).not.toHaveProperty('activity');
+    });
   });
 });
