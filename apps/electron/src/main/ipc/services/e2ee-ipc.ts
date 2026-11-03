@@ -148,6 +148,29 @@ function sender() {
   }
   return event.sender.id
 }
+/** Main-owned reader for background member key delivery; renderer webContents ids start at 1. */
+const KEY_DELIVERY_READER = 0
+const KEY_DELIVERY_RETRY_MS = 10_000
+const KEY_DELIVERY_RETRY_MAX_MS = 5 * 60_000
+const KEY_DELIVERY_RETAINED = 32
+/** Access loss ends delivery from this device; other failures retry on a later due poll. */
+const TERMINAL_KEY_DELIVERY = new Set(['e2ee_member_removed', 'e2ee_device_revoked'])
+type MemberKeyDelivery = {
+  state: 'pending' | 'delivered' | 'failed'
+  code?: string
+  attempts: number
+  retryAt: number
+}
+/** Public reason code only: never key bytes, tokens, causes or plaintext. */
+const keyDeliveryCode = (cause: unknown) => {
+  const message = cause instanceof Error ? cause.message : ''
+  return /^e2ee_[a-z0-9_-]{1,64}$/.test(message) ? message : 'e2ee_key_delivery_failed'
+}
+const keyDeliveryView = (requestId: string, delivery: MemberKeyDelivery) => ({
+  requestId,
+  state: delivery.state,
+  ...(delivery.state === 'failed' && delivery.code ? { code: delivery.code } : {})
+})
 /** Explicit operations only: no arbitrary signing, secret export or unbound identity generation. */
 export class E2eeIpc extends IpcService {
   static override readonly groupName = 'e2ee'
@@ -155,6 +178,166 @@ export class E2eeIpc extends IpcService {
   // here, never on the cause-bearing Error passed to that logging/IPC boundary.
   private pairingFailure: unknown
   private readonly readerOwners = new WeakMap<object, string>()
+  // Member key delivery after admission is owned here, not by a renderer request.
+  // One in-flight round per account/workspace; failures keep a public code and are
+  // retried by the next due poll (email admission worker or team settings).
+  private keyDeliveryNow = () => Date.now()
+  private readonly keyDeliveries = new Map<
+    string,
+    { requests: Map<string, MemberKeyDelivery>; running?: Promise<void>; again: boolean }
+  >()
+  private keyDeliverySlot(accountId: string, workspaceId: string) {
+    const key = `${accountId}\n${workspaceId}`
+    let slot = this.keyDeliveries.get(key)
+    if (!slot) {
+      slot = { requests: new Map(), again: false }
+      this.keyDeliveries.set(key, slot)
+    }
+    return slot
+  }
+  /** Synchronization point for the owning tests; production callers never await delivery.
+   * Protected, not public: public instance methods are renderer-facing IPC. */
+  protected keyDeliveryIdle(accountId: string, workspaceId: string) {
+    return this.keyDeliveries.get(`${accountId}\n${workspaceId}`)?.running ?? Promise.resolve()
+  }
+  private trackKeyDelivery(accountId: string, workspaceId: string, requestId: string) {
+    const slot = this.keyDeliverySlot(accountId, workspaceId)
+    slot.requests.delete(requestId)
+    slot.requests.set(requestId, { state: 'pending', attempts: 0, retryAt: 0 })
+    while (slot.requests.size > KEY_DELIVERY_RETAINED) {
+      const settled = [...slot.requests].find(([, delivery]) => delivery.state === 'delivered')
+      slot.requests.delete(settled?.[0] ?? slot.requests.keys().next().value!)
+    }
+    void this.runKeyDelivery(accountId, workspaceId)
+    return slot.requests.get(requestId)!.state
+  }
+  private retryDueKeyDeliveries(accountId: string, workspaceId: string) {
+    const slot = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
+    if (!slot || slot.running) return
+    const now = this.keyDeliveryNow()
+    if (
+      [...slot.requests.values()].some(
+        (delivery) =>
+          delivery.state === 'pending' ||
+          (delivery.state === 'failed' &&
+            delivery.retryAt <= now &&
+            !TERMINAL_KEY_DELIVERY.has(delivery.code ?? ''))
+      )
+    )
+      void this.runKeyDelivery(accountId, workspaceId)
+  }
+  /** Never rejects: every outcome is recorded on the covered requests. */
+  private runKeyDelivery(accountId: string, workspaceId: string): Promise<void> {
+    const slot = this.keyDeliverySlot(accountId, workspaceId)
+    if (slot.running) {
+      slot.again = true
+      return slot.running
+    }
+    const running = (async () => {
+      // A request admitted during a round gets one follow-up pass; later ones wait for a poll.
+      for (let pass = 0; pass < 2; pass++) {
+        slot.again = false
+        const covered = [...slot.requests.values()].filter(
+          (delivery) =>
+            delivery.state !== 'delivered' && !TERMINAL_KEY_DELIVERY.has(delivery.code ?? '')
+        )
+        if (covered.length === 0) return
+        for (const delivery of covered) {
+          delivery.state = 'pending'
+          delete delivery.code
+        }
+        try {
+          await this.deliverMemberKeys(accountId, workspaceId)
+        } catch (cause) {
+          this.pairingFailure = cause
+          const code = keyDeliveryCode(cause)
+          const now = this.keyDeliveryNow()
+          for (const delivery of covered) {
+            delivery.attempts += 1
+            delivery.state = 'failed'
+            delivery.code = code
+            delivery.retryAt =
+              now +
+              Math.min(
+                KEY_DELIVERY_RETRY_MS * 2 ** (delivery.attempts - 1),
+                KEY_DELIVERY_RETRY_MAX_MS
+              )
+          }
+          return
+        }
+        for (const delivery of covered) {
+          delivery.state = 'delivered'
+          delivery.attempts = 0
+        }
+        if (!slot.again) return
+      }
+    })()
+      .catch((cause) => {
+        this.pairingFailure = cause
+      })
+      .finally(() => {
+        slot.running = undefined
+      })
+    slot.running = running
+    return running
+  }
+  /** One key round under a main-owned reader, so closing every window cannot stop it.
+   * Distribution still targets only verified ledger members inside the native host. */
+  private async deliverMemberKeys(accountId: string, workspaceId: string) {
+    const scope = this.memberScope(workspaceId)
+    const cloud = await desktopE2eeCloudClient()
+    if (cloud.accountId !== accountId) throw new Error('e2ee_account_mismatch')
+    await scope((owner) =>
+      owner.accountId === accountId
+        ? Effect.gen(function* () {
+            yield* owner.host.open(workspaceId)
+            const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
+            readers.set(KEY_DELIVERY_READER, (readers.get(KEY_DELIVERY_READER) ?? 0) + 1)
+            owner.readers.set(workspaceId, readers)
+          })
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    try {
+      const work = await scope((owner) =>
+        Effect.map(owner.bootstrap.deviceCredential(workspaceId), (credential) =>
+          owner.host.keyRound(
+            workspaceId,
+            (signal) => cloud.client.mailbox({ workspaceId, credential }, signal),
+            (signal) => cloud.client.staging({ workspaceId, credential }, signal),
+            (signal) => (request) => cloud.client.history(request, signal)
+          )
+        )
+      )
+      await runDesktopE2eeOperation(accountId, work)
+    } finally {
+      try {
+        const cleanup = await scope((owner) =>
+          Effect.gen(function* () {
+            const readers = owner.readers.get(workspaceId)
+            const count = readers?.get(KEY_DELIVERY_READER) ?? 0
+            if (count > 1) readers!.set(KEY_DELIVERY_READER, count - 1)
+            else readers?.delete(KEY_DELIVERY_READER)
+            if (readers?.size === 0) {
+              const drain = yield* owner.host.beginCloseWorkspace(workspaceId)
+              owner.readers.delete(workspaceId)
+              return drain
+            }
+            return Effect.void
+          })
+        )
+        await runDesktopE2eeOperation(accountId, cleanup)
+      } catch (cause) {
+        this.pairingFailure = cause
+      }
+    }
+  }
+  private readerAccount(workspaceId: string, reader: number) {
+    return this.memberScope(workspaceId)((owner) =>
+      owner.readers.get(workspaceId)?.has(reader)
+        ? Effect.succeed(owner.accountId)
+        : Effect.fail(new Error('e2ee_not_open'))
+    )
+  }
   private readerOwner(owner: object) {
     let id = this.readerOwners.get(owner)
     if (!id) {
@@ -354,6 +537,8 @@ export class E2eeIpc extends IpcService {
     const id = sender()
     const scope = this.memberScope(workspaceId)
     const access = await this.memberAccess(workspaceId, id, scope)
+    // The admission worker and team settings poll here; that drives due delivery retries.
+    this.retryDueKeyDeliveries(access.accountId, workspaceId)
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
     const result = await this.memberResult(access, cloud.client.memberPending(access))
@@ -407,8 +592,9 @@ export class E2eeIpc extends IpcService {
       }
     }
     // A lost ACK is reconciled from genuine ledger history, never by signing again.
+    // Ledger ingest only: key delivery must not hold the admission result.
     try {
-      await this.refresh(workspaceId)
+      await this.refresh(workspaceId, { installKeys: false })
     } catch (cause) {
       this.pairingFailure = cause
     }
@@ -420,8 +606,32 @@ export class E2eeIpc extends IpcService {
       this.pairingFailure = primary
       return { admitted: false, keyPending: true }
     }
-    // refresh drives existing all-device mailbox delivery. Its failure cannot undo admission.
-    return { admitted: true, keyPending: true }
+    // Delivery continues in main and cannot undo admission; its state is readable below.
+    const keyDelivery = this.trackKeyDelivery(access.accountId, workspaceId, requestId)
+    return { admitted: true, keyPending: true, keyDelivery }
+  }
+  @IpcMethod()
+  async memberKeyDeliveries(workspaceId: string) {
+    const accountId = await this.readerAccount(workspaceId, sender())
+    this.retryDueKeyDeliveries(accountId, workspaceId)
+    const slot = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
+    return {
+      items: [...(slot?.requests ?? [])].map(([requestId, delivery]) =>
+        keyDeliveryView(requestId, delivery)
+      )
+    }
+  }
+  @IpcMethod()
+  async retryMemberKeyDelivery(workspaceId: string, requestId: string) {
+    if (typeof requestId !== 'string' || !/^[0-9a-f]{32}$/.test(requestId))
+      throw new Error('e2ee_invalid-input')
+    const accountId = await this.readerAccount(workspaceId, sender())
+    const delivery = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)?.requests.get(requestId)
+    if (!delivery) throw new Error('e2ee_invalid-input')
+    // An explicit retry skips the backoff wait, never the terminal access-loss result.
+    if (delivery.state === 'failed') delivery.retryAt = 0
+    void this.runKeyDelivery(accountId, workspaceId)
+    return keyDeliveryView(requestId, delivery)
   }
   @IpcMethod()
   async rejectMemberJoin(workspaceId: string, requestId: string) {

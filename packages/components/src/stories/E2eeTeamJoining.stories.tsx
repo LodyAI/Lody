@@ -146,3 +146,58 @@ export const ApprovalQueue: Story = {
     </div>
   ),
 };
+const settingsFrame = { maxWidth: 600, margin: '24px auto', padding: 16 };
+const settingsRuntime = {
+  createMemberInvitation: async () => offer,
+  rejectMemberJoin: async () => ({ state: 'rejected' as const }),
+  revokeMemberInvitation: async () => ({ revoked: true as const }),
+};
+/** Click Approve: the request shows progress while the relay commits. */
+export const ApprovalSubmitting: Story = {
+  render: () => (
+    <div style={settingsFrame}>
+      <E2eeTeamSettings
+        workspaceId={offer.workspaceId}
+        runtime={{
+          ...settingsRuntime,
+          memberJoinRequests: async () => ({ ...pending, items: [pending.items[0]!] }),
+          approveMemberJoin: () => new Promise(() => {}),
+        }}
+      />
+    </div>
+  ),
+};
+let keyDeliveryReads = 0;
+/** Admitted members stay listed while their key is sent; a failed delivery offers a retry. */
+export const KeyDelivery: Story = {
+  render: () => (
+    <div style={settingsFrame}>
+      <E2eeTeamSettings
+        workspaceId={offer.workspaceId}
+        runtime={{
+          ...settingsRuntime,
+          // The first read names both applicants; afterwards both are committed.
+          memberJoinRequests: async () => ({
+            ...pending,
+            items: keyDeliveryReads++ === 0 ? pending.items : [],
+          }),
+          approveMemberJoin: async () => ({ admitted: true, keyPending: true }),
+          memberKeyDeliveries: async () => ({
+            items: [
+              { requestId: pending.items[0]!.requestId, state: 'pending' },
+              {
+                requestId: pending.items[1]!.requestId,
+                state: 'failed',
+                code: 'e2ee_management_retry',
+              },
+            ],
+          }),
+          retryMemberKeyDelivery: async (_workspace, requestId) => ({
+            requestId,
+            state: 'pending',
+          }),
+        }}
+      />
+    </div>
+  ),
+};
