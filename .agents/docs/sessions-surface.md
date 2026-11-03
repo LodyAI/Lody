@@ -91,8 +91,10 @@ this page is the full text of the rules summarised there.
 Session continuation uses the target machine's advertised protocol capability before
 starting reads: `sessionAutomations` for local IPC, `remoteAutomationControl` for
 remote control. Missing capabilities hide its settings and notes without polling;
-metadata updates enable the reader after a CLI upgrade. Supported owners retain
-connection-error recovery. Trailing connection warnings use `ConversationColumn`
-to align with messages in both normal and wide layouts. Workspace content and
-ownership admission remain unchanged; see the
+metadata updates enable the reader after a CLI upgrade. When a read fails, existing
+continuation notes are marked unavailable and the reader retries in the background;
+the conversation does not add a standalone warning for a failed poll. Settings reads
+are tracked independently: the last confirmed settings remain visible but disabled
+when they cannot be refreshed. An uncertain cancellation or settings change is reported
+and followed by a fresh read. Workspace content and ownership admission remain unchanged; see the
 [continuation availability decision](../notes/implemented/feature/2026-10-30-session-continuation-general-availability.md).

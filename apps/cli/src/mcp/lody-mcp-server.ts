@@ -12,7 +12,11 @@ import {
 } from '@/commands/session-catalog-read';
 import { getMachineRoomId } from '@lody/shared';
 import { getLogger } from '@/utils/logger';
-import { machineSupportsProtocolCapability, MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
+import {
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  parseGitHubPullRequestUrl,
+} from '@lody/shared';
 import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
 import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
 import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
@@ -926,6 +930,8 @@ const SessionListToolInputSchema = z
       .optional(),
     pullRequest: z
       .object({
+        url: z.string().trim().min(1).optional(),
+        number: z.number().int().positive().optional(),
         exists: z.boolean().optional(),
         state: z.enum(['open', 'closed', 'merged']).optional(),
         draft: z.boolean().optional(),
@@ -968,6 +974,23 @@ const SessionHistoryToolInputSchema = z
       .optional()
       .describe(
         `Maximum transcript turns to return. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}.`
+      ),
+    direction: z
+      .enum(['backward', 'forward'])
+      .optional()
+      .describe(
+        'backward (default) starts at the newest page and nextCursor reads older entries; forward starts at the oldest and nextCursor reads newer ones, including entries appended later.'
+      ),
+    role: z.enum(['user', 'assistant']).optional().describe('Only return entries from this role.'),
+    since: z.string().datetime().optional().describe('Only return entries at or after this time.'),
+    maxChars: z
+      .number()
+      .int()
+      .positive()
+      .max(100_000)
+      .optional()
+      .describe(
+        'Truncate each entry text to this many characters; cut entries carry truncated and originalChars.'
       ),
   })
   .strict();
@@ -1806,6 +1829,7 @@ const sessionSummaryForMcp = (
     : {}),
   ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
   executionContext: summarizeProjectRefForMcp(session.project),
+  ...(session.branchName ? { branch: session.branchName } : {}),
   pullRequests: resolveSessionPullRequests(session)
     .map(normalizeSessionPullRequestMeta)
     .filter((item): item is NonNullable<typeof item> => item !== null)
@@ -1915,6 +1939,22 @@ const matchesSessionListFilters = (
       .map(normalizeSessionPullRequestMeta)
       .filter((item): item is NonNullable<typeof item> => item !== null);
     if (prFilter.exists === false) return prs.length === 0;
+    if (prFilter.url !== undefined || prFilter.number !== undefined) {
+      const wanted =
+        prFilter.url === undefined ? undefined : parseGitHubPullRequestUrl(prFilter.url);
+      if (prFilter.url !== undefined && !wanted) return false;
+      const matches = prs.some((pr) => {
+        const parsed = parseGitHubPullRequestUrl(pr.url);
+        return (
+          parsed !== null &&
+          (wanted == null ||
+            (parsed.prNumber === wanted.prNumber &&
+              parsed.repoFullName.toLowerCase() === wanted.repoFullName.toLowerCase())) &&
+          (prFilter.number === undefined || parsed.prNumber === prFilter.number)
+        );
+      });
+      if (!matches) return false;
+    }
     if (prFilter.exists === true && prs.length === 0) return false;
     if (prFilter.state !== undefined || prFilter.draft !== undefined) {
       return prs.some((pr) => {
@@ -2027,8 +2067,9 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
 const readMcpSessionStatusTargets = async (
   ids: readonly string[],
   ctx: ReturnType<typeof getSessionContext>,
-  read: (id: SessionId) => Promise<SessionMeta | undefined>
-) =>
+  read: (id: SessionId) => Promise<SessionMeta | undefined>,
+  expand: (id: string) => Promise<string> = async (id) => id
+): Promise<Array<{ sessionId: SessionId; session: SessionMeta | undefined; error?: unknown }>> =>
   Promise.all(
     ids.map(async (rawSessionId) => {
       let sessionId: SessionId;
@@ -2037,7 +2078,12 @@ const readMcpSessionStatusTargets = async (
       } catch {
         // Status-many is ordered and independently fallible. Invalid/foreign references
         // must neither abort valid siblings nor reach the authorized workspace reader.
-        return { sessionId: rawSessionId, session: undefined };
+        return { sessionId: rawSessionId as SessionId, session: undefined };
+      }
+      try {
+        sessionId = (await expand(sessionId)) as SessionId;
+      } catch (error) {
+        return { sessionId, session: undefined, error };
       }
       return { sessionId, session: await read(sessionId) };
     })
@@ -2049,8 +2095,11 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    const targets = await readMcpSessionStatusTargets(input.sessionIds, ctx, (id) =>
-      readCurrentSessionMeta(manager, id)
+    const targets = await readMcpSessionStatusTargets(
+      input.sessionIds,
+      ctx,
+      (id) => readCurrentSessionMeta(manager, id),
+      createSessionIdResolver(manager)
     );
     const liveStatuses = await readSessionLiveStatusesMany({
       auth,
@@ -2064,7 +2113,10 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
     const nowMs = getServerNow();
     const viewed = collectViewedSessionIdsFromPresence(presence, nowMs);
     const items = await Promise.all(
-      targets.map(async ({ sessionId, session }) => {
+      targets.map(async ({ sessionId, session, error: resolveError }) => {
+        if (resolveError !== undefined) {
+          return { sessionId, ok: false as const, error: normalizeMcpError(resolveError) };
+        }
         if (!session) {
           return {
             sessionId,
@@ -2139,8 +2191,9 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
   const ctx = getSessionContext();
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-  const sessionId = resolveMcpSessionId(input.sessionId, ctx) as SessionId;
+  const requestedSessionId = resolveMcpSessionId(input.sessionId, ctx);
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+    const sessionId = (await createSessionIdResolver(manager)(requestedSessionId)) as SessionId;
     const session = await readCurrentSessionMeta(manager, sessionId);
     if (!session) {
       throw new LodyOperationStoreError(
@@ -2162,6 +2215,10 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
           history: backend.history,
           limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
           ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
+          direction: input.direction,
+          role: input.role,
+          since: input.since,
+          maxChars: input.maxChars,
           maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
         });
       },
@@ -2288,6 +2345,37 @@ const readCurrentSessionMeta = async (
     return undefined;
   }
   return record.meta as SessionMeta;
+};
+
+const MAX_AMBIGUOUS_SESSION_CANDIDATES = 8;
+
+/** Session ids are UUIDs; anything shorter may be a copied prefix. */
+const FULL_SESSION_ID_LENGTH = 36;
+
+/**
+ * One resolver per request: the workspace Session list is read at most once and
+ * only when a short id misses. An exact or unknown id is returned unchanged so the
+ * caller keeps its own not-found handling; only a prefix shared by several
+ * Sessions fails, listing candidates to choose from.
+ */
+const createSessionIdResolver = (manager: LoroDocumentManager) => {
+  let alive: Promise<SessionMeta[]> | undefined;
+  return async (sessionId: string): Promise<string> => {
+    if (sessionId.length >= FULL_SESSION_ID_LENGTH) return sessionId;
+    if (await readCurrentSessionMeta(manager, sessionId as SessionId)) return sessionId;
+    alive ??= listAliveSessionMetas(manager).then((rows) => rows.map((row) => row.meta));
+    const matches = (await alive).filter((meta) => meta.id.startsWith(sessionId));
+    if (matches.length === 1) return matches[0]!.id;
+    if (matches.length === 0) return sessionId;
+    const candidates = matches
+      .slice(0, MAX_AMBIGUOUS_SESSION_CANDIDATES)
+      .map((meta) => ({ id: meta.id, ...(meta.title ? { title: meta.title } : {}) }));
+    throw new LodyOperationStoreError(
+      'SESSION_ID_AMBIGUOUS',
+      `Session id prefix ${sessionId} matches ${matches.length} Sessions: ${JSON.stringify(candidates)}`,
+      false
+    );
+  };
 };
 
 const bindMcpCreateContext = (
@@ -3136,6 +3224,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     await syncWorkspaceMetaForRead(manager, `mcp.session_chat:${ctx.sessionId}:operation`);
+    args = { ...args, sessionId: await createSessionIdResolver(manager)(args.sessionId) };
     const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!currentSession) {
       throw new LodyOperationStoreError(
@@ -3805,7 +3894,17 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
         false
       );
     }
-    const expanded = args.items.map((item) => ({ ...(args.defaults ?? {}), ...item }));
+    // A unique prefix expands; an ambiguous or unknown one stays as given so the
+    // item fails on its own instead of rejecting its siblings.
+    const resolveSessionId = createSessionIdResolver(manager);
+    const expanded = await Promise.all(
+      args.items.map(async (item) => {
+        const merged = { ...(args.defaults ?? {}), ...item };
+        if (!merged.sessionId) return merged;
+        const sessionId = await resolveSessionId(merged.sessionId).catch(() => merged.sessionId!);
+        return { ...merged, sessionId };
+      })
+    );
     const invoking = await resolveInvokingTurnContext(requester, manager);
     const canonicalCommand = {
       items: expanded,
@@ -5019,7 +5118,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     SESSION_HISTORY_TOOL_NAME,
     {
       title: 'Read Lody session history',
-      description: `Read one bounded visible transcript page, oldest-to-newest. For session mentions pass the full lody://session/<sessionId>?workspace=<workspaceId> URI as sessionId; its workspace must match this tool context. Bare IDs and legacy session:// URIs are also accepted. Omit cursor for the newest page; nextCursor reads older entries. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
+      description: `Read one bounded visible transcript page, oldest-to-newest. For session mentions pass the full lody://session/<sessionId>?workspace=<workspaceId> URI as sessionId; its workspace must match this tool context. Bare IDs and legacy session:// URIs are also accepted. Omit cursor for the newest page; nextCursor reads older entries. Use direction forward to read oldest-first and resume later from nextCursor; role, since and maxChars narrow and cap entries. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
       inputSchema: SessionHistoryToolInputSchema,
     },
     async (args: SessionHistoryToolInput) => {
