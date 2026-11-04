@@ -1778,6 +1778,7 @@ export type MessageContent =
   | {
       type: 'text';
       text: string;
+      messagePhase?: 'commentary' | 'final_answer';
       /** Mention regions of `text`. See `message-text-spans.ts`. */
       spans?: MessageTextSpan[];
     }

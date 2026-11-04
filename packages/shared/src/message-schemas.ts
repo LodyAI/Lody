@@ -3778,6 +3778,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
   z.object({
     type: z.literal('text'),
     text: SharedStringSchema,
+    messagePhase: z.enum(['commentary', 'final_answer']).optional(),
     spans: z.array(MessageTextSpanSchema).optional(),
   }),
   SubagentTaskPayloadSchema.extend({
@@ -3793,6 +3794,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
               ...SubagentItemIdentityShape,
               type: z.literal('text'),
               text: SharedStringSchema,
+              messagePhase: z.enum(['commentary', 'final_answer']).optional(),
               spans: z.array(MessageTextSpanSchema).optional(),
             }),
             z.object({

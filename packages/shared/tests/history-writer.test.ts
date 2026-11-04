@@ -29,6 +29,43 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
+  it('persists ACP phases in Loro history across reopening', () => {
+    const doc = new Loro();
+    const mirror = open(doc);
+    const writer = mirror.historyWriter;
+    writer.append({ ...entry('phase-turn'), role: 'assistant', items: [] });
+    for (const [text, messagePhase] of [
+      ['Working', 'commentary'],
+      ['Done', 'final_answer'],
+    ] as const) {
+      const notification = parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text },
+          _meta: { lody: { messagePhase } },
+        },
+      });
+      writer.updateEntry(
+        'phase-turn',
+        (turn) =>
+          applyNotificationOnHistory([turn], [notification], undefined, {
+            targetAssistantEntryId: 'phase-turn',
+          })[0]!
+      );
+    }
+    const bytes = doc.export({ mode: 'snapshot' });
+    mirror.dispose();
+    const restarted = new Loro();
+    restarted.import(bytes);
+    const reopened = open(restarted);
+    expect(reopened.historyWriter.read('phase-turn')?.items).toEqual([
+      { type: 'text', text: 'Working', messagePhase: 'commentary' },
+      { type: 'text', text: 'Done', messagePhase: 'final_answer' },
+    ]);
+    reopened.dispose();
+  });
+
   it('retains quoted snapshots through the writer, a restart and execution projection', () => {
     const snapshot = '  Unicode 引文 👩🏽‍💻\n\n> nested\nEnd of quoted message.\n';
     const quote = formatMessageQuote(snapshot);
