@@ -118,6 +118,10 @@ after a submodule update, which is why `prepare:acp-adapters` runs before both
 `src/claude-acp-entry.ts` and `src/codex-acp-entry.ts` entries import the adapters' package roots,
 whose runtime exports point at adapter `dist/`.
 
+The Codex adapter bundle initializes ACP SDK 2.0.2 validation schemas when first used, while
+preserving the SDK's exposed NES object schemas. The [decision and measurements](../notes/implemented/architecture/2026-11-04-codex-acp-schema-memory.md)
+describe the memory and first-use costs.
+
 `packages/acp-extension-core` is the exception: it builds its own `dist/` through its `prepare`
 script on every install, because `packages/shared` (and every other workspace consumer) imports
 its runtime export directly. `prepare:acp-adapters` therefore only compiles the four adapters.
