@@ -103,21 +103,18 @@ const promptSuggestionStyles = stylex.create({
     userSelect: 'none',
     color: colors.secondaryLabel,
     fontSize: textScale.bodySize,
-    // The session textarea's `leading-6`.
-    lineHeight: '1.5rem',
+    lineHeight: textScale.bodyLeading,
   },
   overlayLanding: {
     insetInlineStart: 0,
     insetInlineEnd: 0,
     lineHeight: textScale.bodyLeading,
   },
-  // The sheet textarea's `px-5 py-4 text-base leading-7`.
+  // Match the sheet textarea's padding.
   overlaySheet: {
     insetInlineStart: '1.25rem',
     insetInlineEnd: '1.25rem',
     top: space[4],
-    fontSize: '1rem',
-    lineHeight: '1.75rem',
   },
   text: {
     minWidth: 0,
@@ -294,11 +291,10 @@ export function getChatComposerTextareaClassName({
     'input-scrollbar resize-none transition-shadow',
     stylex.props(typography.prompt).className,
     isSheet
-      ? 'min-h-0 flex-1 border-transparent bg-transparent px-5 py-4 text-base leading-7'
+      ? 'min-h-0 flex-1 border-transparent bg-transparent px-5 py-4'
       : isLanding
         ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
         : cn(
-            'text-sm leading-6',
             'border-transparent bg-transparent px-1 py-0',
             // Mobile session composer floors at a single line; desktop keeps two.
             isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
