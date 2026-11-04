@@ -10,6 +10,7 @@ import {
   safeParseLocalSessionControlRequest,
   safeParseServerToMachine,
   MachineAcpCapabilitiesRefreshRequestSchema,
+  MachineAcpCapabilitiesRefreshResponseSchema,
   ServerToClientSchema,
   SessionCreateRequestSchema,
 } from '../src/message-schemas';
@@ -40,6 +41,36 @@ describe('message-schemas machine ACP capabilities refresh', () => {
 });
 
 describe('message-schemas machine ACP authentication', () => {
+  it('carries more than 32 advertised authentication methods through RPC', () => {
+    const authMethods = Array.from({ length: 46 }, (_, index) => ({
+      type: 'agent',
+      id: `provider-${index}`,
+      name: `Provider ${index}`,
+    }));
+    const progress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'sorbet',
+      status: 'auth-methods',
+      interactionId: 'choice-1',
+      authMethods,
+    };
+    expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(progress).success).toBe(true);
+    expect(
+      MachineAcpCapabilitiesRefreshResponseSchema.safeParse({
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId: 'machine-1',
+        configId: 'config-1',
+        cliType: 'builtin',
+        agentType: 'sorbet',
+        success: false,
+        authRequired: true,
+        authMethods,
+      }).success
+    ).toBe(true);
+  });
+
   it('accepts config-bound starts and request-bound follow-ups', () => {
     const request = {
       type: 'machine/acp-authenticate',

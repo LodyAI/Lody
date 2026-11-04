@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-Builtin Sorbet needs agent-driven authentication and explicit credential form negotiation. It uses the existing ACP authentication lifecycle, which advertises credential form version 1 and carries form replies through the existing protected Machine RPC path. This retains the existing field and authentication-method limits; real Sorbet authentication remains unverified.
+Builtin Sorbet needs agent-driven authentication and explicit credential form negotiation. It uses the existing ACP authentication lifecycle, which advertises credential form version 1 and carries form replies through the existing protected Machine RPC path. Existing form field limits still apply; real Sorbet authentication remains unverified.
 
 ## Decision and evidence
 

@@ -842,14 +842,15 @@ describe('AcpAuthenticationManager', () => {
     child.stdout = stdout;
     child.stderr = new PassThrough();
     const authenticatedWith = createDeferred<string>();
+    const methods = Array.from({ length: 46 }, (_, index) => ({
+      id: `provider-${index}`,
+      name: `Provider ${index}`,
+    }));
     const agent = acp
       .agent({ name: 'test-method-auth-agent' })
       .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
         protocolVersion: params.protocolVersion,
-        authMethods: [
-          { id: 'oauth', name: 'OAuth' },
-          { id: 'api-key', name: 'API key' },
-        ],
+        authMethods: methods,
       }))
       .onRequest(acp.methods.agent.authenticate, async ({ params }) => {
         authenticatedWith.resolve(params.methodId);
@@ -870,7 +871,9 @@ describe('AcpAuthenticationManager', () => {
       customAcp: { command: '/test/custom-acp', args: [] },
       onProgress: (event) => {
         if (event.status === 'auth-methods') {
-          expect(event.authMethods.map((method) => method.id)).toEqual(['oauth', 'api-key']);
+          expect(event.authMethods.map((method) => method.id)).toEqual(
+            methods.map((method) => method.id)
+          );
           methodsReceived.resolve({ interactionId: event.interactionId });
         }
       },
@@ -881,10 +884,10 @@ describe('AcpAuthenticationManager', () => {
       manager.submitAuthenticationInput(
         'auth-method-choice',
         interactionId,
-        JSON.stringify({ action: 'accept', methodId: 'api-key' })
+        JSON.stringify({ action: 'accept', methodId: 'provider-45' })
       )
     ).toEqual({ success: true, disposition: 'input-accepted' });
-    await expect(authenticatedWith.promise).resolves.toBe('api-key');
+    await expect(authenticatedWith.promise).resolves.toBe('provider-45');
     await expect(authentication).resolves.toEqual({
       success: true,
       disposition: 'authenticated',

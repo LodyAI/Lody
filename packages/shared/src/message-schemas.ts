@@ -39,7 +39,6 @@ import {
   ACP_AUTH_FORM_FIELD_MAX_COUNT,
   ACP_AUTH_ID_MAX_LENGTH,
   ACP_AUTH_LABEL_MAX_LENGTH,
-  ACP_AUTH_METHOD_MAX_COUNT,
   ACP_AUTH_SELECT_OPTION_MAX_COUNT,
   ACP_AUTH_TEXT_MAX_LENGTH,
   ACP_AUTHORIZATION_URL_MAX_LENGTH,
@@ -1340,10 +1339,7 @@ const AcpCapabilityCacheEntrySchema = z
           .strict()
       )
       .optional(),
-    authMethods: z
-      .array(MachineAcpAuthMethodSummarySchema)
-      .max(ACP_AUTH_METHOD_MAX_COUNT)
-      .optional(),
+    authMethods: z.array(MachineAcpAuthMethodSummarySchema).optional(),
     sessionFork: z.boolean().optional(),
     acknowledgedSteer: z.boolean().optional(),
     sessionTitle: z.boolean().optional(),
@@ -1503,10 +1499,7 @@ export const MachineAcpCapabilitiesRefreshResponseSchema = z
       )
       .optional(),
     authRequired: z.boolean().optional(),
-    authMethods: z
-      .array(MachineAcpAuthMethodSummarySchema)
-      .max(ACP_AUTH_METHOD_MAX_COUNT)
-      .optional(),
+    authMethods: z.array(MachineAcpAuthMethodSummarySchema).optional(),
     error: SharedOptionalStringSchema,
   })
   .strict();
@@ -1559,10 +1552,7 @@ export const MachineAcpAuthenticateResponseSchema = z
     ]),
     capabilitiesRefreshed: z.boolean().optional(),
     authRequired: z.boolean().optional(),
-    authMethods: z
-      .array(MachineAcpAuthMethodSummarySchema)
-      .max(ACP_AUTH_METHOD_MAX_COUNT)
-      .optional(),
+    authMethods: z.array(MachineAcpAuthMethodSummarySchema).optional(),
     error: SharedOptionalStringSchema,
   })
   .strict();
@@ -1584,10 +1574,7 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
       'cancelled',
       'error',
     ]),
-    authMethods: z
-      .array(MachineAcpAuthMethodSummarySchema)
-      .max(ACP_AUTH_METHOD_MAX_COUNT)
-      .optional(),
+    authMethods: z.array(MachineAcpAuthMethodSummarySchema).optional(),
     interactionId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
     message: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
     form: MachineAcpAuthenticationFormSchema.optional(),

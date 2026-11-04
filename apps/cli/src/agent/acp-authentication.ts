@@ -17,7 +17,6 @@ import {
   ACP_AUTH_FORM_FIELD_MAX_COUNT,
   ACP_AUTH_ID_MAX_LENGTH,
   ACP_AUTH_LABEL_MAX_LENGTH,
-  ACP_AUTH_METHOD_MAX_COUNT,
   ACP_AUTH_SELECT_OPTION_MAX_COUNT,
   ACP_AUTH_TEXT_MAX_LENGTH,
   ACP_AUTHORIZATION_URL_MAX_LENGTH,
@@ -1195,7 +1194,6 @@ export class AcpAuthenticationManager {
                     );
                   }
                   if (
-                    methods.length > ACP_AUTH_METHOD_MAX_COUNT ||
                     new Set(methods.map((method) => method.id)).size !== methods.length ||
                     methods.some(
                       (method) =>
@@ -1205,7 +1203,7 @@ export class AcpAuthenticationManager {
                     )
                   ) {
                     throw new Error(
-                      `${options.agentType} advertised too many or invalid authentication methods`
+                      `${options.agentType} advertised invalid authentication methods`
                     );
                   }
                   let methodId: string | undefined;

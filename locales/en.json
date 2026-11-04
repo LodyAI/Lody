@@ -520,7 +520,7 @@
   "sharing.request.deny": "Do not share",
   "sharing.request.approve": "Approve and share",
   "settings.agent.dialog.lodyAgentSignInHint": "After setup, open this provider to sign in and choose an available account.",
-  "settings.agent.dialog.option.sorbet.description": "Lody Agent runtime",
+  "settings.agent.dialog.option.sorbet.description": "An agent harness for work that outlives one conversation. Built for Lody.",
   "settings.agent.dialog.option.pi.description": "Lody-managed Pi ACP runtime",
   "piExtensions.title": "Pi extensions",
   "piExtensions.consent": "Scanning only lists installed global extensions. Selected extensions run with your permissions in Pi and its subagents. Project extensions are not discovered. Provider registration is supported; other plugin features may not work in ACP.",
