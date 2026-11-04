@@ -621,6 +621,7 @@
   "agents.authentication.enterCode": "请在授权页面输入此代码。",
   "agents.authentication.enterCodeWithExpiry": "请在授权页面输入此代码，代码将在 {{minutes}} 分钟后过期。",
   "agents.authentication.finishInBrowser": "完成 {{provider}} 登录",
+  "agents.authentication.inputOutcomeUnknown": "响应可能已送达。请等待登录完成，或取消后重新开始。",
   "agents.authentication.inputSubmitFailed": "无法提交认证响应，请重试。",
   "agents.authentication.machineUpgradeRequired": "请更新目标 Machine，以使用此 Provider 的交互式认证。",
   "agents.authentication.noMethods": "该 Agent 未提供登录方式。",

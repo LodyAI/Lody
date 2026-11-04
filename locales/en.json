@@ -621,6 +621,7 @@
   "agents.authentication.enterCode": "Enter this code on the authorization page.",
   "agents.authentication.enterCodeWithExpiry": "Enter this code on the authorization page. It expires in {{minutes}} minutes.",
   "agents.authentication.finishInBrowser": "Finish signing in to {{provider}}",
+  "agents.authentication.inputOutcomeUnknown": "The response may have been received. Wait for sign-in to finish or cancel and start again.",
   "agents.authentication.inputSubmitFailed": "Could not submit the authentication response. Please try again.",
   "agents.authentication.machineUpgradeRequired": "Update the target Machine to use interactive authentication for this Provider.",
   "agents.authentication.noMethods": "This agent did not advertise a sign-in method.",

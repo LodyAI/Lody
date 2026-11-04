@@ -535,8 +535,12 @@ export async function probeBuiltinAuthentication(
       };
 }
 
+// Authentication mutates machine-local provider credentials across workspace runtimes.
+// Keep a slot until its child actually exits, even if its workflow has returned.
+const runningAuthentications = new Map<string, RunningAuthentication>();
+
 export class AcpAuthenticationManager {
-  private readonly runningByAgentType = new Map<string, RunningAuthentication>();
+  private readonly runningByAgentType = runningAuthentications;
   private readonly authenticationTimeoutMs: number;
   private readonly terminationGraceMs: number;
   private readonly nodeProcess: NodeProcessApi | undefined;
@@ -804,7 +808,18 @@ export class AcpAuthenticationManager {
         running.sorbetLease?.release();
         if (timeoutHandle) clearTimeout(timeoutHandle);
         if (this.runningByAgentType.get(options.agentType) === running) {
-          this.runningByAgentType.delete(options.agentType);
+          const child = running.child;
+          if (!running.sorbetLease && child && child.exitCode == null && child.signalCode == null) {
+            child.once('exit', () => {
+              if (this.runningByAgentType.get(options.agentType) === running)
+                this.runningByAgentType.delete(options.agentType);
+            });
+            // An exit may have arrived between the state check and listener registration.
+            if (child.exitCode != null || child.signalCode != null)
+              this.runningByAgentType.delete(options.agentType);
+          } else {
+            this.runningByAgentType.delete(options.agentType);
+          }
         }
       }
     }
@@ -1285,19 +1300,19 @@ export class AcpAuthenticationManager {
                   cleanupError = error;
                 }
               } else {
-                await shutdownLocalAcpAgent({
-                  agentProcess: child,
-                  logger: this.logger,
-                  sessionLabel: `acp-auth:${options.agentType}:protocol`,
-                  exitTimeoutMs: this.terminationGraceMs,
-                  nodeProcess: this.nodeProcess,
-                }).catch((error: unknown) => {
-                  this.logger.debug(
-                    `[acp-auth] Failed to terminate protocol authentication process: ${formatErrorMessage(error)}`
-                  );
-                });
+                try {
+                  await terminateAcpProcessTree(child, {
+                    logger: this.logger,
+                    sessionLabel: `acp-auth:${options.agentType}:protocol`,
+                    exitTimeoutMs: this.terminationGraceMs,
+                    nodeProcess: this.nodeProcess,
+                  });
+                } catch (error) {
+                  cleanupFailed = true;
+                  cleanupError = error;
+                }
               }
-              if (running.child === child) running.child = undefined;
+              if (!cleanupFailed && running.child === child) running.child = undefined;
             }
             safeOfflineFailure =
               operationFailed &&
@@ -1313,14 +1328,17 @@ export class AcpAuthenticationManager {
             if (operationFailed && cleanupFailed) {
               throw new AggregateError(
                 [operationError, cleanupError],
-                `${formatErrorMessage(operationError)}; Sorbet authentication process cleanup is unconfirmed`
+                `${formatErrorMessage(operationError)}; ${running.sorbetLease ? 'Sorbet a' : 'A'}uthentication process cleanup is unconfirmed`
               );
             }
             if (operationFailed) throw operationError;
             if (cleanupFailed) {
-              throw new Error('Sorbet authentication process cleanup is unconfirmed', {
-                cause: cleanupError,
-              });
+              throw new Error(
+                `${running.sorbetLease ? 'Sorbet a' : 'A'}uthentication process cleanup is unconfirmed`,
+                {
+                  cause: cleanupError,
+                }
+              );
             }
           },
         })

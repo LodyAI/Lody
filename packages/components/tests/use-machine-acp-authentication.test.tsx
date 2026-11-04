@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, MachineId, WorkspaceId } from '@lody/shared';
 
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
-import { useMachineAcpAuthentication } from '../src/hooks/use-machine-acp-authentication';
+import {
+  AcpInputOutcomeUnknownError,
+  useMachineAcpAuthentication,
+} from '../src/hooks/use-machine-acp-authentication';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -45,6 +48,70 @@ describe('useMachineAcpAuthentication', () => {
     await act(async () => root?.unmount());
     container?.remove();
     vi.restoreAllMocks();
+  });
+
+  it('reports a lost submit response as unknown rather than safe to retry', async () => {
+    const runtime = {
+      sendControl: vi.fn(),
+      waitForMachineAcpAuthenticateResponse: vi.fn(async () => null),
+    } as unknown as WorkspaceRuntime;
+    let controller: AuthenticationController | undefined;
+    await act(async () => {
+      root?.render(
+        createElement(Probe, {
+          runtime,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          onResult: (value) => {
+            controller = value;
+          },
+        })
+      );
+    });
+    await expect(
+      controller!.submitAuthorizationCode({
+        machineId: 'machine-1' as MachineId,
+        authenticationRequestId: 'request',
+        authorizationCode: 'synthetic',
+      })
+    ).rejects.toBeInstanceOf(AcpInputOutcomeUnknownError);
+    await expect(
+      controller!.submitAuthenticationInput({
+        machineId: 'machine-1' as MachineId,
+        authenticationRequestId: 'request',
+        interactionId: 'question',
+        input: { action: 'accept' },
+      })
+    ).rejects.toBeInstanceOf(AcpInputOutcomeUnknownError);
+  });
+
+  it('preserves a confirmed submit rejection', async () => {
+    const runtime = {
+      sendControl: vi.fn(),
+      waitForMachineAcpAuthenticateResponse: vi.fn(async () => ({
+        success: false,
+        disposition: 'error',
+        error: 'Rejected by machine',
+      })),
+    } as unknown as WorkspaceRuntime;
+    let controller: AuthenticationController | undefined;
+    await act(async () => {
+      root?.render(
+        createElement(Probe, {
+          runtime,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          onResult: (value) => {
+            controller = value;
+          },
+        })
+      );
+    });
+    await expect(
+      controller!.submitAuthorizationCode({
+        machineId: 'machine-1' as MachineId,
+        authenticationRequestId: 'request',
+        authorizationCode: 'synthetic',
+      })
+    ).rejects.toThrow('Rejected by machine');
   });
 
   it('cancels the CLI login when the response registry times out', async () => {

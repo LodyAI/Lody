@@ -126,15 +126,37 @@ export function createEncryptedDispatchLegacy(options: {
       );
     });
   const requestFeature = async (
-    request: LocalMachineRpcRequest
+    request: LocalMachineRpcRequest,
+    optionsForRequest: {
+      requestId?: string;
+      expectedDevice?: string;
+      onPrepared?: (requesterDevice: string) => void;
+      signal?: AbortSignal;
+    } = {}
   ): Promise<LocalMachineRpcResponse> => {
     if (closed || !options.prepareFeature || !options.acceptFeature)
       throw new Error('e2ee_rpc_unavailable');
-    const input = { requestId: crypto.randomUUID().replaceAll('-', ''), request };
+    if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
+    const input = {
+      requestId: optionsForRequest.requestId ?? crypto.randomUUID().replaceAll('-', ''),
+      request,
+    };
     const original = await options.prepareFeature(input);
+    if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
+    if (original.requestId !== input.requestId || original.targetMachineId !== request.machineId)
+      throw new Error('e2ee_rpc_request_binding');
+    if (
+      optionsForRequest.expectedDevice &&
+      original.requesterDevice !== optionsForRequest.expectedDevice
+    )
+      throw new Error('e2ee_rpc_signer_mismatch');
+    optionsForRequest.onPrepared?.(original.requesterDevice);
+    if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const client = yield* channel(original);
+        if (optionsForRequest.signal?.aborted)
+          return yield* Effect.fail(new Error('e2ee_rpc_aborted'));
         return yield* client.send(
           original,
           { kind: 'feature', input },

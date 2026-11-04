@@ -27,6 +27,7 @@ import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runti
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { useAtomValue } from 'jotai';
 import {
+  AcpInputOutcomeUnknownError,
   useMachineAcpAuthentication,
   type MachineAcpAuthenticationArgs,
 } from '@/hooks/use-machine-acp-authentication';
@@ -251,6 +252,7 @@ export function AcpAuthenticationPanel({
   const [submittingInteraction, setSubmittingInteraction] = useState(false);
   const [authorizationCode, setAuthorizationCode] = useState('');
   const [authorizationCodeSubmitted, setAuthorizationCodeSubmitted] = useState(false);
+  const [authorizationCodeUnknown, setAuthorizationCodeUnknown] = useState(false);
   const [submittingAuthorizationCode, setSubmittingAuthorizationCode] = useState(false);
   const [userCodeCopied, setUserCodeCopied] = useState(false);
   const [runtimeDownload, setRuntimeDownload] = useState<RuntimeDownloadProgress | null>(null);
@@ -359,6 +361,7 @@ export function AcpAuthenticationPanel({
     setSubmittingInteraction(false);
     setAuthorizationCode('');
     setAuthorizationCodeSubmitted(false);
+    setAuthorizationCodeUnknown(false);
     setSubmittingAuthorizationCode(false);
     discoveryTargetRef.current = null;
     setDiscoveredAuthMethods(undefined);
@@ -457,6 +460,7 @@ export function AcpAuthenticationPanel({
     setSubmittingInteraction(false);
     setAuthorizationCode('');
     setAuthorizationCodeSubmitted(false);
+    setAuthorizationCodeUnknown(false);
     setSubmittingAuthorizationCode(false);
     setUserCodeCopied(false);
     setRuntimeDownload(null);
@@ -756,6 +760,11 @@ export function AcpAuthenticationPanel({
         activeAuthenticationRef.current?.requestId === active.requestId &&
         interactionIdRef.current === interactionId
       ) {
+        if (nextError instanceof AcpInputOutcomeUnknownError) {
+          interactionIdRef.current = null;
+          setInteraction(null);
+          setFormValues({});
+        }
         setError(nextError instanceof Error ? nextError.message : String(nextError));
       }
     } finally {
@@ -787,6 +796,10 @@ export function AcpAuthenticationPanel({
       }
     } catch (nextError) {
       if (activeAuthenticationRef.current?.requestId === active.requestId) {
+        if (nextError instanceof AcpInputOutcomeUnknownError) {
+          setAuthorizationCode('');
+          setAuthorizationCodeUnknown(true);
+        }
         setError(nextError instanceof Error ? nextError.message : String(nextError));
       }
     } finally {
@@ -914,6 +927,7 @@ export function AcpAuthenticationPanel({
           authorization={authorization}
           authorizationCode={authorizationCode}
           authorizationCodeSubmitted={authorizationCodeSubmitted}
+          authorizationCodeUnknown={authorizationCodeUnknown}
           submittingAuthorizationCode={submittingAuthorizationCode}
           userCodeCopied={userCodeCopied}
           onOpenAuthorization={() => void handleOpenAuthorization()}
@@ -943,6 +957,7 @@ export function AcpAuthenticationAuthorizationView({
   authorization,
   authorizationCode,
   authorizationCodeSubmitted,
+  authorizationCodeUnknown = false,
   submittingAuthorizationCode,
   userCodeCopied,
   onOpenAuthorization,
@@ -956,6 +971,7 @@ export function AcpAuthenticationAuthorizationView({
   authorization: AcpAuthorizationDetails;
   authorizationCode: string;
   authorizationCodeSubmitted: boolean;
+  authorizationCodeUnknown?: boolean;
   submittingAuthorizationCode: boolean;
   userCodeCopied: boolean;
   onOpenAuthorization: () => void;
@@ -1052,7 +1068,7 @@ export function AcpAuthenticationAuthorizationView({
               <Input
                 id={authorizationCodeInputId}
                 value={authorizationCode}
-                disabled={authorizationCodeSubmitted}
+                disabled={authorizationCodeSubmitted || authorizationCodeUnknown}
                 autoComplete="one-time-code"
                 spellCheck={false}
                 placeholder={t(
@@ -1073,6 +1089,7 @@ export function AcpAuthenticationAuthorizationView({
               size="medium"
               disabled={
                 authorizationCodeSubmitted ||
+                authorizationCodeUnknown ||
                 submittingAuthorizationCode ||
                 !authorizationCode.trim()
               }

@@ -44,6 +44,9 @@ const mocks = vi.hoisted(() => {
   const streamsConnect = vi.fn(async () => undefined);
   const streamsTransportConstructors = vi.fn();
   const machineRpcConstructors = vi.fn();
+  const encryptedAcpTransport = {
+    handler: null as null | ((request: any, options: any) => Promise<any>),
+  };
   const machineRpcStart = vi.fn(async () => {});
   const machineRpcStop = vi.fn();
   const machineRpcOpenTurnDiff = vi.fn(async () => ({ status: 'ok' }));
@@ -99,6 +102,7 @@ const mocks = vi.hoisted(() => {
     streamsConnect,
     streamsTransportConstructors,
     machineRpcConstructors,
+    encryptedAcpTransport,
     machineRpcStart,
     machineRpcStop,
     machineRpcOpenTurnDiff,
@@ -338,7 +342,8 @@ vi.mock('../src/providers/workspace-machine-monitor-transport', () => ({
   },
 }));
 
-vi.mock('@lody/loro-streams-rpc', () => ({
+vi.mock('@lody/loro-streams-rpc', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@lody/loro-streams-rpc')>()),
   createLoroStreamsJsonStreamClient: vi.fn(() => mocks.streamClient),
   LoroStreamsLiveModePolicy: class LoroStreamsLiveModePolicy {
     constructor(readonly options: unknown) {}
@@ -411,6 +416,25 @@ vi.mock('@lody/shared', async (importOriginal) => {
   };
 });
 
+vi.mock('../src/providers/encrypted-dispatch-legacy', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../src/providers/encrypted-dispatch-legacy')>();
+  return {
+    ...actual,
+    createEncryptedDispatchLegacy: (
+      options: Parameters<typeof actual.createEncryptedDispatchLegacy>[0]
+    ) => {
+      if (!mocks.encryptedAcpTransport.handler)
+        return actual.createEncryptedDispatchLegacy(options);
+      return {
+        requestFeature: (request: unknown, requestOptions: unknown) =>
+          mocks.encryptedAcpTransport.handler!(request, requestOptions),
+        close: async () => {},
+      } as ReturnType<typeof actual.createEncryptedDispatchLegacy>;
+    },
+  };
+});
+
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
 import { META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX } from '../src/lib/clear-local-cache';
 import { waitForWorkspaceContentAdmission } from '../src/providers/workspace-mode-admission';
@@ -420,6 +444,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     vi.useFakeTimers({
       toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
     });
+    mocks.encryptedAcpTransport.handler = null;
     mocks.repoOverride = null;
     mocks.realTokenProvider = false;
     mocks.tokenReady.mockReset().mockResolvedValue('streams-token');
@@ -1861,6 +1886,303 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       });
       expect(comments.getState().meta.sessionId).toBe('synthetic');
       runtime.releasePreviewVisualCommentStoreRef('synthetic' as SessionId);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it('routes remote authentication and probing through protected interaction with translated IDs', async () => {
+    vi.useRealTimers();
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const repo = await RealRepo.create({});
+    mocks.repoOverride = repo;
+    await repo.upsertDocMeta('machine-remote-machine', {
+      protocolCapabilities: { e2eeAcpInteraction: 1 },
+    });
+    const { createRpcSecretRecipient, encryptRpcSecret } = await import('@lody/loro-streams-rpc');
+    const { e2eeAcpInteractionResponseContext, e2eeAcpInteractionInputContext } =
+      await import('@lody/shared/e2ee-rpc');
+    const inputRecipient = await createRpcSecretRecipient();
+    const device = '22'.repeat(32);
+    const calls: any[] = [];
+    const inputs: unknown[] = [];
+    let responseKey: any;
+    let interactionId = '';
+    let kind = '';
+    let submitted = false;
+    mocks.encryptedAcpTransport.handler = async (request, options) => {
+      expect(request.method).toBe('machine/acp-interaction');
+      calls.push({ request, options });
+      const params = request.params;
+      options.onPrepared?.(device);
+      if (params.action === 'start') {
+        responseKey = params.responseKey;
+        interactionId = options.requestId;
+        kind = params.kind;
+      } else expect(options.expectedDevice).toBe(device);
+      if (params.action === 'submit') {
+        inputs.push(
+          JSON.parse(
+            await inputRecipient.decrypt(
+              params.inputEnvelope,
+              e2eeAcpInteractionInputContext({
+                workspaceId: 'workspace-1',
+                machineId: 'remote-machine',
+                requesterDevice: device,
+                interactionRequestId: interactionId,
+                interactionId: params.interactionId,
+              })
+            )
+          )
+        );
+        submitted = true;
+      }
+      const completed = params.action === 'poll' && (kind === 'probe' || submitted);
+      const payload = completed
+        ? {
+            result: {
+              kind,
+              response:
+                kind === 'authenticate'
+                  ? {
+                      type: 'machine/acp-authenticate_response',
+                      machineId: 'remote-machine',
+                      requestId: interactionId,
+                      agentType: 'sorbet',
+                      success: true,
+                      disposition: 'authenticated',
+                    }
+                  : {
+                      type: 'machine/acp-capabilities-refresh_response',
+                      machineId: 'remote-machine',
+                      configId: 'config',
+                      cliType: 'builtin',
+                      agentType: 'sorbet',
+                      success: true,
+                    },
+            },
+          }
+        : params.action === 'activate' && kind === 'authenticate'
+          ? {
+              progress: {
+                type: 'machine/acp-authentication-progress',
+                machineId: 'remote-machine',
+                requestId: interactionId,
+                agentType: 'sorbet',
+                status: 'starting',
+              },
+              progressCursor: 1,
+            }
+          : null;
+      const envelope = payload
+        ? await encryptRpcSecret(
+            responseKey,
+            JSON.stringify(payload),
+            e2eeAcpInteractionResponseContext({
+              workspaceId: 'workspace-1',
+              machineId: 'remote-machine',
+              requesterDevice: device,
+              interactionRequestId: interactionId,
+              requestId: options.requestId,
+            })
+          )
+        : undefined;
+      return {
+        ok: true,
+        result: {
+          type: 'machine/acp-interaction',
+          interactionRequestId: interactionId,
+          state: completed ? 'completed' : 'running',
+          ...(params.action === 'start' && kind === 'authenticate'
+            ? { inputPublicKey: inputRecipient.publicKey }
+            : {}),
+          ...(envelope ? { responseEnvelope: envelope } : {}),
+        },
+      };
+    };
+    const host = {
+      prepareDispatch: vi.fn(),
+      acceptDispatchResponse: vi.fn(),
+      prepareFeatureRpc: vi.fn(),
+      acceptFeatureRpcResponse: vi.fn(),
+    } as unknown as E2eeWorkspaceRuntime;
+    const access = createE2eeContent({
+      runtime: host,
+      workspaceId: 'workspace-1',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => null,
+    });
+    const runtime = await createWorkspaceRuntime({
+      content: access.content,
+      e2ee: access.e2ee,
+      accountId: 'account',
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1',
+      apiBaseUrl: 'https://synthetic.invalid',
+      syncMode: 'cloud',
+      e2eeLocalIdentity: {
+        accountId: 'account',
+        workspaceId: 'workspace-1',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: device,
+      },
+    });
+    const machine = 'remote-machine' as MachineId;
+    const requestId = '01234567-89ab-4cde-8fab-0123456789ab';
+    const progress = Promise.withResolvers<any>();
+    const unsubscribe = runtime.subscribeMachineAcpAuthenticationProgress(
+      machine,
+      requestId,
+      progress.resolve
+    );
+    try {
+      const result = runtime.waitForMachineAcpAuthenticateResponse(machine, requestId);
+      runtime.sendControl({
+        type: 'machine/acp-authenticate',
+        action: 'start',
+        workspaceId: 'workspace-1',
+        machineId: machine,
+        configId: 'config',
+        requestId,
+      } as never);
+      const first = await Promise.race([progress.promise, result]);
+      if ('error' in first) throw new Error(String(first.error));
+      expect(first).toMatchObject({ requestId, status: 'starting' });
+      const submitId = '11234567-89ab-4cde-8fab-0123456789ab';
+      const receipt = runtime.waitForMachineAcpAuthenticateResponse(machine, submitId);
+      runtime.sendControl({
+        type: 'machine/acp-authenticate',
+        action: 'submit-input',
+        workspaceId: 'workspace-1',
+        machineId: machine,
+        requestId: submitId,
+        authenticationRequestId: requestId,
+        interactionId: 'form',
+        authenticationInput: 'synthetic-input',
+      } as never);
+      expect(await receipt).toMatchObject({ success: true, disposition: 'input-accepted' });
+      expect(await result).toMatchObject({
+        success: true,
+        requestId,
+        disposition: 'authenticated',
+      });
+      expect(inputs).toEqual([{ action: 'submit-input', authenticationInput: 'synthetic-input' }]);
+      expect(calls[0].options.requestId).toBe(requestId.replaceAll('-', ''));
+      expect(calls.slice(0, 2).map((call) => call.request.params.action)).toEqual([
+        'start',
+        'activate',
+      ]);
+      expect(calls.map((call) => call.request.params.action)).toContain('submit');
+      expect(calls.map((call) => call.request.params.action)).toContain('poll');
+      calls.length = 0;
+      const probe = await runtime.requestMachineAcpCapabilitiesRefresh({
+        type: 'machine/acp-capabilities-refresh',
+        workspaceId: 'workspace-1',
+        machineId: machine,
+        configId: 'config',
+      } as never);
+      expect(probe).toMatchObject({ success: true, machineId: machine, configId: 'config' });
+      expect(calls.map((call) => call.request.params.action)).toEqual([
+        'start',
+        'activate',
+        'poll',
+      ]);
+      expect(calls[0].options.requestId).toMatch(/^[0-9a-f]{32}$/);
+      expect(mocks.machineRpcConstructors).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      await runtime.dispose();
+      await access.close();
+    }
+  });
+
+  it('rejects protected remote ACP operations when the machine has not advertised the encrypted capability', async () => {
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    mocks.repoOverride = await RealRepo.create({});
+    const host = {
+      prepareDispatch: vi.fn(),
+      acceptDispatchResponse: vi.fn(),
+      prepareFeatureRpc: vi.fn(),
+      acceptFeatureRpcResponse: vi.fn(),
+    } as unknown as E2eeWorkspaceRuntime;
+    const access = createE2eeContent({
+      runtime: host,
+      workspaceId: 'workspace-1',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => null,
+    });
+    const runtime = await createWorkspaceRuntime({
+      content: access.content,
+      e2ee: access.e2ee,
+      accountId: 'account',
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1',
+      apiBaseUrl: 'https://synthetic.invalid',
+      syncMode: 'cloud',
+      e2eeLocalIdentity: {
+        accountId: 'account',
+        workspaceId: 'workspace-1',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      },
+    });
+    try {
+      const probe = await runtime.requestMachineAcpCapabilitiesRefresh({
+        type: 'machine/acp-capabilities-refresh',
+        workspaceId: 'workspace-1',
+        machineId: 'remote-machine',
+        configId: 'config',
+      } as never);
+      expect(probe).toMatchObject({
+        success: false,
+        error: 'Encrypted ACP interaction is not supported by this machine',
+      });
+      const requestId = '01234567-89ab-4cde-8fab-0123456789ab';
+      const response = runtime.waitForMachineAcpAuthenticateResponse(
+        'remote-machine' as MachineId,
+        requestId
+      );
+      runtime.sendControl({
+        type: 'machine/acp-authenticate',
+        action: 'start',
+        workspaceId: 'workspace-1',
+        machineId: 'remote-machine',
+        configId: 'config',
+        requestId,
+      } as never);
+      await expect(response).resolves.toMatchObject({
+        success: false,
+        error: 'Encrypted ACP interaction is not supported by this machine',
+      });
+      const earlyId = '11234567-89ab-4cde-8fab-0123456789ab';
+      runtime.sendControl({
+        type: 'machine/acp-authenticate',
+        action: 'cancel',
+        workspaceId: 'workspace-1',
+        machineId: 'remote-machine',
+        requestId: 'cancel',
+        authenticationRequestId: earlyId,
+      } as never);
+      const earlyResponse = runtime.waitForMachineAcpAuthenticateResponse(
+        'remote-machine' as MachineId,
+        earlyId
+      );
+      runtime.sendControl({
+        type: 'machine/acp-authenticate',
+        action: 'start',
+        workspaceId: 'workspace-1',
+        machineId: 'remote-machine',
+        configId: 'config',
+        requestId: earlyId,
+      } as never);
+      await expect(earlyResponse).resolves.toMatchObject({
+        success: false,
+        error: 'ACP authentication cancelled',
+      });
+      expect(mocks.machineRpcConstructors).not.toHaveBeenCalled();
+      expect(host.prepareFeatureRpc).not.toHaveBeenCalled();
     } finally {
       await runtime.dispose();
     }

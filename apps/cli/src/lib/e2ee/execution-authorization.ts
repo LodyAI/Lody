@@ -61,10 +61,12 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
     const grants = new Map<string, Stamp>();
     let flight: Fiber.Fiber<Stamp | undefined> | undefined;
     let closed = false;
+    const authorityController = new AbortController();
     // Fence synchronously before asynchronous owner drain. Scope close still
     // owns the actual raw reads and final resource release.
     const invalidate = () => {
       closed = true;
+      authorityController.abort();
       grants.clear();
     };
     yield* Effect.addFinalizer(() => Effect.sync(invalidate));
@@ -214,7 +216,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         // Bounded cache; eviction can only require an earlier authenticated reread.
         if (grants.size >= 1024) grants.clear();
         grants.set(requesterDevice, start);
-        if (access !== 'execute') return { _tag: 'Authorized' };
+        if (access === 'read') return { _tag: 'Authorized' };
         return {
           _tag: 'Authorized',
           principal,
@@ -242,6 +244,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       ),
       authorizeRead: (workspaceId: string, requesterDevice: string) =>
         authorize(workspaceId, requesterDevice, 'read'),
+      authoritySignal: authorityController.signal,
       invalidate,
     };
   }

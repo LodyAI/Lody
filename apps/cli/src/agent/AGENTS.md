@@ -89,8 +89,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## `acp-authentication.ts`
 
-- The per-agent slot covers preparation and the child; cancel/timeout wins through cleanup,
-  terminates the process, and releases Retry. Stop the process before success.
+- The per-agent slot is daemon-wide across workspace runtimes and covers preparation and the child; cancel/timeout wins through cleanup. Retain a child whose exit is unconfirmed until its exit event. Stop the process before success.
 - Authorization data must never enter logs, chat, Flock, or config; raw provider output and
   secret defaults must never reach retained progress.
 - Claude capability refresh runs its native status command first so missing credentials surface

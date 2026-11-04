@@ -591,6 +591,59 @@ describe('AcpAuthenticationManager', () => {
     (await acquireSorbetCredentialMutation()).release();
   });
 
+  it('keeps a replacement manager fenced after cleanup fails until the child exits', async () => {
+    vi.useFakeTimers();
+    const child = createFakeChild();
+    child.kill = vi.fn(() => true);
+    const spawned = createDeferred<void>();
+    const spawnProcess = vi.fn(() => {
+      spawned.resolve();
+      return child;
+    });
+    const options = {
+      nodeProcess: fakeNodeProcess(spawnProcess),
+      resolveLoginShellEnv: async () => ({}),
+      terminationGraceMs: 2,
+    };
+    const first = new AcpAuthenticationManager(createSilentLogger(), options);
+    const reopened = new AcpAuthenticationManager(createSilentLogger(), options);
+    const input = {
+      cliType: 'custom' as const,
+      agentType: 'unconfirmed-cleanup-fence',
+      customAcp: { command: '/synthetic/agent', args: [] },
+    };
+    try {
+      const original = first.authenticate({ ...input, requestId: 'original' });
+      await spawned.promise;
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(original).resolves.toMatchObject({
+        success: false,
+        disposition: 'error',
+        error: expect.stringContaining('process cleanup is unconfirmed'),
+      });
+      expect(child.exitCode).toBeNull();
+      await expect(
+        reopened.authenticate({ ...input, requestId: 'overlap' })
+      ).resolves.toMatchObject({
+        success: false,
+        error: expect.stringContaining('authentication is already running'),
+      });
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+
+      child.exitCode = 0;
+      child.emit('exit', 0, null);
+      const next = createFakeChild();
+      spawnProcess.mockImplementation(() => next);
+      const retry = reopened.authenticate({ ...input, requestId: 'after-exit' });
+      await vi.advanceTimersByTimeAsync(20);
+      await retry;
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+    } finally {
+      child.exitCode = 0;
+      child.emit('exit', 0, null);
+    }
+  });
+
   it.each(['custom', 'devin', 'sorbet'] as const)(
     'bridges request-scoped ACP form elicitation for %s',
     async (provider) => {

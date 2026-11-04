@@ -445,6 +445,7 @@ for (const method of ['sorbet/credentials-list', 'sorbet/credentials-logout'] as
         };
         const original = yield* f.sender.prepareFeature(input);
         const calls: string[] = [];
+        const signers: string[] = [];
         let authorized = false;
         let revokeDuringExecution = false;
         const checked = yield* Deferred.make<void>();
@@ -467,9 +468,11 @@ for (const method of ['sorbet/credentials-list', 'sorbet/credentials-logout'] as
           isOpen: () => true,
           client: streams.client,
           handle: async (
-            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+            context: import('./feature-rpc').EncryptedFeatureContext
           ) => {
             calls.push(request.method);
+            signers.push(context.requesterDevice);
             if (revokeDuringExecution) authorized = false;
             return { ok: false as const, error: 'synthetic outcome' };
           },
@@ -500,6 +503,7 @@ for (const method of ['sorbet/credentials-list', 'sorbet/credentials-logout'] as
           })
         );
         expect(calls).toEqual([method]);
+        expect(signers).toEqual([original.requesterDevice]);
         const replies = streams.writes.filter((write) => write.stream.includes(':res:'));
         expect(replies[1]).toEqual(replies[0]);
         const reply = replies[0]?.value as { frame: string };
@@ -742,4 +746,53 @@ it('shares the feature codec with the ordinary read adapter for a Guest, with co
     await renderer.close();
     vi.useRealTimers();
   }
+});
+
+it('protects interaction progress from another workspace member and binds both directions to the signed identity', async () => {
+  const { createRpcSecretRecipient, encryptRpcSecret } = await import('@lody/loro-streams-rpc');
+  const { e2eeAcpInteractionInputContext, e2eeAcpInteractionResponseContext } =
+    await import('@lody/shared/e2ee-rpc');
+  const { E2eeAcpInteractionResultSchema } = await import('@lody/shared/local-machine-rpc');
+  const initiator = await createRpcSecretRecipient();
+  const other = await createRpcSecretRecipient();
+  const identity = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    requesterDevice: 'a'.repeat(64),
+    interactionRequestId: 'b'.repeat(32),
+    requestId: 'c'.repeat(32),
+  };
+  const progress = JSON.stringify({
+    authorizationUrl: 'https://example.invalid/private',
+    userCode: 'SYNTHETIC-CODE',
+  });
+  const responseContext = e2eeAcpInteractionResponseContext(identity);
+  const envelope = await encryptRpcSecret(initiator.publicKey, progress, responseContext);
+  expect(await initiator.decrypt(envelope, responseContext)).toBe(progress);
+  await expect(other.decrypt(envelope, responseContext)).rejects.toThrow();
+  await expect(
+    initiator.decrypt(
+      envelope,
+      e2eeAcpInteractionResponseContext({ ...identity, requesterDevice: 'd'.repeat(64) })
+    )
+  ).rejects.toThrow();
+  const result = {
+    type: 'machine/acp-interaction',
+    interactionRequestId: identity.interactionRequestId,
+    state: 'running',
+    responseEnvelope: envelope,
+  };
+  expect(E2eeAcpInteractionResultSchema.safeParse(result).success).toBe(true);
+  expect(E2eeAcpInteractionResultSchema.safeParse({ ...result, progress }).success).toBe(false);
+  expect(JSON.stringify(result)).not.toContain('SYNTHETIC-CODE');
+  const target = await createRpcSecretRecipient();
+  const inputContext = e2eeAcpInteractionInputContext({
+    ...identity,
+    interactionId: 'interaction',
+  });
+  const input = await encryptRpcSecret(target.publicKey, 'SYNTHETIC-INPUT', inputContext);
+  expect(await target.decrypt(input, inputContext)).toBe('SYNTHETIC-INPUT');
+  await expect(
+    target.decrypt(input, e2eeAcpInteractionInputContext({ ...identity, interactionId: 'other' }))
+  ).rejects.toThrow();
 });

@@ -16,6 +16,7 @@ import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspa
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
+import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
 import { SESSION_GOAL_ACTIONS } from './goal';
 import {
@@ -150,7 +151,25 @@ export const SorbetCredentialsResultSchema = z.discriminatedUnion('type', [
 
 export type SorbetCredentialsResult = z.infer<typeof SorbetCredentialsResultSchema>;
 
+export const E2eeAcpInteractionParamsSchema = z.union([
+  z.object({ action: z.literal('start'), kind: z.literal('probe'), configId: AgentConfigIdSchema, force: z.boolean().optional(), responseKey: RpcSecretPublicKeySchema }).strict(),
+  z.object({ action: z.literal('start'), kind: z.literal('authenticate'), configId: AgentConfigIdSchema, methodId: z.string().trim().min(1).max(1024).optional(), responseKey: RpcSecretPublicKeySchema }).strict(),
+  z.object({ action: z.literal('activate'), interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/) }).strict(),
+  z.object({ action: z.literal('poll'), interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/), progressAck: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional() }).strict(),
+  z.object({ action: z.literal('submit'), interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/), interactionId: z.string().trim().min(1).max(1024), inputEnvelope: RpcSecretEnvelopeSchema }).strict(),
+  z.object({ action: z.literal('cancel'), interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/) }).strict(),
+]);
+
+export const E2eeAcpInteractionResultSchema = z.object({
+  type: z.literal('machine/acp-interaction'),
+  interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/),
+  state: z.enum(['running', 'completed', 'cancelled', 'expired']),
+  inputPublicKey: RpcSecretPublicKeySchema.optional(),
+  responseEnvelope: RpcSecretEnvelopeSchema.optional(),
+}).strict();
+
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({ method: z.literal('machine/acp-interaction'), params: E2eeAcpInteractionParamsSchema }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('sorbet/credentials-list'),
     params: z.object({ configId: AgentConfigIdSchema }).strict(),
@@ -486,6 +505,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
 ]);
 
 export const LocalMachineRpcResultSchema = z.union([
+  E2eeAcpInteractionResultSchema,
   MachineStatusResponseSchema,
   MachinePingResponseSchema,
   MachineAcpBinaryStatusResponseSchema,

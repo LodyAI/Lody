@@ -66,6 +66,11 @@ export class MachineRuntime {
       if (!context) throw new Error('e2ee_rpc_unavailable');
       return this.requireHandler().readEncryptedMachineRequest(request, context);
     }
+    if (request.method === 'machine/acp-interaction') {
+      if (!context?.authority || context.authority.signal.aborted || !context.authority.isCurrent())
+        throw new Error('e2ee_feature_unavailable');
+      return this.requireHandler().handleEncryptedAcpInteraction(request, context);
+    }
     return this.dispatchLocalMachineRpc(request, context?.signal);
   }
   private handler: MessageHandler | null = null;

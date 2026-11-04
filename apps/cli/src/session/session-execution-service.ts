@@ -859,6 +859,7 @@ function createAcpRefreshAbortError(): DOMException {
 }
 
 type AcpAuthenticationOptions = {
+  signal?: AbortSignal;
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
 };
 
@@ -8621,10 +8622,19 @@ export class SessionExecutionService {
       };
     }
 
-    const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-      message.configId,
-      this.deps.machineId
-    );
+    const cancelled = () => ({
+      ...base,
+      success: true as const,
+      disposition: 'cancelled' as const,
+    });
+    if (options.signal?.aborted) return cancelled();
+    const config = await this.deps.workspaceDocument
+      .getAgentConfigForMachineLaunch(message.configId, this.deps.machineId)
+      .catch((error: unknown) => {
+        if (options.signal?.aborted) return undefined;
+        throw error;
+      });
+    if (options.signal?.aborted) return cancelled();
     if (!config || (config.cliType === 'custom' && !config.customAcp)) {
       return {
         ...base,
@@ -8635,7 +8645,13 @@ export class SessionExecutionService {
     }
     const resolvedBase = { ...base, agentType: config.agentType };
     const profileStore = getCodexProfileStore();
-    const codexProfile = await profileStore.resolve(this.deps.workspaceId, config, true);
+    const codexProfile = await profileStore
+      .resolve(this.deps.workspaceId, config, true)
+      .catch((error: unknown) => {
+        if (options.signal?.aborted) return undefined;
+        throw error;
+      });
+    if (options.signal?.aborted) return cancelled();
 
     const onProgress = (event: AcpAuthenticationProgressEvent): void => {
       if (event.status === 'auth-methods') {
@@ -8658,128 +8674,144 @@ export class SessionExecutionService {
         ...event,
       });
     };
-    const result = await this.acpAuthenticationManager.authenticate({
-      agentConfigId: config.id,
-      requestId: message.requestId,
-      cliType: config.cliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      magpieGatewayUrl: config.magpieGatewayUrl,
-      env: config.env,
-      ...(message.methodId ? { methodId: message.methodId } : {}),
-      onProgress,
-      codexProfile,
-      authenticateManagedProfile:
-        codexProfile?.profile.mode === 'api-key'
-          ? async ({ signal, requestInput }) => {
-              const frozenBinding = JSON.stringify(config.codexAuth);
-              const input = await requestInput(
-                {
-                  title: 'Codex API Key',
-                  description: `Confirm the destination: ${codexProfile.profile.mode === 'api-key' ? codexProfile.profile.baseUrl : ''}. The key is stored only on this machine.`,
-                  fields: [{ id: 'apiKey', type: 'secret', label: 'API Key', required: true }],
-                },
-                `Enter an API Key for ${codexProfile.profile.mode === 'api-key' ? codexProfile.profile.baseUrl : ''}`
-              );
-              const assertCurrent = async () => {
-                signal.throwIfAborted();
-                const current = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-                  config.id,
-                  this.deps.machineId
+    const cancelAuthentication = () => this.acpAuthenticationManager.cancel(message.requestId);
+    options.signal?.addEventListener('abort', cancelAuthentication, { once: true });
+    try {
+      if (options.signal?.aborted) return cancelled();
+      const authentication = this.acpAuthenticationManager.authenticate({
+        agentConfigId: config.id,
+        requestId: message.requestId,
+        cliType: config.cliType,
+        agentType: config.agentType,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        magpieGatewayUrl: config.magpieGatewayUrl,
+        env: config.env,
+        ...(message.methodId ? { methodId: message.methodId } : {}),
+        onProgress,
+        codexProfile,
+        authenticateManagedProfile:
+          codexProfile?.profile.mode === 'api-key'
+            ? async ({ signal, requestInput }) => {
+                const frozenBinding = JSON.stringify(config.codexAuth);
+                const input = await requestInput(
+                  {
+                    title: 'Codex API Key',
+                    description: `Confirm the destination: ${codexProfile.profile.mode === 'api-key' ? codexProfile.profile.baseUrl : ''}. The key is stored only on this machine.`,
+                    fields: [{ id: 'apiKey', type: 'secret', label: 'API Key', required: true }],
+                  },
+                  `Enter an API Key for ${codexProfile.profile.mode === 'api-key' ? codexProfile.profile.baseUrl : ''}`
                 );
-                if (!current || JSON.stringify(current.codexAuth) !== frozenBinding)
-                  throw new Error('Provider changed during authentication; try again');
-                assertManagedCodexProfileConfig(current);
-              };
-              await assertCurrent();
-              await profileStore.withApiKeyCandidate(
-                codexProfile,
-                String(input.apiKey ?? ''),
-                async (candidateKey) => {
-                  await this.deps.fetchAcpCapabilities(
-                    config.cliType,
-                    config.agentType,
-                    config.env,
-                    config.customAcp,
-                    config.runtimeOverrides,
-                    {
-                      signal,
-                      magpieGatewayUrl: config.magpieGatewayUrl,
-                      codexProfile: { profile: codexProfile, candidateKey },
-                      verifyCodexCredential: true,
-                    }
+                const assertCurrent = async () => {
+                  signal.throwIfAborted();
+                  const current = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+                    config.id,
+                    this.deps.machineId
                   );
-                  await assertCurrent();
-                },
-                signal
-              );
+                  if (!current || JSON.stringify(current.codexAuth) !== frozenBinding)
+                    throw new Error('Provider changed during authentication; try again');
+                  assertManagedCodexProfileConfig(current);
+                };
+                await assertCurrent();
+                await profileStore.withApiKeyCandidate(
+                  codexProfile,
+                  String(input.apiKey ?? ''),
+                  async (candidateKey) => {
+                    await this.deps.fetchAcpCapabilities(
+                      config.cliType,
+                      config.agentType,
+                      config.env,
+                      config.customAcp,
+                      config.runtimeOverrides,
+                      {
+                        signal,
+                        magpieGatewayUrl: config.magpieGatewayUrl,
+                        codexProfile: { profile: codexProfile, candidateKey },
+                        verifyCodexCredential: true,
+                      }
+                    );
+                    await assertCurrent();
+                  },
+                  signal
+                );
+              }
+            : undefined,
+      });
+      // authenticate reserves its slot synchronously; catch aborts during registration.
+      if (options.signal?.aborted) cancelAuthentication();
+      const result = await authentication;
+      if (options.signal?.aborted) return cancelled();
+      if (result.success && result.disposition === 'authenticated') {
+        const refreshController = new AbortController();
+        const refreshTimeoutMs = Math.max(
+          1,
+          Math.min(
+            ACP_POST_AUTH_REFRESH_MAX_MS,
+            ACP_AUTHENTICATION_WORKFLOW_DEADLINE_MS - (Date.now() - workflowStartedAt)
+          )
+        );
+        const refreshTimeout = setTimeout(() => refreshController.abort(), refreshTimeoutMs);
+        refreshTimeout.unref?.();
+        let refresh: MachineAcpCapabilitiesRefreshResponse;
+        try {
+          refresh = await this.refreshMachineAcpCapabilitiesForConfig(
+            {
+              type: 'machine/acp-capabilities-refresh',
+              machineId: message.machineId,
+              workspaceId: message.workspaceId,
+              configId: message.configId,
+              cliType: config.cliType,
+              agentType: config.agentType,
+              customAcp: config.customAcp,
+              runtimeOverrides: config.runtimeOverrides,
+              magpieGatewayUrl: config.magpieGatewayUrl,
+              env: config.env,
+              codexAuth: config.codexAuth,
+              // Authentication changes what the agent will advertise (models and
+              // config options gated on the account), and the persisted entry was
+              // stamped with the same launch inputs, so only a real probe can tell
+              // the caller whether the new credentials actually work.
+              force: true,
+            },
+            {
+              signal: options.signal
+                ? AbortSignal.any([refreshController.signal, options.signal])
+                : refreshController.signal,
             }
-          : undefined,
-    });
-    if (result.success && result.disposition === 'authenticated') {
-      const refreshController = new AbortController();
-      const refreshTimeoutMs = Math.max(
-        1,
-        Math.min(
-          ACP_POST_AUTH_REFRESH_MAX_MS,
-          ACP_AUTHENTICATION_WORKFLOW_DEADLINE_MS - (Date.now() - workflowStartedAt)
-        )
-      );
-      const refreshTimeout = setTimeout(() => refreshController.abort(), refreshTimeoutMs);
-      refreshTimeout.unref?.();
-      let refresh: MachineAcpCapabilitiesRefreshResponse;
-      try {
-        refresh = await this.refreshMachineAcpCapabilitiesForConfig(
-          {
-            type: 'machine/acp-capabilities-refresh',
+          );
+        } catch (error) {
+          refresh = {
+            type: 'machine/acp-capabilities-refresh_response',
             machineId: message.machineId,
-            workspaceId: message.workspaceId,
             configId: message.configId,
             cliType: config.cliType,
             agentType: config.agentType,
-            customAcp: config.customAcp,
-            runtimeOverrides: config.runtimeOverrides,
-            magpieGatewayUrl: config.magpieGatewayUrl,
-            env: config.env,
-            codexAuth: config.codexAuth,
-            // Authentication changes what the agent will advertise (models and
-            // config options gated on the account), and the persisted entry was
-            // stamped with the same launch inputs, so only a real probe can tell
-            // the caller whether the new credentials actually work.
-            force: true,
-          },
-          { signal: refreshController.signal }
-        );
-      } catch (error) {
-        refresh = {
-          type: 'machine/acp-capabilities-refresh_response',
-          machineId: message.machineId,
-          configId: message.configId,
-          cliType: config.cliType,
-          agentType: config.agentType,
-          success: false,
-          error: refreshController.signal.aborted
-            ? 'Authentication succeeded, but capability verification timed out'
-            : formatErrorMessage(error),
-        };
-      } finally {
-        clearTimeout(refreshTimeout);
+            success: false,
+            error: refreshController.signal.aborted
+              ? 'Authentication succeeded, but capability verification timed out'
+              : formatErrorMessage(error),
+          };
+        } finally {
+          clearTimeout(refreshTimeout);
+        }
+        if (options.signal?.aborted) return cancelled();
+        if (!refresh.success) {
+          return {
+            ...resolvedBase,
+            ...result,
+            capabilitiesRefreshed: false,
+            authRequired: refresh.authRequired,
+            authMethods: refresh.authMethods,
+            error: refresh.error ?? 'Authentication succeeded, but capability refresh failed',
+          };
+        }
+        return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
       }
-      if (!refresh.success) {
-        return {
-          ...resolvedBase,
-          ...result,
-          capabilitiesRefreshed: false,
-          authRequired: refresh.authRequired,
-          authMethods: refresh.authMethods,
-          error: refresh.error ?? 'Authentication succeeded, but capability refresh failed',
-        };
-      }
-      return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
-    }
 
-    return { ...resolvedBase, ...result };
+      return { ...resolvedBase, ...result };
+    } finally {
+      options.signal?.removeEventListener('abort', cancelAuthentication);
+    }
   }
 
   async refreshMachineAcpCapabilities(

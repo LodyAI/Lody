@@ -141,6 +141,7 @@ import {
   type LocalProjectControlErrorCode,
   type LocalProjectControlRequest,
   type LocalProjectControlResponse,
+  E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
   type LocalMachineRpcRequestValidated,
@@ -729,6 +730,11 @@ function isImageGenerationTerminalStatus(status: string): boolean {
 export class MessageHandler {
   private sessionManager: SessionManager;
   private logger: Logger;
+  private acpInteractionOwner?: Promise<
+    ReturnType<typeof import('./e2ee/acp-interaction-owner').createAcpInteractionOwner>
+  >;
+  private acpInteractionStopping = false;
+
   private machineId: MachineId;
   private token: string;
   private userId: string;
@@ -3896,6 +3902,9 @@ export class MessageHandler {
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
+          ...(this.encryptedAttachments
+            ? { e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION }
+            : {}),
           ...(this.sorbetCredentials
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
@@ -6258,6 +6267,9 @@ export class MessageHandler {
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
+          ...(this.encryptedAttachments
+            ? { e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION }
+            : {}),
           ...(this.sorbetCredentials
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
@@ -7052,6 +7064,128 @@ export class MessageHandler {
     );
   }
 
+  async handleEncryptedAcpInteraction(
+    request: Extract<LocalMachineRpcRequestValidated, { method: 'machine/acp-interaction' }>,
+    context: import('./e2ee/feature-rpc').EncryptedFeatureContext
+  ): Promise<LocalMachineRpcResponse> {
+    if (
+      !this.encryptedAttachments ||
+      request.workspaceId !== this.workspaceId ||
+      request.machineId !== this.machineId ||
+      this.acpInteractionStopping ||
+      context.signal.aborted ||
+      !context.authority ||
+      context.authority.signal.aborted ||
+      !context.authority.isCurrent()
+    )
+      throw new Error('e2ee_feature_unavailable');
+    if (!this.acpInteractionOwner) {
+      this.acpInteractionOwner = Promise.all([
+        import('./e2ee/acp-interaction-owner'),
+        import('@lody/loro-streams-rpc'),
+        import('@lody/shared'),
+      ]).then(
+        ([{ createAcpInteractionOwner }, { createRpcSecretRecipient, encryptRpcSecret }, shared]) =>
+          createAcpInteractionOwner({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            createRecipient: createRpcSecretRecipient,
+            encrypt: encryptRpcSecret,
+            start: ({ requestId, configId, kind, force, methodId, signal, onProgress }) => {
+              const common = { machineId: this.machineId, workspaceId: this.workspaceId };
+              if (kind === 'probe') {
+                return {
+                  result: this.executionService.refreshMachineAcpCapabilities(
+                    {
+                      ...common,
+                      type: 'machine/acp-capabilities-refresh',
+                      configId: configId as AgentConfigId,
+                      force,
+                    },
+                    { signal, onAcpBinaryProgress: onProgress }
+                  ),
+                  cancel: () => {},
+                };
+              }
+              return {
+                result: this.authenticateMachineAcpAndResumeSetup(
+                  {
+                    ...common,
+                    type: 'machine/acp-authenticate',
+                    action: 'start',
+                    requestId,
+                    configId: configId as AgentConfigId,
+                    methodId,
+                  },
+                  { onProgress, signal }
+                ),
+                cancel: async () => {
+                  await this.executionService.authenticateMachineAcp({
+                    ...common,
+                    type: 'machine/acp-authenticate',
+                    action: 'cancel',
+                    requestId,
+                    authenticationRequestId: requestId,
+                  });
+                },
+              };
+            },
+            submit: async ({ requestId, interactionId, input }) => {
+              let decoded: unknown;
+              try {
+                decoded = JSON.parse(input) as unknown;
+              } catch {
+                throw new Error('e2ee_acp_invalid_input');
+              }
+              if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded))
+                throw new Error('e2ee_acp_invalid_input');
+              const keys = Object.keys(decoded);
+              if (
+                !('action' in decoded) ||
+                (decoded.action === 'submit-code'
+                  ? keys.some((key) => key !== 'action' && key !== 'authorizationCode')
+                  : decoded.action === 'submit-input'
+                    ? keys.some((key) => key !== 'action' && key !== 'authenticationInput')
+                    : true)
+              )
+                throw new Error('e2ee_acp_invalid_input');
+              const message = shared.MachineAcpAuthenticateRequestSchema.safeParse({
+                ...decoded,
+                type: 'machine/acp-authenticate',
+                machineId: this.machineId,
+                workspaceId: this.workspaceId,
+                requestId,
+                authenticationRequestId: requestId,
+                ...('action' in decoded && decoded.action === 'submit-input'
+                  ? { interactionId }
+                  : {}),
+              });
+              if (
+                !message.success ||
+                (message.data.action !== 'submit-input' && message.data.action !== 'submit-code')
+              )
+                throw new Error('e2ee_acp_invalid_input');
+              const result = await this.executionService.authenticateMachineAcp({
+                ...message.data,
+                machineId: this.machineId,
+                workspaceId: this.workspaceId,
+              });
+              if (!result.success || result.disposition === 'not-running')
+                throw new Error('e2ee_acp_input_rejected');
+            },
+          })
+      );
+    }
+    const owner = await this.acpInteractionOwner;
+    if (this.acpInteractionStopping || context.signal.aborted)
+      throw new Error('e2ee_feature_unavailable');
+    try {
+      return { ok: true, result: await owner.handle(request.params, context) };
+    } catch {
+      return { ok: false, error: 'Encrypted ACP interaction failed.' };
+    }
+  }
+
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
     signal?: AbortSignal
@@ -7130,6 +7264,8 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'machine/acp-interaction':
+        throw new Error('e2ee_feature_unavailable');
       case 'machine/status':
         return this.executionService.getMachineStatus({
           type: 'machine/status',
@@ -9361,6 +9497,7 @@ export class MessageHandler {
   ): Promise<MachineAcpAuthenticateResponse> {
     const response = await this.executionService.authenticateMachineAcp(message, options);
     if (
+      !options.signal?.aborted &&
       message.action === 'start' &&
       response.success &&
       response.disposition === 'authenticated'
@@ -10778,6 +10915,8 @@ export class MessageHandler {
    * Flush pending ACP updates and tear down session resources.
    */
   async prepareForShutdown(): Promise<void> {
+    this.acpInteractionStopping = true;
+    await (await this.acpInteractionOwner)?.close();
     this.sessionDispatchWatcher.stop();
     this.executionService.stopCompletionPublication();
     void this.operationCoordinator
@@ -10787,6 +10926,8 @@ export class MessageHandler {
   }
 
   async cleanup(): Promise<void> {
+    this.acpInteractionStopping = true;
+    await (await this.acpInteractionOwner)?.close();
     this.executionService.stopCompletionPublication();
     const inboxShutdown = this.operationCoordinator.recoverStop();
     void inboxShutdown.catch((cause) =>
