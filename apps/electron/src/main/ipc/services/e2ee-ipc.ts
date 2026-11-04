@@ -2675,7 +2675,10 @@ export class E2eeIpc extends IpcService {
       throw new Error('e2ee_account_mismatch')
     let accountId: string | undefined
     let proofIdentity: typeof identity
-    const openLocal = (proof?: readonly E2eeWorkspaceHistoryPage[]) =>
+    // Join at most one drain of a reader this account just released for this
+    // workspace (e.g. the workspace runtime closing as its control page opens).
+    let drained = false
+    const acquire = (proof?: readonly E2eeWorkspaceHistoryPage[]) =>
       withDesktopE2eeAccount(
         (owner) =>
           Effect.gen(
@@ -2691,6 +2694,10 @@ export class E2eeIpc extends IpcService {
                   return yield* Effect.fail(new Error('e2ee_account_mismatch'))
               }
               accountId = owner.accountId
+              if (!drained) {
+                const closing = yield* owner.host.pendingClose(workspaceId)
+                if (closing) return { kind: 'closing', closing } as const
+              }
               const status = yield* owner.host.open(workspaceId, observed, proof)
               const latest =
                 expectedAccountId === undefined && !proofIdentity
@@ -2711,14 +2718,32 @@ export class E2eeIpc extends IpcService {
               const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
               readers.set(id, (readers.get(id) ?? 0) + 1)
               owner.readers.set(workspaceId, readers)
-              return expectedAccountId === undefined
-                ? status
-                : { ...status, readerOwner: this.readerOwner(owner) }
+              return {
+                kind: 'opened',
+                opened:
+                  expectedAccountId === undefined
+                    ? status
+                    : { ...status, readerOwner: this.readerOwner(owner) }
+              } as const
             }.bind(this)
           ),
         workspaceId,
         false
       )
+    // The drain runs outside the account lock, exactly like the releasing close.
+    const openLocal = async (proof?: readonly E2eeWorkspaceHistoryPage[]) => {
+      const first = await acquire(proof)
+      if (first.kind === 'opened') return first.opened
+      drained = true
+      await Effect.runPromise(first.closing).catch(() => {
+        throw new Error(
+          'e2ee_restart-required: Restart Lody to finish releasing encrypted resources.'
+        )
+      })
+      const second = await acquire(proof)
+      if (second.kind === 'opened') return second.opened
+      throw new Error('e2ee_closed')
+    }
     // Only a missing pre-snapshot proof requests history. A known conflict never retries.
     // Network work stays outside the native account lock and grants no reader on failure.
     return openLocal()

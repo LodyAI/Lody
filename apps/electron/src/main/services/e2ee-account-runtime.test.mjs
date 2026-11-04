@@ -240,7 +240,11 @@ void test('in-place and subframe navigation retain the ledger lease; document na
   const readers = new Map()
   const owner = {
     readers,
-    host: { open: () => Effect.succeed('open'), status: () => Effect.succeed('ready') }
+    host: {
+      pendingClose: () => Effect.succeed(undefined),
+      open: () => Effect.succeed('open'),
+      status: () => Effect.succeed('ready')
+    }
   }
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
     '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
@@ -989,6 +993,27 @@ void test('a confirmed link invitation closes through the quit barrier and reope
     'hasDeviceCredential'
   ])
     assert.deepEqual(after[key], before[key], key)
+})
+
+void test('a window reopening a workspace whose previous reader is still draining gets a reader after that drain, never e2ee_closed', async (t) => {
+  // Navigating from a workspace to its control page releases the workspace runtime's
+  // reader while the control page opens its own; a keyed device must not be shown
+  // as unapproved because the open arrived during the release.
+  const f = await personalJoinFixture(t)
+  const owner = await f.open('reopen-during-drain')
+  await owner.create()
+  const before = await owner.ipc.status(f.workspaceId)
+  // The releasing reader's locked half: the host entry is closing, its drain not yet run.
+  const drain = await Effect.runPromise(owner.host.beginCloseWorkspace(f.workspaceId))
+  owner.readers.delete(f.workspaceId)
+  const opened = await owner.ipc.open(f.workspaceId)
+  assert.equal(opened.genesisHash, before.genesisHash)
+  // The original releaser's late drain cannot close the replacement entry.
+  await Effect.runPromise(drain)
+  const after = await owner.ipc.status(f.workspaceId)
+  assert.equal(after.hasCurrentKey, true)
+  assert.equal(after.headHash, before.headHash)
+  assert.equal((await owner.ipc.ledgerView(f.workspaceId)).status.genesisHash, before.genesisHash)
 })
 
 void test('personal join IPC bridges the control-page observation outside the account lock and retains an offline proof', async (t) => {
@@ -2607,6 +2632,7 @@ async function memberIpcFixture(options = {}) {
           signed.push(label)
           return { workspaceId: 'team', genesisHash: '11'.repeat(32), mode: 'link' }
         }),
+      pendingClose: () => Effect.succeed(undefined),
       open: () => Effect.succeed({ hasCurrentKey: true }),
       ingestLedgerRecords: () => Effect.void,
       status: () => Effect.succeed({ hasCurrentKey: true }),

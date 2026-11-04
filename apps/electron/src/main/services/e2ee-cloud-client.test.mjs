@@ -675,6 +675,47 @@ void test('only exact authenticated member removal or device revocation carries 
   }
 })
 
+void test('a removed device learns its loss from the content grant action reported over HTTP 200', async () => {
+  // Convex streams action failures as an HTTP 200 error envelope; a real packaged
+  // run refused a removed member's content grant exactly so. Without the typed loss
+  // the device keeps its accepted join and every new invitation fails as conflict.
+  for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async () =>
+            Response.json(
+              { status: 'error', errorMessage: 'synthetic-private-cause', errorData: { code } },
+              { status: 200 }
+            )
+          )
+          const grant = yield* Effect.result(client.contentStreamsToken(access))
+          assert.equal(grant._tag, 'Failure')
+          assert.equal(
+            grant.failure instanceof E2eeMemberRemovedError,
+            code === 'e2ee_member_removed'
+          )
+          assert.equal(
+            grant.failure instanceof E2eeDeviceRevokedError,
+            code === 'e2ee_device_revoked'
+          )
+          assert.equal(JSON.stringify(grant.failure).includes('synthetic-private-cause'), false)
+          // Other credential-bound endpoints keep requiring Convex's 560 status.
+          for (const operation of [
+            client.memberPending(access),
+            client.memberRead({ ...access, requestId: '11'.repeat(16) })
+          ]) {
+            const result = yield* Effect.result(operation)
+            assert.equal(result._tag, 'Failure')
+            assert.equal(result.failure instanceof E2eeMemberRemovedError, false)
+            assert.equal(result.failure instanceof E2eeDeviceRevokedError, false)
+          }
+        })
+      )
+    )
+  }
+})
+
 void test('access loss authority belongs to a credential response, never an exception or unrelated endpoint', async () => {
   for (const code of ['e2ee_member_removed', 'e2ee_device_revoked']) {
     const terminal =
