@@ -900,7 +900,13 @@ export class E2eeIpc extends IpcService {
   }
   @IpcMethod()
   async retryMemberKeyDelivery(workspaceId: string, requestId: string) {
-    if (typeof requestId !== 'string' || !/^[0-9a-f]{32}$/.test(requestId))
+    // Member admissions use 32-hex ids; account pairing keeps its journaled admission id.
+    if (
+      typeof requestId !== 'string' ||
+      !/^(?:[0-9a-f]{32}|account-device-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(
+        requestId
+      )
+    )
       throw new Error('e2ee_invalid-input')
     const accountId = await this.readerAccount(workspaceId, sender())
     const delivery = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)?.requests.get(requestId)
@@ -1495,7 +1501,12 @@ export class E2eeIpc extends IpcService {
           withOwner: (workspaceId, work, create) =>
             withDesktopE2eeAccount((owner) => work(owner), workspaceId, create),
           run: (effect) => runDesktopE2eeOperation(accountId, effect),
-          workspaces: () => holder.hints
+          workspaces: () => holder.hints,
+          // The same main-owned delivery as a member approval: distribute-only round,
+          // per-device mailbox evidence, backoff retry and `memberKeyDeliveries` status.
+          deliverKeys: (workspaceId, requestId, device) => {
+            this.trackKeyDelivery(accountId, workspaceId, requestId, device)
+          }
         })
       })
       this.accountPairings.set(cloud.accountId, current)

@@ -12,7 +12,7 @@ import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
 import { Context, Effect, Layer, Scope, Exit, Result } from 'effect'
-import { KeyMailbox } from '@lody/e2ee-core/services'
+import { BackendError, KeyMailbox } from '@lody/e2ee-core/services'
 import { makeSqliteKeyMailbox, referenceKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite'
 import { WorkspaceKeyRoundFailure } from '@lody/e2ee-core'
 import {
@@ -3097,7 +3097,7 @@ void test('passive cache inspection stays account/product-window bound without o
   await assert.rejects(f.ipc.inspectCachedState('', 'machine'), /e2ee_invalid-input/)
 })
 
-async function accountPairingFixture(t) {
+async function accountPairingFixture(t, options = {}) {
   // Real custody, bootstrap, ledger hosts and SQLite journals on both devices; the
   // cloud is an in-memory relay plus the approver's own ledger as the history source.
   const f = await personalJoinFixture(t)
@@ -3210,7 +3210,7 @@ async function accountPairingFixture(t) {
       )
   }
   const hints = [{ workspaceId: f.workspaceId, name: 'Synthetic encrypted workspace', genesisHash }]
-  const hostFor = (owner, name) => {
+  const hostFor = (owner, name, extra = {}) => {
     const db = new DatabaseSync(join(owner.path, name))
     t.after(() => db.close())
     return makeDesktopAccountPairingHost({
@@ -3220,11 +3220,16 @@ async function accountPairingFixture(t) {
       cloud,
       withOwner: (_workspaceId, work) => Effect.runPromise(work(owner)),
       run: (effect) => Effect.runPromise(effect),
-      workspaces: () => hints
+      workspaces: () => hints,
+      ...extra
     })
   }
   const requester = hostFor(newDevice, 'account-pairing.sqlite')
-  const approving = hostFor(approver, 'account-pairing.sqlite')
+  const approving = hostFor(
+    approver,
+    'account-pairing.sqlite',
+    options.deliverKeys ? { deliverKeys: options.deliverKeys } : {}
+  )
 
   return {
     f,
@@ -3300,6 +3305,138 @@ void test('the new device opens the paired workspace and asks for its keys right
   assert.deepEqual(
     mailboxRequests.map((item) => [item.workspaceId, item.credential]),
     [[f.workspaceId, credential]]
+  )
+})
+
+void test('the approver sends the current epoch key to exactly the admitted device, retrying the same envelope until the new device decrypts', async (t) => {
+  // The approval hands the admitted device to main's delivery; the delivery here runs
+  // the same steps as `E2eeIpc.deliverMemberKeys`: ledger target check, distribute-only
+  // round, then mailbox evidence for that device.
+  const scheduled = []
+  const deliveries = []
+  let deliver = () => assert.fail('delivery before the fixture is ready')
+  const { f, approver, newDevice, genesisHash, cloud, requester, approving } =
+    await accountPairingFixture(t, {
+      deliverKeys: (workspaceId, requestId, device) => {
+        scheduled.push({ workspaceId, requestId, device })
+        deliveries.push(deliver(workspaceId, device))
+      }
+    })
+  const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(genesisHash, 'hex')))
+  const mailboxScope = Effect.runSync(Scope.make())
+  t.after(() => Effect.runPromise(Scope.close(mailboxScope, Exit.void)))
+  const mailbox = await Effect.runPromise(
+    makeSqliteKeyMailbox({
+      path: join(approver.path, 'reference-mailbox.sqlite'),
+      mode: 'create',
+      genesis,
+      ledger: () =>
+        Effect.promise(async () => {
+          const ledger = await Effect.runPromise(approver.host.ledgerView(f.workspaceId))
+          const records = ledger.recordsHex.map((value) => Buffer.from(value, 'hex'))
+          return Result.getOrThrow(
+            verifyLedger({
+              anchor: genesis,
+              records,
+              checkpoint: { length: records.length, head: hashRecordBytes(records.at(-1)) }
+            })
+          )
+        })
+    }).pipe(Scope.provide(mailboxScope))
+  )
+  const portFor = async (owner) => {
+    const device = await Effect.runPromise(owner.custody.openDevice(genesis))
+    return Context.get(
+      await Effect.runPromise(
+        Layer.buildWithScope(referenceKeyMailbox(mailbox, device.publicKey), mailboxScope)
+      ),
+      KeyMailbox
+    )
+  }
+  const approverPort = await portFor(approver)
+  // Envelope storage is refused until `refusing` is cleared; every attempt is recorded.
+  let refusing = true
+  const puts = []
+  const sending = {
+    ...approverPort,
+    put: (id, frame) => {
+      puts.push({ id, frame: Buffer.from(frame).toString('hex') })
+      return refusing
+        ? Effect.fail(new BackendError({ service: 'KeyMailbox', reason: 'unavailable' }))
+        : approverPort.put(id, frame)
+    }
+  }
+  deliver = async (workspaceId, device) => {
+    await Effect.runPromise(approver.host.open(workspaceId))
+    if (!(await Effect.runPromise(approver.host.keyDeliveryTarget(workspaceId, device))))
+      return 'e2ee_admission_not_ingested'
+    await Effect.runPromise(approver.host.distributeKeys(workspaceId, () => sending))
+    return Effect.runPromise(
+      approver.host.keyDeliveryEvidence(workspaceId, device, () => approverPort)
+    )
+  }
+  const approverCredential = await Effect.runPromise(
+    approver.bootstrap.deviceCredential(f.workspaceId)
+  )
+  let desktopPort
+  cloud.keyServices = (access) =>
+    Effect.promise(async () => {
+      assert.notEqual(access.credential, approverCredential)
+      desktopPort ??= await portFor(newDevice)
+      return { mailbox: () => desktopPort, history: () => cloud.history }
+    })
+
+  const request = await Effect.runPromise(requester.requestAccountPairing({}))
+  const preview = await Effect.runPromise(approving.inspectAccountPairing(request.pairingString))
+  const result = await Effect.runPromise(
+    approving.approveAccountPairing({
+      pairingString: request.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: [f.workspaceId]
+    })
+  )
+  assert.deepEqual(result.workspaces, [{ workspaceId: f.workspaceId, outcome: 'admitted' }])
+  // A refused mailbox leaves the key unsent, but the approval already returned admitted.
+  assert.equal(deliveries.length, 1)
+  assert.equal(await deliveries[0], 'e2ee_key_not_sent')
+  assert.ok(puts.length > 0)
+  const firstAttempt = puts.map((item) => ({ ...item }))
+
+  // Admitted and joined is not keyed: the claim's own key round finds no envelope.
+  assert.equal((await Effect.runPromise(requester.accountPairingRequest())).status, 'joined')
+  const joined = await Effect.runPromise(newDevice.host.open(f.workspaceId))
+  assert.equal(joined.hasCurrentKey, false)
+  // Exactly the device the verified ledger admitted, under the journaled admission id.
+  assert.deepEqual(
+    scheduled.map((item) => [item.workspaceId, item.device]),
+    [[f.workspaceId, joined.signingPublicKey]]
+  )
+  assert.match(scheduled[0].requestId, /^account-device-[0-9a-f-]{36}$/)
+
+  // The retry stores the same envelope under the same id: no re-encryption.
+  refusing = false
+  puts.length = 0
+  assert.equal(await deliver(f.workspaceId, joined.signingPublicKey), 'delivered')
+  assert.deepEqual(puts.slice(0, firstAttempt.length), firstAttempt)
+
+  await Effect.runPromise(newDevice.host.keyRound(f.workspaceId, () => desktopPort))
+  assert.equal((await Effect.runPromise(newDevice.host.status(f.workspaceId))).hasCurrentKey, true)
+  const room = { kind: 'meta' }
+  const context = {
+    protocol: 'loro-streams-crdt-payload-protection',
+    version: 2,
+    kind: 'update_batch'
+  }
+  const plaintext = new TextEncoder().encode('synthetic account pairing history')
+  const additionalData = new Uint8Array([4, 5, 6])
+  const sealed = await Effect.runPromise(
+    approver.host.seal(f.workspaceId, { epoch: 0, room, context, plaintext, additionalData })
+  )
+  assert.deepEqual(
+    await Effect.runPromise(
+      newDevice.host.openContent(f.workspaceId, { room, context, ...sealed, additionalData })
+    ),
+    plaintext
   )
 })
 

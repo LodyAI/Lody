@@ -115,6 +115,10 @@ export interface AccountPairingApproverWorkspace {
   invitation(record: Uint8Array): Effect.Effect<Uint8Array | null, unknown>;
   /** Device access for the relay; it never leaves the main process. */
   access(): Effect.Effect<E2eeDeviceAccess, unknown>;
+  /** Starts the existing current-epoch key distribution for the device whose admission
+   * `append` just confirmed in the verified ledger. It only schedules owned background
+   * work and returns at once: delivery never holds or undoes the approval. */
+  deliverKeys?(signingPublicKey: Uint8Array, requestId: string): Effect.Effect<void, unknown>;
 }
 
 /** One encrypted workspace of the account on the new device. */
@@ -773,6 +777,16 @@ export function makeAccountPairing(input: {
                 );
               outcomes.set(workspace.workspaceId, 'not-admitted');
               continue;
+            }
+            // The admission is now in the verified ledger: the new device needs the
+            // current epoch key from an existing device, which the invitation does
+            // not carry. Only this admitted device is named; the port schedules it.
+            if (workspace.deliverKeys) {
+              const scheduled = yield* Effect.result(
+                workspace.deliverKeys(new Uint8Array(row.signingPublicKey), journaled.request_id)
+              );
+              if (Result.isFailure(scheduled))
+                rememberDesktopE2eeFailure('account-pairing-key-delivery', scheduled.failure);
             }
             let invitation: Uint8Array | null = journaled.invitation
               ? new Uint8Array(journaled.invitation)
