@@ -71,7 +71,13 @@ asked the server.
   records the receipt, discards the frame and returns the exact code. Any other check
   failure establishes nothing and returns the frame, as before; nothing is retried.
   The cost is one credential round trip per dispatch, the same one a failed
-  preparation already made.
+  preparation already made. The check starts beside the local preparation, not
+  after it: the renderer races preparation against a 200 ms deadline, local
+  preparation measured 10–60 ms, and a serial check made every live send miss the
+  deadline. The deadline only bounds activation, so a preparation that answers late
+  still stores its original and sends the dispatch for the already-activated turn.
+  Raising the deadline was rejected because it is also the bound for refusing a
+  known machine withdrawal before any write.
 - **Reader hint.** Revocation keeps workspace membership visible, so nothing made
   a revoked window refresh. After recording a loss, main sends each reader window a
   reason-free `e2ee.accessLost` push; the renderer runs its existing native refresh,

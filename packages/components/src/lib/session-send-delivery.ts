@@ -13,7 +13,11 @@ import debug from 'debug';
 import i18next from 'i18next';
 import type { SessionDocDraft, WorkspaceRuntime } from '@/atoms/runtime';
 import { SessionInputNotSentError } from './session-accepted-inputs';
-import { EncryptedPrepareTimeout, isKnownMachineWithdrawal } from './encrypted-dispatch-outcome';
+import {
+  EncryptedPrepareTimeout,
+  isKnownMachineWithdrawal,
+  type PreparedEncryptedDispatch,
+} from './encrypted-dispatch-outcome';
 import { throwIfSendAborted } from './session-send-resources';
 
 const log = debug('lody:session-send');
@@ -269,15 +273,8 @@ export async function dispatchUserTurn(
     userId &&
     timestamp
   ) {
-    try {
-      const prepared = await runtime.prepareEncryptedDispatch(machineId, {
-        sessionId,
-        userTurnId,
-        userId,
-        timestamp,
-        inputConfig,
-      });
-      await runtime.sendResources.withSessionStore(sessionId, (store) => {
+    const store = (prepared: PreparedEncryptedDispatch) =>
+      runtime.sendResources.withSessionStore(sessionId, (store) => {
         store.setState((draft: SessionDocDraft) => {
           const existing = draft.rpcDispatchOriginals?.[userTurnId];
           if (existing !== undefined && existing !== prepared.original.frameHex)
@@ -286,16 +283,40 @@ export async function dispatchUserTurn(
           draft.rpcDispatchOriginals[userTurnId] = prepared.original.frameHex;
         });
       });
-      rpc = prepared.send().then(
+    const send = (prepared: PreparedEncryptedDispatch) =>
+      prepared.send().then(
         (response) => {
           if (response?.accepted) options?.onAccepted?.();
           return response?.accepted ?? false;
         },
         () => false
       );
-    } catch {
-      // Preparation/storage failure cannot remove or delay durable activation.
+    const unavailable = () => {
       log('Encrypted dispatch acceleration unavailable for %s/%s', sessionId, userTurnId);
+      return false;
+    };
+    try {
+      const prepared = await runtime.prepareEncryptedDispatch(machineId, {
+        sessionId,
+        userTurnId,
+        userId,
+        timestamp,
+        inputConfig,
+      });
+      await store(prepared);
+      rpc = send(prepared);
+    } catch (error) {
+      // Preparation/storage failure cannot remove or delay durable activation. A host
+      // that answers after the deadline still accelerates the activated turn.
+      rpc =
+        error instanceof EncryptedPrepareTimeout
+          ? error.late
+              .then(async (prepared) => {
+                await store(prepared);
+                return send(prepared);
+              })
+              .catch(unavailable)
+          : Promise.resolve(unavailable());
     }
   }
   if (runtime.contentMode !== 'e2ee' && machineId && inputConfig && userId && timestamp) {

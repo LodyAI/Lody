@@ -2354,7 +2354,7 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
         isDestroyed: () => false,
         send: (channel, payload) => pushes.push({ channel, payload: { ...payload } })
       })
-      const server = { lost: false }
+      const server = { lost: false, checks: 0 }
       const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
         'electron-ipc-decorator': {
           IpcService: class {},
@@ -2374,12 +2374,14 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
           desktopE2eeCloudClient: async () => ({
             accountId: 'account',
             client: {
-              contentStreamsToken: () =>
-                !server.lost
+              contentStreamsToken: () => {
+                server.checks += 1
+                return !server.lost
                   ? Effect.succeed({ token: 'synthetic-unused-token' })
                   : Loss
                     ? Effect.fail(new Loss())
-                    : Effect.fail(new Error('synthetic network failure')),
+                    : Effect.fail(new Error('synthetic network failure'))
+              },
               machineSharing: () => ({}),
               history: () => Effect.fail(new Error('synthetic history unavailable'))
             }
@@ -2393,7 +2395,10 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
         (owner) =>
           Effect.sync(() => {
             owner.host.prepareDispatch = () =>
-              Effect.succeed({ frame: 'synthetic-prepared-dispatch' })
+              Effect.sync(() => ({
+                frame: 'synthetic-prepared-dispatch',
+                checksSeenByPreparation: server.checks
+              }))
           }),
         'workspace',
         false
@@ -2408,9 +2413,14 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
       const sealed = await ipc.seal('workspace', sealInput)
       const openInput = { room, context, ...sealed, additionalData }
       assert.deepEqual(await ipc.openContent('workspace', openInput), sealInput.plaintext)
+      // The credential check is already asked while the local preparation runs: the
+      // renderer's dispatch fast path cannot absorb a serial server round trip.
+      const checksBefore = server.checks
       assert.deepEqual(await ipc.prepareDispatch('workspace', 'synthetic-machine', dispatchInput), {
-        frame: 'synthetic-prepared-dispatch'
+        frame: 'synthetic-prepared-dispatch',
+        checksSeenByPreparation: checksBefore + 1
       })
+      assert.equal(server.checks, checksBefore + 1)
 
       // The server accepted the removal/revocation; this live process has not learned it.
       server.lost = true

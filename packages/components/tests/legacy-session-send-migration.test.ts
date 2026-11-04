@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import {
@@ -403,6 +404,79 @@ it('settles timed-out input that a late verified withdrawal reaches before any m
     expect(f.turns().find((turn) => turn.id === 'late')?.items).toEqual(entry('late').items);
   } finally {
     vi.useRealTimers();
+  }
+});
+
+it('activates on time and still accelerates a turn whose encrypted preparation outlasts the deadline', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const f = fixture();
+  f.runtime.contentMode = 'e2ee';
+  const input = entry('slow-host');
+  const original = {
+    requestId: '04'.repeat(16),
+    targetMachineId: MACHINE,
+    frameHex: '05'.repeat(300),
+    requesterDevice: '06'.repeat(32),
+    expiresAt: 4_102_444_800_000,
+  };
+  const answered = Promise.withResolvers<void>();
+  const asked = Promise.withResolvers<void>();
+  const appended = Promise.withResolvers<string>();
+  // A host whose credential-confirmed preparation answers only after the renderer deadline.
+  const rpc = createEncryptedDispatchLegacy({
+    workspaceId: 'workspace',
+    prepare: async () => {
+      asked.resolve();
+      await answered.promise;
+      return original;
+    },
+    accept: async () => {
+      throw new Error('no response is delivered');
+    },
+    client: async () =>
+      ({
+        ensureJsonStream: async () => undefined,
+        readJsonLive: (
+          _stream: string,
+          _state: unknown,
+          _batch: unknown,
+          options: { signal: AbortSignal }
+        ) =>
+          new Promise<void>((resolve) => options.signal.addEventListener('abort', () => resolve())),
+        appendJson: async (_stream: string, value: { id: string }) => appended.resolve(value.id),
+      }) as unknown as LoroStreamsJsonStreamClient,
+  });
+  cleanup.push(() => rpc.close());
+  f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
+  let dispatched: Promise<void> | undefined;
+  try {
+    const written = writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'history' },
+    });
+    await asked.promise;
+    await vi.advanceTimersByTimeAsync(200);
+    await written;
+    dispatched = dispatchUserTurn(f.runtime, SESSION, input.id);
+    await vi.advanceTimersByTimeAsync(200);
+    vi.useRealTimers();
+    // The deadline bounds activation: durable dispatch never waits for the host.
+    await vi.waitFor(() =>
+      expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe(input.id)
+    );
+    answered.resolve();
+    expect(
+      await Promise.race([appended.promise, dispatched.then(() => 'settled unaccelerated')])
+    ).toBe(original.requestId);
+    expect(f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id)).toBe(
+      original.frameHex
+    );
+  } finally {
+    vi.useRealTimers();
+    answered.resolve();
+    await rpc.close();
+    await dispatched;
   }
 });
 

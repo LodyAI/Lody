@@ -21,7 +21,9 @@ reader owns them.
 A prepared dispatch frame is returned only after this device's credential is
 confirmed with the server; an exact loss discards the frame and records the receipt,
 while any other check failure leaves the prepared frame unchanged. Never retry the
-check or replace a refusal with a fallback.
+check or replace a refusal with a fallback. Start the check beside the local
+preparation, never after it, because the renderer races preparation against its
+dispatch deadline.
 A sender without a reader is refused with the identity's recorded removal reason as
 its exact public code. Without a receipt, and on account mismatch, the refusal stays
 the untagged `e2ee_not_open`, which the boundary publishes only as the sanitized

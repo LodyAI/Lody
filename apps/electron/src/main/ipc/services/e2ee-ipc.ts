@@ -2589,7 +2589,8 @@ export class E2eeIpc extends IpcService {
       // Preparation is local, so it cannot see a removal or revocation by itself. Like
       // management, ask the server with this device's credential; only its exact answer
       // is loss. Any other check failure establishes nothing and changes no outcome.
-      const confirmAccess = async () => {
+      // The check runs beside the local work: the renderer's fast path has a deadline.
+      const confirmed = (async () => {
         try {
           await Effect.runPromise(
             cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
@@ -2598,17 +2599,18 @@ export class E2eeIpc extends IpcService {
           const loss = accessLoss(checked)
           if (loss) await this.removeLocalWorkspace(access, loss)
         }
-      }
+      })()
+      confirmed.catch(() => undefined)
       const prepared = await runDesktopE2eeOperation(access.accountId, access.work).catch(
         async (error) => {
           if (accessLoss(error)) return this.removeLocalWorkspace(access, accessLoss(error)!)
           if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message)))
-            await confirmAccess()
+            await confirmed
           throw error
         }
       )
       // A frame prepared for a device the server no longer accepts never leaves main.
-      await confirmAccess()
+      await confirmed
       return prepared
     })
   }
