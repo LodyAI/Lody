@@ -283,6 +283,14 @@ export class E2eeIpc extends IpcService {
     slot.timer = undefined
     this.keyDeliveries.delete(key)
   }
+  /** The signed-in account, or undefined when it cannot be read. */
+  private keyDeliveryAccount() {
+    try {
+      return getIpcServiceDeps().authService.getCachedSessionIdentity().userId ?? undefined
+    } catch {
+      return undefined
+    }
+  }
   /** Drops every slot of a removed or reset workspace (all accounts when `accountId` is
    * absent, every workspace when `workspaceId` is too): nothing reopens it afterwards. */
   private dropKeyDeliveryWorkspace(workspaceId?: string, accountId?: string) {
@@ -389,6 +397,9 @@ export class E2eeIpc extends IpcService {
     const running = (async () => {
       // A request admitted during a round gets one follow-up pass; later ones wait for a poll.
       for (let pass = 0; pass < 2; pass++) {
+        // Sign-out or an account change ends this account's delivery at once.
+        if (!slot.aborted && this.keyDeliveryAccount() !== accountId)
+          this.dropKeyDeliverySlot(accountId, workspaceId)
         if (slot.aborted) return
         slot.again = false
         const coveredEntries = [...slot.requests].filter(
@@ -425,6 +436,9 @@ export class E2eeIpc extends IpcService {
           )
         } catch (cause) {
           this.pairingFailure = cause
+          if (this.keyDeliveryAccount() !== accountId)
+            this.dropKeyDeliverySlot(accountId, workspaceId)
+          if (slot.aborted) return
           const code = keyDeliveryCode(cause)
           // Terminal: this device can no longer deliver; drop the slot, never retry.
           if (TERMINAL_KEY_DELIVERY.has(code)) {
