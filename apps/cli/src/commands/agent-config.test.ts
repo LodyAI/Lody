@@ -13,7 +13,11 @@ import {
 import { importMagpieProviders, resolveMagpieImport } from './magpie-import';
 import { toAgentConfigOutput } from './agent-config-output';
 import type { AgentConfigMeta, MachineMeta } from '@lody/shared';
-import { resolveMachineOrThrow, resolveAgentConfigSelector } from './agent-config';
+import {
+  inferAgentConfigCliType,
+  resolveMachineOrThrow,
+  resolveAgentConfigSelector,
+} from './agent-config';
 
 const state = vi.hoisted(() => ({
   config: undefined as AgentConfigMeta | undefined,
@@ -125,6 +129,10 @@ describe('agent-config command helpers', () => {
         }
       )
     ).toThrow(/ambiguous/i);
+  });
+
+  it('classifies Sorbet as a builtin agent', () => {
+    expect(inferAgentConfigCliType('sorbet')).toBe('builtin');
   });
 });
 

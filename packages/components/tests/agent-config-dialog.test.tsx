@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-// @vitest-environment jsdom
 import { act, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -34,7 +33,6 @@ import {
   type AgentConfigDialogMode,
   type AgentConfigSubmitPayload,
 } from '../src/components/settings/agent-config-dialog';
-
 import { initI18n } from '../src/i18n';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
@@ -727,9 +725,10 @@ describe('AgentConfigDialog', () => {
     expect(getSelectedOption()?.textContent).toContain('Kimi Code');
     expect(
       getOptionButtons()
-        .slice(0, 6)
+        .slice(0, 7)
         .map((option) => option.textContent)
     ).toEqual([
+      expect.stringContaining('Lody Agent'),
       expect.stringContaining('Kimi Code'),
       expect.stringContaining('Devin'),
       expect.stringContaining('Grok'),
@@ -750,6 +749,55 @@ describe('AgentConfigDialog', () => {
     expect(document.body.querySelector('#custom-acp-command')).not.toBeNull();
   });
 
+  it('offers Lody Agent and creates its builtin configuration', async () => {
+    const onSubmit = vi.fn(async () => {});
+    await renderDialog(
+      { kind: 'create' },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
+      onSubmit
+    );
+    expect(getOptionButtons()[0]?.textContent).toContain('Lody Agent');
+    await act(async () => {
+      getOptionByText('Lody Agent').click();
+    });
+    expect(getSelectedOption()?.textContent).toContain('Lody Agent');
+    expect(document.body.textContent).toContain(
+      'After setup, open this provider to sign in and choose an available account.'
+    );
+    await act(async () => {
+      getPrimaryAction('Create').click();
+    });
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ cliType: 'builtin', agentType: 'sorbet', name: 'Lody Agent' })
+      );
+    });
+  });
+
+  it('queues Lody Agent creation and requires provider setup support', async () => {
+    const onSubmit = vi.fn(async () => {});
+    const mode: AgentConfigDialogMode = {
+      kind: 'create',
+      initialForm: { agentType: 'sorbet', cliType: 'builtin', name: 'Lody Agent' },
+    };
+    await renderDialog(mode, createMachine('Legacy workstation'), onSubmit);
+    expect(getPrimaryAction('Create').disabled).toBe(true);
+
+    await renderDialog(
+      mode,
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
+      onSubmit
+    );
+    await act(async () => {
+      getPrimaryAction('Create').click();
+    });
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ cliType: 'builtin', agentType: 'sorbet', backgroundSetup: true })
+      );
+    });
+  });
+
   it('does not create Bub against a daemon without deferred provider setup', async () => {
     const onSubmit = vi.fn(async () => {});
     await renderDialog({ kind: 'create' }, createMachine('Legacy workstation'), onSubmit);
@@ -766,7 +814,7 @@ describe('AgentConfigDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it.each(['bub', 'dimcode'])('%s setup supports retry and refresh', async (agentType) => {
+  it.each(['bub', 'dimcode', 'sorbet'])('%s setup retry and refresh', async (agentType) => {
     const workspaceId = 'workspace-bub-test' as WorkspaceId;
     const workspaceSlug = 'workspace-bub-test';
     const mirrorRows = new Map<string, MachineFlockScanRow>();
@@ -853,7 +901,7 @@ describe('AgentConfigDialog', () => {
         value: {
           ...setup,
           status: 'failed',
-          failureCode: 'runtime-unavailable',
+          failureCode: agentType === 'sorbet' ? 'verification-failed' : 'runtime-unavailable',
         },
       });
       publishRows();
@@ -864,9 +912,11 @@ describe('AgentConfigDialog', () => {
         'curl -fsSL https://bub.build/install.sh | bash -- --preset acp'
       );
       expect(document.body.textContent).toContain('Open install guide');
-    } else {
+    } else if (agentType === 'dimcode') {
       expect(document.body.textContent).toContain('npm install -g dimcode');
       expect(document.body.textContent).not.toContain('Open install guide');
+    } else {
+      expect(document.body.textContent).not.toContain('npm install -g dimcode');
     }
     await act(async () => {
       getPrimaryAction('Retry').click();

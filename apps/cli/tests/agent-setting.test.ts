@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -9,6 +9,7 @@ import {
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
 } from 'acp-extension-dsh/profile';
 import { REGISTRY_ACP_AGENTS, CODEX_PROFILE_LEGACY_LAUNCH_GUARD } from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { spawn } from 'node:child_process';
 
 import {
@@ -46,6 +47,44 @@ function getRegistryAgent(agentType: string) {
     throw new Error(`Missing registry agent fixture: ${agentType}`);
   }
   return agent;
+}
+
+/**
+ * Isolate both npx cache roots (the configured cache and `~/.npm/_npx`) so the source
+ * version a Sorbet launch stamps never depends on what this machine happens to have
+ * installed.
+ */
+async function withIsolatedNpxCache<T>(body: (cacheDir: string) => Promise<T>): Promise<T> {
+  const home = await mkdtemp(join(tmpdir(), 'lody-sorbet-npx-home-'));
+  const cacheDir = join(home, 'npm-cache');
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('npm_config_cache', cacheDir);
+  try {
+    return await body(cacheDir);
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(home, { recursive: true, force: true });
+  }
+}
+
+/** The cache layout npx materializes for `npx -y @sorbetai/acp@alpha`. */
+async function writeTaggedSorbetInstall(cacheDir: string, version: string): Promise<void> {
+  const hashDir = join(cacheDir, '_npx', 'aa11');
+  const packageDir = join(hashDir, 'node_modules', '@sorbetai', 'acp');
+  await mkdir(join(packageDir, 'dist'), { recursive: true });
+  await writeFile(
+    join(hashDir, 'package.json'),
+    JSON.stringify({ _npx: { packages: ['@sorbetai/acp@alpha'] } })
+  );
+  await writeFile(
+    join(packageDir, 'package.json'),
+    JSON.stringify({
+      name: '@sorbetai/acp',
+      version,
+      bin: { 'sorbet-acp': 'dist/stdio-cli.js' },
+    })
+  );
+  await writeFile(join(packageDir, 'dist', 'stdio-cli.js'), '');
 }
 
 describe('resolveBuiltinACPSetting', () => {
@@ -320,6 +359,69 @@ describe('resolveBuiltinACPSetting', () => {
     } finally {
       vi.unstubAllEnvs();
       await rm(dshHome, { recursive: true, force: true });
+    }
+  });
+
+  it('launches the floating Sorbet ACP package with bounded registry requests', async () => {
+    await withIsolatedNpxCache(async () => {
+      const launch = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'sorbet',
+        extraArgs: ['--example'],
+      });
+      expect(launch).toEqual({
+        command: 'npx',
+        args: ['-y', '@sorbetai/acp@alpha', '--no-session-title', '--example'],
+        env: {
+          npm_config_fetch_retries: '0',
+          npm_config_fetch_timeout: '5000',
+          SORBET_DATA_DIR: join(getLodyDataDir(), 'sorbet'),
+          SORBET_OBSERVABILITY_RECORDING: 'false',
+          SORBET_OBSERVABILITY_CONFIG: '',
+        },
+        // No install to name on a cold cache: the tag is the only known build.
+        capabilitySourceVersion: 'builtin-sorbet:@sorbetai/acp@alpha+auth-discovery:1',
+      });
+      expect(
+        await resolveExpectedAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'sorbet' })
+      ).toBeUndefined();
+    });
+  });
+
+  it('names the installed Sorbet build in the capability source version', async () => {
+    await withIsolatedNpxCache(async (cacheDir) => {
+      await writeTaggedSorbetInstall(cacheDir, '0.1.0-alpha.6');
+      const launch = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'sorbet',
+      });
+      expect(launch.capabilitySourceVersion).toBe(
+        'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.6+auth-discovery:1'
+      );
+      // Naming the build never becomes a cache-hit key: a moved tag must re-probe.
+      expect(
+        await resolveExpectedAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'sorbet' })
+      ).toBeUndefined();
+    });
+  });
+
+  it('shares Sorbet state across launches within the selected Lody data directory', async () => {
+    const previous = process.env.LODY_DATA_DIR;
+    try {
+      process.env.LODY_DATA_DIR = join(tmpdir(), 'lody-sorbet-profile-a');
+      const first = await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'sorbet' });
+      const second = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'sorbet',
+      });
+      expect(first.env?.SORBET_DATA_DIR).toBe(join(tmpdir(), 'lody-sorbet-profile-a', 'sorbet'));
+      expect(second.env?.SORBET_DATA_DIR).toBe(first.env?.SORBET_DATA_DIR);
+      process.env.LODY_DATA_DIR = join(tmpdir(), 'lody-sorbet-profile-b');
+      const other = await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'sorbet' });
+      expect(other.env?.SORBET_DATA_DIR).toBe(join(tmpdir(), 'lody-sorbet-profile-b', 'sorbet'));
+    } finally {
+      if (previous === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previous;
     }
   });
 

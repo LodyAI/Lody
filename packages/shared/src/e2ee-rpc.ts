@@ -28,9 +28,15 @@ export type E2eeDispatchAck = {
 import { z } from 'zod';
 import { LocalMachineRpcRequestSchema, type LocalMachineRpcRequest } from './local-machine-rpc';
 
-/** Network access stays restricted to the existing file and preview product surfaces. */
+/** Network access stays restricted to the existing feature surfaces and owner credentials. */
 export const isE2eeFeatureMethod = (method: string): boolean =>
+  method === 'machine/acp-interaction' ||
   method.startsWith('code-collab/') ||
+  method === 'sorbet/credentials-list' ||
+  method === 'sorbet/credentials-logout' ||
+  method === 'sorbet/providers-list' ||
+  method === 'sorbet/providers-create' ||
+  method === 'sorbet/providers-delete' ||
   method === 'file/preview' ||
   method === 'session/preview-create' ||
   method === 'session/preview-revoke' ||
@@ -69,4 +75,39 @@ export type E2eeQueryResult =
 
 export function isE2eeReadQuery(method: string, _params: unknown): method is E2eeReadQueryMethod {
   return (E2EE_READ_QUERY_METHODS as readonly string[]).includes(method);
+}
+/** Associated data for the separately encrypted, one-shot authentication input. */
+export function e2eeAcpInteractionInputContext(input: {
+  workspaceId: string;
+  machineId: string;
+  requesterDevice: string;
+  interactionRequestId: string;
+  interactionId: string;
+}): string {
+  return JSON.stringify([
+    'lody-e2ee-acp-input-v1',
+    input.workspaceId,
+    input.machineId,
+    input.requesterDevice,
+    input.interactionRequestId,
+    input.interactionId,
+  ]);
+}
+
+/** Associated data for progress and results encrypted to the initiating device. */
+export function e2eeAcpInteractionResponseContext(input: {
+  workspaceId: string;
+  machineId: string;
+  requesterDevice: string;
+  interactionRequestId: string;
+  requestId: string;
+}): string {
+  return JSON.stringify([
+    'lody-e2ee-acp-response-v1',
+    input.workspaceId,
+    input.machineId,
+    input.requesterDevice,
+    input.interactionRequestId,
+    input.requestId,
+  ]);
 }

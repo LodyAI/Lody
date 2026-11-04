@@ -357,6 +357,31 @@ describe('AgentClient session startup', () => {
     }
   );
 
+  it('discovers methods with the authentication probe handshake without changing ordinary sessions', async () => {
+    connectionMocks.initialize.mockImplementation(async ({ clientCapabilities }) => ({
+      agentCapabilities: {},
+      authMethods:
+        clientCapabilities.elicitation?.url &&
+        clientCapabilities.auth?._meta?.lody?.credentialForm?.version === 1
+          ? [{ id: 'sorbet:example:oauth', name: 'Example OAuth' }]
+          : [],
+    }));
+    for (const discoverAuthenticationMethods of [false, true]) {
+      const client = new AgentClient({
+        logger: createLogger(),
+        sessionId: 'auth-discovery' as SessionId,
+        terminalManager: {} as never,
+        discoverAuthenticationMethods,
+        onUpdateMessage: vi.fn(),
+        onRequestPermission: vi.fn(),
+      });
+      await client.startSession({} as never, '/workdir');
+      expect(client.getAuthMethods()).toEqual(
+        discoverAuthenticationMethods ? [{ id: 'sorbet:example:oauth', name: 'Example OAuth' }] : []
+      );
+    }
+  });
+
   it('keeps unrelated MCP loader failures best effort without a readiness retry', async () => {
     const warnings: string[] = [];
     const failure = new Error('Synthetic configuration failure');

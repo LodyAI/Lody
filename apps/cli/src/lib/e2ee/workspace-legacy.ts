@@ -1436,6 +1436,11 @@ async function openWorkspaceOwned(
                       journal: rpcJournal,
                       authorize: opened.executionAuthorization.authorizeOwnedExecution,
                       authorizeRead: opened.executionAuthorization.authorizeRead,
+                      authoritySignal: () =>
+                        AbortSignal.any([
+                          opened.runtime.executionAuthoritySignal(),
+                          opened.executionAuthorization.authoritySignal,
+                        ]),
                       isOpen: () => !closed,
                       handle: handleFeature,
                       client,

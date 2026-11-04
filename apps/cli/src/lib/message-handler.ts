@@ -1,3 +1,7 @@
+import type {
+  SorbetCustomProvider,
+  SorbetCustomProviderInput,
+} from '@lody/shared/local-machine-rpc';
 import { AndroidEmulatorService } from '@/android-emulator/service';
 import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
 import {
@@ -142,6 +146,11 @@ import {
   type LocalProjectControlErrorCode,
   type LocalProjectControlRequest,
   type LocalProjectControlResponse,
+  E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+  SORBET_CREDENTIALS_PROTOCOL_VERSION,
+  SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
   type LocalMachineRpcRequestValidated,
   type LocalMachineRpcResponse,
   type LocalMachineRpcResult,
@@ -613,6 +622,27 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  sorbetCredentials?: {
+    list: (
+      configId: AgentConfigId,
+      signal?: AbortSignal
+    ) => Promise<Array<{ providerId: string; type: string }>>;
+    logout: (configId: AgentConfigId, providerId: string, signal?: AbortSignal) => Promise<void>;
+    listProviders: (
+      configId: AgentConfigId,
+      signal?: AbortSignal
+    ) => Promise<SorbetCustomProvider[]>;
+    createProvider: (
+      configId: AgentConfigId,
+      provider: SorbetCustomProviderInput,
+      signal?: AbortSignal
+    ) => Promise<SorbetCustomProvider>;
+    deleteProvider: (
+      configId: AgentConfigId,
+      providerId: string,
+      signal?: AbortSignal
+    ) => Promise<void>;
+  };
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -724,6 +754,11 @@ function isImageGenerationTerminalStatus(status: string): boolean {
 export class MessageHandler {
   private sessionManager: SessionManager;
   private logger: Logger;
+  private acpInteractionOwner?: Promise<
+    ReturnType<typeof import('./e2ee/acp-interaction-owner').createAcpInteractionOwner>
+  >;
+  private acpInteractionStopping = false;
+
   private machineId: MachineId;
   private token: string;
   private userId: string;
@@ -824,6 +859,7 @@ export class MessageHandler {
   private executionService: SessionExecutionService;
   /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
   private readonly encryptedExecution?: EncryptedAgentExecution;
+  private readonly sorbetCredentials?: MessageHandlerConfig['sorbetCredentials'];
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
@@ -3023,6 +3059,7 @@ export class MessageHandler {
     config: MessageHandlerConfig
   ) {
     this.sessionManager = sessionManager;
+    this.sorbetCredentials = config.sorbetCredentials;
     this.encryptedAttachments = config.encryptedWorkspace === true;
     // Create a child logger with workspace context for file logging
     this.logger = logger.child({
@@ -4007,6 +4044,21 @@ export class MessageHandler {
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
+          ...(this.encryptedAttachments
+            ? { e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION }
+            : {}),
+          ...(this.sorbetCredentials
+            ? {
+                sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
+                sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                ...(this.encryptedAttachments
+                  ? {
+                      sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+                      sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                    }
+                  : {}),
+              }
+            : {}),
           ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
         },
         timeZone: getDeviceTimeZone(process.env.TZ),
@@ -6429,6 +6481,21 @@ export class MessageHandler {
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
+          ...(this.encryptedAttachments
+            ? { e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION }
+            : {}),
+          ...(this.sorbetCredentials
+            ? {
+                sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
+                sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                ...(this.encryptedAttachments
+                  ? {
+                      sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+                      sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                    }
+                  : {}),
+              }
+            : {}),
           ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
         },
         timeZone: getDeviceTimeZone(process.env.TZ),
@@ -7219,11 +7286,134 @@ export class MessageHandler {
     );
   }
 
+  async handleEncryptedAcpInteraction(
+    request: Extract<LocalMachineRpcRequestValidated, { method: 'machine/acp-interaction' }>,
+    context: import('./e2ee/feature-rpc').EncryptedFeatureContext
+  ): Promise<LocalMachineRpcResponse> {
+    if (
+      !this.encryptedAttachments ||
+      request.workspaceId !== this.workspaceId ||
+      request.machineId !== this.machineId ||
+      this.acpInteractionStopping ||
+      context.signal.aborted ||
+      !context.authority ||
+      context.authority.signal.aborted ||
+      !context.authority.isCurrent()
+    )
+      throw new Error('e2ee_feature_unavailable');
+    if (!this.acpInteractionOwner) {
+      this.acpInteractionOwner = Promise.all([
+        import('./e2ee/acp-interaction-owner'),
+        import('@lody/loro-streams-rpc'),
+        import('@lody/shared'),
+      ]).then(
+        ([{ createAcpInteractionOwner }, { createRpcSecretRecipient, encryptRpcSecret }, shared]) =>
+          createAcpInteractionOwner({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            createRecipient: createRpcSecretRecipient,
+            encrypt: encryptRpcSecret,
+            start: ({ requestId, configId, kind, force, methodId, signal, onProgress }) => {
+              const common = { machineId: this.machineId, workspaceId: this.workspaceId };
+              if (kind === 'probe') {
+                return {
+                  result: this.executionService.refreshMachineAcpCapabilities(
+                    {
+                      ...common,
+                      type: 'machine/acp-capabilities-refresh',
+                      configId: configId as AgentConfigId,
+                      force,
+                    },
+                    { signal, onAcpBinaryProgress: onProgress }
+                  ),
+                  cancel: () => {},
+                };
+              }
+              return {
+                result: this.authenticateMachineAcpAndResumeSetup(
+                  {
+                    ...common,
+                    type: 'machine/acp-authenticate',
+                    action: 'start',
+                    requestId,
+                    configId: configId as AgentConfigId,
+                    methodId,
+                  },
+                  { onProgress, signal }
+                ),
+                cancel: async () => {
+                  await this.executionService.authenticateMachineAcp({
+                    ...common,
+                    type: 'machine/acp-authenticate',
+                    action: 'cancel',
+                    requestId,
+                    authenticationRequestId: requestId,
+                  });
+                },
+              };
+            },
+            submit: async ({ requestId, interactionId, input }) => {
+              let decoded: unknown;
+              try {
+                decoded = JSON.parse(input) as unknown;
+              } catch {
+                throw new Error('e2ee_acp_invalid_input');
+              }
+              if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded))
+                throw new Error('e2ee_acp_invalid_input');
+              const keys = Object.keys(decoded);
+              if (
+                !('action' in decoded) ||
+                (decoded.action === 'submit-code'
+                  ? keys.some((key) => key !== 'action' && key !== 'authorizationCode')
+                  : decoded.action === 'submit-input'
+                    ? keys.some((key) => key !== 'action' && key !== 'authenticationInput')
+                    : true)
+              )
+                throw new Error('e2ee_acp_invalid_input');
+              const message = shared.MachineAcpAuthenticateRequestSchema.safeParse({
+                ...decoded,
+                type: 'machine/acp-authenticate',
+                machineId: this.machineId,
+                workspaceId: this.workspaceId,
+                requestId,
+                authenticationRequestId: requestId,
+                ...('action' in decoded && decoded.action === 'submit-input'
+                  ? { interactionId }
+                  : {}),
+              });
+              if (
+                !message.success ||
+                (message.data.action !== 'submit-input' && message.data.action !== 'submit-code')
+              )
+                throw new Error('e2ee_acp_invalid_input');
+              const result = await this.executionService.authenticateMachineAcp({
+                ...message.data,
+                machineId: this.machineId,
+                workspaceId: this.workspaceId,
+              });
+              if (!result.success || result.disposition === 'not-running')
+                throw new Error('e2ee_acp_input_rejected');
+            },
+          })
+      );
+    }
+    const owner = await this.acpInteractionOwner;
+    if (this.acpInteractionStopping || context.signal.aborted)
+      throw new Error('e2ee_feature_unavailable');
+    try {
+      return { ok: true, result: await owner.handle(request.params, context) };
+    } catch {
+      return { ok: false, error: 'Encrypted ACP interaction failed.' };
+    }
+  }
+
   async handleLocalMachineRpc(
-    request: LocalMachineRpcRequestValidated
+    request: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
     try {
-      const result = await this.dispatchLocalMachineRpc(request);
+      const result = await this.dispatchLocalMachineRpc(request, signal);
       return { ok: true, result };
     } catch (error) {
       if (isCodeCollabV2ServiceErrorForLocalRpc(error)) {
@@ -7281,7 +7471,8 @@ export class MessageHandler {
   }
 
   private async dispatchLocalMachineRpc(
-    request: LocalMachineRpcRequestValidated
+    request: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResult> {
     const assertOwner = async (sessionId: SessionId): Promise<void> => {
       if (!request.ownerSessionId) {
@@ -7298,6 +7489,8 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'machine/acp-interaction':
+        throw new Error('e2ee_feature_unavailable');
       case 'machine/status':
         return this.executionService.getMachineStatus({
           type: 'machine/status',
@@ -7336,6 +7529,62 @@ export class MessageHandler {
         )
           throw new Error('Project group probe scope mismatch');
         return this.probeProjectLocalMember(request.params.localProjectId as LocalProjectId);
+      }
+      case 'sorbet/credentials-list':
+      case 'sorbet/credentials-logout':
+      case 'sorbet/providers-list':
+      case 'sorbet/providers-create':
+      case 'sorbet/providers-delete': {
+        if (
+          request.workspaceId !== this.workspaceId ||
+          request.machineId !== this.machineId ||
+          request.ownerSessionId
+        )
+          throw new Error('Sorbet credentials scope mismatch');
+        const configId = request.params.configId as AgentConfigId;
+        const config = await this.workspaceDocument.getAgentConfigById(configId, this.machineId);
+        if (
+          !config ||
+          config.machineId !== this.machineId ||
+          config.cliType !== 'builtin' ||
+          config.agentType !== 'sorbet'
+        )
+          throw new Error('Sorbet credentials configuration unavailable');
+        if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
+        try {
+          const { SorbetCredentialsResultSchema, SorbetProvidersResultSchema } =
+            await import('@lody/shared/local-machine-rpc');
+          if (request.method === 'sorbet/credentials-list') {
+            return SorbetCredentialsResultSchema.parse({
+              type: 'sorbet/credentials-list',
+              credentials: await this.sorbetCredentials.list(configId, signal),
+            });
+          }
+          if (request.method === 'sorbet/credentials-logout') {
+            await this.sorbetCredentials.logout(configId, request.params.providerId, signal);
+            return { type: 'sorbet/credentials-logout' };
+          }
+          if (request.method === 'sorbet/providers-list') {
+            return SorbetProvidersResultSchema.parse({
+              type: 'sorbet/providers-list',
+              providers: await this.sorbetCredentials.listProviders(configId, signal),
+            });
+          }
+          if (request.method === 'sorbet/providers-create') {
+            return SorbetProvidersResultSchema.parse({
+              type: 'sorbet/providers-create',
+              provider: await this.sorbetCredentials.createProvider(
+                configId,
+                request.params.provider,
+                signal
+              ),
+            });
+          }
+          await this.sorbetCredentials.deleteProvider(configId, request.params.providerId, signal);
+          return { type: 'sorbet/providers-delete' };
+        } catch {
+          throw new Error('Sorbet provider operation failed');
+        }
       }
       case 'mcp/list-tools':
       case 'mcp/authentication': {
@@ -9499,6 +9748,7 @@ export class MessageHandler {
   ): Promise<MachineAcpAuthenticateResponse> {
     const response = await this.executionService.authenticateMachineAcp(message, options);
     if (
+      !options.signal?.aborted &&
       message.action === 'start' &&
       response.success &&
       response.disposition === 'authenticated'
@@ -10920,6 +11170,8 @@ export class MessageHandler {
    * Flush pending ACP updates and tear down session resources.
    */
   async prepareForShutdown(): Promise<void> {
+    this.acpInteractionStopping = true;
+    await (await this.acpInteractionOwner)?.close();
     this.sessionDispatchWatcher.stop();
     this.executionService.stopCompletionPublication();
     void this.operationCoordinator
@@ -10929,6 +11181,8 @@ export class MessageHandler {
   }
 
   async cleanup(): Promise<void> {
+    this.acpInteractionStopping = true;
+    await (await this.acpInteractionOwner)?.close();
     this.executionService.stopCompletionPublication();
     const inboxShutdown = this.operationCoordinator.recoverStop();
     void inboxShutdown.catch((cause) =>

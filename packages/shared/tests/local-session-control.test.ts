@@ -32,6 +32,25 @@ describe('local session control node validators', () => {
     }
   });
 
+  it('accepts builtin Sorbet sessions in TS and CJS validators', () => {
+    const request = {
+      type: 'session/create',
+      sessionId: 'session-builtin',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      acpSessionConfig: {
+        cliType: 'builtin',
+        agentType: 'sorbet',
+        prompt: 'hello',
+      },
+      userId: 'user-1',
+      userName: 'Test User',
+      userEmail: 'test@example.com',
+    };
+    expect(isLocalSessionControlRequest(request)).toBe(true);
+    expect(isLocalSessionControlRequestCjs(request)).toBe(true);
+  });
+
   it('accepts up to 8 image upload paths and rejects 9', () => {
     const baseRequest = {
       type: 'session/image-upload',

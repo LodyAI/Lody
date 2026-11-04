@@ -1,3 +1,12 @@
+import {
+  MachineAcpAuthenticateResponseSchema,
+  MachineAcpAuthenticationProgressMessageSchema,
+  MachineAcpBinaryProgressMessageSchema,
+  MachineAcpCapabilitiesRefreshResponseSchema,
+} from '@lody/shared';
+import { E2eeAcpInteractionParamsSchema } from '@lody/shared/local-machine-rpc';
+import { createAcpInteraction } from './acp-interaction-client';
+import { createAcpInteractionCrypto } from './acp-interaction-crypto';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import {
   requirePlaintextWorkspaceStreamsContent,
@@ -2116,6 +2125,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestMachineBugReport,
     requestLocalMcpTools,
     requestLocalMcpAuthentication,
+    requestLocalSorbetCredentials,
+    requestLocalSorbetProviders,
     requestMemoryProvider,
     requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
@@ -2355,6 +2366,107 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return request;
   };
 
+  const encryptedAcpStarts = new Map<string, AbortController>();
+  const encryptedAcpActive = new Set<{ cancel: (signal?: AbortSignal) => Promise<void> }>();
+  let encryptedAcpCloseCancellation = false;
+  const encryptedAcpEarlyCancels = new Map<string, ReturnType<typeof setTimeout>>();
+  let encryptedAcpCancelOverflow: ReturnType<typeof setTimeout> | undefined;
+  const encryptedAcpOperations = new Map<
+    string,
+    { cancel: () => Promise<void>; submit: (id: string, input: unknown) => Promise<void> }
+  >();
+  const encryptedAcpKey = (machineId: string, requestId: string) =>
+    JSON.stringify([machineId, requestId]);
+  const startEncryptedAcp = async (args: {
+    machineId: MachineId;
+    requestId: string;
+    kind: 'probe' | 'authenticate';
+    configId: AgentConfigId;
+    force?: boolean;
+    methodId?: string;
+    signal?: AbortSignal;
+    onProgress: (progress: unknown) => void;
+  }) => {
+    await waitForContentAdmission(args.signal);
+    const capabilities = await getMachineProtocolCapabilities(args.machineId);
+    if ((capabilities as Record<string, unknown> | undefined)?.e2eeAcpInteraction !== 1)
+      throw new Error('Encrypted ACP interaction is not supported by this machine');
+    if (!protectedRpcAvailable || disposePromise || args.signal?.aborted)
+      throw new Error('e2ee_rpc_unavailable');
+    const crypto = await createAcpInteractionCrypto();
+    if (disposePromise || args.signal?.aborted) throw new Error('e2ee_rpc_unavailable');
+    let first = true;
+    const operation = createAcpInteraction(
+      {
+        ...crypto,
+        newRequestId: () => {
+          if (first) {
+            first = false;
+            return args.requestId.replaceAll('-', '');
+          }
+          return globalThis.crypto.randomUUID().replaceAll('-', '');
+        },
+        transport: async ({ requestId, expectedDevice, params, signal, onPrepared }) => {
+          // Retirement fences ordinary work immediately. Existing interactions alone
+          // may use their already-open channel to send the final best-effort cancel.
+          const closingCancel = params.action === 'cancel' && encryptedAcpCloseCancellation;
+          if (!closingCancel) await waitForContentAdmission(signal);
+          const dispatch = closingCancel ? encryptedDispatch : await ensureEncryptedRpc();
+          if (!dispatch) throw new Error('e2ee_rpc_unavailable');
+          let signer = '';
+          const response = await dispatch.requestFeature(
+            {
+              workspaceId,
+              machineId: args.machineId,
+              method: 'machine/acp-interaction',
+              params: E2eeAcpInteractionParamsSchema.parse(params),
+              timeoutMs: 10000,
+            },
+            {
+              requestId,
+              expectedDevice,
+              signal,
+              onPrepared: (device) => {
+                signer = device;
+                onPrepared?.(device);
+              },
+            }
+          );
+          if (!response.ok) throw new Error('Encrypted ACP interaction failed');
+          return { requesterDevice: signer, response: response.result };
+        },
+        parseProgress: (value) =>
+          args.kind === 'probe'
+            ? MachineAcpBinaryProgressMessageSchema.parse(value)
+            : MachineAcpAuthenticationProgressMessageSchema.parse(value),
+        parseResult: (kind, value) =>
+          kind === 'probe'
+            ? MachineAcpCapabilitiesRefreshResponseSchema.parse(value)
+            : MachineAcpAuthenticateResponseSchema.parse(value),
+      },
+      {
+        workspaceId,
+        machineId: args.machineId,
+        kind: args.kind,
+        configId: args.configId,
+        force: args.force,
+        methodId: args.methodId,
+        timeoutMs: args.kind === 'probe' ? ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS : 300000,
+        requestTimeoutMs: 10000,
+        pollIntervalMs: 500,
+        maxPolls: 2000,
+        signal: args.signal,
+        onProgress: args.onProgress,
+      }
+    );
+    encryptedAcpActive.add(operation);
+    void operation.result.then(
+      () => encryptedAcpActive.delete(operation),
+      () => encryptedAcpActive.delete(operation)
+    );
+    return operation;
+  };
+
   const performMachineAcpCapabilitiesRefreshViaRpc = async (
     message: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
     options: {
@@ -2369,8 +2481,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         force: message.force,
         onProgress: (progress) => {
           if (!options.signal?.aborted) {
-            handleMachineAcpBinaryProgress(progress);
-            options.onProgress?.(progress);
+            handleMachineAcpBinaryProgress({ ...progress, machineId: message.machineId });
+            options.onProgress?.({ ...progress, machineId: message.machineId });
           }
         },
         signal: options.signal,
@@ -2501,8 +2613,147 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         error: 'Cloud Machine RPC is disabled in local-only sync mode',
       };
     }
+    if (protectedContent) {
+      try {
+        const operation = await startEncryptedAcp({
+          machineId: message.machineId,
+          requestId: globalThis.crypto.randomUUID(),
+          kind: 'probe',
+          configId: message.configId,
+          force: negotiatedMessage.force,
+          signal,
+          onProgress: (value) => {
+            const progress = MachineAcpBinaryProgressMessageSchema.parse(value);
+            if (progress.machineId !== message.machineId)
+              throw new Error('ACP progress machine mismatch');
+            handleMachineAcpBinaryProgress({ ...progress, machineId: message.machineId });
+            options.onProgress?.({ ...progress, machineId: message.machineId });
+          },
+        });
+        const response = MachineAcpCapabilitiesRefreshResponseSchema.parse(await operation.result);
+        if (response.machineId !== message.machineId || response.configId !== message.configId)
+          throw new Error('ACP probe target mismatch');
+        if (response.capability?.models.some((model) => typeof model.name !== 'string'))
+          throw new Error('Invalid ACP capability models');
+        return {
+          ...response,
+          machineId: message.machineId,
+          configId: message.configId,
+        } as MachineAcpCapabilitiesRefreshResponse;
+      } catch (error) {
+        if (signal?.aborted) return null;
+        return {
+          type: 'machine/acp-capabilities-refresh_response',
+          machineId: message.machineId,
+          configId: message.configId,
+          cliType: 'builtin',
+          agentType: 'unknown',
+          success: false,
+          error: error instanceof Error ? error.message : 'Encrypted ACP probe failed',
+        };
+      }
+    }
     const request = performMachineAcpCapabilitiesRefreshViaRpc(negotiatedMessage, options);
     return signal ? waitForPromiseOrAbort(request, signal) : request;
+  };
+
+  const dispatchEncryptedAcpAuthentication = async (
+    message: Extract<ClientToServer, { type: 'machine/acp-authenticate' }>,
+    routeSignal?: AbortSignal
+  ) => {
+    const key = encryptedAcpKey(
+      message.machineId,
+      message.action === 'start' ? message.requestId : message.authenticationRequestId
+    );
+    try {
+      if (message.action === 'start') {
+        const startController = new AbortController();
+        if (routeSignal?.aborted) throw new Error('ACP authentication cancelled');
+        routeSignal?.addEventListener('abort', () => startController.abort(), { once: true });
+        let pendingOperation: ReturnType<typeof startEncryptedAcp>;
+        const pending = {
+          cancel: async () => {
+            startController.abort();
+            const operation = await pendingOperation.catch(() => null);
+            if (operation) await operation.cancel();
+          },
+          submit: async (id: string, input: unknown) => {
+            const operation = await pendingOperation;
+            await operation.submit(id, input);
+          },
+        };
+        encryptedAcpOperations.set(key, pending);
+        pendingOperation = startEncryptedAcp({
+          machineId: message.machineId,
+          requestId: message.requestId,
+          kind: 'authenticate',
+          configId: message.configId,
+          methodId: message.methodId,
+          signal: startController.signal,
+          onProgress: (value) => {
+            const progress = MachineAcpAuthenticationProgressMessageSchema.parse(value);
+            if (
+              progress.machineId !== message.machineId ||
+              progress.requestId !== message.requestId.replaceAll('-', '')
+            )
+              throw new Error('ACP authentication progress target mismatch');
+            handleMachineAcpAuthenticationProgress({
+              ...progress,
+              machineId: message.machineId,
+              requestId: message.requestId,
+            });
+          },
+        });
+        try {
+          const operation = await pendingOperation;
+          const response = MachineAcpAuthenticateResponseSchema.parse(await operation.result);
+          if (
+            response.machineId !== message.machineId ||
+            response.requestId !== message.requestId.replaceAll('-', '')
+          )
+            throw new Error('ACP authentication target mismatch');
+          handleMachineAcpAuthenticateResponse({
+            ...response,
+            machineId: message.machineId,
+            requestId: message.requestId,
+          });
+        } finally {
+          if (encryptedAcpOperations.get(key) === pending) encryptedAcpOperations.delete(key);
+        }
+        return;
+      }
+      const operation = encryptedAcpOperations.get(key);
+      if (!operation) throw new Error('ACP authentication is not running');
+      if (message.action === 'cancel') await operation.cancel();
+      else if (message.action === 'submit-code')
+        await operation.submit('authorization-code', {
+          action: 'submit-code',
+          authorizationCode: message.authorizationCode,
+        });
+      else
+        await operation.submit(message.interactionId, {
+          action: 'submit-input',
+          authenticationInput: message.authenticationInput,
+        });
+      handleMachineAcpAuthenticateResponse({
+        type: 'machine/acp-authenticate_response',
+        machineId: message.machineId,
+        requestId: message.requestId,
+        agentType: 'unknown',
+        success: true,
+        disposition: message.action === 'cancel' ? 'cancelled' : 'input-accepted',
+      });
+    } catch (error) {
+      handleMachineAcpAuthenticateResponse({
+        type: 'machine/acp-authenticate_response',
+        machineId: message.machineId,
+        requestId: message.requestId,
+        agentType: 'unknown',
+        success: false,
+        disposition: 'error',
+        error: error instanceof Error ? error.message : 'Encrypted ACP authentication failed',
+      });
+    }
   };
 
   const dispatchMachineAcpAuthenticateViaRpc = async (
@@ -2903,6 +3154,40 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     if (isMachineControlRequest(message)) {
+      let acpStart: AbortController | undefined;
+      let acpKey: string | undefined;
+      if (protectedContent && message.type === 'machine/acp-authenticate') {
+        acpKey = encryptedAcpKey(
+          message.machineId,
+          message.action === 'start' ? message.requestId : message.authenticationRequestId
+        );
+        if (message.action === 'start') {
+          acpStart = new AbortController();
+          encryptedAcpStarts.set(acpKey, acpStart);
+          if (encryptedAcpCancelOverflow) acpStart.abort();
+          const earlyCancel = encryptedAcpEarlyCancels.get(acpKey);
+          if (earlyCancel) {
+            clearTimeout(earlyCancel);
+            encryptedAcpEarlyCancels.delete(acpKey);
+            acpStart.abort();
+          }
+        } else if (message.action === 'cancel') {
+          const active = encryptedAcpStarts.get(acpKey);
+          if (active) active.abort();
+          else if (!encryptedAcpEarlyCancels.has(acpKey) && encryptedAcpEarlyCancels.size < 1024) {
+            const key = acpKey;
+            encryptedAcpEarlyCancels.set(
+              key,
+              setTimeout(() => encryptedAcpEarlyCancels.delete(key), 300000)
+            );
+          } else if (!encryptedAcpEarlyCancels.has(acpKey)) {
+            if (encryptedAcpCancelOverflow) clearTimeout(encryptedAcpCancelOverflow);
+            encryptedAcpCancelOverflow = setTimeout(() => {
+              encryptedAcpCancelOverflow = undefined;
+            }, 300000);
+          }
+        }
+      }
       void (async () => {
         await waitForMachineRouteIfNeeded(message.machineId);
         if (targetRouter.getPlaneForMachine(message.machineId) === 'local') {
@@ -2945,6 +3230,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           await dispatchMachineUpgradeViaRpc(message);
           return;
         }
+        if (message.type === 'machine/acp-authenticate' && protectedContent) {
+          try {
+            await dispatchEncryptedAcpAuthentication(message, acpStart?.signal);
+          } finally {
+            if (acpStart && acpKey && encryptedAcpStarts.get(acpKey) === acpStart)
+              encryptedAcpStarts.delete(acpKey);
+          }
+          return;
+        }
         if (message.type === 'machine/acp-authenticate') {
           await dispatchMachineAcpAuthenticateViaRpc(message);
           return;
@@ -2957,7 +3251,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           await dispatchMachineAcpBinaryInstallViaRpc(message);
           return;
         }
-      })();
+      })()
+        .catch(() => {
+          handleMachineControlTransportFailure(message, 'Machine control request failed');
+        })
+        .finally(() => {
+          if (acpStart && acpKey && encryptedAcpStarts.get(acpKey) === acpStart)
+            encryptedAcpStarts.delete(acpKey);
+        });
       return;
     }
 
@@ -5468,6 +5769,33 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // Publish retirement before any cancellation callback or asynchronous close runs.
     const attempt = Promise.resolve().then(async () => {
       await closeStep('dispatch', async () => {
+        encryptedAcpCloseCancellation = true;
+        const cancellationController = new AbortController();
+        try {
+          const cancellations = Array.from(encryptedAcpActive, (operation) =>
+            operation.cancel(cancellationController.signal)
+          );
+          for (const start of encryptedAcpStarts.values()) start.abort();
+          cancellations.push(
+            ...Array.from(encryptedAcpOperations.values(), (operation) => operation.cancel())
+          );
+          if (cancellations.length) {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              await Promise.race([
+                Promise.allSettled(cancellations),
+                new Promise<void>((resolve) => {
+                  timer = setTimeout(resolve, 2000);
+                }),
+              ]);
+            } finally {
+              if (timer) clearTimeout(timer);
+            }
+          }
+        } finally {
+          cancellationController.abort();
+          encryptedAcpCloseCancellation = false;
+        }
         await encryptedDispatch?.close();
       });
       await closeStep('readers', () => {
@@ -5549,6 +5877,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
         machineAcpBinaryStatusRegistry.clearAll();
         machineAcpBinaryInstallRegistry.clearAll();
+        for (const start of encryptedAcpStarts.values()) start.abort();
+        encryptedAcpStarts.clear();
+        for (const timer of encryptedAcpEarlyCancels.values()) clearTimeout(timer);
+        encryptedAcpEarlyCancels.clear();
+        if (encryptedAcpCancelOverflow) clearTimeout(encryptedAcpCancelOverflow);
+        for (const operation of encryptedAcpOperations.values())
+          void operation.cancel().catch(() => {});
+        encryptedAcpOperations.clear();
         machineAcpAuthenticateRegistry.clearAll();
         machineAcpBinaryProgressListeners.clear();
         machineAcpBinaryProgressSnapshots.clear();
@@ -5969,6 +6305,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestMachineBugReport,
     requestLocalMcpTools,
     requestLocalMcpAuthentication,
+    requestLocalSorbetCredentials,
+    requestLocalSorbetProviders,
     requestMemoryProvider,
     requestMachinePiExtensions,
     dispose,

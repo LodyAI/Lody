@@ -31,6 +31,7 @@ import {
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { acquireSorbetCredentialMutation } from './sorbet-credential-mutation';
 import {
   AcpAgentAuthorizationOutputParser,
   BuiltinAuthenticationOutputParser,
@@ -156,6 +157,7 @@ const BUILTIN_AUTH_METHODS = {
 
 type RunningAuthentication = {
   child?: ChildProcess;
+  sorbetLease?: Awaited<ReturnType<typeof acquireSorbetCredentialMutation>>;
   requestId: string;
   cancelled: boolean;
   timedOut: boolean;
@@ -533,8 +535,12 @@ export async function probeBuiltinAuthentication(
       };
 }
 
+// Authentication mutates machine-local provider credentials across workspace runtimes.
+// Keep a slot until its child actually exits, even if its workflow has returned.
+const runningAuthentications = new Map<string, RunningAuthentication>();
+
 export class AcpAuthenticationManager {
-  private readonly runningByAgentType = new Map<string, RunningAuthentication>();
+  private readonly runningByAgentType = runningAuthentications;
   private readonly authenticationTimeoutMs: number;
   private readonly terminationGraceMs: number;
   private readonly nodeProcess: NodeProcessApi | undefined;
@@ -645,6 +651,10 @@ export class AcpAuthenticationManager {
     timeoutHandle.unref?.();
 
     try {
+      if (options.cliType === 'builtin' && options.agentType === 'sorbet') {
+        running.sorbetLease = await acquireSorbetCredentialMutation(running.abortController.signal);
+        running.abortController.signal.throwIfAborted();
+      }
       if (options.authenticateManagedProfile) {
         await options.authenticateManagedProfile({
           signal: running.abortController.signal,
@@ -795,9 +805,21 @@ export class AcpAuthenticationManager {
           'Codex authentication process record cleanup failed; retained for recovery'
         );
       } finally {
+        running.sorbetLease?.release();
         if (timeoutHandle) clearTimeout(timeoutHandle);
         if (this.runningByAgentType.get(options.agentType) === running) {
-          this.runningByAgentType.delete(options.agentType);
+          const child = running.child;
+          if (!running.sorbetLease && child && child.exitCode == null && child.signalCode == null) {
+            child.once('exit', () => {
+              if (this.runningByAgentType.get(options.agentType) === running)
+                this.runningByAgentType.delete(options.agentType);
+            });
+            // An exit may have arrived between the state check and listener registration.
+            if (child.exitCode != null || child.signalCode != null)
+              this.runningByAgentType.delete(options.agentType);
+          } else {
+            this.runningByAgentType.delete(options.agentType);
+          }
         }
       }
     }
@@ -980,6 +1002,7 @@ export class AcpAuthenticationManager {
     delete env.TERM;
     running.abortController.signal.throwIfAborted();
     let lastStderrTail = '';
+    let safeOfflineFailure = false;
     await withAcpSessionStartSlot(
       {
         label: `acp-auth:${options.agentType}`,
@@ -988,6 +1011,10 @@ export class AcpAuthenticationManager {
       },
       async () =>
         await runNpxStartupWithRecovery({
+          maxAttempts: running.sorbetLease ? 1 : undefined,
+          canRetryOfflineAfterFailure: running.sorbetLease
+            ? () => safeOfflineFailure && !running.abortController.signal.aborted
+            : undefined,
           command: launch.command,
           args: launch.args,
           env,
@@ -997,6 +1024,10 @@ export class AcpAuthenticationManager {
           attempt: async ({ args }) => {
             running.abortController.signal.throwIfAborted();
             lastStderrTail = '';
+            safeOfflineFailure = false;
+            let initializationCompleted = false;
+            let interactionStarted = false;
+            let sawProtocolOutput = false;
             options.onProgress?.({ status: 'starting' });
             const child = spawnAcpProcess({
               cliType: options.cliType,
@@ -1012,6 +1043,9 @@ export class AcpAuthenticationManager {
             });
             running.child = child;
             running.terminating = false;
+            child.stdout?.on('data', () => {
+              sawProtocolOutput = true;
+            });
             child.stderr?.setEncoding('utf8');
             const authorizationParser = new AcpAgentAuthorizationOutputParser();
             child.stderr?.on('data', (chunk: string) => {
@@ -1021,6 +1055,7 @@ export class AcpAuthenticationManager {
               lastStderrTail = appendStderrTail(lastStderrTail, chunk);
               const authorization = authorizationParser.push(chunk);
               if (authorization && isAllowedAuthorizationUrl(authorization.authorizationUrl)) {
+                interactionStarted = true;
                 options.onProgress?.({ status: 'authorization', ...authorization });
               }
             });
@@ -1045,6 +1080,10 @@ export class AcpAuthenticationManager {
               }
             );
 
+            let operationFailed = false;
+            let operationError: unknown;
+            let cleanupFailed = false;
+            let cleanupError: unknown;
             try {
               running.abortController.signal.throwIfAborted();
               if (!child.stdin || !child.stdout) {
@@ -1054,6 +1093,7 @@ export class AcpAuthenticationManager {
               const app = acp
                 .client({ name: 'lody-authentication' })
                 .onRequest(acp.methods.client.elicitation.create, async ({ params }) => {
+                  interactionStarted = true;
                   const raw = asRecord(params);
                   if (raw?.mode === 'url') {
                     if (typeof raw.url !== 'string' || !isAllowedAuthorizationUrl(raw.url)) {
@@ -1112,18 +1152,28 @@ export class AcpAuthenticationManager {
               );
               await Promise.race([
                 app.connectWith(stream, async (context) => {
-                  const initialized = await context.request(
-                    acp.methods.agent.initialize,
-                    {
-                      protocolVersion: acp.PROTOCOL_VERSION,
-                      clientCapabilities: {
-                        auth: { terminal: false },
-                        elicitation: { form: {}, url: {} },
+                  const initialized = await context
+                    .request(
+                      acp.methods.agent.initialize,
+                      {
+                        protocolVersion: acp.PROTOCOL_VERSION,
+                        clientCapabilities: {
+                          auth: {
+                            terminal: false,
+                            _meta: { lody: { credentialForm: { version: 1 } } },
+                          },
+                          elicitation: { form: {}, url: {} },
+                        },
+                        clientInfo: { name: 'lody', title: 'Lody', version: '1' },
                       },
-                      clientInfo: { name: 'lody', title: 'Lody', version: '1' },
-                    },
-                    { cancellationSignal: running.abortController.signal }
-                  );
+                      { cancellationSignal: running.abortController.signal }
+                    )
+                    .catch(() => {
+                      throw new Error(
+                        `${options.agentType} ACP initialization failed. Check the agent configuration and try again.`
+                      );
+                    });
+                  initializationCompleted = true;
                   const advertisedMethods = [...(initialized.authMethods ?? [])];
                   const methods = advertisedMethods.filter(
                     (method) => getAuthMethodType(method) === 'agent'
@@ -1207,33 +1257,88 @@ export class AcpAuthenticationManager {
                       `${options.agentType} no longer advertises authentication method ${methodId}`
                     );
                   }
-                  await context.request(
-                    acp.methods.agent.authenticate,
-                    { methodId },
-                    { cancellationSignal: running.abortController.signal }
-                  );
+                  await context
+                    .request(
+                      acp.methods.agent.authenticate,
+                      { methodId },
+                      { cancellationSignal: running.abortController.signal }
+                    )
+                    .catch(() => {
+                      // The agent controls JSON-RPC error text and may echo submitted
+                      // credentials, including encoded or partial values. Never forward it.
+                      throw new Error(
+                        interactionError ??
+                          `${options.agentType} ACP authentication failed. Check the sign-in details and try again.`
+                      );
+                    });
                   if (interactionError) {
                     throw new Error(interactionError);
                   }
                 }),
                 startupMonitor.abortPromise,
               ]);
+            } catch (error) {
+              operationFailed = true;
+              operationError = error;
             } finally {
               running.pendingInteraction?.resolve({ action: 'cancel' });
               running.pendingInteraction = undefined;
               startupMonitor.dispose();
-              await shutdownLocalAcpAgent({
-                agentProcess: child,
-                logger: this.logger,
-                sessionLabel: `acp-auth:${options.agentType}:protocol`,
-                exitTimeoutMs: this.terminationGraceMs,
-                nodeProcess: this.nodeProcess,
-              }).catch((error: unknown) => {
-                this.logger.debug(
-                  `[acp-auth] Failed to terminate protocol authentication process: ${formatErrorMessage(error)}`
-                );
-              });
-              if (running.child === child) running.child = undefined;
+              if (running.sorbetLease) {
+                const terminate = () =>
+                  terminateAcpProcessTree(child, {
+                    logger: this.logger,
+                    sessionLabel: 'sorbet-authentication',
+                    exitTimeoutMs: this.terminationGraceMs,
+                    nodeProcess: this.nodeProcess,
+                  });
+                try {
+                  await terminate();
+                } catch (error) {
+                  running.sorbetLease.retain(child, terminate);
+                  cleanupFailed = true;
+                  cleanupError = error;
+                }
+              } else {
+                try {
+                  await terminateAcpProcessTree(child, {
+                    logger: this.logger,
+                    sessionLabel: `acp-auth:${options.agentType}:protocol`,
+                    exitTimeoutMs: this.terminationGraceMs,
+                    nodeProcess: this.nodeProcess,
+                  });
+                } catch (error) {
+                  cleanupFailed = true;
+                  cleanupError = error;
+                }
+              }
+              if (!cleanupFailed && running.child === child) running.child = undefined;
+            }
+            safeOfflineFailure =
+              operationFailed &&
+              !cleanupFailed &&
+              !initializationCompleted &&
+              !interactionStarted &&
+              !sawProtocolOutput &&
+              child.exitCode !== null &&
+              child.exitCode !== 0 &&
+              /npm (?:error|ERR!) code (?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH)/i.test(
+                lastStderrTail
+              );
+            if (operationFailed && cleanupFailed) {
+              throw new AggregateError(
+                [operationError, cleanupError],
+                `${formatErrorMessage(operationError)}; ${running.sorbetLease ? 'Sorbet a' : 'A'}uthentication process cleanup is unconfirmed`
+              );
+            }
+            if (operationFailed) throw operationError;
+            if (cleanupFailed) {
+              throw new Error(
+                `${running.sorbetLease ? 'Sorbet a' : 'A'}uthentication process cleanup is unconfirmed`,
+                {
+                  cause: cleanupError,
+                }
+              );
             }
           },
         })

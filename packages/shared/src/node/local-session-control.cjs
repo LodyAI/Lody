@@ -443,7 +443,8 @@ function isACPSessionConfig(value) {
     agentType === 'kimi' ||
     agentType === 'deepseek' ||
     agentType === 'bub' ||
-    agentType === 'dimcode';
+    agentType === 'dimcode' ||
+    agentType === 'sorbet';
   if (
     typeof value.prompt !== 'string' ||
     (cliType === 'builtin' && !isBuiltinAgentType) ||

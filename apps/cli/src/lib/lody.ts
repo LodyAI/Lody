@@ -4,6 +4,7 @@ import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
 import { LoroDocumentManager } from '@/lib/loro/doc';
 import { MachineRuntime } from '@/lib/machine-runtime';
+import { createSorbetCredentialsHandler } from '@/lib/sorbet-credentials';
 import { Logger } from '@/utils/logger';
 import {
   CliType,
@@ -316,6 +317,11 @@ export class Lody {
       workspaceDocument: documentManager,
       memoryPressure: options.memoryPressure,
       handlerConfig: {
+        sorbetCredentials: createSorbetCredentialsHandler(
+          documentManager,
+          this.machineId,
+          this.logger
+        ),
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
         encryptedExecution: options.contentMode === 'e2ee' ? encryptedExecution : undefined,
@@ -570,9 +576,10 @@ export class Lody {
   }
 
   async dispatchLocalMachineRpc(
-    message: LocalMachineRpcRequestValidated
+    message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
-    return await this.runtime.dispatchLocalMachineRpc(message);
+    return await this.runtime.dispatchLocalMachineRpc(message, signal);
   }
 
   isControlPlaneReady(): boolean {

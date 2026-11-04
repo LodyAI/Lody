@@ -90,6 +90,10 @@ describe('usesAcpProtocolAuthentication', () => {
     expect(usesAcpProtocolAuthentication('custom')).toBe(true);
     expect(usesAcpProtocolAuthentication('builtin')).toBe(false);
     expect(usesAcpProtocolAuthentication('builtin', 'devin')).toBe(true);
+    expect(usesAcpProtocolAuthentication('builtin', 'sorbet')).toBe(true);
+    expect(supportsAuthenticationWhenRequired({ cliType: 'builtin', agentType: 'sorbet' })).toBe(
+      true
+    );
     expect(supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'devin' })).toBe(false);
     expect(usesAcpProtocolAuthentication(undefined)).toBe(false);
   });

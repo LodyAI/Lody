@@ -106,6 +106,21 @@ describe('fetchAcpCapabilities', () => {
     mocks.startLocalAcpAgent.mockImplementation(async () => createSuccessfulStartupResult());
   });
 
+  it('discovers authentication methods only for the Sorbet probe', async () => {
+    mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) =>
+      createSuccessfulStartupResult(
+        undefined,
+        options.discoverAuthenticationMethods
+          ? [{ id: 'sorbet:example:oauth', name: 'Example OAuth' }]
+          : []
+      )
+    );
+    const sorbet = await fetchAcpCapabilities('builtin', 'sorbet', createSilentLogger());
+    const other = await fetchAcpCapabilities('builtin', 'bub', createSilentLogger());
+    expect(sorbet.authMethods).toEqual([{ id: 'sorbet:example:oauth', name: 'Example OAuth' }]);
+    expect(other.authMethods).toEqual([]);
+  });
+
   it('reports missing builtin credentials before starting the ACP adapter', async () => {
     const authMethods = [
       {
