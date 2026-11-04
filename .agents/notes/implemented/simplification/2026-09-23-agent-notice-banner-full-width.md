@@ -5,6 +5,10 @@ Translation: current
 
 [中文](2026-09-23-agent-notice-banner-full-width.zh.md)
 
+Later change: the tone ring and mixed-fill sentence is superseded by
+[the soft well](2026-10-27-agent-notice-soft-well.md); the width and folding
+rationale still applies.
+
 ## Abstract
 
 `AgentNoticeBanner` — the one surface `chat_failed` and `agent_warning` share —

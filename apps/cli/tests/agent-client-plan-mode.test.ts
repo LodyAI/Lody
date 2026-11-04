@@ -1,3 +1,8 @@
+import { daemonLossObserver } from '../src/lib/e2ee/client-loss-observer';
+vi.hoisted(() => {
+  Object.assign(globalThis, { __LODY_E2E_DAEMON_LOSS__: true });
+  process.env.LODY_E2E = '1';
+});
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ACPSessionId,
@@ -365,7 +370,20 @@ describe('AgentClient plan mode permission restoration', () => {
     it.each(['resolve', 'reject'] as const)(
       'keeps cancelled raw prompts pending until they %s',
       async (outcome) => {
-        const { client } = createTestClient();
+        const { client } = createTestClient({ workspaceId: 'e2e-probe' as WorkspaceId });
+        daemonLossObserver.register(
+          { workspaceId: 'e2e-probe', machineId: 'machine', accountId: 'account' },
+          () => ({
+            intakeClosed: false,
+            pending: {
+              processorActive: 0,
+              processorQueued: 0,
+              watcherChecks: 0,
+              executionTurns: 0,
+              executionBookkeeping: 0,
+            },
+          })
+        );
         const raw = Promise.withResolvers<PromptResponse>();
         // @ts-expect-error - focused transport-boundary setup
         client.connection = { prompt: () => raw.promise, cancel: async () => {} };
@@ -377,6 +395,7 @@ describe('AgentClient plan mode permission restoration', () => {
         await expect(local).rejects.toThrow('Agent prompt aborted');
 
         const drain = client.pendingPromptCompletion;
+        expect(daemonLossObserver.inspect('e2e-probe')?.pending.executionBookkeeping).toBe(1);
         expect(drain).not.toBeNull();
         let drained = false;
         void drain?.then(() => {
@@ -388,6 +407,7 @@ describe('AgentClient plan mode permission restoration', () => {
         if (outcome === 'resolve') raw.resolve({ stopReason: 'cancelled' });
         else raw.reject(new Error('ACP connection closed'));
         await drain;
+        expect(daemonLossObserver.inspect('e2e-probe')?.pending.executionBookkeeping).toBe(0);
         expect(client.pendingPromptCompletion).toBeNull();
       }
     );
@@ -395,7 +415,23 @@ describe('AgentClient plan mode permission restoration', () => {
     it.each(['original', 'steer'] as const)(
       'drains both Claude handoff requests when %s finishes first',
       async (first) => {
-        const { client } = createTestClient({ agentType: 'claude' });
+        const { client } = createTestClient({
+          agentType: 'claude',
+          workspaceId: 'e2e-handoff' as WorkspaceId,
+        });
+        daemonLossObserver.register(
+          { workspaceId: 'e2e-handoff', machineId: 'machine', accountId: 'account' },
+          () => ({
+            intakeClosed: false,
+            pending: {
+              processorActive: 0,
+              processorQueued: 0,
+              watcherChecks: 0,
+              executionTurns: 0,
+              executionBookkeeping: 0,
+            },
+          })
+        );
         const original = Promise.withResolvers<PromptResponse>();
         const steered = Promise.withResolvers<PromptResponse>();
         let steerId = '';
@@ -428,6 +464,7 @@ describe('AgentClient plan mode permission restoration', () => {
         if (outcome.outcome !== 'applied') throw new Error('Expected applied steer');
         outcome.application.release();
         await application;
+        expect(daemonLossObserver.inspect('e2e-handoff')?.pending.executionBookkeeping).toBe(2);
         const drain = client.pendingPromptCompletion;
         let drained = false;
         void drain?.then(() => {
@@ -441,10 +478,12 @@ describe('AgentClient plan mode permission restoration', () => {
           await steer.completion;
         }
         expect(drained).toBe(false);
+        expect(daemonLossObserver.inspect('e2e-handoff')?.pending.executionBookkeeping).toBe(1);
         expect(client.pendingPromptCompletion).not.toBeNull();
         original.resolve({ stopReason: 'end_turn' });
         steered.resolve({ stopReason: 'end_turn' });
         await Promise.all([initial, steer.completion, drain]);
+        expect(daemonLossObserver.inspect('e2e-handoff')?.pending.executionBookkeeping).toBe(0);
         expect(client.pendingPromptCompletion).toBeNull();
       }
     );
@@ -630,15 +669,19 @@ describe('AgentClient plan mode permission restoration', () => {
       );
 
       expect(onRateLimitUpdate).toHaveBeenCalledWith({
-        limitId: 'codex',
-        limitName: null,
-        planName: '"pro"',
-        scope: { providerId: 'codex' },
-        windows: [
+        rateLimits: [
           {
-            usedPercent: 18,
-            windowDurationSeconds: 604800,
-            resetsAtEpochSeconds: 1777400602,
+            limitId: 'codex',
+            limitName: null,
+            planName: '"pro"',
+            scope: { providerId: 'codex' },
+            windows: [
+              {
+                usedPercent: 18,
+                windowDurationSeconds: 604800,
+                resetsAtEpochSeconds: 1777400602,
+              },
+            ],
           },
         ],
       });
@@ -657,19 +700,23 @@ describe('AgentClient plan mode permission restoration', () => {
       await expect(client.extMethod('_acp_ext:session_rate_limits', limits)).resolves.toEqual({});
 
       expect(onRateLimitUpdate).toHaveBeenCalledWith({
-        limitId: 'codex',
-        planName: null,
-        scope: { providerId: 'codex' },
-        windows: [
+        rateLimits: [
           {
-            usedPercent: 3,
-            windowDurationSeconds: 18000,
-            resetsAtEpochSeconds: 1777288209,
-          },
-          {
-            usedPercent: 82,
-            windowDurationSeconds: 604800,
-            resetsAtEpochSeconds: 1777400602,
+            limitId: 'codex',
+            planName: null,
+            scope: { providerId: 'codex' },
+            windows: [
+              {
+                usedPercent: 3,
+                windowDurationSeconds: 18000,
+                resetsAtEpochSeconds: 1777288209,
+              },
+              {
+                usedPercent: 82,
+                windowDurationSeconds: 604800,
+                resetsAtEpochSeconds: 1777400602,
+              },
+            ],
           },
         ],
       });
@@ -1347,6 +1394,55 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
     });
   });
 
+  it('bridges a Droid question and returns its custom answer in the expected fields', async () => {
+    const { client, onRequestPermission } = createTestClient({
+      cliType: 'registry',
+      agentType: 'factory-droid',
+    });
+    onRequestPermission.mockResolvedValueOnce({
+      outcome: {
+        outcome: 'selected',
+        optionId: 'answer',
+        _meta: { lody: { elicitation: { version: 1, answers: { question_1: 'DuckDB' } } } },
+      },
+    } as unknown as Awaited<ReturnType<typeof onRequestPermission>>);
+    const request = {
+      mode: 'form',
+      sessionId: 'acp-test',
+      message: 'Droid needs your answers to continue.',
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          question_1: {
+            type: 'string',
+            title: 'Database',
+            description: 'Which database?',
+            oneOf: [
+              { const: 'option_0', title: 'PostgreSQL' },
+              { const: 'option_1', title: 'SQLite' },
+              { const: 'other', title: 'Other answer' },
+            ],
+          },
+          question_1_other: { type: 'string', title: 'Database: Other answer' },
+        },
+        required: ['question_1'],
+      },
+    } as unknown as CreateElicitationRequest;
+    await expect(client.unstable_createElicitation(request)).resolves.toEqual({
+      action: 'accept',
+      content: { question_1: 'other', question_1_other: 'DuckDB' },
+    });
+    const calls = onRequestPermission.mock.calls as unknown as Array<
+      [string, RequestPermissionRequest]
+    >;
+    const parsed = parseAskUserQuestionPermissionMeta(calls[0]?.[1]._meta);
+    expect(parsed?.questions[0]).toMatchObject({
+      id: 'question_1',
+      question: 'Which database?',
+      options: [{ label: 'PostgreSQL' }, { label: 'SQLite' }],
+    });
+  });
+
   it('returns cancel when the user dismisses the question', async () => {
     const { client, onRequestPermission } = createTestClient({ agentType: 'claude' });
     onRequestPermission.mockResolvedValueOnce({
@@ -1440,7 +1536,7 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
       mode: 'form',
       sessionId: 'acp-test',
       toolCallId: 'codex-question',
-      message: 'What next?',
+      message: 'Input requested',
       requestedSchema: {
         type: 'object',
         properties: {
@@ -1448,7 +1544,7 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
             type: 'string',
             title: 'Next step',
             description: 'What next?',
-            oneOf: [{ const: 'Ship', title: 'Ship' }],
+            oneOf: [{ const: 'Ship', title: 'Ship', description: 'Use the current plan' }],
             _meta: { lody: { elicitation: { version: 1, secret: false } } },
           },
           next_step__other: {
@@ -1472,6 +1568,12 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
     expect(parsed?.source).toBe('lody');
     expect(parsed?.autoResolveAt).toEqual(expect.any(Number));
     expect(parsed?.questions[0]?.allowCustomAnswer).toBe(true);
+    expect(parsed?.questions[0]).toMatchObject({
+      header: 'Next step',
+      question: 'What next?',
+      options: [{ label: 'Ship', description: 'Use the current plan' }],
+    });
+    expect(request?.toolCall.title).toBe('What next?');
     expect(request?._meta).toMatchObject({
       lody: { elicitation: { version: 1 } },
       codex: {

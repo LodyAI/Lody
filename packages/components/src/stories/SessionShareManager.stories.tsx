@@ -50,6 +50,9 @@ const meta = {
       { sessionId: 'child-2', title: 'Reader layout notes' },
     ],
     hasPending: false,
+    plaintextConfirmation: false,
+    onConfirmPlaintextPublish: noop,
+    onCancelPlaintextPublish: () => {},
     phase: 'idle',
     progress: 0,
     result: null,
@@ -104,7 +107,8 @@ export const PublishFailed: Story = {
     selected: ['main', 'child'],
     hasSecret: true,
     shareLink: storyLink,
-    error: 'Could not update sharing. Check the current settings and try again.',
+    error:
+      'The share upload did not finish. Check your connection and retry in this window to continue with the same content.',
     hasPending: true,
   },
 };
@@ -147,3 +151,8 @@ export const Revoked: Story = {
 };
 
 export const Loading: Story = { args: { entry: undefined } };
+
+export const EncryptedPublicationConfirmation: Story = { args: { plaintextConfirmation: true } };
+export const EncryptedPublicationConfirmationEmbedded: Story = {
+  args: { plaintextConfirmation: true, embedded: true },
+};

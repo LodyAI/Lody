@@ -10,7 +10,10 @@ import {
   SessionToolResultSchema,
   type SessionMeta,
 } from '@lody/shared';
-import { getSessionCommandEnvironment } from '@/lib/session-command-environment';
+import {
+  getDaemonWorkspace,
+  getSessionCommandEnvironment,
+} from '@/lib/session-command-environment';
 
 // Registration is stateless (tools read scope from ALS), so build the handler table once.
 let handlers: SessionToolHandlers | undefined;
@@ -28,21 +31,25 @@ export async function executeDaemonSessionTool(
   name: string,
   args: unknown
 ) {
-  const environment = getSessionCommandEnvironment();
+  const daemon = getDaemonWorkspace();
   if (
-    !environment ||
-    context.machineId !== environment.auth.machineId ||
-    context.workspaceId !== environment.workspace.id
+    !daemon ||
+    context.machineId !== daemon.machineId ||
+    context.workspaceId !== daemon.workspaceId
   )
     throw new Error('Session tool scope mismatch');
-  const invocation = environment.host.readInvocation(context.sessionId);
-  if (!invocation.active || invocation.requesterUserId !== environment.auth.userId)
-    throw new Error('Session tool requires an active local user Turn');
-  const row = await environment.manager.repo.getDocMeta(getSessionRoomId(context.sessionId));
+  // Only the exact Turn driving this Session may invoke its tools. The local
+  // platform has one user; on a shared cloud machine a collaborator may drive it.
+  const invocation = daemon.readInvocation(context.sessionId);
+  if (getSessionCommandEnvironment()) {
+    if (!invocation.active || invocation.requesterUserId !== daemon.userId)
+      throw new Error('Session tool requires an active local user Turn');
+  } else if (!invocation.active) throw new Error('Session tool requires an active Turn');
+  const row = await daemon.manager.repo.getDocMeta(getSessionRoomId(context.sessionId));
   if (
     !row?.meta ||
     isLoroRepoDocDeleted(row) ||
-    (row.meta as SessionMeta).machineId !== environment.auth.machineId
+    (row.meta as SessionMeta).machineId !== daemon.machineId
   )
     throw new Error('Requester Session does not belong to this machine');
   const handler = getHandlers().get(name);

@@ -1,3 +1,4 @@
+import { nativeScrollbar } from '../scroll-area/surface';
 import { Popover as BasePopover } from '@base-ui/react/popover';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
@@ -96,6 +97,7 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
               return appendClassName(
                 stylex.props(
                   surface.popup,
+                  nativeScrollbar,
                   surface.popupPanel,
                   hidden && hiddenSurfaceForSide(state.side)
                 ).className,

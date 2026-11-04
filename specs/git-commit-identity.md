@@ -26,8 +26,8 @@ The selected name and email are exported as both Git author and committer enviro
 GitHub authentication remains a separate requester-bound decision and does not change the commit
 object's author or committer.
 
-Changing requester or Git identity must not restart the ACP process or sandbox, including
-adopted speculative preparations. The new identity updates the host Session configuration for
+Changing requester or Git identity must not restart the ACP process or sandbox. The new
+identity updates the host Session configuration for
 subsequent commands launched through it. An existing ACP retains its launch environment, so
 Git commands launched directly by that process may retain the previous identity. Live identity
 propagation without restarting remains unimplemented.

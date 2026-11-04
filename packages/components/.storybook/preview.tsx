@@ -1,5 +1,5 @@
 import type { Preview } from '@storybook/react-vite';
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect } from 'react';
 import {
   Outlet,
   RouterContextProvider,
@@ -14,13 +14,23 @@ import {
   AuthenticatedConvexContext,
   type AuthenticatedConvexContextValue,
 } from '../src/hooks/use-authenticated-convex';
-import { ThemeProvider } from '../src/theme-provider';
+import { ThemeProvider, useTheme, type Theme } from '../src/theme-provider';
 import { Tooltip } from '@lody/ui/tooltip';
 import { installFocusModality } from '@lody/ui/focus-modality';
 import { I18nextProvider } from 'react-i18next';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { resources, defaultNS } from '../src/i18n';
+
+function StorybookThemeMode({ theme, children }: { theme: Theme; children: React.ReactNode }) {
+  const { previewTheme } = useTheme();
+
+  useLayoutEffect(() => {
+    previewTheme(theme);
+  }, [previewTheme, theme]);
+
+  return children;
+}
 
 function RouterOutlet() {
   return <Outlet />;
@@ -152,11 +162,13 @@ const preview: Preview = {
                   defaultTheme={theme}
                   storageKey="storybook-theme"
                 >
-                  <Tooltip.Provider>
-                    <div className="h-full bg-background text-foreground">
-                      <Story />
-                    </div>
-                  </Tooltip.Provider>
+                  <StorybookThemeMode theme={theme}>
+                    <Tooltip.Provider>
+                      <div className="h-full bg-background text-foreground">
+                        <Story />
+                      </div>
+                    </Tooltip.Provider>
+                  </StorybookThemeMode>
                 </ThemeProvider>
               </I18nextProvider>
             </RouterContextProvider>

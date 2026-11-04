@@ -24,5 +24,14 @@ Provider 绑定服务端点和工作区，返回缓存前解析当前登录凭�
 一次被拒绝的 token。临时错误由传输层重试；
 凭证遭到 401/403 拒绝后继续抑制请求，直到凭证变化或手动失效。
 
-实现：`packages/shared/src/loro-streams-auth.ts`；回归测试：
+原生 provider 在 Scope 下拥有共享刷新。一个等待者取消或超时不取消其他租约。
+最后租约释放、凭据替换和关闭在交接前取消并等待真实 I/O。Raw 工作不配合 abort 时，
+有界清理失败保留旧拥有者和完整 Cause；成功显式恢复后才允许替换。并发 close 共享
+完成/失败结果。Timeout、取消不能投影为 undefined auth 成功。
+Native getToken/auth 保留 terminal auth typed failure；只有显式 Legacy 旧协议 callback
+将非空、全 auth Cause 投影为 undefined，混合 Cause 保留所有其他失败原因。
+诊断快照不含凭据、JWT、URL、原始错误内容或 owner；恢复仍保留原始完整 Cause。
+Promise 调用方在拥有者迁移前保留唯一显式 Legacy 门面。
+
+实现：`packages/shared/src/loro-streams-auth.ts` 和[原生 provider](../packages/shared/src/loro-streams-token/README.md)；回归测试：
 `packages/shared/tests/loro-streams-auth.test.ts`。不承诺跨标签页协调。

@@ -1,3 +1,5 @@
+import { Immer, enablePatches, type Patch } from 'immer';
+import type { AgentHistoryMutationPath } from '../acp/history-apply';
 import { markAssistantTurnFinished } from './assistant-finalize';
 import { planOperationProgress, planOperationCompletion } from './operation-progress';
 import type { StoredLodyOperation } from '../session-orchestration';
@@ -29,6 +31,12 @@ export type HistoryAction =
     }
   | { kind: 'operation-completion'; operation: StoredLodyOperation; turn: SessionEntry }
   | {
+      kind: 'operation-batch-status';
+      turnId: string;
+      batchId: string;
+      status: 'prepared' | 'submitted' | 'unknown' | 'settled' | 'not_submitted';
+    }
+  | {
       kind: 'upsert-goal';
       goal: Extract<MessageContent, { type: 'goal' }>;
       targetTurnId?: string;
@@ -41,8 +49,11 @@ export type HistoryAction =
       kind: 'user-status';
       turnId: string;
       status: SessionTurnStatus;
+      cancellationReason?: 'user_stop';
       requeueUndelivered?: boolean;
       onlyPendingApply?: boolean;
+      /** Settle only input no execution has claimed: every copy is still pending or seen. */
+      onlyAwaitingStart?: boolean;
       deliveredSteer?: boolean;
       /** Execution-owned steer projection cannot regress a terminal or ordinary input. */
       steerProjection?: boolean;
@@ -63,11 +74,17 @@ export type HistoryAction =
   | { kind: 'upsert-turn'; turn: SessionEntry; beforeTurnId?: string; beforeLastUser?: boolean }
   | { kind: 'remove-turn'; turnId: string }
   | { kind: 'agent-warning'; turn: SessionEntry; message: string }
-  | { kind: 'file-backfilled'; fileId: string; relayFileId: string };
+  | {
+      kind: 'file-backfilled';
+      fileId: string;
+      relayFileId: string;
+      encryption?: import('../encrypted-attachment').EncryptedAttachment;
+    };
 
 /** Which actions can be committed by reading exactly one body. */
 export function historyActionTarget(action: HistoryAction): string | undefined {
-  return action.kind === 'assistant-items' ||
+  return action.kind === 'operation-batch-status' ||
+    action.kind === 'assistant-items' ||
     action.kind === 'user-status' ||
     action.kind === 'finish-assistant' ||
     action.kind === 'assistant-file-diff' ||
@@ -108,6 +125,8 @@ function applyUserStatus(
   if (!canonical) return action.requeueUndelivered === true;
   const write = (entry: SessionEntry) => {
     entry.status = action.status;
+    if (action.status === 'canceled' && action.cancellationReason)
+      entry.cancellationReason = action.cancellationReason;
     entry.read = action.status !== 'pending' && action.status !== 'pending_apply';
     if (action.deliveredSteer)
       entry.inputConfig = { ...entry.inputConfig, _lodyDeliveryKind: 'steer' };
@@ -119,6 +138,11 @@ function applyUserStatus(
       if (STEER_PROJECTABLE_USER_STATUSES.includes(copy.status)) write(copy);
     return true;
   }
+  if (action.onlyAwaitingStart) {
+    if (copies.some((copy) => copy.status !== 'pending' && copy.status !== 'seen')) return false;
+    for (const copy of copies) write(copy);
+    return true;
+  }
   if (action.requeueUndelivered || action.onlyPendingApply) {
     // Requeueing grants execution again: any copy that started or settled vetoes it.
     if (copies.some((copy) => !REQUEUEABLE_USER_STATUSES.includes(copy.status))) return false;
@@ -128,8 +152,7 @@ function applyUserStatus(
   }
   write(canonical);
   const rank = userStatusRank(action.status);
-  for (const copy of copies.slice(0, -1))
-    if (userStatusRank(copy.status) <= rank) write(copy);
+  for (const copy of copies.slice(0, -1)) if (userStatusRank(copy.status) <= rank) write(copy);
   return true;
 }
 
@@ -160,6 +183,24 @@ export function applyHistoryAction(
         action.statuses
       );
       return { turns, matched: turns !== history };
+    }
+    case 'operation-batch-status': {
+      let matched = false;
+      const turns = history.map((entry) => {
+        if (entry.id !== action.turnId || entry.role !== 'system') return entry;
+        const items = entry.items?.map((item) => {
+          if (
+            item.type !== 'operation_completion_batch' ||
+            item.batchId !== action.batchId ||
+            item.deliveryStatus === action.status
+          )
+            return item;
+          matched = true;
+          return { ...item, deliveryStatus: action.status };
+        });
+        return items === entry.items ? entry : { ...entry, items };
+      });
+      return { turns: matched ? turns : history, matched };
     }
     case 'operation-completion': {
       const turns = planOperationCompletion(history, action.operation, action.turn);
@@ -293,6 +334,7 @@ export function applyHistoryAction(
         for (const item of entry.items ?? []) {
           if (item.type === 'file' && item.fileId === action.fileId && item.transport === 'local') {
             item.fileId = action.relayFileId;
+            if (action.encryption) item.encryption = action.encryption;
             item.transport = 'r2';
             delete item.machineId;
             matched = true;
@@ -303,4 +345,51 @@ export function applyHistoryAction(
   }
   const unreachable: never = action;
   throw new Error('Unsupported history action', { cause: unreachable });
+}
+
+enablePatches();
+const actionImmer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
+/** Private write planning; the established mutating action semantics stay shared. */
+export function planHistoryAction(
+  history: SessionEntry[],
+  action: HistoryAction
+): {
+  turns: SessionEntry[];
+  matched: boolean;
+  changes: AgentHistoryMutationPath[];
+} {
+  const owned = structuredClone(action);
+  let matched = false,
+    patches: Patch[] = [];
+  const turns = actionImmer.produce(
+    history,
+    (draft) => {
+      const result = applyHistoryAction(draft as SessionEntry[], owned);
+      matched = result.matched;
+      if (result.turns === draft) return;
+      for (const [index, entry] of result.turns.entries()) {
+        const current = draft[index];
+        if (!current || current.id !== entry.id) {
+          draft[index] = entry;
+          continue;
+        }
+        for (const key of new Set([...Object.keys(current), ...Object.keys(entry)])) {
+          if (Reflect.get(current, key) === Reflect.get(entry, key)) continue;
+          if (Object.hasOwn(entry, key)) Reflect.set(current, key, Reflect.get(entry, key));
+          else Reflect.deleteProperty(current, key);
+        }
+      }
+      draft.length = result.turns.length;
+    },
+    (recorded) => {
+      patches = recorded;
+    }
+  );
+  const changes: AgentHistoryMutationPath[] = [];
+  for (const patch of patches) {
+    const index = patch.path[0];
+    const entry = typeof index === 'number' ? turns[index] : undefined;
+    if (entry) changes.push({ turnId: entry.id, path: patch.path.slice(1) });
+  }
+  return { turns, matched, changes };
 }

@@ -3,9 +3,16 @@
 Conversation rendering for a Session: the message stream, assistant turn folding,
 the outline rail, and the markdown/terminal/file content surfaces.
 
-Builtin DeepSeek Harness keeps thought prose in expandable activity groups, including
-a default-open Thought disclosure for groups without tools; explicit collapse is retained. Provider visibility is part of the
-virtual-row cache identity; other providers retain their existing filtering.
+Builtin DeepSeek Harness separates thought disclosures from tool groups. Thoughts
+start open, tools closed, and explicit toggles remain respected. DSH thought prose
+uses the same Markdown typography as ordinary answers, aligned with its disclosure
+label and shown in secondary text color; tool
+labels and details retain their compact process styling. While streaming,
+intermediate prose stays visible in order. Once a final answer is complete, the shared finished-work disclosure collapses earlier prose and tools;
+expanding it restores their order and independent disclosure states. Interrupted
+turns without an answer remain visible. Duration follows the shared header/footer
+policy. Both layout and virtual-row caches include provider visibility. Other providers retain their grouping and filtering. This is
+presentation only: stored thought/text types and provider delivery remain unchanged.
 
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and
 the reasoning behind those rules.
@@ -19,6 +26,7 @@ the reasoning behind those rules.
 | Turns                   | `assistant-turn-render-blocks.ts`                                                                 | Activity groups and foldable segments.                                                  |
 | Outline                 | `conversation-outline-*`                                                                          | Round ticks and navigation.                                                             |
 | Image sharing selection | [`message-selection.tsx`](message-selection.tsx)                                                  | Temporary message selection, drag rectangle, range modifiers, and edge scrolling.       |
+| Chat quotes             | [`message-quote-action.tsx`](message-quote-action.tsx)                                            | Portal action over a retained native prose selection, outside viewport layout.          |
 | Typography              | [`conversation-font-size-classes.ts`](conversation-font-size-classes.ts), `markdown-renderer.tsx` | Shared text roles; explicit preview size and compact tool prose without nested scaling. |
 | Spacing and surfaces    | [`conversation.tokens.stylex.ts`](conversation.tokens.stylex.ts), [`surface.ts`](surface.ts)      | Themeable conversation anatomy, activity rows and user bubbles.                         |
 
@@ -26,24 +34,93 @@ the reasoning behind those rules.
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
   a pointer heading for a tick counts as arrival.
 - `markdown-renderer.tsx` renders finished text with react-markdown and a
-  streaming turn with `@lobehub/streamdown`. Its dependency patch reveals text
+  streaming turn with `@lobehub/streamdown`. Finished static text uses
+  `lib/markdown-parse-cache.ts` to reuse only the raw syntax tree across remounts.
+  Each parser configuration retains at most 64 entries, 1,048,576 source characters
+  and 8,192 AST nodes; an input above 131,072 characters is not retained. Each
+  consumer gets a fresh tree, so transformations, sanitization, URL policy and
+  context-dependent components still run. Streaming prefixes bypass the cache. Its dependency patch reveals text
   already present at mount so switching back to a live Session does not replay
   the stream fade ([note](../../../../../.agents/notes/implemented/bug-fix/2026-09-26-streamdown-remount-animation.md)).
+  A nonempty session search renders the complete current Markdown without the
+  stream reveal animation, so index results and marks update together; clearing
+  search resumes the stream engine. Search and outline summaries share
+  `lib/session-chat-search.ts`'s CommonMark/GFM text extraction, preserving literal
+  punctuation in prose and code while removing parsed formatting delimiters.
+  [Decision and synthetic acceptance evidence](../../../../../.agents/notes/implemented/bug-fix/2026-10-07-session-search-literal-punctuation.md).
   Conversation paragraphs use start alignment during and after streaming; see
   [conversation Markdown alignment](../../../../../specs/conversation-markdown-alignment.md).
+  Rendering and search extraction share CJK-friendly emphasis parsing, so bold
+  sentences ending in punctuation can touch subsequent prose without exposing
+  their markers; see [CJK emphasis](../../../../../specs/markdown-cjk-emphasis.md).
+  After mounting in the browser, the renderer loads KaTeX's bundled Copy-tex
+  extension through `markdown-math-copy.ts`, keeping Node imports free of DOM
+  access. The extension converts selected rendered formulas to LaTeX
+  in the clipboard's plain text (`$...$` inline, `$$...$$` display), including
+  selections mixed with prose; the selected HTML is preserved. Partial formula
+  selections expand to the complete formula. The native selection guard stops
+  incomplete copy events before the extension can write clipboard data; see the
+  [integration note](../../../../../.agents/notes/implemented/feature/2026-10-16-math-selection-copy.md).
   `markdown-code-block.tsx` owns fenced
-  blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Shiki
-  tokens); `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
+  blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Highlights
+  tokens). Unsupported optional languages use an isolated Shiki fallback;
+  its native grammar registry owns loaded-language state, while Lody shares
+  fallback initialization and clears failed initialization for retry.
+  `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
   renders a closed Mermaid fence. Diagrams are split three ways: `use-mermaid-diagram-canvas.tsx`
   owns activation and the gestures that follow it, `mermaid-inline-canvas.ts` the
   pure zoom/pan geometry, and `mermaid-diagram-viewer.tsx` the full-screen
   surface. Invariants live in
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
-- A `[Title](session://<id>)` link (the form session mentions reach the agent in)
-  renders as a conversation chip. `session-link-context.tsx` supplies the Session
-  navigation from `SessionChatInterface`; without it, or on a read-only share, the
-  chip is inert.
+- A `[Title](lody://session/<id>?workspace=<id>)` link (or legacy `session://<id>`)
+  renders as a conversation chip. `SessionChatInterface` enables
+  `session-link-context.tsx`'s explicit-target deep-link dispatch for both same-
+  and cross-workspace links. Ordinary related-session navigation remains separate
+  so its last-active-tab restoration cannot override a resource destination.
+  Without live navigation, or on a read-only share, the chip is inert.
+  Message/plan copy and UI/CLI Markdown exports normalize prose references using
+  shared `session-link-export`, preserving code examples and stored history.
+  Only a known source workspace supplies a missing ID; anonymous readers do not
+  borrow the viewer's workspace.
+- Conversation file links use `agent-file-link-context.ts`: absolute paths render
+  immediately, while relative candidates keep their original text/code until the
+  owning Session's file index confirms an exact path. The conversation boundary
+  borrows the existing shared index only when a relative candidate appears; leaf
+  subscriptions update presentation without reparsing Markdown. Opening goes
+  directly to the known path, retaining anchors. Copy uses the authored path,
+  without worktree discovery; Codex cards retain their original unencoded path.
+  `MarkdownCodexFileCitations.IndexedPaths` shows confirmation and removal.
+- `plan-surface.ts` resolves plan approval text from nonempty `rawInput.plan` first,
+  then the first nonempty content text block. Claude result updates can replace
+  content with a rejection message while retaining the original plan input.
+  This also restores historical rejected cards without rewriting session data.
+  Content-only adapters retain their fallback; a separate `proposed_plan` row
+  still suppresses the card's duplicate. See the
+  [rejected-plan fix](../../../../../.agents/notes/implemented/bug-fix/2026-10-22-claude-rejected-plan-display.md).
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
+- `assistant-turn-timing.ts` builds the turn popover's timing rows (Started,
+  Ended, Duration, and Last update for a running turn) and the live status
+  line's "no output for N m" suffix. Durations reuse the "Worked for" resolvers.
+  "Running" means presence reports the session active (`liveTurnActivity`),
+  never an unfinished history entry. The age reads `ConversationView.lastUpdateAt`,
+  an in-memory stamp of backend history notifications. It counts only inside the
+  live window from `hooks/use-history-live-window.ts`, which the session page
+  opens each time room sync becomes live. Otherwise the row states a reason:
+  syncing, disconnected, or waiting on the user. `view.tsx` passes all of this
+  through `LiveTurnContext`. Thresholds are constants in the module.
+  [Decision](../../../../../.agents/notes/implemented/feature/2026-10-15-turn-timing-liveness.md).
+- The stream and `SessionChatInterface` derive the last completed assistant id
+  directly from the same `resolveLastAssistantTurnIds` index query. The parent
+  uses its existing conversation-version subscription; the stream does not copy
+  this derived value into parent state through an effect. The query retains the
+  empty-entry and duplicate-id rules and does not hydrate message bodies.
+  [Decision](../../../../../.agents/notes/implemented/simplification/2026-10-13-completed-assistant-derived-state.md).
+- The scroll engine also bounds synchronous unsettled commits across transaction
+  restarts. Budget exhaustion records `update-loop`, then reaches the existing
+  message-list fallback instead of continuing until React's nested-update limit.
+  The fallback preserves the composer and requires explicit retry. The reset
+  microtask is counter bookkeeping, not a layout retry or delay.
+  [Guard and scope](../../../../../.agents/notes/implemented/bug-fix/2026-10-13-scroll-update-loop-guard.md).
 - `markdown-file-image.tsx` binds live file Markdown to its owning provider. Local
   resources load automatically; remote file images show a one-line recessed slot
   (alt, file name, Load image) and load on click. Relative paths use the opened document; Blob URLs last only for the mounted
@@ -74,6 +151,11 @@ group, derived from `@lody/ui` space, radius and colour tokens or the active VS 
 palette. `surface.ts` owns shared row and bubble styles; the Markdown renderer and
 code block own their element styles. A host can apply `createTheme(conversation, …)`
 to a subtree to change these values without descendant utility overrides.
+`scopedConversationTheme` rebinds the defaults on a host that pins its own CSS
+palette, such as a share card. CSS aliases resolve where they are declared;
+inheriting the root aliases would retain the app's colours even after that host
+changes the underlying theme variables. Share cards also bind the product colour
+theme locally. Code-block dark styling respects `.light-scope` and `.dark-scope`.
 
 Activity thought prose uses compact Markdown at the same subheadline size and
 leading as its summary and tool rows, in the parent conversation and task dialog.
@@ -101,6 +183,9 @@ See the [global scale decision](../../../../../.agents/notes/implemented/simplif
 for scope and retained exceptions.
 `AssistantTurnAlignment.ConversationRhythm` renders a synthetic two-round conversation;
 `ConversationRhythmTheme` applies a scoped StyleX theme to the same components.
+`MobileConversationRhythm` renders the same rounds at phone width: one left rail,
+the round gap below the always-visible footer, and only the newest turn's
+buttons at rest (`tests/assistant-turn-action-inset.test.ts` covers tap reveal).
 `ConversationRhythmReading` and its streaming variant add continuous mixed-script
 paragraphs to verify real wrapped-line pitch and compare reading density.
 `ConversationRhythmProgress` and its streaming variant interleave long progress
@@ -131,6 +216,12 @@ uses a synthetic upward wheel because a real scrollbar gesture is not reliable i
 the Storybook canvas.
 The [compact duration Spec](../../../../../specs/compact-duration-spacing.md)
 defines locale-specific spacing for these labels.
+Turn timing is covered by `tests/assistant-turn-timing.test.ts` (rows, liveness
+states, thresholds, local-time formatting) and by `tests/agent-activity-row.test.tsx`
+(running and finished popovers, the stale warning, catch-up, waiting and offline
+states, and the "no output" status).
+`DesktopTurnTimingLive` and `DesktopTurnTimingFinished` in
+`AssistantTurnAlignment.stories.tsx` show both popover states.
 
 ## Why the rules read the way they do
 
@@ -144,6 +235,32 @@ defines locale-specific spacing for these labels.
   ([note](../../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md)).
   `bufferSize` is a trade between blank space during a fast scroll and keeping
   resizing rows mounted.
+- **Local send continuity.** Ready accepted inputs have individual turn-ID keys
+  in the same scroll engine, so a send can anchor before owner history arrives.
+  A directory placeholder keeps the local body until formal history is hydrated;
+  the formal row then wins once under the same key. These rows stay outside
+  authoritative history and outline/export facts. Sending feedback does not imply
+  owner delivery or execution. [Decision](../../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md#local-row-anchoring-and-hydrated-handoff).
+- **Touch input before scroll delivery.** The adapter releases following on a single
+  upward conversation pan, including its final touch position when no move was
+  delivered. The controller adopts post-touch momentum as reader movement even if
+  a resize samples it before the scroll event. Taps, pinches, horizontal gestures,
+  cancelled touches and nested scrolling do not leave momentum evidence. Model and
+  adapter tests cover these orderings; iOS device behavior still needs verification.
+- **Native bottom arrival.** The controller samples elastic `scrollTop` in the
+  valid range, so overshoot/rebound does not fight a programmatic bottom reset.
+  Only conversation input can re-arm follow. An exact-edge arrival retains native
+  input; the 4px near-edge and remembered stale-bottom cases snap on `scrollend`.
+  Unconfirmed wheel/key evidence expires 100ms after the first animation callback,
+  allowing compositor-driven motion to start. Body keys require actual viewport
+  movement before releasing follow.
+  Boundary inputs, button Space and prevented bubbling keys cannot arm a new
+  sequence. Relative layout compensation uses the raw
+  elastic offset as its write baseline, while intent and anchors use bounded offsets.
+  Focus, pointer input or editing outside the viewport clears previous evidence,
+  including when the composer already has focus. Hosts without `scrollend` still
+  follow at the exact edge; near-edge recovery needs that native signal.
+  [Decision and verification](../../../../../.agents/notes/implemented/bug-fix/2026-10-11-mobile-conversation-bottom-ownership.md).
 - **`buildChatStreamItems()` filtering.** An empty assistant entry renders `null`,
   which Virtua cannot measure, and a duplicate history id produces a duplicate key
   that desyncs the list.
@@ -179,7 +296,15 @@ defines locale-specific spacing for these labels.
 ruled rows. A row's first line is the task and its time; a running task adds a
 second line with its latest step, taken from the last `run.items` entry, then
 `run.progress`, then the legacy `summary`/`lastToolName`, so older tasks keep
-working. A row opens the panel's ONE dialog by task id (not a snapshot), so a
+working. While any task is pending or running, the finished turn keeps this
+panel after its answer; once every task is terminal, the panel returns to the
+folded work details. When a turn has both agent runs and other tasks (shell
+commands, MCP tasks, monitors, scheduled wakeups), the rows split into a Subagents
+tab, selected first, and a Tasks tab; each tab shows a spinner while live and
+carries no count. `groupOf` infers the split from task types because `taskKind`
+marks backgrounding, not agent versus command
+([decision](../../../../../.agents/notes/implemented/feature/2026-10-28-subagent-task-tabs.md)).
+A row opens the panel's ONE dialog by task id (not a snapshot), so a
 streaming run keeps updating inside it and the view follows the end only while
 the reader is there. `subagent-run-history.tsx` groups `run.items` with the conversation's
 `buildAssistantTurnRenderBlocks`; `view.tsx` supplies the same activity headers,
@@ -192,9 +317,15 @@ No `searchBlockId` is passed: search indexes the conversation, not a dialog.
 `subagent-task-panel.tsx` owns rows and the selected task;
 `subagent-task-detail.tsx` owns the dialog body and cancellation. Panel, detail and
 run-history styles each live in their adjacent `.stylex.ts` file and use shared
-conversation spacing and UI text tokens. Background command briefs use the same
-`ToolCommandSection` and `ToolDetailSheet` as tool steps, including shell highlighting
-and conversation font sizing. The brief and activity share one vertical scroller.
+conversation spacing and UI text tokens. Claude `local_bash` tasks display as `Bash`,
+including Core metadata that carries the type in `actor`. Aggregation joins their
+`toolUseId` to an execute tool's `toolCallId` within the same turn and derives the
+command from its stored `terminal_command` block. The dialog retains the description
+as Brief and shows a resolved command separately using `ToolCommandSection` and
+`ToolDetailSheet`, including shell highlighting and conversation font sizing.
+Missing tool evidence leaves only the Brief; descriptions are never guessed to be
+commands. This is a render-time association and does not rewrite stored history.
+The brief and activity share one vertical scroller.
 
 State comes from `run.snapshot.state` when present; the legacy `status` cannot
 say cancelled or unknown. `unknown` means Lody lost sight of the run, so the
@@ -212,6 +343,14 @@ scroll and a sideways swipe dragged the session away. So inside a
 `[data-vaul-drawer]` the dialog mounts in the drawer, `data-vaul-no-drag`,
 with a no-drag layer over its backdrop (`InMobileDrawer` story).
 
+The Loro conversation view carries display-only task metadata and a bounded latest
+step, not every child transcript. The task's non-enumerable `history` capability
+reads one exact owned run only after its detail mounts. Activity shows loading or
+retry until that read completes; a preview must never masquerade as the full run.
+Changing the selected task or closing the dialog discards late results and releases
+the full body. Static shares and other readers without this capability keep their
+already complete task data. Export/copy/replay use authoritative full readers.
+
 ## Creation progress
 
 `created-session-operation-card.tsx` owns each navigable child card and its title
@@ -221,6 +360,23 @@ so a long-running child is reachable before its Operation completes. Status come
 from the creating Operation's target Turn, not later Session activity. Completion
 rows linked by `progressMessageId` show a summary without creating a second set of
 cards. Older histories without progress rows retain successful-target cards.
+
+`created-session-list.tsx` uses the Subagent Task panel surface and ruled rows,
+with leading status marks and no repeated “Session created” labels. The header
+reports the total and expands/collapses lists longer than five rows; the default
+viewport holds five compact rows with internal scrolling. Expanded lists retain
+the Subagent Task panel’s 22rem height cap and internal scrollbar. Controls use `@lody/ui`.
+`buildChatVirtualRows` combines consecutive pure creation records (including
+separate MCP calls) under the first record's key; a different message or an
+unhydrated turn ends the group. The row retains its final turn index so visible
+range reporting keeps every grouped turn hydrated. Failure summaries
+remain outside the bounded card list, and card navigation/title/status remain live.
+Message-selection mode keeps original rows so each selected id matches one record.
+Completion summaries aggregate the original item results: all-failed batches show
+failure, all-cancelled batches show cancellation, and mixed outcomes show counts.
+Progress deduplication hides duplicate cards without removing successes from those
+counts. A result envelope alone does not imply successful work.
+See the [decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-created-session-list.md).
 
 Coverage: `SessionRelationCard.stories.tsx`, `tests/session-relation-card.test.tsx`,
 and CLI `tests/operation-progress-history.test.ts`. The latter uses real Loro Mirror
@@ -236,6 +392,10 @@ follow suppression; `markdown-renderer.tsx` holds selected prose presentation.
 Session data and action controls continue updating. This is independent of
 `message-selection.tsx`, which selects messages for image sharing.
 
+The chat quote action floats above the first visible selected line, centered on
+that line. It measures its rendered size, flips below the selection when there is
+no room above, and stays inside the conversation and safe viewport bounds.
+
 The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
 records lifecycle, alternatives, and platform verification limits.
 
@@ -246,3 +406,16 @@ Assistant replies do not show an author identity entry or its popover. It reads 
 in `view.tsx`; execution controls continue to describe the receiving turn. The
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.
+
+## Completed work batches
+
+Render `operation_completion_batch` as one result group with total count and delivery
+uncertainty. Its bounded member preview reuses existing completion/creation cards and
+`progressMessageId` deduplication. Rendering is passive: it never resumes a session or
+reads every omitted result. The `CompletedWorkBatch` story covers the uncertain state.
+
+Hide success receipts with no remaining concrete cards, including creation results
+already represented by progress. Hide their entire batch row when every member is
+present and hidden. Preserve concrete session cards, failure/cancellation details,
+unknown delivery and headers for omitted preview members. This is presentation-only;
+history and model delivery retain the original results.

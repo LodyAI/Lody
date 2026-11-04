@@ -105,8 +105,8 @@ Translation: current
 种分享动作都在；已发布的私密对话显示「已共享」，而菜单里依然写明私密范围和链接披
 露。`use-session-share-management.test.tsx` 增加了状态钩子：active 读作 `shared`，
 不存在以及 `draft`/`revoked` 读作 `none`，未作答的查询保持 `unknown`，没有工作区时
-无论控制面持有什么都读作 `none`。这两个文件，连同既有的头部菜单、分享管理器和移动
-端菜单套件，全部通过。
+无论控制面持有什么都读作 `none`。受众选项卡列表有「谁可以打开此对话」这个可访问名。
+这两个文件，连同既有的头部菜单、分享管理器和移动端菜单套件，全部通过。
 
 布局通过 `Sessions/SessionAccessControl` 在明暗两种主题下的 Storybook 渲染截图审
 阅，覆盖普通分享按钮、已共享文案，以及在有/没有已发布链接两种情况下的私密菜单。

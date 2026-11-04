@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { toShared } from '@/platform/process-options';
 import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_WORKTREE_CLEANUP_TIMEOUT_MS,
@@ -12,9 +12,49 @@ import {
   type WorktreeSetupShell,
   type WorkspaceId,
 } from '@lody/shared';
+import { startProcessLegacy } from '@lody/shared/node/process';
+
+import type { TerminationPolicy } from '@lody/shared/node/process';
 import type { Logger } from '@/utils/logger';
+import { formatErrorMessage } from '@/utils/format-error';
 
 const OUTPUT_TAIL_MAX_CHARS = 16_000;
+const HISTORY_EVENT_TIMEOUT_MS = 1_000;
+
+async function recordScriptEvent<T>(
+  options: {
+    sessionId: SessionId;
+    phase: WorktreeScriptPhase;
+    logger: Logger;
+    events?: WorktreeScriptEvents;
+  },
+  record: ((event: T) => Promise<void> | void) | undefined,
+  event: T
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.resolve().then(() => record?.call(options.events, event)),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('History recording timed out')),
+          HISTORY_EVENT_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } catch (error) {
+    options.logger.warn(
+      `[${options.sessionId}] Failed to record worktree ${options.phase}: ${formatErrorMessage(error)}`
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+/**
+ * How a failed or timed-out script is ended: SIGTERM to the shell's whole
+ * process group (every command the script started), then SIGKILL.
+ */
+const SCRIPT_TERMINATION_POLICY: TerminationPolicy = { graceMs: 2_000, killWaitMs: 2_000 };
 
 export type WorktreeScriptOutputStream = 'stdout' | 'stderr';
 
@@ -211,7 +251,7 @@ async function runWorktreeScript(options: {
   options.logger.info(
     `[${options.sessionId}] Running worktree ${options.phase} (${shell}) in ${options.workdir}`
   );
-  await options.events?.onStart?.({
+  await recordScriptEvent(options, options.events?.onStart, {
     phase: options.phase,
     shell,
     displayCommand: script,
@@ -227,21 +267,31 @@ async function runWorktreeScript(options: {
     let childClosed = false;
     let childExitStatus: WorktreeScriptEndEvent['exitStatus'];
     let waitForCloseResolve: (() => void) | null = null;
-    const child = spawn(command, args, {
-      cwd: options.workdir,
-      windowsHide: true,
-      env: {
-        ...process.env,
-        LODY_WORKSPACE_ID: options.workspaceId,
-        LODY_SESSION_ID: options.sessionId,
-        LODY_WORKTREE_PATH: options.workdir,
-        LODY_WORKTREE_BRANCH: options.branch,
-        LODY_WORKTREE_SCRIPT_PHASE: options.phase,
-        ...(options.repoFullName ? { LODY_GITHUB_REPO: options.repoFullName } : {}),
-        ...(options.localProjectId ? { LODY_LOCAL_PROJECT_ID: options.localProjectId } : {}),
+    // The shell leads its own process group so a failure or timeout ends every
+    // command the script started, not just the shell.
+    const shellProcess = startProcessLegacy(
+      {
+        command,
+        args,
+        options: {
+          cwd: options.workdir,
+          env: {
+            ...process.env,
+            LODY_WORKSPACE_ID: options.workspaceId,
+            LODY_SESSION_ID: options.sessionId,
+            LODY_WORKTREE_PATH: options.workdir,
+            LODY_WORKTREE_BRANCH: options.branch,
+            LODY_WORKTREE_SCRIPT_PHASE: options.phase,
+            ...(options.repoFullName ? { LODY_GITHUB_REPO: options.repoFullName } : {}),
+            ...(options.localProjectId ? { LODY_LOCAL_PROJECT_ID: options.localProjectId } : {}),
+          },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        },
+        processGroup: true,
       },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+      toShared()
+    );
+    const child = shellProcess.child;
 
     const emitOutput = (step: RunningStep, stream: WorktreeScriptOutputStream, chunk: string) => {
       if (stream === 'stdout') {
@@ -372,7 +422,7 @@ async function runWorktreeScript(options: {
       };
 
       activeStep = step;
-      await options.events?.onStepStart?.({
+      await recordScriptEvent(options, options.events?.onStepStart, {
         phase: options.phase,
         shell,
         stepIndex,
@@ -390,7 +440,7 @@ async function runWorktreeScript(options: {
 
       lastStepExitStatus = exitStatus;
       const status = exitStatus.exitCode === 0 ? 'completed' : 'failed';
-      await options.events?.onStepEnd?.({
+      await recordScriptEvent(options, options.events?.onStepEnd, {
         phase: options.phase,
         stepIndex,
         status,
@@ -412,17 +462,24 @@ async function runWorktreeScript(options: {
       }
       settled = true;
       clearTimeout(timeout);
-      if (error && !child.killed && !childClosed) {
-        child.kill('SIGTERM');
-      }
-      void Promise.resolve(
-        options.events?.onEnd?.({
-          phase: options.phase,
-          status,
-          exitStatus,
-          error,
-        })
-      )
+      // A successful script may leave background services running on purpose;
+      // a failed one must not leave anything behind, even after its shell exited.
+      const terminated = error
+        ? shellProcess.terminate(SCRIPT_TERMINATION_POLICY).catch((terminationError: unknown) => {
+            options.logger.warn(
+              `[${options.sessionId}] Worktree ${options.phase} processes did not exit: ${formatErrorMessage(terminationError)}`
+            );
+          })
+        : Promise.resolve();
+      void terminated
+        .then(() =>
+          recordScriptEvent(options, options.events?.onEnd, {
+            phase: options.phase,
+            status,
+            exitStatus,
+            error,
+          })
+        )
         .then(() => {
           if (error) {
             reject(error);
@@ -430,45 +487,32 @@ async function runWorktreeScript(options: {
           }
           resolve();
         })
-        .catch((historyError: unknown) => {
-          const normalizedError =
-            historyError instanceof Error ? historyError : new Error(String(historyError));
-          if (error) {
-            options.logger.warn(
-              `[${options.sessionId}] Failed to record worktree ${options.phase} completion: ${normalizedError.message}`
-            );
-            reject(error);
-            return;
-          }
-          reject(normalizedError);
-        });
+        .catch(reject);
     };
 
     const timeout = setTimeout(() => {
       const error = new Error(`Worktree ${options.phase} timed out after ${timeoutMs}ms.`);
       if (activeStep) {
         flushStepBuffers(activeStep);
-        void Promise.resolve(
-          options.events?.onStepEnd?.({
-            phase: options.phase,
-            stepIndex: activeStep.index,
-            status: 'failed',
-            exitStatus: { signal: 'SIGTERM' },
-          })
-        ).catch(() => {});
+        void recordScriptEvent(options, options.events?.onStepEnd, {
+          phase: options.phase,
+          stepIndex: activeStep.index,
+          status: 'failed',
+          exitStatus: { signal: 'SIGTERM' },
+        }).catch(() => {});
         activeStep.reject(error);
       }
       settle('failed', error, { signal: 'SIGTERM' });
     }, timeoutMs);
 
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       if (!activeStep) {
         return;
       }
       consumeStepStream(activeStep, 'stdout', text);
     });
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       if (!activeStep) {
         return;
@@ -491,14 +535,12 @@ async function runWorktreeScript(options: {
         const error = new Error(
           `Worktree ${options.phase} shell exited before command completed: ${activeStep.command}`
         );
-        void Promise.resolve(
-          options.events?.onStepEnd?.({
-            phase: options.phase,
-            stepIndex: activeStep.index,
-            status: 'failed',
-            exitStatus: childExitStatus,
-          })
-        ).catch(() => {});
+        void recordScriptEvent(options, options.events?.onStepEnd, {
+          phase: options.phase,
+          stepIndex: activeStep.index,
+          status: 'failed',
+          exitStatus: childExitStatus,
+        }).catch(() => {});
         activeStep.reject(error);
         activeStep = null;
       }

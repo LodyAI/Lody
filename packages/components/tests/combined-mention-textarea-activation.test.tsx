@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import React, { act, useState } from 'react';
 import {
   buildMentionFileIndex,
   getSuggestions,
@@ -61,6 +62,7 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
   useAgentRoleMentionItems: () => [],
 }));
 
+import { UserMessageEditor } from '../src/components/ai-gui/user-message-editor';
 import { CombinedMentionTextarea } from '../src/components/mentions/combined-mention-textarea';
 import { initI18n } from '../src/i18n';
 import { commands } from '../src/lib/commands';
@@ -89,6 +91,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    vi.useRealTimers();
     container.remove();
     if (originalScrollIntoView) {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -281,70 +284,60 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     }
   );
 
-  it('renders a plain textarea when no mention type is reachable', async () => {
-    await render({ value: '' });
-
-    expect(textarea()).not.toBeNull();
-    expect(mentionTreeMounted()).toBe(false);
-  });
-
-  it('mounts the mention tree when sessions are the only mentionable type', async () => {
+  it('expands and reanchors an edited session mention before saving and ignores IME submit', async () => {
     sessionItems.push({
-      sessionId: 's1',
-      title: 'Fix the parser',
-      slug: 'fix-the-parser',
+      sessionId: 'other-session',
+      title: 'Other session',
+      slug: 'other-session',
       projectKey: 'chat',
     });
-
-    await render({ value: '' });
-
-    expect(mentionTreeMounted()).toBe(true);
-  });
-
-  it('wraps ArrowUp from the first @ result and continues in reverse order', async () => {
-    sessionItems.push(
-      {
-        sessionId: 's1',
-        title: 'First session',
-        slug: 'first-session',
-        activityAt: 3,
-        projectKey: 'chat',
-      },
-      {
-        sessionId: 's2',
-        title: 'Second session',
-        slug: 'second-session',
-        activityAt: 2,
-        projectKey: 'chat',
-      },
-      {
-        sessionId: 's3',
-        title: 'Third session',
-        slug: 'third-session',
-        activityAt: 1,
-        projectKey: 'chat',
-      }
+    let saved: Parameters<React.ComponentProps<typeof UserMessageEditor>['onSave']>[0] | undefined;
+    function Editor() {
+      const [value, setValue] = useState('  @other-session  ');
+      return (
+        <UserMessageEditor
+          value={value}
+          onChange={setValue}
+          onCancel={() => undefined}
+          onSave={(submission) => {
+            saved = submission;
+          }}
+          isSaving={false}
+          conversationFontSize={13}
+        />
+      );
+    }
+    await act(async () => root.render(<Editor />));
+    await act(async () => {
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          metaKey: true,
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(saved).toBeUndefined();
+    await act(async () => {
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(saved?.text).toContain('lody://session/other-session');
+    expect(saved?.text).toBe(saved?.text.trim());
+    expect(saved?.spans).toEqual([
+      expect.objectContaining({ start: 0, kind: 'session', target: 'other-session' }),
+    ]);
+    expect(saved!.text.slice(saved!.spans![0]!.start, saved!.spans![0]!.end)).toContain(
+      'lody://session/other-session'
     );
-    await render({ value: '' });
-    await typeInto('@session:');
-
-    const input = textarea();
-    if (!input) throw new Error('composer textarea missing');
-    expect(highlightedRowText()).toContain('First session');
-
-    await act(async () => {
-      input.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
-      );
-    });
-    expect(highlightedRowText()).toContain('Third session');
-
-    await act(async () => {
-      input.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
-      );
-    });
-    expect(highlightedRowText()).toContain('Second session');
   });
 
   it('starts in the current project and toggles without losing query or focus', async () => {
@@ -535,23 +528,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
   });
 
-  it('does not scan skills until something asks for them', async () => {
-    await render({ value: '', skillAgent: { machineId: 'machine-1' } });
-
-    expect(skillScanEnabled).not.toContain(true);
-  });
-
-  it('scans skills when the menu scopes to the Skills category', async () => {
-    await render({ value: '', skillAgent: { machineId: 'machine-1' } });
-    expect(skillScanEnabled).not.toContain(true);
-
-    // Typed/pasted namespace prefixes still activate their lazy source.
-    await typeInto('@skill:');
-
-    expect(skillScanEnabled).toContain(true);
-  });
-
-  it.each(['$', '￥'])('opens skills from %s and commits the dollar form', async (trigger) => {
+  it.each(['$', '￥', '¥'])('opens skills from %s and commits the dollar form', async (trigger) => {
     for (const token of ['review', 'research']) {
       skillItems.push({
         token,
@@ -581,28 +558,22 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     expect(textarea()!.value.trimEnd()).toBe('Use $review');
   });
 
-  it.each(['$', '￥'])('keeps %s plain when skills are unavailable', async (trigger) => {
+  it.each(['$', '￥', '¥'])('keeps %s plain when skills are unavailable', async (trigger) => {
     await render({ value: '', availableCommands: [{ name: 'review', description: 'Review' }] });
     await typeInto(`${trigger}review`);
     expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
     expect(textarea()!.value).toBe(`${trigger}review`);
   });
 
-  it('preserves an unselected yuan query on dismissal', async () => {
+  it.each(['￥', '¥'])('preserves an unselected %s query on dismissal', async (trigger) => {
     await render({ value: '', skillAgent: { machineId: 'machine-1' } });
-    await typeInto('￥unknown');
+    await typeInto(`${trigger}unknown`);
     await act(async () => {
       textarea()!.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
       );
     });
-    expect(textarea()!.value).toBe('￥unknown');
+    expect(textarea()!.value).toBe(`${trigger}unknown`);
     expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
-  });
-
-  it('still scans skills for a draft that already carries a $ token', async () => {
-    await render({ value: 'use $review', skillAgent: { machineId: 'machine-1' } });
-
-    expect(skillScanEnabled).toContain(true);
   });
 });

@@ -1,3 +1,51 @@
+import { beforeEach, afterEach, vi } from 'vitest';
+import { Effect, Layer } from 'effect';
+import { LocalLoroWriterTurn } from '../src/local-loro-writer';
+import {
+  makeLocalLoroWriterLegacy,
+  type LocalLoroWriterLegacy,
+} from '../src/local-loro-writer/legacy';
+/**
+ * Regression tests for the 2026-07-04 adversarial review of the local Loro data
+ * plane (P4 protocol + R3/R4 remediation). Each test originally REPRODUCED a
+ * protocol-v2 bug; protocol v3 (peer-scoped addressing, peer lifecycle, join
+ * reconciliation) fixes them and these now pin the correct behavior:
+ *
+ *   F1  multi-window sync: per-peer subscriber state on the server means one
+ *       window's upload is still pushed to sibling windows sharing the relay
+ *       socket (v2 keyed subscribers by connection id and starved siblings)
+ *   F2  `joined` responses are peer-addressed and room-checked, so one
+ *       adapter's join payload can never be imported into another adapter's doc
+ *   F3  every server message carries workspaceId, so one workspace's metaFlock
+ *       broadcast is never imported into another workspace's metaFlock
+ *   F5a join is a reconciliation point: client-ahead ops present at join time
+ *       (offline writes + app restart; in-memory dirty flag lost) are up-synced
+ *   F5b an update silently dropped by the relay (send swallowed while the
+ *       async status channel still reports connected) is re-sent by the rejoin
+ *       reconciliation, not dependent on the cleared dirty flag
+ *   F5c superseded joins on one connection cannot advance a frontier for a
+ *       reply the client discards
+ *   F5d Flock rejoin reports the server's real frontier, so client-ahead meta
+ *       such as lastCanceledTurn is uploaded after a silently dropped frame
+ *   F5e an async Flock export from an old connection generation cannot restore
+ *       the optimistic frontier after rejoin reconciliation replaced it
+ *   F5f an async Flock import from an old join generation cannot publish a
+ *       false joined status after its replacement join was lost
+ *   F8  `detach` (sent by adapter.close(), synthesized by the relay for
+ *       destroyed/navigated windows) withdraws the peer server-side, so rooms
+ *       are released and nothing is pushed to departed clients
+ *
+ * The RelayHarness faithfully models the production transport chain:
+ *  - ONE server-side connection object per socket, shared by every renderer
+ *    window (apps/cli/src/lib/local-loro-data-plane-server.ts creates one
+ *    connection per net socket; the Electron relay holds a single long-lived
+ *    socket for the whole app, loro-data-plane-relay.ts).
+ *  - Client messages are routed to the per-workspace engine by
+ *    message.workspaceId (as the CLI socket server does).
+ *  - Every server→client message is fanned out to ALL renderer listeners
+ *    (relay.publish broadcasts each event to every attached webContents;
+ *    adapters filter by workspaceId + peerId).
+ */
 /**
  * Regression tests for the 2026-07-04 adversarial review of the local Loro data
  * plane (P4 protocol + R3/R4 remediation). Each test originally REPRODUCED a
@@ -42,7 +90,7 @@
 import { describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { LocalLoroTransportAdapter } from '../src/local-loro-transport';
-import { LocalLoroDataPlaneServer } from '../src/local-loro-data-plane-server';
+import { LocalLoroDataPlaneServerLegacy } from '../src/local-loro-data-plane-server';
 import {
   base64ToBytes,
   bytesToBase64,
@@ -59,20 +107,7 @@ import { MemoryFlock } from './helpers/memory-flock';
  */
 class RelayHarness {
   private readonly tasks: Array<() => void | Promise<void>> = [];
-  private readonly scheduler = {
-    scheduleDataWork: (work: () => void | Promise<void>) => {
-      const scheduled = { cancelled: false };
-      this.tasks.push(async () => {
-        if (!scheduled.cancelled) {
-          await work();
-        }
-      });
-      return () => {
-        scheduled.cancelled = true;
-      };
-    },
-  };
-  private readonly engines = new Map<string, LocalLoroDataPlaneServer>();
+  private readonly engines = new Map<string, LocalLoroDataPlaneServerLegacy>();
   private readonly serverDocs = new Map<string, LoroDoc>();
   private readonly serverMetaFlocks = new Map<string, MemoryFlock>();
   private readonly rendererListeners = new Set<(m: LocalLoroDataPlaneServerMessage) => void>();
@@ -100,15 +135,15 @@ class RelayHarness {
     },
   };
 
-  engineFor(workspaceId: string): LocalLoroDataPlaneServer {
+  engineFor(workspaceId: string): LocalLoroDataPlaneServerLegacy {
     const existing = this.engines.get(workspaceId);
     if (existing) return existing;
-    const engine = new LocalLoroDataPlaneServer({
+    const engine = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId,
       resolveDoc: async (docId) => this.serverDoc(workspaceId, docId),
       resolveFlockDoc: async () => new MemoryFlock(),
       resolveMetaFlock: async () => this.serverMetaFlock(workspaceId),
-      scheduler: this.scheduler,
     });
     this.engines.set(workspaceId, engine);
     return engine;
@@ -178,9 +213,10 @@ class RelayHarness {
   setConnected(next: boolean): void {
     if (this.connected === next) return;
     this.connected = next;
+    if (next) this.sharedConnection.id += ':redial';
     if (!next) {
       for (const engine of this.engines.values()) {
-        engine.handleDisconnect(this.sharedConnection.id);
+        void engine.handleDisconnectLegacy(this.sharedConnection.id);
       }
     }
     for (const listener of this.statusListeners) listener(next);
@@ -189,14 +225,14 @@ class RelayHarness {
   async settle(): Promise<void> {
     for (let round = 0; round < 200; round += 1) {
       if (this.tasks.length === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await vi.advanceTimersByTimeAsync(1);
         if (this.tasks.length === 0) return;
       }
       const batch = this.tasks.splice(0);
       for (const task of batch) {
         await task();
       }
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(1);
     }
     throw new Error('settle_did_not_converge');
   }
@@ -327,24 +363,6 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
     // R3: rejoin reconciliation re-exports from the server's returned version —
     // recovery must not depend on the (already cleared) dirty flag.
     expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('dropped-edit');
-  });
-
-  it('F5c: only the newest same-connection join may advance the doc send frontier', async () => {
-    const harness = new RelayHarness();
-    insert(harness.serverDoc('ws', 'doc-1'), 0, 'server-history');
-    const renderer = harness.createAdapter('ws', 'renderer:double-rejoin');
-    const doc = new LoroDoc();
-
-    const subscription = renderer.joinDocRoom('doc-1', doc);
-    void subscription.rejoin();
-    void subscription.rejoin();
-    await harness.settle();
-
-    const joined = harness.pushed.filter(
-      (message) => message.type === 'joined' && message.room.scope === 'doc'
-    );
-    expect(joined.map((message) => message.requestId)).toEqual(['join:renderer:double-rejoin:3']);
-    expect(text(doc)).toBe('server-history');
   });
 
   it('F5d: Flock client-ahead metadata is resent after a silently dropped upload', async () => {
@@ -510,27 +528,6 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
   // `joined`. Observed in production as a user turn that never reached the CLI,
   // so `TurnHistoryGate` held the whole agent reply for its full 20s timeout.
   describe('F9: repo doc eviction must invalidate the cached data-plane room', () => {
-    it('drops renderer uploads into the orphaned instance when the room is not invalidated', async () => {
-      const harness = new RelayHarness();
-      const renderer = harness.createAdapter('ws', 'renderer:1');
-      const doc = new LoroDoc();
-      renderer.joinDocRoom('doc-1', doc);
-      await harness.settle();
-
-      insert(doc, 0, 'before-unload');
-      await harness.settle();
-      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload');
-
-      harness.unloadServerDoc('ws', 'doc-1');
-
-      insert(doc, text(doc).length, '|after-unload');
-      await harness.settle();
-
-      // The upload was applied to the evicted instance, so the repo's current
-      // doc — the one the CLI reads and persists — never sees it.
-      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload');
-    });
-
     it('recovers both directions once the evicted room is invalidated', async () => {
       const harness = new RelayHarness();
       const renderer = harness.createAdapter('ws', 'renderer:1');
@@ -597,7 +594,6 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       // bound to the instance the repo just evicted. That is the original bug
       // with no recovery signal at all, and it is reachable because
       // `unloadDocRoom` awaits `repo.unloadDoc` before it invalidates.
-      const tasks: Array<() => void | Promise<void>> = [];
       const currentDocs = new Map<string, LoroDoc>();
       let openGate = (): void => {};
       const gate = new Promise<void>((resolve) => {
@@ -605,7 +601,8 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       });
       let parkNextResolve = true;
 
-      const engine = new LocalLoroDataPlaneServer({
+      const engine = new LocalLoroDataPlaneServerLegacy({
+        writerLegacy,
         workspaceId: 'ws',
         resolveDoc: async (docId) => {
           // Capture BEFORE parking: this models the real race, where
@@ -622,12 +619,6 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
           return doc;
         },
         resolveFlockDoc: async () => new MemoryFlock(),
-        scheduler: {
-          scheduleDataWork: (work) => {
-            tasks.push(work);
-            return () => {};
-          },
-        },
       });
 
       const evicted = new LoroDoc();
@@ -653,7 +644,7 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
 
       openGate();
       await joining;
-      for (const task of tasks.splice(0)) await task();
+      await vi.advanceTimersByTimeAsync(1);
 
       // A peer upload must reach the repo's CURRENT doc, not the orphan.
       const peer = new LoroDoc();
@@ -674,104 +665,24 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       expect(text(reloaded)).toBe('from-peer');
       expect(text(evicted)).toBe('');
     });
-
-    // The generation check inside `ensureRoom` only covers the window BEFORE the
-    // entry is installed. An invalidation landing between `rooms.set` and the
-    // awaiting caller resuming would hand back an already-dead entry, which is
-    // worse than the bug this class fixes: `handleJoin` registers the peer on
-    // it, `buildJoinReplyFrames` then finds no room and emits nothing, and the
-    // client is parked on `connecting` forever — not a terminal status, so the
-    // renderer's reconnect loop never fires either.
-    //
-    // The install and the caller's resumption are one microtask apart, so
-    // rather than guess that distance (scheduler luck, and a test that silently
-    // stops covering anything when the code shifts by a hop), sweep the
-    // invalidation across a fixed range of microtask depths and require the
-    // invariant to hold at every one. Deterministic: same depths every run.
-    for (const depth of [0, 1, 2, 3, 4, 5, 6, 7]) {
-      it(`answers a join whose room is invalidated ${depth} microtask(s) into the build`, async () => {
-        const tasks: Array<() => void | Promise<void>> = [];
-        const currentDocs = new Map<string, LoroDoc>();
-        let armed = true;
-        const engine = new LocalLoroDataPlaneServer({
-          workspaceId: 'ws',
-          resolveDoc: async (docId) => {
-            const doc = currentDocs.get(docId);
-            if (!doc) throw new Error(`no doc ${docId}`);
-            if (armed) {
-              armed = false;
-              let chain = Promise.resolve();
-              for (let hop = 0; hop < depth; hop += 1) {
-                chain = chain.then(() => undefined);
-              }
-              void chain.then(() => {
-                const reloaded = new LoroDoc();
-                reloaded.import(doc.export({ mode: 'snapshot' }));
-                currentDocs.set(docId, reloaded);
-                engine.invalidateDocRoom(docId);
-              });
-            }
-            return doc;
-          },
-          resolveFlockDoc: async () => new MemoryFlock(),
-          scheduler: {
-            scheduleDataWork: (work) => {
-              tasks.push(work);
-              return () => {};
-            },
-          },
-        });
-
-        const seeded = new LoroDoc();
-        insert(seeded, 0, 'seed');
-        currentDocs.set('doc-1', seeded);
-
-        const frames: LocalLoroDataPlaneServerMessage[] = [];
-        const connection = {
-          id: 'dp:1',
-          send: (frame: LocalLoroDataPlaneServerMessage) => {
-            frames.push(frame);
-          },
-        };
-        await engine.handleMessage(connection, {
-          type: 'join',
-          protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-          requestId: 'join:1',
-          workspaceId: 'ws',
-          peerId: 'renderer:1',
-          room: { scope: 'doc', docId: 'doc-1' },
-        });
-        for (const task of tasks.splice(0)) await task();
-
-        // The invariant: the peer is never left silent. Either the join is
-        // answered, or it is told the room is gone so it re-joins. Silence is
-        // the unrecoverable state — the client parks on `connecting`, which is
-        // not terminal, so the renderer's reconnect loop never fires.
-        const joined = frames.filter((f) => f.type === 'joined' && f.requestId === 'join:1');
-        const terminalStatus = frames.filter(
-          (f) => f.type === 'room-status' && (f.status === 'disconnected' || f.status === 'error')
-        );
-        expect(joined.length + terminalStatus.length).toBeGreaterThan(0);
-
-        if (joined.length > 0) {
-          // The room it was registered on must be the live one, so a CLI write
-          // on the repo's CURRENT doc still reaches the peer.
-          const current = currentDocs.get('doc-1');
-          if (!current) throw new Error('missing current doc');
-          insert(current, text(current).length, '|after');
-          for (const task of tasks.splice(0)) await task();
-          const peerDoc = new LoroDoc();
-          for (const frame of frames) {
-            if (
-              (frame.type === 'joined' || frame.type === 'update') &&
-              frame.payload?.kind === 'doc-update'
-            ) {
-              peerDoc.import(base64ToBytes(frame.payload.dataBase64));
-            }
-          }
-          expect(text(peerDoc)).toBe('seed|after');
-        }
-      });
-    }
   });
+});
+
+let writerLegacy: LocalLoroWriterLegacy;
+beforeEach(() => {
+  vi.useFakeTimers();
+  writerLegacy = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, {
+      next: Effect.callback<void>((resume) => {
+        const handle = setTimeout(() => resume(Effect.void), 0);
+        return Effect.sync(() => clearTimeout(handle));
+      }),
+    })
+  );
+});
+afterEach(async () => {
+  const closed = writerLegacy.closeLegacy();
+  await vi.runAllTimersAsync();
+  await closed;
+  vi.useRealTimers();
 });

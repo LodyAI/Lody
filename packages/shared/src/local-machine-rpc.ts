@@ -1,4 +1,13 @@
 import {
+  AndroidEmulatorCommandSchema,
+  AndroidEmulatorRequestSchema,
+  AndroidEmulatorResponseSchema,
+} from './android-emulator';
+import { SessionFileRootIdSchema } from './project-path';
+import { FileDownloadRequestSchema, FileDownloadResponseSchema } from './file-download';
+import { ProjectLocalMemberProbeSchema } from './workspace-project';
+import { MemoryProviderRequestSchema, MemoryProviderResponseSchema } from './memory-provider';
+import {
   IosSimulatorCommandSchema,
   IosSimulatorRequestSchema,
   IosSimulatorResponseSchema,
@@ -7,6 +16,7 @@ import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspa
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
+import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
 import { SESSION_GOAL_ACTIONS } from './goal';
 import {
   CodeCollabV2ErrorSchema,
@@ -30,6 +40,9 @@ import {
 } from './code-collab';
 import { FilePreviewV3RequestSchema, FilePreviewV3ResponseSchema } from './file-preview';
 import {
+  MachineStatusResponseSchema,
+  MachinePingResponseSchema,
+  MachineAcpBinaryStatusResponseSchema,
   SessionCancelResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
@@ -83,6 +96,16 @@ export const SessionActiveInvocationContextResultSchema = z.discriminatedUnion('
       requesterUserId: z.string().trim().min(1),
       sourceTurnId: z.string().trim().min(1),
       inputConfig: z.record(z.string(), z.unknown()),
+      notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
+      notificationProvenancePending: z.boolean().optional(),
+      // Daemon-hosted tools use the frozen sender without rereading input history.
+      // The legacy socket handler omits this field for older strict readers.
+      sender: z
+        .discriminatedUnion('kind', [
+          z.object({ kind: z.literal('user') }).strict(),
+          z.object({ kind: z.literal('agent'), sessionId: SessionIdSchema }).strict(),
+        ])
+        .optional(),
     })
     .strict(),
 ]);
@@ -108,6 +131,36 @@ export const SessionToolResultSchema = z
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/status'),
+    params: z.object({ includeDisk: z.literal(true).optional() }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/ping'),
+    params: z.object({ requestId: z.string().trim().min(1) }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/acp-binary-status'),
+    params: z.object({ agentType: z.string().trim().min(1) }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/live-status'),
+    params: z
+      .object({
+        sessionId: z.string().trim().min(1),
+        includeActivity: z.literal(true).optional(),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('file/download-chunk'),
+    params: FileDownloadRequestSchema,
+  }).strict(),
+
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('project/probe-local-member'),
+    params: z.object({ localProjectId: z.string().trim().min(1) }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('ios-simulator/agent-control'),
     params: z.object({ sessionId: SessionIdSchema, command: IosSimulatorCommandSchema }).strict(),
   }).strict(),
@@ -116,9 +169,34 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     params: IosSimulatorRequestSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('android-emulator/agent-control'),
+    params: z
+      .object({ sessionId: SessionIdSchema, command: AndroidEmulatorCommandSchema })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('android-emulator/control'),
+    params: AndroidEmulatorRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('mcp/list-tools'),
     params: z
-      .object({ server: z.custom<WorkspaceMcpServerMeta>(isWorkspaceMcpServerMeta) })
+      .object({
+        server: z.custom<WorkspaceMcpServerMeta>(isWorkspaceMcpServerMeta),
+        requesterUserId: z.string().min(1).optional(),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('mcp/authentication'),
+    params: z
+      .object({
+        server: z.custom<WorkspaceMcpServerMeta>(isWorkspaceMcpServerMeta),
+        requesterUserId: z.string().min(1),
+        action: z.enum(['status', 'configure', 'authorize', 'cancel', 'signout']),
+        authentication: McpLocalAuthenticationSchema.optional(),
+        attemptId: z.string().max(128).optional(),
+      })
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
@@ -180,6 +258,7 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     method: z.literal('code-collab/lsp-definition'),
     params: z
       .object({
+        rootId: SessionFileRootIdSchema.optional(),
         sessionId: z.string().trim().min(1),
         path: z.string().min(1),
         line: z.number().int().nonnegative().optional(),
@@ -191,6 +270,7 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     method: z.literal('code-collab/lsp-references'),
     params: z
       .object({
+        rootId: SessionFileRootIdSchema.optional(),
         sessionId: z.string().trim().min(1),
         path: z.string().min(1),
         line: z.number().int().nonnegative().optional(),
@@ -217,6 +297,8 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .object({
         sessionId: SessionIdSchema,
         turnId: z.string().trim().min(1),
+        cancelId: z.string().uuid().optional(),
+        pauseInbox: z.boolean().optional(),
         subagentTaskId: z.string().trim().min(1).optional(),
       })
       .strict(),
@@ -237,6 +319,7 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
         userTurnId: z.string().trim().min(1),
         userId: z.string().trim().min(1),
         timestamp: z.string().trim().min(1),
+        inputOrigin: z.enum(['human', 'agent']).optional(),
         // Opaque at the transport layer; the CLI normalizes it with
         // `normalizeSessionTurnInputConfig` before offering the turn, the same
         // guard the Loro Streams Machine RPC server applies.
@@ -328,6 +411,10 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/memory'),
+    params: MemoryProviderRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/pi-extensions'),
     params: z
       .object({
@@ -340,9 +427,88 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
 export type LocalMachineRpcRequest = z.infer<typeof LocalMachineRpcRequestSchema>;
 export type LocalMachineRpcRequestValidated = LocalMachineRpcRequest;
 
+export const ProjectProbeLocalMemberResultSchema = ProjectLocalMemberProbeSchema.extend({
+  type: z.literal('project/probe-local-member'),
+}).strict();
+
+export type ProjectProbeLocalMemberResult = z.infer<typeof ProjectProbeLocalMemberResultSchema>;
+
+const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
+
+/**
+ * What a busy Session is doing, read on demand by its owning daemon and never
+ * published on presence. Sent only when the request asked with `includeActivity`.
+ */
+export const SessionLiveActivitySchema = z
+  .object({
+    turnStartedAt: z.number().finite().nonnegative().optional(),
+    lastOutputAt: z.number().finite().nonnegative().optional(),
+    currentAction: z.string().max(200).optional(),
+    queuedInputs: z.number().int().nonnegative(),
+  })
+  .strict();
+export type SessionLiveActivity = z.infer<typeof SessionLiveActivitySchema>;
+
+/**
+ * Best-effort withdrawal of a queued input that has not started. `withdrawn`
+ * means the input was still pending and is now canceled; a dispatch racing the
+ * withdrawal may still run it, which callers observe in the target history.
+ */
+export const SessionWithdrawInputResponseSchema = z
+  .object({
+    type: z.literal('session/withdraw-input_response'),
+    sessionId: z.string().trim().min(1),
+    userTurnId: z.string().trim().min(1),
+    outcome: z.enum([
+      'withdrawn',
+      'already_withdrawn',
+      'already_started',
+      'not_found',
+      'not_owner',
+      'error',
+    ]),
+    error: z.string().optional(),
+  })
+  .strict();
+export type SessionWithdrawInputResponse = z.infer<typeof SessionWithdrawInputResponseSchema>;
+
+export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
+  z
+    .object({
+      type: z.literal('session/live-status_response'),
+      machineId: z.string().trim().min(1),
+      sessionId: z.string().trim().min(1),
+      success: z.literal(true),
+      state: SessionLiveStateSchema,
+      observedAtMs: z.number().finite().nonnegative(),
+      reason: z.string().trim().min(1).optional(),
+      activity: SessionLiveActivitySchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('session/live-status_response'),
+      machineId: z.string().trim().min(1),
+      sessionId: z.string().trim().min(1),
+      success: z.literal(false),
+      state: z.literal('unknown'),
+      error: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+
 export const LocalMachineRpcResultSchema = z.union([
+  MachineStatusResponseSchema,
+  MachinePingResponseSchema,
+  MachineAcpBinaryStatusResponseSchema,
+  SessionLiveStatusResponseSchema,
+  FileDownloadResponseSchema,
+  ProjectProbeLocalMemberResultSchema,
+  MemoryProviderResponseSchema,
   IosSimulatorResponseSchema,
+  AndroidEmulatorResponseSchema,
   McpToolListResultSchema,
+  McpAuthenticationResultSchema,
   SessionToolResultSchema,
   SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
@@ -386,6 +552,11 @@ export const LocalMachineRpcResponseSchema = z.union([
     .object({
       ok: z.literal(false),
       error: z.string().trim().min(1),
+      code: z
+        .string()
+        .regex(/^[A-Za-z0-9_-]{1,64}$/)
+        .optional(),
+      data: z.unknown().optional(),
     })
     .strict(),
 ]);

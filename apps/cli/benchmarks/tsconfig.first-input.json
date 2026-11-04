@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.typecheck.json",
+  "include": ["roost-first-input.mts"]
+}

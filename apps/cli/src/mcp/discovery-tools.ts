@@ -1,7 +1,13 @@
 import type { createSessionToolRegistrar } from './session-tool-router';
 import { z } from 'zod';
 import { ResourceListSchemas, type DiscoveryQuery } from '@/lib/discovery-query';
-import type { ResourceDiscovery, DiscoveryResource } from '@/lib/resource-discovery';
+import {
+  CatalogSyncingError,
+  type ResourceDiscovery,
+  type DiscoveryResource,
+} from '@/lib/resource-discovery';
+
+const resourceGetInputSchema = z.object({ id: z.string().trim().min(1) }).strict();
 
 export function registerDiscoveryTools(
   registerTool: ReturnType<typeof createSessionToolRegistrar>,
@@ -9,7 +15,7 @@ export function registerDiscoveryTools(
 ) {
   const descriptions: Record<DiscoveryResource, string> = {
     machine:
-      'List readable machines, including offline machines, with online/offline/unknown presence and protocol capabilities.',
+      'List readable machines, including offline machines, with online/offline/unknown presence, protocol capabilities and synced agent quota windows (most used first, with reset times). Pass includeResources to also ask each listed online machine for memory and disk; a machine that cannot answer reports resources unavailable.',
     project:
       'List readable local projects across machines and enabled GitHub repositories. kind and machineId restrict the catalog. Local project identity includes machineId.',
     agent_config:
@@ -24,6 +30,16 @@ export function registerDiscoveryTools(
         content: [{ type: 'text' as const, text: JSON.stringify(await withDiscovery(read)) }],
       };
     } catch (error) {
+      if (error instanceof CatalogSyncingError)
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({ ok: false, error: error.toLodyError() }),
+            },
+          ],
+        };
       return {
         isError: true,
         content: [
@@ -39,7 +55,7 @@ export function registerDiscoveryTools(
     registerTool(
       `lody_${resource}_list`,
       {
-        description: `${descriptions[resource]} Returns a bounded page (default 20, maximum 100); follow nextCursor with the same filters to enumerate all entries.`,
+        description: `${descriptions[resource]} Returns a bounded page (default 20, maximum 100); follow nextCursor with the same filters to enumerate all entries. If sync.state is syncing, cached results may be incomplete; retry before treating absence as final.`,
         inputSchema: ResourceListSchemas[resource],
         annotations: { readOnlyHint: true },
       },
@@ -50,8 +66,8 @@ export function registerDiscoveryTools(
     registerTool(
       `lody_${resource}_get`,
       {
-        description: `Read one ${resource} by stable id from its list tool.`,
-        inputSchema: z.object({ id: z.string().trim().min(1) }).strict(),
+        description: `Read one ${resource} by stable id from its list tool. CATALOG_SYNCING is retryable.`,
+        inputSchema: resourceGetInputSchema,
         annotations: { readOnlyHint: true },
       },
       (args) => result((discovery) => discovery.get(resource, args.id))

@@ -1,3 +1,8 @@
+import { providerBindingFingerprint, type ProviderBinding } from './automation-observations';
+import { CommandTimedOut } from '@lody/shared/node/process';
+import { TURN_BUDGETS } from './turn-budgets';
+import { nativeSessionCredentials, type SessionCredentials } from './session-credentials';
+import { memoryEnvironment } from '@/lib/memory-providers';
 import EventEmitter from 'eventemitter3';
 import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
 import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
@@ -17,7 +22,7 @@ import { Logger } from '@/utils/logger';
 import { ndJsonStream } from '@agentclientprotocol/sdk';
 import * as fs from 'fs';
 import type { AcpStartupTimeoutOptions, AgentClient } from '@/agent/agent-client';
-import { createAcpClient } from '@/agent/acp-runner';
+import { createAcpClient, prepareAcpProcessEnvironmentLegacy } from '@/agent/acp-runner';
 import { withAcpSessionStartSlot } from '@/agent/acp-session-start-gate';
 import {
   AcpStartupProcessError,
@@ -38,7 +43,7 @@ import {
   resolveAcpLauncher,
 } from '@/agent/acp-analytics';
 import { scrubInheritedClaudeAuthEnv, shouldScrubClaudeAuthEnv } from '@/agent/claude-env-conflict';
-import { getCachedLoginShellEnvSync, getLoginShellEnv } from '@/agent/login-shell-env';
+import { getCachedLoginShellEnvSyncLegacy, getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 import { mergeLoginShellEnv, withDefaultAcpPathEntries } from '@/agent/setting';
 import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { ShellTerminalManager, TerminalManager } from './terminal-manager';
@@ -58,6 +63,15 @@ import {
   normalizeAcpSessionCapabilities,
   type AcpCapabilitiesResult,
 } from '@/agent/acp-capability-normalization';
+
+/** One run of `Session.terminate`, shared by the calls that arrive while it runs. */
+type SessionTermination = {
+  force: boolean;
+  /** Settles when a forced call joins, ending the graceful waits early. */
+  readonly escalated: Promise<void>;
+  readonly escalate: () => void;
+  done: Promise<void>;
+};
 
 type SessionEvents = {
   output: (event: SessionOutputEvent) => void;
@@ -113,6 +127,8 @@ function createAbortPromise(signal?: AbortSignal):
 }
 
 export class Session extends EventEmitter<SessionEvents> implements ISession {
+  private sandboxCleanupFailed = false;
+
   readonly sessionId: SessionId;
   private readonly config: SessionConfig;
   private readonly logger: Logger;
@@ -121,19 +137,23 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private readonly startedAtMs = getServerNow();
   private activeProcess: SessionProcessHandle | null = null;
   private agentProcess: SessionProcessHandle | null = null;
+  private termination: SessionTermination | null = null;
   private readonly sandbox: SessionSandbox;
+  private personalIdentityEnabled = false;
   private gitIdentity: { id: string; name: string; email: string };
   public agentClient: AgentClient | null = null;
   public acpSessionId: ACPSessionId | null = null;
   private acpCapabilities: AcpCapabilitiesResult | null = null;
   private acpCapabilitySourceVersion: string | null = null;
+  private releaseExternalMcpServers?: () => Promise<void>;
   public terminalManager: TerminalManager;
 
   constructor(
     config: SessionConfig,
     logger: Logger,
     workdir?: string,
-    sandbox: SessionSandbox = createNoopSessionSandbox()
+    sandbox: SessionSandbox = createNoopSessionSandbox(),
+    private readonly credentials: SessionCredentials = nativeSessionCredentials
   ) {
     super();
     this.config = config;
@@ -189,28 +209,21 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.getWorkdir();
   }
 
-  setWorkdir(workdir: string): void {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(workdir);
-    } catch (error) {
-      const code =
-        error && typeof error === 'object' && 'code' in error
-          ? (error as { code?: unknown }).code
-          : null;
-      if (code === 'ENOENT') {
-        throw new Error(`Session workdir does not exist: ${workdir}`, { cause: error });
-      }
-      throw error;
-    }
-    if (!stat.isDirectory()) {
-      throw new Error(`Session workdir is not a directory: ${workdir}`);
-    }
-    this.fixedWorkdir = workdir;
+  peekHostWorkdir(): string | null {
+    const candidate = this.fixedWorkdir ?? getDefaultSessionWorkdir(this.sessionId);
+    return fs.statSync(candidate, { throwIfNoEntry: false })?.isDirectory() ? candidate : null;
   }
 
   getParentSessionId(): SessionId | undefined {
     return this.config.parentSessionId;
+  }
+
+  getExecutionScope(): Pick<SessionConfig, 'project' | 'projectRun' | 'parentSessionId'> {
+    return {
+      project: this.config.project,
+      projectRun: this.config.projectRun,
+      parentSessionId: this.config.parentSessionId,
+    };
   }
 
   async applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void> {
@@ -247,25 +260,77 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return execPromise;
   }
 
-  async terminate(force: boolean = false): Promise<void> {
-    this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
+  /**
+   * Terminate every process this Session started and release its sandbox.
+   *
+   * Concurrent calls share one termination, so `terminated` is emitted once; a
+   * forced call during a graceful one escalates it at once. A call after a
+   * termination finished starts a new one: the Session may have started
+   * processes since, and a failed attempt deserves a retry rather than its
+   * stale rejection. Each process tree gets a bounded SIGTERM grace (none when
+   * forced) and a bounded wait after SIGKILL. A tree that survives both still
+   * retains process handles, sandbox and credentials, and rejects with an
+   * AggregateError containing the original failures. Callers must not reuse
+   * that agent; independent recovery retries physical termination first.
+   */
+  terminate(force: boolean = false): Promise<void> {
+    const current = this.termination;
+    if (current) {
+      if (force && !current.force) this.escalateTermination(current);
+      return current.done;
+    }
+    let escalate = (): void => {};
+    const escalated = new Promise<void>((resolve) => {
+      escalate = resolve;
+    });
+    const termination: SessionTermination = { force, escalated, escalate, done: Promise.resolve() };
+    this.termination = termination;
+    termination.done = this.terminateOnce(termination).finally(() => {
+      if (this.termination === termination) this.termination = null;
+    });
+    return termination.done;
+  }
+
+  /** Force an in-flight graceful termination: SIGKILL everything now. */
+  private escalateTermination(termination: SessionTermination): void {
+    this.logger.debug(`[${this.sessionId}] Escalating in-flight termination to force`);
+    termination.force = true;
+    termination.escalate();
+    // The in-flight termination's own forced calls below report any survivor.
+    void Promise.allSettled([
+      this.activeProcess?.terminate(true),
+      this.agentProcess?.terminate(true),
+      this.sandbox.terminate(true),
+    ]);
+  }
+
+  private async terminateOnce(termination: SessionTermination): Promise<void> {
+    this.logger.debug(
+      `[${this.sessionId}] Terminating session${termination.force ? ' (force)' : ''}`
+    );
     this.status = 'stopping';
 
-    if (this.acpSessionId && this.terminalManager.disposeAll) {
-      try {
-        await this.terminalManager.disposeAll(this.acpSessionId);
-      } catch (error) {
-        this.logger.debug(
-          `[${
-            this.sessionId
-          }] Failed to dispose ACP terminals during terminate: ${formatErrorMessage(error)}`
-        );
-      }
+    const acpSessionId = this.acpSessionId;
+    const disposeAll = this.terminalManager.disposeAll?.bind(this.terminalManager);
+    const terminalsDisposed =
+      acpSessionId && disposeAll
+        ? disposeAll(acpSessionId).catch((error: unknown) => {
+            this.logger.debug(
+              `[${
+                this.sessionId
+              }] Failed to dispose ACP terminals during terminate: ${formatErrorMessage(error)}`
+            );
+          })
+        : Promise.resolve();
+    // A graceful stop lets terminal commands wind down before the agent. A
+    // forced one does not wait on them: the sandbox SIGKILLs them below.
+    if (!termination.force) {
+      await Promise.race([terminalsDisposed, termination.escalated]);
     }
 
-    if (!force && this.acpSessionId && this.agentClient?.isCreated()) {
+    if (!termination.force && acpSessionId && this.agentClient?.isCreated()) {
       try {
-        await this.agentClient.closeSession(this.acpSessionId);
+        await Promise.race([this.agentClient.closeSession(acpSessionId), termination.escalated]);
       } catch (error) {
         this.logger.debug(
           `[${this.sessionId}] Failed to close ACP session during terminate: ${formatErrorMessage(
@@ -279,99 +344,64 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
 
-    // Kill both processes and wait for them to actually exit before proceeding.
-    // This prevents OS-level process leaks where SIGTERM is sent but the process
-    // outlives this function (and all tracking of it).
-    await Promise.all([
-      this.killAndWait(activeProcess, force),
-      this.killAndWait(agentProcess, force),
-    ]);
-
-    try {
-      await this.sandbox.terminate(force);
-    } catch (error) {
-      this.logger.debug(
-        `[${this.sessionId}] Failed to terminate sandbox process tree: ${formatErrorMessage(error)}`
+    // The sandbox as a whole also reaches terminal commands and groups whose
+    // leader already exited. It tracks the per-process trees too, so ending
+    // them one after the other would double every bounded wait on a survivor.
+    const failures: unknown[] = [];
+    for (const outcome of await Promise.allSettled([
+      activeProcess?.terminate(termination.force),
+      agentProcess?.terminate(termination.force),
+      this.sandbox.terminate(termination.force),
+    ])) {
+      if (outcome.status === 'rejected') failures.push(outcome.reason);
+    }
+    await terminalsDisposed;
+    for (const failure of failures) {
+      this.logger.error(
+        `[${this.sessionId}] Session process termination failed: ${formatErrorMessage(failure)}`
       );
     }
 
-    try {
-      await this.sandbox.cleanup();
-    } catch (error) {
-      this.logger.debug(
-        `[${this.sessionId}] Failed to clean up sandbox state: ${formatErrorMessage(error)}`
-      );
+    if (failures.length > 0) {
+      this.status = 'failed';
+      // Keep the sandbox registry, process handles and credentials for explicit recovery.
+      // An exited waiter is not a release receipt, and closing its Scope cannot retry cleanup.
+      throw new AggregateError(failures, `Session ${this.sessionId} resources were not released`);
     }
 
+    try {
+      if (this.sandboxCleanupFailed && this.sandbox.recoverCleanup)
+        await this.sandbox.recoverCleanup();
+      else await this.sandbox.cleanup();
+      this.sandboxCleanupFailed = false;
+    } catch (error) {
+      this.sandboxCleanupFailed = true;
+      this.status = 'failed';
+      throw new Error(`Session ${this.sessionId} sandbox cleanup is unresolved`, { cause: error });
+    }
+
+    for (const outcome of await Promise.allSettled([
+      this.credentials.release(),
+      this.cleanupExternalMcpServers(),
+    ])) {
+      if (outcome.status === 'rejected') failures.push(outcome.reason);
+    }
     this.activeProcess = null;
     this.agentProcess = null;
     this.agentClient = null;
     this.acpSessionId = null;
     this.acpCapabilities = null;
 
-    this.status = 'terminated';
+    this.status = failures.length > 0 ? 'failed' : 'terminated';
 
     const event: SessionExitEvent = {
       sessionId: this.sessionId,
-      exitCode: activeProcess?.child.exitCode ?? 0,
+      exitCode: agentProcess?.child.exitCode ?? activeProcess?.child.exitCode ?? 0,
     };
     this.emit('terminated', event);
-  }
 
-  /**
-   * Kill a process and wait for it to actually exit.
-   *
-   * With force=false: sends SIGTERM, waits up to SIGTERM_GRACE_MS, then
-   * escalates to SIGKILL if the process hasn't exited.
-   * With force=true: sends SIGKILL directly.
-   *
-   * Always awaits the actual OS process exit before returning, so callers can
-   * be certain no orphaned processes remain.
-   */
-  private async killAndWait(proc: SessionProcessHandle | null, force: boolean): Promise<void> {
-    if (!proc?.child) return;
-
-    const child = proc.child;
-    // Already exited — nothing to do.
-    // Note: child.killed only means a signal was *sent*, not that the process
-    // exited. Only exitCode !== null proves the process has actually terminated.
-    if (child.exitCode !== null) return;
-
-    const waitForExit = (): Promise<void> =>
-      new Promise<void>((resolve) => {
-        const unsubscribe = proc.onExit(() => {
-          unsubscribe();
-          resolve();
-        });
-        // Guard: if the process exited between the check above and
-        // registering the listener, resolve immediately.
-        if (child.exitCode !== null) {
-          unsubscribe();
-          resolve();
-        }
-      });
-
-    if (force) {
-      await proc.terminate(true);
-      await waitForExit();
-      return;
-    }
-
-    // Graceful path: SIGTERM → wait → SIGKILL fallback
-    const SIGTERM_GRACE_MS = 5_000;
-    await proc.terminate(false);
-
-    const outcome = await Promise.race([
-      waitForExit().then(() => 'exited' as const),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), SIGTERM_GRACE_MS)),
-    ]);
-
-    if (outcome === 'timeout' && child.exitCode === null) {
-      this.logger.debug(
-        `[${this.sessionId}] Process did not exit within ${SIGTERM_GRACE_MS}ms of SIGTERM; escalating to SIGKILL`
-      );
-      await proc.terminate(true);
-      await waitForExit();
+    if (failures.length > 0) {
+      throw failures[0];
     }
   }
 
@@ -386,11 +416,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     options: { preferMachineIdentity: boolean; personalIdentityEnabled?: boolean }
   ): void {
     const configEnv = this.config.env ?? {};
-    if (this.config.githubCredentialPolicy) {
-      // Commit attribution follows the turn; network credentials belong to the session owner.
-      if (options.personalIdentityEnabled !== undefined) {
-        this.config.githubCredentialPolicy.personalEnabled = options.personalIdentityEnabled;
-      }
+    if (options.personalIdentityEnabled !== undefined) {
+      this.personalIdentityEnabled = options.personalIdentityEnabled;
     }
     // Set git identity using Git's recognized environment variables directly.
     // The env is per agent process, so a shared machine never mixes requesters.
@@ -398,10 +425,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       { name: userName, email: userEmail },
       {
         preferMachineIdentity: options.preferMachineIdentity,
-        personalIdentityEnabled:
-          options.personalIdentityEnabled ??
-          this.config.githubCredentialPolicy?.personalEnabled ??
-          false,
+        personalIdentityEnabled: options.personalIdentityEnabled ?? this.personalIdentityEnabled,
       }
     );
     configEnv.GIT_AUTHOR_NAME = name;
@@ -421,9 +445,30 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.gitIdentity.id === userId ? { ...this.gitIdentity } : null;
   }
 
-  updateGitHubCredentialPolicy(allowLocalAuth: boolean): void {
-    if (!this.config.githubCredentialPolicy) throw new Error('github_context_missing');
-    this.config.githubCredentialPolicy.allowLocalAuth = allowLocalAuth;
+  getGitHubCredentials(): SessionCredentials {
+    return this.credentials;
+  }
+
+  getProviderBinding(): ProviderBinding | undefined {
+    const config = this.config;
+    if (!config.agentConfigId) return undefined;
+    return {
+      bindingId: config.agentConfigId,
+      fingerprint: providerBindingFingerprint({
+        id: config.agentConfigId,
+        cliType: config.agentCliType,
+        agentType: config.agentType,
+        env: config.env,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        codexAuth: config.codexAuth,
+        magpieGatewayUrl: config.magpieGatewayUrl,
+      }),
+    };
+  }
+
+  getMemoryBinding(): SessionConfig['memory'] {
+    return this.config.memory;
   }
 
   updateEnv(env: Record<string, string | undefined>): void {
@@ -452,7 +497,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   private buildShellEnv(
     extraEnv?: Record<string, string>,
-    loginShellEnv: NodeJS.ProcessEnv = getCachedLoginShellEnvSync()
+    loginShellEnv: NodeJS.ProcessEnv = getCachedLoginShellEnvSyncLegacy()
   ): NodeJS.ProcessEnv {
     const configEnv = this.config.env ?? {};
     const workspaceSessionId = this.config.parentSessionId ?? this.sessionId;
@@ -509,9 +554,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const finalEnv = withLoopbackNoProxy(
       withDefaultAcpPathEntries(agentEnv, this.config.agentType)
     );
-    const policy = this.config.githubCredentialPolicy;
+    const policy = this.credentials.mode === 'managed' ? this.credentials.lease : undefined;
     if (policy) {
-      if (!policy.allowLocalAuth) {
+      if (!policy.active || !policy.allowLocalAuth) {
         clearGitHubTokenEnv(finalEnv);
         applyNonOwnerShellEnv(finalEnv, policy.stateFilePath);
       } else if (policy.stateFilePath) {
@@ -532,8 +577,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   }
 
   async createAgent(callbacks: CreateAgentConfig): Promise<string> {
+    this.releaseExternalMcpServers = callbacks.releaseExternalMcpServers;
+    const releaseMcp = callbacks.releaseExternalMcpServers;
+    let established = false;
     this.acpCapabilitySourceVersion = callbacks.capabilitySourceVersion ?? null;
-    const loginShellEnv = await getLoginShellEnv();
+    const loginShellEnv = await getLoginShellEnvLegacy();
     callbacks.abortSignal?.throwIfAborted();
     const env = withLodyNpmCacheForNpx(
       callbacks.command,
@@ -557,7 +605,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         return;
       }
       try {
-        await this.killAndWait(handle, true);
+        await handle.terminate(true);
       } catch (error) {
         this.logger.debug(
           `[${
@@ -601,16 +649,23 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           ? await codexProfileSpawnEnvironment({ profile }, env)
           : { env, close: undefined };
         closeBroker = prepared.close;
+        Object.assign(prepared.env, memoryEnvironment(this.config.memory));
         if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
+        const startupEnv = await prepareAcpProcessEnvironmentLegacy(
+          { command: callbacks.command, args: callbacks.args ?? [], env: callbacks.env },
+          prepared.env,
+          { logger: this.logger, signal: callbacks.abortSignal, cwd: this.getWorkdir() }
+        );
+        callbacks.abortSignal?.throwIfAborted();
         const executable = resolveDeepSeekHarnessSpawn({
           command: callbacks.command,
           args: callbacks.args ?? [],
-          env: prepared.env,
+          env: startupEnv,
           workdir: this.getWorkdir(),
         });
         agentProcessHandle = await this.sandbox.spawn(executable.command, executable.args, {
           cwd: this.getWorkdir(),
-          env: prepared.env,
+          env: startupEnv,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         agentProcessHandle.onExit(() => {
@@ -638,7 +693,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         this.logger.debug(
           `[${this.sessionId}] ACP agent process exited with code ${code} signal ${signal}`
         );
-        this.agentProcess = null;
+        if (this.agentProcess === agentProcessHandle) this.agentProcess = null;
+        if (established)
+          void this.cleanupExternalMcpServers(releaseMcp).catch(() => {
+            this.logger.error(`[${this.sessionId}] MCP connection cleanup failed.`);
+          });
         void agentProcessHandle
           .inspectExit(code, signal)
           .then((violation) => {
@@ -703,12 +762,14 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           stream,
           workdir: this.getWorkdir(),
           resolveWorktreeProject: callbacks.resolveWorktreeProject,
+          resolveAdditionalDirectories: callbacks.resolveAdditionalDirectories,
           logger: this.logger,
           terminalManager: this.terminalManager,
           agentConfig: {
             cliType: callbacks.cliType,
             agentType: callbacks.agentType,
           },
+          modelId: this.config.modelId,
           configOptionValues: this.config.configOptionValues,
           launcher,
           workspaceId: this.config.workspaceId,
@@ -722,6 +783,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           onUsageUpdate: callbacks.onUsageUpdate,
           onContextWindowUsageUpdate: callbacks.onContextWindowUsageUpdate,
           onRateLimitUpdate: callbacks.onRateLimitUpdate,
+          onPromptSuggestion: callbacks.onPromptSuggestion,
           onThreadGoalUpdated: callbacks.onThreadGoalUpdated,
           onThreadGoalCleared: callbacks.onThreadGoalCleared,
           onSessionTitleUpdate: callbacks.onSessionTitleUpdate,
@@ -735,29 +797,33 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           startupAbort: externalAbort
             ? Promise.race([startupMonitor.abortPromise, externalAbort.promise])
             : startupMonitor.abortPromise,
-          resolveSessionStart: callbacks.resolveSessionStart,
         });
         client = started.client;
         acpSessionId = started.acpSessionId;
         acpCapabilities = normalizeAcpSessionCapabilities(started.sessionResponse, {
           sessionFork: started.client.supportsSessionFork(),
           sessionTitle: started.client.supportsSessionTitleGeneration(),
+          rateLimits: started.client.getRateLimitsCapability(),
           acknowledgedSteer: started.client.supportsAcknowledgedSteer(),
           goalActions: started.client.getGoalCapability()?.actions.slice(),
           agent: { cliType: this.config.agentCliType, agentType: this.config.agentType },
         });
       } catch (error) {
+        const startupError = startupMonitor.resolveError(error);
         // The agent process died before startup completed (the startup monitor
         // surfaces async ENOENT/EACCES/early-exit here). Protocol-level failures
         // are captured inside AgentClient.startSession; only spawn-level monitor
         // errors are reported here to avoid double-counting.
         if (
-          error instanceof AcpStartupProcessExitError ||
-          error instanceof AcpStartupProcessError
+          startupError instanceof AcpStartupProcessExitError ||
+          startupError instanceof AcpStartupProcessError
         ) {
-          captureAcpSpawnFailed({ ...spawnAnalyticsProps, reason: classifyCliSpawnReason(error) });
+          captureAcpSpawnFailed({
+            ...spawnAnalyticsProps,
+            reason: classifyCliSpawnReason(startupError),
+          });
         }
-        throw error;
+        throw startupError;
       } finally {
         startupMonitor.dispose();
         externalAbort?.dispose();
@@ -794,7 +860,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         }
       );
     try {
-      return await runCodexRefreshStartupWithRetry({
+      const result = await runCodexRefreshStartupWithRetry({
         attempt: () => startAttempt(false),
         retryAttempt: callbacks.revalidateManagedCodexProfile
           ? () => startAttempt(true)
@@ -806,10 +872,27 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             `[${this.sessionId}] Retrying Codex session startup after refresh contention`
           ),
       });
+      established = true;
+      if (!this.agentProcess) await this.cleanupExternalMcpServers(releaseMcp);
+      return result;
     } catch (error) {
       await cleanupFailedAttempt();
+      await this.cleanupExternalMcpServers(releaseMcp);
       throw error;
     }
+  }
+
+  private async cleanupExternalMcpServers(release = this.releaseExternalMcpServers): Promise<void> {
+    await release?.();
+    if (this.releaseExternalMcpServers === release) this.releaseExternalMcpServers = undefined;
+  }
+
+  async validateMcpRequester(userId: string): Promise<void> {
+    if (!this.config.mcpServerIds?.length || userId === this.config.requesterUserId) return;
+    await this.terminate(true);
+    throw new Error(
+      'The MCP user changed. Start a new turn to use this user’s local authorization.'
+    );
   }
 
   getAcpCapabilities(): AcpCapabilitiesResult | null {
@@ -887,8 +970,47 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             );
           });
 
+          let timedOut = false;
+          const observation =
+            !isAI &&
+            command === 'git' &&
+            ([
+              'status',
+              'diff',
+              'rev-parse',
+              'rev-list',
+              'merge-base',
+              'ls-files',
+              'log',
+              'show',
+            ].includes(args[0] ?? '') ||
+              (args[0] === 'branch' && args[1] === '--show-current'));
+          const timeout = observation
+            ? setTimeout(() => {
+                timedOut = true;
+                this.logger.warn(
+                  `[${this.sessionId}] Git observation timed out after ${TURN_BUDGETS.gitObservationMs}ms`
+                );
+                void processHandle.terminate(true).then(
+                  () => {
+                    cleanup();
+                    reject(
+                      new CommandTimedOut({
+                        command: 'git',
+                        message: `Git observation timed out after ${TURN_BUDGETS.gitObservationMs}ms`,
+                      })
+                    );
+                  },
+                  (error: unknown) => {
+                    cleanup();
+                    reject(error);
+                  }
+                );
+              }, TURN_BUDGETS.gitObservationMs)
+            : undefined;
           const cleanup = () => {
-            this.activeProcess = null;
+            clearTimeout(timeout);
+            if (this.activeProcess === processHandle) this.activeProcess = null;
             if (parser) {
               parser.end();
               parser.removeListener('data', this.handleParserData);
@@ -897,10 +1019,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           };
 
           processHandle.onClose((code: number | null, signal: NodeJS.Signals | null) => {
+            if (timedOut) return;
             cleanup();
             void processHandle
               .inspectExit(code, signal)
-              .then((violation) => {
+              .then(async (violation) => {
                 if (violation) {
                   const error = createSessionResourceLimitError(this.sessionId, violation);
                   void this.handleResourceLimitExceeded(error);
@@ -937,6 +1060,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
                   }
                 }
                 if (isAI) {
+                  await this.credentials.release();
                   this.emit('exit', { sessionId: this.sessionId, exitCode });
                 }
                 // stderr is decoded but not used in return value (only logged above)
@@ -949,6 +1073,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           });
 
           processHandle.onError((error) => {
+            if (timedOut) return;
             cleanup();
             reject(error);
           });

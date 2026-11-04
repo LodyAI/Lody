@@ -2,7 +2,9 @@ import { useCallback, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import {
+  getAgentRoleTargets,
   listAccessibleAgentRoles,
+  machineSupportsMemoryProviders,
   resolveAgentRoleAvailability,
   type AgentConfigId,
   type AgentRole,
@@ -11,7 +13,7 @@ import {
   type AgentRoleId,
   type MachineId,
 } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { machineFlockRowsByWorkspaceAtom } from '@/atoms/machine-flock';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
@@ -38,7 +40,7 @@ export type WorkspaceAgentRolesSnapshot = {
  */
 export function useWorkspaceAgentRoles(): WorkspaceAgentRolesSnapshot {
   const { roles, synced } = useWorkspaceCatalog();
-  const currentUserId = useAtomValue(userAtom)?.id ?? null;
+  const currentUserId = useWorkspaceLocalAccountId();
   return useMemo(
     () => ({ roles: listAccessibleAgentRoles(roles, currentUserId), synced }),
     [currentUserId, roles, synced]
@@ -46,6 +48,10 @@ export function useWorkspaceAgentRoles(): WorkspaceAgentRolesSnapshot {
 }
 
 export type AgentRoleAvailabilityResolver = {
+  /**
+   * Availability of the Role's inline (first or bound) target. Pass a Role
+   * bound with `bindAgentRoleTarget` to judge another machine's target.
+   */
   resolve: (role: AgentRole) => AgentRoleAvailability;
 };
 
@@ -63,7 +69,15 @@ export function useAgentRoleAvailability(
   roles: readonly AgentRole[]
 ): AgentRoleAvailabilityResolver {
   const roleMachineIdsKey = useMemo(
-    () => [...new Set(roles.map((role) => role.machineId))].filter(Boolean).sort().join('\0'),
+    () =>
+      [
+        ...new Set(
+          roles.flatMap((role) => getAgentRoleTargets(role).map((target) => target.machineId))
+        ),
+      ]
+        .filter(Boolean)
+        .sort()
+        .join('\0'),
     [roles]
   );
   const roleMachineIds = useMemo(
@@ -104,6 +118,11 @@ export function useAgentRoleAvailability(
       if (config.machineId) agentConfigMachineIds.set(config.id, config.machineId);
     }
     return {
+      memoryProviderMachineIds: new Set(
+        Array.from(machines)
+          .filter(([, machine]) => machineSupportsMemoryProviders(machine))
+          .map(([id]) => id)
+      ),
       authorizedMachineIds: new Set(machines.keys()),
       onlineMachineIds,
       agentConfigMachineIds,

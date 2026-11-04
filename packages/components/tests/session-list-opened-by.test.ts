@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
+import { buildOpenedBySessionTree } from '../src/lib/session-opened-by-tree';
 import {
   buildGroups,
   getVisibleSessionGroupRows,
@@ -14,7 +14,14 @@ import {
   sessionGroupOverflowsPreview,
   type SessionListRow,
 } from '../src/components/session-list';
+import type { LocalProjectId, MachineId, SessionId, SessionMeta } from '@lody/shared';
+import {
+  buildSessionListRows,
+  placeWorkspaceSessionsWithOpeners,
+  type WorkspaceSidebarGroups,
+} from '../src/components/sessions/session-list-rows';
 import { sidebarCollapsedOpenedBySessionsAtom } from '../src/atoms/focus-layer';
+import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { initI18n } from '../src/i18n';
 
 const REPO = 'loro-dev/lody';
@@ -68,34 +75,6 @@ function buildRepoGroup(sessions: SessionListRow[]) {
 }
 
 describe('session group opened-by tree', () => {
-  it('renders opened sessions indented under their opener', () => {
-    const group = buildRepoGroup(makeOpenerGroupRows());
-    expect(
-      getVisibleSessionGroupTree(group, true).map((node) => [node.item.sessionId, node.depth])
-    ).toEqual([
-      ['opener', 0],
-      ['opened-1', 1],
-      ['opened-2', 1],
-      ['opened-3', 1],
-      ['unrelated', 0],
-    ]);
-  });
-
-  it('hides opened sessions while their opener is collapsed', () => {
-    const group = buildRepoGroup(makeOpenerGroupRows());
-    expect(
-      getVisibleSessionGroupRows(group, true, { opener: true }).map((row) => row.sessionId)
-    ).toEqual(['opener', 'unrelated']);
-  });
-
-  it('keeps an opened session top-level when its opener is not in the group (orphan)', () => {
-    const group = buildRepoGroup([
-      makeRow({ sessionId: 'visible' }),
-      makeRow({ sessionId: 'orphan', openedBySessionId: 'opener-in-another-repo' }),
-    ]);
-    expect(getVisibleSessionGroupTree(group, true).map((node) => node.depth)).toEqual([0, 0]);
-  });
-
   it('counts only top-level rows when deciding whether a group overflows the preview', () => {
     const openerRows = [
       makeRow({ sessionId: 'opener' }),
@@ -160,9 +139,14 @@ describe('SessionList opened-by rendering', () => {
     vi.restoreAllMocks();
   });
 
-  function renderList(sessions: SessionListRow[], collapsed: Record<string, boolean> = {}) {
+  function renderList(
+    sessions: SessionListRow[],
+    collapsed: Record<string, boolean> = {},
+    showBranchNames = false
+  ) {
     const store = createStore();
     store.set(sidebarCollapsedOpenedBySessionsAtom, collapsed);
+    store.set(sidebarShowBranchNamesAtom, showBranchNames);
     const onSelectSession = vi.fn();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -185,86 +169,24 @@ describe('SessionList opened-by rendering', () => {
     return { onSelectSession, store };
   }
 
-  function depthOf(sessionId: string): string | null | undefined {
-    const row = container?.querySelector(`[data-sidebar-session-id="${sessionId}"]`);
-    return row?.closest('[data-session-tree-depth]')?.getAttribute('data-session-tree-depth');
-  }
-
   function indentOf(sessionId: string): string | null | undefined {
     const row = container?.querySelector(`[data-sidebar-session-id="${sessionId}"]`);
     return row?.closest('[data-session-tree-depth]')?.getAttribute('data-session-tree-indent');
   }
 
-  it('marks opened sessions at depth 1 and their opener at depth 0', () => {
-    renderList(makeOpenerGroupRows());
-    expect(depthOf('opener')).toBe('0');
-    expect(depthOf('opened-1')).toBe('1');
-    expect(depthOf('opened-3')).toBe('1');
-    expect(depthOf('unrelated')).toBe('0');
-  });
-
-  it('keeps every top-level row aligned and indents only children with tree connectors', () => {
-    renderList(makeOpenerGroupRows());
+  it('keeps all descendants at one visual indentation regardless of conversation depth', () => {
+    renderList([
+      makeRow({ sessionId: 'opener' }),
+      makeRow({ sessionId: 'child', openedBySessionId: 'opener' }),
+      makeRow({ sessionId: 'grandchild', openedBySessionId: 'child' }),
+      makeRow({ sessionId: 'great-grandchild', openedBySessionId: 'grandchild' }),
+      makeRow({ sessionId: 'unrelated' }),
+    ]);
     expect(indentOf('opener')).toBeNull();
-    expect(indentOf('opened-1')).toBe('child');
     expect(indentOf('unrelated')).toBeNull();
-
-    const openerRow = container
-      ?.querySelector('[data-sidebar-session-id="opener"]')
-      ?.closest('[data-session-tree-depth]');
-    expect(openerRow?.getAttribute('data-session-tree-indent')).toBeNull();
-
-    const childRow = container
-      ?.querySelector('[data-sidebar-session-id="opened-1"]')
-      ?.closest('[data-session-tree-depth]');
-    const childSlot = childRow?.querySelector('[data-session-row-leading-slot]');
-    expect(childRow?.getAttribute('data-session-tree-indent')).toBe('child');
-    expect(childSlot?.className).toContain('w-[26px]');
-    expect(childSlot?.querySelectorAll('[data-session-tree-connector]')).toHaveLength(2);
-    expect(childSlot?.querySelector('[data-session-tree-connector="trunk"]')).not.toBeNull();
-    expect(childSlot?.querySelector('[data-session-tree-connector="elbow"]')).not.toBeNull();
-    expect(childSlot?.querySelector('button[aria-label="More actions"]')).not.toBeNull();
-
-    const openerSlot = openerRow?.querySelector('[data-session-row-leading-slot]');
-    expect(openerSlot?.querySelector('[data-session-opened-by-toggle]')).not.toBeNull();
-    expect(openerSlot?.querySelector('button[aria-label="More actions"]')).not.toBeNull();
-  });
-
-  it('renders no tree gutter for a list without any opened session', () => {
-    renderList([makeRow({ sessionId: 'a' }), makeRow({ sessionId: 'b' })]);
-    expect(container?.querySelector('[data-session-tree-depth]')).toBeNull();
-  });
-
-  it('renders exactly one disclosure toggle, on the opener row', () => {
-    renderList(makeOpenerGroupRows());
-    const toggles = container?.querySelectorAll('[data-session-opened-by-toggle]') ?? [];
-    expect(toggles).toHaveLength(1);
-    expect(toggles[0]?.getAttribute('aria-expanded')).toBe('true');
-  });
-
-  it('collapsing the opener hides its opened rows and keeps the opener visible', () => {
-    renderList(makeOpenerGroupRows());
-    const toggle = container?.querySelector<HTMLButtonElement>('[data-session-opened-by-toggle]');
-    expect(toggle).not.toBeNull();
-
-    flushSync(() => {
-      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-
-    expect(container?.querySelector('[data-sidebar-session-id="opener"]')).not.toBeNull();
-    expect(container?.querySelector('[data-sidebar-session-id="opened-1"]')).toBeNull();
-    expect(
-      container?.querySelector('[data-session-opened-by-toggle]')?.getAttribute('aria-expanded')
-    ).toBe('false');
-  });
-
-  it('does not navigate when the disclosure toggle is clicked', () => {
-    const { onSelectSession } = renderList(makeOpenerGroupRows());
-    const toggle = container?.querySelector<HTMLButtonElement>('[data-session-opened-by-toggle]');
-    flushSync(() => {
-      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    expect(onSelectSession).not.toHaveBeenCalled();
+    for (const id of ['child', 'grandchild', 'great-grandchild']) {
+      expect(indentOf(id)).toBe('child');
+    }
   });
 
   it('lets the disclosure toggle own keyboard activation without navigating', () => {
@@ -287,43 +209,38 @@ describe('SessionList opened-by rendering', () => {
     expect(container?.querySelector('[data-sidebar-session-id="opened-1"]')).toBeNull();
   });
 
-  it('offers the same collapse action from the opener context menu', () => {
-    renderList(makeOpenerGroupRows());
-    const opener = container?.querySelector('[data-sidebar-session-id="opener"]');
-
-    flushSync(() => {
-      opener?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    });
-
-    const collapseItem = Array.from(document.querySelectorAll('[role="menuitem"]')).find((item) =>
-      item.textContent?.includes('Hide opened sessions')
+  it('gives a top-level row a branch and time line and keeps nested children to one line', () => {
+    renderList(
+      [
+        makeRow({ sessionId: 'opener', branchName: 'feat/two-line' }),
+        makeRow({ sessionId: 'opened-1', openedBySessionId: 'opener', branchName: 'feat/child' }),
+      ],
+      {},
+      true
     );
-    expect(collapseItem).toBeDefined();
 
-    flushSync(() => {
-      collapseItem?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-
-    expect(container?.querySelector('[data-sidebar-session-id="opened-1"]')).toBeNull();
-    expect(
-      container?.querySelector('[data-session-opened-by-toggle]')?.getAttribute('aria-expanded')
-    ).toBe('false');
+    const opener = container?.querySelector('[data-sidebar-session-id="opener"]');
+    const child = container?.querySelector('[data-sidebar-session-id="opened-1"]');
+    expect(opener?.querySelector('[data-sidebar-session-meta]')?.textContent).toContain(
+      'feat/two-line'
+    );
+    expect(child?.querySelector('[data-sidebar-session-meta]')).toBeNull();
   });
 
-  it('keeps the disclosure on a working opener and marks status at the row end', () => {
-    renderList([
-      makeRow({ sessionId: 'opener', isWorking: true }),
-      makeRow({ sessionId: 'opened-1', openedBySessionId: 'opener' }),
-    ]);
+  it('collapses repo rows to one line when the branch detail preference is off', () => {
+    const { store } = renderList(
+      [
+        makeRow({ sessionId: 'opener', branchName: 'feat/two-line' }),
+        makeRow({ sessionId: 'opened-1', openedBySessionId: 'opener', branchName: 'feat/child' }),
+      ],
+      {},
+      true
+    );
+    flushSync(() => {
+      store.set(sidebarShowBranchNamesAtom, false);
+    });
 
-    const opener = container?.querySelector('[data-sidebar-session-id="opener"]');
-    const openerSlot = opener?.querySelector('[data-session-row-leading-slot]');
-    // The leading slot is the tree's, unconditionally: status no longer evicts it.
-    expect(openerSlot?.querySelector('[data-session-opened-by-toggle]')).not.toBeNull();
-    expect(openerSlot?.querySelector('[data-session-row-indicator]')).toBeNull();
-
-    const openerEnd = opener?.querySelector('[data-session-row-end-slot]');
-    expect(openerEnd?.querySelector('[data-session-working-indicator]')).not.toBeNull();
+    expect(container?.querySelector('[data-sidebar-session-meta]')).toBeNull();
   });
 
   it('keeps collapse reachable from the context menu while the opener is working', () => {
@@ -348,95 +265,109 @@ describe('SessionList opened-by rendering', () => {
 
     expect(container?.querySelector('[data-sidebar-session-id="opened-1"]')).toBeNull();
   });
+});
 
-  it('keeps tree connectors on an active child and moves its status to the row end', () => {
-    // The regression this locks: a working or unread child used to drop its ├/└,
-    // so the rows a user actually watches were the ones that lost their nesting.
-    renderList(makeOpenerGroupRows());
-
-    const rowOf = (sessionId: string) =>
-      container?.querySelector(`[data-sidebar-session-id="${sessionId}"]`);
-    const slotOf = (sessionId: string) =>
-      rowOf(sessionId)?.querySelector('[data-session-row-leading-slot]');
-    const endOf = (sessionId: string) =>
-      rowOf(sessionId)?.querySelector('[data-session-row-end-slot]');
-
-    for (const sessionId of ['opened-1', 'opened-2', 'opened-3']) {
-      const slot = slotOf(sessionId);
-      expect(slot?.querySelectorAll('[data-session-tree-connector]')).toHaveLength(2);
-      expect(slot?.querySelector('[data-session-row-indicator]')).toBeNull();
-    }
-
-    expect(endOf('opened-1')?.querySelector('[data-session-row-indicator]')).toBeNull();
-    expect(endOf('opened-2')?.querySelector('[data-session-working-indicator]')).not.toBeNull();
-    expect(endOf('opened-3')?.querySelector('[data-session-row-indicator] span')).not.toBeNull();
-  });
-
-  it('keeps the disclosure AND the status mark for an unread or waiting opener', () => {
-    // The two no longer compete for one node, so neither may be dropped: the
-    // disclosure stays at the leading edge and the status mark at the row end.
-    for (const status of [{ hasUnreadMessages: true }, { isWaitingPermission: true }] as const) {
-      renderList([
-        makeRow({ sessionId: 'opener', ...status }),
-        makeRow({ sessionId: 'opened-1', openedBySessionId: 'opener' }),
-      ]);
-
-      const opener = container?.querySelector('[data-sidebar-session-id="opener"]');
-      const openerSlot = opener?.querySelector('[data-session-row-leading-slot]');
-      expect(openerSlot?.querySelector('[data-session-opened-by-toggle]')).not.toBeNull();
-      expect(
-        opener?.querySelector('[data-session-row-end-slot] [data-session-row-indicator]')?.children
-          .length
-      ).toBe(1);
-
-      expect(
-        container
-          ?.querySelector('[data-sidebar-session-id="opened-1"]')
-          ?.querySelectorAll('[data-session-tree-connector]')
-      ).toHaveLength(2);
-    }
-  });
-
-  it('drops the resting metric cluster while a row carries a status', () => {
-    // "Only status at the right edge": the diff numbers a running row would
-    // otherwise show are what made the end slot compete with the status mark.
-    renderList([
-      makeRow({ sessionId: 'idle', addedLines: 12, deletedLines: 3 }),
-      makeRow({ sessionId: 'busy', addedLines: 12, deletedLines: 3, isWorking: true }),
-    ]);
-
-    const endOf = (sessionId: string) =>
-      container
-        ?.querySelector(`[data-sidebar-session-id="${sessionId}"]`)
-        ?.querySelector('[data-session-row-end-slot]');
-
-    expect(endOf('idle')?.textContent).not.toContain('+12');
-    expect(endOf('busy')?.textContent).not.toContain('+12');
-    expect(endOf('busy')?.querySelector('[data-session-working-indicator]')).not.toBeNull();
-  });
-
-  it('renders an active opened session as the selected row', () => {
-    const store = createStore();
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    flushSync(() => {
-      root?.render(
-        React.createElement(
-          Provider,
-          { store },
-          React.createElement(SessionList, {
-            sessions: makeOpenerGroupRows(),
-            repos: [{ repoFullName: REPO, collapsed: false }],
-            selectedSessionId: 'opened-2',
-            onSelectSession: vi.fn(),
-          })
-        )
-      );
+describe('Workspace placement under openers across groups', () => {
+  const PROJECT_KEY = 'machine-local:project-1';
+  const meta = (overrides: Partial<SessionMeta> & { id: string }): SessionMeta =>
+    ({
+      machineId: 'machine-local' as MachineId,
+      createdAt: '2026-05-09T10:00:00.000Z',
+      userId: 'user-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      ...overrides,
+      id: overrides.id as SessionId,
+    }) as SessionMeta;
+  const localProject = {
+    kind: 'local',
+    localProjectId: 'project-1' as LocalProjectId,
+  } as const;
+  const toTaskRows = (sessions: SessionMeta[]) =>
+    buildSessionListRows(sessions, {
+      scope: 'my',
+      currentUserId: 'user-1',
+      defaultTitle: 'Untitled',
+    });
+  const place = (
+    natural: WorkspaceSidebarGroups,
+    sessions: SessionMeta[],
+    rendered: (key: string) => boolean = (key) => key === PROJECT_KEY
+  ) =>
+    placeWorkspaceSessionsWithOpeners(natural, {
+      sessions,
+      isRenderedLocalProject: rendered,
+      resolveOpenerRowId: (id) => id ?? null,
+      toTaskRows,
+      latestMessageAt: (session) => session.lastMessageAt ?? 0,
     });
 
-    const row = container?.querySelector('[data-sidebar-session-id="opened-2"]');
-    expect(row?.className).toContain('bg-sidebar-selection');
-    expect(row?.querySelector('[data-session-working-indicator]')).not.toBeNull();
+  it('nests a remote plain chat opened from a Local Project under its opener there', () => {
+    const opener = meta({ id: 'opener', project: localProject, lastMessageAt: 1_000 });
+    const remoteChat = meta({
+      id: 'remote-chat',
+      machineId: 'machine-remote' as MachineId,
+      openedBySessionId: 'opener' as SessionId,
+      lastMessageAt: 2_000,
+    });
+    const placed = place(
+      {
+        chatSessions: toTaskRows([remoteChat]),
+        repoSessions: [],
+        projectGroupSessions: [],
+        localProjectSessionsByKey: new Map([[PROJECT_KEY, [opener]]]),
+      },
+      [opener, remoteChat]
+    );
+
+    expect(placed.chatSessions).toEqual([]);
+    expect(placed.localProjectSessionsByKey.get(PROJECT_KEY)?.map((s) => s.id)).toEqual([
+      'remote-chat',
+      'opener',
+    ]);
+    const tree = buildOpenedBySessionTree(placed.localProjectSessionsByKey.get(PROJECT_KEY) ?? [], {
+      getId: (session) => session.id,
+      getOpenedBySessionId: (session) => session.openedBySessionId ?? null,
+    });
+    expect(tree.map((node) => `${node.id}@${node.depth}`)).toEqual(['opener@0', 'remote-chat@1']);
+  });
+
+  it('renders a Local Project Session opened from a GitHub Session as a row of that repo group', () => {
+    const opener = makeRow({ sessionId: 'repo-opener' });
+    const localChild = meta({
+      id: 'local-child',
+      project: localProject,
+      openedBySessionId: 'repo-opener' as SessionId,
+    });
+    const placed = place(
+      {
+        chatSessions: [],
+        repoSessions: [opener],
+        projectGroupSessions: [],
+        localProjectSessionsByKey: new Map([[PROJECT_KEY, [localChild]]]),
+      },
+      [localChild]
+    );
+
+    expect(placed.localProjectSessionsByKey.get(PROJECT_KEY)).toEqual([]);
+    const [group] = buildGroups(placed.repoSessions, [], false);
+    expect(group?.repoFullName).toBe(REPO);
+    expect(
+      getVisibleSessionGroupTree(group!, true).map((node) => `${node.id}@${node.depth}`)
+    ).toEqual(['repo-opener@0', 'local-child@1']);
+  });
+
+  it('leaves a row in its own group when the opener is not rendered there', () => {
+    const opener = meta({ id: 'opener', project: localProject });
+    const chat = toTaskRows([meta({ id: 'chat', openedBySessionId: 'opener' as SessionId })]);
+    const natural: WorkspaceSidebarGroups = {
+      chatSessions: chat,
+      repoSessions: [],
+      projectGroupSessions: [],
+      localProjectSessionsByKey: new Map([[PROJECT_KEY, [opener]]]),
+    };
+    // A hidden project (or a pinned opener, absent from every Workspace group)
+    // cannot host the row, so it stays where it was.
+    expect(place(natural, [opener], () => false)).toBe(natural);
   });
 });

@@ -47,9 +47,9 @@ URL 与远程端口访问方式请参阅 [Lody Preview](/zh/docs/preview)。
 
 Lody 在左侧 sidebar 中展示 Chat、GitHub Worktree 和本地项目里的所有会话。你可以使用默认的项目组织方式，也可以切换到 **Updated** 模式，按 Today / This week / Older 将所有任务按最近更新时间聚合。
 
-其中每个会话都会带有 AI 自动根据 Prompt 生成的语义化的标题，当前分支名和分支状态，相比于基础分支此对话的文件行数变更等信息，便于查看。
+每个会话都会带有 AI 根据 Prompt 自动生成的语义化标题和状态；把鼠标移到会话上，可以在会话详情卡中查看仓库、分支、PR 状态以及相比基础分支的行数变更。
 
-<img src="/_docs-assets/session-list.png" width="200px" />
+<SessionListPreview locale="zh" />
 
 你可以通过鼠标移动到仓库列表上，右边显示的拖动按钮来自定义更改多个仓库项目的顺序。
 
@@ -93,6 +93,8 @@ Code、Xcode 和 Sublime Text 等受支持编辑器。
 ## 删除会话
 
 在左侧 sidebar 的最下方右侧有归档列表按钮，点击后会展示所有归档会话。点击会话右方的删除按钮会永久删除会话及其对话历史，此操作无法撤销。尚未移除的托管工作树继续按[同一备份规则](/zh/docs/worktrees#automatic-cleanup)等待清理；本地 Git 分支和提交仍会保留。
+
+未选择项目的会话，删除时会一并移除其 Lody 托管的聊天工作目录及其中文件，这些文件没有备份，无法恢复；仅归档时，只有空目录会被回收。
 
 <img src="/_docs-assets/delete-archive.png" alt="" />
 

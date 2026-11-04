@@ -39,3 +39,7 @@ export function getInitialDesktopPath(): InitialDesktopPath {
 export function markOnboardingCompleted(): void {
   onboardingStateStore.set('completed', true)
 }
+
+export function resetOnboardingCompleted(): void {
+  onboardingStateStore.set('completed', false)
+}

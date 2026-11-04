@@ -30,6 +30,10 @@ import {
   lightSheenTheme,
 } from '@lody/ui/tokens/colors.stylex';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
+import {
+  scrollbarPaletteTheme,
+  scrollbarNativeTheme,
+} from '@lody/ui/scroll-area/scroll-area.tokens.stylex';
 
 export type Theme = 'dark' | 'light' | 'system';
 
@@ -41,8 +45,20 @@ export type Theme = 'dark' | 'light' | 'system';
 const uiPaletteClassNames = (mode: 'light' | 'dark'): string[] =>
   (
     (mode === 'dark'
-      ? stylex.props(productDarkPalette, darkShadowTheme, darkSheenTheme)
-      : stylex.props(productLightPalette, lightShadowTheme, lightSheenTheme)
+      ? stylex.props(
+          productDarkPalette,
+          darkShadowTheme,
+          darkSheenTheme,
+          scrollbarPaletteTheme,
+          scrollbarNativeTheme
+        )
+      : stylex.props(
+          productLightPalette,
+          lightShadowTheme,
+          lightSheenTheme,
+          scrollbarPaletteTheme,
+          scrollbarNativeTheme
+        )
     ).className ?? ''
   )
     .split(' ')
@@ -73,7 +89,7 @@ export function nextCycledTheme(current: Theme): Theme {
 }
 
 /**
- * The app ships exactly two palettes: Lody Light (cool white) and Vesper
+ * The app ships exactly two palettes: neutral Lody Light and Vesper
  * (dark). Users pick light, dark, or system (follow the OS). The underlying
  * VS Code theme selection is FIXED — there is no per-mode theme picker or
  * persistence. The bundled VS Code theme machinery stays only to drive syntax

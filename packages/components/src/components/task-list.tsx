@@ -1,4 +1,6 @@
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { sidebarSurface } from './sidebar-surface';
 import {
   closestCenter,
   DndContext,
@@ -66,6 +68,9 @@ import {
   SidebarListSkeleton,
   SidebarSessionTitleText,
   SessionMergeablePill,
+  SIDEBAR_GROUP_LABEL_CLASS,
+  SIDEBAR_GROUP_LABEL_COLOR_CLASS,
+  SIDEBAR_ROW_TEXT_CLASS,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import { SessionSharingIndicator } from '@/components/session-sharing';
@@ -484,22 +489,15 @@ const TaskGroupSection = memo(function TaskGroupSection({
     ? t('sessions.showLess', 'Show less')
     : t('sessions.showAll', 'Show all ({{count}})', { count: group.tasks.length });
   const resolvedTrailingContent = trailingContent ?? (group.collapsed ? null : dragHandle);
-  // Repo group labels (e.g. "loro-dev/loro") name concrete content, but dark-mode
-  // resting chrome should still recede behind the conversation. Hover and active
-  // states restore full contrast; "Chats" stays at the quieter section-label tone.
-  const headerBaseColorClass =
-    group.kind === 'repo'
-      ? 'text-sidebar-foreground dark:text-sidebar-foreground/75'
-      : 'text-sidebar-foreground-muted/55';
-  // Typography splits with color: repo headers read as content (xs semibold),
-  // the "Chats" header reads as section chrome (13px medium) so
-  // section labels visually recede from titles at a glance.
-  const headerTypographyClass =
-    group.kind === 'repo' ? 'text-xs font-semibold' : 'text-[13px] font-medium';
-  const headerToggleHoverClass =
-    group.kind === 'repo'
-      ? 'hover:text-sidebar-hover-foreground'
-      : 'hover:text-sidebar-foreground-muted';
+  // The same two rungs as the session list: a repo ("loro-dev/loro") is a row
+  // (row type, medium, the row ink from `sidebarSurface.row`) and "Chats" is the
+  // shared group label.
+  const isRepoHeader = group.kind === 'repo';
+  const headerBaseColorClass = isRepoHeader ? undefined : SIDEBAR_GROUP_LABEL_COLOR_CLASS;
+  const headerTypographyClass = isRepoHeader
+    ? cn(SIDEBAR_ROW_TEXT_CLASS, 'font-medium')
+    : SIDEBAR_GROUP_LABEL_CLASS;
+  const headerToggleHoverClass = isRepoHeader ? undefined : 'hover:text-sidebar-foreground';
 
   return (
     <div
@@ -516,25 +514,23 @@ const TaskGroupSection = memo(function TaskGroupSection({
           data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
-            'relative flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-left',
+            'relative flex h-7 w-full select-none items-center gap-1 text-left',
             'border border-transparent',
             'min-w-0 flex-1 transition-colors',
             headerTypographyClass,
+            stylex.props(
+              sidebarSurface.row,
+              showActiveGroupState
+                ? sidebarSurface.selected
+                : canNavigate && !isMobile && isRepoHeader && sidebarSurface.hover
+            ).className,
             showActiveGroupState
-              ? 'cursor-pointer border-sidebar-ring/30 bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection'
+              ? 'cursor-pointer border-sidebar-ring/30'
               : canNavigate
-                ? cn(
-                    'cursor-pointer bg-transparent',
-                    headerBaseColorClass,
-                    !isMobile && 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
-                  )
+                ? cn('cursor-pointer', headerBaseColorClass)
                 : canToggle
-                  ? cn(
-                      'cursor-pointer bg-transparent',
-                      headerBaseColorClass,
-                      !isMobile && headerToggleHoverClass
-                    )
-                  : cn('cursor-default bg-transparent', headerBaseColorClass)
+                  ? cn('cursor-pointer', headerBaseColorClass, !isMobile && headerToggleHoverClass)
+                  : cn('cursor-default', headerBaseColorClass)
           )}
           onClick={canNavigate ? handleNavigate : handleToggleGroup}
           onKeyDown={
@@ -767,18 +763,18 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   data-scope-item="row"
                   data-sidebar-session-id={task.taskId}
                   className={cn(
-                    'group relative w-full rounded-md text-left',
+                    'group relative w-full text-left',
                     // Both chat and repo rows are a single line now; the repo row's
                     // low-signal metadata (time / repo / branch / PR) moves to the
                     // desktop hover info card so both organize modes read equally compact.
-                    'px-2 py-1',
-                    'border border-transparent bg-transparent',
-                    !showSelectedState &&
-                      isSelectable &&
-                      !isMobile &&
-                      'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-                    showSelectedState &&
-                      'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+                    stylex.props(
+                      sidebarSurface.row,
+                      sidebarSurface.snug,
+                      showSelectedState
+                        ? sidebarSurface.selected
+                        : isSelectable && !isMobile && sidebarSurface.hover
+                    ).className,
+                    'border border-transparent',
                     // Keyboard-only focus ring. Plain :focus-within also matches
                     // after a mouse click (the overlay <a> keeps focus), which
                     // left a permanent inset ring on the selected row that read
@@ -825,10 +821,12 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     />
                     <div
                       className={cn(
-                        'min-w-0 flex-1 flex items-center gap-1 truncate text-sm',
-                        showSelectedState
-                          ? 'text-sidebar-selection-foreground'
-                          : 'text-sidebar-foreground',
+                        'flex items-center gap-1',
+                        SIDEBAR_ROW_TEXT_CLASS,
+                        stylex.props(
+                          sidebarSurface.title,
+                          showSelectedState && sidebarSurface.titleSelected
+                        ).className,
                         useAnchor && isEditingTitle && 'relative z-20'
                       )}
                       // Double-click to rename is scoped to the title only, so it can't

@@ -25,6 +25,10 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Skeleton } from '@lody/ui/skeleton';
 import {
+  RemoteDirectoryNewFolderAction,
+  RemoteDirectoryNewFolderControl,
+} from './remote-directory-new-folder-control';
+import {
   describeBrowseError,
   getTailPriorityBreadcrumbs,
   splitBreadcrumbs,
@@ -288,15 +292,18 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
                 <Spinner className="h-4 w-4 text-muted-foreground" aria-hidden />
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={c.startEditPath}
-                disabled={!c.current}
-                aria-label={t('localProjects.add.editPath', 'Edit path')}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-muted/60 disabled:opacity-40"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
+              <>
+                <RemoteDirectoryNewFolderAction controller={c} />
+                <button
+                  type="button"
+                  onClick={c.startEditPath}
+                  disabled={!c.current}
+                  aria-label={t('localProjects.add.editPath', 'Edit path')}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-muted/60 disabled:opacity-40"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              </>
             )}
           </>
         )}
@@ -381,8 +388,9 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
         )}
       </div>
 
-      {/* Footer — full-width primary action (adds the current folder directly) */}
+      {/* Footer — the creation form appears only after invoking the path-bar action. */}
       <div className="border-t border-border/60 px-4 pb-[max(0.75rem,var(--safe-area-bottom,0px))] pt-3">
+        <RemoteDirectoryNewFolderControl controller={c} />
         {c.addError ? (
           <p className="mb-2 text-left text-[0.8rem] text-destructive">{c.addError}</p>
         ) : null}
@@ -390,7 +398,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
           type="button"
           size="large"
           className="w-full"
-          disabled={!c.current || c.status !== 'ready' || c.editingPath || c.adding}
+          disabled={!c.canAddCurrentFolder}
           onClick={() => void c.addCurrentFolder()}
         >
           {c.adding ? <Spinner className="h-5 w-5" /> : null}

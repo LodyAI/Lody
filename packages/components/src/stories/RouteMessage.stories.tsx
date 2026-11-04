@@ -14,6 +14,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Error: Story = {
   args: {
+    gate: 'workspace_list_error',
     title: 'Unable to load workspaces',
     description: 'Please refresh the page and try again.',
   },

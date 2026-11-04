@@ -137,6 +137,8 @@ export const settingsSurface = stylex.create({
     paddingBlock: space[2],
   },
   rowTop: { alignItems: { default: 'stretch', [WIDE]: 'start' } },
+  /** An identity mark travels with its text inside the label column. */
+  rowIdentity: { display: 'flex', alignItems: 'center', gap: space[3], minWidth: 0 },
   /** Helper copy is capped so it stays readable on a wide panel. */
   rowText: { minWidth: 0 },
   rowTextCapped: { maxWidth: { default: null, [WIDE]: '520px' } },
@@ -313,6 +315,8 @@ export const settingsSurface = stylex.create({
   },
   /** A link row's end holds a control's height, so it is as tall as a row with a button. */
   linkEnd: { minHeight: control.small },
+  /** A link row's answer: a figure in the label's ink, set before the mark. */
+  linkValue: { color: colors.label, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' },
   /** A link row's end mark: a hint, in the ink of a glyph at rest. */
   linkMark: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
 

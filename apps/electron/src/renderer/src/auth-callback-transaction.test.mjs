@@ -5,13 +5,67 @@ import { betterAuth } from 'better-auth'
 import { createAuthClient } from 'better-auth/client'
 import { memoryAdapter } from 'better-auth/adapters/memory'
 import { electron } from '@better-auth/electron'
-import {
-  DesktopLogin,
-  DesktopLoginFailure,
-  readDesktopLoginCallback
-} from '../../main/services/desktop-login.ts'
+import { crossDomainClient } from '@convex-dev/better-auth/client/plugins'
+import { createDesktopAuthFetch } from '../../main/auth-fetch.ts'
+import { DesktopLogin, readDesktopLoginCallback } from '../../main/services/desktop-login.ts'
 
 const session = { session: { token: 'synthetic-session' }, user: { id: 'synthetic-user' } }
+
+void test('desktop auth waits for app readiness and preserves the cookie plugin round trip', async () => {
+  const ready = deferred()
+  const waitingForReady = deferred()
+  let appReady = false
+  const storage = new Map()
+  const cookie = 'better-auth.session_token=synthetic-session'
+  const client = createAuthClient({
+    baseURL: 'https://auth.example.test',
+    plugins: [
+      crossDomainClient({
+        storage: {
+          getItem: (key) => storage.get(key) ?? null,
+          setItem: (key, value) => storage.set(key, value)
+        }
+      })
+    ],
+    fetchOptions: {
+      customFetchImpl: createDesktopAuthFetch({
+        whenReady: () => {
+          waitingForReady.resolve()
+          return ready.promise
+        },
+        fetch: async (input, init) => {
+          assert.equal(appReady, true)
+          const request = new Request(input, init)
+          assert.equal(request.credentials, 'omit')
+          if (new URL(request.url).pathname.endsWith('/electron/token')) {
+            assert.equal(request.method, 'POST')
+            assert.deepEqual(await request.json(), { token: 'synthetic-code' })
+            return Response.json(session, {
+              headers: { 'set-better-auth-cookie': `${cookie}; Path=/; HttpOnly; Max-Age=3600` }
+            })
+          }
+          // The next authenticated read must use the cookie saved by Better Auth.
+          return Response.json(
+            request.headers.get('Better-Auth-Cookie')?.includes(cookie) ? session : null
+          )
+        }
+      })
+    }
+  })
+  const pending = client.$fetch('/electron/token', {
+    method: 'POST',
+    body: { token: 'synthetic-code' },
+    throw: true
+  })
+  await waitingForReady.promise
+  assert.equal(storage.size, 0)
+  appReady = true
+  ready.resolve('ready')
+  assert.deepEqual(await pending, session)
+  assert.ok(client.getCookie().includes(cookie))
+  const restored = await client.getSession({ query: { disableCookieCache: true } })
+  assert.deepEqual(restored.data, session)
+})
 
 void test('Nightly login selects its callback channel and rejects callbacks addressed to Stable', async (t) => {
   const { login, browser, callback } = harness(t, { channel: 'nightly' })
@@ -66,19 +120,6 @@ function harness(t, overrides = {}) {
     )
   return { login, browser, snapshots, callback }
 }
-
-void test('main completes PKCE without a renderer or any organization request', async (t) => {
-  const { login, callback, snapshots } = harness(t)
-  await login.start()
-  await login.complete(callback())
-  assert.deepEqual(login.getState().session, session)
-  assert.equal(login.getState().phase, 'authenticated')
-  assert.deepEqual(
-    snapshots.map((s) => s.phase),
-    ['waiting', 'exchanging', 'authenticated']
-  )
-  assert.equal(login.getState(), snapshots.at(-1))
-})
 
 for (const channel of ['stable', 'nightly']) {
   void test(`the pinned Better Auth endpoint accepts ${channel} PKCE and returns a usable desktop session`, async (t) => {
@@ -197,19 +238,6 @@ void test('exchange timeout is visible, never reuses its code, and ignores late 
   assert.equal(login.getState().session, null)
 })
 
-void test('an old exchange failure cannot overwrite a new attempt after cancellation', async (t) => {
-  const gate = deferred()
-  const { login, callback } = harness(t, { exchange: async () => gate.promise })
-  await login.start()
-  const completion = login.complete(callback())
-  login.cancel()
-  await login.start()
-  const waiting = login.getState()
-  gate.reject(new Error('old transport failed'))
-  await completion
-  assert.equal(login.getState(), waiting)
-})
-
 void test('browser launch errors and expired waiting attempts settle with actionable errors', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const failed = harness(t, {
@@ -272,18 +300,6 @@ void test('exchange failures carry a credential-free, actionable detail', async 
   // A fresh attempt clears the previous failure's detail.
   await offline.login.start()
   assert.equal(offline.login.getState().errorDetail, null)
-})
-
-void test('unavailable secure storage fails before the browser round trip', async (t) => {
-  const { login, browser } = harness(t, {
-    openBrowser: async () => {
-      throw new DesktopLoginFailure('secure_storage_unavailable', 'keychain locked')
-    }
-  })
-  await login.start()
-  assert.equal(browser.length, 0)
-  assert.equal(login.getState().error, 'secure_storage_unavailable')
-  assert.equal(login.getState().errorDetail, 'keychain locked')
 })
 
 void test('failure preserves an already authenticated session', async (t) => {

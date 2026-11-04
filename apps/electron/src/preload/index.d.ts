@@ -2,6 +2,10 @@ import { ElectronAPI } from '@electron-toolkit/preload'
 import type { BootProfilerBridge } from './boot-profiler'
 
 type LodyPlatformInfo = {
+  osVersion?: string
+  architecture?: string
+  electronVersion?: string
+  chromiumVersion?: string
   os: string
   homeDir: string
   machineName: string
@@ -14,6 +18,11 @@ type LodyNativeAppInfo = {
   native_platform?: string
   os_name?: string
   os_version?: string
+  manufacturer?: string
+  model?: string
+  android_sdk_version?: number
+  webview_version?: string
+  is_virtual?: boolean
   app_version?: string
   install_id?: string
 }
@@ -55,6 +64,8 @@ declare global {
     __LODY_PLATFORM__?: LodyPlatformInfo
     __LODY_APP_INFO__?: LodyNativeAppInfo
     __LODY_E2E_BOOT__?: BootProfilerBridge
+    /** E2E-only: main registered the client-loss probe for this window. */
+    __LODY_E2E_CLIENT_LOSS__?: true
     electron: ElectronAPI
     ipc: LodyIpcBridge
   }

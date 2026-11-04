@@ -3,6 +3,8 @@ import { toast } from '@/lib/toast';
 import { Toast } from '@lody/ui';
 import { toastManager } from '@/lib/toast';
 import { Button } from '@lody/ui/button';
+import { RoostHistoryError, SessionHistoryRequestError } from '@/lib/roost-history-error';
+import { useTranslation } from 'react-i18next';
 
 /**
  * The global toast surface. Close is always on the far right. Title stays
@@ -62,3 +64,62 @@ export default meta;
 type Story = StoryObj<typeof Toast.Provider>;
 
 export const Default: Story = {};
+
+export const RoostWriteFailure: Story = {
+  render: function RoostWriteFailureStory(args) {
+    const { t } = useTranslation();
+    return (
+      <>
+        <Toast.Provider manager={toastManager} {...args} />
+        <Button
+          onClick={() =>
+            toast.error(t('sessions.sendError'), {
+              description: new RoostHistoryError(
+                'write',
+                'Roost history initialize failed (code=workerFailed; diagnostic=65b4a1d8-6f6a-4ea0-87e8-2dbd563d25f6)'
+              ).message,
+              duration: 0,
+            })
+          }
+        >
+          {t('sessions.sendError')}
+        </Button>
+      </>
+    );
+  },
+};
+
+const historyRequestFailureStory = (metadataPending: boolean): Story => ({
+  render: function HistoryRequestFailureStory(args) {
+    const { t } = useTranslation();
+    return (
+      <>
+        <Toast.Provider manager={toastManager} {...args} />
+        <Button
+          onClick={() =>
+            toast.error(t('sessions.sendError'), {
+              description: new SessionHistoryRequestError(
+                'write',
+                {
+                  source: metadataPending ? 'remote' : 'transport',
+                  code: metadataPending ? 'session_metadata_pending' : 'request_failed',
+                  requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                  machineId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                },
+                metadataPending
+                  ? 'Session history metadata did not reach the target machine in time.'
+                  : 'History RPC request append exceeded 10000ms.'
+              ).message,
+              duration: 0,
+            })
+          }
+        >
+          {t('sessions.sendError')}
+        </Button>
+      </>
+    );
+  },
+});
+
+export const HistoryRequestTransportFailure = historyRequestFailureStory(false);
+export const HistoryMetadataPending = historyRequestFailureStory(true);

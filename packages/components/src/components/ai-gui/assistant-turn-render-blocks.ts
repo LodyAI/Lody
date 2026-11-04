@@ -3,7 +3,6 @@ import {
   buildAssistantMessageRenderItems,
   type AssistantMessageRenderItem,
 } from './assistant-message-render-items';
-import { shouldCollapseAssistantMessageItem } from './message-copy';
 
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
 type ThoughtMessage = Extract<MessageContent, { type: 'thought' }>;
@@ -195,7 +194,8 @@ const buildActivityGroupKey = (messageId: string, first: AssistantActivityRender
 
 const buildAssistantTurnRenderBlocksFromEntries = (
   messageId: string,
-  entries: readonly AssistantMessageRenderItem[]
+  entries: readonly AssistantMessageRenderItem[],
+  separateThoughts = false
 ): AssistantTurnRenderBlock[] => {
   const blocks: AssistantTurnRenderBlock[] = [];
   let pendingActivityEntries: AssistantActivityRenderItem[] = [];
@@ -217,6 +217,14 @@ const buildAssistantTurnRenderBlocksFromEntries = (
       continue;
     }
     if (isActivityGroupEntry(entry)) {
+      const previous = pendingActivityEntries[0];
+      if (
+        separateThoughts &&
+        previous &&
+        (previous.content.type === 'thought') !== (entry.content.type === 'thought')
+      ) {
+        flushActivityGroup();
+      }
       pendingActivityEntries.push(entry);
       continue;
     }
@@ -276,30 +284,14 @@ const buildSegmentBlockRanges = (
   return ranges.length > 0 ? ranges : [[0, blocks.length]];
 };
 
-const collectSegmentEntries = (
-  blocks: readonly AssistantTurnRenderBlock[],
-  [start, end]: readonly [number, number]
-): AssistantMessageRenderItem[] => {
-  const entries: AssistantMessageRenderItem[] = [];
-  for (let index = start; index < end; index += 1) {
-    const block = blocks[index];
-    if (!block) continue;
-    if (block.kind === 'content') {
-      entries.push(block.entry);
-    } else {
-      entries.push(...block.entries);
-    }
-  }
-  return entries;
-};
-
 export const buildAssistantTurnRenderLayout = (
   messageId: string,
   items: readonly MessageContent[],
-  isTurnFinished: boolean
+  isTurnFinished: boolean,
+  separateThoughts = false
 ): AssistantTurnRenderLayout => {
   const entries = buildAssistantMessageRenderItems(items);
-  const blocks = buildAssistantTurnRenderBlocksFromEntries(messageId, entries);
+  const blocks = buildAssistantTurnRenderBlocksFromEntries(messageId, entries, separateThoughts);
   const ranges = buildSegmentBlockRanges(blocks);
 
   // Nothing folds while the turn streams, but the segment shape does not depend
@@ -310,36 +302,17 @@ export const buildAssistantTurnRenderLayout = (
       return { key, blockRange, workBlockKeys: new Set<string>(), firstWorkBlockIndex: -1 };
     }
 
-    // The "keep the final contiguous text run visible" rule is applied PER
-    // SEGMENT: each region has its own answer tail. Applied across the whole
-    // turn, the plan would be demoted to process output just because
-    // implementation followed it.
-    const segmentEntries = collectSegmentEntries(blocks, blockRange);
-    const segmentContents = segmentEntries.map((entry) => entry.content);
-    const collapsibleItemIndexes = new Set<number>();
-    segmentEntries.forEach((entry, indexInSegment) => {
-      if (
-        shouldCollapseAssistantMessageItem({
-          content: entry.content,
-          index: indexInSegment,
-          items: segmentContents,
-          isTurnFinished,
-        })
-      ) {
-        collapsibleItemIndexes.add(entry.itemIndex);
-      }
-    });
-
+    // Only process folds. Prose is what the reader came for, and whether a text
+    // block is narration or the answer cannot be known from where it sits: a run
+    // may answer first and keep working. Folding by position buried that answer.
     const segmentWorkBlockKeys = new Set<string>();
     let firstWorkBlockIndex = -1;
     for (let index = blockRange[0]; index < blockRange[1]; index += 1) {
       const block = blocks[index];
-      if (!block) continue;
-      if (block.kind === 'activity_group' || collapsibleItemIndexes.has(block.entry.itemIndex)) {
-        segmentWorkBlockKeys.add(block.key);
-        if (firstWorkBlockIndex === -1) {
-          firstWorkBlockIndex = index;
-        }
+      if (block?.kind !== 'activity_group') continue;
+      segmentWorkBlockKeys.add(block.key);
+      if (firstWorkBlockIndex === -1) {
+        firstWorkBlockIndex = index;
       }
     }
     return { key, blockRange, workBlockKeys: segmentWorkBlockKeys, firstWorkBlockIndex };

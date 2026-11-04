@@ -5,6 +5,9 @@ Translation: current
 
 [English](2026-09-20-sidebar-updated-project-display-preference.md)
 
+> 更新（2026-10-18）：底部的孤立开关及其禁用/提示机制已被 Details 组的段开关取代，见
+> [行详情组](2026-10-18-sidebar-row-details-group.zh.md)。
+
 ## 摘要
 
 Updated 行新增的项目行更容易辨认来源，但也会让每一行变高，而且彩色 GitHub 头像会和会话标题争夺注意力。现在侧栏视图浮层会显示一个持久化的「显示项目」开关，默认开启；GitHub owner 头像保留原色并固定为 60% 透明度。这个入口留在现有浮层里，因为它是低频的视图偏好，不是侧栏的主要操作。

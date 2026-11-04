@@ -11,14 +11,9 @@ import { useAtomValue } from 'jotai';
 import { Copy, Download, ExternalLink, FolderOpen, Share2 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useTranslation } from 'react-i18next';
-import {
-  getMachineFlockLocalProjects,
-  type CodeCollabContentUnavailableReason,
-  type SessionMeta,
-} from '@lody/shared';
-import { getMachineMetaByIdAtomFamily } from '@/atoms';
+import { type CodeCollabContentUnavailableReason, type SessionMeta } from '@lody/shared';
 import { localHomeDirAtom, localMachineIdAtom } from '@/atoms/local-probe';
-import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
+import { useSessionWorkspacePath } from '@/hooks/use-session-workspace-path';
 import { usePostHog } from '@posthog/react';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
@@ -39,11 +34,8 @@ import {
   type SessionFileErrorActions,
 } from '@/lib/session-file-actions';
 import { isAbsoluteFilePath, resolveLocalWorkspaceFilePath } from '@/lib/session-local-file-path';
-import { resolveSessionFileOpenTarget } from '@/lib/session-file-open-target';
-import {
-  resolveSessionLocalProjectRootPath,
-  resolveSessionRepoFullName,
-} from '@/lib/session-local-file-source';
+import { resolveDirectMarkdownFileOpenTarget } from '@/lib/session-file-open-target';
+import { getMarkdownAgentFileCopyPath } from '@/lib/markdown-agent-file-link';
 import {
   buildPathLauncherLaunchInput,
   buildPathLauncherProbes,
@@ -55,10 +47,6 @@ import {
   resolveSelectedPathLauncher,
   type PathLauncherOption,
 } from '@/lib/session-path-launchers';
-import {
-  resolveMachineDotlodyPath,
-  resolveSessionWorkspacePath,
-} from '@/lib/session-workspace-path';
 
 export type SessionFileLocalHostActionSet = {
   readonly revealLabel: string;
@@ -138,7 +126,10 @@ export type SessionFileActions = {
    * file-tree menu, this deliberately never offers download/share remotely:
    * outside the owning local Electron machine it is Copy Path only.
    */
-  readonly buildMarkdownLinkMenuItems: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
+  readonly buildMarkdownLinkMenuItems: (
+    href: string,
+    copyPath?: string
+  ) => readonly MarkdownAgentFileLinkMenuItem[];
   /**
    * The same actions as a menu, for the file tree's context menu and the side
    * panel's ⋯ menu. Stable across renders so a memoized tree row can take it.
@@ -159,17 +150,26 @@ export function useSessionFileActions({
   /** Null while the surface has no session yet; every action is then absent. */
   readonly session: SessionMeta | null | undefined;
   /**
-   * Only `openFile` is used (for the remote download), so both the file
-   * workspace and session provider shapes fit.
+   * Preview bytes cover ordinary downloads; the optional download path handles
+   * larger files without entering the preview/editor cache.
    */
   readonly fileProvider?: {
     openFile(pathOrFileId: string): Promise<FileWorkspaceOpenResult>;
+    downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   } | null;
 }): SessionFileActions {
   const { t } = useTranslation();
   const postHog = usePostHog();
   const nativeShell = isNativeAppShell();
   const exportingRef = useRef(false);
+  const downloadControllers = useRef(new Set<AbortController>());
+  const largeDownloadInProgress = useRef(false);
+  useEffect(
+    () => () => {
+      for (const controller of downloadControllers.current) controller.abort();
+    },
+    [session?.id]
+  );
   // `session/file_action`: one event per user-invoked file action. Only the
   // extension bucket leaves the client, never the path.
   const trackFileAction = useCallback(
@@ -188,53 +188,23 @@ export function useSessionFileActions({
   );
   const localMachineId = useAtomValue(localMachineIdAtom);
   const localHomeDir = useAtomValue(localHomeDirAtom);
-  const sessionMachine = useAtomValue(
-    getMachineMetaByIdAtomFamily(session?.machineId ?? undefined)
-  );
-  const machineFlockRows = useMachineFlockRows(session?.machineId ?? null, {
-    // `dotlodyPath` is what turns a worktree session into an absolute path.
-    families: ['localProject', 'dotlodyPath'],
-  });
-
   const isElectronRenderer = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
   const isLocalMachine = Boolean(localMachineId) && session?.machineId === localMachineId;
   const platform = normalizeSessionFileActionPlatform(
     typeof window === 'undefined' ? undefined : window.__LODY_PLATFORM__?.os
   );
 
-  const localProjectRootPath = useMemo(
-    () =>
-      session
-        ? resolveSessionLocalProjectRootPath(session, {
-            ...(sessionMachine?.localProjects ?? {}),
-            ...getMachineFlockLocalProjects(machineFlockRows),
-          })
-        : null,
-    [machineFlockRows, session, sessionMachine?.localProjects]
-  );
-  const machineDotlodyPath = useMemo(
-    () => resolveMachineDotlodyPath(machineFlockRows, isLocalMachine ? localHomeDir : null),
-    [isLocalMachine, localHomeDir, machineFlockRows]
-  );
-  const workspacePath = useMemo(
-    () =>
-      !session
-        ? null
-        : resolveSessionWorkspacePath({
-            sessionId: session.id,
-            ownerSessionId: session.parentSessionId,
-            isWorktree: session.isWorktree,
-            dotlodyPath: machineDotlodyPath,
-            localProjectRootPath,
-            repoFullName: resolveSessionRepoFullName(session),
-            legacyWorkspacePath: sessionMachine?.workspacePaths?.[session.id],
-          }),
-    [localProjectRootPath, machineDotlodyPath, session, sessionMachine?.workspacePaths]
-  );
+  const workspacePath = useSessionWorkspacePath(session, isLocalMachine ? localHomeDir : null);
 
   const resolveHostPath = useCallback(
-    (filePath: string) => resolveLocalWorkspaceFilePath(workspacePath, filePath, isLocalMachine),
-    [isLocalMachine, workspacePath]
+    (filePath: string) =>
+      resolveLocalWorkspaceFilePath(
+        workspacePath,
+        filePath,
+        isLocalMachine,
+        isLocalMachine ? localHomeDir : null
+      ),
+    [isLocalMachine, localHomeDir, workspacePath]
   );
 
   // Keep the Markdown menu's "Open in" target aligned with the session-header
@@ -570,15 +540,8 @@ export function useSessionFileActions({
   const download = useMemo(() => {
     if (!session || !availability.download || !fileProvider) return null;
 
-    // KNOWN CEILING: this reads through the preview API, which answers in ONE
-    // bounded response (10 MiB text / 5 MiB binary remotely). So the download
-    // covers ordinary files and cannot cover the oversized ones — the very
-    // files whose error card sent the user looking for a way out. Saying that
-    // is the point of `downloadTooLarge`: a generic "could not download" reads
-    // as a glitch worth retrying. A real answer for those needs a ranged or
-    // streamed transfer, which is a Machine RPC protocol change (new method
-    // plus a negotiated `protocolCapabilities` key, never inferred from the CLI
-    // version) rather than a client-side fix.
+    // Preview stays bounded. Paid machines can supply original bytes in small chunks
+    // through the separately negotiated download path when preview cannot return them.
     const reportUnavailable = (reason: CodeCollabContentUnavailableReason | 'no-bytes') => {
       if (reason === 'deleted') {
         toast.error(t('sessions.fileActions.fileMissing', 'That file no longer exists.'));
@@ -602,14 +565,35 @@ export function useSessionFileActions({
         exportingRef.current = true;
         setSharing(true);
       }
+      const controller = new AbortController();
+      downloadControllers.current.add(controller);
       void (async () => {
         try {
           const exportBytes = async (bytes: Uint8Array) => {
             if (nativeShell) await shareFileBytesNatively(getDownloadFileName(filePath), bytes);
             else downloadBytesAsFile(filePath, bytes);
           };
+          const downloadOriginal = async () => {
+            if (largeDownloadInProgress.current) return true;
+            largeDownloadInProgress.current = true;
+            try {
+              const bytes = await fileProvider.downloadFile?.(filePath, controller.signal);
+              controller.signal.throwIfAborted();
+              if (!bytes) return false;
+              await exportBytes(bytes);
+              return true;
+            } finally {
+              largeDownloadInProgress.current = false;
+            }
+          };
           const result = await fileProvider.openFile(filePath);
+          controller.signal.throwIfAborted();
           if (result.status !== 'ready') {
+            if (
+              (result.reason === 'text-too-large' || result.reason === 'blob-too-large') &&
+              (await downloadOriginal())
+            )
+              return;
             reportUnavailable(result.reason);
             return;
           }
@@ -624,14 +608,17 @@ export function useSessionFileActions({
           }
           // A `binary` snapshot with no bytes is the machine declining to send
           // them, which is the same "too big for one response" situation.
+          if (await downloadOriginal()) return;
           reportUnavailable('no-bytes');
         } catch {
+          if (controller.signal.aborted) return;
           toast.error(
             nativeShell
               ? t('sessions.fileActions.shareFailed', 'Could not share that file.')
               : t('sessions.fileActions.downloadFailed', 'Could not download that file.')
           );
         } finally {
+          downloadControllers.current.delete(controller);
           if (nativeShell) {
             exportingRef.current = false;
             setSharing(false);
@@ -684,24 +671,13 @@ export function useSessionFileActions({
     [copyPath, download, localHost, nativeShell, resolveHostPath, session, sharing, trackFileAction]
   );
 
-  const resolveMarkdownLinkFilePath = useCallback(
-    (href: string): string | null => {
-      const trimmed = href.trim();
-      if (!trimmed) return null;
-      return resolveSessionFileOpenTarget({
-        rawPath: trimmed,
-        pathKind: 'markdown-href',
-        workspacePath,
-        preserveWorktreePath: isElectronRenderer && isLocalMachine,
-      }).filePath;
-    },
-    [isElectronRenderer, isLocalMachine, workspacePath]
-  );
-
   const buildMarkdownLinkMenuItems = useCallback(
-    (href: string): readonly MarkdownAgentFileLinkMenuItem[] => {
-      const filePath = resolveMarkdownLinkFilePath(href);
-      if (!filePath) return [];
+    (href: string, originalPath?: string): readonly MarkdownAgentFileLinkMenuItem[] => {
+      const filePath = resolveDirectMarkdownFileOpenTarget(href)?.filePath;
+      const copyTarget = originalPath ?? getMarkdownAgentFileCopyPath(href);
+      const withPath = (act: (filePath: string) => void) => () => {
+        if (filePath) act(filePath);
+      };
 
       const items: MarkdownAgentFileLinkMenuItem[] = [
         {
@@ -710,8 +686,8 @@ export function useSessionFileActions({
           label: t('sessions.fileActions.copyPath', 'Copy Path'),
           icon: Copy,
           run: () => {
-            trackFileAction('copy_path', 'md_link_context_menu', filePath);
-            copyPath(filePath);
+            trackFileAction('copy_path', 'md_link_context_menu', copyTarget);
+            writePathToClipboard(copyTarget);
           },
         },
       ];
@@ -719,17 +695,17 @@ export function useSessionFileActions({
       // The exact same local-host gate protects every path handed to Electron.
       // A remote agent's href can still be copied, but must never reach this
       // viewer's shell or advertise actions that will fail.
-      if (!localHost || !resolveHostPath(filePath)) return items;
+      if (!filePath || !localHost || !resolveHostPath(filePath)) return items;
 
       items.push({
         kind: 'action',
         id: 'open-file',
         label: t('sessions.fileActions.openFile', 'Open File'),
         icon: ExternalLink,
-        run: () => {
-          trackFileAction('open_external', 'md_link_context_menu', filePath);
-          localHost.openInDefaultApp(filePath);
-        },
+        run: withPath((path) => {
+          trackFileAction('open_external', 'md_link_context_menu', path);
+          localHost.openInDefaultApp(path);
+        }),
       });
       if (availableEditorLaunchers) {
         items.push({
@@ -739,10 +715,10 @@ export function useSessionFileActions({
             editor: availableEditorLaunchers.selected.label,
           }),
           icon: ExternalLink,
-          run: () => {
-            trackFileAction('open_in_editor', 'md_link_context_menu', filePath);
-            runEditorAction(availableEditorLaunchers.selected, filePath);
-          },
+          run: withPath((path) => {
+            trackFileAction('open_in_editor', 'md_link_context_menu', path);
+            runEditorAction(availableEditorLaunchers.selected, path);
+          }),
         });
       }
 
@@ -758,10 +734,10 @@ export function useSessionFileActions({
             id: `open-with:${getPathLauncherId(launcher)}`,
             label: launcher.label,
             icon: ExternalLink,
-            run: () => {
-              trackFileAction('open_with', 'md_link_context_menu', filePath);
-              runEditorAction(launcher, filePath);
-            },
+            run: withPath((path) => {
+              trackFileAction('open_with', 'md_link_context_menu', path);
+              runEditorAction(launcher, path);
+            }),
           })),
         });
       }
@@ -771,19 +747,18 @@ export function useSessionFileActions({
         id: 'reveal',
         label: localHost.revealLabel,
         icon: FolderOpen,
-        run: () => {
-          trackFileAction('reveal', 'md_link_context_menu', filePath);
-          localHost.reveal(filePath);
-        },
+        run: withPath((path) => {
+          trackFileAction('reveal', 'md_link_context_menu', path);
+          localHost.reveal(path);
+        }),
       });
       return items;
     },
     [
-      copyPath,
+      writePathToClipboard,
       availableEditorLaunchers,
       localHost,
       resolveHostPath,
-      resolveMarkdownLinkFilePath,
       runEditorAction,
       t,
       trackFileAction,

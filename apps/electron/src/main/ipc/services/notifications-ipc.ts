@@ -10,7 +10,9 @@ function isShowSessionCompletionNotificationInput(
     typeof payload === 'object' &&
     typeof (payload as ShowSessionCompletionNotificationInput).sessionId === 'string' &&
     typeof (payload as ShowSessionCompletionNotificationInput).title === 'string' &&
-    typeof (payload as ShowSessionCompletionNotificationInput).body === 'string'
+    typeof (payload as ShowSessionCompletionNotificationInput).body === 'string' &&
+    ((payload as ShowSessionCompletionNotificationInput).allowWhileForeground === undefined ||
+      typeof (payload as ShowSessionCompletionNotificationInput).allowWhileForeground === 'boolean')
   )
 }
 

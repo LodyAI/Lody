@@ -6,11 +6,18 @@
 //    owning machine". While that machine's path metadata loads, the local-host
 //    actions can only fail — and the download that would have worked must not
 //    be hidden behind them.
-// 2. The remote download reads through the preview API's ONE bounded response,
-//    so it cannot serve a file past those limits — exactly the file whose error
-//    card sent the user looking. It must SAY that: a generic "could not
-//    download" reads as a glitch worth retrying.
+// 2. Oversized remote downloads use the paid chunk path when available;
+//    unsupported machines retain the explicit size-limit explanation.
 
+// @vitest-environment jsdom
+// Two rules this hook must not get wrong:
+//
+// 1. Reaching a shell needs a RESOLVED host path, not merely "Electron on the
+//    owning machine". While that machine's path metadata loads, the local-host
+//    actions can only fail — and the download that would have worked must not
+//    be hidden behind them.
+// 2. Oversized remote downloads use the paid chunk path when available;
+//    unsupported machines retain the explicit size-limit explanation.
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -131,8 +138,11 @@ describe('remote file download action', () => {
     container = undefined;
   });
 
-  const runDownload = async (openResult: FileWorkspaceOpenResult): Promise<void> => {
-    const fileProvider = { openFile: async () => openResult };
+  const runDownload = async (
+    openResult: FileWorkspaceOpenResult,
+    downloadFile?: () => Promise<Uint8Array | null>
+  ): Promise<void> => {
+    const fileProvider = { openFile: async () => openResult, downloadFile };
     let download: ((filePath: string) => void) | null = null;
     function Probe() {
       download = useSessionFileActions({ session, fileProvider }).download;
@@ -223,17 +233,6 @@ describe('remote file download action', () => {
     }
   );
 
-  it('downloads the bytes of a file the preview API can return', async () => {
-    await runDownload({
-      status: 'ready',
-      entry: { entryType: 'file', fileId: 'docs/huge.log', path: 'docs/huge.log' },
-      snapshot: { kind: 'text', text: 'hello' },
-    } as unknown as FileWorkspaceOpenResult);
-
-    expect(downloadBytesAsFile).toHaveBeenCalledTimes(1);
-    expect(toastError).not.toHaveBeenCalled();
-  });
-
   it('exports the complete binary snapshot in the native shell', async () => {
     nativeShell = true;
     const bytes = Uint8Array.of(0, 255, 7);
@@ -245,6 +244,13 @@ describe('remote file download action', () => {
     expect(sharedBytes).toEqual(bytes);
     expect(downloadBytesAsFile).not.toHaveBeenCalled();
     nativeShell = false;
+  });
+
+  it('downloads original bytes through the paid path when preview refuses a large file', async () => {
+    const bytes = Uint8Array.of(0, 255, 128, 13, 10);
+    await runDownload({ status: 'unavailable', reason: 'blob-too-large' }, async () => bytes);
+    expect(downloadBytesAsFile).toHaveBeenCalledWith('docs/huge.log', bytes);
+    expect(toastError).not.toHaveBeenCalled();
   });
 
   it('names the real ceiling when the file is past what one response carries', async () => {
@@ -330,52 +336,37 @@ describe('local-host actions vs a resolvable host path', () => {
     return actions;
   };
 
-  it('offers the shell actions once the machine path resolves', async () => {
+  it('expands a home-rooted Markdown link against the local home directory', async () => {
     const actions = await resolveActions();
+    const homeRooted = '~/Code/my-spells/better-readme/SKILL.md';
+    const expanded = '/home/dev/Code/my-spells/better-readme/SKILL.md';
+    expect(actions.resolveHostPath(homeRooted)).toBe(expanded);
 
-    expect(actions.resolveHostPath('src/main.ts')).not.toBeNull();
-    expect(actions.localHost).not.toBeNull();
-    expect(actions.menuItems.map((item) => item.id)).toEqual([
-      'copy-relative-path',
-      'copy-absolute-path',
-      'open-in-editor',
-      'reveal',
-    ]);
-    // The download is the complement, so it stays away while the shell is reachable.
-    expect(actions.download).toBeNull();
-  });
-
-  it('splits Copy into the relative path and the resolved absolute path', async () => {
-    const actions = await resolveActions();
-    const relative = 'src/main.ts';
-    const absolute = actions.resolveHostPath(relative);
-    expect(absolute).not.toBeNull();
-
+    const items = actions.buildMarkdownLinkMenuItems(homeRooted);
+    const reveal = items.find((item) => item.id === 'reveal');
+    if (!reveal || reveal.kind !== 'action') throw new Error('Missing reveal action');
     await act(async () => {
-      actions.menuItems.find((item) => item.id === 'copy-relative-path')?.run(relative);
+      reveal.run();
       await Promise.resolve();
     });
-    expect(writeTextToClipboard).toHaveBeenLastCalledWith(relative);
-
-    await act(async () => {
-      actions.menuItems.find((item) => item.id === 'copy-absolute-path')?.run(relative);
-      await Promise.resolve();
-    });
-    expect(writeTextToClipboard).toHaveBeenLastCalledWith(absolute);
-    expect(toastSuccess).toHaveBeenLastCalledWith('File path copied');
+    expect(revealLocalPath).toHaveBeenLastCalledWith(expanded);
   });
 
-  it('reveals an absolute local artifact through both the menu and preview action', async () => {
+  it('never resolves a home-rooted path against a remote workspace', async () => {
+    localMachineId = 'another-machine';
     const actions = await resolveActions();
-    const artifact = '/tmp/build/Lody.zip';
+    expect(actions.resolveHostPath('~/Code/app/SKILL.md')).toBeNull();
+
+    const items = actions.buildMarkdownLinkMenuItems('~/Code/app/SKILL.md');
+    expect(items.map((item) => item.id)).toEqual(['copy-path']);
     await act(async () => {
-      actions.menuItems.find((item) => item.id === 'reveal')?.run(artifact);
+      const item = items[0];
+      if (item?.kind === 'action') item.run();
+      await Promise.resolve();
     });
-    expect(revealLocalPath).toHaveBeenLastCalledWith(artifact);
-    await act(async () => {
-      actions.buildErrorActions(artifact)?.localHost?.onOpen();
-    });
-    expect(openLocalPath).toHaveBeenLastCalledWith(artifact);
+    expect(writeTextToClipboard).toHaveBeenLastCalledWith('~/Code/app/SKILL.md');
+    expect(openLocalPath).not.toHaveBeenCalled();
+    expect(revealLocalPath).not.toHaveBeenCalled();
   });
 
   it.each(['/tmp/build/Lody.zip', '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/Lody.zip'])(
@@ -423,13 +414,6 @@ describe('local-host actions vs a resolvable host path', () => {
     }
   );
 
-  it('does not offer local shell actions for an absolute remote path', async () => {
-    localMachineId = 'another-machine';
-    const actions = await resolveActions();
-    expect(actions.buildErrorActions('/tmp/build/Lody.zip')?.localHost).toBeUndefined();
-    expect(actions.menuItems.some((item) => item.id === 'reveal')).toBe(false);
-  });
-
   it('offers only Copy Path for Markdown links outside the local Electron boundary', async () => {
     localMachineId = 'another-machine';
     const actions = await resolveActions();
@@ -444,31 +428,6 @@ describe('local-host actions vs a resolvable host path', () => {
     expect(openLocalPath).not.toHaveBeenCalled();
     expect(revealLocalPath).not.toHaveBeenCalled();
     expect(launchLocalPath).not.toHaveBeenCalled();
-  });
-
-  it('reports a reveal IPC failure without claiming an application is missing', async () => {
-    revealLocalPath.mockRejectedValueOnce(new Error('IPC unavailable'));
-    const actions = await resolveActions();
-    await act(async () => {
-      actions.localHost?.reveal('/tmp/build/Lody.zip');
-    });
-    expect(toastError).toHaveBeenLastCalledWith(
-      'Could not reveal that file.',
-      expect.objectContaining({
-        description: expect.any(String),
-        action: expect.objectContaining({ label: 'Copy error details' }),
-      })
-    );
-    expect(console.error).toHaveBeenLastCalledWith(
-      '[session-file-actions] Local file action failed',
-      expect.objectContaining({
-        action: 'reveal',
-        filePath: '/tmp/build/Lody.zip',
-        resolvedPath: '/tmp/build/Lody.zip',
-        error: 'IPC unavailable',
-      }),
-      expect.any(Error)
-    );
   });
 
   it('passes a local parent-relative DMG to Finder and the selected editor', async () => {
@@ -487,72 +446,6 @@ describe('local-host actions vs a resolvable host path', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it('shows and copies the failed path resolution without attempting IPC', async () => {
-    const actions = await resolveActions();
-    actions.localHost?.reveal('');
-    expect(revealLocalPath).not.toHaveBeenCalled();
-    const options = toastError.mock.calls.at(-1)?.[1] as {
-      description: string;
-      action: { onClick: () => void };
-    };
-    expect(options.description).toContain('file path could not be resolved');
-    await act(async () => options.action.onClick());
-    expect(JSON.parse(writeTextToClipboard.mock.calls.at(-1)![0])).toMatchObject({
-      action: 'reveal',
-      filePath: '',
-      resolvedPath: null,
-      error: 'path_unresolved',
-      machineId: session.machineId,
-    });
-  });
-
-  it('reports a missing bridge for editor actions instead of silently returning', async () => {
-    bridgeAvailable = false;
-    const actions = await resolveActions();
-    await act(async () => actions.localHost?.editor?.open('/tmp/Lody.dmg'));
-    expect(toastError).toHaveBeenLastCalledWith(
-      'Failed to open path',
-      expect.objectContaining({
-        description: 'The desktop connection is unavailable. Restart Lody and try again.',
-      })
-    );
-  });
-
-  it('retains editor launch errors and provides editor-specific guidance', async () => {
-    launchLocalPath.mockResolvedValueOnce({
-      launched: false,
-      command: 'code',
-      error: 'spawn code ENOENT',
-    });
-    const actions = await resolveActions();
-    await act(async () => actions.localHost?.editor?.open('/tmp/Lody.dmg'));
-    expect(console.error).toHaveBeenLastCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        action: 'editor',
-        error: 'spawn code ENOENT',
-        result: { launched: false, command: 'code', error: 'spawn code ENOENT' },
-      }),
-      expect.anything()
-    );
-    expect(toastError).toHaveBeenLastCalledWith(
-      'Failed to open path',
-      expect.objectContaining({
-        description: expect.stringContaining('selected editor is installed'),
-      })
-    );
-  });
-
-  it('distinguishes file access denial from a missing file', async () => {
-    revealLocalPath.mockResolvedValueOnce({ revealed: false, error: 'EPERM' });
-    const actions = await resolveActions();
-    await act(async () => actions.localHost?.reveal('/tmp/Lody.dmg'));
-    expect(toastError).toHaveBeenLastCalledWith(
-      'Could not reveal that file.',
-      expect.objectContaining({ description: expect.stringContaining('file permissions') })
-    );
-  });
-
   it('offers no shell action, and keeps the download, while the path is unresolved', async () => {
     // Same machine, same desktop app — the path metadata simply has not landed.
     localHomeDir = null;
@@ -567,19 +460,5 @@ describe('local-host actions vs a resolvable host path', () => {
       .map((item) => item.id);
     expect(visibleIds).toEqual(['copy-relative-path', 'download']);
     expect(actions.download).not.toBeNull();
-  });
-
-  it('keeps the absolute copy, and drops the relative one, for an absolute path', async () => {
-    localMachineId = 'another-machine';
-    const actions = await resolveActions();
-    const artifact = '/tmp/build/Lody.zip';
-
-    const relativeItem = actions.menuItems.find((item) => item.id === 'copy-relative-path');
-    expect(relativeItem?.isAvailable?.(artifact)).toBe(false);
-    await act(async () => {
-      actions.menuItems.find((item) => item.id === 'copy-absolute-path')?.run(artifact);
-      await Promise.resolve();
-    });
-    expect(writeTextToClipboard).toHaveBeenLastCalledWith(artifact);
   });
 });

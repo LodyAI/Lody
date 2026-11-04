@@ -1,4 +1,11 @@
+import {
+  WorkspaceStreamsConfigurationError,
+  type WorkspaceStreamsContent,
+} from '@lody/shared/workspace-streams-content';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
+import { registerLoroSyncErrorFormatter } from '../../utils/format-error';
 import {
   CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS,
   getLoroMetaStreamId,
@@ -11,20 +18,33 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
-import { StreamsTransportAdapter, createRepoStreamsPersistence } from 'loro-repo/transport/streams';
+import {
+  StreamsTransportAdapter,
+  createRepoStreamsPersistence,
+  type StreamsRoomPayloadProtectionResolver,
+} from 'loro-repo/transport/streams';
 import type { Logger } from '@/utils/logger';
-import type { LoroStreamsTokenProvider } from '@lody/platform';
+import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { prepareCliStreamsGatewayBaseUrl } from './streams-access';
+
+const { getLoroSyncDiagnostic, formatLoroSyncError } = createLoroSyncErrorTools({
+  RepoSyncError,
+  RepoTransportError,
+});
+registerLoroSyncErrorFormatter(formatLoroSyncError);
 
 export type CliStreamsTransport = {
   adapter: StreamsTransportAdapter;
   gatewayBaseUrl: string;
-  tokenProvider: LoroStreamsTokenProvider;
+  tokenProvider: LoroStreamsTokenProviderLegacy;
 };
 
 export async function createCliStreamsTransport(args: {
+  content: WorkspaceStreamsContent;
+  /** Protected content must name its dedicated bucket explicitly. */
+  bucketId?: string;
   workspaceId: WorkspaceId;
-  tokenProvider: LoroStreamsTokenProvider;
+  tokenProvider: LoroStreamsTokenProviderLegacy;
   repo: LoroRepo;
   /**
    * LoroDoc room cursors only. Meta and named Flock cursors are replica-bound:
@@ -34,6 +54,18 @@ export async function createCliStreamsTransport(args: {
   documentRemoteCursorStore: RemoteCursorStore;
   logger: Logger;
 }): Promise<CliStreamsTransport> {
+  const content = args.content;
+  if (content?.mode !== 'plaintext' && content?.mode !== 'protected')
+    throw new WorkspaceStreamsConfigurationError('Unsupported workspace Streams content mode');
+  if (
+    content.mode === 'protected' &&
+    (!args.bucketId ||
+      args.bucketId === LORO_STREAMS_BUCKET_ID ||
+      !content.namespace ||
+      typeof content.resolve !== 'function' ||
+      typeof content.snapshotUpload?.canUpload !== 'function')
+  )
+    throw new WorkspaceStreamsConfigurationError('Incomplete workspace Streams content protection');
   const tokenProvider = args.tokenProvider;
   const gatewayBaseUrl = await prepareCliStreamsGatewayBaseUrl(tokenProvider);
 
@@ -41,7 +73,16 @@ export async function createCliStreamsTransport(args: {
     gatewayBaseUrl,
     tokenProvider,
     adapter: new StreamsTransportAdapter({
-      bucketId: LORO_STREAMS_BUCKET_ID,
+      diagnostics: (event) => {
+        const diagnostic = getLoroSyncDiagnostic(event);
+        if (diagnostic) {
+          args.logger[diagnostic.level]('[loro-streams] transport failure', {
+            workspaceId: args.workspaceId,
+            ...diagnostic,
+          });
+        }
+      },
+      bucketId: args.bucketId ?? LORO_STREAMS_BUCKET_ID,
       metaStreamId: getLoroMetaStreamId(args.workspaceId),
       docStreamId: (docId) => getLoroStreamIdForDocId(args.workspaceId, docId),
       flockDocStreamId: (flockDocId) => flockDocId,
@@ -56,13 +97,32 @@ export async function createCliStreamsTransport(args: {
       persistence: createRepoStreamsPersistence(args.repo, {
         documentRemoteCursorStore: args.documentRemoteCursorStore,
       }),
-      snapshotCodec: streamsSnapshotCodec,
+      snapshotCodec:
+        content.mode === 'protected'
+          ? (content.snapshotCodec ?? streamsSnapshotCodec)
+          : streamsSnapshotCodec,
       baseUrl: gatewayBaseUrl,
       shardUrls: getLoroStreamsShardUrls(gatewayBaseUrl, tokenProvider.getShardHostSuffix()),
-      snapshotUpload: {
-        canUpload: async () => true,
-        debounceMs: 5_000,
-      },
+      snapshotUpload:
+        content.mode === 'protected'
+          ? content.snapshotUpload
+          : {
+              canUpload: async () => true,
+              debounceMs: 5_000,
+            },
+      ...(content.mode === 'protected'
+        ? {
+            payloadProtectionNamespace: content.namespace,
+            payloadProtection: ((room) => {
+              const selected = content.resolve(room);
+              if (selected?.mode !== 'protected')
+                throw new WorkspaceStreamsConfigurationError(
+                  'Workspace Streams room requires content protection'
+                );
+              return selected;
+            }) satisfies StreamsRoomPayloadProtectionResolver,
+          }
+        : { payloadProtection: undefined }),
     }),
   };
 }

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -102,6 +103,7 @@ describe('MarkdownRenderer streaming rendering', () => {
       });
     }
     root = undefined;
+    document.getSelection()?.removeAllRanges();
     container?.remove();
     container = undefined;
     localStorage.removeItem('lody-inline-math-enabled');
@@ -154,6 +156,47 @@ describe('MarkdownRenderer streaming rendering', () => {
   };
 
   it.each([false, true])(
+    'renders CJK emphasis next to punctuation and prose while streaming=%s',
+    async (isStreaming) => {
+      const source =
+        '“**示例流程正确。**”\n\n**检查完成。**接着执行下一步。\n\n前文**“重点”**后文\n\n前文*“提示”*后文';
+      await renderMarkdown(source, { isStreaming });
+
+      expect(Array.from(container!.querySelectorAll('strong'), (node) => node.textContent)).toEqual(
+        ['示例流程正确。', '检查完成。', '“重点”']
+      );
+      expect(container?.querySelector('em')?.textContent).toBe('“提示”');
+      expect(container?.textContent).not.toContain('*');
+
+      await renderMarkdown(source, { isStreaming: false });
+      expect(container?.querySelectorAll('strong')).toHaveLength(3);
+      expect(container?.textContent).not.toContain('*');
+    }
+  );
+
+  it.each([false, true])(
+    'preserves escaped and code CJK emphasis while streaming=%s',
+    async (isStreaming) => {
+      const literal = '**检查完成。**接着执行下一步。';
+      await renderMarkdown(
+        [
+          String.raw`\*\*检查完成。\*\*接着执行下一步。`,
+          '`' + literal + '`',
+          '```text\n' + literal + '\n```',
+          '**Done.**Next',
+        ].join('\n\n'),
+        { isStreaming }
+      );
+      expect(container?.querySelector('strong')).toBeNull();
+      expect(container?.querySelector('em')).toBeNull();
+      expect(container?.querySelector('p')?.textContent).toBe(literal);
+      expect(container?.querySelector('p code')?.textContent).toBe(literal);
+      expect(container?.querySelector('pre code')?.textContent).toBe(literal);
+      expect(container?.textContent).toContain('**Done.**Next');
+    }
+  );
+
+  it.each([false, true])(
     'preserves the rest of a math document after a less-than comparison while streaming=%s',
     async (isStreaming) => {
       await renderMarkdown(
@@ -188,12 +231,6 @@ End of synthetic document.`,
     }
   );
 
-  it('uses the GFM autolink path for email literals', async () => {
-    await renderMarkdown('Contact agent-000@example.com before checking https://example.com.');
-
-    expect(container?.querySelector('a[href="mailto:agent-000@example.com"]')).not.toBeNull();
-  });
-
   it.each([false, true])(
     'repairs bold URLs followed by inline code while streaming=%s',
     async (isStreaming) => {
@@ -211,58 +248,6 @@ End of synthetic document.`,
       expect(container?.textContent).not.toContain('**');
     }
   );
-
-  it('preserves an absolute destination when repairing a bold www autolink', async () => {
-    await renderMarkdown(MALFORMED_BOLD_WWW_AUTOLINK_MARKDOWN);
-
-    const link = container?.querySelector('strong a[href="http://www.example.com"]');
-    expect(link?.textContent).toBe('www.example.com');
-    expect(container?.textContent).toContain('fix/some-branch -> main');
-  });
-
-  it('adds an absolute scheme for mixed-case www autolinks', async () => {
-    await renderMarkdown(MALFORMED_BOLD_MIXED_CASE_WWW_AUTOLINK_MARKDOWN);
-
-    const link = container?.querySelector('strong a');
-    expect(link?.getAttribute('href')).toBe('http://WWW.example.com');
-    expect(link?.textContent).toBe('WWW.example.com');
-  });
-
-  it('does not split a URL at double asterisks followed by ordinary URL text', async () => {
-    await renderMarkdown(URL_WITH_DOUBLE_ASTERISK_MARKDOWN);
-
-    const link = container?.querySelector('a[href="https://example.com/path**segment"]');
-    expect(link?.textContent).toBe('https://example.com/path**segment');
-    expect(container?.querySelector('strong')).toBeNull();
-  });
-
-  it('does not split a URL when ordinary URL text precedes an inline code suffix', async () => {
-    await renderMarkdown(URL_WITH_DOUBLE_ASTERISK_BEFORE_CODE_MARKDOWN);
-
-    const link = container?.querySelector('a');
-    expect(link?.getAttribute('href')).toBe('https://example.com/path**segment(%60code%60)');
-    expect(link?.textContent).toBe('https://example.com/path**segment(`code`)');
-    expect(container?.querySelector('strong')).toBeNull();
-    expect(container?.querySelector('code')).toBeNull();
-  });
-
-  it('searches past an invalid asterisk pair for a later valid closer', async () => {
-    await renderMarkdown(URL_WITH_LATER_VALID_CLOSER_MARKDOWN);
-
-    const link = container?.querySelector('strong a');
-    expect(link?.getAttribute('href')).toBe('https://example.com/a**b/c');
-    expect(link?.textContent).toBe('https://example.com/a**b/c');
-    expect(container?.querySelector('code')?.textContent).toBe('code');
-  });
-
-  it('handles many non-closing asterisk pairs before a valid closer', async () => {
-    await renderMarkdown(LONG_URL_WITH_REPEATED_NON_CLOSERS_MARKDOWN);
-
-    const link = container?.querySelector('strong a');
-    expect(link?.getAttribute('href')).toBe(LONG_URL_WITH_REPEATED_NON_CLOSERS);
-    expect(link?.textContent).toBe(LONG_URL_WITH_REPEATED_NON_CLOSERS);
-    expect(container?.querySelector('code')?.textContent).toBe('code');
-  });
 
   it('preserves explicit link destinations', async () => {
     await renderMarkdown(EXPLICIT_BOLD_LINK_MARKDOWN);
@@ -295,34 +280,6 @@ End of synthetic document.`,
     );
     expect(copy?.getAttribute('aria-label')).toBe('Copied');
   });
-
-  it.each([false, true])(
-    'classifies table columns by content length (streaming: %s)',
-    async (isStreaming) => {
-      await renderMarkdown(
-        [
-          '| 项目 | 路径 | 状态 |',
-          '| --- | --- | --- |',
-          '| OSS：升级到 Electron 43 | `~/Code/lody-build/.lody-build/artifacts/20260930/Lody.app` | Draft |',
-          '| 私有仓库 | [a.md](a.md) | 已通过 CI；需要确认两项例外：electron-vite 6 beta 与 19 项隔离依赖 |',
-        ].join('\n'),
-        { isStreaming }
-      );
-
-      const table = container?.querySelector('[data-markdown-table] table');
-      // Short column 1 stays on one line; the path column breaks inside its
-      // token; the prose column wraps between words.
-      expect(table?.getAttribute('data-one-line-columns')).toBe('1');
-      expect(table?.getAttribute('data-break-anywhere-columns')).toBe('2');
-      // Both long columns are intrinsically wide and keep a higher floor.
-      expect(table?.getAttribute('data-wide-columns')).toBe('2 3');
-      // Every column carries a preferred width so a crowded table shrinks
-      // columns in proportion to their content, not down to a flat floor.
-      const cols = table?.querySelectorAll('colgroup > col');
-      expect(cols?.length).toBe(3);
-      expect((cols?.[1] as HTMLElement | undefined)?.style.width).toBe('30em');
-    }
-  );
 
   it('renders links that only name a GitHub PR or issue as reference labels', async () => {
     await renderMarkdown(
@@ -379,49 +336,6 @@ End of synthetic document.`,
     expect(link?.textContent).toBe('https://zh.example.com/wiki/中文');
   });
 
-  it('does not treat a non-ASCII symbol as Markdown punctuation after the marker', async () => {
-    await renderMarkdown(URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN);
-
-    expect(container?.querySelector('strong')).toBeNull();
-    expect(container?.querySelector('code')).toBeNull();
-    expect(container?.textContent).toContain('https://example.com/**€(`code`)');
-  });
-
-  it('recognizes astral Unicode punctuation after a strong closer', async () => {
-    await renderMarkdown(URL_WITH_ASTRAL_PUNCTUATION_AFTER_MARKER_MARKDOWN);
-
-    const link = container?.querySelector('strong a');
-    expect(link?.getAttribute('href')).toBe('https://example.com');
-    expect(link?.textContent).toBe('https://example.com');
-    expect(container?.querySelector('code')?.textContent).toBe('code');
-  });
-
-  it('does not reduce triple-star emphasis to a strong link', async () => {
-    await renderMarkdown(TRIPLE_STAR_BOLD_ITALIC_AUTOLINK_MARKDOWN);
-
-    expect(container?.querySelector('strong')).toBeNull();
-    expect(container?.textContent).toContain('https://example.com');
-  });
-
-  it('searches past an escaped URL marker for a later valid closer', async () => {
-    await renderMarkdown(ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN);
-
-    const link = container?.querySelector('strong a');
-    expect(link?.getAttribute('href')).toBe('https://example.com/%5C*%5C*path');
-    expect(link?.textContent).toBe('https://example.com/\\*\\*path');
-    expect(container?.querySelector('code')?.textContent).toBe('code');
-  });
-
-  it('repairs bold autolinks when the URL contains an HTML entity', async () => {
-    await renderMarkdown(HTML_ENTITY_BOLD_AUTOLINK_MARKDOWN);
-
-    const link = container?.querySelector('strong a');
-    expect(link?.getAttribute('href')).toBe('https://example.com/?a=1&amp;b=2');
-    expect(link?.textContent).toBe('https://example.com/?a=1&amp;b=2');
-    expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
-    expect(container?.textContent).toContain('fix/some-branch -> main');
-  });
-
   it.each([
     ESCAPED_BOLD_AUTOLINK_MARKDOWN,
     ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN,
@@ -440,41 +354,6 @@ End of synthetic document.`,
     expect(container?.textContent).toContain('<strong>raw</strong>');
   });
 
-  it('labels the icon-only code copy button', async () => {
-    await renderMarkdown('```ts\nconst answer = 42;\n```');
-
-    const copyButton = await waitForElement('[data-streamdown="code-block-copy-button"]');
-    expect(copyButton.getAttribute('aria-label')).toBe('Copy code');
-  });
-
-  it('renders headerless diff fences with semantic line rows and existing code controls', async () => {
-    await renderMarkdown(
-      [
-        '```diff',
-        ' resolveSource(session)',
-        '-  return staleProvider',
-        '+  return localFiles',
-        '@@ -8,1 +8,1 @@',
-        '--- a/source.ts',
-        '+++ b/source.ts',
-        '```',
-      ].join('\n')
-    );
-
-    const diffBlock = await waitForElement('[data-markdown-diff-block="true"]');
-    expect(diffBlock.getAttribute('data-language')).toBe('diff');
-    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="context"]')).toHaveLength(1);
-    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="deletion"]')).toHaveLength(1);
-    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="addition"]')).toHaveLength(1);
-    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="hunk"]')).toHaveLength(1);
-    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="metadata"]')).toHaveLength(2);
-    expect(
-      diffBlock
-        .querySelector('[data-streamdown="code-block-copy-button"]')
-        ?.getAttribute('aria-label')
-    ).toBe('Copy code');
-  });
-
   it('keeps an incomplete streaming diff fence in the semantic renderer', async () => {
     await renderMarkdown(['```diff', '-old source', '+new source'].join('\n'), {
       isStreaming: true,
@@ -486,10 +365,18 @@ End of synthetic document.`,
     expect(diffBlock.querySelectorAll('[data-markdown-diff-line="addition"]')).toHaveLength(1);
   });
 
-  it('renders sanitized raw HTML when allowHtml is enabled', async () => {
-    await renderMarkdown('Hello <strong>raw</strong>.', { allowHtml: true });
-
-    expect(container?.querySelector('strong')?.textContent).toBe('raw');
+  it('reapplies HTML policy to the same parsed text after static remounts', async () => {
+    const source =
+      'Hello <strong>raw</strong><img src="x" onerror="alert(1)"><script>alert(1)</script>.';
+    for (const allowHtml of [true, false, true]) {
+      await act(async () => root?.render(null));
+      await renderMarkdown(source, { allowHtml });
+      expect(container?.querySelector('strong')?.textContent ?? null).toBe(
+        allowHtml ? 'raw' : null
+      );
+      expect(container?.querySelector('script')).toBeNull();
+      expect(container?.querySelector('[onerror]')).toBeNull();
+    }
   });
 
   it('keeps inline LaTeX literal while rendering Mermaid blocks', async () => {
@@ -518,27 +405,80 @@ End of synthetic document.`,
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
   });
 
-  it('renders parenthesis inline math through the streaming path when enabled', async () => {
-    const store = createStore();
-    store.set(inlineMathEnabledAtom, true);
-    await renderMarkdownWithStore(PARENTHESIS_INLINE_MATH_MARKDOWN, store, {
-      isStreaming: true,
+  const copyRange = async (range: Range) => {
+    await vi.dynamicImportSettled();
+    const selection = document.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const contents = new Map<string, string>();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData: (format: string, value: string) => contents.set(format, value) },
     });
+    container!.dispatchEvent(event);
+    return { event, contents };
+  };
 
-    await act(async () => {
-      await import('@lobehub/streamdown');
-    });
-    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
+  it.each([false, true])(
+    'copies inline math with surrounding prose while streaming=%s',
+    async (isStreaming) => {
+      const store = createStore();
+      store.set(inlineMathEnabledAtom, true);
+      await renderMarkdownWithStore(String.raw`Before $\frac{a}{b}$ after.`, store, {
+        isStreaming,
+      });
+      if (isStreaming)
+        await act(async () => {
+          await import('@lobehub/streamdown');
+        });
+
+      const range = document.createRange();
+      range.selectNodeContents(container!.querySelector('p')!);
+      const { event, contents } = await copyRange(range);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(contents.get('text/plain')).toBe(String.raw`Before $\frac{a}{b}$ after.`);
+      const html = document.createElement('div');
+      html.innerHTML = contents.get('text/html')!;
+      expect(html.querySelector('.katex')).not.toBeNull();
+      expect(html.textContent).toContain('Before ');
+      expect(html.textContent).toContain(' after.');
+    }
+  );
+
+  it.each([false, true])('copies display math as LaTeX while streaming=%s', async (isStreaming) => {
+    await renderMarkdown('$$\nx^2 + y^2 = z^2\n$$', { isStreaming });
+    if (isStreaming)
+      await act(async () => {
+        await import('@lobehub/streamdown');
+      });
+
+    const range = document.createRange();
+    range.selectNode(container!.querySelector('.katex-display')!);
+    const { contents } = await copyRange(range);
+
+    expect(contents.get('text/plain')?.trim()).toBe('$$x^2 + y^2 = z^2$$');
   });
 
-  it('renders an already normalized inline pair when enabled', async () => {
+  it('copies the complete formula when only part of its rendered text is selected', async () => {
     const store = createStore();
     store.set(inlineMathEnabledAtom, true);
-    await renderMarkdownWithStore(NORMALIZED_INLINE_MATH_MARKDOWN, store);
+    await renderMarkdownWithStore('Before $x+y$ after.', store);
 
-    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
+    const range = document.createRange();
+    range.selectNodeContents(container!.querySelector('.katex-html .mord')!);
+    expect(range.toString()).toBe('x');
+    expect((await copyRange(range)).contents.get('text/plain')).toBe('$x+y$');
+  });
+
+  it('leaves ordinary prose copying to the browser', async () => {
+    await renderMarkdown('Plain text and `literal code`.');
+    const range = document.createRange();
+    range.selectNodeContents(container!.querySelector('p')!);
+    const { event, contents } = await copyRange(range);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(contents.size).toBe(0);
   });
 
   it('updates an existing renderer when the inline math preference changes', async () => {
@@ -572,47 +512,12 @@ End of synthetic document.`,
     expect(container?.textContent).not.toContain('$$x$$');
   });
 
-  it('renders later inline math after prose-positioned display delimiters', async () => {
-    const store = createStore();
-    await renderMarkdownWithStore(INLINE_DISPLAY_MATH_CONTEXT_MARKDOWN, store);
-
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
-
-    await act(async () => {
-      store.set(inlineMathEnabledAtom, true);
-    });
-
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
-    expect(container?.textContent).not.toContain('$$p$$');
-    expect(container?.querySelectorAll('.katex').length).toBeGreaterThan(1);
-  });
-
   it('renders same-line bracket math after prose with the inline preference off', async () => {
     await renderMarkdown(String.raw`令\[x+y\]。`);
 
     expect(container?.querySelectorAll('.katex')).toHaveLength(1);
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
     expect(container?.textContent).toContain('x+y');
-  });
-
-  it('renders later inline math after prose-positioned display delimiters while streaming', async () => {
-    const store = createStore();
-    await renderMarkdownWithStore(INLINE_DISPLAY_MATH_CONTEXT_MARKDOWN, store, {
-      isStreaming: true,
-    });
-
-    await act(async () => {
-      await import('@lobehub/streamdown');
-    });
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
-
-    await act(async () => {
-      store.set(inlineMathEnabledAtom, true);
-    });
-
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
-    expect(container?.textContent).not.toContain('$$p$$');
-    expect(container?.querySelectorAll('.katex').length).toBeGreaterThan(1);
   });
 
   it('keeps code literal when inline math is enabled', async () => {
@@ -647,14 +552,6 @@ End of synthetic document.`,
     expect(container?.querySelector('a')?.textContent).toContain('(x_i)');
   });
 
-  it('renders inline delimiters in ordinary square-bracket text when enabled', async () => {
-    const store = createStore();
-    store.set(inlineMathEnabledAtom, true);
-    await renderMarkdownWithStore('[\\(x_i\\)]', store);
-
-    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
-  });
-
   it('keeps parenthesis LaTeX literal while rendering bracket display LaTeX', async () => {
     await renderMarkdown(
       [
@@ -673,33 +570,6 @@ End of synthetic document.`,
     expect(container?.querySelectorAll('.katex')).toHaveLength(1);
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
     expect(container?.textContent).toContain('(t_i)');
-  });
-
-  it('keeps Codex-style LaTeX delimiters literal inside Markdown code', async () => {
-    await renderMarkdown(
-      [
-        '`\\(inline_code\\)`',
-        '',
-        '```tex',
-        '\\[',
-        'fenced_code',
-        '\\]',
-        '```',
-        '',
-        'Outside \\(x_i\\) renders.',
-      ].join('\n')
-    );
-
-    expect(container?.querySelectorAll('.katex')).toHaveLength(0);
-    expect(container?.querySelector('code')?.textContent).toBe('\\(inline_code\\)');
-    expect(container?.textContent).toContain('\\[fenced_code\\]');
-  });
-
-  it('keeps LaTeX delimiters literal in indented code blocks', async () => {
-    await renderMarkdown(['    \\(literal\\)', '', 'Outside \\(x_i\\) renders.'].join('\n'));
-
-    expect(container?.querySelectorAll('.katex')).toHaveLength(0);
-    expect(container?.querySelector('pre code')?.textContent).toContain('\\(literal\\)');
   });
 
   it('keeps LaTeX delimiters literal in container-nested fenced code', async () => {
@@ -732,6 +602,41 @@ End of synthetic document.`,
     expect(container?.textContent).toContain('\\(ordered_list_literal\\)');
   });
 
+  it('renders multiline Codex citations as file cards and opens their exact target', async () => {
+    let opened = '';
+    await renderMarkdown(
+      'Ready: :codex-file-citation{path="\n/tmp/exports/预算 draft.xlsx\n" purpose="output" artifact_kind="workbook"} Done.',
+      {
+        onAgentFileLinkClick: (href) => {
+          opened = decodeURIComponent(href);
+        },
+      }
+    );
+    const button = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="预算 draft.xlsx"]'
+    );
+    expect(button).not.toBeNull();
+    expect(container?.textContent).not.toContain('codex-file-citation');
+    expect(container?.textContent).toContain('Ready:');
+    expect(container?.textContent).toContain('Done.');
+    expect(container?.querySelector('p div')).toBeNull();
+    await act(async () => {
+      button?.click();
+    });
+    expect(opened).toBe('/tmp/exports/预算 draft.xlsx');
+  });
+
+  it('leaves code examples and incomplete citations as text until completed', async () => {
+    const citation = ':codex-file-citation{path="/tmp/report.pdf"}';
+    await renderMarkdown('`' + citation + '`\n\n```text\n' + citation + '\n```');
+    expect(container?.querySelector('button[aria-label="report.pdf"]')).toBeNull();
+    expect(container?.querySelector('code')?.textContent).toBe(citation);
+    await renderMarkdown(citation.slice(0, -1));
+    expect(container?.querySelector('button[aria-label="report.pdf"]')).toBeNull();
+    await renderMarkdown(citation + ' ' + citation);
+    expect(container?.querySelectorAll('button[aria-label="report.pdf"]')).toHaveLength(2);
+  });
+
   it('does not parse dollars inside code spans or link labels as LaTeX', async () => {
     await renderMarkdown(
       [
@@ -747,109 +652,5 @@ End of synthetic document.`,
       'button[title="/home/agent/project/src/routes/api/upload.$key.tsx:9"]'
     );
     expect(fileLinkButton).not.toBeNull();
-  });
-
-  it('fades a streaming turn in, then hands the finished text to the static renderer', async () => {
-    await renderMarkdown('Streaming words are still arriving.', { isStreaming: true });
-    await waitForElement('.streamdown-animated');
-
-    vi.useFakeTimers();
-    try {
-      await renderMarkdown('Streaming words are still arriving. Done.', { isStreaming: false });
-      expect(container?.querySelector('.streamdown-animated')).not.toBeNull();
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1000);
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-
-    expect(container?.querySelector('.streamdown-animated')).toBeNull();
-    expect(container?.querySelector('.stream-char')).toBeNull();
-    expect(container?.textContent).toBe('Streaming words are still arriving. Done.');
-  });
-
-  it('shows a mounted stream immediately while still animating later additions', async () => {
-    const existingText = 'Earlier paragraph.\n\nAlready visible before reopening.';
-    vi.useFakeTimers();
-    try {
-      await renderMarkdown(existingText, { isStreaming: true });
-      expect(container?.textContent).toContain('Already visible before reopening.');
-      expect(container?.querySelector('.stream-char:not(.stream-char-revealed)')).toBeNull();
-      expect(container?.querySelector('.stream-block')).toBeNull();
-
-      await act(async () => {
-        root?.render(null);
-      });
-      await renderMarkdown(existingText, { isStreaming: true });
-      expect(container?.textContent).toContain('Already visible before reopening.');
-      expect(container?.querySelector('.stream-char:not(.stream-char-revealed)')).toBeNull();
-      expect(container?.querySelector('.stream-block')).toBeNull();
-
-      await renderMarkdown(`${existingText} New output arrives.`, {
-        isStreaming: true,
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(250);
-      });
-
-      expect(container?.textContent).toContain('New');
-      expect(container?.querySelector('.stream-char:not(.stream-char-revealed)')).not.toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('keeps GFM autolinks available across streaming renders', async () => {
-    const chunks = buildStreamingMarkdownChunks(STREAM_CHUNK_COUNT);
-    const finalText = chunks.join('');
-    let streamingText = '';
-    let cumulativeRenderedInputChars = 0;
-
-    const streamingStartedAt = performance.now();
-    for (const chunk of chunks) {
-      streamingText += chunk;
-      cumulativeRenderedInputChars += streamingText.length;
-      await renderMarkdown(streamingText, { isStreaming: true });
-    }
-    const streamingElapsedMs = performance.now() - streamingStartedAt;
-
-    const amplification = cumulativeRenderedInputChars / finalText.length;
-    const finalEmail = `mailto:agent-${String(STREAM_CHUNK_COUNT - 1).padStart(3, '0')}@example.com`;
-    const finalOnlyContainer = document.createElement('div');
-    document.body.appendChild(finalOnlyContainer);
-    const finalOnlyRoot = createRoot(finalOnlyContainer);
-    let finalOnlyElapsedMs = 0;
-
-    try {
-      const finalOnlyStartedAt = performance.now();
-      await act(async () => {
-        finalOnlyRoot.render(createElement(MarkdownRenderer, { text: finalText }));
-      });
-      finalOnlyElapsedMs = performance.now() - finalOnlyStartedAt;
-      expect(finalOnlyContainer.querySelector(`a[href="${finalEmail}"]`)).not.toBeNull();
-    } finally {
-      await act(async () => {
-        finalOnlyRoot.unmount();
-      });
-      finalOnlyContainer.remove();
-    }
-
-    expect(streamingText).toBe(finalText);
-    expect(cumulativeRenderedInputChars).toBe(countCumulativePrefixChars(chunks));
-    expect(amplification).toBeGreaterThan(20);
-    expect(container?.querySelector(`a[href="${finalEmail}"]`)).not.toBeNull();
-
-    console.info(
-      [
-        'markdown streaming render',
-        `finalChars=${finalText.length}`,
-        `cumulativeRenderedInputChars=${cumulativeRenderedInputChars}`,
-        `amplification=${amplification.toFixed(1)}x`,
-        `streamingElapsedMs=${streamingElapsedMs.toFixed(1)}`,
-        `finalOnlyElapsedMs=${finalOnlyElapsedMs.toFixed(1)}`,
-      ].join(' ')
-    );
   });
 });

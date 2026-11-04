@@ -1,5 +1,7 @@
 import {
+  bindAgentRoleTarget,
   canReadAgentRole,
+  getAgentRoleTargets,
   getAcpCapabilityCacheKey,
   summarizeAgentRunConfigCapabilities,
   normalizeAgentRoleRunConfig,
@@ -12,6 +14,8 @@ import {
   type MachineMeta,
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
+import type { RateLimit } from 'acp-extension-core';
+import { mapWithConcurrency } from './bounded-concurrency';
 import {
   discoveryPage,
   matchesDiscoveryQuery,
@@ -32,16 +36,36 @@ export type DiscoveryRow = {
   availability?: DiscoveryAvailability;
   [key: string]: unknown;
 };
+export class CatalogSyncingError extends Error {
+  constructor() {
+    super(
+      'CATALOG_SYNCING: catalog has not completed its first synchronization; retry the request.'
+    );
+  }
+  toLodyError() {
+    return { code: 'CATALOG_SYNCING', message: this.message, retryable: true };
+  }
+}
+
 export type DiscoverySource = {
   workspaceId: string;
   userId: string;
   /** Undefined means there is no active Turn selection to report. */
   selectedMcpServerIds?: readonly string[];
+  catalogReadiness?(): {
+    metadata: boolean;
+    workspace: boolean;
+    machines: ReadonlyMap<MachineId, boolean>;
+  };
   machines(): Promise<MachineMeta[]>;
   onlineMachineIds(): Promise<ReadonlySet<MachineId> | null>;
   canAccess(machineId: MachineId, projectId?: string): Promise<boolean>;
   configs(machineId: MachineId): Promise<AgentConfigMeta[]>;
   capabilities(machineId: MachineId): Promise<Record<string, AcpCapabilityCacheEntry>>;
+  /** Latest provider rate-limit snapshots the Machine synced; optional for older sources. */
+  rateLimits?(machineId: MachineId): Promise<Record<string, RateLimit>>;
+  /** Live memory/disk from the Machine itself; undefined when it cannot answer. */
+  machineResources?(machine: MachineMeta): Promise<Record<string, unknown> | undefined>;
   projects(machineId: MachineId): Promise<LocalProjectMeta[]>;
   roles(): Promise<AgentRole[]>;
   mcpServers(): Promise<WorkspaceMcpServerMeta[]>;
@@ -100,6 +124,18 @@ export class ResourceDiscovery {
     return match.id;
   }
 
+  private catalogSyncing(resource: DiscoveryResource): boolean {
+    const state = this.source.catalogReadiness?.();
+    if (!state) return false;
+    if (resource === 'mcp') return !state.workspace;
+    if (!state.metadata) return true;
+    if (resource === 'machine') return false;
+    return (
+      (resource === 'agent_role' && !state.workspace) ||
+      [...state.machines.values()].some((ready) => !ready)
+    );
+  }
+
   private async rows(
     resource: DiscoveryResource,
     query: DiscoveryQuery,
@@ -118,11 +154,18 @@ export class ResourceDiscovery {
         repoFullName: repo.fullName,
       }));
     }
+    // One row per machine target: a Role on several machines is listed once per
+    // machine, each bound so its machine/config/run config are that target's.
     const roles =
       resource === 'agent_role'
-        ? (await source.roles()).filter(
-            (role) => canReadAgentRole(role, source.userId) && (!id || role.id === id)
-          )
+        ? (await source.roles())
+            .filter((role) => canReadAgentRole(role, source.userId) && (!id || role.id === id))
+            .flatMap((role) =>
+              getAgentRoleTargets(role).flatMap((target) => {
+                const bound = bindAgentRoleTarget(role, target.machineId);
+                return bound ? [bound] : [];
+              })
+            )
         : [];
     const machines = await source.machines();
     const online = await source.onlineMachineIds();
@@ -211,6 +254,12 @@ export class ResourceDiscovery {
       else if (config.machineId !== role.machineId)
         state = { state: 'unavailable', reason: 'agent_config_machine_mismatch' };
       else state = availability(role.machineId);
+      const catalogState = source.catalogReadiness?.();
+      const pending =
+        catalogState &&
+        (!catalogState.metadata ||
+          !catalogState.workspace ||
+          catalogState.machines.get(role.machineId) === false);
       const capability = config ? capabilityOf(config) : undefined;
       if (state.state === 'available' && !capability)
         state = { state: 'unknown', reason: 'capabilities_unreported' };
@@ -222,24 +271,44 @@ export class ResourceDiscovery {
         !models.some((model) => model.id === role.runConfig.modelId)
       )
         state = { state: 'unavailable', reason: 'model_unavailable' };
-      const permission = capability?.configOptions?.find(
-        (option) => option.id === '_permission' || option.category === 'mode'
-      );
-      const modeId = role.runConfig.modeId ?? role.runConfig.configOptionValues?._permission;
-      if (
-        state.state === 'available' &&
-        capability &&
-        modeId &&
-        !(permission
-          ? permission.options.some((option) => option.value === modeId)
-          : capability.modes.some((mode) => mode.id === modeId))
-      )
+      // A Role pins permission as `modeId` (legacy modes or a `mode` option) or
+      // as the value of the agent's `_permission` option, e.g. Grok's
+      // `permission_mode`. Check each pin against the knob that carries it.
+      const modeOption = capability?.configOptions?.find((option) => option.category === 'mode');
+      const modeId = role.runConfig.modeId;
+      const unavailableMode =
+        Boolean(modeId) &&
+        !(modeOption
+          ? modeOption.options.some((option) => option.value === modeId)
+          : capability?.modes.some((mode) => mode.id === modeId));
+      const unavailablePermission = (capability?.configOptions ?? []).some((option) => {
+        if (option.category !== '_permission') return false;
+        const value = role.runConfig.configOptionValues?.[option.id];
+        return (
+          value !== undefined && !option.options.some((candidate) => candidate.value === value)
+        );
+      });
+      if (state.state === 'available' && capability && (unavailableMode || unavailablePermission))
         state = { state: 'unavailable', reason: 'mode_unavailable' };
+      if (
+        pending &&
+        (state.reason === 'agent_config_missing' ||
+          state.reason === 'capabilities_unreported' ||
+          state.reason === 'model_unavailable' ||
+          state.reason === 'mode_unavailable' ||
+          (state.reason === 'machine_inaccessible_or_missing' &&
+            !catalogState.metadata &&
+            !machines.some((machine) => machine.id === role.machineId)))
+      )
+        state = { state: 'unknown', reason: 'catalog_syncing' };
       return {
         id: role.id,
         name: role.name,
+        ...(role.alias ? { alias: role.alias } : {}),
         description: role.description ?? '',
         machineId: role.machineId,
+        // More than one: create with agentRoleMachineId naming this row's machine.
+        machineCount: 1 + (role.additionalTargets?.length ?? 0),
         agentConfigId: role.agentConfigId,
         visibility: role.visibility,
         revision: role.revision,
@@ -266,21 +335,110 @@ export class ResourceDiscovery {
         (!query.machineId || row.machineId === query.machineId) &&
         (!query.onlineStatus || row.onlineStatus === query.onlineStatus)
     );
+    const page = discoveryPage(
+      rows,
+      query,
+      JSON.stringify([resource, this.source.workspaceId, this.source.userId]),
+      (row) => JSON.stringify([row.kind ?? resource, row.machineId ?? '', row.id])
+    );
+    if (resource === 'machine')
+      page.items = await this.withMachineDetails(page.items, query.includeResources === true);
     return {
       ok: true as const,
       workspaceId: this.source.workspaceId,
-      ...discoveryPage(
-        rows,
-        query,
-        JSON.stringify([resource, this.source.workspaceId, this.source.userId]),
-        (row) => JSON.stringify([row.kind ?? resource, row.machineId ?? '', row.id])
-      ),
+      ...(this.catalogSyncing(resource) && !(resource === 'project' && query.kind === 'github')
+        ? { sync: { state: 'syncing' as const, reason: 'catalog_syncing', retryable: true } }
+        : {}),
+      ...page,
     };
   }
 
-  async get(resource: 'agent_config' | 'agent_role', id: string) {
-    const row = (await this.rows(resource, {}, id)).find((candidate) => candidate.id === id);
-    if (!row) throw new Error('RESOURCE_NOT_FOUND: resource does not exist or is not readable.');
-    return { ok: true as const, workspaceId: this.source.workspaceId, item: row };
+  /**
+   * Quota and, on request, live resources for one page of machines, four at a time.
+   * Unreadable quota is omitted; a Machine that is offline, older or slow reports
+   * `resources: "unavailable"`. Neither fails the list.
+   */
+  private async withMachineDetails(
+    rows: DiscoveryRow[],
+    includeResources: boolean
+  ): Promise<DiscoveryRow[]> {
+    const machines = includeResources
+      ? new Map((await this.source.machines()).map((machine) => [machine.id, machine]))
+      : undefined;
+    return mapWithConcurrency(rows, MACHINE_DETAIL_CONCURRENCY, async (row) => {
+      const rateLimits = await this.source.rateLimits?.(row.id as MachineId).catch(() => undefined);
+      const quota = rateLimits ? summarizeMachineQuota(rateLimits) : [];
+      const machine = machines?.get(row.id as MachineId);
+      const resources =
+        machine && row.onlineStatus !== 'offline'
+          ? await this.source.machineResources?.(machine).catch(() => undefined)
+          : undefined;
+      return {
+        ...row,
+        ...(quota.length ? { quota } : {}),
+        ...(includeResources ? { resources: resources ?? 'unavailable' } : {}),
+      };
+    });
   }
+
+  async get(resource: 'agent_config' | 'agent_role', id: string, machineId?: string) {
+    const rows = (await this.rows(resource, machineId ? { machineId } : {}, id)).filter(
+      (candidate) => candidate.id === id
+    );
+    const [row] = rows;
+    if (!row) {
+      if (this.catalogSyncing(resource)) throw new CatalogSyncingError();
+      throw new Error('RESOURCE_NOT_FOUND: resource does not exist or is not readable.');
+    }
+    // A Role on several machines has one row per machine; all are returned.
+    return {
+      ok: true as const,
+      workspaceId: this.source.workspaceId,
+      item: row,
+      ...(this.catalogSyncing(resource)
+        ? { sync: { state: 'syncing' as const, reason: 'catalog_syncing', retryable: true } }
+        : {}),
+      ...(rows.length > 1 ? { targets: rows } : {}),
+    };
+  }
+}
+
+const MAX_QUOTA_WINDOWS = 20;
+const MACHINE_DETAIL_CONCURRENCY = 4;
+
+/**
+ * Most-used quota windows first, with reset times, so a coordinator sees an
+ * exhausted agent account before dispatching to it.
+ */
+/** Synced rows may predate the current shape; such rows are skipped, not fatal. */
+const isCurrentRateLimit = (value: unknown): value is RateLimit => {
+  const limit = value as Partial<RateLimit> | null;
+  return (
+    typeof limit?.scope?.providerId === 'string' &&
+    Array.isArray(limit.windows) &&
+    limit.windows.every(
+      (window) => typeof window?.usedPercent === 'number' && Number.isFinite(window.usedPercent)
+    )
+  );
+};
+
+export function summarizeMachineQuota(rateLimits: Record<string, unknown>) {
+  return Object.values(rateLimits)
+    .filter(isCurrentRateLimit)
+    .flatMap((limit) =>
+      limit.windows.map((window) => ({
+        provider: limit.scope.providerId,
+        ...(limit.scope.modelId ? { model: limit.scope.modelId } : {}),
+        ...(limit.limitName ? { limit: limit.limitName } : {}),
+        ...(window.label ? { label: window.label } : {}),
+        usedPercent: window.usedPercent,
+        exhausted: window.usedPercent >= 100,
+        ...(typeof window.resetsAtEpochSeconds === 'number' &&
+        Number.isFinite(window.resetsAtEpochSeconds)
+          ? { resetsAt: new Date(window.resetsAtEpochSeconds * 1000).toISOString() }
+          : {}),
+      }))
+    )
+    .sort((left, right) => right.usedPercent - left.usedPercent)
+    .slice(0, MAX_QUOTA_WINDOWS);
 }

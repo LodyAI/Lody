@@ -9,9 +9,16 @@
  */
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore, useAtomValue } from 'jotai';
-import { expect, waitFor } from 'storybook/test';
-import type { ReactNode } from 'react';
-import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
+import { expect, userEvent, waitFor } from 'storybook/test';
+import { useState, type ReactNode } from 'react';
+import {
+  getSessionRoomId,
+  type MessageContent,
+  type SessionHistoryParsed,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
@@ -22,6 +29,9 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { conversation } from '../components/ai-gui/conversation.tokens.stylex';
 import { conversationFontSizeAtom } from '@/atoms/settings';
 import { InterfaceFontController } from '@/components/interface-font-controller';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import { SessionPinContext } from '@/components/sessions/session-pin-context';
+import { createConversationViewFromHistory, type ConversationView } from '@/lib/conversation-view';
 
 /**
  * `usePermissionResponse` reports `isReady: !!runtime`, and a NOT-ready card
@@ -61,6 +71,7 @@ const renderMessageRow: SessionChatStreamViewProps['renderMessageRow'] = ({
 
 const rhythmStyles = stylex.create({
   frame: { height: '1500px', width: '100%', backgroundColor: colors.background },
+  phone: { width: '390px' },
 });
 const rhythmTheme = stylex.createTheme(conversation, {
   bubbleFill: 'rgb(24 64 80)',
@@ -153,9 +164,204 @@ const rhythmItems: ChatStreamItem[] = rhythmMessages.map((message, turnIndex) =>
   turnIndex,
 }));
 
+// Finished turns with a recorded end, so the mobile footer leads with its duration.
+const mobileRhythmItems: ChatStreamItem[] = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.role === 'assistant'
+    ? {
+        ...item,
+        message: { ...item.message, endedAt: Date.parse(item.message.timestamp) + 8_000 },
+      }
+    : item
+);
+
 export const ConversationRhythm: Story = {
   args: { sessionId, items: rhythmItems, renderMessageRow },
   render: () => <ConversationRhythmScene />,
+};
+
+const backgroundTaskItems: ChatStreamItem[] = [
+  {
+    type: 'message',
+    sessionId,
+    turnIndex: 0,
+    message: {
+      id: 'background-task-user',
+      role: 'user',
+      timestamp: '2026-10-01T08:00:00.000Z',
+      read: true,
+      items: [{ type: 'text', text: 'Run a background build and answer before it finishes.' }],
+    },
+  },
+  {
+    type: 'message',
+    sessionId,
+    turnIndex: 1,
+    message: {
+      id: 'background-task-assistant',
+      role: 'assistant',
+      timestamp: '2026-10-01T08:00:01.000Z',
+      finished: true,
+      read: true,
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'background-build-call',
+          kind: 'execute',
+          title: 'pnpm build',
+          status: 'completed',
+        },
+        { type: 'text', text: 'The answer is ready; the build is still running.' },
+        {
+          type: 'subagent_task',
+          taskId: 'background-build',
+          taskKind: 'background',
+          actor: 'Bash',
+          status: 'in_progress',
+          description: 'pnpm build',
+          isBackgrounded: true,
+        },
+        {
+          type: 'subagent_task',
+          taskId: 'background-check',
+          taskKind: 'background',
+          actor: 'Bash',
+          status: 'completed',
+          description: 'Check generated files',
+          isBackgrounded: true,
+        },
+      ],
+    },
+  },
+];
+
+export const FinishedAnswerWithRunningBackgroundTasks: Story = {
+  ...ConversationRhythm,
+  name: 'Finished answer with a running background task',
+  args: { ...ConversationRhythm.args, items: backgroundTaskItems },
+  render: () => <ConversationRhythmScene items={backgroundTaskItems} />,
+};
+
+/**
+ * The same rounds on a phone. Every left edge — prose, the "Ran N commands"
+ * label, and the footer's "Worked for …" — sits on one rail; only the newest
+ * turn's buttons rest visible, and a tap on an older turn reveals its own. The
+ * round gap sits below the always-visible footer instead of around it.
+ */
+export const MobileConversationRhythm: Story = {
+  args: { sessionId, items: rhythmItems, renderMessageRow },
+  render: () => (
+    <ForceMobileLayoutProvider force>
+      <div {...stylex.props(rhythmStyles.phone)}>
+        <ConversationRhythmScene
+          items={mobileRhythmItems}
+          lastAssistantMessageId="rhythm-assistant-2"
+        />
+      </div>
+    </ForceMobileLayoutProvider>
+  ),
+};
+
+const phoneTool = (id: string, kind: 'read' | 'execute', title: string): MessageContent => ({
+  type: 'tool_call',
+  toolCallId: id,
+  kind,
+  title,
+  status: 'completed',
+});
+
+/** A phone session mid-turn, shaped like the bug report: an answered round, a
+ *  short follow-up, and a live turn with folded command groups. */
+// The live turn started 2m 34s before the story opens, as in the report.
+const phoneLiveStart = new Date(Date.now() - 154_000).toISOString();
+const phoneModelInfo = { modelId: 'claude-opus-5-5', name: 'Opus 5.5' };
+const phoneMessages: SessionHistoryParsed[] = [
+  {
+    id: 'phone-assistant-1',
+    role: 'assistant',
+    timestamp: '2026-10-14T06:48:00.000Z',
+    endedAt: Date.parse('2026-10-14T06:48:08.000Z'),
+    read: true,
+    finished: true,
+    modelInfo: phoneModelInfo,
+    items: [
+      {
+        type: 'text',
+        text: '5. 补回归测试：新写法和现有的全量写法得到相同的历史，且没改到的记录原样保留。\n\n要现在开始实现吗？如果你想先小步验证，可以只做第 1、2 步加测试，后面几步拆到另一个 PR。',
+      },
+    ],
+  },
+  {
+    id: 'phone-user-1',
+    role: 'user',
+    timestamp: '2026-10-14T06:49:00.000Z',
+    read: true,
+    items: [{ type: 'text', text: '好，请完成实现' }],
+  },
+  {
+    id: 'phone-assistant-2',
+    role: 'assistant',
+    timestamp: phoneLiveStart,
+    read: true,
+    finished: false,
+    modelInfo: phoneModelInfo,
+    items: [
+      {
+        type: 'text',
+        text: "I'll start by reading the parts of the writer and the applier the change will touch, then measure how fast the history can be scanned for tool calls without `toJSON`.",
+      },
+      phoneTool('phone-run-1', 'execute', 'rg -n applyHistoryAction'),
+      phoneTool('phone-run-2', 'execute', 'git log --oneline -5'),
+      phoneTool('phone-run-3', 'execute', 'node bench/scan-history.mjs'),
+      phoneTool('phone-read-1', 'read', 'Read history-writer.ts'),
+      phoneTool('phone-read-2', 'read', 'Read history-applier.ts'),
+      {
+        type: 'text',
+        text: 'Now the applier itself. I need to know every way it can change a turn, to decide what a partial view has to include.',
+      },
+      phoneTool('phone-run-4', 'execute', 'rg -n "case ." history-applier.ts'),
+      phoneTool('phone-read-3', 'read', 'Read history-applier.test.ts'),
+    ],
+  },
+];
+const phoneItems: ChatStreamItem[] = phoneMessages.map((message, turnIndex) => ({
+  type: 'message',
+  sessionId,
+  message,
+  turnIndex,
+}));
+const phonePin = { pinnedHistoryId: null, onPin: () => undefined };
+
+/**
+ * The reported phone screen, for before/after comparison of the left rail,
+ * round spacing, and resting message actions.
+ */
+export const MobileReportedSession: Story = {
+  args: { sessionId, items: phoneItems, renderMessageRow },
+  render: () => (
+    <ForceMobileLayoutProvider force>
+      <SessionPinContext.Provider value={phonePin}>
+        <div {...stylex.props(rhythmStyles.frame, rhythmStyles.phone)}>
+          <SessionChatStreamView
+            sessionId={sessionId}
+            items={phoneItems}
+            lastAssistantMessageId="phone-assistant-2"
+            lastCompletedAssistantMessageId="phone-assistant-1"
+            onCopyContext={() => undefined}
+            onForkLastAssistant={() => undefined}
+            agentActivityLabel="Working"
+            agentActivityShimmer
+            renderMessageRow={({ message, sessionId: id }) => (
+              <MessageRowView
+                message={message}
+                sessionId={id}
+                onEdit={() => Promise.resolve(true)}
+              />
+            )}
+          />
+        </div>
+      </SessionPinContext.Provider>
+    </ForceMobileLayoutProvider>
+  ),
 };
 
 export const ConversationRhythmTheme: Story = {
@@ -281,12 +487,51 @@ export const ConversationRhythmWithFiles: Story = {
   render: () => <ConversationRhythmScene items={rhythmWithFiles} />,
 };
 
+/** Long enough to collapse behind "Show more", with wrapped and short lines mixed. */
+const rhythmLongUserItems = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-user-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          items: [
+            {
+              type: 'text' as const,
+              text: [
+                'Verification only — do not edit, commit, or push anything.',
+                '',
+                '1. Fetch the review branch and confirm HEAD is the expected commit ("fix: keep line breaks in shell output").',
+                '2. Initialize the workspace submodules: packages/extension-core packages/extension-alpha packages/extension-beta.',
+                '3. 安装依赖后运行与终端输出相关的测试，确认中文、English、数字 512 和标点都能正常换行。',
+                '4. Run the static checks and record any failure with its full output.',
+                '5. Open the conversation and compare the collapsed and expanded message.',
+                '6. Report the results in a short summary.',
+                '7. Note which checks were skipped and why.',
+                '8. Keep every command read-only.',
+                '9. Attach the exact commit you verified.',
+                '',
+                'Do not reuse any running application or its data.',
+              ].join('\n'),
+            },
+          ],
+        },
+      }
+    : item
+);
+
+export const ConversationRhythmLongUser: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmLongUserItems} />,
+};
+
 function ConversationRhythmScene({
   themed = false,
   items = rhythmItems,
+  lastAssistantMessageId = null,
 }: {
   themed?: boolean;
   items?: ChatStreamItem[];
+  lastAssistantMessageId?: string | null;
 }) {
   const fontSize = useAtomValue(conversationFontSizeAtom);
   return (
@@ -295,6 +540,7 @@ function ConversationRhythmScene({
       <SessionChatStreamView
         sessionId={sessionId}
         items={items}
+        lastAssistantMessageId={lastAssistantMessageId}
         conversationFontSize={fontSize}
         renderMessageRow={({ message, sessionId: id }) => (
           <MessageRowView message={message} sessionId={id} conversationFontSize={fontSize} />
@@ -561,6 +807,141 @@ export const DesktopFinishedTurn: Story = {
   ),
 };
 
+/**
+ * A view whose last history update landed `silentForMs` ago: the same turns
+ * arriving once more from the "backend", stamped by an injected clock.
+ */
+function useSilentConversationView(turn: SessionHistoryParsed, silentForMs: number) {
+  const [view] = useState<ConversationView>(() => {
+    let history = [turn];
+    let notify: () => void = () => undefined;
+    const next = createConversationViewFromHistory({
+      sessionId,
+      getHistory: () => history as never,
+      subscribe: (listener) => {
+        notify = listener;
+        return () => undefined;
+      },
+      now: () => Date.now() - silentForMs,
+    });
+    history = history.slice();
+    notify();
+    return next;
+  });
+  return view;
+}
+
+async function openTurnInfo(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const findTrigger = () =>
+    waitFor(() => {
+      const node = canvasElement.querySelector<HTMLElement>('[aria-label="Turn configuration"]');
+      if (!node) throw new Error('Turn configuration button is not mounted');
+      return node;
+    });
+  // Row overlays mount once a pointer arms their row; arming remounts the trigger.
+  (await findTrigger())
+    .closest('[data-virtual-index]')
+    ?.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  // Click once: a retried click would toggle the popover shut again.
+  (await findTrigger()).click();
+  return await waitFor(() => {
+    const timing = document.querySelector<HTMLElement>('[data-turn-timing]');
+    if (!timing) throw new Error('Turn timing did not open');
+    return timing;
+  });
+}
+
+const timingModelInfo = {
+  modelId: 'claude-opus-5-5',
+  name: 'Claude Opus 5.5',
+  _meta: { lodyThoughtLevel: 'high' },
+};
+
+const silentLiveTurn: SessionHistoryParsed = {
+  id: 'alignment-timing-live',
+  role: 'assistant',
+  // Opened later, the story still reads "8m 40s" in, "4m" silent.
+  timestamp: new Date(Date.now() - 520_000).toISOString(),
+  read: true,
+  finished: false,
+  modelInfo: timingModelInfo,
+  items: [
+    {
+      type: 'tool_call',
+      toolCallId: 'alignment-timing-lint',
+      title: 'Run pnpm check',
+      kind: 'execute',
+      status: 'in_progress',
+    },
+    { type: 'text', text: 'Running the lint gate before committing.' },
+  ],
+};
+
+/**
+ * A live turn that has received nothing for four minutes: the status line says
+ * so, and the turn popover shows start, running time and a warned Last update.
+ */
+export const DesktopTurnTimingLive: Story = {
+  args: { sessionId, items: [], renderMessageRow },
+  globals: { theme: 'dark' },
+  render: function Render() {
+    const view = useSilentConversationView(silentLiveTurn, 250_000);
+    // Live sync opened well before the last update, so that update counts.
+    const [historyLive] = useState(() => ({ sync: 'live' as const, since: Date.now() - 600_000 }));
+    return (
+      <div className="h-[520px] w-full bg-background">
+        <SessionChatStreamView
+          items={[{ type: 'message', sessionId, message: silentLiveTurn, turnIndex: 0 }]}
+          sessionId={sessionId}
+          conversationView={view}
+          liveTurnActivity="working"
+          historyLive={historyLive}
+          renderMessageRow={renderMessageRow}
+          lastAssistantMessageId={silentLiveTurn.id}
+          agentActivityLabel="Working"
+          agentActivityTone="primary"
+          agentActivityShimmer
+        />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const timing = await openTurnInfo(canvasElement);
+    // Seconds keep ticking while the story loads; assert the minute.
+    await expect(timing.textContent).toMatch(/running 8m \d\ds/);
+    await expect(timing.querySelector('[data-stale]')?.textContent).toMatch(/^4m \d\ds ago$/);
+  },
+};
+
+const timedFinishedTurn: SessionHistoryParsed = {
+  ...finishedTurn,
+  id: 'alignment-timing-finished',
+  modelInfo: timingModelInfo,
+};
+
+/** A finished turn: Started, Ended and the Worked-for duration; no liveness row. */
+export const DesktopTurnTimingFinished: Story = {
+  args: { sessionId, items: [], renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <div className="h-[520px] w-full bg-background">
+      <SessionChatStreamView
+        items={[{ type: 'message', sessionId, message: timedFinishedTurn, turnIndex: 0 }]}
+        sessionId={sessionId}
+        renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={timedFinishedTurn.id}
+        lastCompletedAssistantMessageId={timedFinishedTurn.id}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const timing = await openTurnInfo(canvasElement);
+    await expect(timing.textContent).toContain('Ended');
+    await expect(timing.textContent).not.toContain('Last update');
+  },
+};
+
 export const DesktopForkingTurn: Story = {
   args: { sessionId, items: finishedItems, renderMessageRow },
   globals: { theme: 'dark' },
@@ -811,16 +1192,21 @@ const planExitOutcomeTurn = (
       toolCallId: `${id}-plan-exit`,
       title: 'Ready to code?',
       kind: 'switch_mode',
-      status: 'completed',
-      /* CLAUDE's shape: `ExitPlanMode` carries the plan as a `content` text
-         block, so the card renders it above the outcome and there is no
-         separate `proposed_plan` item. */
+      status:
+        outcome.outcome === 'selected' && outcome.optionId === 'reject' ? 'failed' : 'completed',
+      // Claude retains the plan input when rejection replaces the tool content.
+      rawInput: {
+        plan: '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+      },
       content: [
         {
           type: 'content',
           content: {
             type: 'text',
-            text: '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+            text:
+              outcome.outcome === 'selected' && outcome.optionId === 'reject'
+                ? "The user doesn't want to proceed with this tool use."
+                : '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
           },
         },
       ],
@@ -828,7 +1214,7 @@ const planExitOutcomeTurn = (
         requestId: `${id}-permission`,
         options: [
           { optionId: 'approve', name: 'Yes, implement the plan', kind: 'allow_once' },
-          { optionId: 'reject', name: 'No, and tell Codex what to change', kind: 'reject_once' },
+          { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
         ],
         outcome,
       },
@@ -1146,4 +1532,153 @@ export const DesktopPlanModeTurn: Story = {
       </div>
     </WithRuntime>
   ),
+};
+
+const dshStore = createStore();
+dshStore.set(runtimeAtom, stubRuntime as never);
+dshStore.set(sessionMetaCacheAtom, {
+  [getSessionRoomId(sessionId)]: { cliType: 'builtin', agentType: 'deepseek' } as SessionMeta,
+});
+const dshMessage: SessionHistoryParsed = {
+  id: 'dsh-independent-prose',
+  role: 'assistant',
+  read: true,
+  timestamp: '2026-10-22T08:00:00.000Z',
+  finished: true,
+  items: [
+    { type: 'thought', text: '先检查输入边界，再执行测试。' },
+    {
+      type: 'tool_call',
+      toolCallId: 'dsh-command',
+      kind: 'execute',
+      status: 'completed',
+      title: 'pnpm test',
+      content: [{ type: 'content', content: { type: 'text', text: 'Synthetic command output' } }],
+    },
+    { type: 'text', text: '测试已经返回，继续核对结果。' },
+    { type: 'thought', text: '命令完成后，这段思考仍然独立可读。' },
+    { type: 'text', text: '检查完成。' },
+  ],
+};
+const dshItems: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: dshMessage, turnIndex: 0 },
+];
+
+/** Completed DSH work folds together; expanded prose retains answer typography. */
+export const DeepSeekIndependentProse: Story = {
+  play: async ({ canvasElement }) => {
+    const workedButton = () =>
+      canvasElement.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    await waitFor(async () => {
+      await expect(workedButton()).not.toBeNull();
+      await expect(canvasElement.textContent).toContain('检查完成。');
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).not.toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      const paragraphs = Array.from(canvasElement.querySelectorAll('p'));
+      const thought = paragraphs.find(
+        (node) => node.textContent === '先检查输入边界，再执行测试。'
+      );
+      const answer = paragraphs.find((node) => node.textContent === '检查完成。');
+      await expect(thought).toBeDefined();
+      await expect(answer).toBeDefined();
+      const thoughtStyle = getComputedStyle(thought!);
+      const answerStyle = getComputedStyle(answer!);
+      for (const property of ['font-family', 'font-size', 'font-weight', 'line-height']) {
+        await expect(thoughtStyle.getPropertyValue(property)).toBe(
+          answerStyle.getPropertyValue(property)
+        );
+      }
+      await expect(thoughtStyle.color).not.toBe(answerStyle.color);
+      await expect(
+        Math.abs(thought!.getBoundingClientRect().left - answer!.getBoundingClientRect().left)
+      ).toBeLessThan(1);
+      await expect(canvasElement.textContent).not.toContain('Synthetic command output');
+      await expect(canvasElement.textContent).toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).toContain('检查完成。');
+    });
+  },
+  args: { sessionId, items: dshItems, renderMessageRow },
+  render: () => (
+    <Provider store={dshStore}>
+      <ConversationRhythmScene items={dshItems} />
+    </Provider>
+  ),
+};
+
+/** A streaming DSH turn with the same rail guide as the plan examples. */
+export const DeepSeekThinking: Story = {
+  args: { sessionId, items: dshItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => {
+    const message: SessionHistoryParsed = {
+      ...dshMessage,
+      id: 'dsh-thinking-preview',
+      finished: false,
+      items: [
+        {
+          type: 'thought',
+          text: [
+            'First, trace the message from the provider to the conversation view. The output can contain **structured Markdown**, not just plain paragraphs.',
+            '',
+            '| Content | Expected behavior | Check |',
+            '| --- | --- | --- |',
+            '| Paragraph | Align with the thought label | Inspect the left edge |',
+            '| Table | Keep columns readable | Scroll if the viewport is narrow |',
+            '| Code block | Preserve syntax highlighting | Compare both edges with the answer |',
+            '',
+            'Next, verify the rendering path:',
+            '',
+            '1. Find the `thought` item and preserve its original text.',
+            '2. Render Markdown while the response is streaming.',
+            '3. Check the finished state and search highlighting.',
+            '',
+            '```ts',
+            'const visibleItems = message.items.filter((item) =>',
+            "  item.type === 'thought' || item.type === 'text'",
+            ');',
+            '',
+            'for (const item of visibleItems) {',
+            '  renderMarkdown(item.text);',
+            '}',
+            '```',
+            '',
+            '> Keep the original order when a tool call arrives between thoughts.',
+          ].join('\n'),
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'preview-read',
+          title: 'Read conversation layout',
+          kind: 'read',
+          status: 'completed',
+        },
+        { type: 'text', text: 'The layout uses a shared left edge for the conversation.' },
+        {
+          type: 'thought',
+          text: 'The tool returned successfully. Check the remaining cases:\n\n- A long line should wrap without moving the whole conversation.\n- Inline `code` and **emphasis** should remain readable.\n- A [link](https://example.com) should keep its usual treatment.',
+        },
+        { type: 'text', text: 'The updated display is ready for review.\n\n```sh\npnpm test\n```' },
+      ],
+    };
+    return (
+      <Provider store={dshStore}>
+        <div className="relative h-[900px] w-full bg-background">
+          <SessionChatStreamView
+            sessionId={sessionId}
+            items={[{ type: 'message', sessionId, message, turnIndex: 0 }]}
+            lastAssistantMessageId={message.id}
+            renderMessageRow={renderMessageRow}
+          />
+          <RailGuide />
+        </div>
+      </Provider>
+    );
+  },
 };

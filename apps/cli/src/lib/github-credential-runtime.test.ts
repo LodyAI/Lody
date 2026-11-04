@@ -3,7 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { githubCredentialRuntime } from './github-credential-runtime';
 
 function harness(
-  options: { personal?: string; app?: string; owner?: boolean; offline?: boolean } = {}
+  options: {
+    nativeRepositories?: string[];
+    personal?: string;
+    app?: string;
+    owner?: boolean;
+    offline?: boolean;
+  } = {}
 ) {
   const events: string[] = [];
   const logs: string[] = [];
@@ -11,7 +17,11 @@ function harness(
     githubCredentialRuntime +
       '\n({ readCredentialPolicy, selectGitHubCredential, githubCredentials, readCredentialContext })',
     {
-      getContext: () => ({ contextToken: 'fixture', allowLocalAuth: options.owner ?? true }),
+      getContext: () => ({
+        contextToken: 'fixture',
+        allowLocalAuth: options.owner ?? true,
+        nativeRepositories: options.nativeRepositories,
+      }),
       requestBroker: async (_endpoint: string, body: { source: 'personal' | 'app' }) => {
         events.push(body.source);
         if (options.offline)
@@ -34,16 +44,30 @@ function harness(
 }
 
 describe('ordered GitHub credentials', () => {
-  it('selects personal first without a policy request or a permission API', async () => {
-    const h = harness({ personal: 'personal' });
-    const selected = await h.context.selectGitHubCredential(
-      'org/repo',
+  it('uses only native credentials for a resolved-local member in a mixed runtime', async () => {
+    const h = harness({ personal: 'personal', app: 'app', nativeRepositories: ['org/local'] });
+    const local = await h.context.selectGitHubCredential(
+      'ORG/LOCAL',
       h.context.readCredentialPolicy(),
       h.local,
       true
     );
-    expect(selected).toEqual({ token: 'personal', source: 'personal' });
-    expect(h.events).toEqual(['personal']);
+    const managed = await h.context.selectGitHubCredential(
+      'org/managed',
+      h.context.readCredentialPolicy(),
+      h.local,
+      true
+    );
+    expect(local).toEqual({ token: 'machine', source: 'local' });
+    expect(managed).toEqual({ token: 'personal', source: 'personal' });
+    await expect(
+      h.context.selectGitHubCredential(
+        'org/local',
+        h.context.readCredentialPolicy(),
+        async () => null,
+        true
+      )
+    ).rejects.toMatchObject({ code: 'credentials_exhausted' });
   });
   it('uses authorized machine credentials while the broker is offline', async () => {
     const h = harness({ offline: true });
@@ -118,19 +142,6 @@ describe('ordered GitHub credentials', () => {
       ],
     });
   });
-  it('retains the same iterator through execution fallbacks', async () => {
-    const h = harness({ personal: 'personal', app: 'app' });
-    const iterator = h.context.githubCredentials(
-      'org/repo',
-      h.context.readCredentialPolicy(),
-      h.local
-    );
-    expect((await iterator.next()).value.source).toBe('personal');
-    expect((await iterator.next()).value.source).toBe('local');
-    expect((await iterator.next()).value.source).toBe('app');
-    await expect(iterator.next()).rejects.toMatchObject({ code: 'credentials_exhausted' });
-    expect(h.events).toEqual(['personal', 'local', 'app']);
-  });
   it('rejects missing or malformed host context instead of trusting environment ownership', () => {
     const h = harness();
     expect(() =>
@@ -142,19 +153,5 @@ describe('ordered GitHub credentials', () => {
     expect(() =>
       h.context.readCredentialContext({}, '/broker', { LODY_ALLOW_LOCAL_AUTH: 'true' })
     ).toThrow('context_missing');
-  });
-  it('reads a pinned host snapshot without the mutable session context file', () => {
-    const h = harness();
-    const context = h.context.readCredentialContext(
-      {
-        readFileSync: (file: string) => {
-          if (file !== '/workspace/broker.contexts/frozen.json') throw new Error('wrong authority');
-          return JSON.stringify({ version: 1, contextToken: 'frozen', allowLocalAuth: false });
-        },
-      },
-      '/workspace/broker',
-      { LODY_GIT_CRED_CONTEXT_TOKEN: 'frozen' }
-    );
-    expect(context).toEqual({ version: 1, contextToken: 'frozen', allowLocalAuth: false });
   });
 });

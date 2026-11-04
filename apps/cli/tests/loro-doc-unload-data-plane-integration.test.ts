@@ -1,3 +1,4 @@
+import { bindTestPresenceApplication } from './presence-application-fixture';
 import { updateTestHistory } from './history-port-fixture';
 /**
  * End-to-end coverage of the CLI seam that pairs a repo doc eviction with the
@@ -7,7 +8,7 @@ import { updateTestHistory } from './history-port-fixture';
  *     -> SessionDocument.destroy
  *       -> LoroDocumentManager.unloadDocRoom
  *         -> repo.unloadDoc(docId)            (evicts the LoroDoc instance)
- *         -> LocalLoroDataPlaneServer.invalidateDocRoom(docId)
+ *         -> LocalLoroDataPlaneServerLegacy.invalidateDocRoom(docId)
  *
  * `repo.unloadDoc` hands the NEXT `openPersistedDoc` a different `LoroDoc`, but
  * a data-plane doc room resolves its instance ONCE and keeps it while a peer
@@ -17,7 +18,7 @@ import { updateTestHistory } from './history-port-fixture';
  *
  * Everything here is REAL — a real `LoroDocumentManager` over a real `LoroRepo`
  * with SQLite storage in a temp dir, and the manager's own
- * `LocalLoroDataPlaneServer`. Only the socket is faked: the renderer peer is an
+ * `LocalLoroDataPlaneServerLegacy`. Only the socket is faked: the renderer peer is an
  * in-memory connection driven straight through `engine.handleMessage`, exactly
  * as `local-loro-data-plane-server.ts` drives it for a real net socket.
  *
@@ -27,7 +28,7 @@ import { updateTestHistory } from './history-port-fixture';
  *  - `packages/components/tests/local-data-plane-room-invalidation-reconnect.test.ts`:
  *    that the published terminal status actually makes the renderer's reconnect
  *    loop fire.
- *  - `apps/cli/tests/loro-doc-unload-invalidates-data-plane.test.ts`: that
+ *  - The local writer boundary guard protects the single unload entry;
  *    `unloadDocRoom` stays the only `repo.unloadDoc` call site.
  */
 import fs from 'node:fs/promises';
@@ -44,7 +45,7 @@ import {
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
   sessionDocSchema,
   type LocalLoroDataPlaneRoom,
-  type LocalLoroDataPlaneServer,
+  type LocalLoroDataPlaneServerLegacy,
   type LocalLoroDataPlaneServerMessage,
   type Role,
   type SessionDoc,
@@ -150,7 +151,7 @@ class FakeRendererPeer {
   private joinCount = 0;
 
   constructor(
-    private readonly engine: LocalLoroDataPlaneServer,
+    private readonly engine: LocalLoroDataPlaneServerLegacy,
     private readonly connection: FakeRendererConnection,
     private readonly workspaceId: WorkspaceId,
     private readonly room: LocalLoroDataPlaneRoom
@@ -251,7 +252,10 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
   let tempDir: string;
   let originalEnv: NodeJS.ProcessEnv;
 
+  let presenceApplication: ReturnType<typeof bindTestPresenceApplication>;
+
   beforeEach(async () => {
+    presenceApplication = bindTestPresenceApplication(createSilentLogger());
     originalEnv = { ...process.env };
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-doc-unload-dp-'));
     process.env.LODY_PLATFORM = 'local';
@@ -259,6 +263,7 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
   });
 
   afterEach(async () => {
+    await presenceApplication.closeLegacy();
     process.env = originalEnv;
     await fs.rm(tempDir, { recursive: true, force: true });
   });
@@ -483,6 +488,61 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
       await cloudPort.dispose();
     }
   });
+
+  it.each([false, true])(
+    'reopens a partially destroyed doc, persistent failure=%s',
+    async (persistent) => {
+      const harness = await createHarness();
+      const manager = harness.manager;
+      const previous = await manager.getOrCreateSessionDoc(harness.sessionId);
+      const unload = manager.repo.unloadDoc.bind(manager.repo);
+      let failing = true;
+      const injected = vi.spyOn(manager.repo, 'unloadDoc').mockImplementation(async (id) => {
+        if (failing) throw new Error('synthetic unload failure');
+        await unload(id);
+      });
+      try {
+        await expect(manager.cleanSessionDoc(harness.sessionId)).rejects.toThrow(
+          'synthetic unload failure'
+        );
+        expect(previous.isDestroyed).toBe(true);
+        expect(previous.getSessionBackend()).toBeUndefined();
+        failing = persistent;
+        const [replacement, concurrent] = await Promise.all([
+          manager.getOrCreateSessionDoc(harness.sessionId),
+          manager.getOrCreateSessionDoc(harness.sessionId),
+        ]);
+        expect(replacement).not.toBe(previous);
+        expect(concurrent).toBe(replacement);
+        expect(replacement.isDestroyed).toBe(false);
+        const changed = createDeferred();
+        const unsubscribe = replacement.subscribeControl(() => changed.resolve());
+        await replacement.pushMessageQueue({
+          userTurnId: 'recovered-turn',
+          task: 'hello',
+          project: undefined,
+          userId: 'test-user',
+          timestamp: new Date(0).toISOString(),
+          acpSessionConfig: {
+            prompt: 'hello',
+            inputBlocks: [{ type: 'text', text: 'hello' }],
+            cliType: 'builtin',
+            agentType: 'codex',
+          },
+        });
+        await changed.promise;
+        expect((await replacement.getMessageQueue())[0]?.userTurnId).toBe('recovered-turn');
+        unsubscribe();
+        expect(
+          (await manager.getSessionHistorySnapshot(harness.sessionId)).map((entry) => entry.id)
+        ).toContain(harness.cliEntryId);
+      } finally {
+        failing = false;
+        injected.mockRestore();
+        await harness.dispose();
+      }
+    }
+  );
 
   it('lets a renderer update authored after session GC reach the CLI', async () => {
     const harness = await createHarness();

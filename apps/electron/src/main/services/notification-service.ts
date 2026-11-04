@@ -123,6 +123,14 @@ export class NotificationService {
     }
   }
 
+  showQuitWarning(input: { title: string; body: string }): Promise<{ shown: boolean }> {
+    if (!Notification.isSupported()) return Promise.resolve({ shown: false })
+    return showNativeNotification(
+      new Notification({ ...input, silent: true }),
+      this.activeNotifications
+    )
+  }
+
   async showSessionCompletion(
     input: ShowSessionCompletionNotificationInput
   ): Promise<ShowSessionCompletionNotificationResult> {
@@ -130,7 +138,7 @@ export class NotificationService {
       return { shown: false, reason: 'notification_not_supported' }
     }
 
-    if ([...productWindows].some((window) => window.isFocused())) {
+    if (!input.allowWhileForeground && [...productWindows].some((window) => window.isFocused())) {
       return { shown: false, reason: 'app_foreground' }
     }
     const title = input.title.trim()

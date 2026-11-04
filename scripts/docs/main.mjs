@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /** Read-only document triage and scoped Git-content review; confirm is the only write command. */
-import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -16,12 +15,35 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { extractAnchors, sourceRoots, sourceExtension } from './anchors.mjs';
+import { git } from './git.mjs';
 
 const documentRoots = ['specs', '.agents/docs', '.agents/notes'];
-/** Hard gate, and the budget a relocation should aim for so the next edit still fits. */
-const agentsFileLimit = 8192;
-const agentsFileTarget = 7000;
+/** Word ceilings for AGENTS.md files; unlisted files use `default`, and raising one is a reviewed PR change. */
+const agentsBudgetFile = 'scripts/docs/agents-budgets.json';
+const agentsBudgetFallback = { default: 1200, files: {} };
+/** Warn once a file consumes this share of its ceiling, so relocation happens before the gate. */
+const agentsBudgetWarningShare = 0.9;
 const recordSuffix = '.anchors.json';
+/** Proposal-era headings that an implemented note may not carry; it describes shipped reality. */
+const proposalHeadings =
+  /^## (?:Proposal|Plan|Migration plan|Rollout plan|Acceptance criteria|提案|方案|计划|迁移计划|验收标准)\s*$/m;
+/** Run-log phrases: a note links what pins the behavior and names what is unverified, not what passed. */
+const runLogPhrases = [
+  /\b(?:all|every|\d+)\s+(?:\w+[- ])*(?:tests?|cases?|suites?|specs?)\s+(?:now\s+)?pass(?:es|ed)?\b/i,
+  /\btests?\s+(?:now\s+)?pass(?:es|ed)?\b/i,
+  /\bthis checkout\b/i,
+  /\bno installed dependencies\b/i,
+  /\btype-?check(?:ing|s)?\s+(?:passes|passed|succeeds|succeeded|is clean)\b/i,
+  /\b(?:lint|linting|formatting|format check|docs? check)\s+(?:passes|passed|succeeds|succeeded|reports?|is clean)\b/i,
+  /\bexisting (?:lint |declaration-order )?warnings?\b/i,
+  /(?:全部|所有|\d+ ?个)?(?:测试|用例|套件)(?:均|全部|都|现已|现在)?通过/,
+  /本机|此检出|当前检出|本检出/,
+  /未安装依赖|没有安装依赖/,
+  /类型检查(?:均|都)?通过|lint (?:均|都)?通过|文档检查(?:均|都)?通过/,
+];
+/** Backticked repository paths whose disappearance means an active note describes code that moved. */
+const repositoryPath =
+  /`((?:apps|packages|scripts|specs|e2e|site-docs|\.agents|\.github)\/[\w@./-]*[\w-])`/g;
 const classes = new Set([
   'architecture',
   'feature',
@@ -32,8 +54,6 @@ const classes = new Set([
 ]);
 const lifecycles = new Set(['proposed', 'implemented', 'rejected', 'archived']);
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const git = (root, args) =>
-  execFileSync('git', args, { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
 
 /** Reject path escapes and symlinks so a review cannot silently hash another checkout. */
 function localPath(root, relative) {
@@ -178,6 +198,62 @@ function readScope(root, topic) {
   return { file, scope, fingerprint };
 }
 
+const countWords = (text) => text.split(/\s+/).filter(Boolean).length;
+
+function agentsBudgets(root) {
+  const file = path.join(root, agentsBudgetFile);
+  if (!existsSync(file)) return agentsBudgetFallback;
+  const budgets = JSON.parse(readFileSync(file, 'utf8'));
+  exactKeys(budgets, ['default', 'files'], agentsBudgetFile);
+  const ceiling = (value, label) => {
+    if (!Number.isInteger(value) || value <= 0)
+      throw new Error(`${agentsBudgetFile}: ${label} must be a positive integer`);
+  };
+  ceiling(budgets.default, 'default');
+  exactKeys(budgets.files, Object.keys(budgets.files), agentsBudgetFile);
+  for (const [relative, value] of Object.entries(budgets.files)) {
+    localPath(root, relative);
+    if (path.basename(relative) !== 'AGENTS.md')
+      throw new Error(`${agentsBudgetFile}: ${relative} is not an AGENTS.md file`);
+    ceiling(value, relative);
+  }
+  return budgets;
+}
+
+/**
+ * Files this task changed or added: the working tree against `base` (default HEAD) plus
+ * untracked files. A rename counts as changed, not added, so a lifecycle move is not a new note.
+ */
+async function changedFiles(root, base) {
+  const changed = new Set();
+  const added = new Set();
+  const list = (bytes) => bytes.toString().split('\0').filter(Boolean);
+  const diff = ['diff', '--name-only', '-z', '--find-renames'];
+  for (const file of list(await git(root, [...diff, base ?? 'HEAD', '--']))) changed.add(file);
+  for (const file of list(await git(root, [...diff, '--diff-filter=A', base ?? 'HEAD', '--'])))
+    added.add(file);
+  for (const file of list(await git(root, ['ls-files', '--others', '--exclude-standard', '-z']))) {
+    changed.add(file);
+    added.add(file);
+  }
+  return { changed, added };
+}
+
+/** Dated note records; rule files such as `.agents/notes/AGENTS.md` are owners, not notes. */
+const noteRecord = /^\.agents\/notes\/(?:proposed|implemented|rejected|archived)\//;
+/** One key per note pair, so a link to either language counts for both. */
+const noteKey = (file) => file.replace(/\.zh\.md$/, '.md');
+
+function noteLinkTargets(value) {
+  const links = [...value.matchAll(/\]\(<?([^\s)>]+)>?\)/g)].map((match) => match[1]);
+  return links.length
+    ? links
+    : value
+        .split(/[,\s]+/)
+        .map((token) => token.trim())
+        .filter(Boolean);
+}
+
 function scopeNames(root) {
   return documentRoots
     .flatMap((directory) => walk(root, directory))
@@ -185,8 +261,8 @@ function scopeNames(root) {
     .map((file) => file.slice(0, -recordSuffix.length));
 }
 
-function snapshot(root, scope, topic) {
-  const objectFormat = git(root, ['rev-parse', '--show-object-format']).toString().trim();
+async function snapshot(root, scope, topic) {
+  const objectFormat = (await git(root, ['rev-parse', '--show-object-format'])).toString().trim();
   const files = Object.fromEntries(
     [...scope.documents, ...scope.sources].map((relative) => {
       const file = localPath(root, relative);
@@ -252,10 +328,10 @@ function checkAnchorLinks(root, topic) {
 }
 
 /** Compare bytes and watched membership, not timestamps or HEAD identity. */
-export function inspectTopic(root, topic) {
+export async function inspectTopic(root, topic) {
   const { scope, fingerprint } = readScope(root, topic);
   if (scope.retired) return { topic, status: 'retired', retired: scope.retired, changes: [] };
-  const current = snapshot(root, scope, topic);
+  const current = await snapshot(root, scope, topic);
   const baseline = scope.baseline;
   const changes = [];
   for (const [file, hash] of Object.entries(current.files)) {
@@ -275,18 +351,26 @@ export function inspectTopic(root, topic) {
   const status = !scope.scopeReview
     ? 'scope-pending'
     : !baseline
-    ? 'unreviewed'
-    : changes.length
-    ? 'stale'
-    : 'current';
+      ? 'unreviewed'
+      : changes.length
+        ? 'stale'
+        : 'current';
   return { topic, status, changes };
 }
 
-/** Produce queues directly from document metadata; pending translation is not a check failure. */
-export function documentStatus(root) {
+/**
+ * Produce queues directly from document metadata; pending translation is not a check failure.
+ * Note hygiene gates apply only to notes this task changed (against `base`, default HEAD):
+ * earlier records are not cleaned up retroactively.
+ */
+export async function documentStatus(root, { base } = {}) {
   const documents = [];
   const errors = [];
   const warnings = [];
+  const staleReferences = [];
+  const unlinkedNotes = new Set();
+  const markdown = await checkRepositoryMarkdown(root);
+  const { changed, added } = await changedFiles(root, base);
   for (const file of ['specs', '.agents/notes'].flatMap((p) => walk(root, p))) {
     if (
       !file.endsWith('.md') ||
@@ -316,6 +400,56 @@ export function documentStatus(root) {
         status !== lifecycle
       )
         errors.push(`${file}: invalid note lifecycle/type/name/status`);
+      const supersedes = /^Supersedes:[ \t]*(.+)$/m.exec(text)?.[1];
+      for (const target of supersedes ? noteLinkTargets(supersedes) : []) {
+        const resolved = path.relative(
+          root,
+          path.resolve(root, path.dirname(file), target.split(/[?#]/)[0])
+        );
+        if (
+          !resolved.startsWith('.agents/notes/archived/') ||
+          !existsSync(path.join(root, resolved))
+        )
+          errors.push(
+            `${file}: Supersedes target ${target} must be an archived note; archive a fully ` +
+              'superseded note in the same change (.agents/notes/AGENTS.md#supersession)'
+          );
+      }
+      if (!file.endsWith('.zh.md')) {
+        const missing = [...new Set([...text.matchAll(repositoryPath)].map((m) => m[1]))].filter(
+          (reference) => !existsSync(path.join(root, reference))
+        );
+        if (missing.length) staleReferences.push({ file, missing });
+      }
+      if (
+        ['proposed', 'implemented'].includes(lifecycle) &&
+        !markdown.ownerLinkedNotes.has(noteKey(file))
+      ) {
+        const key = noteKey(file);
+        const counterpartAdded = added.has(key) || added.has(key.replace(/\.md$/, '.zh.md'));
+        if (counterpartAdded && !unlinkedNotes.has(key))
+          errors.push(
+            `${key}: a new note needs an inbound link from its current-state owner (a README, ` +
+              '.agents/docs page, AGENTS.md or Spec) so readers of that code find it ' +
+              '(.agents/notes/AGENTS.md#linking)'
+          );
+        unlinkedNotes.add(key);
+      }
+      if (changed.has(file)) {
+        const heading = proposalHeadings.exec(text)?.[0];
+        if (lifecycle === 'implemented' && heading)
+          errors.push(
+            `${file}: implemented notes describe shipped reality; replace "${heading.trim()}" ` +
+              'with Decision/Consequences (.agents/notes/AGENTS.md#lifecycle-and-type)'
+          );
+        const phrase = runLogPhrases.map((pattern) => pattern.exec(text)?.[0]).find(Boolean);
+        if (phrase)
+          warnings.push(
+            `${file}: run-log phrase "${phrase}". Verification links what pins the behavior and ` +
+              'names what remains unverified; omit pass counts and environment logs ' +
+              '(.agents/notes/AGENTS.md#verification)'
+          );
+      }
     }
     if (
       (file.startsWith('specs/') || file.startsWith('.agents/notes/')) &&
@@ -340,37 +474,55 @@ export function documentStatus(root) {
     }
     documents.push({ file, status, translation, missingTranslation });
   }
-  const markdown = checkRepositoryMarkdown(root);
   errors.push(...markdown.errors);
   warnings.push(...markdown.warnings);
-  return { documents, errors, warnings };
+  return { documents, staleReferences, unlinkedNotes: [...unlinkedNotes], errors, warnings };
 }
 
-/** Check tracked and untracked non-ignored Markdown, including hubs and archives. */
-function checkRepositoryMarkdown(root) {
+/**
+ * Check tracked and untracked non-ignored Markdown, including hubs and archives, and collect
+ * the notes that a non-note document links to.
+ */
+async function checkRepositoryMarkdown(root) {
   const errors = [];
   const warnings = [];
+  const ownerLinkedNotes = new Set();
   const files = [
     ...new Set(
-      git(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
+      (await git(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']))
         .toString()
         .split('\0')
     ),
   ];
+  let budgets;
+  try {
+    budgets = agentsBudgets(root);
+  } catch (error) {
+    errors.push(error.message);
+    budgets = agentsBudgetFallback;
+  }
+  for (const relative of Object.keys(budgets.files))
+    if (!files.includes(relative))
+      errors.push(
+        `${agentsBudgetFile}: ${relative} is budgeted but does not exist; update the manifest in the same change`
+      );
   for (const file of files.filter((file) => /\.md$/i.test(file))) {
     const absolute = path.join(root, file);
     if (!existsSync(absolute) || lstatSync(absolute).isSymbolicLink()) continue;
     const bytes = readFileSync(localPath(root, file));
     if (path.basename(file) === 'AGENTS.md') {
-      if (bytes.length >= agentsFileLimit)
+      const ceiling = budgets.files[file] ?? budgets.default;
+      const words = countWords(bytes.toString());
+      if (words > ceiling)
         errors.push(
-          `${file}: ${bytes.length} bytes; AGENTS.md must be under ${agentsFileLimit} bytes. ` +
-            'Route the excess per .agents/README.md#where-content-goes'
+          `${file}: ${words} words exceeds its ${ceiling}-word ceiling. Relocate a topic per ` +
+            '.agents/README.md#where-content-goes, condense without losing a rule, or raise the ' +
+            `ceiling in ${agentsBudgetFile} with the justification in the PR`
         );
-      else if (bytes.length > agentsFileTarget)
+      else if (words > ceiling * agentsBudgetWarningShare)
         warnings.push(
-          `${file}: ${bytes.length} bytes; ${agentsFileLimit - bytes.length} left before the gate. ` +
-            `Route a topic out rather than growing it past ${agentsFileTarget} bytes.`
+          `${file}: ${words} of ${ceiling} words; ${ceiling - words} left. Route a topic to a ` +
+            'child scope or owning doc before the ceiling binds, rather than compressing sentences'
         );
     }
     const text = bytes
@@ -402,13 +554,17 @@ function checkRepositoryMarkdown(root) {
         !existsSync(destination)
       )
         errors.push(`${file}: broken local link ${target}`);
+      else if (!noteRecord.test(file)) {
+        const linked = path.relative(root, destination).split(path.sep).join('/');
+        if (linked.startsWith('.agents/notes/')) ownerLinkedNotes.add(noteKey(linked));
+      }
     }
   }
-  return { errors, warnings };
+  return { errors, warnings, ownerLinkedNotes };
 }
 
 /** Explicit confirmation requires committed, recoverable content and never edits a Spec. */
-export function confirmTopic(root, topic, reason, evidence) {
+export async function confirmTopic(root, topic, reason, evidence) {
   if (!reason?.trim() || !evidence?.trim())
     throw new Error('confirm requires --reason and --evidence.');
   const { scope, file, fingerprint } = readScope(root, topic);
@@ -416,21 +572,21 @@ export function confirmTopic(root, topic, reason, evidence) {
   if (!scope.scopeReview) throw new Error('Human scope confirmation is pending.');
   const linkErrors = checkAnchorLinks(root, topic);
   if (linkErrors.length) throw new Error(linkErrors.join('\n'));
-  const current = snapshot(root, scope, topic);
+  const current = await snapshot(root, scope, topic);
   if (Object.values(current.files).some((hash) => !hash))
     throw new Error('Cannot confirm missing protected files.');
-  const revision = git(root, ['rev-parse', 'HEAD']).toString().trim();
+  const revision = (await git(root, ['rev-parse', 'HEAD'])).toString().trim();
   for (const [relative, hash] of Object.entries({
     ...Object.fromEntries(Object.entries(current.files).filter(([key]) => !key.includes('::'))),
     ...current.sourceBlobs,
   })) {
-    const committed = git(root, ['rev-parse', `${revision}:${relative}`])
-      .toString()
-      .trim();
+    const committed = (await git(root, ['rev-parse', `${revision}:${relative}`])).toString().trim();
     if (committed !== hash) throw new Error(`Commit reviewed content first: ${relative}`);
   }
   if (scope.watch.length) {
-    const committedInventory = git(root, ['ls-tree', '-r', '-z', revision, '--', ...scope.watch])
+    const committedInventory = (
+      await git(root, ['ls-tree', '-r', '-z', revision, '--', ...scope.watch])
+    )
       .toString()
       .split('\0')
       .filter(Boolean)
@@ -447,9 +603,9 @@ export function confirmTopic(root, topic, reason, evidence) {
 }
 
 /** Display recorded bytes against current files without changing Git or the record. */
-export function topicDiff(root, topic) {
+export async function topicDiff(root, topic) {
   const { scope } = readScope(root, topic);
-  const report = inspectTopic(root, topic);
+  const report = await inspectTopic(root, topic);
   const output = [JSON.stringify(report, null, 2)];
   if (!scope.baseline) return output.join('\n');
   const displayed = new Set();
@@ -465,10 +621,11 @@ export function topicDiff(root, topic) {
     if (!gitHash.test(hash)) throw new Error(`Invalid baseline blob: ${source}`);
     let before;
     try {
-      before = git(root, ['cat-file', 'blob', hash]);
-    } catch {
+      before = await git(root, ['cat-file', 'blob', hash]);
+    } catch (error) {
       throw new Error(
-        `Missing baseline blob ${hash} for ${source}; obtain history containing this content before reviewing. No baseline was changed.`
+        `Missing baseline blob ${hash} for ${source}; obtain history containing this content before reviewing. No baseline was changed. ${error.message}`,
+        { cause: error }
       );
     }
     const currentPath = localPath(root, source);
@@ -477,15 +634,13 @@ export function topicDiff(root, topic) {
     try {
       writeFileSync(path.join(temporary, 'before'), before);
       writeFileSync(path.join(temporary, 'after'), after);
-      const result = spawnSync(
-        'git',
+      const result = await git(
+        temporary,
         ['diff', '--no-index', '--no-ext-diff', '--no-textconv', '--', 'before', 'after'],
-        { cwd: temporary, encoding: 'utf8' }
+        { diff: true }
       );
-      if (![0, 1].includes(result.status))
-        throw new Error(result.stderr || 'Could not compare content');
       output.push(
-        result.stdout.replaceAll('a/before', `a/${source}`).replaceAll('b/after', `b/${source}`)
+        result.toString().replaceAll('a/before', `a/${source}`).replaceAll('b/after', `b/${source}`)
       );
     } finally {
       rmSync(temporary, { recursive: true, force: true });
@@ -494,7 +649,7 @@ export function topicDiff(root, topic) {
   return output.join('\n');
 }
 
-export function main(root, args) {
+export async function main(root, args) {
   const [command, ...rest] = args;
   const options = {};
   for (let i = 0; i < rest.length; i += 2) {
@@ -514,44 +669,56 @@ export function main(root, args) {
     command === 'confirm'
       ? ['--topic', '--reason', '--evidence']
       : command === 'diff'
-      ? ['--topic']
-      : command === 'check'
-      ? ['--base']
-      : [];
+        ? ['--topic']
+        : command === 'check'
+          ? ['--base']
+          : [];
   if (Object.keys(options).some((key) => !allowed.includes(key)))
     throw new Error(`Unexpected option for ${command}`);
   if (command === 'confirm' || command === 'diff') {
     if (!options['--topic']) throw new Error('--topic is required');
     console.log(
       command === 'diff'
-        ? topicDiff(root, options['--topic'])
+        ? await topicDiff(root, options['--topic'])
         : JSON.stringify(
-            confirmTopic(root, options['--topic'], options['--reason'], options['--evidence']),
+            await confirmTopic(
+              root,
+              options['--topic'],
+              options['--reason'],
+              options['--evidence']
+            ),
             null,
             2
           )
     );
     return 0;
   }
-  const report = documentStatus(root);
+  const base = options['--base']
+    ? (
+        await git(root, [
+          'rev-parse',
+          '--verify',
+          '--end-of-options',
+          `${options['--base']}^{commit}`,
+        ])
+      )
+        .toString()
+        .trim()
+    : undefined;
+  const report = await documentStatus(root, { base });
   report.errors.push(...checkAnchorLinks(root));
-  report.topics = scopeNames(root).map((topic) => {
+  report.topics = [];
+  for (const topic of scopeNames(root)) {
     try {
-      return inspectTopic(root, topic);
+      report.topics.push(await inspectTopic(root, topic));
     } catch (error) {
-      return { topic, status: 'error', message: error.message };
+      report.topics.push({ topic, status: 'error', message: error.message });
     }
-  });
-  if (options['--base']) {
-    const base = git(root, [
-      'rev-parse',
-      '--verify',
-      '--end-of-options',
-      `${options['--base']}^{commit}`,
-    ])
-      .toString()
-      .trim();
-    const previous = git(root, ['ls-tree', '-r', '--name-only', base, '--', ...documentRoots])
+  }
+  if (base) {
+    const previous = (
+      await git(root, ['ls-tree', '-r', '--name-only', base, '--', ...documentRoots])
+    )
       .toString()
       .split('\n')
       .filter((p) => p.endsWith(recordSuffix));
@@ -570,7 +737,10 @@ export function main(root, args) {
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    process.exitCode = main(path.resolve(import.meta.dirname, '../..'), process.argv.slice(2));
+    process.exitCode = await main(
+      path.resolve(import.meta.dirname, '../..'),
+      process.argv.slice(2)
+    );
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

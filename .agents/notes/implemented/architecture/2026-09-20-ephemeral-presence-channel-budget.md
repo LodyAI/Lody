@@ -8,7 +8,7 @@ Translation: current
 ## Abstract
 
 A workspace publishes liveness through one ephemeral Loro transport whose queue is
-serial, uncoalesced and unbounded, and the machine heartbeat shares it with every other
+serial, uncoalesced and unbounded at the originally inspected 0.15.1 version, and the machine heartbeat shares it with every other
 presence writer. A writer that outruns the network therefore delays the heartbeat, and
 because the heartbeat's `updatedAt` is stamped at creation rather than at send, a
 delayed one arrives already past the 90s freshness window: readers receive it and still
@@ -141,3 +141,72 @@ motivated it was never reproduced end to end under instrumentation.
 The outage that motivated this invariant, and the reverted producer that caused it, are
 recorded in
 [the rejected transient-reasoning note](../../rejected/bug-fix/2026-09-18-codex-transient-reasoning.md).
+
+## Correction and diagnostic boundary — 2026-10-12
+
+Diagnostic PR: [#1503](https://github.com/LodyAI/Lody/pull/1503).
+
+Reinspection of consumed streams-crdt 0.16.2 corrects the current queue description:
+its built-in `EphemeralStoreAdaptor` coalesces unsent same-key set/delete chains.
+In-flight bytes and distinct/unknown/multi-key writes remain independent. The
+original 0.15.1 observation above is historical; rate/size/origin obligations and
+three-state reader intent remain unchanged. No Spec guarantee changes here.
+
+The old diagnostics overclaimed: optional `lastLocalAppendAtMs`/`lastWriteError`
+getters exist on the inherited type but not the published ephemeral implementation.
+`pendingLocalCount` counts logical unacknowledged writes, including superseded ones.
+`waitUntilSynced()` snapshots chains, follows same-key successors and excludes later
+independent chains. Therefore the former “heartbeat delivered”, `ageAtSendMs` and
+`queuedAhead` labels are removed; barrier latency cannot establish an individual
+heartbeat send, server processing time or peer receipt.
+
+The existing daemon logger now forwards Effect 4.0.2 fiber annotations through a
+numeric/closed-enum allowlist. Arbitrary annotation values, message objects and Cause
+contents are omitted; reason categories preserve diagnostic severity without copying
+credentials, payloads or URLs. The complete Cause and its recovery ownership remain
+untouched in the program. Trace reaches the existing opt-in file policy. Individual
+success events move to trace, slow completions remain debug, and 30s health summaries
+retain pending auth/POST counts, actual waiting ages and accumulated failure counts.
+
+A temporary observer at the existing auth/fetch boundary keeps one diagnostic state
+per remote generation. It passes callback context and fetch signal/headers/body
+through, does not read response bodies, and never retries, drains or recreates the
+upstream queue. Auth/fetch attempts are observation IDs, not retry numbers. Queue
+entry age, retry identity and peer receipt explicitly remain unavailable. Replace
+this adapter once a pinned published native upstream API supplies equivalent safe
+stage events and truthful completion receipts; extend the existing application
+owner rather than adding a diagnostic runtime or a second send kernel.
+
+Ownership remains with the current Promise runtime and upstream transport. This
+change adds no native lifecycle kernel or Legacy facade and removes no public
+presence API. In 0.16.2, bootstrap can precede a blocked outbound flush preventing
+`join()` from returning. Close rejects waiters and detaches local subscriptions but
+does not abort/await an in-flight POST. The `close_returned` log records only that
+return; late observations retain their old generation. Native cancellation, shared
+close completion, cleanup failure ownership and safe replacement remain unimplemented
+in this unit. The [current presence guide](../../../docs/cli-lib-loro-presence.md)
+owns the stage meanings and replacement condition.
+
+Verification uses real installed EphemeralStreamCrdt/EphemeralStore and the public
+adaptor, synthetic fetch/SSE, explicit request/peer/completion gates and fake Date or
+timers. The suite covers healthy reads during blocked POST, auth waiting/rejection,
+HTTP rejection, bootstrap before join completion, same-key chain supersession,
+independent writes outside a captured barrier, reconnect republishing, origin
+partition and POST completion after close. Effect logger tests use TestClock and
+check the real file sink's trace opt-in and safe projection. The private-subscription
+stand-in and mock-call-only notification test are removed. Temporary ablations of
+annotation forwarding, POST pending observation and barrier-age projection each
+fail behavioral assertions; scripts stay outside product source. These synthetic
+results do not identify a production incident's root cause or prove native cleanup,
+remote service behavior, desktop packaging, or non-Linux platforms.
+
+Final validation at base `3ac76bad10f46720517a2ca6929f03de4ef5bb9b`: 37 focused/adjacent
+tests pass; root typechecks/lint, format/format:check, i18n and code-collab/platform/
+CLI-process/public guards pass. `pnpm check` stops in CLI tests (4031 pass, 15 fail,
+one skip); restoring both changed runtime sources to the base reproduces the same
+five failing suites/15 failures and four unhandled errors (iOS simulator, native Git
+fixture and cloudflared IPC). This establishes a baseline failure in this environment,
+not its exact cause; remaining full CI stages were interrupted. `docs status` ran at
+start; final `docs check --base` has the same six absent Kimi/Pi submodule links on
+base/head, zero added errors and no SHA-protected topics. Only validation subprocesses
+strip inherited `GIT_CONFIG_*`; user global configuration is unchanged.

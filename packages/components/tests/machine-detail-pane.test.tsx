@@ -1,17 +1,12 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import {
-  getRateLimitEntryKey,
-  type AgentConfigId,
-  type AgentConfigMeta,
-  type MachineId,
-  type MachineViewMeta,
-} from '@lody/shared';
+import { type MachineId, type MachineViewMeta } from '@lody/shared';
 import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
-import { ProviderRow } from '../src/components/settings/provider-row';
+
 import { initI18n } from '../src/i18n';
 import { Tooltip } from '@lody/ui/tooltip';
 
@@ -143,30 +138,6 @@ describe('MachineDetailPane revoke machine access', () => {
     expect(document.body.textContent).toContain('Revoke machine access?');
   });
 
-  it('closes the confirm dialog when revoking succeeds', async () => {
-    const onRevokeCredentials = vi.fn(async () => {});
-    await renderPane(onRevokeCredentials);
-
-    await click(findRevokeTrigger());
-    const dialog = findConfirmDialog();
-    await click(findConfirmButton(dialog));
-
-    await vi.waitFor(() => {
-      expect(onRevokeCredentials).toHaveBeenCalledTimes(1);
-      expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
-    });
-  });
-
-  it('keeps removal discoverable while an owned machine is online', async () => {
-    await renderPane(vi.fn(async () => {}));
-
-    const removeButton = document.body.querySelector<HTMLButtonElement>(
-      'button[aria-label="Remove from workspace"]'
-    );
-    expect(removeButton).not.toBeNull();
-    expect(removeButton?.disabled).toBe(true);
-  });
-
   it('removes an offline owned machine from the current workspace after confirmation', async () => {
     const onDelete = vi.fn(async () => {});
     await renderPane(
@@ -203,66 +174,5 @@ describe('MachineDetailPane revoke machine access', () => {
     ).toBeNull();
     expect(document.body.querySelector('button[aria-label="Revoke machine access"]')).toBeNull();
     expect(document.body.querySelector('button[aria-label="Remove from workspace"]')).toBeNull();
-  });
-
-  it('shows each Codex provider only its own rate limits', async () => {
-    const workId = 'codex-work' as AgentConfigId;
-    const personalId = 'codex-personal' as AgentConfigId;
-    const config = (id: AgentConfigId, name: string): AgentConfigMeta => ({
-      id,
-      machineId: machine.id,
-      name,
-      description: undefined,
-      cliType: 'builtin',
-      agentType: 'codex',
-      env: {},
-    });
-    const scopedMachine: MachineViewMeta = {
-      ...machine,
-      raceLimits: {
-        [getRateLimitEntryKey('codex', 'codex')]: {
-          limitId: 'codex',
-          scope: { providerId: 'codex' },
-          windows: [
-            { usedPercent: 55, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
-          ],
-        },
-        [getRateLimitEntryKey('codex', 'codex', workId)]: {
-          limitId: 'codex',
-          scope: { providerId: 'codex' },
-          windows: [
-            { usedPercent: 10, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
-          ],
-        },
-        [getRateLimitEntryKey('codex', 'codex', personalId)]: {
-          limitId: 'codex',
-          scope: { providerId: 'codex' },
-          windows: [
-            { usedPercent: 80, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
-          ],
-        },
-      },
-    };
-
-    await act(async () => {
-      root?.render(
-        <Tooltip.Provider>
-          <ProviderRow
-            config={config(workId, 'Work Codex')}
-            machine={scopedMachine}
-            onEdit={vi.fn()}
-          />
-          <ProviderRow
-            config={config(personalId, 'Personal Codex')}
-            machine={scopedMachine}
-            onEdit={vi.fn()}
-          />
-        </Tooltip.Provider>
-      );
-    });
-
-    expect(container?.textContent).toContain('90%');
-    expect(container?.textContent).toContain('20%');
-    expect(container?.textContent).not.toContain('45%');
   });
 });

@@ -156,7 +156,21 @@ does not finish its children. Preserve each provider's existing prompt-completio
 contract; this proposal does not create a background scheduler.
 
 Persist received task state and content through the existing SessionMirror /
-HistoryWriter owner. Model them as per-run transcripts within the owning Lody
+HistoryWriter owner. As in root tool history, discard ACP image blocks and embedded
+image blob resources from child tool content. Clear unused non-image resource blob
+bytes while retaining the resource and its download URI; data-URI references retain
+their display label with an empty URI because the UI already disallows that scheme.
+Root and child tool history use the same preprocessing and merge policy: omit read
+bodies and full edit diff/text blocks, retain paths and tool state, and apply the
+same bounded terminal command/output projection. Generic raw output and provider
+metadata are not additional transcript copies. Switch-mode raw input retains only
+the displayed plan; scheduling tools retain the fields their history-derived panel
+requires. Preserve omitted fields, explicit list clears and permission enrichment.
+Edit evidence is captured from execution notifications with its original turn owner,
+independently of the filtered history. Malformed new retained fields are rejected
+atomically rather than silently omitted.
+This storage projection does not change the provider's execution output or
+ordinary conversation image attachments. Model per-run transcripts within the owning Lody
 session; native grandchildren can nest there without creating extra Lody child
 Sessions or changing their one-level creation rule. Store the transcript in an
 optional `subagent_task.run` containing the root `sessionId`, snapshot, latest

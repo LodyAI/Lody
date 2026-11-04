@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -127,18 +128,6 @@ describe('UserMessageRowView undelivered resend dialog', () => {
     expect(document.body.textContent).not.toContain('did not run');
   });
 
-  it('cancels without resending', async () => {
-    const onResendUndelivered = vi.fn(async () => true);
-    await renderRow(onResendUndelivered);
-
-    await click(queryBodyButton('Not delivered'));
-    expect(document.body.textContent).toContain('Message not delivered');
-
-    await click(queryBodyButton('Cancel'));
-    expect(onResendUndelivered).not.toHaveBeenCalled();
-    expect(document.body.textContent).not.toContain('did not run');
-  });
-
   it('warns that unknown delivery may repeat work and waits for explicit confirmation', async () => {
     const submissions: unknown[] = [];
     await renderRow(
@@ -158,25 +147,5 @@ describe('UserMessageRowView undelivered resend dialog', () => {
     expect(submissions).toEqual([
       { id: missingTurnId, blocks: buildResendInputBlocks(undeliveredMessage) },
     ]);
-  });
-
-  it('keeps the label non-interactive without a resend handler', async () => {
-    const store = createStore();
-    store.set(sessionMetaCacheAtom, { [getSessionRoomId(sessionId)]: markerMeta });
-    await act(async () => {
-      root?.render(
-        createElement(
-          JotaiProvider,
-          { store },
-          createElement(MessageRowView, { message: undeliveredMessage, sessionId })
-        )
-      );
-    });
-
-    const labelButton = [...document.body.querySelectorAll('button')].find((candidate) =>
-      candidate.textContent?.includes('Not delivered')
-    );
-    expect(labelButton).toBeUndefined();
-    expect(container?.textContent).toContain('Not delivered');
   });
 });

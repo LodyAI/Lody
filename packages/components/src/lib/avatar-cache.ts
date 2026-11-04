@@ -31,6 +31,8 @@ type AvatarCacheEntry = {
   blobUrl: string;
   blob: Blob;
   fetchedAt: number;
+  /** Keep the local image warm for Base UI's synchronous cached-image path. */
+  image?: HTMLImageElement;
 };
 
 const AVATAR_IMAGE_PERSISTENT_CACHE_NAME = 'lody-avatar-image-v2';
@@ -119,6 +121,17 @@ const writePersistedAvatarBlob = async (
   }
 };
 
+const preloadAvatarImage = (blobUrl: string): HTMLImageElement | undefined => {
+  if (typeof window === 'undefined' || typeof window.Image !== 'function') return undefined;
+
+  const image = new window.Image();
+  image.decoding = 'async';
+  image.src = blobUrl;
+  // Warm only local bytes. Neither cache reads nor first paint wait for decode.
+  if (typeof image.decode === 'function') void image.decode().catch(() => {});
+  return image;
+};
+
 const rememberAvatarBlob = (cacheKey: string, blob: Blob, fetchedAt: number): string => {
   const previous = avatarMemoryCache.get(cacheKey);
   if (previous) {
@@ -127,7 +140,12 @@ const rememberAvatarBlob = (cacheKey: string, blob: Blob, fetchedAt: number): st
   }
 
   const blobUrl = URL.createObjectURL(blob);
-  avatarMemoryCache.set(cacheKey, { blobUrl, blob, fetchedAt });
+  avatarMemoryCache.set(cacheKey, {
+    blobUrl,
+    blob,
+    fetchedAt,
+    image: previous?.image ? preloadAvatarImage(blobUrl) : undefined,
+  });
   return blobUrl;
 };
 
@@ -230,6 +248,13 @@ export function peekAvatarBlobUrl(image?: string | null): string | null | undefi
   }
 
   return avatarMemoryCache.get(getAvatarCacheKey(image))?.blobUrl;
+}
+
+/** Warm an already cached avatar used by a stable-source surface; never fetch. */
+export function preloadAvatarBlobUrl(image?: string | null): void {
+  if (image == null) return;
+  const entry = avatarMemoryCache.get(getAvatarCacheKey(image));
+  if (entry && !entry.image) entry.image = preloadAvatarImage(entry.blobUrl);
 }
 
 /**

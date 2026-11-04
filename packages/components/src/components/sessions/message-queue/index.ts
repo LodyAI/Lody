@@ -1,5 +1,7 @@
 export { MessageQueueDisplay } from './message-queue-display';
 export type { MessageQueueDisplayProps } from './message-queue-display';
+export { ScheduledQueueRow } from './scheduled-queue-row';
+export type { ScheduledQueueItem } from './scheduled-queue-row';
 export { MessageQueueRow } from './message-queue-row';
 export type { MessageQueueRowProps } from './message-queue-row';
 export { shouldRequestNativeQueueSteer, shouldShowQueuedItemSteer } from './queued-message-steer';

@@ -84,6 +84,10 @@ interface MentionContentProps
    */
   positionAnchor?: 'caret' | 'composer';
 
+  /** Mobile dock placement. Full-height composers use `bottom` (above the
+      footer) instead of the default above-composer strip. */
+  mobilePanelPlacement?: 'above-composer' | 'bottom';
+
   /**
    * Event handler called when the `Escape` key is pressed.
    *
@@ -127,6 +131,7 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
       trackAnchor = true,
       positionAnchor = 'caret',
       dockedOnMobile = true,
+      mobilePanelPlacement = 'above-composer',
       onEscapeKeyDown,
       onPointerDownOutside,
       style,
@@ -373,6 +378,14 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
       trackAnchor,
     });
 
+    // Resize observation can arrive a frame after new rows or a detail pane
+    // change the popup height. Reposition after the commit so an upward menu
+    // cannot paint its new height at the previous top coordinate.
+    const updatePosition = positionerContext.update;
+    React.useLayoutEffect(() => {
+      if (context.open && !isMobile) updatePosition();
+    }, [context.open, isMobile, contentProps.children, updatePosition]);
+
     const setFloatingRef = React.useRef(positionerContext.refs.setFloating);
     setFloatingRef.current = positionerContext.refs.setFloating;
     const handleFloatingRef = React.useCallback((node: ContentElement | null) => {
@@ -444,7 +457,11 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
           onArrowChange={positionerContext.onArrowChange}
           forceMount={forceMount}
         >
-          <MentionMobilePanel open={forceMount || context.open} anchorRef={context.inputRef}>
+          <MentionMobilePanel
+            open={forceMount || context.open}
+            anchorRef={context.inputRef}
+            placement={mobilePanelPlacement}
+          >
             {contentProps.children}
           </MentionMobilePanel>
         </MentionContentProvider>

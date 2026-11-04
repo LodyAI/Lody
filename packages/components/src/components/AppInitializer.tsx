@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import i18next from 'i18next';
-import { syncTime, createServerTimeFetcher } from '@lody/shared';
+import { startTimeSyncLegacy } from '@lody/shared';
 import { usePlatformCapability } from '@lody/platform/react';
 import { API_BASE_URL } from '../lib';
 import { registerBuiltInCommands } from '../lib/commands';
@@ -8,6 +8,8 @@ import { CommandShortcutHost } from '../lib/commands/shortcut-host';
 import { rehydrateAvatarMemoryCacheFromPersistent } from '../lib/avatar-cache';
 import { languageAtom } from '../atoms/settings';
 import { maybeClearLodyCacheOnBoot } from '../lib/clear-local-cache';
+import { installAppActivityTracking } from '../lib/app-activity-gap';
+import { installClientLog } from '../lib/client-log';
 import { getIpcServices } from '../lib/electron-ipc-client';
 import { useSetAtom } from 'jotai';
 import { installFocusModality } from '@lody/ui/focus-modality';
@@ -34,6 +36,10 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
   useState(() => {
     registerBuiltInCommands();
   });
+
+  // Before anything below can fail: the boot entry and the previous page's
+  // unclean exit belong at the head of this page's log.
+  useEffect(() => installClientLog(), []);
 
   useEffect(() => {
     const stored = readStoredLanguagePreference();
@@ -65,6 +71,8 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
     void maybeClearLodyCacheOnBoot();
   }, []);
 
+  useEffect(() => installAppActivityTracking(), []);
+
   useEffect(() => {
     const syncLanguage = (language: string) => {
       void getIpcServices()?.app.setLanguage(language);
@@ -87,11 +95,14 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
   // kind while preserving the local-clock behavior of getServerNow().
   useEffect(() => {
     if (!hasCloudSync) {
-      return;
+      return undefined;
     }
-    syncTime(createServerTimeFetcher(`${API_BASE_URL}/api/time`)).catch(() => {
-      // Silently ignore time sync failures - operations will use local time
-    });
+    const calibration = startTimeSyncLegacy(`${API_BASE_URL}/api/time`);
+    return () => {
+      void calibration.stop().catch(() => {
+        console.warn('Failed to stop server time calibration');
+      });
+    };
   }, [hasCloudSync]);
 
   /* Pre-warm the in-memory avatar blob-URL map from the persistent

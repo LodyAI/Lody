@@ -191,6 +191,9 @@ export function SessionFilePptxRenderer({
             virtualization
             onLoad={(presentation) => setSlideCount(presentation.document.slides.length)}
             onSlideChange={setSlide}
+            onSlideRendered={(index, element) => {
+              element.dataset.lodySlide = String(index);
+            }}
             onError={() => setFailed(true)}
             renderLoading={() => (
               <div {...stylex.props(styles.loading)} role="status">

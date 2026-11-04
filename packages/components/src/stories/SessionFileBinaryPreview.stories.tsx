@@ -1,4 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useMemo, useState } from 'react';
+import type { SessionMeta } from '@lody/shared';
+import { Button } from '@lody/ui';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
+import { SessionFileContentView } from '@/components/sessions/session-file-content-view';
+import { createFakeSessionFileProvider } from '@/lib/session-file-provider';
 import * as stylex from '@stylexjs/stylex';
 import { fn } from 'storybook/test';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +12,8 @@ import { resolveRevealFileLabel } from '@/lib/session-file-actions';
 import { SessionFileBinaryPreview } from '@/components/sessions/session-file-binary-preview';
 import { SessionFileNoticeCard } from '@/components/sessions/session-file-error-state';
 import { sampleDocx, samplePptx, sampleXlsx } from './fixtures/office-viewer-files';
+import type { DocumentSelection } from '@/lib/document-selection';
+import { PendingImageMarkupDialog } from '@/components/sessions/pending-image-markup-dialog';
 
 const styles = stylex.create({
   frame: { width: 'min(100%, 960px)', height: '640px' },
@@ -112,12 +120,184 @@ export const PdfDocument: Story = {
   args: { path: '/tmp/annual-report.pdf', bytes: createSamplePdf() },
 };
 
+function PdfFilePanelStory({ preload = false }: { preload?: boolean }) {
+  const [mounted, setMounted] = useState(preload);
+  const [open, setOpen] = useState(false);
+  const provider = useMemo(
+    () =>
+      createFakeSessionFileProvider({
+        sourceState: 'live-readonly',
+        files: [
+          { fileId: 'pdf', path: 'report.pdf', kind: 'binary', sourceState: 'live-readonly' },
+        ],
+        snapshots: { 'report.pdf': { kind: 'binary', bytes: createSamplePdf() } },
+      }),
+    []
+  );
+  const session = {
+    id: 'storybook-pdf-panel',
+    machineId: 'storybook-machine',
+    userId: 'storybook-user',
+    createdAt: '2026-10-19T00:00:00Z',
+    cliType: 'codex',
+    agentType: 'codex',
+  } as unknown as SessionMeta;
+  return (
+    <DesktopSessionDetailLayout
+      defaultSizes={{ main: 50, sidebar: 50 }}
+      topBar={null}
+      chatSurfaces={
+        <Button
+          onClick={() => {
+            setMounted(true);
+            setOpen(true);
+          }}
+        >
+          Open PDF
+        </Button>
+      }
+      terminalDock={null}
+      secondaryPanel={
+        mounted ? (
+          <SessionFileContentView
+            sessionId={session.id}
+            session={session}
+            filePath="report.pdf"
+            fileId="pdf"
+            fileProvider={provider}
+            fileProviderRole="read"
+            active={open}
+            onAddSelectionToChat={() => true}
+          />
+        ) : null
+      }
+      sidebarOpen={open}
+      onSidebarCollapse={() => setOpen(false)}
+      deleteConfirmDialog={null}
+    />
+  );
+}
+
+export const PdfFilePanel: Story = {
+  args: { path: 'report.pdf' },
+  render: () => <PdfFilePanelStory />,
+};
+
+export const PdfCollapsedFilePanel: Story = {
+  args: { path: 'report.pdf' },
+  render: () => <PdfFilePanelStory preload />,
+};
+
 export const DocxDocument: Story = {
   args: { path: '/tmp/quarterly-report.docx', bytes: sampleDocx() },
 };
 
 export const XlsxWorkbook: Story = {
   args: { path: '/tmp/revenue.xlsx', bytes: sampleXlsx() },
+};
+
+// The mock composer retains the actual File so browser acceptance can decode its pixels.
+const acceptSelection = fn((selection: DocumentSelection) => {
+  (window as Window & { documentSelection?: DocumentSelection }).documentSelection = selection;
+  return true;
+});
+export const PdfSelection: Story = {
+  args: { ...PdfDocument.args, onAddSelectionToChat: acceptSelection },
+};
+export const DocxSelection: Story = {
+  args: { ...DocxDocument.args, onAddSelectionToChat: acceptSelection },
+};
+export const XlsxSelection: Story = {
+  args: { ...XlsxWorkbook.args, onAddSelectionToChat: acceptSelection },
+};
+export const PptxSelection: Story = {
+  args: { path: '/tmp/slides.pptx', bytes: samplePptx(), onAddSelectionToChat: acceptSelection },
+};
+
+function AttachedImageMarkupStory({ file }: { file: File }) {
+  const [open, setOpen] = useState(true);
+  return open ? (
+    <PendingImageMarkupDialog
+      file={file}
+      onClose={() => setOpen(false)}
+      onAdd={(selection) => {
+        acceptSelection(selection);
+        setOpen(false);
+        return true;
+      }}
+    />
+  ) : null;
+}
+export const AttachedImageMarkup: Story = {
+  args: { path: 'screenshot.png' },
+  loaders: [
+    async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 800;
+      canvas.height = 400;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, 800, 400);
+      // Exercise transparent source images when the marked-up result is flattened.
+      context.clearRect(0, 0, 16, 16);
+      context.fillStyle = '#2563eb';
+      context.fillRect(40, 40, 720, 100);
+      context.fillStyle = '#111';
+      context.font = '28px sans-serif';
+      context.fillText('Synthetic screenshot', 40, 210);
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((value) => resolve(value!), 'image/png')
+      );
+      return { file: new File([blob], 'screenshot.png', { type: 'image/png' }) };
+    },
+  ],
+  render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,
+};
+
+export const AnimatedAttachedImageMarkup: Story = {
+  args: { path: 'animated.gif' },
+  loaders: [
+    async () => {
+      // Two synthetic frames: red followed by blue.
+      const data = atob(
+        'R0lGODlhCAAIAPAAAP8AAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAACAAIAAACB4SPqcvtXQAAIfkEAGQAAAAsAAAAAAgACACAAAD/AAAAAgeEj6nL7V0AADs='
+      );
+      const bytes = Uint8Array.from(data, (character) => character.charCodeAt(0));
+      return { file: new File([bytes], 'animated.gif', { type: 'image/gif' }) };
+    },
+  ],
+  render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,
+};
+
+export const LargeAttachedImageMarkup: Story = {
+  args: { path: 'large.jpg' },
+  loaders: [
+    async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = 2048;
+      const context = canvas.getContext('2d')!;
+      const pixels = context.createImageData(canvas.width, canvas.height);
+      let random = 0x6d2b79f5;
+      for (let index = 0; index < pixels.data.length; index += 4) {
+        for (let channel = 0; channel < 3; channel++) {
+          random ^= random << 13;
+          random ^= random >>> 17;
+          random ^= random << 5;
+          pixels.data[index + channel] = random & 255;
+        }
+        pixels.data[index + 3] = 255;
+      }
+      context.putImageData(pixels, 0, 0);
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((value) => resolve(value!), 'image/jpeg', 0.7)
+      );
+      const file = new File([blob], 'large.jpg', { type: 'image/jpeg' });
+      (window as Window & { markupSourceFile?: File }).markupSourceFile = file;
+      return { file };
+    },
+  ],
+  render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,
 };
 
 function PreviousXlsxFallback() {
@@ -146,4 +326,31 @@ export const InactiveXlsxWorkbook: Story = {
 
 export const PptxPresentation: Story = {
   args: { path: '/tmp/quarterly-report.pptx', bytes: samplePptx() },
+};
+
+// Synthetic 160x90 VP8 color pattern; no captured user media.
+export const WebmVideo: Story = {
+  args: { path: 'clip.webm' },
+  loaders: [
+    async () => ({
+      bytes: new Uint8Array(
+        await (
+          await fetch(new URL('./fixtures/video-preview.webm', import.meta.url).href)
+        ).arrayBuffer()
+      ),
+    }),
+  ],
+  render: (args, { loaded }) => <SessionFileBinaryPreview {...args} bytes={loaded.bytes} />,
+};
+
+export const UnsupportedVideo: Story = {
+  args: {
+    path: 'broken.webm',
+    bytes: Uint8Array.of(1, 2, 3),
+    fileActions: { onCopyPath: fn(), onShare: fn() },
+  },
+};
+
+export const InactiveVideo: Story = {
+  args: { path: 'clip.webm', bytes: Uint8Array.of(1), active: false },
 };

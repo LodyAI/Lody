@@ -36,7 +36,7 @@ runs:
       shell: bash
       run: |
         echo "store-path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-        echo "key=pnpm-store-v1-${RUNNER_OS}-${RUNNER_ARCH}-${{ hashFiles('pnpm-lock.yaml') }}" >> "$GITHUB_OUTPUT"
+        echo "key=pnpm-store-v2-${RUNNER_OS}-${RUNNER_ARCH}-${{ hashFiles('pnpm-lock.yaml') }}" >> "$GITHUB_OUTPUT"
 
     # The prefix fallback keeps a lockfile change from turning into a cold
     # download of the whole store: pnpm fetches only the missing packages.
@@ -46,4 +46,8 @@ runs:
       with:
         path: ${{ steps.key.outputs.store-path }}
         key: ${{ steps.key.outputs.key }}
-        restore-keys: pnpm-store-v1-${{ runner.os }}-${{ runner.arch }}-
+        # v2 repopulates stores that v1 pruned empty on macOS. Older stores
+        # remain useful as a fallback, but cannot count as an exact v2 hit.
+        restore-keys: |
+          pnpm-store-v2-${{ runner.os }}-${{ runner.arch }}-
+          pnpm-store-v1-${{ runner.os }}-${{ runner.arch }}-

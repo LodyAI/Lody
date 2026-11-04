@@ -12,12 +12,13 @@ import {
   type MachineId,
   type SessionMeta,
   type WorkspaceId,
+  type WorkspaceProject,
   writeMachineFlockRowToFlock,
 } from '@lody/shared';
 import type { MachineLegacyMetaFields } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
-import { realpathSync, statSync } from 'node:fs';
-import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
+import { existsSync, realpathSync, statSync } from 'node:fs';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 
 import { readTimeoutEnv, withTimeout } from './loro/timeout-utils';
 
@@ -51,7 +52,9 @@ export async function withMachineCatalogWriteLock<T>(
 function canonicalLocalProjectRootPath(rootPath: string): string {
   try {
     const resolved = realpathSync.native(rootPath);
-    return statSync(resolved).isDirectory() ? normalizeLocalProjectRootPath(resolved) : rootPath;
+    return statSync(resolved).isDirectory()
+      ? localProjectsLegacy.normalizeLocalProjectRootPath(resolved)
+      : rootPath;
   } catch {
     return rootPath;
   }
@@ -113,12 +116,34 @@ export async function upsertMachineLocalProject(
   machineId: MachineId,
   project: LocalProjectMeta,
   nowMs = getServerNow(),
-  options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
+  options: {
+    sync?: MachineFlockSyncScheduler;
+    reason?: string;
+    refreshGitHubRemote?: boolean;
+    standaloneVisible?: boolean;
+  } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+  const rootPath = canonicalLocalProjectRootPath(project.rootPath);
+  const observed = options.refreshGitHubRemote
+    ? existsSync(rootPath)
+      ? await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(rootPath)
+      : null
+    : undefined;
+  const current = getMachineFlockLocalProjects(
+    readMachineFlockRowsFromFlock(handle.flock, { families: ['localProject'] })
+  )[project.id];
   const canonicalProject = {
     ...project,
-    rootPath: canonicalLocalProjectRootPath(project.rootPath),
+    rootPath,
+    standaloneVisible:
+      options.standaloneVisible ?? current?.standaloneVisible ?? project.standaloneVisible,
+    githubRepoFullName:
+      observed !== undefined
+        ? (observed ?? undefined)
+        : current
+          ? current.githubRepoFullName
+          : project.githubRepoFullName,
   };
   const changed = writeMachineFlockRowToFlock(
     handle.flock,
@@ -141,18 +166,19 @@ export async function upsertMachineLocalProject(
   }
 }
 
-/** Repairs older project rows whose path was stored through a symlink. */
+/** Startup-only reconciliation of canonical paths and daemon-observed GitHub remotes. */
 export async function reconcileMachineLocalProjectRootPaths(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
-  sync: MachineFlockSyncScheduler
+  sync: MachineFlockSyncScheduler,
+  signal?: AbortSignal
 ): Promise<void> {
   await withMachineCatalogWriteLock(getMachineRoomId(machineId), async () => {
     const projects = await readMachineLocalProjects(repo, workspaceId, machineId);
     for (const project of Object.values(projects)) {
+      if (signal?.aborted) return;
       const canonicalRootPath = canonicalLocalProjectRootPath(project.rootPath);
-      if (canonicalRootPath === project.rootPath) continue;
       await upsertMachineLocalProject(
         repo,
         workspaceId,
@@ -162,7 +188,7 @@ export async function reconcileMachineLocalProjectRootPaths(
           rootPath: canonicalRootPath,
         },
         undefined,
-        { sync, reason: 'local-project-path-reconcile' }
+        { sync, reason: 'local-project-path-reconcile', refreshGitHubRemote: true }
       );
     }
   });
@@ -249,46 +275,31 @@ export type ResolveLocalProjectRootPathRetryOptions = {
    * flag is load-bearing — it is what keeps the room's rejoin loop alive.
    */
   requestSync?: () => Promise<unknown>;
+  /**
+   * Encrypted workspaces: any member can write a synced registry row, but this machine
+   * derived each ID from the canonical root it registered. A row whose `rootPath` no
+   * longer hashes to its ID is treated as missing, so a rewritten path cannot redirect
+   * an authorized project to another directory.
+   */
+  verifyProjectIdentity?: boolean;
   /** Total reads including the first. Default: LODY_LOCAL_PROJECT_RESOLVE_MAX_ATTEMPTS or 4. */
   maxAttempts?: number;
   /** Wait between attempts. Default: LODY_LOCAL_PROJECT_RESOLVE_RETRY_DELAY_MS or 400. */
   retryDelayMs?: number;
   /**
-   * Bound on each `requestSync` await. Needed on the caller side because the
-   * coordinator dedupes onto an in-flight sync whose own timeout (default 8s)
-   * may be much larger than the turn-dispatch budget. Default:
-   * LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS or 1500.
+   * Bound on each `requestSync` await. The coordinator dedupes onto an
+   * in-flight sync with its own deadline, so each attempt is bounded here.
+   * Default: LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS or 10000.
    */
   syncTimeoutMs?: number;
   /** Injectable for tests; defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
   /** Called after each miss, before the sync wait (attempt is 1-based). */
   onRetry?: (attempt: number, maxAttempts: number) => void;
-  /** Cancels retry waits without cancelling the coordinator's background sync. */
-  signal?: AbortSignal;
 };
 
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
-
-function withAbortSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return promise;
-  signal.throwIfAborted();
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener('abort', onAbort);
-        reject(error);
-      }
-    );
-  });
-}
 
 export async function resolveWorkspaceLocalProjectWithSyncOnMiss(
   repo: LoroRepo,
@@ -317,6 +328,14 @@ export async function resolveWorkspaceLocalProjectWithSyncOnMiss(
 }
 
 /**
+ * Per-attempt Machine Flock sync budget for root-path resolution. A miss fails
+ * the turn's session init, so the three syncs between four reads give a row
+ * that has not synced down yet about 30s in total.
+ */
+export const readLocalProjectRootResolveSyncTimeoutMs = (): number =>
+  readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS', 10_000);
+
+/**
  * Session create/restore resolves a local project's workdir from the machine
  * Flock doc — synced CRDT state that a single point-in-time read can miss
  * transiently (cold start before the first remote sync, or a row written by a
@@ -338,12 +357,10 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
   );
   const retryDelayMs =
     options.retryDelayMs ?? readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_RETRY_DELAY_MS', 400);
-  const syncTimeoutMs =
-    options.syncTimeoutMs ?? readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS', 1_500);
+  const syncTimeoutMs = options.syncTimeoutMs ?? readLocalProjectRootResolveSyncTimeoutMs();
   const sleep = options.sleep ?? defaultSleep;
 
   for (let attempt = 1; ; attempt += 1) {
-    options.signal?.throwIfAborted();
     const rootPath = await resolveWorkspaceLocalProjectRootPath(
       repo,
       workspaceId,
@@ -351,7 +368,16 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
       localProjectId
     );
     if (rootPath !== null) {
-      return rootPath;
+      if (!options.verifyProjectIdentity) return rootPath;
+      // Same native canonicalization as registration (`prepareProject`) and root
+      // reconciliation, so on-disk case and symlinks hash identically on every host.
+      try {
+        return localProjectsLegacy.createLocalProjectId(rootPath) === localProjectId
+          ? rootPath
+          : null;
+      } catch {
+        return null;
+      }
     }
     if (attempt >= maxAttempts) {
       return null;
@@ -360,19 +386,45 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
     if (options.requestSync) {
       // try/catch (not .catch) so a synchronously-throwing stub is also tolerated.
       try {
-        await withAbortSignal(
-          withTimeout(
-            options.requestSync(),
-            syncTimeoutMs,
-            `Timeout waiting for machine Flock sync (localProject=${localProjectId})`
-          ),
-          options.signal
+        await withTimeout(
+          options.requestSync(),
+          syncTimeoutMs,
+          `Timeout waiting for machine Flock sync (localProject=${localProjectId})`
         );
       } catch {
-        options.signal?.throwIfAborted();
         // Best-effort pull — the next read is the verdict.
       }
     }
-    await withAbortSignal(sleep(retryDelayMs), options.signal);
+    await sleep(retryDelayMs);
   }
+}
+
+/** Catalog members and existing group runs can both retain a local registration. */
+export function isLocalProjectReferenced(
+  project: LocalProjectMeta,
+  machineId: MachineId,
+  projects: readonly WorkspaceProject[],
+  sessions: readonly SessionMeta[]
+): boolean {
+  const matches = (source: WorkspaceProject['members'][number]['source']) =>
+    source.kind === 'local'
+      ? source.machineId === machineId && source.localProjectId === project.id
+      : source.preferLocal === true &&
+        !!project.githubRepoFullName &&
+        source.repoFullName.toLowerCase() === project.githubRepoFullName.toLowerCase();
+  return (
+    projects.some((group) => group.members.some((member) => matches(member.source))) ||
+    sessions.some(
+      (session) =>
+        session.machineId === machineId &&
+        session.projectRun &&
+        Object.values(session.projectRun.members).some((member) =>
+          member.repositoryCheckout
+            ? member.repositoryCheckout.kind === 'local' &&
+              member.repositoryCheckout.machineId === machineId &&
+              member.repositoryCheckout.localProjectId === project.id
+            : matches(member.src)
+        )
+    )
+  );
 }

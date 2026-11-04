@@ -1,15 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildSyncDocIds, createWorkspaceSummary, mergeSummaries, syncItems } from './sync';
-
-describe('buildSyncDocIds', () => {
-  it('returns a stable order of alive rooms', () => {
-    expect(buildSyncDocIds(['session-b', 'session-a', 'machine-1'])).toEqual([
-      'machine-1',
-      'session-a',
-      'session-b',
-    ]);
-  });
-});
+import { createWorkspaceSummary, syncItems } from './sync';
 
 describe('sync command helpers', () => {
   it('continues syncing remaining items after one item fails', async () => {
@@ -41,36 +31,5 @@ describe('sync command helpers', () => {
         error: 'network unavailable',
       },
     ]);
-  });
-
-  it('merges workspace summaries into final exit summary counters', async () => {
-    const first = createWorkspaceSummary('workspace-1');
-    first.totals.meta = 1;
-    first.completed.meta = 1;
-
-    const second = createWorkspaceSummary('workspace-2');
-    second.totals.meta = 1;
-    second.failed.meta = 1;
-    second.failures.push({
-      workspaceId: 'workspace-2',
-      kind: 'meta',
-      id: 'meta',
-      error: 'timeout',
-    });
-
-    expect(mergeSummaries([first, second])).toMatchObject({
-      ok: false,
-      total: 2,
-      completed: 1,
-      failed: 1,
-      failures: [
-        {
-          workspaceId: 'workspace-2',
-          kind: 'meta',
-          id: 'meta',
-          error: 'timeout',
-        },
-      ],
-    });
   });
 });

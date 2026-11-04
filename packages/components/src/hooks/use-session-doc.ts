@@ -58,9 +58,13 @@ export type UseSessionDocResult = {
       dispatch?: boolean;
       guideExpectedTurnId?: string;
       attachments?: SessionAttachmentDraft[];
+      onAccepted?: () => void;
     }
   ) => Promise<{ entry: SessionHistory }>;
-  pushMessageQueue: (item: PushMessageQueueInput) => Promise<void>;
+  pushMessageQueue: (
+    item: PushMessageQueueInput,
+    options?: { onAccepted?: () => void }
+  ) => Promise<void>;
   removeMessageQueueItem: (cid: string) => Promise<void>;
   updateMessageQueueItem: (
     cid: string,
@@ -117,7 +121,11 @@ export function useSessionDoc(
     () => ({
       session: { id: sessionId },
       mq: [],
+      humanInputReceipts: {},
+      rpcDispatchOriginals: {},
+      cancelRequest: undefined,
       forkOperation: undefined,
+      notification: undefined,
       preview: undefined,
       externalHistoryCursor: undefined,
       acpRuntimeConfig: undefined,
@@ -273,6 +281,7 @@ export function useSessionDoc(
         dispatch?: boolean;
         guideExpectedTurnId?: string;
         attachments?: SessionAttachmentDraft[];
+        onAccepted?: () => void;
       }
     ) => {
       if (!runtime) {
@@ -289,7 +298,8 @@ export function useSessionDoc(
             : { kind: writeOptions?.dispatch ? 'dispatch' : 'history' },
           undefined,
           undefined,
-          writeOptions?.attachments
+          writeOptions?.attachments,
+          writeOptions?.onAccepted
         );
         return { entry };
       }
@@ -315,7 +325,7 @@ export function useSessionDoc(
   );
 
   const pushMessageQueue = useCallback(
-    async (item: PushMessageQueueInput) => {
+    async (item: PushMessageQueueInput, writeOptions?: { onAccepted?: () => void }) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
@@ -355,7 +365,8 @@ export function useSessionDoc(
         { kind: 'queue' },
         undefined,
         { ...wireEntry, userTurnId },
-        attachments
+        attachments,
+        writeOptions?.onAccepted
       );
     },
     [runtime, sessionId]

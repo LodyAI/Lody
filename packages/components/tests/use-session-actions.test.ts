@@ -1,3 +1,5 @@
+import { userAtom } from '../src/atoms';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
   createSessionSendResources,
   type SessionSendResources,
@@ -14,20 +16,27 @@ import { applyHistoryAction } from '../../shared/src/session-data/history-action
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
+import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
+import { LoroDoc } from 'loro-crdt';
 import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   SESSION_DOC_PREFIX,
   getMachineRoomId,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getSessionRoomId,
+  getSessionCancelRequestMarker,
+  createSessionControlPlaneMirror,
   isLoroRepoDocDeleted,
   machineFlockKeys,
   type LocalProjectId,
   readSessionOperationTargets,
+  isSessionCollaborationStopped,
   type MachineId,
   type SessionHistory,
   type SessionId,
@@ -38,6 +47,8 @@ import {
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
+  createStore as createPlatformStore,
+  type PlatformSessionState,
   type CloudApi,
   type PlatformProvider,
 } from '@lody/platform';
@@ -66,7 +77,8 @@ const billingEntitlementState = {
 // its cloud dependencies explicit. Rejected: teaching usePlatform() a test-only
 // implicit default, which would hide missing production assembly as well.
 const testCloudApi = {
-  useQuery: () => billingEntitlementState,
+  useQuery: (operation, args) =>
+    args !== 'skip' && operation.name.startsWith('billing:') ? billingEntitlementState : undefined,
   useMutation: () => recordMyWorkspaceDailyActiveUser,
   useAction: () => vi.fn(async () => undefined),
 } as CloudApi;
@@ -104,12 +116,27 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '../src/atoms/presence';
+import {
+  SessionArchiveConfirmationDialog,
+  useArchiveSessionWithConfirmation,
+} from '../src/components/sessions/session-archive-confirmation';
+import { initI18n } from '../src/i18n';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
+import {
+  editSessionRunConfigDraftAtom,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftsAtom,
+  setSessionRunConfigDraftAccountAtom,
+} from '../src/atoms/session-run-config-drafts';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
-  countSessionMentions,
+  developerModeEnabledAtom,
+  experimentalFeaturesEnabledAtom,
+  roostHistoryExperimentEnabledAtom,
+} from '../src/atoms/settings';
+import {
   SessionCreateBillingError,
-  resolveSessionChatType,
   useSessionActions,
   type SessionActions,
 } from '../src/hooks/use-session-actions';
@@ -130,6 +157,36 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void; reject
     throw new Error('Failed to create deferred');
   }
   return { promise, resolve, reject };
+}
+
+function editRunConfigDraft(
+  store: ReturnType<typeof createStore>,
+  sessionId: string,
+  workspaceId = 'workspace-1',
+  accountId = 'user-1'
+) {
+  store.set(setSessionRunConfigDraftAccountAtom, accountId);
+  const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
+    accountId,
+    workspaceId,
+    sessionId,
+    targetKey: 'codex',
+  });
+  store.set(editSessionRunConfigDraftAtom, {
+    lease,
+    edit: { type: 'config', configId: 'fast', value: false },
+  });
+  return lease;
+}
+
+type ConfirmedArchive = (sessionId: SessionId, options?: { confirm?: boolean }) => Promise<boolean>;
+
+function ConfirmedArchiveProbe({ onReady }: { onReady: (archive: ConfirmedArchive) => void }) {
+  const archive = useArchiveSessionWithConfirmation(useSessionActions().archiveSession);
+  useEffect(() => {
+    onReady(archive);
+  }, [archive, onReady]);
+  return createElement(SessionArchiveConfirmationDialog);
 }
 
 function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void }) {
@@ -267,7 +324,11 @@ const createRuntime = (
     ({
       upsertDocMeta: vi.fn(async () => undefined),
       getDocMeta: vi.fn(async (roomId: string) => ({
-        meta: { id: roomId.slice(SESSION_DOC_PREFIX.length), machineId: 'machine-1' },
+        meta: {
+          id: roomId.slice(SESSION_DOC_PREFIX.length),
+          machineId: 'machine-1',
+          protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        },
       })),
     } as unknown as WorkspaceRuntime['repo']);
 
@@ -418,18 +479,24 @@ function createContainmentSessions(prefix: string, isArchived: boolean) {
   };
 }
 
-function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
+function createSessionMetaRepo(
+  sessions: readonly SessionMeta[],
+  onChange?: (sessions: Record<string, SessionMeta>) => void
+) {
   const docs = new Map<string, Record<string, unknown>>(
     sessions.map((session) => [getSessionRoomId(session.id), { ...session }])
   );
+  const publish = () => onChange?.(Object.fromEntries(docs) as Record<string, SessionMeta>);
   const repo = {
     listDoc: async () => [...docs].map(([docId, meta]) => ({ docId, meta: { ...meta } })),
     getDocMeta: vi.fn(async (roomId: string) => ({ meta: docs.get(roomId) ?? {} })),
     upsertDocMeta: vi.fn(async (roomId: string, patch: Record<string, unknown>) => {
       docs.set(roomId, { ...(docs.get(roomId) ?? {}), ...patch });
+      publish();
     }),
     deleteDoc: vi.fn(async (roomId: string) => {
       docs.delete(roomId);
+      publish();
     }),
     openFlockDoc: vi.fn(async () => ({
       flock: { scan: () => [], set: vi.fn(), delete: vi.fn(), commit: vi.fn() },
@@ -444,6 +511,7 @@ function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
       docs.get(getSessionRoomId(sessionId)) as SessionMeta | undefined,
     setMeta: (roomId: string, meta: Record<string, unknown>) => {
       docs.set(roomId, { ...meta });
+      publish();
     },
   };
 }
@@ -477,6 +545,7 @@ describe('useSessionActions', () => {
     container?.remove();
     container = undefined;
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   const renderActions = async (
@@ -487,6 +556,7 @@ describe('useSessionActions', () => {
       docMetaCacheReady?: boolean;
       sessionMetaCache?: Record<string, SessionMeta>;
       store?: ReturnType<typeof createStore>;
+      identitySession?: PlatformProvider['identity']['session'];
     } = {}
   ): Promise<SessionActions> => {
     const jotaiStore = options.store ?? createStore();
@@ -495,7 +565,33 @@ describe('useSessionActions', () => {
     jotaiStore.set(sessionMetaCacheAtom, options.sessionMetaCache ?? {});
     jotaiStore.set(currentWorkspaceIdAtom, options.workspaceId ?? ('workspace-1' as WorkspaceId));
     jotaiStore.set(currentWorkspaceSlugAtom, options.workspaceSlug ?? 'workspace-slug');
+    jotaiStore.set(userAtom, { id: 'synthetic-session-account' } as never);
+    jotaiStore.set(workspaceContentModeAtom, {
+      accountId: 'synthetic-session-account',
+      workspaceId: options.workspaceId ?? 'workspace-1',
+      workspaceSlug: options.workspaceSlug ?? 'workspace-slug',
+      descriptor: {
+        workspaceId: options.workspaceId ?? 'workspace-1',
+        contentMode: runtime.contentMode ?? 'plaintext',
+        contentModeVersion: 1,
+      },
+    });
 
+    const platform =
+      runtime.contentMode === 'e2ee'
+        ? {
+            ...testPlatform,
+            identity: {
+              ...testPlatform.identity,
+              session:
+                options.identitySession ??
+                createStaticStore({
+                  status: 'authenticated' as const,
+                  user: { id: 'synthetic-session-account' },
+                }),
+            },
+          }
+        : testPlatform;
     let actions: SessionActions | null = null;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -505,7 +601,7 @@ describe('useSessionActions', () => {
       root?.render(
         createElement(
           PlatformContext.Provider,
-          { value: testPlatform },
+          { value: platform },
           createElement(
             Provider,
             { store: jotaiStore },
@@ -525,6 +621,494 @@ describe('useSessionActions', () => {
     return actions;
   };
 
+  it.each([
+    'archive',
+    'restore',
+    'delete',
+    'rename',
+    'pin',
+    'close',
+    'owner',
+    'bulk-delete',
+    'cancel',
+    'activity',
+    'unread',
+    'move',
+    'collaboration',
+  ] as const)(
+    'refuses history-only management through the shared action: %s',
+    async (operation) => {
+      const repo = await LoroRepo.create({});
+      const id = 'foreign-history' as SessionId;
+      const childId = 'foreign-child' as SessionId;
+      const rootMeta = {
+        id,
+        machineId: 'unshared-machine',
+        userId: 'another-member',
+        title: 'History',
+        lastMessageAt: 2,
+        isArchived: operation === 'restore' || operation === 'delete',
+      } as SessionMeta;
+      const childMeta = { ...rootMeta, id: childId, parentSessionId: id };
+      await repo.upsertDocMeta(getSessionRoomId(id), rootMeta);
+      await repo.upsertDocMeta(getSessionRoomId(childId), childMeta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+        readSessionOperationTargets: (target, kind) =>
+          readSessionOperationTargets(repo, target, kind),
+      });
+      Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+      const actions = await renderActions(runtime);
+      const run = {
+        archive: () => actions.archiveSession(id),
+        restore: () => actions.restoreSession(id),
+        delete: () => actions.deleteArchivedSession(id),
+        rename: () => actions.updateSessionTitle(id, 'Changed'),
+        pin: () => actions.setSessionPinned(id, true),
+        close: () => actions.setSessionTabClosed(id, true),
+        owner: () => actions.transferSessionOwner(id, 'synthetic-session-account'),
+        'bulk-delete': () => actions.deleteSessions([id, childId]),
+        cancel: () => actions.requestSessionCancel(id, 'turn'),
+        activity: () => actions.touchSessionActivity(id),
+        unread: () => actions.markSessionUnread(id),
+        move: () => actions.updateSessionMetadata(id, { projectGroup: { id: 'other-group' } }),
+        collaboration: () => actions.setTreeCollaborationStopped(id, true),
+      }[operation];
+      try {
+        await expect(run()).rejects.toMatchObject({ code: 'session_management_denied' });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(rootMeta);
+        expect((await repo.getDocMeta(getSessionRoomId(childId)))?.meta).toEqual(childMeta);
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it.each(['archive', 'restore', 'delete'] as const)(
+    'preflights a manageable root and denied child before any tree mutation: %s',
+    async (operation) => {
+      const repo = await LoroRepo.create({});
+      const id = 'owned-root' as SessionId;
+      const rootMeta = {
+        id,
+        machineId: 'unshared-machine',
+        userId: 'synthetic-session-account',
+        title: 'Own root',
+      } as SessionMeta;
+      const childMeta = {
+        ...rootMeta,
+        id: 'foreign-child' as SessionId,
+        userId: 'another-member',
+        parentSessionId: id,
+      };
+      await repo.upsertDocMeta(getSessionRoomId(id), rootMeta);
+      await repo.upsertDocMeta(getSessionRoomId(childMeta.id), childMeta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+        readSessionOperationTargets: (target, kind) =>
+          readSessionOperationTargets(repo, target, kind),
+      });
+      Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+      const actions = await renderActions(runtime);
+      try {
+        await expect(
+          {
+            archive: actions.archiveSession,
+            restore: actions.restoreSession,
+            delete: actions.deleteArchivedSession,
+          }[operation](id)
+        ).rejects.toMatchObject({ code: 'session_management_denied' });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(rootMeta);
+        expect((await repo.getDocMeta(getSessionRoomId(childMeta.id)))?.meta).toEqual(childMeta);
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it('retains encrypted author management and rejects metadata/project edits based on stale cached ownership', async () => {
+    const repo = await LoroRepo.create({});
+    const id = 'owned-history' as SessionId;
+    const meta = {
+      id,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Original',
+    } as SessionMeta;
+    const child = { ...meta, id: 'owned-child' as SessionId, parentSessionId: id };
+    await repo.upsertDocMeta(getSessionRoomId(id), meta);
+    await repo.upsertDocMeta(getSessionRoomId(child.id), child);
+    const runtime = createRuntime({
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+      readSessionOperationTargets: (target, kind) =>
+        readSessionOperationTargets(repo, target, kind),
+    });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(id)]: meta },
+    });
+    try {
+      await actions.updateSessionTitle(id, 'Changed');
+      await actions.setSessionPinned(id, true);
+      await actions.archiveSession(id);
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+        title: 'Changed',
+        isPinned: true,
+        isArchived: true,
+      });
+      expect((await repo.getDocMeta(getSessionRoomId(child.id)))?.meta?.isArchived).toBe(true);
+      await actions.restoreSession(id);
+      expect((await repo.getDocMeta(getSessionRoomId(child.id)))?.meta?.isArchived).toBe(false);
+      // Cache still claims ownership. Current Repo state must decide each new action.
+      await repo.upsertDocMeta(getSessionRoomId(id), { userId: 'different-member' });
+      await expect(
+        actions.updateSessionMetadata(id, { projectGroup: { id: 'another-group' } })
+      ).rejects.toMatchObject({ code: 'session_management_denied' });
+      await expect(actions.updateSessionTitle(id, 'Stolen')).rejects.toMatchObject({
+        code: 'session_management_denied',
+      });
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.title).toBe('Changed');
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.projectGroup).toBeUndefined();
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('preflights a mixed exact-ID batch before deleting any owned or history-only session', async () => {
+    const repo = await LoroRepo.create({});
+    const own = {
+      id: 'batch-owned' as SessionId,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Own',
+    } as SessionMeta;
+    const foreign = { ...own, id: 'batch-foreign' as SessionId, userId: 'different-member' };
+    for (const meta of [own, foreign]) await repo.upsertDocMeta(getSessionRoomId(meta.id), meta);
+    const runtime = createRuntime({ repo, writer: createDirectWorkspaceWriter({ repo } as never) });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime);
+    try {
+      await expect(actions.deleteSessions([own.id, foreign.id])).rejects.toMatchObject({
+        code: 'session_management_denied',
+      });
+      for (const meta of [own, foreign])
+        expect((await repo.getDocMeta(getSessionRoomId(meta.id)))?.meta).toEqual(meta);
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it.each(['account', 'workspace', 'runtime', 'logout'] as const)(
+    'fences a retained management callback when %s changes during its Repo read',
+    async (changed) => {
+      const repo = await LoroRepo.create({});
+      const id = 'held-rename' as SessionId;
+      const meta = {
+        id,
+        machineId: 'unshared-machine',
+        userId: 'synthetic-session-account',
+        title: 'Original',
+      } as SessionMeta;
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+      });
+      Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+      const state = createStore();
+      const identity = createPlatformStore<PlatformSessionState>({
+        status: 'authenticated',
+        user: { id: 'synthetic-session-account' },
+      });
+      const actions = await renderActions(runtime, { store: state, identitySession: identity });
+      const reached = createDeferred();
+      const release = createDeferred();
+      const originalRead = repo.getDocMeta.bind(repo);
+      vi.spyOn(repo, 'getDocMeta').mockImplementationOnce(async (room) => {
+        reached.resolve();
+        await release.promise;
+        return originalRead(room);
+      });
+      const refused = expect(
+        actions.updateSessionTitle(id, 'Stale account write')
+      ).rejects.toMatchObject({ code: 'session_management_denied' });
+      try {
+        await reached.promise;
+        await act(async () => {
+          if (changed === 'account') state.set(userAtom, { id: 'different-account' } as never);
+          else if (changed === 'workspace')
+            state.set(currentWorkspaceIdAtom, 'different-workspace' as WorkspaceId);
+          else if (changed === 'runtime') state.set(runtimeAtom, { ...runtime });
+          else {
+            identity.set({ status: 'unauthenticated' });
+            state.set(userAtom, null);
+          }
+        });
+        release.resolve();
+        await refused;
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
+      } finally {
+        release.resolve();
+        await repo.destroy();
+      }
+    }
+  );
+
+  it('preflights related opened conversations and parent activity before changing owned metadata', async () => {
+    const repo = await LoroRepo.create({});
+    const own = {
+      id: 'owned-root-with-relations' as SessionId,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Own',
+    } as SessionMeta;
+    const foreign = {
+      ...own,
+      id: 'foreign-opened' as SessionId,
+      openedBySessionId: own.id,
+      userId: 'different-member',
+    };
+    const child = {
+      ...own,
+      id: 'owned-child-with-foreign-parent' as SessionId,
+      parentSessionId: foreign.id,
+    };
+    for (const meta of [own, foreign, child])
+      await repo.upsertDocMeta(getSessionRoomId(meta.id), meta);
+    const runtime = createRuntime({
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+      readSessionOperationTargets: (target, kind) =>
+        readSessionOperationTargets(repo, target, kind),
+    });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime);
+    try {
+      await expect(
+        actions.archiveSession(own.id, { includeOpenedSessions: true })
+      ).rejects.toMatchObject({ code: 'session_management_denied' });
+      await expect(actions.touchSessionActivity(child.id)).rejects.toMatchObject({
+        code: 'session_management_denied',
+      });
+      for (const meta of [own, foreign, child])
+        expect((await repo.getDocMeta(getSessionRoomId(meta.id)))?.meta).toEqual(meta);
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('retains management with a bound local identity during uncertain cloud authentication', async () => {
+    const repo = await LoroRepo.create({});
+    const id = 'offline-owned-history' as SessionId;
+    await repo.upsertDocMeta(getSessionRoomId(id), {
+      id,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Original',
+    });
+    const runtime = createRuntime({ repo, writer: createDirectWorkspaceWriter({ repo } as never) });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime, {
+      identitySession: createStaticStore({ status: 'unauthenticated', uncertain: true }),
+    });
+    try {
+      await actions.updateSessionTitle(id, 'Offline edit');
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.title).toBe('Offline edit');
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('uses released Stop wire fields and turn marker when the target has no Inbox capability', async () => {
+    const sessionId = 'legacy-stop' as SessionId;
+    const metaRepo = createSessionMetaRepo([
+      { id: sessionId, machineId: 'old-machine', userId: 'user-1' } as SessionMeta,
+    ]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const received: unknown[] = [];
+    runtime.requestSessionCancel = async (_machine, _session, turnId, options) => {
+      expect(Object.keys(options ?? {})).toEqual(['timeoutMs']);
+      received.push(turnId);
+      return { success: true } as never;
+    };
+    const actions = await renderActions(runtime);
+    await actions.requestSessionCancel(sessionId, 'assistant-legacy');
+    expect(received).toEqual(['assistant-legacy']);
+    expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe('assistant-legacy');
+  });
+
+  it('interrupts without a Stop identity so queued input keeps its eligibility', async () => {
+    const sessionId = 'session-interrupt' as SessionId;
+    const metaRepo = createSessionMetaRepo([
+      { id: sessionId, machineId: 'machine-1', userId: 'user-1' } as SessionMeta,
+    ]);
+    metaRepo.setMeta(getMachineRoomId('machine-1'), {
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    });
+    const doc = new LoroDoc();
+    const control = createSessionControlPlaneMirror({
+      doc,
+      initialState: { session: { id: sessionId } },
+    });
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    runtime.withSessionStore = async (_id, fn) =>
+      fn({ ...control, sessionData: sessionDataOver([]) } as never);
+    const rpcOptions: unknown[] = [];
+    runtime.requestSessionCancel = async (_machine, _session, _turnId, options) => {
+      rpcOptions.push(options);
+      return { success: true } as never;
+    };
+    try {
+      const actions = await renderActions(runtime);
+      await actions.requestSessionCancel(sessionId, 'assistant-running', { interrupt: true });
+
+      expect(rpcOptions).toEqual([{ timeoutMs: 2_000, pauseInbox: false }]);
+      expect(control.getState().cancelRequest?.id).toBeUndefined();
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe('assistant-running');
+    } finally {
+      control.dispose();
+    }
+  });
+
+  it('persists Stop details before publishing only its marker, and reuses the request on RPC', async () => {
+    const sessionId = 'session-stop-control' as SessionId;
+    const metaRepo = createSessionMetaRepo([
+      {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-10-13T00:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    ]);
+    metaRepo.setMeta(getMachineRoomId('machine-1'), {
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    });
+    const doc = new LoroDoc();
+    const control = createSessionControlPlaneMirror({
+      doc,
+      initialState: { session: { id: sessionId } },
+    });
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    runtime.withSessionStore = async (_id, fn) =>
+      fn({ ...control, sessionData: sessionDataOver([]) } as never);
+    const flushEntered = createDeferred();
+    const durable = createDeferred();
+    let holdFlush = true;
+    runtime.repo.flush = async () => {
+      if (holdFlush) {
+        flushEntered.resolve();
+        await durable.promise;
+      }
+    };
+    const rpcReceipts: { turnId: string; cancelId?: string }[] = [];
+    runtime.requestSessionCancel = async (_machine, _session, turnId, options) => {
+      rpcReceipts.push({ turnId, cancelId: options?.cancelId });
+      return undefined; // RPC timeout/loss still leaves a complete durable request.
+    };
+    try {
+      const actions = await renderActions(runtime);
+      const stopped = actions.requestSessionCancel(sessionId, 'assistant-stop');
+      await flushEntered.promise;
+      expect(control.getState().cancelRequest?.turnId).toBe('assistant-stop');
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBeUndefined();
+      expect(rpcReceipts).toEqual([
+        {
+          turnId: 'assistant-stop',
+          cancelId: control.getState().cancelRequest!.id,
+        },
+      ]);
+      holdFlush = false;
+      durable.resolve();
+      await stopped;
+      const first = control.getState().cancelRequest!;
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe(
+        getSessionCancelRequestMarker(first.id)
+      );
+      expect(Object.keys(metaRepo.getSession(sessionId)!)).toEqual([
+        'id',
+        'machineId',
+        'userId',
+        'createdAt',
+        'cliType',
+        'agentType',
+        'lastCanceledTurn',
+      ]);
+      expect(rpcReceipts).toEqual([{ turnId: 'assistant-stop', cancelId: first.id }]);
+
+      await actions.requestSessionCancel(sessionId, 'assistant-stop');
+      const second = control.getState().cancelRequest!;
+      expect(second.id).not.toBe(first.id);
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe(
+        getSessionCancelRequestMarker(second.id)
+      );
+      const reopened = new LoroDoc();
+      reopened.import(doc.export({ mode: 'snapshot' }));
+      const reopenedControl = createSessionControlPlaneMirror({
+        doc: reopened,
+        initialState: { session: { id: sessionId } },
+      });
+      try {
+        expect(reopenedControl.getState().cancelRequest).toMatchObject({
+          id: second.id,
+          turnId: 'assistant-stop',
+        });
+      } finally {
+        reopenedControl.dispose();
+      }
+    } finally {
+      durable.resolve();
+      control.dispose();
+    }
+  });
+
+  it('stops and restores the whole authoritative tree from a leaf, including hidden descendants', async () => {
+    const tree = createContainmentSessions('collaboration', false);
+    const unrelated = { ...tree.rootSession, id: 'unrelated' as SessionId };
+    const metaRepo = createSessionMetaRepo([...tree.sessions, unrelated]);
+    for (const session of [...tree.sessions, unrelated]) {
+      metaRepo.setMeta(getMachineRoomId(session.machineId), {
+        id: session.machineId,
+        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      });
+    }
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      sessionMetaCache: {},
+    });
+    await actions.setTreeCollaborationStopped(tree.openedFromTabSession.id, true);
+    for (const session of tree.sessions) {
+      expect(metaRepo.getSession(session.id)?.collaborationStopped).toBe(true);
+    }
+    expect(metaRepo.getSession(unrelated.id)?.collaborationStopped).toBeUndefined();
+    const lateChild = 'late-child' as SessionId;
+    metaRepo.setMeta(getSessionRoomId(lateChild), {
+      ...tree.openedSession,
+      id: lateChild,
+      openedBySessionId: tree.rootSession.id,
+    });
+    expect(await isSessionCollaborationStopped(metaRepo.repo, lateChild)).toBe(true);
+    await actions.setTreeCollaborationStopped(tree.rootSession.id, false);
+    for (const id of [...tree.sessions.map((session) => session.id), lateChild]) {
+      expect(await isSessionCollaborationStopped(metaRepo.repo, id)).toBe(false);
+    }
+  });
+
+  it('rejects collaboration control before writes when a target daemon lacks support', async () => {
+    const tree = createContainmentSessions('unsupported-collaboration', false);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+    await expect(actions.setTreeCollaborationStopped(tree.rootSession.id, true)).rejects.toThrow(
+      'Update every machine'
+    );
+    expect(
+      tree.sessions.map((session) => metaRepo.getSession(session.id)?.collaborationStopped)
+    ).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
   it('does not block session creation on remote stream pre-creation', async () => {
     const sessionId = 'session-create-stream-pending' as SessionId;
     const streamCreate = createDeferred();
@@ -536,10 +1120,7 @@ describe('useSessionActions', () => {
     });
     const actions = await renderActions(runtime);
 
-    const result = await Promise.race([
-      actions.createSession(createSessionPayload(sessionId)),
-      new Promise<'still-pending'>((resolve) => setTimeout(() => resolve('still-pending'), 20)),
-    ]);
+    const result = await actions.createSession(createSessionPayload(sessionId));
 
     expect(result).toEqual(
       expect.objectContaining({
@@ -610,57 +1191,6 @@ describe('useSessionActions', () => {
     await expect(
       actions.createSession(createSessionPayload('new-session-while-loading' as SessionId))
     ).resolves.toMatchObject({ sessionId: 'new-session-while-loading' });
-  });
-
-  it('allows creation while workspace id atom is pending if runtime matches the route slug', async () => {
-    const sessionId = 'session-create-workspace-id-pending' as SessionId;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const runtime = createRuntime({
-      repo: { upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
-    });
-    const actions = await renderActions(runtime, {
-      workspaceId: null,
-      workspaceSlug: 'workspace-slug',
-    });
-
-    await expect(actions.createSession(createSessionPayload(sessionId))).resolves.toEqual(
-      expect.objectContaining({
-        sessionId,
-        sessionMeta: expect.objectContaining({ id: sessionId }),
-      })
-    );
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ id: sessionId })
-    );
-  });
-
-  it('records daily active user when creating a child session', async () => {
-    const sessionId = 'session-child-create' as SessionId;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const runtime = createRuntime({
-      repo: { upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
-    });
-    const actions = await renderActions(runtime);
-
-    await actions.createSession({
-      ...createSessionPayload(sessionId),
-      parentSessionId: 'parent-session-id' as SessionId,
-    });
-
-    expect(recordMyWorkspaceDailyActiveUser).toHaveBeenCalledWith({
-      workspaceId: runtime.workspaceId,
-    });
-  });
-
-  it('does not record daily activity while Convex authentication is recovering', async () => {
-    convexAuthState.isAuthenticated = false;
-    const runtime = createRuntime({});
-    const actions = await renderActions(runtime);
-
-    await actions.createSession(createSessionPayload('session-auth-recovery' as SessionId));
-
-    expect(recordMyWorkspaceDailyActiveUser).not.toHaveBeenCalled();
   });
 
   it('does not mutate through a runtime from a different workspace slug', async () => {
@@ -753,7 +1283,8 @@ describe('useSessionActions', () => {
         },
       },
     ];
-    const setState = vi.fn();
+    const control: { humanInputReceipts?: Record<string, { userId: string }> } = {};
+    const setState = (update: (draft: typeof control) => void) => update(control);
     const waitUntilSynced = vi.fn(async () => undefined);
     const upsertDocMeta = vi.fn(() => metaWrite.promise);
     const requestSessionDispatchTurn = vi.fn(async () => ({
@@ -792,7 +1323,7 @@ describe('useSessionActions', () => {
     expect(upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(sessionId), {
       latestUserMsgId: userTurnId,
     });
-    expect(setState).not.toHaveBeenCalled();
+    expect(control.humanInputReceipts?.[userTurnId]).toEqual({ userId: 'user-1' });
     expect(waitUntilSynced).toHaveBeenCalledTimes(1);
 
     metaWrite.resolve();
@@ -914,28 +1445,6 @@ describe('useSessionActions', () => {
     ).rejects.toThrow('meta write failed');
   });
 
-  it('authors the pending user turn through the writer seam on send', async () => {
-    const sessionId = 'session-append-turn-writer' as SessionId;
-    const runtime = createRuntime({});
-    const actions = await renderActions(runtime);
-
-    const entry = await actions.addSessionHistory(sessionId, {
-      role: 'user',
-      userId: 'user-1',
-      items: [{ type: 'text', text: 'hi' }],
-      timestamp: '2026-07-05T00:00:00.000Z',
-      status: 'pending',
-      read: false,
-      finished: true,
-    } as unknown as Parameters<SessionActions['addSessionHistory']>[1]);
-
-    const stored = await runtime.withSessionStore(sessionId, (sessionStore) =>
-      sessionStore.sessionData.history.readTurn(entry.id)
-    );
-    expect(stored).toMatchObject({ state: 'ready', turn: entry });
-    expect(entry.items).toEqual([{ type: 'text', text: 'hi' }]);
-  });
-
   it('mints a fresh turn id when identical content is sent again (undelivered-turn resend)', async () => {
     const sessionId = 'session-resend-new-turn-id' as SessionId;
     const runtime = createRuntime({});
@@ -976,36 +1485,78 @@ describe('useSessionActions', () => {
     expect(resent).toMatchObject({ state: 'ready', turn: { inputConfig: { inputBlocks } } });
   });
 
-  it('preserves the initial history and activity through the extracted submission service', async () => {
-    const sessionId = 'session-aggregate-start' as SessionId;
+  it('selects Roost for new sessions with developer opt-in while experiments are off', async () => {
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    store.set(experimentalFeaturesEnabledAtom, false);
+    store.set(roostHistoryExperimentEnabledAtom, true);
     const runtime = createRuntime({});
-    const actions = await renderActions(runtime);
+    const actions = await renderActions(runtime, { store });
 
-    const result = await actions.startSession(createSessionPayload(sessionId), {
-      role: 'user',
-      userId: 'user-1',
-      items: [{ type: 'text', text: 'hi' }],
-      timestamp: '2026-07-18T00:00:00.000Z',
-      status: 'pending',
-      read: false,
-      finished: true,
-      inputConfig: {
-        inputBlocks: [{ type: 'text', text: 'hi' }],
-        agentType: 'codex',
-      },
-    } as unknown as Parameters<SessionActions['startSession']>[1]);
-
-    const stored = await runtime.withSessionStore(sessionId, (sessionStore) =>
-      sessionStore.sessionData.history.readTurn(result.historyEntry.id)
+    const result = await actions.createSession(
+      createSessionPayload('session-roost-gated' as SessionId)
     );
-    expect(stored).toMatchObject({ state: 'ready', turn: result.historyEntry });
-    expect(result.sessionMeta).toMatchObject({
-      id: sessionId,
-      machineId: 'machine-1',
-      historyBackend: 'loro',
-      lastMessageAt: expect.any(Number),
-    });
-    expect(result.historyEntry.inputConfig?.inputBlocks).toEqual([{ type: 'text', text: 'hi' }]);
+
+    expect(result.sessionMeta.historyBackend).toBe('roost');
+  });
+
+  it.each([
+    { developerMode: false, roostHistory: true },
+    { developerMode: true, roostHistory: false },
+  ])('keeps Loro when a developer gate is off: %j', async ({ developerMode, roostHistory }) => {
+    const store = createStore();
+    store.set(developerModeEnabledAtom, developerMode);
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(roostHistoryExperimentEnabledAtom, roostHistory);
+    const runtime = createRuntime({});
+    const actions = await renderActions(runtime, { store });
+
+    const result = await actions.createSession(
+      createSessionPayload('session-roost-developer-gate-off' as SessionId)
+    );
+
+    expect(result.sessionMeta.historyBackend).toBe('loro');
+  });
+
+  it('keeps creating ordinary Loro sessions on targets without Roost capability', async () => {
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    store.set(experimentalFeaturesEnabledAtom, false);
+    store.set(roostHistoryExperimentEnabledAtom, true);
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime, { store });
+    const result = await actions.createSession(
+      createSessionPayload('old-machine-session' as SessionId)
+    );
+    expect(result.sessionMeta.historyBackend).toBe('loro');
+    expect(metaRepo.repo.upsertDocMeta).toHaveBeenCalledWith(
+      getSessionRoomId(result.sessionId),
+      expect.objectContaining({ historyBackend: 'loro' })
+    );
+  });
+
+  it('rejects explicit Roost creation before metadata, history or warm-up on unsupported targets', async () => {
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime);
+    const payload = {
+      ...createSessionPayload('unsupported-roost-session' as SessionId),
+      historyBackend: 'roost' as const,
+    };
+    await expect(actions.createSession(payload)).rejects.toThrow('Update the machine');
+    await expect(
+      actions.startSession(payload, {
+        role: 'user',
+        userId: 'user-1',
+        timestamp: '2026-10-09T00:00:00.000Z',
+        items: [{ type: 'text', text: 'hello' }],
+        fileDiff: [],
+        inputConfig: { inputBlocks: [{ type: 'text', text: 'hello' }] },
+      } as never)
+    ).rejects.toThrow('Update the machine');
+    expect(metaRepo.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(runtime.ensureDocStream).not.toHaveBeenCalled();
   });
 
   it('keeps a local branch selector out of baseBranch until the target machine resolves it', async () => {
@@ -1044,73 +1595,6 @@ describe('useSessionActions', () => {
     expect(meta).toMatchObject({ id: sessionId });
     expect(meta).not.toHaveProperty('baseBranch');
     expect(meta.project).toMatchObject({ branch: selector });
-  });
-
-  it('fires the Machine RPC fast path and still authors the durable dispatch pointer', async () => {
-    const sessionId = 'session-dispatch-fast-path' as SessionId;
-    const userTurnId = 'user-turn-fast-path';
-    const machineId = 'machine-1' as MachineId;
-    const history = [
-      {
-        id: userTurnId,
-        role: 'user',
-        userId: 'user-1',
-        timestamp: '2026-07-05T00:00:00.000Z',
-        status: 'pending',
-        read: false,
-        inputConfig: {
-          prompt: 'hello',
-          inputBlocks: [{ type: 'text', text: 'hello' }],
-          cliType: 'builtin',
-          agentType: 'codex',
-        },
-      },
-    ];
-    const writerUpsertDocMeta = vi.fn(async () => undefined);
-    const requestSessionDispatchTurn = vi.fn(async () => ({
-      type: 'session/dispatch-turn_response' as const,
-      sessionId,
-      userTurnId,
-      accepted: true,
-      disposition: 'accepted' as const,
-    }));
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta: vi.fn(async () => ({ meta: { machineId } })),
-        upsertDocMeta: vi.fn(async () => undefined),
-      } as unknown as WorkspaceRuntime['repo'],
-      writer: {
-        modeForMachine: () => 'direct' as const,
-        modeForSession: async () => 'direct' as const,
-        upsertDocMeta: writerUpsertDocMeta,
-        appendSessionTurn: vi.fn(async () => 'direct' as const),
-        appendSessionHistory: vi.fn(async () => undefined),
-      } as unknown as WorkspaceRuntime['writer'],
-    }) as WorkspaceRuntime & {
-      withSessionStore: WorkspaceRuntime['withSessionStore'];
-      requestSessionDispatchTurn: WorkspaceRuntime['requestSessionDispatchTurn'];
-    };
-    runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
-      fn({
-        getState: vi.fn(() => ({ history })),
-        sessionData: sessionDataOver(history),
-        setState: vi.fn(),
-        waitUntilSynced: vi.fn(async () => undefined),
-      })
-    ) as unknown as WorkspaceRuntime['withSessionStore'];
-    runtime.requestSessionDispatchTurn =
-      requestSessionDispatchTurn as WorkspaceRuntime['requestSessionDispatchTurn'];
-    const actions = await renderActions(runtime);
-
-    await actions.requestSessionDispatch(sessionId, userTurnId, { machineId });
-
-    // The facade routes local machines over the local socket RPC and remote
-    // machines over the cloud stream; the durable pointer remains recovery truth.
-    expect(requestSessionDispatchTurn).toHaveBeenCalledTimes(1);
-    expect(writerUpsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ latestUserMsgId: userTurnId })
-    );
   });
 
   const userInput = (text: string) =>
@@ -1498,35 +1982,6 @@ describe('useSessionActions', () => {
     expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
   });
 
-  it('restores root containment without changing any close flag', async () => {
-    const tree = createContainmentSessions('root-restore', true);
-    const archivedRoot = { ...tree.rootSession, isTabClosed: true };
-    const child = { ...tree.tabSession, isTabClosed: true };
-    const metaRepo = createSessionMetaRepo([archivedRoot, child, tree.openedSession]);
-    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
-      sessionMetaCache: tree.sessionMetaCache,
-    });
-    await actions.restoreSession(archivedRoot.id);
-    expect(metaRepo.getSession(archivedRoot.id)).toEqual({ ...archivedRoot, isArchived: false });
-    expect(metaRepo.getSession(child.id)).toEqual({ ...child, isArchived: false });
-    expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
-  });
-
-  it('preserves state when closing or restoration writes fail', async () => {
-    const tree = createContainmentSessions('failed-close', true);
-    const metaRepo = createSessionMetaRepo(tree.sessions);
-    metaRepo.repo.upsertDocMeta = async () => {
-      throw new Error('disk full');
-    };
-    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
-      docMetaCacheReady: false,
-    });
-    await expect(actions.setSessionTabClosed(tree.rootSession.id, true)).rejects.toThrow(
-      'disk full'
-    );
-    expect(metaRepo.getSession(tree.rootSession.id)).toEqual(tree.rootSession);
-  });
-
   it.each([false, true])('uses one Repo snapshot even when UI readiness is %s', async (ready) => {
     const tree = createContainmentSessions('snapshot', false);
     const unrelated = { ...tree.rootSession, id: 'unrelated' as SessionId };
@@ -1558,13 +2013,19 @@ describe('useSessionActions', () => {
         sessionMetaCache: { [getSessionRoomId(tree.rootSession.id)]: tree.rootSession },
       });
       await actions.archiveSession(tree.rootSession.id);
-      for (const session of tree.sessions) {
+      for (const session of [tree.rootSession, tree.tabSession]) {
         expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta).toMatchObject({
           isArchived: true,
           status: { type: 'idle' },
         });
       }
-      for (const session of [unrelated, hintOnly, conflicting]) {
+      for (const session of [
+        tree.openedSession,
+        tree.openedFromTabSession,
+        unrelated,
+        hintOnly,
+        conflicting,
+      ]) {
         expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta.isArchived).toBe(false);
       }
       expect(isLoroRepoDocDeleted(await repo.getDocMeta(getSessionRoomId(deleted.id)))).toBe(true);
@@ -1578,7 +2039,7 @@ describe('useSessionActions', () => {
         isTabClosed: true,
       });
       for (const session of [tree.openedSession, tree.openedFromTabSession]) {
-        expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta.isArchived).toBe(true);
+        expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta.isArchived).toBe(false);
       }
       await actions.archiveSession(tree.rootSession.id);
       await actions.deleteArchivedSession(tree.rootSession.id);
@@ -1590,7 +2051,7 @@ describe('useSessionActions', () => {
       for (const session of [tree.openedSession, tree.openedFromTabSession]) {
         const entry = await repo.getDocMeta(getSessionRoomId(session.id));
         expect(isLoroRepoDocDeleted(entry)).toBe(false);
-        expect(entry?.meta.isArchived).toBe(true);
+        expect(entry?.meta.isArchived).toBe(false);
       }
       expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
     } finally {
@@ -1684,10 +2145,14 @@ describe('useSessionActions', () => {
     });
     finish.resolve();
     await result;
-    for (const session of tree.sessions) {
+    for (const session of [tree.rootSession, tree.tabSession]) {
       expect(original.getSession(session.id)?.isArchived).toBe(true);
-      expect(replacement.getSession(session.id)).toEqual(session);
     }
+    for (const session of [tree.openedSession, tree.openedFromTabSession]) {
+      expect(original.getSession(session.id)).toEqual(session);
+    }
+    for (const session of tree.sessions)
+      expect(replacement.getSession(session.id)).toEqual(session);
     expect(original.getSession(lateChild.id)).toEqual(lateChild);
   });
 
@@ -1712,53 +2177,189 @@ describe('useSessionActions', () => {
       throw new Error('terminal unavailable');
     });
     await actions.archiveSession(tree.rootSession.id);
-    for (const session of tree.sessions)
+    for (const session of [tree.rootSession, tree.tabSession])
       expect(metaRepo.getSession(session.id)?.isArchived).toBe(true);
+    for (const session of [tree.openedSession, tree.openedFromTabSession])
+      expect(metaRepo.getSession(session.id)).toEqual(session);
   });
 
-  it('archives tabs and recursively opened sessions, leaving unrelated sessions active', async () => {
-    const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
-      createContainmentSessions('archive', false);
-    const grandchild = {
-      ...openedSession,
-      id: 'archive-grandchild' as SessionId,
-      openedBySessionId: openedSession.id,
-    };
-    const unrelated = { ...rootSession, id: 'archive-unrelated' as SessionId };
-    sessionMetaCache[getSessionRoomId(grandchild.id)] = grandchild;
-    sessionMetaCache[getSessionRoomId(unrelated.id)] = unrelated;
-    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
-    const runtime = createRuntime({ repo: metaRepo.repo });
-    const actions = await renderActions(runtime, { sessionMetaCache });
-    sendIpcMock.mockClear();
-
-    await actions.archiveSession(rootSession.id);
-
-    for (const session of [
-      rootSession,
-      tabSession,
-      openedSession,
-      openedFromTabSession,
-      grandchild,
-    ]) {
-      expect(metaRepo.getSession(session.id)).toMatchObject({
-        isArchived: true,
-        status: { type: 'idle' },
+  describe('archive confirmation for opened sub-conversations', () => {
+    const renderConfirmedArchive = async (runtime: WorkspaceRuntime, workingIds: SessionId[]) => {
+      await initI18n('en');
+      const jotaiStore = createStore();
+      jotaiStore.set(runtimeAtom, runtime);
+      jotaiStore.set(docMetaCacheReadyAtom, true);
+      jotaiStore.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
+      jotaiStore.set(currentWorkspaceSlugAtom, 'workspace-slug');
+      const nowMs = 1_000_000;
+      jotaiStore.set(lodyPresenceNowMsAtom, nowMs);
+      jotaiStore.set(
+        lodyPresenceStatesAtom,
+        Object.fromEntries(
+          workingIds.map((sessionId) => [
+            `presence-${sessionId}`,
+            {
+              kind: 'session',
+              sessionId,
+              machineId: 'machine' as MachineId,
+              instanceId: 'instance',
+              status: { type: 'running' },
+              updatedAt: nowMs,
+            },
+          ])
+        ) as never
+      );
+      let archive: ConfirmedArchive | null = null;
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root?.render(
+          createElement(
+            PlatformContext.Provider,
+            { value: testPlatform },
+            createElement(
+              Provider,
+              { store: jotaiStore },
+              createElement(ConfirmedArchiveProbe, {
+                onReady: (next) => {
+                  archive = next;
+                },
+              })
+            )
+          )
+        );
       });
-    }
-    expect(metaRepo.getSession(unrelated.id)).toMatchObject({ isArchived: false });
+      if (!archive) throw new Error('Confirmed archive was not initialized');
+      return archive as ConfirmedArchive;
+    };
 
-    expect(sendIpcMock.mock.calls).toEqual([
-      ['terminal.closeSession', { sessionId: rootSession.id }],
-      ['terminal.closeSession', { sessionId: tabSession.id }],
-      ['terminal.closeSession', { sessionId: openedSession.id }],
-      ['terminal.closeSession', { sessionId: openedFromTabSession.id }],
-      ['terminal.closeSession', { sessionId: grandchild.id }],
-    ]);
-    expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
-    for (const session of [rootSession, openedSession, openedFromTabSession]) {
-      expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toBeUndefined();
-    }
+    const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+    // Wrapped: returning the pending promise would make the caller await the answer.
+    const startArchive = async (
+      archive: ConfirmedArchive,
+      sessionId: SessionId,
+      options?: { confirm?: boolean }
+    ) => {
+      let result!: Promise<boolean>;
+      await act(async () => {
+        result = archive(sessionId, options);
+      });
+      await vi.waitFor(() => expect(dialog()).not.toBeNull());
+      return { result };
+    };
+    const answer = async (label: string) => {
+      const button = Array.from(dialog()!.querySelectorAll('button')).find(
+        (candidate) => candidate.textContent?.trim() === label
+      );
+      expect(button).toBeInstanceOf(HTMLButtonElement);
+      await act(async () => button!.click());
+    };
+
+    const createTree = (prefix: string) => {
+      const tree = createContainmentSessions(prefix, false);
+      const openedTab = {
+        ...tree.tabSession,
+        id: `${prefix}-opened-tab` as SessionId,
+        parentSessionId: tree.openedSession.id,
+        openedBySessionId: tree.openedSession.id,
+      };
+      const archivedOpened = {
+        ...tree.openedSession,
+        id: `${prefix}-archived-opened` as SessionId,
+        isArchived: true,
+      };
+      const metaRepo = createSessionMetaRepo([...tree.sessions, openedTab, archivedOpened]);
+      return { ...tree, openedTab, archivedOpened, metaRepo };
+    };
+
+    it('counts active and working sub-conversations, then archives the whole tree', async () => {
+      const tree = createTree('confirm-all');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      // Work in an opened Session's own Tab makes that sub-conversation working.
+      const archive = await renderConfirmedArchive(runtime, [tree.openedTab.id]);
+
+      const { result } = await startArchive(archive, tree.rootSession.id);
+      expect(dialog()?.textContent).toContain(
+        'This conversation opened 2 active sub-conversations.'
+      );
+      expect(dialog()?.textContent).toContain('1 is still working; archiving it stops that work.');
+      // Nothing is written while the user decides.
+      expect(tree.metaRepo.getSession(tree.rootSession.id)?.isArchived).toBe(false);
+
+      await answer('Archive all');
+      await expect(result).resolves.toBe(true);
+      for (const session of [
+        tree.rootSession,
+        tree.tabSession,
+        tree.openedSession,
+        tree.openedTab,
+        tree.openedFromTabSession,
+      ]) {
+        expect(tree.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+      }
+      expect(dialog()).toBeNull();
+    });
+
+    it('archives only the conversation and its Tabs, or nothing on cancel', async () => {
+      const tree = createTree('confirm-only');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const archive = await renderConfirmedArchive(runtime, []);
+
+      const { result: cancelled } = await startArchive(archive, tree.rootSession.id);
+      expect(dialog()?.textContent).toContain('None of them is working right now.');
+      await answer('Cancel');
+      await expect(cancelled).resolves.toBe(false);
+      expect(tree.metaRepo.getSession(tree.rootSession.id)?.isArchived).toBe(false);
+
+      const { result: onlyThis } = await startArchive(archive, tree.rootSession.id);
+      await answer('Archive this only');
+      await expect(onlyThis).resolves.toBe(true);
+      for (const session of [tree.rootSession, tree.tabSession]) {
+        expect(tree.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+      }
+      for (const session of [tree.openedSession, tree.openedTab, tree.openedFromTabSession]) {
+        expect(tree.metaRepo.getSession(session.id)?.isArchived).toBe(false);
+      }
+    });
+
+    it('archives directly when every opened sub-conversation is already archived', async () => {
+      const tree = createTree('confirm-none');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const archive = await renderConfirmedArchive(runtime, []);
+
+      await act(async () => {
+        await expect(archive(tree.archivedOpened.id)).resolves.toBe(true);
+      });
+      expect(dialog()).toBeNull();
+      expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.isArchived).toBe(true);
+    });
+
+    it('asks one question when confirmation is always required', async () => {
+      const tree = createTree('confirm-always');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const archive = await renderConfirmedArchive(runtime, []);
+
+      // Without sub-conversations, the shared dialog asks the plain question.
+      const { result: plain } = await startArchive(archive, tree.archivedOpened.id, {
+        confirm: true,
+      });
+      expect(dialog()?.textContent).toContain('Archive chat?');
+      expect(dialog()?.textContent).not.toContain('sub-conversation');
+      await answer('Archive');
+      await expect(plain).resolves.toBe(true);
+      expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.isArchived).toBe(true);
+
+      // With them, the sub-conversation choice is the only dialog.
+      const { result: treeArchive } = await startArchive(archive, tree.rootSession.id, {
+        confirm: true,
+      });
+      expect(document.querySelectorAll('[role="alertdialog"]')).toHaveLength(1);
+      expect(dialog()?.textContent).toContain('Archive sub-conversations too?');
+      await answer('Archive all');
+      await expect(treeArchive).resolves.toBe(true);
+      expect(tree.metaRepo.getSession(tree.openedSession.id)?.isArchived).toBe(true);
+    });
   });
 
   it.each([
@@ -1773,6 +2374,7 @@ describe('useSessionActions', () => {
         `held-${action}-${settle}`,
         action !== 'archiveSession'
       );
+      tree.openedSession.isArchived = false;
       const metaRepo = createSessionMetaRepo(tree.sessions);
       const runtime = createRuntime({ repo: metaRepo.repo });
       const actions = await renderActions(runtime);
@@ -1786,14 +2388,24 @@ describe('useSessionActions', () => {
         dispatch: true,
         attachments: [imageDraft('att-tab')],
       });
-      const [rootPreparation] = heldPreparations;
+      const openedSend = await actions.addSessionHistory(
+        tree.openedSession.id,
+        userInput('opened'),
+        {
+          dispatch: true,
+          attachments: [imageDraft('att-opened')],
+        }
+      );
+      const [rootPreparation, , openedPreparation] = heldPreparations;
 
       const running = actions[action](tree.rootSession.id);
       await whenAborted(rootPreparation.signal);
       rootPreparation[settle]();
       await expect(running).resolves.toBeUndefined();
 
-      expect(runtime.pendingSends?.getSnapshot()).toEqual([]);
+      expect(runtime.pendingSends?.getSnapshot().map((send) => send.id)).toEqual([openedSend.id]);
+      expect(openedPreparation.signal.aborted).toBe(false);
+      expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
       const written = await readHistory(runtime, tree.rootSession.id);
       expect(written.map((turn) => turn.id)).not.toContain(rootSend.id);
       expect(written.map((turn) => turn.id)).not.toContain(tabSend.id);
@@ -1803,6 +2415,11 @@ describe('useSessionActions', () => {
           expect(metaRepo.getSession(session.id)?.latestUserMsgId).toBeUndefined();
         } else expect(metaRepo.getSession(session.id)).toBeUndefined();
       }
+      openedPreparation.finish();
+      await whenSessionDrained(runtime.pendingSends!, tree.openedSession.id);
+      expect((await readHistory(runtime, tree.openedSession.id)).map((turn) => turn.id)).toContain(
+        openedSend.id
+      );
     }
   );
 
@@ -1868,11 +2485,15 @@ describe('useSessionActions', () => {
     }
   });
 
-  it('archives an already archived root again to repair descendants, tolerating opener cycles', async () => {
-    const { rootSession, openedSession, sessions, sessionMetaCache } = createContainmentSessions(
-      'retry',
-      false
-    );
+  it('archives an already archived root again to repair tabs without following opener cycles', async () => {
+    const {
+      rootSession,
+      tabSession,
+      openedSession,
+      openedFromTabSession,
+      sessions,
+      sessionMetaCache,
+    } = createContainmentSessions('retry', false);
     rootSession.isArchived = true;
     rootSession.openedBySessionId = openedSession.id;
     const metaRepo = createSessionMetaRepo(sessions);
@@ -1883,8 +2504,11 @@ describe('useSessionActions', () => {
     await actions.archiveSession(rootSession.id);
     await actions.archiveSession(rootSession.id);
 
-    for (const session of sessions) {
+    for (const session of [rootSession, tabSession]) {
       expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: true });
+    }
+    for (const session of [openedSession, openedFromTabSession]) {
+      expect(metaRepo.getSession(session.id)).toEqual(session);
     }
   });
 
@@ -1937,12 +2561,35 @@ describe('useSessionActions', () => {
         throw new Error('Session metadata is still loading');
       },
     });
-    const actions = await renderActions(runtime, { sessionMetaCache, docMetaCacheReady: false });
+    const store = createStore();
+    const targetLease = editRunConfigDraft(store, tabSession.id);
+    editRunConfigDraft(store, rootSession.id);
+    editRunConfigDraft(store, tabSession.id, 'other-workspace');
+    const actions = await renderActions(runtime, {
+      store,
+      sessionMetaCache,
+      docMetaCacheReady: false,
+    });
 
     await actions.deleteSessions([tabSession.id]);
 
     expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: false });
     expect(metaRepo.getSession(tabSession.id)).toBeUndefined();
+    expect(
+      [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => [
+        scope.workspaceId,
+        scope.sessionId,
+      ])
+    ).toEqual([
+      ['workspace-1', rootSession.id],
+      ['other-workspace', tabSession.id],
+    ]);
+    expect(targetLease.active).toBe(false);
+    store.set(editSessionRunConfigDraftAtom, {
+      lease: targetLease,
+      edit: { type: 'config', configId: 'fast', value: true },
+    });
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(2);
     expect(metaRepo.getSession(openedSession.id)).toMatchObject({
       isArchived: false,
       openedBySessionId: rootSession.id,
@@ -1961,27 +2608,7 @@ describe('useSessionActions', () => {
     }
   });
 
-  it('cleans up a partially created child absent from the metadata cache', async () => {
-    const rootSessionId = 'partial-create-root' as SessionId;
-    const childSession = {
-      id: 'partial-create-child' as SessionId,
-      parentSessionId: rootSessionId,
-      createdAt: '2026-09-10T00:00:00.000Z',
-    } as SessionMeta;
-    const metaRepo = createSessionMetaRepo([childSession]);
-    const runtime = createRuntime({ repo: metaRepo.repo });
-    const actions = await renderActions(runtime);
-
-    expect(metaRepo.getSession(childSession.id)).toMatchObject({
-      parentSessionId: rootSessionId,
-    });
-
-    await actions.deleteSessions([childSession.id]);
-
-    expect(metaRepo.getSession(childSession.id)).toBeUndefined();
-  });
-
-  it('keeps archived opened Sessions and their machine queues after archive then delete', async () => {
+  it('keeps active opened Sessions and their machine queues after archive then delete', async () => {
     const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
       createContainmentSessions('archive-delete', false);
     for (const session of [openedSession, openedFromTabSession]) {
@@ -2003,29 +2630,39 @@ describe('useSessionActions', () => {
       },
     });
     const runtime = createRuntime({ repo: metaRepo.repo });
+    const store = createStore();
+    editRunConfigDraft(store, rootSession.id);
+    editRunConfigDraft(store, tabSession.id);
+    editRunConfigDraft(store, openedSession.id);
+    const drafts = store.get(sessionRunConfigDraftsAtom);
     const actions = await renderActions(runtime, {
+      store,
       docMetaCacheReady: true,
       sessionMetaCache,
     });
 
     await actions.archiveSession(rootSession.id);
+    expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
     for (const session of [openedSession, openedFromTabSession]) {
-      expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: true });
+      expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: false });
     }
     vi.mocked(runtime.writer.flockRowPut).mockClear();
     vi.mocked(runtime.writer.flockRowDelete).mockClear();
     vi.mocked(runtime.writer.deleteDoc).mockClear();
 
     await actions.deleteArchivedSession(rootSession.id);
+    expect(
+      [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => scope.sessionId)
+    ).toEqual([openedSession.id]);
 
     expect(metaRepo.getSession(rootSession.id)).toBeUndefined();
     expect(metaRepo.getSession(tabSession.id)).toBeUndefined();
     expect(metaRepo.getSession(openedSession.id)).toMatchObject({
-      isArchived: true,
+      isArchived: false,
       openedBySessionId: rootSession.id,
     });
     expect(metaRepo.getSession(openedFromTabSession.id)).toMatchObject({
-      isArchived: true,
+      isArchived: false,
       openedBySessionId: tabSession.id,
       openedByRootSessionId: rootSession.id,
     });
@@ -2050,60 +2687,6 @@ describe('useSessionActions', () => {
         [openedSession.id]: true,
         [openedFromTabSession.id]: true,
       },
-    });
-  });
-});
-
-describe('resolveSessionChatType', () => {
-  it('distinguishes side chats from regular sessions', () => {
-    expect(resolveSessionChatType({ childSessionPlacement: 'side-panel' })).toBe('side_chat');
-    expect(resolveSessionChatType({})).toBe('regular');
-    expect(resolveSessionChatType(undefined)).toBe('regular');
-  });
-});
-
-describe('countSessionMentions', () => {
-  it('counts each sent mention kind and ignores pasted-text spans', () => {
-    expect(
-      countSessionMentions([
-        {
-          type: 'text',
-          text: '@src @dir #12 $review /test @session @role pasted',
-          spans: [
-            { start: 0, end: 4, kind: 'file', label: '@src' },
-            { start: 5, end: 9, kind: 'dir', label: '@dir' },
-            { start: 10, end: 13, kind: 'issue', label: '#12' },
-            { start: 14, end: 21, kind: 'skill', label: '$review' },
-            { start: 22, end: 27, kind: 'command', label: '/test' },
-            { start: 28, end: 36, kind: 'session', label: '@session' },
-            { start: 37, end: 42, kind: 'agent_role', label: '@role' },
-            { start: 43, end: 49, kind: 'pasted_text', label: 'pasted' },
-          ],
-        },
-        {
-          type: 'text',
-          text: '#34 pull request',
-          spans: [{ start: 0, end: 3, kind: 'pr', label: '#34' }],
-        },
-      ])
-    ).toEqual({
-      mention_count: 8,
-      mention_types: ['file', 'dir', 'issue', 'pr', 'skill', 'session', 'command', 'agent_role'],
-      mention_file_count: 1,
-      mention_dir_count: 1,
-      mention_issue_count: 1,
-      mention_pr_count: 1,
-      mention_skill_count: 1,
-      mention_session_count: 1,
-      mention_command_count: 1,
-      mention_agent_role_count: 1,
-    });
-  });
-
-  it('returns zero counts when the message has no mentions', () => {
-    expect(countSessionMentions(undefined)).toMatchObject({
-      mention_count: 0,
-      mention_types: [],
     });
   });
 });

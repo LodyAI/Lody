@@ -10,7 +10,7 @@ import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Select } from '@lody/ui/select';
 import { Dialog } from '@/ui/dialog';
-import { formatDate, formatUsd } from './billing-setting-pure';
+import { formatDate } from './billing-setting-pure';
 import { settingsSurface as surface } from './surface';
 
 const styles = stylex.create({
@@ -55,13 +55,14 @@ export type SeatInvitePreview =
       status: 'billed';
       interval: 'month' | 'year';
       /** Per-seat list price for the current interval. */
-      unitAmount: number;
+      unitAmount: number | null;
       /** Estimated charge on acceptance; null when the period is unknown. */
       proratedAmount: number | null;
       currentPeriodEnd: number | null;
       seatCount: number;
       nextSeatCount: number;
-      nextRenewalAmount: number;
+      nextRenewalAmount: number | null;
+      currency?: string;
     };
 
 export interface InviteMemberDialogProps {
@@ -245,12 +246,8 @@ export function InviteMemberDialog({
   );
 }
 
-/**
- * Seat cost for this invitation. A paid workspace is charged the prorated
- * remainder of the current period the moment the invitee accepts, so the
- * amount is an estimate until Stripe settles it at that point.
- */
-function SeatCostNotice({ preview }: { preview?: SeatInvitePreview | null }) {
+/** Admission accrues a daily-prorated charge; collection happens later. */
+export function SeatCostNotice({ preview }: { preview?: SeatInvitePreview | null }) {
   const { t } = useTranslation();
 
   if (preview === null) return null;
@@ -273,6 +270,11 @@ function SeatCostNotice({ preview }: { preview?: SeatInvitePreview | null }) {
     );
   }
 
+  const formatAmount = (amount: number) =>
+    new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: preview.currency ?? 'usd',
+    }).format(amount / 100);
   const yearly = preview.interval === 'year';
   return (
     <div {...stylex.props(surface.formBlock)}>
@@ -282,26 +284,26 @@ function SeatCostNotice({ preview }: { preview?: SeatInvitePreview | null }) {
           {preview.proratedAmount === null
             ? t('workspace.invite.seat.amountUnknown')
             : t('workspace.invite.seat.approxAmount', {
-                amount: formatUsd(preview.proratedAmount),
+                amount: formatAmount(preview.proratedAmount),
               })}
         </span>
       </div>
       <p {...stylex.props(styles.costNote)}>
         {yearly
-          ? t('workspace.invite.seat.chargeNoteYear', { price: formatUsd(preview.unitAmount) })
-          : t('workspace.invite.seat.chargeNoteMonth', { price: formatUsd(preview.unitAmount) })}
+          ? t('workspace.invite.seat.chargeNoteYear')
+          : t('workspace.invite.seat.chargeNoteMonth')}
       </p>
-      {preview.currentPeriodEnd !== null && (
+      {preview.currentPeriodEnd !== null && preview.nextRenewalAmount !== null && (
         <p {...stylex.props(styles.costNote, styles.renewal)}>
           {yearly
             ? t('workspace.invite.seat.renewalYear', {
                 date: formatDate(preview.currentPeriodEnd),
-                amount: formatUsd(preview.nextRenewalAmount),
+                amount: formatAmount(preview.nextRenewalAmount),
                 seats: preview.nextSeatCount,
               })
             : t('workspace.invite.seat.renewalMonth', {
                 date: formatDate(preview.currentPeriodEnd),
-                amount: formatUsd(preview.nextRenewalAmount),
+                amount: formatAmount(preview.nextRenewalAmount),
                 seats: preview.nextSeatCount,
               })}
         </p>

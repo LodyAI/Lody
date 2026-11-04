@@ -105,6 +105,10 @@ export const ClaudeWithRateLimit: Story = {
   },
 };
 
+export const ClaudeWithRateLimitNarrow: Story = {
+  args: { ...ClaudeWithRateLimit.args, narrow: true, showActions: true },
+};
+
 export const ClaudeEnvOverrideHidesRateLimit: Story = {
   args: {
     config: makeConfig({
@@ -146,11 +150,7 @@ export const CodexSpark: Story = {
     config: makeConfig({ name: 'Codex Spark', cliType: 'builtin', agentType: 'codex' }),
     machine: makeMachine({
       raceLimits: {
-        [getRateLimitEntryKey(
-          'codex',
-          CODEX_SPARK_LIMIT_ID,
-          'cfg-codex' as AgentConfigId
-        )]: {
+        [getRateLimitEntryKey('codex', CODEX_SPARK_LIMIT_ID, 'cfg-codex' as AgentConfigId)]: {
           limitId: CODEX_SPARK_LIMIT_ID,
           scope: { providerId: 'codex' },
           planName: 'Codex Spark',

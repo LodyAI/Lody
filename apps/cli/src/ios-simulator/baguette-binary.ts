@@ -7,7 +7,7 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { pipeline } from 'node:stream/promises';
 import * as tar from 'tar';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { withFileLock } from '@/utils/file-lock';
+import { fileLocksLegacy } from '@/utils/file-lock';
 import { getCliHttpFetch } from '@/utils/http-transport';
 import manifest from './baguette-manifest.json';
 import notices from './baguette-notices.json';
@@ -25,7 +25,7 @@ export async function ensureBaguetteBinary(
   if (`${process.platform}-${process.arch}` !== manifest.platform)
     throw new Error('Baguette requires Apple Silicon macOS 15 or newer.');
   const root = join(getLodyDataDir(), 'runtimes', 'baguette', manifest.version);
-  return withFileLock(
+  return fileLocksLegacy.withLock(
     `baguette-${manifest.version}`,
     async () => {
       signal.throwIfAborted();
@@ -104,6 +104,6 @@ export async function ensureBaguetteBinary(
         await rm(scratch, { recursive: true, force: true });
       }
     },
-    { locksDir: join(root, 'locks'), timeout: 300_000 }
+    { locksDir: join(root, 'locks'), timeout: 300_000, signal }
   );
 }

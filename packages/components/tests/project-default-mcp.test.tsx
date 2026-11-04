@@ -1,0 +1,743 @@
+// @vitest-environment jsdom
+// @vitest-environment jsdom
+import { act } from 'react';
+import i18next from 'i18next';
+import { Toast } from '@lody/ui';
+import { toastManager, toast } from '../src/lib/toast';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import { buildSessionDoc, reimport, FIXTURE_SESSION_ID } from './conversation-view-fixtures';
+import { PlatformContext } from '@lody/platform/react';
+import { createLocalPlatformProvider, type PlatformSyncMode } from '@lody/platform';
+import { TEST_CLOUD_PLATFORM } from './test-platform';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createStore, Provider } from 'jotai';
+import {
+  getProjectMcpKey,
+  createHistoryWriter,
+  buildPendingUserHistoryEntry,
+  buildSessionTurnInputConfig,
+  resolveSessionConversationConfig,
+  workspaceFlockKeys,
+  type LocalProjectId,
+  type McpServerId,
+  type ProjectRef,
+  type WorkspaceId,
+  type WorkspaceMcpServerMeta,
+} from '@lody/shared';
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { ProjectDefaultMcpTab } from '../src/components/settings/project-default-mcp-tab';
+import { putProjectMcpDefault } from '../src/lib/workspace-catalog-write';
+import {
+  useSessionMcpSelection,
+  type SessionMcpDefaultsTarget,
+  type SessionMcpSelection,
+} from '../src/hooks/use-session-mcp-selection';
+import {
+  reportMcpDefaultsBlocked,
+  McpDefaultsRecovery,
+} from '../src/components/chat/mcp-defaults-recovery';
+import { initI18n } from '../src/i18n';
+import type {
+  ProjectMcpDefaultAccess,
+  ProjectMcpDefaultTarget,
+} from '../src/lib/workspace-catalog-write';
+
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+
+const server = (id: string, name: string, extra: Partial<WorkspaceMcpServerMeta> = {}) =>
+  ({
+    id: id as McpServerId,
+    name,
+    transport: 'stdio',
+    connection: { transport: 'stdio', command: `mcp-${id}` },
+    createdAt: 1,
+    updatedAt: 1,
+    ...extra,
+  }) satisfies WorkspaceMcpServerMeta;
+
+const projectA: ProjectRef = { kind: 'local', localProjectId: 'project-a' as LocalProjectId };
+const projectB: ProjectRef = { kind: 'local', localProjectId: 'project-b' as LocalProjectId };
+const keyOf = (project: ProjectRef) => getProjectMcpKey(project, 'machine-1')!;
+
+/**
+ * A workspace document whose rows live in memory. A put commits the row and
+ * emits the Flock event synchronously, as a local durable write does, so the
+ * shared catalog room — not a mock of it — carries the change to every hook.
+ * Opening the document waits on `open()`, so tests decide when it is readable.
+ */
+function createWorkspace(workspaceId: string, rows: Array<[readonly string[], unknown]>) {
+  const store = new Map(rows.map(([key, value]) => [JSON.stringify(key), { key, value }]));
+  const listeners = new Set<(batch: unknown) => void>();
+  let open!: () => void;
+  let fail!: (error: Error) => void;
+  let opened = new Promise<void>((resolve, reject) => {
+    open = resolve;
+    fail = reject;
+  });
+  let sync!: () => void;
+  const firstSyncedWithRemote = new Promise<void>((resolve) => {
+    sync = resolve;
+  });
+  const flock = {
+    scan: (options?: { prefix?: readonly unknown[] }) =>
+      [...store.values()].filter(({ key }) => key[0] === options?.prefix?.[0]),
+    subscribe: (listener: (batch: unknown) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  const put = (key: readonly string[], value: unknown) => {
+    store.set(JSON.stringify(key), { key, value });
+    for (const listener of listeners) listener({ events: [{ key, value }] });
+  };
+  const runtime = {
+    workspaceId: workspaceId as WorkspaceId,
+    repo: {
+      openFlockDoc: async () => {
+        await opened;
+        return {
+          flock,
+          joinRoom: async () => ({
+            unsubscribe: () => {},
+            firstSyncedWithRemote,
+          }),
+          syncOnce: async () => {},
+        };
+      },
+    },
+    writer: {
+      flockRowPut: async (_docId: string, key: readonly string[], value: unknown) =>
+        put(key, value),
+      flockRowDelete: async () => {},
+    },
+  } as unknown as WorkspaceRuntime;
+  return {
+    runtime,
+    open,
+    fail,
+    recover: () => {
+      opened = Promise.resolve();
+    },
+    sync,
+    put,
+    rowOf: (key: readonly string[]) => store.get(JSON.stringify(key))?.value,
+  };
+}
+
+const settle = async () => {
+  await act(async () => {
+    for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+  });
+};
+
+let root: Root;
+let container: HTMLDivElement;
+let store: ReturnType<typeof createStore>;
+beforeEach(async () => {
+  await initI18n('en');
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  store = createStore();
+});
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+  vi.restoreAllMocks();
+});
+
+const catalogRows = (): Array<[readonly string[], unknown]> => [
+  [
+    workspaceFlockKeys.mcpServer('files' as McpServerId),
+    server('files', 'Files', { enabledByDefault: true }),
+  ],
+  [workspaceFlockKeys.mcpServer('search' as McpServerId), server('search', 'Search')],
+  [
+    workspaceFlockKeys.mcpServer('db' as McpServerId),
+    server('db', 'Database', { enabledByDefault: true }),
+  ],
+];
+
+function appendMcpTurn(
+  writer: ReturnType<typeof createHistoryWriter>,
+  id: string,
+  inputConfig: ReturnType<typeof buildSessionTurnInputConfig>
+) {
+  writer.append({
+    id,
+    ...buildPendingUserHistoryEntry({
+      userId: 'user-1',
+      inputBlocks: inputConfig.inputBlocks ?? [],
+      inputConfig,
+      timestamp: '2026-10-30T00:00:00.000Z',
+    })!,
+  });
+}
+
+/** Renders the composer hook and records the selection of EVERY render. */
+function renderSelection(props: {
+  persistedIds?: readonly McpServerId[];
+  existingSession?: boolean;
+  scopeKey?: string;
+  defaultsTarget?: SessionMcpDefaultsTarget;
+  syncMode?: PlatformSyncMode;
+  executePlan?: (selection: SessionMcpSelection) => Promise<void>;
+}) {
+  const renders: SessionMcpSelection[] = [];
+  let latest!: SessionMcpSelection;
+  function Probe(current: typeof props) {
+    latest = useSessionMcpSelection(current.persistedIds, {
+      existingSession: current.existingSession,
+      scopeKey: current.scopeKey,
+      defaultsTarget: current.defaultsTarget,
+    });
+    renders.push(latest);
+    return (
+      <>
+        <Toast.Provider manager={toastManager} />
+        {current.executePlan ? (
+          <button onClick={() => void current.executePlan!(latest)}>Execute plan</button>
+        ) : null}
+        {latest.defaultsFailed && !current.executePlan ? (
+          <McpDefaultsRecovery onRetry={latest.retryDefaults} onSendWithoutMcp={() => {}} />
+        ) : null}
+      </>
+    );
+  }
+  const render = (next: typeof props) =>
+    act(() =>
+      root.render(
+        <Provider store={store}>
+          <PlatformContext.Provider
+            value={
+              next.syncMode && next.syncMode !== 'local'
+                ? { ...TEST_CLOUD_PLATFORM, sync: { mode: next.syncMode } }
+                : createLocalPlatformProvider({
+                    session: TEST_CLOUD_PLATFORM.identity.session,
+                    workspaces: TEST_CLOUD_PLATFORM.workspaces.state,
+                  })
+            }
+          >
+            <Probe {...next} />
+          </PlatformContext.Provider>
+        </Provider>
+      )
+    );
+  render(props);
+  return { renders, render, current: () => latest };
+}
+
+describe('composer MCP selection', () => {
+  it.each([false, true])('local mode waits only for its document (empty=%s)', async (empty) => {
+    const workspace = createWorkspace('workspace-1', empty ? [] : catalogRows());
+    store.set(runtimeAtom, workspace.runtime);
+    const view = renderSelection({ defaultsTarget: { project: projectA, machineId: 'machine-1' } });
+    await settle();
+    expect(view.current().ready).toBe(false);
+
+    workspace.open();
+    await settle();
+    expect(view.current()).toMatchObject({
+      ready: true,
+      selectedIds: empty ? [] : ['db', 'files'],
+    });
+  });
+
+  it.each(['cloud', 'dual'] as const)(
+    'sends %s defaults from the local snapshot without waiting for catch-up',
+    async (syncMode) => {
+      const workspace = createWorkspace('workspace-1', []);
+      store.set(runtimeAtom, workspace.runtime);
+      const view = renderSelection({
+        syncMode,
+        defaultsTarget: { project: projectA, machineId: 'machine-1' },
+      });
+      expect(view.current().ready).toBe(false);
+      workspace.open();
+      await settle();
+      expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
+      act(() => {
+        for (const [key, value] of catalogRows()) workspace.put(key, value);
+      });
+      await settle();
+      expect(view.current()).toMatchObject({ ready: true, selectedIds: ['db', 'files'] });
+      // A project row arriving with catch-up updates the unsent selection.
+      act(() =>
+        workspace.put(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search'] })
+      );
+      workspace.sync();
+      await settle();
+      expect(view.current()).toMatchObject({ ready: true, selectedIds: ['search'] });
+    }
+  );
+
+  it('reports unreadable defaults as a failure, never as an empty selection', async () => {
+    const workspace = createWorkspace('workspace-1', catalogRows());
+    store.set(runtimeAtom, workspace.runtime);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const view = renderSelection({ defaultsTarget: { project: projectA, machineId: 'machine-1' } });
+    workspace.fail(new Error('storage unavailable'));
+    await settle();
+    expect(view.current()).toMatchObject({ ready: false, defaultsFailed: true });
+    // Existing conversations remain sendable during the same catalog outage.
+    view.render({ existingSession: true });
+    expect(view.current().ready).toBe(true);
+    view.render({ defaultsTarget: { project: projectA, machineId: 'machine-1' } });
+    workspace.recover();
+    act(() =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Retry')!
+        .click()
+    );
+    await settle();
+    expect(view.current()).toMatchObject({
+      ready: true,
+      defaultsFailed: false,
+      selectedIds: ['db', 'files'],
+    });
+    expect(container.querySelector('[role=alert]')).toBeNull();
+    expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toBeUndefined();
+    error.mockRestore();
+  });
+
+  it.each(['loading', 'stale-toast', 'double-click'] as const)(
+    'guards plan execution and recovery toast actions (%s)',
+    async (scenario) => {
+      const failed = scenario !== 'loading';
+      const workspace = createWorkspace('shortcut-workspace', catalogRows());
+      store.set(runtimeAtom, workspace.runtime);
+      const view = renderSelection({});
+      act(() => view.current().acceptSend('shortcut-session', true));
+      const doc = buildSessionDoc([]);
+      const writer = createHistoryWriter(doc);
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      if (failed) workspace.fail(new Error('storage unavailable'));
+      await settle();
+      const writePlan = async (ids: readonly McpServerId[]) => {
+        const blocks = [{ type: 'text' as const, text: 'Implement the plan' }];
+        appendMcpTurn(
+          writer,
+          `plan-turn-${writer.readStored().length}`,
+          buildSessionTurnInputConfig({
+            inputBlocks: blocks,
+            cliType: 'builtin',
+            agentType: 'codex',
+            mcpServerIds: ids,
+          })
+        );
+        return true;
+      };
+      const published = vi.spyOn(toastManager, 'add');
+      const executePlan = async (selection: SessionMcpSelection) => {
+        await selection.send('shortcut-session', undefined, writePlan, (blockedFailed) =>
+          reportMcpDefaultsBlocked(
+            i18next.t,
+            blockedFailed,
+            selection.retryDefaults,
+            () => {
+              void selection.send(
+                'shortcut-session',
+                { mcpServerIds: [], skipMcpOnce: true },
+                writePlan,
+                () => {}
+              );
+            },
+            'shortcut-session',
+            selection.recoveryGeneration
+          )
+        );
+      };
+      const props = {
+        existingSession: true,
+        scopeKey: 'shortcut-session',
+        persistedIds: [] as McpServerId[],
+        executePlan,
+      };
+      view.render(props);
+      const button = (label: string) =>
+        [...document.body.querySelectorAll('button')].find((node) => node.textContent === label)!;
+      await act(async () => button('Execute plan').click());
+      expect(writer.readStored()).toEqual([]);
+      expect(document.body.textContent).toContain(
+        failed
+          ? 'Default MCP servers couldn’t be read'
+          : 'Loading this project’s default MCP servers…'
+      );
+      if (failed) expect(document.body.textContent).toContain('Send without MCP');
+      // Keep the published handler to model a click already queued by the UI,
+      // even after the toast starts closing.
+      const action = published.mock.calls[0]![0].actionProps?.onClick;
+      const residualClick = () => action?.({} as never);
+      if (scenario === 'double-click') {
+        await act(async () => {
+          residualClick();
+          residualClick();
+        });
+        expect(writer.readStored()).toHaveLength(1);
+        expect(writer.readStored()[0].inputConfig?.mcpServerIds).toEqual([]);
+        published.mockRestore();
+        log.mockRestore();
+        return;
+      }
+
+      let explicitIds: readonly McpServerId[] | undefined;
+      await act(async () => {
+        await view.current().send(
+          'shortcut-session',
+          { mcpServerIds: [] },
+          async (ids) => {
+            explicitIds = ids;
+            return false;
+          },
+          () => {
+            throw new Error('explicit selection was blocked');
+          }
+        );
+      });
+      expect(explicitIds).toEqual([]);
+      expect(view.current().ready).toBe(false);
+      workspace.recover();
+      if (failed) await act(async () => button('Retry').click());
+      else workspace.open();
+      await settle();
+      await act(async () => button('Execute plan').click());
+      expect(writer.readStored()).toHaveLength(1);
+      expect(writer.readStored()[0].inputConfig?.mcpServerIds).toEqual(['db', 'files']);
+      if (scenario === 'stale-toast') {
+        await act(async () => {
+          residualClick();
+          residualClick();
+        });
+        expect(writer.readStored()).toHaveLength(1);
+      }
+
+      // The accepted shortcut consumes recovery: subsequent catalog edits cannot
+      // replace the accepted baseline with newly changed project/workspace defaults.
+      view.render({ ...props, persistedIds: ['search' as McpServerId] });
+      expect(view.current().selectedIds).toEqual(['search']);
+      act(() => toast.dismiss('mcp-defaults:shortcut-session'));
+      published.mockRestore();
+      log.mockRestore();
+    }
+  );
+
+  it.each([true, false])(
+    'restores defaults after an accepted temporary opt-out, but preserves menu [] (temporary=%s)',
+    async (temporary) => {
+      const workspace = createWorkspace('workspace-1', [
+        ...catalogRows(),
+        [workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search'] }],
+      ]);
+      store.set(runtimeAtom, workspace.runtime);
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const target = { project: projectA, machineId: 'machine-1' };
+      const view = renderSelection({ defaultsTarget: target });
+      if (temporary) workspace.fail(new Error('storage unavailable'));
+      else workspace.open();
+      await settle();
+      if (!temporary) act(() => view.current().setSelectedIds([]));
+      const blocks = [{ type: 'text' as const, text: 'first message' }];
+      const first = buildSessionTurnInputConfig({
+        inputBlocks: blocks,
+        cliType: 'builtin',
+        agentType: 'codex',
+        mcpServerIds: [],
+      });
+      const doc = buildSessionDoc([]);
+      appendMcpTurn(createHistoryWriter(doc), 'first', first);
+      const accepted = reimport(doc);
+      const writer = createHistoryWriter(accepted);
+      const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc: accepted });
+      try {
+        expect(writer.readStored()[0].inputConfig).toMatchObject({ mcpServerIds: [] });
+        act(() => view.current().acceptSend('accepted-session', temporary));
+        const rows = await data.history.readDirectory(0, 1);
+        const baseline = resolveSessionConversationConfig(
+          rows.map((row) => ({
+            id: row.turnId!,
+            role: row.scalars?.role,
+            inputConfig: row.inputConfig,
+          }))
+        );
+        view.render({
+          existingSession: true,
+          scopeKey: 'accepted-session',
+          persistedIds: baseline.mcpServerIds,
+          defaultsTarget: target,
+        });
+        expect(view.current().ready).toBe(!temporary);
+        workspace.recover();
+        act(() => view.current().retryDefaults());
+        await settle();
+        expect(view.current()).toMatchObject({
+          ready: true,
+          selectedIds: temporary ? ['search'] : [],
+        });
+        const second = buildSessionTurnInputConfig({
+          inputBlocks: blocks,
+          cliType: 'builtin',
+          agentType: 'codex',
+          mcpServerIds: view.current().selectedIds,
+        });
+        appendMcpTurn(writer, 'second', second);
+        expect(writer.readStored()[1].inputConfig?.mcpServerIds).toEqual(
+          temporary ? ['search'] : []
+        );
+        expect(writer.readStored()[1].inputConfig?.skipMcpOnce).toBeUndefined();
+        act(() => view.current().acceptSend('accepted-session'));
+        view.render({
+          existingSession: true,
+          scopeKey: 'accepted-session',
+          persistedIds: second.mcpServerIds,
+          defaultsTarget: target,
+        });
+        expect(view.current().selectedIds).toEqual(temporary ? ['search'] : []);
+      } finally {
+        data.dispose();
+        log.mockRestore();
+      }
+    }
+  );
+
+  it('replaces the workspace defaults with a project row, including [] for none', async () => {
+    const workspace = createWorkspace('workspace-1', [
+      ...catalogRows(),
+      [workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search', 'deleted'] }],
+      [workspaceFlockKeys.projectMcpDefault(keyOf(projectB)), { ids: [] }],
+    ]);
+    store.set(runtimeAtom, workspace.runtime);
+    workspace.open();
+    const view = renderSelection({ defaultsTarget: { project: projectA, machineId: 'machine-1' } });
+    await settle();
+    // A deleted id is filtered out of derived defaults rather than sent.
+    expect(view.current().selectedIds).toEqual(['search']);
+
+    view.render({ defaultsTarget: { project: projectB, machineId: 'machine-1' } });
+    expect(view.current().selectedIds).toEqual([]);
+
+    // Same local project id on another machine is another project.
+    view.render({ defaultsTarget: { project: projectB, machineId: 'machine-2' } });
+    expect(view.current().selectedIds).toEqual(['db', 'files']);
+
+    view.render({ defaultsTarget: { project: null } });
+    expect(view.current().selectedIds).toEqual(['db', 'files']);
+  });
+
+  it('keeps an existing conversation’s selection and never enrolls an unrecorded one', async () => {
+    const workspace = createWorkspace('workspace-1', [
+      ...catalogRows(),
+      [workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search'] }],
+    ]);
+    store.set(runtimeAtom, workspace.runtime);
+    const target = { project: projectA, machineId: 'machine-1' };
+    const view = renderSelection({ existingSession: true, scopeKey: 's1', defaultsTarget: target });
+    // Recorded or not, an existing conversation never waits on defaults.
+    expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
+
+    workspace.open();
+    await settle();
+    expect(view.current().selectedIds).toEqual([]);
+
+    view.render({
+      existingSession: true,
+      scopeKey: 's2',
+      persistedIds: [],
+      defaultsTarget: target,
+    });
+    expect(view.current().selectedIds).toEqual([]);
+    view.render({
+      existingSession: true,
+      scopeKey: 's3',
+      persistedIds: ['db' as McpServerId],
+      defaultsTarget: target,
+    });
+    expect(view.current().selectedIds).toEqual(['db']);
+  });
+
+  it('drops a project’s edits in the very render the project changes', async () => {
+    const workspace = createWorkspace('workspace-1', [
+      ...catalogRows(),
+      [workspaceFlockKeys.projectMcpDefault(keyOf(projectB)), { ids: ['search'] }],
+    ]);
+    store.set(runtimeAtom, workspace.runtime);
+    workspace.open();
+    const view = renderSelection({ defaultsTarget: { project: projectA, machineId: 'machine-1' } });
+    await settle();
+    act(() => view.current().setSelectedIds(['db' as McpServerId]));
+    expect(view.current().selectedIds).toEqual(['db']);
+
+    const before = view.renders.length;
+    view.render({ defaultsTarget: { project: projectB, machineId: 'machine-1' } });
+    // Every render after the switch — including the first — shows B's defaults.
+    expect(view.renders.slice(before).map((render) => render.selectedIds)).toEqual(
+      view.renders.slice(before).map(() => ['search'])
+    );
+
+    // Coming back does not resurrect the abandoned edit either.
+    view.render({ defaultsTarget: { project: projectA, machineId: 'machine-1' } });
+    expect(view.current().selectedIds).toEqual(['db', 'files']);
+  });
+
+  it('shows nothing of the previous workspace while the next one opens', async () => {
+    const first = createWorkspace('workspace-1', catalogRows());
+    store.set(runtimeAtom, first.runtime);
+    first.open();
+    const view = renderSelection({ defaultsTarget: { project: null } });
+    await settle();
+    expect(view.current().selectedIds).toEqual(['db', 'files']);
+
+    const second = createWorkspace('workspace-2', [
+      [
+        workspaceFlockKeys.mcpServer('other' as McpServerId),
+        server('other', 'Other', { enabledByDefault: true }),
+      ],
+    ]);
+    const before = view.renders.length;
+    act(() => store.set(runtimeAtom, second.runtime));
+    const afterSwitch = view.renders.slice(before);
+    expect(afterSwitch.length).toBeGreaterThan(0);
+    for (const render of afterSwitch) {
+      expect(render.servers.map(({ id }) => id)).not.toContain('files');
+      expect(render.ready).toBe(false);
+    }
+
+    second.open();
+    await settle();
+    expect(view.current()).toMatchObject({ ready: true, selectedIds: ['other'] });
+  });
+});
+
+describe('project Default MCP tab', () => {
+  const target: ProjectMcpDefaultTarget = {
+    workspaceId: 'workspace-1' as WorkspaceId,
+    project: { ...projectA, branch: 'feature', useWorktree: true } as ProjectRef,
+    machineId: 'machine-1',
+  };
+  const owner: ProjectMcpDefaultAccess = {
+    kind: 'local',
+    currentUserId: 'user-1',
+    machineOwnerUserId: 'user-1',
+  };
+
+  const renderTab = (access: ProjectMcpDefaultAccess) =>
+    act(() =>
+      root.render(
+        <Provider store={store}>
+          <ProjectDefaultMcpTab target={target} access={access} />
+        </Provider>
+      )
+    );
+  const switches = () =>
+    [...container.querySelectorAll<HTMLElement>('[role="switch"]')].map((element) => ({
+      element,
+      label: element.getAttribute('aria-label'),
+      checked: element.getAttribute('aria-checked') === 'true',
+      disabled:
+        element.hasAttribute('data-disabled') || element.getAttribute('aria-disabled') === 'true',
+    }));
+
+  it('saves the whole effective list on the first edit, shared by every branch', async () => {
+    const workspace = createWorkspace('workspace-1', [
+      ...catalogRows(),
+      [
+        workspaceFlockKeys.mcpServer('bare' as McpServerId),
+        { ...server('bare', 'Bare'), connection: undefined },
+      ],
+    ]);
+    store.set(runtimeAtom, workspace.runtime);
+    renderTab(owner);
+    expect(container.textContent).toContain('Loading the workspace MCP catalog');
+
+    workspace.open();
+    await settle();
+    // Sorted by name: Bare, Database, Files, Search.
+    expect(switches().map(({ checked }) => checked)).toEqual([false, true, true, false]);
+    expect(container.textContent).toContain('Following the workspace defaults');
+    expect(container.textContent).toContain('No connection is configured');
+
+    const search = switches().find(({ label }) => label?.includes('Search'))!;
+    await act(async () => search.element.click());
+    await settle();
+
+    // Stored under the project, not the branch/worktree the target came from.
+    expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toEqual({
+      ids: ['db', 'files', 'search'],
+    });
+    expect(container.textContent).toContain('This project has its own list');
+
+    // Turning everything off is a list of its own, not a return to inheritance.
+    for (const label of ['Files', 'Database', 'Search']) {
+      const toggle = switches().find((entry) => entry.label?.includes(label))!;
+      await act(async () => toggle.element.click());
+      await settle();
+    }
+    expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toEqual({
+      ids: [],
+    });
+  });
+
+  it('is read-only for someone who does not own the project, at the write as well', async () => {
+    const workspace = createWorkspace('workspace-1', catalogRows());
+    store.set(runtimeAtom, workspace.runtime);
+    workspace.open();
+    const teammate: ProjectMcpDefaultAccess = { ...owner, currentUserId: 'user-2' };
+    renderTab(teammate);
+    await settle();
+    expect(switches().every(({ disabled }) => disabled)).toBe(true);
+    expect(container.textContent).toContain('Only the owner');
+
+    // A caller that bypasses the disabled switch is refused by the write itself.
+    await expect(
+      putProjectMcpDefault(workspace.runtime, target, teammate, ['search' as McpServerId])
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toBeUndefined();
+  });
+
+  it('keeps the saved selection after a failed write and lets the next edit succeed', async () => {
+    const workspace = createWorkspace('workspace-1', catalogRows());
+    const put = workspace.runtime.writer.flockRowPut;
+    let failWrite = true;
+    workspace.runtime.writer.flockRowPut = async (...args) => {
+      if (failWrite) throw new Error('Synthetic storage failure');
+      return put(...args);
+    };
+    store.set(runtimeAtom, workspace.runtime);
+    workspace.open();
+    renderTab(owner);
+    await settle();
+    const search = () => switches().find(({ label }) => label?.includes('Search'))!;
+    await act(async () => search().element.click());
+    await settle();
+    expect(search().checked).toBe(false);
+    expect(search().disabled).toBe(false);
+    expect(container.textContent).toContain('The change wasn’t saved');
+    expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toBeUndefined();
+
+    failWrite = false;
+    await act(async () => search().element.click());
+    await settle();
+    expect(search().checked).toBe(true);
+    expect(container.textContent).not.toContain('The change wasn’t saved');
+    expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toEqual({
+      ids: ['db', 'files', 'search'],
+    });
+  });
+});
+
+it.each(['e2ee', 'plaintext'] as const)(
+  'uses loaded %s cloud defaults while the remote room stays unsynced',
+  async (contentMode) => {
+    const workspace = createWorkspace('workspace-offline', catalogRows());
+    Object.assign(workspace.runtime, { contentMode, accountId: 'offline-owner' });
+    store.set(runtimeAtom, workspace.runtime);
+    const view = renderSelection({
+      syncMode: 'cloud',
+      defaultsTarget: { project: projectA, machineId: 'machine-1' },
+    });
+    expect(view.current().ready).toBe(false);
+    workspace.open();
+    await settle();
+    expect(view.current()).toMatchObject({ ready: true, selectedIds: ['db', 'files'] });
+  }
+);

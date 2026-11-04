@@ -35,22 +35,10 @@ if (electronInstall.status !== 0) {
   process.exit(electronInstall.status ?? 1)
 }
 
-const binName = process.platform === 'win32' ? 'electron-builder.cmd' : 'electron-builder'
-const electronBuilderBin = path.join(process.cwd(), 'node_modules', '.bin', binName)
-
-if (!fs.existsSync(electronBuilderBin)) {
-  process.exit(0)
-}
-
-const result = spawnSync(electronBuilderBin, ['install-app-deps'], {
-  stdio: 'inherit',
-  shell: process.platform === 'win32'
-})
-
-if (result.status !== 0) {
-  process.exit(result.status ?? 1)
-}
-
+// Match electron-builder.yml's npmRebuild: false. SQLite and the embedded CLI
+// native dependencies use platform/architecture N-API prebuilds; install-app-deps
+// ignores that setting and unnecessarily asks node-abi for an Electron ABI.
+// Sparkle owns its separate macOS build, both here and in package-electron.mjs.
 if (process.platform === 'darwin') {
   const sparkleBin = path.join(process.cwd(), 'node_modules', '.bin', 'electron-sparkle-updater')
   if (fs.existsSync(sparkleBin)) {

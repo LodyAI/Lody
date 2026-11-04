@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('sidebar footer controls share a compact desktop height across identity states', async ({
+test('sidebar footer controls share one desktop height and inset across identity states', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 900, height: 500 });
@@ -42,6 +42,8 @@ test('sidebar footer controls share a compact desktop height across identity sta
         });
         expect(geometry.identity.height).toBe(28);
         expect(geometry.footer.height).toBeLessThanOrEqual(37);
+        expect(geometry.identity.left - geometry.footer.left).toBe(12);
+        expect(geometry.footer.right - geometry.actions[2].right).toBe(12);
         expect(geometry.overflow).toBe(false);
         expect(geometry.actions).toHaveLength(3);
         const controls = [geometry.identity, ...geometry.actions];

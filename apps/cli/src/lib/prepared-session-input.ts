@@ -1,3 +1,5 @@
+import { readSessionHistoryMetadata } from '@lody/shared/session-data';
+import { normalizeSessionTurnInputConfig } from '@lody/shared';
 import { isDeepStrictEqual } from 'node:util';
 import {
   getSessionRoomId,
@@ -7,7 +9,7 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 import type { LoroDocumentManager } from './loro/doc';
-import { createSessionBackend } from '@/session/session-backend';
+import { createSessionBackend, readHistoryEntry } from '@/session/session-backend';
 
 /** JSON-only preparation, persisted before any Session mutation. */
 export type PreparedSessionInput = {
@@ -57,7 +59,7 @@ export async function isPreparedSessionDispatched(
   const backend = await createSessionBackend(session, record.meta as SessionMeta);
   return hasSessionDispatchEvidence(
     record.meta as SessionMeta,
-    await backend.readHistory(),
+    await readSessionHistoryMetadata(backend.history),
     prepared.userTurn.id
   );
 }
@@ -86,17 +88,19 @@ export async function materializePreparedSessionInput(
     session,
     (existing?.meta as SessionMeta | undefined) ?? prepared.meta
   );
-  const history = await backend.readHistory();
   for (const entry of [prepared.source, prepared.userTurn]) {
     if (!entry) continue;
-    const prior = history.find((item) => item.id === entry.id);
+    const prior = await readHistoryEntry(backend, entry.id);
     if (prior) {
       if (
         prior.role !== entry.role ||
-        !isDeepStrictEqual(prior.items, entry.items) ||
         !isDeepStrictEqual(
-          JSON.parse(JSON.stringify(prior.inputConfig ?? {})),
-          JSON.parse(JSON.stringify(entry.inputConfig ?? {}))
+          JSON.parse(JSON.stringify(prior.items)),
+          JSON.parse(JSON.stringify(entry.items))
+        ) ||
+        !isDeepStrictEqual(
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(prior.inputConfig) ?? {})),
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(entry.inputConfig) ?? {}))
         )
       )
         throw new Error('Prepared Session Turn identity conflict');

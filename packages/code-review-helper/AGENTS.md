@@ -43,7 +43,7 @@ Standalone local code-review renderer and agent prompt package.
 - Theming: the renderer now uses the same VSCode-theme adaptation as
   `@lody/components`. `CodeReviewThemeProvider` resolves the bundled Vesper theme and
   applies its CSS variables to `documentElement`; the diff viewer registers a matching
-  Vesper-derived Shiki theme. When embedded in Lody the host already injects the same
+  Vesper-derived TextMate and Zed themes. When embedded in Lody the host already injects the same
   token names, so the provider can be omitted. Token names stay HSL channels and are
   aliased to the components names where they differ (`--sidebar` ->
   `--sidebar-background`, `--github-addition` -> `--status-success`, etc.).

@@ -1,4 +1,5 @@
 import type {
+  CodeCollabAllChangesScope,
   CodeCollabContentUnavailableReason,
   CodeCollabFileKind,
   CodeCollabFileSourceState,
@@ -100,6 +101,8 @@ export type SessionFileAllChangesDiffResult =
   | {
       readonly status: 'unavailable';
       readonly reason: CodeCollabContentUnavailableReason;
+      /** Explicit All Changes scope limitation (uncommitted mode). */
+      readonly scopeReason?: 'not_a_git_worktree' | 'no_commits';
       readonly message?: string;
     };
 
@@ -108,16 +111,21 @@ export interface SessionFileHistoryProvider {
   getDiff(
     pathOrFileId: string,
     turnId?: string,
-    fileDiff?: FileDiff
+    fileDiff?: FileDiff,
+    options?: { readonly allChangesScope?: CodeCollabAllChangesScope }
   ): Promise<SessionFileDiffResult>;
   listChangedFiles(turnId?: string): Promise<SessionFileChangedFilesResult>;
   // Batched "All Changes" (current disk vs base) diff. Optional: providers that cannot
   // batch simply omit it and callers fall back to per-file getDiff.
-  getAllChangesDiff?(focusPath?: string): Promise<SessionFileAllChangesDiffResult>;
+  getAllChangesDiff?(
+    focusPath?: string,
+    scope?: CodeCollabAllChangesScope
+  ): Promise<SessionFileAllChangesDiffResult>;
 }
 
 export interface SessionFileProvider
   extends Omit<FileWorkspaceProvider, 'openFile'>, SessionFileHistoryProvider {
+  downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   openFile(pathOrFileId: string, mode?: SessionFileProviderMode): Promise<FileWorkspaceOpenResult>;
 }
 

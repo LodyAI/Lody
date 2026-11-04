@@ -1,13 +1,36 @@
-import { useState } from 'react';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
+import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
+import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, usePlatform } from '@lody/platform/react';
+import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
+import { useE2eeAccountId } from '@/lib/e2ee-account';
+import {
+  canDiscardPendingCreation,
+  canResumePendingCreation,
+  clearConfirmedPendingCreation,
+  createPreparedE2eeWorkspace,
+  e2eeCreationAvailability,
+  e2eeCreationIntent,
+  isE2eeCreationNotEnabled,
+  pendingCreationRemoved,
+} from '@/lib/create-e2ee-workspace';
+import {
+  listPendingE2eeWorkspaces,
+  savePendingE2eeWorkspace,
+  type PendingE2eeWorkspace,
+} from '@/lib/e2ee-workspace-storage';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
+import { Switch } from '@lody/ui/switch';
+import { Alert } from '@lody/ui/alert';
+import { AlertDialog } from '@/ui/dialog';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
 import { cn } from '@/lib/utils';
@@ -16,8 +39,10 @@ export type MobileCreateWorkspaceSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Fired with the new workspace's slug after a successful create.
-     Caller is expected to navigate the user into the new workspace. */
-  onCreated?: (slug: string) => void;
+     Caller is expected to navigate the user into the new workspace.
+     `workspaceId` is present for an encrypted create so the caller can open
+     its device/ledger control page instead of an ordinary chat route. */
+  onCreated?: (slug: string, workspaceId?: string) => void;
 };
 
 /**
@@ -33,8 +58,7 @@ export type MobileCreateWorkspaceSheetProps = {
  * `mobile-filter-drawer`):
  *   - vaul `Drawer` with `rounded-t-2xl border-border/60`
  *   - Centered title + close button on the right
- *   - `bottom-[var(--native-keyboard-height,0px)]!` so the sheet
- *     rises with the soft keyboard on iOS Capacitor
+ *   - The shared keyboard-aware sheet contract lifts and scrolls the form
  *   - Safe-area aware footer
  *   - Single shared validation hook (`useWorkspaceSlugField`) so
  *     the slug rules / availability check match the desktop dialog
@@ -45,25 +69,79 @@ export function MobileCreateWorkspaceSheet({
   onCreated,
 }: MobileCreateWorkspaceSheetProps) {
   const { t } = useTranslation();
+  const keyboard = useKeyboardAwareSheet({ chromeHeight: '9rem' });
+  const maxHeight = useFoldAwareSheetHeight(92, true);
   const { createOrganization } = useOrganization();
+  const platform = usePlatform();
+  const creationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
+  const accountId = useE2eeAccountId(creationEnabled);
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [encrypted, setEncrypted] = useState(false);
+  const [pendingCreation, setPendingCreation] = useState<PendingE2eeWorkspace | null>(null);
+  const submitInFlight = useRef(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [intentReadFailed, setIntentReadFailed] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  // Presentation only: keeps the "continuing a saved request" notice steady
+  // through a retry instead of flashing it in for a first-time submit.
+  const [resumeNoticeShown, setResumeNoticeShown] = useState(false);
   const creationAvailability = useCloudQuery(
     cloudOperations.billing.getWorkspaceCreationAvailability
   );
-  const creationAvailable = creationAvailability?.canCreateFree === true;
-  const creationBlocked = creationAvailability?.canCreateFree === false;
+  // A submitted request may already have consumed the free slot and taken the
+  // slug. Resume must not be blocked by checks that only apply to a new workspace.
+  const pendingOwned = canResumePendingCreation(pendingCreation, accountId);
+  const creationState = e2eeCreationAvailability(
+    pendingOwned ? pendingCreation : null,
+    creationAvailability
+  );
+  const resumable = creationState.resumable;
+  const creationAvailable = creationState.canCreate;
+  const creationBlocked = creationState.blocked;
+  const encryptionSupported = Boolean(platform.e2eeWorkspaces?.prepareCreation);
   const { slug, setSlug, resetSlug, canReset, isChecking, isAvailable, error } =
     useWorkspaceSlugField(name);
+  const fieldsDisabled = pendingOwned || creating;
+  const showResumeNotice = pendingOwned && resumeNoticeShown;
+  const formAlert = intentReadFailed ? t('e2ee.create.storageFailed') : createError;
 
+  // Recover the exact saved intent on every open. A lost create response must
+  // retry this requestId, name and handle, never mint a second device identity.
+  useEffect(() => {
+    if (!open || !accountId) return;
+    try {
+      const pending = listPendingE2eeWorkspaces(localStorage, accountId)[0] ?? null;
+      setPendingCreation(pending);
+      setResumeNoticeShown(Boolean(pending));
+      setIntentReadFailed(false);
+      setCreateError(null);
+      if (pending) {
+        setName(pending.name);
+        setSlug(pending.slug);
+        setEncrypted(true);
+      }
+    } catch {
+      setIntentReadFailed(true);
+    }
+  }, [accountId, open, setSlug]);
+
+  // Account changes drop only this component's recovered intent. The saved
+  // request stays on disk for that same account's next open.
+  useEffect(() => {
+    if (pendingCreation && (!accountId || pendingCreation.accountId !== accountId))
+      setPendingCreation(null);
+  }, [accountId, pendingCreation]);
+
+  const slugReady = resumable || (!!slug && !error && !isChecking && isAvailable);
   const canSubmit =
     creationAvailable &&
     !!name.trim() &&
-    !!slug &&
-    !error &&
-    !isChecking &&
-    isAvailable &&
-    !creating;
+    slugReady &&
+    !creating &&
+    !intentReadFailed &&
+    (!pendingCreation || pendingOwned) &&
+    (!encrypted || encryptionSupported);
 
   /* While the create mutation is in flight (and during the close
      animation right after success), suppress the slug field's error
@@ -79,9 +157,9 @@ export function MobileCreateWorkspaceSheet({
      `creating` is true bridges that window cleanly — the canSubmit
      check above already rules out re-submitting from this state, so
      hiding the message has no functional risk. */
-  const showError = !creating && error;
-  const showCheckingHint = !creating && slug && isChecking;
-  const showAvailableHint = !creating && slug && isAvailable && !error;
+  const showError = !creating && !resumable && error;
+  const showCheckingHint = !creating && !resumable && slug && isChecking;
+  const showAvailableHint = !creating && !resumable && slug && isAvailable && !error;
 
   const handleClose = (next: boolean) => {
     onOpenChange(next);
@@ -90,21 +168,64 @@ export function MobileCreateWorkspaceSheet({
          previously-typed name would still be there. The slug field's
          own reset is wired separately so it follows the name. */
       setName('');
+      setEncrypted(false);
+      setPendingCreation(null);
+      setResumeNoticeShown(false);
+      setCreateError(null);
       resetSlug();
     }
   };
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || submitInFlight.current) return;
+    submitInFlight.current = true;
     setCreating(true);
+    setCreateError(null);
+    let submitted: PendingE2eeWorkspace | null = null;
     try {
+      if (encrypted) {
+        const port = platform.e2eeWorkspaces;
+        if (!port?.prepareCreation || !accountId) throw new Error('e2ee_creation_unavailable');
+        const intent = e2eeCreationIntent(
+          accountId,
+          pendingOwned ? pendingCreation : null,
+          name,
+          slug
+        );
+        // Persist before producing a device identity or sending a request. A lost
+        // response retries these exact fields on this device.
+        savePendingE2eeWorkspace(localStorage, intent);
+        submitted = intent;
+        setPendingCreation(intent);
+        const created = await createPreparedE2eeWorkspace(port, localStorage, intent);
+        handleClose(false);
+        onCreated?.(created.slug, created.workspaceId);
+        return;
+      }
       const created = await createOrganization(name.trim(), slug);
       const targetSlug = created?.slug ?? slug;
       handleClose(false);
       onCreated?.(targetSlug);
     } catch (err) {
+      if (encrypted) {
+        const removed = Boolean(
+          submitted && pendingCreationRemoved(localStorage, accountId, submitted.requestId)
+        );
+        if (removed) {
+          setPendingCreation(null);
+          setResumeNoticeShown(false);
+        } else if (!isE2eeCreationNotEnabled(err)) {
+          setResumeNoticeShown(true);
+        }
+        setCreateError(
+          isE2eeCreationNotEnabled(err) ? t('e2ee.create.notEnabled') : t('e2ee.create.failed')
+        );
+      } else {
+        setCreateError(t('organization.createFailed'));
+      }
       console.error('Failed to create organization:', err);
     } finally {
+      submitInFlight.current = false;
       setCreating(false);
     }
   };
@@ -114,15 +235,11 @@ export function MobileCreateWorkspaceSheet({
       <DrawerContent
         className={cn(
           'mobile-create-workspace-sheet',
-          'h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60',
-          'bottom-[var(--native-keyboard-height,0px)]!'
+          'h-auto! rounded-t-2xl border-border/60',
+          keyboard.contentClassName
         )}
         style={{
-          /* Match the new-chat sheet's keyboard-rise easing so the
-             two bottom-sheets feel like the same family when the user
-             toggles between them. */
-          transition: 'bottom 320ms cubic-bezier(0.32, 0.72, 0, 1)',
-          willChange: 'bottom',
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
       >
         <div className="flex max-h-full min-h-0 flex-col">
@@ -152,8 +269,38 @@ export function MobileCreateWorkspaceSheet({
           </DrawerDescription>
 
           {creationAvailable ? (
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+            <div
+              ref={keyboard.scrollRef}
+              style={{ ...keyboard.scrollStyle, paddingBottom: '0.5rem' }}
+              className="min-h-0 flex-1 overflow-y-auto px-4 pb-2"
+            >
               <div className="flex flex-col gap-4">
+                {showResumeNotice && pendingCreation ? (
+                  <Alert.Root tone="neutral" data-testid="mobile-create-workspace-resume">
+                    <Alert.Title>{t('e2ee.create.savedRequest')}</Alert.Title>
+                    <Alert.Description>{t('e2ee.create.pending')}</Alert.Description>
+                    {pendingOwned ? (
+                      <Alert.Actions>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          tone="destructive"
+                          size="small"
+                          disabled={
+                            !canDiscardPendingCreation(creating, pendingCreation, accountId)
+                          }
+                          onClick={() => {
+                            if (creating) return;
+                            setDiscardConfirmOpen(true);
+                          }}
+                        >
+                          {t('e2ee.create.discardPending')}
+                        </Button>
+                      </Alert.Actions>
+                    ) : null}
+                  </Alert.Root>
+                ) : null}
+
                 <div className="space-y-1.5">
                   <UiField.Label
                     htmlFor="mobile-create-workspace-name"
@@ -166,7 +313,7 @@ export function MobileCreateWorkspaceSheet({
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                     placeholder={t('organization.workspaceNamePlaceholder', 'Enter workspace name')}
-                    disabled={creating}
+                    disabled={fieldsDisabled}
                     autoFocus
                     enterKeyHint="next"
                   />
@@ -180,7 +327,7 @@ export function MobileCreateWorkspaceSheet({
                     >
                       {t('organization.workspaceSlug', 'Workspace slug')}
                     </UiField.Label>
-                    {canReset ? (
+                    {canReset && !fieldsDisabled ? (
                       <button
                         type="button"
                         onClick={resetSlug}
@@ -199,7 +346,7 @@ export function MobileCreateWorkspaceSheet({
                     value={slug}
                     onChange={(event) => setSlug(event.target.value)}
                     placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
-                    disabled={creating}
+                    disabled={fieldsDisabled}
                     className={showError ? 'border-destructive' : ''}
                     autoCapitalize="none"
                     autoCorrect="off"
@@ -226,7 +373,46 @@ export function MobileCreateWorkspaceSheet({
                     </p>
                   ) : null}
                 </div>
+
+                {creationEnabled ? (
+                  <div className="flex items-start justify-between gap-4 rounded-xl border border-border/60 p-3">
+                    <div className="min-w-0 space-y-1">
+                      <label
+                        htmlFor="mobile-create-workspace-encrypted"
+                        className="text-[0.78rem] font-medium"
+                      >
+                        {t('e2ee.create.label', 'Encrypted workspace (developer preview)')}
+                      </label>
+                      <p className="text-[0.72rem] leading-snug text-muted-foreground">
+                        {encryptionSupported
+                          ? t(
+                              'e2ee.create.mobileDescription',
+                              'Keys stay in this device’s protected storage. This mode cannot be changed later.'
+                            )
+                          : t(
+                              'e2ee.create.unsupported',
+                              'This platform has no protected device key storage yet.'
+                            )}
+                      </p>
+                    </div>
+                    <Switch
+                      id="mobile-create-workspace-encrypted"
+                      data-testid="mobile-create-workspace-encrypted"
+                      checked={encrypted}
+                      disabled={fieldsDisabled || !encryptionSupported || !accountId}
+                      onCheckedChange={setEncrypted}
+                    />
+                  </div>
+                ) : null}
               </div>
+            </div>
+          ) : null}
+
+          {formAlert != null ? (
+            <div className="shrink-0 px-4 pb-3">
+              <Alert.Root tone="danger">
+                <Alert.Description>{formAlert}</Alert.Description>
+              </Alert.Root>
             </div>
           ) : null}
 
@@ -258,10 +444,48 @@ export function MobileCreateWorkspaceSheet({
                 onClick={() => void handleSubmit()}
                 disabled={!canSubmit}
               >
-                {creating ? t('common.creating', 'Creating...') : t('common.create', 'Create')}
+                {creating
+                  ? t('common.creating', 'Creating...')
+                  : resumable
+                    ? t('e2ee.create.resume', 'Continue saved creation')
+                    : t('common.create', 'Create')}
               </Button>
             ) : null}
           </div>
+
+          <AlertDialog.Root open={discardConfirmOpen} onOpenChange={setDiscardConfirmOpen}>
+            <AlertDialog.Content>
+              <AlertDialog.Header>
+                <AlertDialog.Title>
+                  {t('e2ee.create.discardConfirmTitle', 'Discard saved creation request?')}
+                </AlertDialog.Title>
+                <AlertDialog.Description>
+                  {t(
+                    'e2ee.create.discardConfirmDescription',
+                    'This removes the only saved request for this workspace on this device. It cannot be undone.'
+                  )}
+                </AlertDialog.Description>
+              </AlertDialog.Header>
+              <AlertDialog.Footer>
+                <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+                <AlertDialog.Action
+                  variant="destructive"
+                  onClick={() => {
+                    if (!clearConfirmedPendingCreation(localStorage, pendingCreation, true)) return;
+                    setPendingCreation(null);
+                    setResumeNoticeShown(false);
+                    setName('');
+                    setEncrypted(false);
+                    setCreateError(null);
+                    resetSlug();
+                    setDiscardConfirmOpen(false);
+                  }}
+                >
+                  {t('e2ee.create.discardConfirmAction', 'Discard request')}
+                </AlertDialog.Action>
+              </AlertDialog.Footer>
+            </AlertDialog.Content>
+          </AlertDialog.Root>
         </div>
       </DrawerContent>
     </Drawer>

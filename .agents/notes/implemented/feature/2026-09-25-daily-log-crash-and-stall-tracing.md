@@ -62,8 +62,11 @@ is final):
 - Traces each embedded CLI: spawn (subcommand and argument count only, since
   renderer-supplied arguments may carry credentials), every stderr line, exit
   code/signal/termination kind/uptime, each Supervisor exit decision, and every
-  Supervisor state transition. `reconnecting` with a live child means the CLI did
-  not answer its probe, which the UI shows as a disconnect.
+  Supervisor state transition. Correction: `reconnecting` can also reflect a
+  backend connection change while the runtime snapshot and identity remain
+  available. It does not prove a blocked CLI event loop. The
+  [sidebar identity investigation](../bug-fix/2026-10-11-sidebar-machine-order-stability.md)
+  adds separate probe-error and recovery traces to distinguish these paths.
 
 CLI:
 

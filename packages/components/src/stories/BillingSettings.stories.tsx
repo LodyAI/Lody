@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { FREE_SESSION_LIMIT_PER_WORKSPACE } from '@lody/shared';
 import {
   BillingSettingsView,
@@ -8,6 +8,7 @@ import {
   type BillingOverviewData,
   type BillingUpcomingInvoice,
 } from '@/components/settings/billing-setting-pure';
+import { ReferralSettingsView } from '@/components/settings/referral-settings-pure';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -55,6 +56,29 @@ const mockInvoices: BillingInvoice[] = [
     hostedInvoiceUrl: null,
   },
 ];
+
+const GIFT_START = Date.now() - 60 * DAY;
+const GIFT_END = Date.now() + 30 * DAY;
+const giftPeriodInvoices: BillingInvoice[] = Array.from({ length: 3 }, (_, index) => ({
+  id: `in_gift_period_${index + 1}`,
+  number: `GIFT-000${index + 1}`,
+  status: 'paid',
+  amountPaid: 0,
+  amountDue: 0,
+  amountRemaining: 0,
+  total: 0,
+  currency: 'USD',
+  periodStart: GIFT_START + index * 30 * DAY,
+  periodEnd: GIFT_START + (index + 1) * 30 * DAY,
+  interval: 'month',
+  kind: 'gift_redemption',
+  // The backend repeats the total grant duration on each monthly $0 invoice.
+  // The history UI therefore describes each service period instead of reading
+  // this as three separate three-month grants.
+  giftDurationMonths: 3,
+  createdAt: GIFT_START + index * 30 * DAY,
+  hostedInvoiceUrl: `https://invoice.stripe.com/i/gift-period-${index + 1}`,
+}));
 
 const freeOverview: BillingOverviewData = {
   billingAccountId: null,
@@ -131,6 +155,9 @@ function Harness({
   switchIntervalPending = false,
   canManageBillingKnown = true,
   workspaceOwnerName = null,
+  referralOffer = null,
+  referral = null,
+  referralCreditCents = 0,
 }: {
   overview: BillingOverviewData | null;
   sessionCount?: number | null;
@@ -142,6 +169,9 @@ function Harness({
   switchIntervalPending?: boolean;
   canManageBillingKnown?: boolean;
   workspaceOwnerName?: string | null;
+  referralOffer?: { onRemove?: () => void } | null;
+  referral?: ReactNode;
+  referralCreditCents?: number;
 }) {
   // Mirror the container: a pending checkout presents the interval it was
   // created with; the user can still toggle it from the awaiting-payment row.
@@ -173,6 +203,10 @@ function Harness({
       onResumeSubscription={() => {}}
       onRedeemCode={() => {}}
       onRetryInvoices={() => {}}
+      onViewInvoice={() => {}}
+      referralOffer={referralOffer}
+      referral={referral}
+      referralCreditCents={referralCreditCents}
     />
   );
 }
@@ -292,6 +326,36 @@ export const PromotionalPlus: Story = {
         hostedInvoiceUrl: 'https://invoice.stripe.com/i/gift-example',
       },
     ],
+  },
+};
+
+export const PromotionalPlusScheduledCharge: Story = {
+  args: {
+    overview: {
+      ...paidOverview,
+      entitlementSource: 'stripe_gift',
+      promotionalEntitlementEndsAt: GIFT_END,
+      giftStartsAt: GIFT_START,
+      giftEndsAt: GIFT_END,
+      nextBillingAt: GIFT_END,
+      autoRenewAfterGift: true,
+      scheduledBillingInterval: 'month',
+      scheduleManaged: true,
+      subscriptionStatus: 'active',
+      billingInterval: 'month',
+      currentPeriodEnd: GIFT_END,
+      seatCount: 2,
+    },
+    invoices: giftPeriodInvoices,
+    upcomingInvoice: {
+      amountDue: 2000,
+      currency: 'USD',
+      expectedAt: GIFT_END,
+      renewal: { amount: 2000, quantity: 2 },
+      discount: null,
+      adjustment: null,
+      creditApplied: null,
+    },
   },
 };
 
@@ -453,4 +517,118 @@ export const Enterprise: Story = {
       entitlementSource: 'enterprise',
     },
   },
+};
+
+export const PendingSeatInvoice: Story = {
+  args: {
+    overview: {
+      ...paidOverview,
+      seatBilling: {
+        policy: 'deferred',
+        capacity: 6,
+        available: 1,
+        renewalQuantity: 5,
+        periodEnd: paidOverview.currentPeriodEnd,
+      },
+    },
+    invoices: [
+      {
+        ...mockInvoices[0]!,
+        id: 'in_pending_seat',
+        status: 'open',
+        amountPaid: 0,
+        amountDue: 5741,
+        amountRemaining: 5741,
+        total: 5741,
+        reason: 'seats_added',
+        seatChange: { from: 1, to: 2 },
+      },
+      ...mockInvoices,
+    ],
+  },
+};
+
+export const FreeWithReferralOffer: Story = {
+  args: { overview: freeOverview, referralOffer: { onRemove: () => {} } },
+};
+
+export const FreeWithBoundReferralOffer: Story = {
+  args: { overview: freeOverview, referralOffer: {} },
+};
+
+const referralCard = (
+  <ReferralSettingsView
+    overview={{
+      eligible: true,
+      code: '3f9a1c0e8b7d4e2fa6c5b1d09e8f7a6c',
+      url: 'https://lody.ai/login?ref=3f9a1c0e8b7d4e2fa6c5b1d09e8f7a6c',
+      issued: 3456,
+      spent: 1000,
+      available: 2456,
+      frozen: 0,
+      adjustment: 0,
+      newcomerDiscount: false,
+    }}
+    canManage
+    onCopy={() => {}}
+    onOpenDetails={() => {}}
+  />
+);
+
+export const PaidWithReferrals: Story = {
+  args: { overview: paidOverview, invoices: mockInvoices, referral: referralCard },
+};
+
+export const FreeWithReferralCard: Story = {
+  args: {
+    overview: freeOverview,
+    referral: (
+      <ReferralSettingsView
+        overview={{
+          eligible: true,
+          code: null,
+          url: null,
+          issued: 0,
+          spent: 0,
+          available: 0,
+          frozen: 0,
+          adjustment: 0,
+          newcomerDiscount: false,
+        }}
+        canManage
+        onCopy={() => {}}
+        onOpenDetails={() => {}}
+      />
+    ),
+  },
+};
+
+/** Credit earned while free pays toward the first subscription payment. */
+export const FreeWithReferralCredit: Story = {
+  args: {
+    overview: freeOverview,
+    referralCreditCents: 6000,
+    referral: (
+      <ReferralSettingsView
+        overview={{
+          eligible: true,
+          code: '3f9a1c0e8b7d4e2fa6c5b1d09e8f7a6c',
+          url: 'https://lody.ai/login?ref=3f9a1c0e8b7d4e2fa6c5b1d09e8f7a6c',
+          issued: 6000,
+          spent: 0,
+          available: 6000,
+          frozen: 0,
+          adjustment: 0,
+          newcomerDiscount: false,
+        }}
+        canManage
+        onCopy={() => {}}
+        onOpenDetails={() => {}}
+      />
+    ),
+  },
+};
+
+export const FreeWithCreditCoveringFirstPayment: Story = {
+  args: { overview: freeOverview, referralCreditCents: 50000 },
 };

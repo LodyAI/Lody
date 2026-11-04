@@ -17,8 +17,9 @@ import { vi } from 'vitest';
  *   size it last delivered for that target (the first observation always
  *   delivers).
  *
- * Sizes come from the caller: `sizeOf(element)` returns the element's height,
- * or `undefined` for elements whose size never matters. `rectOf(element)`
+ * Sizes come from the caller: `sizeOf(element)` returns the element's layout
+ * height for `offsetHeight` and ResizeObserver, or `undefined` for elements
+ * whose size never matters. `rectOf(element)`
  * optionally returns an element's top and height in viewport coordinates, for
  * code that reads `getBoundingClientRect`.
  */
@@ -29,7 +30,7 @@ export interface FrameHarness {
   readonly scrollTop: number;
   /** Every value assigned to scrollTop, in order (before clamping). */
   readonly writes: number[];
-  /** Run one frame: scroll steps, then ResizeObserver delivery. Returns true if anything was delivered. */
+  /** Run scroll steps, animation callbacks, then ResizeObserver. True if anything was delivered. */
   frame(): boolean;
   /** Hold ResizeObserver deliveries for targets matching `predicate`. */
   hold(predicate: ((target: Element) => boolean) | null): void;
@@ -61,6 +62,14 @@ export function createFrameHarness({
   let top = 0;
   let pendingScroll = false;
   const writes: number[] = [];
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  let frameTime = 0;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.set(++frameId, callback);
+    return frameId;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (handle: number) => frames.delete(handle));
 
   class FakeResizeObserver {
     private readonly observation: Observation;
@@ -85,6 +94,16 @@ export function createFrameHarness({
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
 
   const originalRect = Element.prototype.getBoundingClientRect;
+  const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    'offsetHeight'
+  );
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get() {
+      return sizeOf(this) ?? originalOffsetHeight?.get?.call(this) ?? 0;
+    },
+  });
   if (rectOf) {
     Element.prototype.getBoundingClientRect = function (this: Element) {
       const rect = rectOf(this, Math.min(top, maxTop()));
@@ -148,6 +167,10 @@ export function createFrameHarness({
         viewport.dispatchEvent(new Event('scroll'));
         delivered = true;
       }
+      frameTime += 16;
+      const callbacks = [...frames.values()];
+      frames.clear();
+      for (const callback of callbacks) callback(frameTime);
       for (const observation of observations) {
         const entries: ResizeObserverEntry[] = [];
         for (const [target, last] of observation.targets) {
@@ -169,7 +192,7 @@ export function createFrameHarness({
           observation.callback(entries, observation.observer);
         }
       }
-      return delivered;
+      return delivered || callbacks.length > 0;
     },
     hold(predicate) {
       heldPredicate = predicate;
@@ -181,6 +204,11 @@ export function createFrameHarness({
     },
     restore() {
       Element.prototype.getBoundingClientRect = originalRect;
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight);
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).offsetHeight;
+      }
       vi.unstubAllGlobals();
     },
   };

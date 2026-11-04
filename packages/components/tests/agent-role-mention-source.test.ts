@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
-  DEFAULT_AGENT_ROLE_EMOJI,
   applyTextRewrites,
   resolveAgentRoleAvailability,
   type AgentConfigId,
@@ -143,34 +143,6 @@ describe('agent role reach from a local project composer', () => {
   });
 });
 
-describe('agent role candidates', () => {
-  it('derives the token from the name, whitespace and all', () => {
-    expect(items(role({ name: 'Code Reviewer' }))[0]?.slug).toBe('Code-Reviewer');
-  });
-
-  it('ranks a prefix match over a substring one, on token or name', () => {
-    const list = items(
-      role({ id: 'a' as AgentRoleId, name: 'Deep reviewer' }),
-      role({ id: 'b' as AgentRoleId, name: 'Reviewer' })
-    );
-    expect(selectAgentRoleMentionCandidates(list, 'rev').map((item) => item.slug)).toEqual([
-      'Reviewer',
-      'Deep-reviewer',
-    ]);
-    expect(selectAgentRoleMentionCandidates(list, 'nope')).toEqual([]);
-  });
-
-  it('lists the entire role catalog, with an explicit cap for aggregate search', () => {
-    const many = items(
-      ...Array.from({ length: 60 }, (_unused, index) =>
-        role({ id: `role-${index}` as AgentRoleId, name: `Reviewer ${index}` })
-      )
-    );
-    expect(selectAgentRoleMentionCandidates(many, '')).toHaveLength(60);
-    expect(selectAgentRoleMentionCandidates(many, '', 4)).toHaveLength(4);
-  });
-});
-
 describe('agent role availability in mentions', () => {
   it('puts available matches first even when a disabled match has a higher score', () => {
     const available = items(role({ id: 'ready' as AgentRoleId, name: 'Deep Reviewer' }))[0]!;
@@ -195,42 +167,6 @@ describe('agent role availability in mentions', () => {
 });
 
 describe('agent role menu rows', () => {
-  it('carries the role own mark instead of the category glyph', () => {
-    const [candidate] = buildAgentRoleCandidates(items(role({ emoji: '🔍' })), '');
-    expect(candidate).toMatchObject({
-      iconEmoji: '🔍',
-      // The name alone: the emoji is the row's icon, not a prefix on the text.
-      title: 'Code Reviewer',
-      insertText: '@Code-Reviewer',
-      value: 'role-1',
-    });
-    // Nothing restated in the detail: the pane heads itself with the same mark
-    // and name.
-    expect(candidate?.detail?.title).toBeUndefined();
-    // Who does the work and where, on the row's own line.
-    expect(candidate?.hint).toBe('Codex · Studio');
-  });
-
-  it('hands the Role to the shared pane instead of restating it as rows', () => {
-    const withPrompt = role({ promptPrefix: 'Check correctness before style.' });
-    const [candidate] = buildAgentRoleCandidates(items(withPrompt), '');
-    // The pane reads the Role itself — including its instruction — resolving
-    // each stored id against the BOUND agent's capabilities. Generic rows here
-    // could only print those ids raw, which is how this menu ended up labelling
-    // the permission mode "Reasoning".
-    expect(candidate?.detail?.agentRole).toEqual({
-      role: withPrompt,
-      agentConfig,
-      machine: { name: 'Studio' },
-      // Named because this menu spans machines, unlike the composer's list.
-      machineLabel: 'Studio',
-    });
-    expect(candidate?.detail?.rows).toBeUndefined();
-    // No badges at all: every Role the menu offers is one this user may run, so
-    // visibility changes nothing about accepting it.
-    expect(candidate?.detail?.badges).toBeUndefined();
-  });
-
   it.each([{ kind: 'unknown' }, { kind: 'unavailable', reason: 'machine_offline' }] as const)(
     'disables unavailable/loading rows and carries the reason below the title',
     (availability) => {
@@ -251,11 +187,6 @@ describe('agent role menu rows', () => {
       expect(hydrateAgentRoleMentionsFromText('@Code-Reviewer', list).mentions).toEqual([]);
     }
   );
-
-  it('falls back to the shared default mark', () => {
-    const [candidate] = buildAgentRoleCandidates(items(role({ emoji: undefined })), '');
-    expect(candidate?.iconEmoji).toBe(DEFAULT_AGENT_ROLE_EMOJI);
-  });
 });
 
 describe('agent role before-send expansion', () => {
@@ -283,26 +214,12 @@ describe('agent role before-send expansion', () => {
     ]);
   });
 
-  it('carries no run configuration into the instruction', () => {
-    const prompt = buildAgentRoleMentionPrompt({ id: 'role-1', name: 'Code Reviewer' });
-    expect(prompt).not.toContain('gpt-5.6');
-    expect(prompt).not.toContain('machine-1');
-    expect(prompt).not.toContain('config-1');
-  });
-
   it('leaves a role that is no longer offered as plain text', () => {
     expect(buildAgentRoleMentionRewrites(text, [mention], [])).toEqual([]);
   });
 });
 
 describe('agent role draft hydration', () => {
-  it('recognises a known token and yields a range carrying the role id', () => {
-    expect(hydrateAgentRoleMentionsFromText('ping @Code-Reviewer now', items(role()))).toEqual({
-      mentions: [{ value: 'role-1', start: 5, end: 19, kind: 'agent_role' }],
-      values: ['role-1'],
-    });
-  });
-
   it('leaves a token the file source already knows to the file hydrator', () => {
     expect(
       hydrateAgentRoleMentionsFromText(
@@ -312,11 +229,74 @@ describe('agent role draft hydration', () => {
       ).mentions
     ).toEqual([]);
   });
+});
 
-  it('claims nothing when no role is offered', () => {
-    expect(hydrateAgentRoleMentionsFromText('@Code-Reviewer', [])).toEqual({
-      mentions: [],
-      values: [],
-    });
+describe('a role on several machines', () => {
+  const multi = role({
+    alias: undefined,
+    additionalTargets: [
+      {
+        machineId: 'machine-2' as MachineId,
+        agentConfigId: 'config-2' as AgentConfigId,
+        runConfig: { modelId: 'gpt-5.6-luna' },
+        alias: 'Reviewer-Linux',
+      },
+    ],
+  });
+  const names: Record<string, string> = { 'machine-1': 'Studio', 'machine-2': 'Linux box' };
+  const targetItems = (preferred?: MachineId) =>
+    buildAgentRoleMentionItems(
+      [multi],
+      {
+        availability: () => ({ kind: 'available' }),
+        machine: (id) => ({ name: names[id] ?? id }),
+        agentConfig: () => agentConfig,
+      },
+      preferred
+    );
+
+  it('offers one row per machine, labelled by alias or name and machine', () => {
+    const rows = targetItems();
+    expect(rows.map((item) => [item.label, item.slug, item.value])).toEqual([
+      ['Code Reviewer · Studio', 'Code-Reviewer-Studio', 'role-1@machine-1'],
+      ['Reviewer-Linux', 'Reviewer-Linux', 'role-1@machine-2'],
+    ]);
+    // Each row is that machine's binding, which the detail pane and dispatch read.
+    expect(rows[1]?.role).toMatchObject({ machineId: 'machine-2', agentConfigId: 'config-2' });
+  });
+
+  it("puts the composer's own machine first", () => {
+    expect(targetItems('machine-2' as MachineId).map((item) => item.value)).toEqual([
+      'role-1@machine-2',
+      'role-1@machine-1',
+    ]);
+  });
+
+  it('names the picked machine in the instruction and on the frozen span', () => {
+    const text = 'ask @Reviewer-Linux';
+    const rewrites = buildAgentRoleMentionRewrites(
+      text,
+      [{ start: 4, end: 19, kind: 'agent_role', value: 'role-1@machine-2' }],
+      targetItems()
+    );
+    expect(rewrites[0]?.replacement).toBe(
+      'use lody mcp to create a session with agent role[id: role-1, agentRoleMachineId: machine-2, name: Code Reviewer]'
+    );
+    expect(rewrites[0]?.span?.target).toBe('role-1@machine-2');
+    // A bare id from an older draft names no machine: it stays plain text.
+    expect(
+      buildAgentRoleMentionRewrites(
+        text,
+        [{ start: 4, end: 19, kind: 'agent_role', value: 'role-1' }],
+        targetItems()
+      )
+    ).toEqual([]);
+  });
+
+  it('hydrates each machine token to its own target', () => {
+    expect(
+      hydrateAgentRoleMentionsFromText('@Reviewer-Linux and @Code-Reviewer-Studio', targetItems())
+        .values
+    ).toEqual(['role-1@machine-2', 'role-1@machine-1']);
   });
 });

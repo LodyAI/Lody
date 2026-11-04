@@ -32,8 +32,49 @@ it. The editor and shared normalizer cap it at 140 Unicode code points; discover
 list/get results expose it separately from the execution prompt prefix. Older rows
 without the field display as blank. See the [description Spec](../../specs/agent-role-description.md).
 
+Explicit Save reconciles the Role's option values against the selected agent's
+authoritative, model-specific editor controls. It drops retired keys, retains valid
+choices and uses current defaults for unset or invalid values. Opening or cancelling
+the editor does not rewrite the catalog. Missing/provisional capabilities preserve
+stored options; model and mode pins remain explicit user choices. The existing
+content comparison advances the revision once when reconciliation changes the row.
+
 Workspace startup also reconciles owned Roles against fresh runtime schemas without
 opening Settings. A conditional writer transaction fences delayed probe results
 against edits and deletion, then uses the same durability/upload split. See the
 [schema reconciliation Spec](../../specs/agent-role-schema-reconciliation.md) for
 which options may be removed and which pins remain user decisions.
+
+A Role can also carry a machine-scoped memory identity reference. The daemon's
+Provider adapter owns commands and environment mapping; neither memory contents
+nor credentials enter the workspace catalog. A new turn freezes the reference,
+and switching it retires the old ACP process without publishing an agent-death
+event against the new turn. See the [memory Spec](../../specs/agent-role-memory.md).
+
+Memory associations are machine-document rows keyed by
+`['memory', providerId, memoryId]`, separate from workspace Role references.
+They store a display name and description, not memory contents. The same writer
+durability/upload split applies. Linking is put-if-absent; editing cannot resurrect
+a deleted row. Deleting an association leaves the external identity and existing
+Role/turn references intact. See the
+[association decision](../notes/implemented/feature/2026-10-05-memory-association-catalog.md).
+
+Project MCP defaults share this workspace document as one optional ids-array row
+per project. Missing rows inherit catalog defaults; present rows replace them,
+including an empty selection. Authoring resolves these defaults before accepting
+a new conversation, while continuation inherits the target conversation selection.
+The existing per-turn and Operation target configurations carry the resolved ids;
+startup and recovery do not reapply project policy. The
+[project default Spec](../../specs/project-default-mcp.md) describes UI behavior
+and acceptance scope.
+Memory batch import reuses these per-row writes sequentially. The editor removes
+successful rows from its checkbox selection, stops on the first failed write, and
+keeps remaining selections for retry; it does not roll back earlier durable rows.
+
+Agents can propose Role creation or text edits through MCP or `lody agent-role
+create/update`. Both publish a conversation card, and only its Save action writes
+the catalog using the same local durability boundary. The updater applies only
+specified text fields to the latest row, keeping bindings and run configuration.
+Concurrent device edits may overwrite one another; there is no cross-device CAS.
+The [tool guide](../../apps/cli/src/mcp/README.md#agent-role-proposals) documents
+inputs, active-conversation requirements and retry receipts.

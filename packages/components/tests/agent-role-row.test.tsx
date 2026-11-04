@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   AGENT_ROLE_VERSION,
-  DEFAULT_AGENT_ROLE_EMOJI,
   type AgentConfigId,
   type AgentConfigMeta,
   type AgentRole,
@@ -36,6 +36,7 @@ const role: AgentRole = {
 };
 
 type RowProps = ComponentProps<typeof AgentRoleRow>;
+type RowTarget = RowProps['targets'][number];
 
 const agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'brandId' | 'env' | 'name'> = {
   cliType: 'builtin',
@@ -44,10 +45,21 @@ const agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'brandId' | '
   name: 'Codex',
 };
 
+const target = (overrides: Partial<RowTarget> = {}): RowTarget => ({
+  machineId: 'machine-1' as MachineId,
+  label: 'MacBook',
+  online: true,
+  availability: { kind: 'available' },
+  runConfig: role.runConfig,
+  agentConfig,
+  ...overrides,
+});
+
+const linux = target({ machineId: 'machine-2' as MachineId, label: 'Linux box', online: false });
+
 const baseProps: RowProps = {
   role,
-  availability: { kind: 'available' },
-  agentConfig,
+  targets: [target()],
   canManage: true,
   onEdit: () => undefined,
   onRemove: () => undefined,
@@ -82,50 +94,34 @@ describe('AgentRoleRow', () => {
     return container as HTMLDivElement;
   };
 
-  it('states what the role will run: model, reasoning, then the rest', async () => {
-    const view = await render();
-    expect(view.textContent).toContain('Code Reviewer');
-    expect(view.textContent).toContain('🔍');
-    // Private is the default: only a Role the workspace can use is marked.
-    expect(view.textContent).not.toContain('Private');
-    expect(view.textContent).toContain('gpt-5.6-sol · high');
-    // The mention token is derived from this very name, so printing both would
-    // say one thing twice; the machine leads the group instead of each row.
-    expect(view.textContent).not.toContain('@Code-Reviewer');
-  });
-
-  it('shows the default glyph when no emoji was picked', async () => {
-    const view = await render({ role: { ...role, emoji: undefined } });
-    expect(view.textContent).toContain(DEFAULT_AGENT_ROLE_EMOJI);
-  });
-
-  it('names a reason about the binding, and leaves the machine to its pill', async () => {
+  it('names a reason about the binding, and leaves the machine to its dot', async () => {
     const missing = await render({
-      availability: { kind: 'unavailable', reason: 'agent_config_missing' },
-      agentConfig: undefined,
+      targets: [
+        target({
+          availability: { kind: 'unavailable', reason: 'agent_config_missing' },
+          agentConfig: undefined,
+        }),
+      ],
     });
     expect(missing.textContent).toContain('its agent config no longer exists');
     // Still listed and still editable: nothing was substituted for it.
     expect(missing.querySelector('button[aria-label="Edit"]')).not.toBeNull();
 
-    // The row sits under its machine's pill, which already carries that
-    // machine's status; saying it again on every row in the group is noise.
+    // The machine's dot already carries its status; saying it again is noise.
     const offline = await render({
-      availability: { kind: 'unavailable', reason: 'machine_offline' },
+      targets: [
+        target({ online: false, availability: { kind: 'unavailable', reason: 'machine_offline' } }),
+      ],
     });
     expect(offline.textContent).not.toContain('Unavailable');
+    expect(offline.textContent).toContain('offline');
     expect(offline.querySelector('button[aria-label="Edit"]')).not.toBeNull();
   });
 
   it('says it is still checking rather than claiming a role is broken', async () => {
-    const view = await render({ availability: { kind: 'unknown' } });
+    const view = await render({ targets: [target({ availability: { kind: 'unknown' } })] });
     expect(view.textContent).toContain('Checking availability');
     expect(view.textContent).not.toContain('Unavailable');
-  });
-
-  it('names the agent config when a role pins no run config of its own', async () => {
-    const view = await render({ role: { ...role, runConfig: {} } });
-    expect(view.textContent).toContain('Codex');
   });
 
   it('offers no delete for a role owned by another member', async () => {
@@ -135,5 +131,13 @@ describe('AgentRoleRow', () => {
     });
     expect(view.textContent).toContain('Workspace');
     expect(view.querySelector('button[aria-label="Remove"]')).toBeNull();
+  });
+
+  it('says the role is configured per machine instead of picking one summary', async () => {
+    const view = await render({
+      targets: [target(), { ...linux, runConfig: { modelId: 'luna' } }],
+    });
+    expect(view.textContent).toContain('Configured per machine');
+    expect(view.textContent).not.toContain('gpt-5.6-sol');
   });
 });

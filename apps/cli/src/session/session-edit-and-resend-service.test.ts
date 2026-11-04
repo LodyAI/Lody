@@ -10,6 +10,7 @@ import {
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
+  type SessionTurnInputConfig,
 } from '@lody/shared';
 import type { ReplaceEditableTailInput } from '@lody/shared/session-data';
 import { SessionEditAndResendService } from './session-edit-and-resend-service';
@@ -134,7 +135,9 @@ function createHarness(
     getMetaState: vi.fn(async () => meta),
     getHistory: vi.fn(realDoc.sessionData.history.readAll.bind(realDoc.sessionData.history)),
     sessionData: {
+      ...realDoc.sessionData,
       commands: {
+        ...realDoc.sessionData.commands,
         replaceEditableTail: vi.fn(async (input: ReplaceEditableTailInput) => {
           events.push('history');
           await options.beforeReplace?.(realDoc);
@@ -169,6 +172,14 @@ function createHarness(
   };
   let barrierHeld = false;
   const executionService = {
+    acceptInboxHumanInput: vi.fn(
+      async (_args: {
+        sessionId: SessionId;
+        inputId: string;
+        userId: string;
+        config: SessionTurnInputConfig;
+      }) => {}
+    ),
     getExecutionSnapshot: vi.fn(() => ({
       hasActiveTurn: options.active === true,
       activeTurnId: options.active ? 'assistant-2' : undefined,
@@ -226,6 +237,9 @@ function createHarness(
     getHistory: () => loro.getList('history').toJSON() as SessionHistoryInput[],
     logger,
     realDoc,
+    sessionDoc,
+    meta,
+    readStoredMeta: () => storedMeta,
     repo,
     service,
   });
@@ -292,6 +306,13 @@ describe('SessionEditAndResendService', () => {
         resume: 'acp-new',
       },
     });
+    const receipt = harness.executionService.acceptInboxHumanInput.mock.calls[0]?.[0];
+    expect(receipt).toMatchObject({
+      sessionId: spec.sessionId,
+      inputId: spec.replacementUserTurnId,
+      userId: spec.requestedByUserId,
+    });
+    expect(receipt?.config).toEqual(harness.sessionData.history.readAll().at(-1)?.inputConfig);
     expect(harness.repo.upsertDocMeta).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
@@ -300,6 +321,25 @@ describe('SessionEditAndResendService', () => {
         lastHandledUserMsgId: 'user-1',
       })
     );
+  });
+
+  it('edits and resends while retaining an inert legacy auto-review pointer', async () => {
+    const harness = createHarness();
+    harness.meta.autoReview = { runId: 'retired-review', t: 1 };
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: true });
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-3',
+    ]);
+    expect(harness.readStoredMeta()).toMatchObject({
+      autoReview: { runId: 'retired-review', t: 1 },
+      acpSessionId: 'acp-new',
+      latestUserMsgId: 'user-3',
+    });
   });
 
   it('refuses the commit when the editable tail moved after the eligibility check', async () => {
@@ -542,3 +582,65 @@ describe('SessionEditAndResendService', () => {
     }
   );
 });
+
+it('normalizes inherited input configuration before edit-and-resend', async () => {
+  const history = historyFixture();
+  history[2]!.inputConfig = {
+    ...history[2]!.inputConfig,
+    modelId: '  model-1  ',
+    chainDepth: 'legacy-invalid',
+  } as unknown as SessionTurnInputConfig;
+  const harness = createHarness({ history });
+  expect(await harness.service.editAndResend(spec)).toMatchObject({ success: true });
+  expect(harness.getHistory().at(-1)?.inputConfig).toMatchObject({ modelId: 'model-1' });
+  expect(harness.getHistory().at(-1)?.inputConfig?.chainDepth).toBeUndefined();
+});
+
+it.each([false, true])(
+  'reports a stale user turn when the selected input changes (superseded=%s)',
+  async (superseded) => {
+    const harness = createHarness();
+    const writer = harness.sessionDoc.sessionData.writer;
+    const read = writer.readSelected.bind(writer);
+    const peer: SessionHistoryInput = {
+      id: 'peer-latest-user',
+      role: 'user',
+      userId: 'peer',
+      timestamp: '2026-08-03T00:00:04.000Z',
+      status: 'pending',
+      read: false,
+      items: [{ type: 'text', text: 'Concurrent input' }],
+      fileDiff: [],
+    };
+    vi.spyOn(writer, 'readSelected').mockImplementationOnce((...args) => {
+      harness.realDoc.sessionData.writer.append(peer);
+      if (superseded)
+        throw Object.assign(new Error('History selection changed'), { code: 'superseded' });
+      return read(...args);
+    });
+    const closing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    harness.agentClient.closeDetachedSession.mockImplementationOnce(async () => {
+      closing.resolve();
+      await release.promise;
+      return true;
+    });
+    const pending = harness.service.editAndResend(spec);
+    try {
+      await closing.promise;
+      expect(harness.executionService.getExecutionSnapshot().hasRewriteBarrier).toBe(true);
+      release.resolve();
+      expect(await pending).toMatchObject({ success: false, error: { code: 'STALE_USER_TURN' } });
+      expect(harness.executionService.getExecutionSnapshot().hasRewriteBarrier).toBe(false);
+    } finally {
+      release.resolve();
+      await pending;
+    }
+    expect(harness.getHistory().map((row) => row.id)).toEqual([
+      ...historyFixture().map((row) => row.id),
+      peer.id,
+    ]);
+    expect(harness.readStoredMeta()).toEqual(harness.meta);
+    expect(harness.agentClient.closeDetachedSession).toHaveBeenCalledWith('acp-new');
+  }
+);

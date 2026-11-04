@@ -6,6 +6,7 @@ import ampAcpSvg from './registry-assets/amp-acp.svg?raw';
 import antigravityAcpSvg from './registry-assets/antigravity-acp.svg?raw';
 import auggieSvg from './registry-assets/auggie.svg?raw';
 import autohandSvg from './registry-assets/autohand.svg?raw';
+import bobSvg from './registry-assets/bob.svg?raw';
 import clineSvg from './registry-assets/cline.svg?raw';
 import codebuddyCodeSvg from './registry-assets/codebuddy-code.svg?raw';
 import cortexCodeSvg from './registry-assets/cortex-code.svg?raw';
@@ -33,6 +34,7 @@ import minionCodeSvg from './registry-assets/minion-code.svg?raw';
 import mistralVibeSvg from './registry-assets/mistral-vibe.svg?raw';
 import novaSvg from './registry-assets/nova.svg?raw';
 import opencodeSvg from './registry-assets/opencode.svg?raw';
+import opencodeV2Svg from './registry-assets/opencode-v2.svg?raw';
 import piAcpSvg from './registry-assets/pi-acp.svg?raw';
 import poolsideSvg from './registry-assets/poolside.svg?raw';
 import qoderSvg from './registry-assets/qoder.svg?raw';
@@ -48,6 +50,7 @@ export const REGISTRY_AGENT_ICON_SVGS: Partial<Record<string, string>> = {
   'antigravity-acp': antigravityAcpSvg,
   auggie: auggieSvg,
   autohand: autohandSvg,
+  bob: bobSvg,
   cline: clineSvg,
   'codebuddy-code': codebuddyCodeSvg,
   'cortex-code': cortexCodeSvg,
@@ -75,6 +78,7 @@ export const REGISTRY_AGENT_ICON_SVGS: Partial<Record<string, string>> = {
   'mistral-vibe': mistralVibeSvg,
   nova: novaSvg,
   opencode: opencodeSvg,
+  'opencode-v2': opencodeV2Svg,
   'pi-acp': piAcpSvg,
   poolside: poolsideSvg,
   qoder: qoderSvg,

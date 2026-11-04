@@ -18,6 +18,10 @@ export type PendingSessionSend = UserTurnSend & {
   /** Set when preparation or the local write failed; blocks the conversation's FIFO. */
   error?: string;
   sequence: number;
+  /** Frozen backend at admission; ready Roost inputs have a separate durable owner. */
+  historyBackend?: 'loro' | 'roost';
+  inputState?: 'saving' | 'sending' | 'unknown' | 'confirmed';
+  persisted?: boolean;
 };
 
 export type PendingSessionSendsPorts = {
@@ -36,7 +40,12 @@ export type PendingSessionSendsPorts = {
   deliver(send: PendingSessionSend): Promise<void>;
 };
 
-export type PendingSessionSends = ReturnType<typeof createPendingSessionSends>;
+export type PendingSessionSends = ReturnType<typeof createPendingSessionSends> & {
+  acknowledgeLanded?: (ids: Iterable<string>) => Promise<void>;
+  resume?: () => Promise<void>;
+  /** The input coordinator keeps delivery ownership after its visible row is gone. */
+  ownsDelivery?: (id: string, kind: 'dispatch' | 'guide') => boolean;
+};
 
 const abortError = () => new DOMException('Pending send canceled', 'AbortError');
 

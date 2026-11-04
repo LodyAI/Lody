@@ -20,7 +20,7 @@ import {
   groupFileChangesByCategory,
   type FileChangeCategory,
 } from '@/lib/file-change-category';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import type { SessionDiffChangeEntry } from './session-diff-summary';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 

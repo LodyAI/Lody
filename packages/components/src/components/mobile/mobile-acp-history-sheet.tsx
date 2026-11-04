@@ -1,3 +1,4 @@
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Locale } from 'date-fns';
@@ -78,6 +79,7 @@ export function MobileAcpHistorySheet({
   onHistorySelectionChange,
 }: MobileAcpHistorySheetProps) {
   const { t, i18n } = useTranslation();
+  const maxHeight = useFoldAwareSheetHeight(88);
   const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
   const providerLabel = state.providerLabel ?? getHistoryProviderLabel(state.provider);
@@ -150,10 +152,8 @@ export function MobileAcpHistorySheet({
     <>
       <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
         <DrawerContent
-          className={cn(
-            'mobile-acp-history-sheet',
-            'h-[88dvh]! max-h-[88dvh]! rounded-t-2xl border-border/60'
-          )}
+          style={{ maxHeight }}
+          className={cn('mobile-acp-history-sheet', 'h-[88dvh]! rounded-t-2xl border-border/60')}
         >
           <div className="flex h-full min-h-0 flex-col">
             {/* Header: provider chip centered, close on right */}

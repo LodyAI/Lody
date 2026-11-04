@@ -1,4 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { CommandTimedOut } from '@lody/shared/node/process';
+import { worktreeGitLegacy } from '../src/session/worktree/git-execution-legacy';
+import { checkoutProjectSubmodule, inspectProjectSubmodule, persistProjectSubmoduleBranch } from '../src/session/worktree/project-submodules';
+import { worktreeGitLayer } from '../src/session/worktree/git-execution';
+import { describe, expect, it, vi } from 'vitest';
+import { it as effectIt } from '@effect/vitest';
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, PlatformError } from 'effect';
+import { NodeFileSystem } from '@effect/platform-node-shared';
+import { TestClock } from 'effect/testing';
+import { RepoId } from '@lody/shared';
+import { createLogger } from '../src/utils/logger';
+import { LodyDataDirUnavailableError } from '@lody/shared/node/installation-profile';
+import { WorktreeGit, WorktreeGitCommandFailed, WorktreeGitExecutionFailed } from '../src/session/worktree/git-execution';
+import { LocalWorktreePreparation, LocalWorktreePreparationLive, LocalWorktreeScratchReleaseFailed, LOCAL_WORKTREE_SCRATCH_RELEASE_MS } from '../src/session/worktree/local-worktree-preparation';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
@@ -23,6 +36,76 @@ describe('WorktreeManager', () => {
   useWorktreeManagerTestFixture((fixture) => {
     ({ testDir, manager } = fixture);
   });
+
+  it('creates, observes, archives and restores a Project Member in its frozen directory', async () => {
+    const originalRootPath = createLocalRepo(testDir);
+    const sessionId = 'project-session' as SessionId;
+    vi.stubEnv('LODY_DATA_DIR', path.join(testDir, 'data'));
+    try {
+      const projectManager = new WorktreeManager({
+        repoId: 'project-member-repo' as RepoId,
+        source: { kind: 'local-shared', originalRootPath },
+        projectMember: { root: 'project-acme-test', dir: 'api' },
+        logger: createLogger({ level: 'error', transports: 'console' }),
+      });
+      const created = await projectManager.createWorktree(sessionId, 'main');
+      expect(created.hostPath).toBe(
+        path.join(testDir, 'data', 'repos', 'project-acme-test', 'worktrees', sessionId, 'api')
+      );
+      expect(runGit(created.hostPath, ['rev-parse', '--git-common-dir'])).toBe(
+        path.join(originalRootPath, '.git')
+      );
+      expect(await projectManager.inspectWorktree(sessionId)).toMatchObject({
+        state: 'clean',
+        info: { branch: created.branch },
+      });
+      fs.writeFileSync(path.join(created.hostPath, 'saved.txt'), 'Project work survives archive');
+      expect(await projectManager.inspectWorktree(sessionId)).toMatchObject({ state: 'dirty' });
+      await projectManager.archiveWorktree(sessionId);
+      expect(fs.existsSync(created.hostPath)).toBe(false);
+      const restored = await projectManager.createWorktree(sessionId, 'main', created.branch);
+      expect(restored.branch).toBe(created.branch);
+      expect(fs.readFileSync(path.join(restored.hostPath, 'saved.txt'), 'utf8')).toBe(
+        'Project work survives archive'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  effectIt.live('checks out the gitlink revision and preserves a submodule task branch across deinit', () =>
+    Effect.gen(function* () {
+      const parentPath = createLocalRepo(testDir);
+      const childContainer = path.join(testDir, 'child');
+      fs.mkdirSync(childContainer);
+      const childPath = createLocalRepo(childContainer);
+      const gitlink = runGit(childPath, ['rev-parse', 'HEAD']);
+      runGit(parentPath, ['-c', 'protocol.file.allow=always', 'submodule', 'add', childPath, 'proto']);
+      gitCommit(parentPath, 'Add protocol submodule');
+      runGit(parentPath, ['submodule', 'deinit', '-f', '--', 'proto']);
+      fs.writeFileSync(path.join(childPath, 'later.txt'), 'later default-branch work');
+      gitCommit(childPath, 'Advance default branch after the gitlink');
+      runGit(childPath, ['branch', 'lody/project-subm']);
+      const options = { parentPath, submodulePath: 'proto', expectedRepositoryUrl: childPath,
+        sessionId: 'project-submodule', local: true, repositoryPath: childPath, env: { GIT_ALLOW_PROTOCOL: 'file' } };
+      const member = yield* checkoutProjectSubmodule(options);
+      expect(runGit(member.path, ['rev-parse', 'HEAD'])).toBe(gitlink);
+      expect(member.branch).toBe('lody/project-subm-2');
+      fs.writeFileSync(path.join(member.path, 'saved.txt'), 'uncommitted submodule work');
+      const branch = yield* persistProjectSubmoduleBranch({ memberPath: member.path, repositoryPath: childPath, sessionId: options.sessionId });
+      const saved = runGit(childPath, ['rev-parse', `refs/heads/${branch}`]);
+      expect(saved).toBe(runGit(member.path, ['rev-parse', 'HEAD']));
+      gitCommit(parentPath, 'Save updated gitlink');
+      runGit(parentPath, ['submodule', 'deinit', '-f', '--', 'proto']);
+      // Simulate losing the parent worktree's submodule admin directory.
+      fs.rmSync(path.join(parentPath, '.git', 'modules'), { recursive: true, force: true });
+      const restored = yield* checkoutProjectSubmodule({ ...options, restore: { repositoryPath: childPath, branch } });
+      expect(restored.branch).toBe(branch);
+      expect(fs.readFileSync(path.join(restored.path, 'saved.txt'), 'utf8')).toBe('uncommitted submodule work');
+      const mismatch = yield* Effect.exit(inspectProjectSubmodule({ ...options, expectedRepositoryUrl: '/different/repository' }));
+      expect(Exit.isFailure(mismatch)).toBe(true);
+      expect(runGit(restored.path, ['rev-parse', 'HEAD'])).toBe(saved);
+    }).pipe(Effect.provide(worktreeGitLayer())), 180_000);
 
   describe('ensureRepo', () => {
     it('should create a bare repository when no repoUrl is provided', async () => {
@@ -52,6 +135,32 @@ describe('WorktreeManager', () => {
 
       // @ts-expect-error - accessing private property for testing
       expect(fs.existsSync(manager.bareGitDir)).toBe(true);
+    });
+
+    it('preserves existing metadata on repeated local-source preparation', async () => {
+      const sourceDir = createLocalRepo(testDir);
+      manager.updateSource({ kind: 'local-shared', originalRootPath: sourceDir, sourceGitDir: '.git' });
+      await manager.ensureRepo();
+      // @ts-expect-error - inspect the persisted boundary
+      const metaPath = path.join(manager.repoDir, 'meta.json');
+      const first = fs.readFileSync(metaPath, 'utf8');
+      expect(JSON.parse(first)).toMatchObject({ sourceGitDir: '.git', originalRootPath: sourceDir });
+      await manager.ensureRepo();
+      expect(fs.readFileSync(metaPath, 'utf8')).toBe(first);
+      expect(fs.readFileSync(path.join(sourceDir, 'README.md'), 'utf8')).toBe('# local\n');
+      expect(fs.readdirSync(path.dirname(metaPath)).some(name => name.startsWith('.lody-source-'))).toBe(false);
+    });
+
+    it('rejects an unavailable local source without publishing metadata', async () => {
+      manager.updateSource({ kind: 'local-shared', originalRootPath: path.join(testDir, 'missing-source') });
+      await expect(manager.ensureRepo()).rejects.toThrow(/Local worktree source is missing/);
+      // @ts-expect-error - inspect the persisted boundary
+      expect(fs.existsSync(path.join(manager.repoDir, 'meta.json'))).toBe(false);
+      const sourceDir = createLocalRepo(testDir);
+      manager.updateSource({ kind: 'local-shared', originalRootPath: sourceDir });
+      await manager.ensureRepo();
+      // @ts-expect-error - inspect the persisted boundary
+      expect(JSON.parse(fs.readFileSync(path.join(manager.repoDir, 'meta.json'), 'utf8'))).toMatchObject({ originalRootPath: sourceDir });
     });
 
     it('should prepare a shared local source without creating a bare clone', async () => {
@@ -230,7 +339,7 @@ describe('WorktreeManager', () => {
       expect(info.headSha).not.toBeNull();
     });
 
-    it('should create a session branch based on the specified common branch', async () => {
+    it.each(['develop', 'HEAD'])('should create a session branch from the remote %s base', async (base) => {
       const { sourceDir, remoteBareDir } = createRemoteRepo(testDir, 'main');
       manager.updateRepoUrl(toFileUrl(remoteBareDir));
 
@@ -240,8 +349,12 @@ describe('WorktreeManager', () => {
       runGit(sourceDir, ['push', '-u', 'origin', 'develop']);
       runGit(sourceDir, ['checkout', 'main']);
 
+      runGit(remoteBareDir, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+      await manager.ensureRepo();
+      runGit(remoteBareDir, ['symbolic-ref', 'HEAD', 'refs/heads/develop']);
       const sessionId = 'rbranch01-remote-develop-1' as SessionId;
-      const info = await manager.createWorktree(sessionId, 'develop');
+      const info = await manager.createWorktree(sessionId, base);
+      expect(info.baseRef).toBe(base === 'HEAD' ? 'origin/develop' : undefined);
       expect(info.headSha).toBe(developHead);
       expect(info.branch).toBe(`session/${sessionId.slice(0, 8)}`);
     });
@@ -464,6 +577,29 @@ describe('WorktreeManager', () => {
       expect(fs.existsSync(restored.hostPath)).toBe(true);
     });
 
+    it('restores local refs after a released fetch timeout and retries fetch on the next restore', async () => {
+      const { remoteBareDir } = createRemoteRepo(testDir, 'main');
+      manager.updateRepoUrl(toFileUrl(remoteBareDir));
+      const id = 'bounded-fetch' as SessionId;
+      const created = await manager.createWorktree(id);
+      const remove = () => runGit(created.hostPath, ['worktree', 'remove', '--force', created.hostPath]);
+      remove();
+      const realRun = worktreeGitLegacy.run;
+      const fetch = vi.spyOn(worktreeGitLegacy, 'run').mockImplementation(async (command, options) => {
+        if (command.args[0] === 'fetch') {
+          expect(command.timeout).toBe(30_000);
+          throw new WorktreeGitExecutionFailed({ message: 'released timeout', cause: new CommandTimedOut({ command: 'git', message: 'timed out' }) });
+        }
+        return realRun(command, options);
+      });
+      try {
+        const restored = await manager.createWorktree(id, undefined, created.branch);
+        expect(restored.headSha).toBe(created.headSha);
+      } finally { fetch.mockRestore(); }
+      remove();
+      expect((await manager.createWorktree(id, undefined, created.branch)).headSha).toBe(created.headSha);
+    });
+
     it('should still require a reachable origin when cutting a fresh worktree', async () => {
       const { remoteBareDir } = createRemoteRepo(testDir, 'main');
       manager.updateRepoUrl(toFileUrl(remoteBareDir));
@@ -488,4 +624,159 @@ describe('WorktreeManager', () => {
       ).rejects.toThrow('Session restore branch not found: feat/missing-restore');
     });
   });
+});
+
+
+const preparationFixture = Effect.gen(function* () {
+  const filesystem = yield* FileSystem.FileSystem;
+  const root = yield* filesystem.makeTempDirectoryScoped({ prefix: 'lody-source-preparation-' });
+  const originalRootPath = path.join(root, 'original');
+  yield* filesystem.makeDirectory(originalRootPath);
+  yield* filesystem.writeFileString(path.join(originalRootPath, 'original.txt'), 'retain user data');
+  const source = { repoId: 'native-local-source' as RepoId, dataDir: path.join(root, 'data'),
+    repoDir: path.join(root, 'data', 'repos', 'native-local-source'),
+    worktreesDir: path.join(root, 'data', 'repos', 'native-local-source', 'worktrees'),
+    cacheDir: path.join(root, 'data', 'repos', 'native-local-source', 'cache'), originalRootPath, sourceGitDir: '.git' };
+  const git = WorktreeGit.of({ run: () => Effect.succeed('.git\ntrue'),
+    probeCredentials: () => Effect.succeed({ exitCode: 0, returnedCredentials: false, stderrNonEmpty: false }) });
+  const layer = (io = filesystem, commands = git) => LocalWorktreePreparationLive.pipe(Layer.provide(Layer.mergeAll(
+    Layer.succeed(FileSystem.FileSystem, io), Layer.succeed(WorktreeGit, commands))));
+  const prepare = (io = filesystem, commands = git) => Effect.flatMap(LocalWorktreePreparation,
+    preparation => preparation.prepareLocked(source)).pipe(Effect.provide(layer(io, commands)));
+  const scratch = () => filesystem.readDirectory(source.repoDir).pipe(Effect.map(entries => entries.filter(name => name.startsWith('.lody-source-'))));
+  return { filesystem, root, source, git, prepare, scratch, target: path.join(source.repoDir, 'meta.json') };
+}).pipe(Effect.provide(NodeFileSystem.layer));
+
+const deniedWrite = new PlatformError.SystemError({ module: 'FileSystem', method: 'writeFile',
+  reason: 'PermissionDenied', description: 'synthetic write denied', pathOrDescriptor: '/synthetic-metadata' });
+
+describe('native local worktree preparation ownership', () => {
+  effectIt.effect('publishes complete metadata with the injected Clock and removes its scratch owner', () => Effect.gen(function* () {
+    const { filesystem, source, prepare, scratch, target } = yield* preparationFixture;
+    yield* prepare();
+    expect(JSON.parse(yield* filesystem.readFileString(target))).toEqual({ kind: 'local',
+      originalRootPath: source.originalRootPath, sourceGitDir: '.git', createdAtMs: 0 });
+    expect(yield* scratch()).toEqual([]);
+    expect(yield* filesystem.exists(source.worktreesDir)).toBe(true);
+    expect(yield* filesystem.exists(source.cacheDir)).toBe(true);
+  }));
+
+  effectIt.effect('failed preparatory writes leave no published or unowned metadata', () => Effect.gen(function* () {
+    const { filesystem, source, prepare, scratch, target } = yield* preparationFixture;
+    const failedFs = { ...filesystem, writeFileString: (file: string) => filesystem.writeFileString(file, '{partial').pipe(Effect.andThen(Effect.fail(deniedWrite))) };
+    const exit = yield* Effect.exit(prepare(failedFs));
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(yield* filesystem.exists(target)).toBe(false);
+    expect(yield* scratch()).toEqual([]);
+    expect(yield* filesystem.readFileString(path.join(source.originalRootPath, 'original.txt'))).toBe('retain user data');
+    yield* prepare();
+    expect(JSON.parse(yield* filesystem.readFileString(target))).toMatchObject({ kind: 'local' });
+  }));
+
+  effectIt.effect('cancellation before publication joins scratch removal before completion', () => Effect.gen(function* () {
+    const { filesystem, prepare, scratch, target } = yield* preparationFixture;
+    const writing = yield* Deferred.make<void>();
+    const blockedFs = { ...filesystem, writeFileString: (file: string) => filesystem.writeFileString(file, '{partial').pipe(
+      Effect.andThen(Deferred.succeed(writing, undefined)), Effect.andThen(Effect.never)) };
+    const fiber = yield* prepare(blockedFs).pipe(Effect.forkChild);
+    yield* Deferred.await(writing);
+    expect((yield* scratch()).length).toBe(1);
+    yield* Fiber.interrupt(fiber);
+    const exit = yield* Fiber.await(fiber);
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(yield* filesystem.exists(target)).toBe(false);
+    expect(yield* scratch()).toEqual([]);
+    yield* prepare();
+    expect(JSON.parse(yield* filesystem.readFileString(target))).toMatchObject({ kind: 'local' });
+  }));
+
+  effectIt.effect('exclusive publication preserves metadata that appears during preparation', () => Effect.gen(function* () {
+    const { filesystem, prepare, scratch, target } = yield* preparationFixture;
+    const prior = '{"kind":"local","retained":"other owner"}\n';
+    const competingFs = { ...filesystem, link: (from: string, to: string) => filesystem.writeFileString(to, prior).pipe(Effect.andThen(filesystem.link(from, to))) };
+    yield* prepare(competingFs);
+    expect(yield* filesystem.readFileString(target)).toBe(prior);
+    expect(yield* scratch()).toEqual([]);
+  }));
+
+  effectIt.effect('a scratch release failure is observable even after complete publication', () => Effect.gen(function* () {
+    const { filesystem, prepare, scratch, target } = yield* preparationFixture;
+    const failedReleaseFs = { ...filesystem, remove: () => Effect.fail(deniedWrite) };
+    const exit = yield* Effect.exit(prepare(failedReleaseFs));
+    expect(Exit.isFailure(exit) && exit.cause.reasons.some(reason => reason._tag === 'Die' && reason.defect instanceof LocalWorktreeScratchReleaseFailed)).toBe(true);
+    expect(JSON.parse(yield* filesystem.readFileString(target))).toMatchObject({ kind: 'local' });
+    expect((yield* scratch()).length).toBe(1);
+  }));
+
+  effectIt.effect('scratch cleanup timeout completes with retained recovery ownership', () => Effect.gen(function* () {
+    const { filesystem, prepare, scratch, target } = yield* preparationFixture;
+    const cleaning = yield* Deferred.make<void>();
+    let blocked = true;
+    const slowFs = { ...filesystem, remove: (directory: string, options?: { recursive?: boolean; force?: boolean }) =>
+      Effect.suspend(() => blocked ? Deferred.succeed(cleaning, undefined).pipe(Effect.andThen(Effect.never)) : filesystem.remove(directory, options)) };
+    const fiber = yield* prepare(slowFs).pipe(Effect.forkChild);
+    yield* Deferred.await(cleaning);
+    expect(fiber.pollUnsafe()).toBeUndefined();
+    yield* TestClock.adjust(LOCAL_WORKTREE_SCRATCH_RELEASE_MS + 1);
+    const exit = yield* Fiber.await(fiber);
+    if (Exit.isSuccess(exit)) return yield* Effect.die(new Error('cleanup timeout became success'));
+    const reason = exit.cause.reasons.find(candidate => candidate._tag === 'Die' && candidate.defect instanceof LocalWorktreeScratchReleaseFailed);
+    if (reason?._tag !== 'Die' || !(reason.defect instanceof LocalWorktreeScratchReleaseFailed))
+      return yield* Effect.die(new Error('missing scratch recovery owner'));
+    expect(JSON.parse(yield* filesystem.readFileString(target))).toMatchObject({ kind: 'local' });
+    expect(yield* scratch()).toEqual([path.basename(reason.defect.directory)]);
+    blocked = false;
+    yield* reason.defect.retryCleanup;
+    expect(yield* scratch()).toEqual([]);
+    return undefined;
+  }));
+
+  effectIt.effect('the actual Legacy manager boundary retains write failure and scratch recovery together', () => Effect.gen(function* () {
+    const { filesystem, source, prepare, scratch } = yield* preparationFixture;
+    let releaseBlocked = true;
+    const failedFs = { ...filesystem,
+      writeFileString: (file: string) => filesystem.writeFileString(file, '{partial').pipe(Effect.andThen(Effect.fail(deniedWrite))),
+      remove: (directory: string, options?: { recursive?: boolean; force?: boolean }) => Effect.suspend(() =>
+        releaseBlocked ? Effect.fail(deniedWrite) : filesystem.remove(directory, options)) };
+    // Exercise the real Promise execution boundary with a native failed operation.
+    const manager = new WorktreeManager({ repoId: source.repoId, logger: createLogger({ level: 'error', transports: 'console' }) });
+    const failure = yield* Effect.promise(async () => {
+      try {
+        // @ts-expect-error - exercise the private compatibility boundary
+        await manager.runWorktreeLegacy(prepare(failedFs));
+        throw new Error('failed preparation became success');
+      } catch (error) { return error; }
+    });
+    if (!(failure instanceof WorktreeGitExecutionFailed) || !(failure.cause instanceof AggregateError))
+      return yield* Effect.die(new Error('missing complete compatibility failure'));
+    const owner = failure.cause.errors.find((error: unknown) => error instanceof LocalWorktreeScratchReleaseFailed);
+    if (!(owner instanceof LocalWorktreeScratchReleaseFailed)) return yield* Effect.die(new Error('missing scratch owner'));
+    expect(failure.cause.errors.some((error: unknown) => error instanceof WorktreeGitExecutionFailed && error.cause === deniedWrite)).toBe(true);
+    expect(yield* scratch()).toEqual([path.basename(owner.directory)]);
+    releaseBlocked = false;
+    yield* owner.retryCleanup;
+    expect(yield* scratch()).toEqual([]);
+    return undefined;
+  }));
+
+  effectIt.effect('Git failure cannot erase a simultaneous release defect during source validation', () => Effect.gen(function* () {
+    const { filesystem, source, git, prepare, target } = yield* preparationFixture;
+    const commandFailure = new WorktreeGitCommandFailed({ message: 'not a repository', args: ['rev-parse'],
+      cwd: source.originalRootPath, code: 128, signal: null, stdout: '', stderr: 'not a repository' });
+    const releaseFailure = new Error('unresolved process release');
+    const commands = { ...git, run: () => Effect.failCause(Cause.combine(Cause.fail(commandFailure), Cause.die(releaseFailure))) };
+    const exit = yield* Effect.exit(prepare(filesystem, commands));
+    expect(Exit.isFailure(exit) && exit.cause.reasons.some(reason => reason._tag === 'Fail' && reason.error === commandFailure)).toBe(true);
+    expect(Exit.isFailure(exit) && exit.cause.reasons.some(reason => reason._tag === 'Die' && reason.defect === releaseFailure)).toBe(true);
+    expect(yield* filesystem.exists(target)).toBe(false);
+  }));
+
+  effectIt.effect('an unavailable installation root fails before touching the source or publishing metadata', () => Effect.gen(function* () {
+    const { filesystem, source, prepare } = yield* preparationFixture;
+    yield* filesystem.writeFileString(source.dataDir, 'existing unrelated file');
+    const exit = yield* Effect.exit(prepare());
+    expect(Exit.isFailure(exit) && exit.cause.reasons.some(reason => reason._tag === 'Fail' && reason.error instanceof LodyDataDirUnavailableError)).toBe(true);
+    expect(yield* filesystem.readFileString(source.dataDir)).toBe('existing unrelated file');
+    expect((yield* filesystem.readDirectory(path.dirname(source.dataDir))).sort()).toEqual(['data', 'original']);
+  }));
 });

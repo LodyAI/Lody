@@ -1,9 +1,15 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { Button } from '@lody/ui/button';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 import { AgentRoleForm, type AgentRoleFormProps } from '@/components/settings/agent-role-form';
 import type { AcpSelectorOptions } from '@/components/shared/acp-selector-options';
-import { EMPTY_AGENT_ROLE_FORM_VALUE, type AgentRoleFormValue } from '@/lib/agent-role-form';
+import {
+  createAgentRoleTargetFormValue,
+  EMPTY_AGENT_ROLE_FORM_VALUE,
+  type AgentRoleFormValue,
+  type AgentRoleTargetFormValue,
+} from '@/lib/agent-role-form';
 
 const machines = [
   { machineId: 'machine-1' as MachineId, label: 'Studio', online: true },
@@ -52,17 +58,44 @@ const selectorOptions: AcpSelectorOptions = {
   ],
 };
 
+const studio: AgentRoleTargetFormValue = {
+  ...createAgentRoleTargetFormValue('machine-1' as MachineId),
+  agentConfigId: 'config-1' as AgentConfigId,
+  modelId: 'gpt-5.6-sol',
+  configOptionValues: { thought_level: 'high' },
+};
+
+const buildBox: AgentRoleTargetFormValue = {
+  ...createAgentRoleTargetFormValue('machine-2' as MachineId),
+  agentConfigId: 'config-2' as AgentConfigId,
+  modelId: 'gpt-5.6-luna',
+};
+
 const configured: AgentRoleFormValue = {
   ...EMPTY_AGENT_ROLE_FORM_VALUE,
   name: 'Code Reviewer',
   description: 'Call this agent to review code changes for correctness before merging.',
   emoji: '🔍',
-  machineId: 'machine-1' as MachineId,
-  agentConfigId: 'config-1' as AgentConfigId,
-  modelId: 'gpt-5.6-sol',
-  configOptionValues: { thought_level: 'high' },
   promptPrefix: 'Check correctness before style.',
+  targets: [studio],
+  activeMachineId: 'machine-1' as MachineId,
 };
+
+/**
+ * What a machine tab without the Role shows. The dialog's own panel also reads
+ * that machine's agents and memories, which a story has no workspace for.
+ */
+const addTargetPanel = (
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+    <p style={{ margin: 0, fontSize: 12 }}>
+      This role does not run on Build box yet. Adding it starts from Codex, the same agent, with the
+      current settings.
+    </p>
+    <Button type="button" size="small" variant="secondary">
+      Add to this machine
+    </Button>
+  </div>
+);
 
 /** The dialog owns the value in the product; the story owns it here. */
 function StatefulAgentRoleForm(props: AgentRoleFormProps) {
@@ -83,6 +116,7 @@ const meta = {
     errors: [],
     onSubmit: () => undefined,
     onCancel: () => undefined,
+    addTargetPanel,
     className: 'min-h-0 flex-1',
   },
   decorators: [
@@ -102,10 +136,13 @@ type Story = StoryObj<typeof meta>;
 
 export const NewRole: Story = {
   args: {
-    value: EMPTY_AGENT_ROLE_FORM_VALUE,
-    agentConfigs: [],
+    value: {
+      ...EMPTY_AGENT_ROLE_FORM_VALUE,
+      targets: [createAgentRoleTargetFormValue('machine-1' as MachineId)],
+      activeMachineId: 'machine-1' as MachineId,
+    },
     selectorOptions: null,
-    errors: ['name_required', 'machine_required', 'agent_config_required'],
+    errors: ['name_required', 'agent_config_required'],
   },
 };
 
@@ -127,7 +164,7 @@ export const SharedWithWorkspace: Story = {
 /** The machine has no providers yet: nothing is offered in their place. */
 export const MachineWithoutAgentConfigs: Story = {
   args: {
-    value: { ...configured, agentConfigId: null },
+    value: { ...configured, targets: [{ ...studio, agentConfigId: null }] },
     agentConfigs: [],
     selectorOptions: null,
   },
@@ -144,7 +181,7 @@ export const CapabilitiesUnavailable: Story = {
 /** A saved model that the agent stopped publishing — reported, never swapped. */
 export const IncompatibleRunConfig: Story = {
   args: {
-    value: { ...configured, modelId: 'gpt-5.5-retired' },
+    value: { ...configured, targets: [{ ...studio, modelId: 'gpt-5.5-retired' }] },
     issues: [
       { kind: 'model_unsupported', value: 'gpt-5.5-retired' },
       { kind: 'option_unsupported', configId: 'legacy_effort' },
@@ -161,5 +198,39 @@ export const SavedLocallyNotSynced: Story = {
     isEditing: true,
     error:
       'Saved on this device but not yet synced to the workspace (offline). Other members cannot see it yet.',
+  },
+};
+
+/**
+ * Runs on two machines. Each tab is that machine's own agent, model and memory;
+ * the alias field appears once there is more than one.
+ */
+export const TwoMachines: Story = {
+  args: {
+    value: { ...configured, targets: [studio, { ...buildBox, alias: 'Reviewer-CI' }] },
+    isEditing: true,
+  },
+};
+
+/** A machine the Role does not run on yet: one action adds it. */
+export const MachineNotAdded: Story = {
+  args: {
+    value: { ...configured, activeMachineId: 'machine-2' as MachineId },
+    isEditing: true,
+  },
+};
+
+/** Overflow belongs to the machine tabs, leaving the fields and footer in place. */
+export const ManyMachines: Story = {
+  args: {
+    machines: [
+      ...machines,
+      ...Array.from({ length: 12 }, (_, index) => ({
+        machineId: `extra-machine-${index}` as MachineId,
+        label: `Development workstation ${index + 1}`,
+        online: index % 2 === 0,
+      })),
+    ],
+    isEditing: true,
   },
 };

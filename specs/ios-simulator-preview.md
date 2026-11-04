@@ -1,7 +1,7 @@
 # iOS Simulator preview
 
 Status: draft
-Translation: current
+Translation: pending
 
 [中文](ios-simulator-preview.zh.md)
 
@@ -104,8 +104,9 @@ Remote authorization depends on the connected Cloud backend understanding the ex
 
 Accepted agent starts expose an iOS Simulator action above the composer. Visible desktop
 conversations automatically reveal the simulator sidebar once per operation per browser
-tab; mobile opens it on explicit action. Manual dismissal is respected. Side Chat
-requests open the originating Session’s preview. The discovery hint is historical,
+tab; mobile opens it on explicit action. Manual dismissal is respected. Child tabs and Side Chat
+requests share the main conversation’s preview binding; switching tabs does not
+change that binding. Both caller and main conversation must pass authorization. The discovery hint is historical,
 not a claim that the preview is still running; opening queries current status.
 
 ## Remote responsiveness

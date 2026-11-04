@@ -224,6 +224,8 @@ export async function prepareSharePackage(options: {
     [...copied.values()],
     async (copy, _index, signal) => {
       const loaded = await options.readAttachment(copy.source, signal);
+      if (copy.source.kind === 'image' && loaded.bytes.length > SHARE_LIMITS.imageBytes)
+        throw new Error('Share image exceeds size limit');
       const descriptor = await addObject(copy.id, loaded.bytes, loaded.mediaType);
       for (const reference of copy.references) {
         if (typeof reference.sha256 === 'string' && descriptor.sha256 !== reference.sha256)

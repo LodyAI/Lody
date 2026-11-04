@@ -35,6 +35,8 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 
 ## Build toolchain and window identity
 
+- Electron 44 desktop builds require macOS 13 or newer.
+
 - `desktop-bootstrap` must be the first main import: Nightly chooses its data
   directory before auth stores open. `desktop-channel` changes desktop identity,
   never the shared CLI namespace, data root, or Host endpoint.
@@ -56,13 +58,25 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 
 ## Embedded CLI and native dependencies
 
+- Main-process E2EE also uses `better-sqlite3`. Declare it in this app's runtime
+  dependencies, externalize it in every main composition, and unpack the installed
+  package including its target prebuild. Never rely on the embedded CLI's separate
+  dependency tree.
+- Both desktop compositions build `src/main/native-storage-smoke.mts` in the same
+  main graph as `application.ts`. The afterPack hook runs that ASAR entry through
+  the packaged Electron runtime on matching hosts, checking E2EE SQLite close/reopen
+  and encrypted Node custody with synthetic temporary state. Keep this separate
+  from the CLI binding probe; it proves no real OS-keychain acceptance.
+
 - The embedded CLI runs built JavaScript, never source-loader/Jiti. Development
   and packaged builds share the output layout.
-- `better-sqlite3`, `@lydell/node-pty`, and `loro-crdt` remain external and must be
+- `@loro-dev/roost-node`, `better-sqlite3`, `@lydell/node-pty`, and Node-only `loro-crdt` remain external and must be
   staged under `resources/cli/node_modules` by `scripts/sync-cli-dist.mjs` and
   `scripts/cli-native-deps.mjs`.
-- `@lydell/node-pty` and `better-sqlite3 >= 13.0.2` use N-API artifacts. Stage the
-  target platform/architecture artifact; do not rebuild by Electron ABI.
+  Roost's client, Worker, and binding retain relative paths; stage only the target prebuild,
+  from the main package or its exact-version optional platform package.
+- `@lydell/node-pty` and `better-sqlite3 >= 13.0.2` use N-API prebuilds. Stage the
+  target platform/arch; never run `install-app-deps` or rebuild these by Electron ABI.
 - Every embedded-CLI descendant launched through `process.execPath` must inherit
   `ELECTRON_RUN_AS_NODE` when it exists. On packaged macOS, omitting it launches a
   second GUI app instead of Node.
@@ -75,10 +89,9 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
   them into `app.asar.unpacked`, assert the DeepSeek adapter plus all four pinned
   presets, then probe CLI `--help`, node-pty loading, and a real in-memory SQLite
   database before signing.
-- Keep `better-sqlite3 >= 13.0.2`, the Node-API 10 engine range
-  (`>=22.14.0 <23 || >=23.6.0`), the first-import guard in
-  `sqlite-runtime-support.ts`, and its tests aligned. Older runtimes can segfault
-  while loading the binding. Linux armv7 is unsupported.
+- Keep `better-sqlite3 >= 13.0.2`, Node-API 10, and the CLI first-import guard aligned.
+  [Node security floors and Electron backport limits](../../.agents/notes/implemented/bug-fix/2026-10-22-node-security-runtime-floor.md)
+  are separate. Linux armv7 is unsupported.
 - When upgrading `@lydell/node-pty`, audit package layout and Windows ConPTY binding
   names. Apply the staged asar-path repair after downloading target artifacts; a pnpm
   patch cannot cover cross-architecture packages fetched during packaging.

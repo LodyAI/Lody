@@ -1,3 +1,4 @@
+import type { SubagentRunHistorySource } from '@/lib/conversation-view/types';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { MessageContent } from '@lody/shared';
@@ -5,9 +6,40 @@ import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-durat
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { useStableNow } from '@/hooks/use-stable-now';
+import { formatToolCommand } from './tool-call-command';
 
-export type SubagentTask = Extract<MessageContent, { type: 'subagent_task' }>;
+export type SubagentTask = Extract<MessageContent, { type: 'subagent_task' }> & {
+  /** Derived from the spawning tool in this turn; never persisted as task metadata. */
+  command?: string;
+  /** Present only on a display projection. Its run.items is a latest-step preview. */
+  history?: SubagentRunHistorySource;
+};
 type SubagentRunItem = NonNullable<SubagentTask['run']>['items'][number];
+
+const isBashTask = (task: SubagentTask): boolean =>
+  task.actor === 'local_bash' || task.taskType === 'local_bash';
+
+/**
+ * Provider task types that run a command or watch something rather than an
+ * agent. `taskKind` cannot tell these apart: Claude publishes `background` for
+ * any backgrounded run, an agent's included, and `subagent` for the rest.
+ */
+const NON_AGENT_TASK_TYPES = new Set(['local_bash', 'mcp_task', 'monitor_mcp']);
+
+/** Which tab of the panel a task belongs on. */
+export type TaskGroup = 'subagents' | 'tasks';
+
+/**
+ * An agent run is a subagent; a shell command, MCP task, monitor or scheduled
+ * wakeup is a task. An unrecognised type stays with the subagents, where the
+ * panel listed every task before it was split.
+ */
+export const groupOf = (task: SubagentTask): TaskGroup => {
+  if (task.taskKind === 'scheduled') return 'tasks';
+  if (task.subagentType || task.run) return 'subagents';
+  const type = task.taskType ?? task.actor;
+  return type && NON_AGENT_TASK_TYPES.has(type) ? 'tasks' : 'subagents';
+};
 
 /**
  * A task's state. A task carrying a normalized run reads its snapshot, which
@@ -36,11 +68,19 @@ export const isRunning = (task: SubagentTask): boolean => {
  */
 export const collectSubagentTasks = (items: readonly MessageContent[]): SubagentTask[] => {
   const byId = new Map<string, SubagentTask>();
+  const commands = new Map<string, string>();
   for (const item of items) {
+    if (item.type === 'tool_call' && item.kind === 'execute') {
+      const block = item.content?.find((content) => content.type === 'terminal_command');
+      if (block) commands.set(item.toolCallId, formatToolCommand(block));
+    }
     if (item.type !== 'subagent_task' || item.skipTranscript) continue;
     byId.set(item.taskId, item);
   }
-  return [...byId.values()];
+  return [...byId.values()].map((task) => {
+    const command = isBashTask(task) && task.toolUseId ? commands.get(task.toolUseId) : undefined;
+    return command ? { ...task, command, history: task.history } : task;
+  });
 };
 
 /** Deepest indent a nested run takes; deeper ones share it rather than run off the card. */
@@ -121,12 +161,12 @@ export function LiveElapsed({ startedAtEpochSeconds }: { startedAtEpochSeconds: 
 }
 
 export const actorOf = (task: SubagentTask, t: TFunction): string =>
-  task.actor ||
-  task.subagentType ||
-  task.workflowName ||
-  (task.taskType === 'local_bash'
+  isBashTask(task)
     ? t('sessions.subagentTasks.bashActor', 'Bash')
-    : t('sessions.subagentTasks.defaultActor', 'Task'));
+    : task.actor ||
+      task.subagentType ||
+      task.workflowName ||
+      t('sessions.subagentTasks.defaultActor', 'Task');
 
 export const durationOf = (task: SubagentTask): number | null =>
   typeof task.startedAtEpochSeconds === 'number' && typeof task.endedAtEpochSeconds === 'number'

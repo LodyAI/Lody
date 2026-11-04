@@ -3,28 +3,26 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { LocalSessionControlRequest } from '@lody/shared';
+import { writeLocalDaemonRunFile } from '@lody/shared/node/local-ipc';
 import {
-  IpcConnectError,
-  IpcProtocolError,
-  IpcTimeoutError,
-  writeLocalDaemonRunFile,
-} from '@lody/shared/node/local-ipc';
-import {
-  DAEMON_NOT_RUNNING_MESSAGE,
-  classifyLocalDaemonIpcError,
-  dispatchLocalControl,
-  ensureWorkspaceMetaSynced,
   ensureDaemonReachable,
-  listAliveDocMetas,
   listAliveRoomIds,
   listAliveSessionMetas,
+  listWorkspaceCandidates,
+  resolveWorkspaceOrThrow,
   selectWorkspaceSummary,
-  syncWorkspaceMetaForRead,
-  WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
-  WorkspaceSyncUnavailableError,
 } from './command-runtime';
+import { makeWorkspaceCommandManagers } from './workspace-command-manager';
+import { Effect } from 'effect';
+import type { MachineId } from '@lody/shared';
+import * as workspaceApi from './workspace';
+import {
+  makeLocalWorkspaceCatalog,
+  type LocalWorkspaceCatalogSnapshot,
+} from './local-workspace-catalog';
+import { fileLocksLegacy } from '@/utils/file-lock';
 
 const createControlRequest = (): LocalSessionControlRequest => ({
   type: 'session/create',
@@ -43,6 +41,69 @@ const createControlRequest = (): LocalSessionControlRequest => ({
 
 const tempDirs: string[] = [];
 const servers: http.Server[] = [];
+
+const commandScope = {
+  userId: 'synthetic-user',
+  token: 'synthetic-token',
+  machineId: 'synthetic-machine',
+  authBaseUrl: 'https://synthetic.invalid',
+};
+const makeCommandManager = () => ({
+  live: true,
+  writes: [] as string[],
+  async cleanUp() {
+    this.live = false;
+  },
+  write(value: string) {
+    if (!this.live) throw new Error('Manager closed');
+    this.writes.push(value);
+  },
+});
+
+describe('workspace command manager sharing', () => {
+  it.each([
+    { userId: 'other-user' },
+    { token: 'other-token' },
+    { machineId: 'other-machine' },
+    { authBaseUrl: 'https://other.invalid' },
+    { authSiteUrl: 'https://other-site.invalid' },
+  ])('does not share an active manager across authorization scopes: %j', async (changed) => {
+    const withManager = makeWorkspaceCommandManagers<ReturnType<typeof makeCommandManager>>();
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const manager = makeCommandManager();
+    const first = withManager(
+      'workspace',
+      commandScope,
+      async () => manager,
+      async () => {
+        entered.resolve();
+        await finish.promise;
+      },
+      () => {}
+    );
+    try {
+      await entered.promise;
+      await expect(
+        withManager(
+          'workspace',
+          { ...commandScope, ...changed },
+          async () => {
+            throw new Error('Must not create another owner');
+          },
+          async () => {
+            throw new Error('Must not use another identity');
+          },
+          () => {}
+        )
+      ).rejects.toThrow('same authorization scope');
+      expect(manager.live).toBe(true);
+    } finally {
+      finish.resolve();
+      await first;
+    }
+  });
+});
 
 function makeTempDir(): string {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-command-runtime-test-'));
@@ -141,17 +202,6 @@ describe('command runtime helpers', () => {
     }
   });
 
-  it('selects a workspace by id, slug, or exact name', () => {
-    const workspaces = [
-      { id: 'ws-1', slug: 'alpha', name: 'Alpha Team', role: 'owner' },
-      { id: 'ws-2', slug: 'beta', name: 'Beta Team', role: 'member' },
-    ];
-
-    expect(selectWorkspaceSummary(workspaces, 'ws-1')).toEqual(workspaces[0]);
-    expect(selectWorkspaceSummary(workspaces, 'beta')).toEqual(workspaces[1]);
-    expect(selectWorkspaceSummary(workspaces, 'Alpha Team')).toEqual(workspaces[0]);
-  });
-
   it('prefers stable workspace ids and slugs over names', () => {
     const workspaces = [
       { id: 'ws-1', slug: 'alpha', name: 'beta', role: 'owner' },
@@ -162,72 +212,144 @@ describe('command runtime helpers', () => {
     expect(selectWorkspaceSummary(workspaces, 'beta')).toEqual(workspaces[1]);
   });
 
-  it('rejects ambiguous workspace names and shows stable selectors', () => {
-    const workspaces = [
+  it('resolves standalone workspaces online, or only from this login cache with --offline', async () => {
+    const auth = {
+      token: 'synthetic-token',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.test',
+      machineId: 'machine-1' as MachineId,
+      machineName: 'host',
+    };
+    const online = [
       { id: 'ws-1', slug: 'alpha', name: 'Shared Team', role: 'owner' },
       { id: 'ws-2', slug: 'beta', name: 'Shared Team', role: 'member' },
     ];
-
-    expect(() => selectWorkspaceSummary(workspaces, 'Shared Team')).toThrow(
-      'Workspace selector is ambiguous: Shared Team. Matches: Shared Team (slug: alpha, id: ws-1), Shared Team (slug: beta, id: ws-2). Use a workspace id or slug instead.'
-    );
-  });
-
-  it('rejects malformed daemon responses with a clear validation error', async () => {
-    const options = await makeDaemonOptions({
-      control: (_req, res) => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ responses: 'not-an-array' }));
-      },
+    vi.stubEnv('LODY_WORKSPACE_ID', '');
+    const list = vi.spyOn(workspaceApi, 'listWorkspacesForToken').mockResolvedValue(online);
+    onTestFinished(() => {
+      list.mockRestore();
+      vi.unstubAllEnvs();
     });
-
-    await expect(dispatchLocalControl(createControlRequest(), options)).rejects.toThrow(
-      'Invalid response from local CLI daemon (HTTP 200).'
+    await expect(resolveWorkspaceOrThrow(auth, 'beta')).resolves.toEqual(online[1]);
+    await expect(resolveWorkspaceOrThrow(auth, 'Shared Team')).rejects.toThrow('ambiguous');
+    await expect(resolveWorkspaceOrThrow(auth, 'missing')).rejects.toThrow(
+      'Workspace not found: missing'
     );
-  });
+    expect(list).toHaveBeenCalledTimes(3);
+    list.mockRejectedValueOnce(new Error('Synthetic discovery outage'));
+    // A discovery failure is never reported as an empty workspace list.
+    await expect(resolveWorkspaceOrThrow(auth, 'beta')).rejects.toThrow(
+      'Synthetic discovery outage'
+    );
+    list.mockClear();
 
-  it('returns parsed local control responses after schema validation', async () => {
-    let healthRequests = 0;
-    const options = await makeDaemonOptions({
-      healthz: (_req, res) => {
-        healthRequests += 1;
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      },
-      control: (_req, res) => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            ok: true,
-            responses: [
-              {
-                type: 'session/create_response',
-                sessionId: 'session-1',
-                success: true,
-              },
-            ],
-          })
-        );
-      },
+    const cached = (snapshot: Partial<LocalWorkspaceCatalogSnapshot>) => ({
+      read: () =>
+        Effect.succeed({
+          version: 1 as const,
+          identity: { userId: 'user-1' },
+          machine: { machineId: 'machine-1' },
+          sessions: [],
+          workspaces: [
+            {
+              workspaceId: 'ws-1',
+              name: 'Alpha',
+              slug: 'alpha',
+              role: 'member',
+              contentMode: 'e2ee' as const,
+              genesisHash: 'ab'.repeat(32),
+              state: 'active' as const,
+              cachedAt: 1,
+            },
+            {
+              workspaceId: 'ws-2',
+              name: 'Removed',
+              slug: 'removed',
+              role: 'owner',
+              state: 'remote_missing' as const,
+              cachedAt: 1,
+            },
+          ],
+          ...snapshot,
+        }),
     });
-
-    await expect(dispatchLocalControl(createControlRequest(), options)).resolves.toEqual([
-      {
-        type: 'session/create_response',
-        sessionId: 'session-1',
-        success: true,
-      },
-    ]);
-    expect(healthRequests).toBe(0);
-  });
-
-  it('fails fast with a friendly message when the daemon probe is unreachable', async () => {
-    await expect(ensureDaemonReachable(missingRunFileOptions())).rejects.toThrow(
-      DAEMON_NOT_RUNNING_MESSAGE
-    );
     await expect(
-      dispatchLocalControl(createControlRequest(), missingRunFileOptions())
-    ).rejects.toThrow(DAEMON_NOT_RUNNING_MESSAGE);
+      resolveWorkspaceOrThrow(auth, undefined, { offline: true, catalog: cached({}) })
+    ).resolves.toEqual({
+      id: 'ws-1',
+      name: 'Alpha',
+      slug: 'alpha',
+      role: 'member',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    });
+    // A workspace the cloud no longer lists is not usable offline.
+    await expect(
+      resolveWorkspaceOrThrow(auth, 'removed', { offline: true, catalog: cached({}) })
+    ).rejects.toThrow('Workspace not found: removed');
+    // Another login's cache grants nothing to this one.
+    await expect(
+      resolveWorkspaceOrThrow(auth, 'alpha', {
+        offline: true,
+        catalog: cached({ identity: { userId: 'user-2' } }),
+      })
+    ).rejects.toThrow('No workspaces are cached locally for the current CLI login');
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it('never resolves an offline selection from a partial cache, but serves explicit ordinary workspaces', async () => {
+    vi.stubEnv('LODY_WORKSPACE_ID', '');
+    onTestFinished(() => vi.unstubAllEnvs());
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-offline-catalog-'));
+    tempDirs.push(directory);
+    const filePath = path.join(directory, 'workspace-catalog.json');
+    const catalog = makeLocalWorkspaceCatalog({
+      filePath,
+      lockName: `offline-${path.basename(directory)}`,
+      cacheTtlMs: 0,
+    });
+    const ordinary = { id: 'ws-plain', name: 'Plain', slug: 'plain', role: 'owner' };
+    const encrypted = {
+      id: 'ws-e2ee',
+      name: 'Sealed',
+      slug: 'sealed',
+      role: 'member',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    await fileLocksLegacy.runPromise(
+      catalog.cacheRemoteWorkspaces({
+        identity: { userId: 'user-1' },
+        machine: { machineId: 'machine-1', machineName: 'host' },
+        workspaces: [ordinary, encrypted],
+      })
+    );
+    const auth = {
+      token: 'synthetic-token',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.test',
+      machineId: 'machine-1' as MachineId,
+      machineName: 'host',
+    };
+    const offline = { offline: true, catalog };
+    await expect(resolveWorkspaceOrThrow(auth, undefined, offline)).rejects.toThrow(
+      'Multiple workspaces are available'
+    );
+    fs.writeFileSync(`${filePath}.e2ee`, '{synthetic damaged encrypted cache');
+    offline.catalog = makeLocalWorkspaceCatalog({ filePath, cacheTtlMs: 0 });
+
+    // The unreadable encrypted half must not shrink the choice to the plain workspace.
+    for (const selector of [undefined, 'sealed', 'Plain'])
+      await expect(resolveWorkspaceOrThrow(auth, selector, offline)).rejects.toThrow(
+        'Encrypted workspace cache is unavailable'
+      );
+    await expect(listWorkspaceCandidates(auth, offline)).rejects.toThrow(
+      'Encrypted workspace cache is unavailable'
+    );
+    // An explicit plaintext workspace remains readable offline.
+    await expect(resolveWorkspaceOrThrow(auth, 'plain', offline)).resolves.toEqual(ordinary);
   });
 
   it('reports a retryable busy daemon when the probe returns a transient status', async () => {
@@ -240,80 +362,6 @@ describe('command runtime helpers', () => {
 
     const error = await ensureDaemonReachable(options).catch((cause: unknown) => cause);
     expect(error).toMatchObject({ code: 'DAEMON_BUSY', retryable: true });
-  });
-
-  it('classifies missing, timeout, and protocol failures without lying about daemon state', () => {
-    expect(
-      classifyLocalDaemonIpcError(new IpcConnectError({ message: 'connect failed' }))
-    ).toMatchObject({ code: 'DAEMON_NOT_RUNNING', retryable: false });
-    expect(
-      classifyLocalDaemonIpcError(new IpcTimeoutError({ message: 'timed out', timeoutMs: 2_000 }))
-    ).toMatchObject({ code: 'DAEMON_BUSY', retryable: true });
-    expect(
-      classifyLocalDaemonIpcError(
-        new IpcProtocolError({
-          message: 'bad request: details: /private/path',
-          status: 400,
-          errorCode: 'INVALID_REQUEST',
-        })
-      )
-    ).toMatchObject({
-      code: 'DAEMON_PROTOCOL_ERROR',
-      message: 'Local CLI daemon request failed: INVALID_REQUEST',
-      retryable: false,
-    });
-  });
-
-  it('passes when the daemon probe responds with 2xx', async () => {
-    const options = await makeDaemonOptions({
-      healthz: (_req, res) => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({}));
-      },
-    });
-
-    await expect(ensureDaemonReachable(options)).resolves.toBeUndefined();
-  });
-
-  it('filters docs using explicit existence state from getDocMeta', async () => {
-    const scan = vi.fn(async ({ prefix }: { prefix: string[]; includeRaw?: boolean }) => {
-      if (prefix[0] === 'e') {
-        return [
-          {
-            key: ['e', 'machine-1'],
-            value: true,
-          },
-          {
-            key: ['e', 'machine-2'],
-            value: true,
-          },
-        ];
-      }
-      return [];
-    });
-    const manager = {
-      repo: {
-        getMeta: () => ({
-          scan,
-        }),
-        getDocMeta: vi.fn(async (roomId: string) =>
-          roomId === 'machine-1'
-            ? {
-                meta: { id: 'machine-1' },
-                exists: true,
-              }
-            : {
-                meta: { id: 'machine-2' },
-                exists: false,
-              }
-        ),
-      },
-    } as any;
-
-    await expect(
-      listAliveDocMetas<{ id: string }>(manager, (roomId) => roomId.startsWith('machine-'))
-    ).resolves.toEqual([{ roomId: 'machine-1', meta: { id: 'machine-1' } }]);
-    expect(scan).toHaveBeenCalledWith({ prefix: ['e'], includeRaw: false });
   });
 
   it('enumerates metadata-free documents from the existence index and excludes tombstones', async () => {
@@ -356,51 +404,5 @@ describe('command runtime helpers', () => {
         meta: { id: 'real', latestUserMsgId: 'turn-1' },
       },
     ]);
-  });
-
-  it('rejects when workspace metadata writes are not confirmed synced', async () => {
-    const manager = {
-      waitUntilMetaSynced: vi.fn(async () => false),
-    };
-
-    await expect(
-      ensureWorkspaceMetaSynced(manager as any, 'session.archive:session-1')
-    ).rejects.toThrow('Workspace metadata changes were not confirmed by Loro Streams');
-    expect(manager.waitUntilMetaSynced).toHaveBeenCalledWith({
-      reason: 'session.archive:session-1',
-    });
-  });
-
-  it('passes when workspace metadata writes are confirmed synced', async () => {
-    const manager = {
-      waitUntilMetaSynced: vi.fn(async () => true),
-    };
-
-    await expect(
-      ensureWorkspaceMetaSynced(manager as any, 'session.archive:session-1')
-    ).resolves.toBeUndefined();
-  });
-
-  it('adds an explicit offline hint when read metadata sync fails', async () => {
-    const syncError = new Error('sync failed');
-    const manager = {
-      syncMetaOrThrow: vi.fn(async () => {
-        throw syncError;
-      }),
-    };
-
-    const error = await syncWorkspaceMetaForRead(manager, 'session.list:workspace-1').catch(
-      (caught: unknown) => caught
-    );
-
-    expect(error).toBeInstanceOf(WorkspaceSyncUnavailableError);
-    expect(error).toMatchObject({ cause: syncError });
-    expect(error).toHaveProperty('message', expect.stringMatching(/--offline/));
-    expect((error as WorkspaceSyncUnavailableError).toLodyError()).toEqual({
-      code: 'SYNC_UNAVAILABLE',
-      message: WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
-      retryable: true,
-    });
-    expect(manager.syncMetaOrThrow).toHaveBeenCalledWith({ reason: 'session.list:workspace-1' });
   });
 });

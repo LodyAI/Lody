@@ -19,6 +19,15 @@ this page is the full text of the rules summarised there.
   Tunnel readiness uses a proxy response marker independent of HTML injection; injection
   overhead that exceeds the response limit leaves the original document intact.
 
+- Encrypted remote previews reuse the signed feature RPC for create, status/renewal
+  and revoke. Missing host support and a verified non-writer are refused before
+  signing; the receiving machine still checks current authority. No ordinary
+  preview-control proof is minted for this path. The Browser shows the tunnel
+  disclosure before creation and while viewing: page bytes pass through the tunnel
+  service as plaintext, even though preview controls and comments remain protected.
+  This entry does not depend on a local Agent. Public-browser navigation retains
+  its declared host capability and cannot fall back to a preview iframe.
+
 - Complete `.html` / `.htm` viewer text may switch between Monaco source and Managed Preview without
   a Machine RPC endpoint. Build a policy-owned `srcdoc` from the current complete viewer text,
   inject the shared annotation runtime, and run it in uncached static-document mode
@@ -28,14 +37,20 @@ this page is the full text of the rules summarised there.
   messages to a file-path logical URL whose namespace distinguishes relative, POSIX-absolute,
   Windows-drive, and UNC paths. Same-document `#fragment` links stay inside the `srcdoc`; leave
   rendered mode on every other navigation request because local subresources/pages are not part of
-  the single-document contract. HTML starts in code mode,
-  and truncated documents are never executable. The iframe is a permission boundary, not a promised
+  the single-document contract. Desktop HTML starts in code mode; mobile session opens
+  default to preview. Truncated documents never enter either HTML preview. The iframe is a
+  permission boundary, not a promised
   renderer-process/thread boundary; do not claim arbitrary user JS cannot consume the app renderer.
   Likewise, CSP governs the initial `srcdoc`, not an arbitrary later self-navigation. Require
-  credentialless iframe support before offering the toggle, and do not describe the
-  self-contained/no-network rule as a hard browser guarantee. The rendered frame exists only while
+  credentialless iframe support before running scripts, and do not describe the
+  executable self-contained/no-network rule as a hard browser guarantee. Engines without
+  that support use `ReadOnlyHtmlPreview`: an empty sandbox, script-blocking CSP,
+  and a document stripped of navigation, scripts, nested documents, and SVG mutation.
+  This preserves inline CSS and embedded media but offers no script interaction or annotation.
+  The standalone mobile project browser uses the same readonly preview and eye toggle.
+  The session rendered frame exists only while
   its viewer tab and containing sidebar are visible. Key the file viewer by session + tab so switching
-  session targets always returns HTML to code mode before the new file can execute.
+  session targets resets the HTML mode to that surface’s default.
 - Session Browser has strict dual engines, split on exactly one question: is the address the
   agent machine's own LOOPBACK? Only that uses Managed Preview, where the machine opens one
   approved port on itself; those are the only pages eligible for Visual Annotation. Everything

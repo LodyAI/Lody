@@ -50,7 +50,7 @@ export class McpCatalogPage {
     await argumentInputs.first().fill(this.fixture.mcpArgs[0]!);
     await argumentsField.getByRole('button', { name: /^(Add argument|添加参数)$/u }).click();
     await argumentInputs.nth(1).fill(this.fixture.mcpArgs[1]!);
-    await editor.getByRole('button', { name: /^(Save|保存)$/u }).click();
+    await editor.getByRole('button', { name: /^(Save configuration|保存配置)$/u }).click();
     await expect(settings.getByText(this.fixture.serverName, { exact: true })).toBeVisible({
       timeout: 30_000,
     });
@@ -135,8 +135,8 @@ export class McpCatalogPage {
 
   async deleteSyntheticServer(): Promise<void> {
     const settings = await this.openMcpSettings();
-    const main = settings.getByRole('main');
-    await main.getByRole('button', { name: /^(Remove|移除)$/u }).click();
+    const surface = settings.locator('[data-settings-surface]');
+    await surface.getByRole('button', { name: /^(Remove|移除)$/u }).click();
     const confirmation = this.page.getByRole('alertdialog');
     await expect(confirmation.getByText(this.fixture.serverName)).toBeVisible();
     await confirmation.getByRole('button', { name: /^(Remove|移除)$/u }).click();

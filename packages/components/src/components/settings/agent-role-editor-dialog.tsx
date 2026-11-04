@@ -1,30 +1,52 @@
-import { useMemo, useState } from 'react';
+import { RoleMemoryPicker } from './memory-setting';
+import { useEffect, useMemo, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { Plus } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
-import { getServerNow, type AgentRole, type AgentRoleId, type MachineId } from '@lody/shared';
+import {
+  getServerNow,
+  type AgentConfigMeta,
+  type AgentRole,
+  type AgentRoleId,
+  type MachineId,
+} from '@lody/shared';
 
 import { userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
+import { buildAcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useWorkspaceAgentRoleActions } from '@/hooks/use-workspace-agent-roles';
 import {
   applyAgentRoleRunConfigDefaults,
+  getAgentRoleFormTarget,
+  putAgentRoleFormTarget,
+  suggestAgentRoleTarget,
+  type AgentRoleTargetFormValue,
   buildAgentRoleFormValue,
   buildAgentRoleFromForm,
   buildAgentRoleRunConfig,
+  carryAgentRoleOptionsToModel,
   findAgentRoleRunConfigIssues,
   validateAgentRoleForm,
   type AgentRoleFormValue,
 } from '@/lib/agent-role-form';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
+import { Tabs } from '@lody/ui/tabs';
+import { Button } from '@lody/ui/button';
+import { useMemoryAssociations } from '@/hooks/use-memory-associations';
 import { Dialog } from '@/ui/dialog';
 import { AgentRoleForm } from './agent-role-form';
 import { useSettingsPane } from './settings-page-header';
-import { SETTINGS_EDITOR_DIALOG_LAYOUT, SETTINGS_EDITOR_DIALOG_WIDTH } from './surface';
+import {
+  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  SETTINGS_EDITOR_DIALOG_WIDTH,
+  settingsCatalog as catalog,
+} from './surface';
 
 /**
  * A `create` carries its id from the moment the form opens.
@@ -44,10 +66,13 @@ export const openAgentRoleEditorForCreate = (value: AgentRoleFormValue): AgentRo
   value,
 });
 
-export const openAgentRoleEditorForEdit = (role: AgentRole): AgentRoleEditorState => ({
+export const openAgentRoleEditorForEdit = (
+  role: AgentRole,
+  activeMachineId?: MachineId
+): AgentRoleEditorState => ({
   mode: 'edit',
   role,
-  value: buildAgentRoleFormValue(role),
+  value: buildAgentRoleFormValue(role, activeMachineId),
 });
 
 /**
@@ -94,58 +119,85 @@ export function AgentRoleEditorDialog({
   // panel fades out with its form rather than emptying first.
   const { shown: editor, onOpenChangeComplete } = useDialogExitSnapshot(openEditor);
 
+  const [tab, setTab] = useState<'configuration' | 'team'>('configuration');
+  const editorId = openEditor?.mode === 'edit' ? openEditor.role.id : openEditor?.roleId;
+  useEffect(() => {
+    setTab('configuration');
+  }, [editorId]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
 
-  const machineOptions = useMemo(
-    () =>
-      [...machines.values()]
-        .map((machine) => ({
-          machineId: machine.id,
-          label: machine.name || machine.id,
-          online: onlineMachineIds.has(machine.id),
-        }))
-        .sort((left, right) => left.label.localeCompare(right.label)),
-    [machines, onlineMachineIds]
-  );
+  const targetMachineIds = editor?.value.targets.map((target) => target.machineId) ?? [];
+  const targetMachineKey = targetMachineIds.join('\0');
+  // The Role's own machines lead, in authoring order, then every other machine
+  // it could be added to. A target on a machine this user cannot see stays as a
+  // tab so it is never dropped from the Role by saving.
+  const machineOptions = useMemo(() => {
+    const own = targetMachineKey ? (targetMachineKey.split('\0') as MachineId[]) : [];
+    const option = (machineId: MachineId) => {
+      const machine = machines.get(machineId);
+      return {
+        machineId,
+        label: machine?.name || (machine ? machineId : t('settings.agentRoles.unknownMachine')),
+        online: onlineMachineIds.has(machineId),
+      };
+    };
+    const others = [...machines.keys()]
+      .filter((machineId) => !own.includes(machineId))
+      .map(option)
+      .sort(
+        (left, right) =>
+          Number(right.online) - Number(left.online) || left.label.localeCompare(right.label)
+      );
+    return [...own.map(option), ...others];
+  }, [machines, onlineMachineIds, t, targetMachineKey]);
 
-  const selectedMachineId: MachineId | null = editor?.value.machineId ?? null;
+  const activeMachineId: MachineId | null = editor?.value.activeMachineId ?? null;
+  const activeTarget = editor ? getAgentRoleFormTarget(editor.value) : undefined;
   const machineAgentConfigs = useMemo(
-    () => agentConfigs.filter((config) => config.machineId === selectedMachineId),
-    [agentConfigs, selectedMachineId]
+    () => agentConfigs.filter((config) => config.machineId === activeMachineId),
+    [agentConfigs, activeMachineId]
   );
   const selectedAgentConfig = useMemo(
-    () => machineAgentConfigs.find((config) => config.id === editor?.value.agentConfigId),
-    [editor?.value.agentConfigId, machineAgentConfigs]
+    () => machineAgentConfigs.find((config) => config.id === activeTarget?.agentConfigId),
+    [activeTarget?.agentConfigId, machineAgentConfigs]
   );
+  const selectorTarget = selectedAgentConfig
+    ? {
+        configId: selectedAgentConfig.id,
+        cliType: selectedAgentConfig.cliType,
+        agentType: selectedAgentConfig.agentType,
+        runtimeOverrides: selectedAgentConfig.runtimeOverrides,
+        machine: activeMachineId ? (machines.get(activeMachineId) ?? null) : null,
+      }
+    : undefined;
   const selectorOptions = useAcpSelectorOptions(
-    selectedAgentConfig
-      ? {
-          configId: selectedAgentConfig.id,
-          cliType: selectedAgentConfig.cliType,
-          agentType: selectedAgentConfig.agentType,
-          // A Role pins its model: the effort ladder must follow the model
-          // being edited, not the probe-time current one, so the picker and
-          // the compatibility check agree on the same ladder.
-          selectedModelId: editor?.value.modelId ?? null,
-          runtimeOverrides: selectedAgentConfig.runtimeOverrides,
-          machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
-        }
-      : undefined
+    selectorTarget && {
+      ...selectorTarget,
+      // A Role pins its model: the effort ladder must follow the model
+      // being edited, not the probe-time current one, so the picker and
+      // the compatibility check agree on the same ladder.
+      selectedModelId: activeTarget?.modelId ?? null,
+    }
   );
 
   // A Role pins concrete values, so as soon as an agent config's capabilities
-  // are known its own defaults fill the unset fields. The user then adjusts a
-  // real selection instead of accepting an "Agent default" that says nothing
-  // about what would run. A stored value is never overwritten — that is what
-  // keeps an incompatible one visible. Derived rather than written back: the
-  // defaults are a function of the value and the capabilities, and the helper
-  // returns the value itself when it changes nothing.
+  // are known its own defaults fill the unset fields of the target being
+  // edited. The user then adjusts a real selection instead of accepting an
+  // "Agent default" that says nothing about what would run. A stored value is
+  // never overwritten — that is what keeps an incompatible one visible.
+  // Derived rather than written back: the defaults are a function of the value
+  // and the capabilities, and the helper returns the value itself when it
+  // changes nothing.
   const editorValue = editor
-    ? selectedAgentConfig
-      ? applyAgentRoleRunConfigDefaults(editor.value, selectorOptions)
+    ? activeTarget && selectedAgentConfig
+      ? putAgentRoleFormTarget(
+          editor.value,
+          applyAgentRoleRunConfigDefaults(activeTarget, selectorOptions)
+        )
       : editor.value
     : null;
+  const editorTarget = editorValue ? getAgentRoleFormTarget(editorValue) : undefined;
 
   const formErrors = useMemo(
     () =>
@@ -163,11 +215,15 @@ export function AgentRoleEditorDialog({
   );
   const runConfigIssues = useMemo(
     () =>
-      editorValue && selectedAgentConfig
-        ? findAgentRoleRunConfigIssues(buildAgentRoleRunConfig(editorValue), selectorOptions)
+      editorTarget && selectedAgentConfig
+        ? findAgentRoleRunConfigIssues(buildAgentRoleRunConfig(editorTarget), selectorOptions)
         : [],
-    [editorValue, selectedAgentConfig, selectorOptions]
+    [editorTarget, selectedAgentConfig, selectorOptions]
   );
+
+  // What "Add to this machine" starts from: the first target with an agent.
+  const sourceTarget = editorValue?.targets.find((target) => target.agentConfigId);
+  const sourceConfig = agentConfigs.find((config) => config.id === sourceTarget?.agentConfigId);
 
   const close = () => {
     setError(undefined);
@@ -181,6 +237,7 @@ export function AgentRoleEditorDialog({
       ownerUserId: currentUserId,
       now: getServerNow(),
       createId: () => (editor.mode === 'add' ? editor.roleId : editor.role.id),
+      selectorOptions: selectedAgentConfig ? selectorOptions : null,
     });
 
     setSubmitting(true);
@@ -196,6 +253,7 @@ export function AgentRoleEditorDialog({
           visibility: role.visibility,
           has_prompt_prefix: Boolean(role.promptPrefix),
           run_config_option_count: Object.keys(role.runConfig.configOptionValues ?? {}).length,
+          machine_target_count: 1 + (role.additionalTargets?.length ?? 0),
         });
       }
       onSaved?.(role, { created: editor.mode === 'add' });
@@ -219,6 +277,7 @@ export function AgentRoleEditorDialog({
         width={SETTINGS_EDITOR_DIALOG_WIDTH}
         centerOn={settingsPane}
         className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        style={{ height: 'min(680px, 88dvh)' }}
       >
         <Dialog.Header>
           <Dialog.Title>
@@ -228,12 +287,83 @@ export function AgentRoleEditorDialog({
           </Dialog.Title>
           <Dialog.Description>{t('settings.agentRoles.dialogDescription')}</Dialog.Description>
         </Dialog.Header>
+        <Tabs.Root value={tab} onValueChange={(value) => setTab(value as 'configuration' | 'team')}>
+          <Tabs.List>
+            <Tabs.Tab value="configuration">{t('settings.agentRoles.configurationTab')}</Tabs.Tab>
+            <Tabs.Tab value="team">{t('settings.agentRoles.teamTab')}</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
         {editor && editorValue ? (
           <AgentRoleForm
+            tab={tab}
             value={editorValue}
+            memoryPicker={
+              editorTarget ? (
+                <RoleMemoryPicker
+                  key={editorTarget.machineId}
+                  machineId={editorTarget.machineId}
+                  value={editorTarget.memory}
+                  onChange={(memory) => {
+                    if (openEditor)
+                      onChange({
+                        ...openEditor,
+                        value: putAgentRoleFormTarget(editorValue, { ...editorTarget, memory }),
+                      });
+                  }}
+                />
+              ) : undefined
+            }
+            addTargetPanel={
+              activeMachineId && !editorTarget ? (
+                <AddAgentRoleTargetPanel
+                  key={activeMachineId}
+                  machineId={activeMachineId}
+                  machineLabel={
+                    machineOptions.find((option) => option.machineId === activeMachineId)?.label ??
+                    ''
+                  }
+                  source={sourceTarget}
+                  sourceConfig={sourceConfig}
+                  machineConfigs={machineAgentConfigs}
+                  onAdd={(target) => {
+                    if (openEditor)
+                      onChange({
+                        ...openEditor,
+                        value: putAgentRoleFormTarget(editorValue, target),
+                      });
+                  }}
+                />
+              ) : undefined
+            }
             // A panel fading out is not edited: a change there would reopen it.
             onChange={(value) => {
-              if (openEditor) onChange({ ...openEditor, value });
+              if (!openEditor) return;
+              const nextTarget = getAgentRoleFormTarget(value);
+              const modelChanged =
+                nextTarget !== undefined &&
+                editorTarget !== undefined &&
+                nextTarget.machineId === editorTarget.machineId &&
+                nextTarget.agentConfigId === editorTarget.agentConfigId &&
+                nextTarget.modelId !== editorTarget.modelId;
+              onChange({
+                ...openEditor,
+                value:
+                  modelChanged && nextTarget
+                    ? putAgentRoleFormTarget(value, {
+                        ...nextTarget,
+                        configOptionValues: carryAgentRoleOptionsToModel(
+                          nextTarget.configOptionValues,
+                          selectorOptions.configOptionSelectors,
+                          buildAcpSelectorOptions(
+                            selectorTarget && {
+                              ...selectorTarget,
+                              selectedModelId: nextTarget.modelId,
+                            }
+                          ).configOptionSelectors
+                        ),
+                      })
+                    : value,
+              });
             }}
             machines={machineOptions}
             agentConfigs={machineAgentConfigs.map((config) => ({
@@ -252,5 +382,57 @@ export function AgentRoleEditorDialog({
         ) : null}
       </Dialog.Content>
     </Dialog.Root>
+  );
+}
+
+const styles = stylex.create({
+  addPanel: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' },
+  icon: { width: '14px', height: '14px' },
+});
+
+/**
+ * A machine tab the Role does not run on yet: one action that adds it, with the
+ * same agent preselected when this machine has one, and what that will be.
+ */
+function AddAgentRoleTargetPanel({
+  machineId,
+  machineLabel,
+  source,
+  sourceConfig,
+  machineConfigs,
+  onAdd,
+}: {
+  machineId: MachineId;
+  machineLabel: string;
+  source: AgentRoleTargetFormValue | undefined;
+  sourceConfig: AgentConfigMeta | undefined;
+  machineConfigs: readonly AgentConfigMeta[];
+  onAdd: (target: AgentRoleTargetFormValue) => void;
+}) {
+  const { t } = useTranslation();
+  const { entries } = useMemoryAssociations(machineId);
+  const suggestion = suggestAgentRoleTarget({
+    machineId,
+    source,
+    sourceConfig,
+    machineConfigs,
+    memories: entries,
+  });
+  const suggestedConfig = machineConfigs.find((config) => config.id === suggestion.agentConfigId);
+  return (
+    <div {...stylex.props(styles.addPanel)}>
+      <p {...stylex.props(catalog.meta)}>
+        {suggestedConfig
+          ? t('settings.agentRoles.form.addToMachineMatched', {
+              machine: machineLabel,
+              agent: suggestedConfig.name,
+            })
+          : t('settings.agentRoles.form.addToMachineHint', { machine: machineLabel })}
+      </p>
+      <Button type="button" size="small" variant="secondary" onClick={() => onAdd(suggestion)}>
+        <Plus aria-hidden="true" {...stylex.props(styles.icon)} />
+        {t('settings.agentRoles.form.addToMachine')}
+      </Button>
+    </div>
   );
 }

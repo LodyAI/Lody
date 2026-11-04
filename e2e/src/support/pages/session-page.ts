@@ -63,7 +63,7 @@ export class SessionPage {
   ): Promise<ScriptedAcpEvent> {
     const priorCount = this.fixture
       .readAcpEvents()
-      .filter((event) => event.event === 'prompt-end').length;
+      .filter((event) => event.event === 'prompt-end' && event.mode !== 'title').length;
     await this.page.locator('#chat-prompt').fill(prompt);
     await this.page.getByRole('button', { name: /^(Send|发送)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/sessions\/[^/?#]+(?:\?.*)?$/u, {
@@ -72,7 +72,18 @@ export class SessionPage {
     await expect(this.page.getByText(/Synthetic (?:response|diff revision)/u).first()).toBeVisible({
       timeout: 60_000,
     });
-    const completed = await this.fixture.waitForAcpEvent('prompt-end', priorCount + 1);
+    await expect
+      .poll(
+        () =>
+          this.fixture
+            .readAcpEvents()
+            .filter((event) => event.event === 'prompt-end' && event.mode !== 'title').length,
+        { timeout: 30_000, intervals: [50, 100, 250, 500] }
+      )
+      .toBeGreaterThan(priorCount);
+    const completed = this.fixture
+      .readAcpEvents()
+      .filter((event) => event.event === 'prompt-end' && event.mode !== 'title');
     return completed.at(-1)!;
   }
 

@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -5,7 +6,9 @@ import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { usePlatform } from '@lody/platform/react';
+import { E2eeTeamSettingsHost } from './e2ee-team-settings';
+import { useCloudQuery } from '@lody/platform/react';
 import { Invitation } from 'better-auth/plugins';
 import { toast } from '@/lib/toast';
 import type { AvatarKind, CliApiKeyRecord, WorkspaceId } from '@lody/shared';
@@ -34,6 +37,7 @@ import {
 } from './account-setting-pure';
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
+import { DeletedWorkspaceBilling } from './deleted-workspace-billing';
 import { AccountMachinesOverview } from './account-machines-overview';
 
 const styles = stylex.create({
@@ -42,6 +46,26 @@ const styles = stylex.create({
 
 const getInviteLink = (invitation: Invitation) => getAppShareUrl(`/invite/${invitation.id}`);
 const FREE_WORKSPACE_MEMBER_LIMIT_REACHED_CODE = 'free_workspace_member_limit_reached';
+
+type UpdateUserAvatarState = {
+  url: string;
+  updateUser: (input: { image: string }) => Promise<{ error: { message?: string } | null }>;
+  refetchSession: () => Promise<unknown>;
+  refetchActiveOrganization: () => Promise<unknown>;
+};
+
+export async function persistUserAvatar({
+  url,
+  updateUser,
+  refetchSession,
+  refetchActiveOrganization,
+}: UpdateUserAvatarState): Promise<string> {
+  const { error } = await updateUser({ image: url });
+  if (error) throw new Error(error.message ?? 'Failed to update avatar');
+  void refetchSession();
+  void refetchActiveOrganization().catch(console.error);
+  return url;
+}
 
 export function AccountSettingsComponent({
   surface = 'account',
@@ -61,7 +85,9 @@ export function AccountSettingsComponent({
 function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) {
   const { t } = useTranslation();
   const authClient = useAuthClient();
-  const transferOwnership = useCloudMutation(cloudOperations.auth.transferWorkspaceOwnership);
+  const transferOwnership = useLegacyWorkspaceMutation(
+    cloudOperations.auth.transferWorkspaceOwnership
+  );
   const signOut = useAuthSignOut();
   const router = useRouter();
   const {
@@ -79,22 +105,27 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   const currentUser = session?.user ?? null;
   const currentUserId = currentUser?.id ?? null;
   const activeOrganizationId = activeOrganization?.id;
+  const encrypted = Boolean(
+    activeOrganization &&
+    'contentMode' in activeOrganization &&
+    activeOrganization.contentMode === 'e2ee'
+  );
+  const platform = usePlatform();
   const memberLimitState = useCloudQuery(
     cloudOperations.billing.getWorkspaceMemberLimitState,
-    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  // Accepting an invitation adds a billed seat and Stripe invoices the
-  // prorated difference immediately, so the invite dialog quotes it up front.
+  // Admission accrues any additional seat fee; collection is deferred to the billing date.
   const seatInvitePreview = useCloudQuery(
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
-    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
   // Deleting a paid workspace needs a billing-aware guard: a live subscription
   // blocks deletion (cancel first); a cancel-scheduled one gets a warning that
-  // deleting now ends it immediately.
+  // deletion preserves its scheduled end and any accrued charges.
   const billingOverview = useCloudQuery(
     cloudOperations.billing.getBillingOverview,
-    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
   const deleteBillingGuard: WorkspaceDeleteBillingGuard | null = useMemo(() => {
     if (
@@ -175,7 +206,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   );
 
   useEffect(() => {
-    if (!activeOrganizationId) {
+    if (!activeOrganizationId || encrypted) {
       setPendingInvitations([]);
       return;
     }
@@ -186,7 +217,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
       );
     };
     void fetchPendingInvitations();
-  }, [activeOrganizationId, listOrganizationInvitations]);
+  }, [activeOrganizationId, encrypted, listOrganizationInvitations]);
 
   useEffect(() => {
     if (memberLimitState?.canInvite === true) {
@@ -379,15 +410,25 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         file,
       });
       if (kind === 'user') {
-        const { error } = await authClient.updateUser({ image: url });
-        if (error) throw new Error(error.message ?? 'Failed to update avatar');
-        void refetchSession();
+        await persistUserAvatar({
+          url,
+          updateUser: (input) => authClient.updateUser(input),
+          refetchSession,
+          refetchActiveOrganization,
+        });
       } else {
         await updateOrganization(activeOrganizationId, { logo: url });
       }
       return url;
     },
-    [activeOrganizationId, authClient, refetchSession, sessionToken, updateOrganization]
+    [
+      activeOrganizationId,
+      authClient,
+      refetchActiveOrganization,
+      refetchSession,
+      sessionToken,
+      updateOrganization,
+    ]
   );
 
   const handleChangePassword = useCallback(
@@ -671,7 +712,12 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   }
 
   if (!activeOrganization) {
-    return <p {...stylex.props(styles.empty)}>No organization</p>;
+    return (
+      <>
+        <p {...stylex.props(styles.empty)}>No organization</p>
+        {surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : null}
+      </>
+    );
   }
 
   return (
@@ -680,12 +726,15 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
       currentUser={currentUser}
       organization={activeOrganization}
       role={role as 'owner' | 'admin' | 'member'}
-      hasAdminPermission={hasAdminPermission}
+      hasAdminPermission={hasAdminPermission && !encrypted}
       members={sortedMembers}
       pendingInvitations={pendingInvitations}
       accountMachinesSlot={surface === 'account' ? <AccountMachinesOverview /> : undefined}
+      accountBillingSlot={
+        surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : undefined
+      }
       workspaceOwnershipSlot={
-        role === 'owner' && currentUserId ? (
+        !encrypted && role === 'owner' && currentUserId ? (
           <WorkspaceOwnershipTransfer
             key={activeOrganization.id}
             workspaceName={activeOrganization.name}
@@ -703,7 +752,20 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         ) : undefined
       }
       workspaceJoinRequestsSlot={
-        role === 'owner' ? (
+        encrypted && platform.e2eeWorkspaces?.runtime && currentUserId ? (
+          <E2eeTeamSettingsHost
+            runtime={platform.e2eeWorkspaces.runtime}
+            workspaceId={activeOrganization.id}
+            accountId={currentUserId}
+            labels={
+              new Map(
+                activeOrganization.members.map(
+                  (member) => [member.id, member.user.name || member.user.email] as const
+                )
+              )
+            }
+          />
+        ) : role === 'owner' && !encrypted ? (
           <WorkspaceJoinRequestsSettings workspaceId={activeOrganization.id} />
         ) : undefined
       }

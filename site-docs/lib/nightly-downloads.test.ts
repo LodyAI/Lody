@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseNightlyRelease, resolveNightlyDownloadBase } from './nightly-downloads.ts';
+import {
+  parseNightlyAndroidRelease,
+  parseNightlyRelease,
+  resolveNightlyDownloadBase,
+} from './nightly-downloads.ts';
 
 const base = 'https://downloads.example.test/production/nightly';
 const version = '0.89.4-nightly.42';
@@ -120,4 +124,66 @@ void test('Android appears only with a matching immutable APK in both manifest l
     { ...mobile, downloads: { ...mobile.downloads, [apk]: '../app.apk' } },
   ])
     assert.throws(() => parseNightlyRelease(invalid, base));
+});
+
+void test('Android uses its own version and does not require desktop metadata', () => {
+  const androidVersion = '0.104.0-nightly.0';
+  const apk = `Lody-${androidVersion}-android.apk`;
+  const android = {
+    schema: 1,
+    channel: 'nightly',
+    target: 'android',
+    version: androidVersion,
+    files: [apk],
+    downloads: { [apk]: apk },
+  };
+  assert.deepEqual(parseNightlyAndroidRelease(android, base), {
+    version: androidVersion,
+    downloads: [{ platform: 'android', label: 'APK', href: `${base}/${apk}` }],
+  });
+  for (const changed of [
+    { schema: 2 },
+    { channel: 'stable' },
+    { target: 'mac' },
+    { version: '0.104.0' },
+    { version: '0.104.0-nightly.00' },
+    { files: [] },
+    { downloads: {} },
+    { downloads: { [apk]: '../app.apk' } },
+    { downloads: { [apk]: 'https://elsewhere.test/app.apk' } },
+    { version: '0.104.0-nightly.1' },
+  ])
+    assert.throws(() => parseNightlyAndroidRelease({ ...android, ...changed }, base));
+  assert.throws(() => parseNightlyAndroidRelease(android, 'http://example.test/nightly'));
+  assert.throws(() => parseNightlyAndroidRelease(manifest, base));
+});
+
+void test('Linux ARM64 is additive for old manifests but requires a complete matching pair', () => {
+  const armFiles = ['AppImage', 'deb'].map(
+    (extension) => `Lody-${version}-arm64-nightly.${extension}`
+  );
+  const arm = {
+    ...manifest,
+    files: [...files, ...armFiles],
+    downloads: {
+      ...manifest.downloads,
+      ...Object.fromEntries(armFiles.map((file) => [file, file])),
+    },
+  };
+  assert.deepEqual(parseNightlyRelease(arm, base).downloads.slice(-2), [
+    { platform: 'linux', label: 'AppImage · ARM64', href: `${base}/${armFiles[0]}` },
+    { platform: 'linux', label: 'Debian / Ubuntu · ARM64', href: `${base}/${armFiles[1]}` },
+  ]);
+  assert.equal(parseNightlyRelease(manifest, base).downloads.length, 6);
+  for (const file of armFiles) {
+    assert.throws(() =>
+      parseNightlyRelease({ ...arm, files: arm.files.filter((name) => name !== file) }, base)
+    );
+    const downloads = { ...arm.downloads };
+    delete downloads[file];
+    assert.throws(() => parseNightlyRelease({ ...arm, downloads }, base));
+    assert.throws(() =>
+      parseNightlyRelease({ ...arm, downloads: { ...arm.downloads, [file]: '../bad' } }, base)
+    );
+  }
 });

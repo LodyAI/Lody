@@ -128,14 +128,17 @@ describe('MessageHandler machine registration', () => {
   it('writes machine rpc version when the machine rpc server is enabled', async () => {
     const logger = createSilentLogger();
     const machineId = 'machine-rpc' as MachineId;
+    let storedMeta: MachineMeta | undefined;
     const workspaceDocument = {
       sessions: new Map<SessionId, unknown>(),
       restoreMachineDocument: vi.fn(async () => {}),
       watchMachineDocumentExistence: vi.fn(() => {}),
-      registerMachine: vi.fn(async () => {}),
+      registerMachine: async (_id: MachineId, meta: MachineMeta) => {
+        storedMeta = structuredClone(meta);
+      },
       repo: {
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
-        getDocMeta: vi.fn(async () => undefined),
+        getDocMeta: async () => (storedMeta ? { meta: storedMeta } : undefined),
       },
     };
 
@@ -174,10 +177,7 @@ describe('MessageHandler machine registration', () => {
 
     await handler.registerMachine();
 
-    const [, registeredMeta] = workspaceDocument.registerMachine.mock.calls[0] as [
-      MachineId,
-      MachineMeta,
-    ];
+    const registeredMeta = (await workspaceDocument.repo.getDocMeta())!.meta;
 
     expect(registeredMeta.rpcVersion).toBe('1');
     expect(registeredMeta.name).toBe('machine-name');
@@ -185,25 +185,58 @@ describe('MessageHandler machine registration', () => {
     // version reach every client, so adding one must be acknowledged here.
     const hostCapabilities = getHostMachineProtocolCapabilities();
     expect(registeredMeta.protocolCapabilities).toEqual({
+      multiRepoProject: 1,
+      machineDiskStatus: 1,
+      projectFileRoots: 1,
+      projectRepositoryMembers: 1,
+      projectFolderSelection: 1,
+      operationInbox: 2,
+      providerRateLimitsRefresh: 1,
+      codeCollabAllChangesScope: 1,
+      magpieImport: 1,
+      dshProviderIsolation: 1,
+      terminalNotifications: 1,
+      memoryProviders: 1,
+      sessionHistory: 3,
+      sessionHistoryIncremental: 1,
+      sessionHistoryInspection: 2,
+      sessionHistoryWatch: 1,
+      sessionHistoryPatches: 1,
+      sessionInputAcceptance: 1,
+      sessionInputDispatch: 1,
       mcpToolDiscovery: 1,
+      mcpLocalAuthentication: 1,
       codexAuthProfiles: 1,
+      sessionInputWithdraw: 1,
       ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),
       ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
       acpAuthenticationInteractions: 2,
+      acpAuthenticationMethodSelection: 1,
       previewControl: 1,
+      androidEmulator: 1,
+      androidEmulatorQuality: 1,
       iosSimulator: 1,
       iosSimulatorControls: 1,
       iosSimulatorExterior: 1,
       localProjectRemoval: 1,
+      localProjectCreateDirectory: 1,
       localProjectHistoryProvider: 1,
       localFileResources: 1,
+      fileDownload: 1,
+      markdownFileLinks: 1,
       providerSetup: 1,
       acpProtocolAuthentication: 2,
       acpCapabilityRefreshCache: 1,
       subagentCancellation: 1,
       subagentEvents: 1,
-      schedules: 1,
+      schedules: 3,
+      sessionAutomations: 1,
       preparedSessionInput: 1,
+      messageQuotes: 1,
+      sessionInputAttachments: 1,
+      sessionCollaborationControl: 1,
+      bugReportClientLog: 1,
+      sessionLiveActivity: 1,
     });
 
     await handler.cleanup();

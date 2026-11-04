@@ -13,6 +13,29 @@ const id = z
   .min(1)
   .max(50)
   .regex(/^[a-zA-Z0-9_-]+$/);
+
+// The HTTP host creates a server per request. Share only immutable schemas;
+// each registration below still binds that server's own dependencies.
+const listInputSchema = z
+  .object({
+    query: z.string().max(200).optional(),
+    limit: z.number().int().min(1).max(100).default(30),
+    offset: z.number().int().min(0).max(100_000).optional(),
+  })
+  .strict();
+const getInputSchema = z.object({ scheduleId: id }).strict();
+const pauseInputSchema = z.object({ scheduleId: id, requestId: id }).strict();
+const proposeInputSchema = z
+  .object({
+    requestId: id,
+    title: z.string().trim().min(1).max(200),
+    prompt: z.string().min(1).max(32768),
+    rule: ScheduleProposalRuleSchema,
+    destination: ScheduleProposalDestinationSchema.optional(),
+    target: ScheduleProposalTargetSchema.optional(),
+  })
+  .strict();
+
 export function registerScheduleTools(server: McpServer, deps: Dependencies): void {
   const call = async (command: ScheduleCommand) => {
     try {
@@ -39,13 +62,7 @@ export function registerScheduleTools(server: McpServer, deps: Dependencies): vo
     {
       description:
         'List scheduled-task summaries in the current workspace. Use get for details; execution belongs to the owner machine.',
-      inputSchema: z
-        .object({
-          query: z.string().max(200).optional(),
-          limit: z.number().int().min(1).max(100).default(30),
-          offset: z.number().int().min(0).max(100_000).optional(),
-        })
-        .strict(),
+      inputSchema: listInputSchema,
     },
     (args) => call({ action: 'list', ...args })
   );
@@ -54,7 +71,7 @@ export function registerScheduleTools(server: McpServer, deps: Dependencies): vo
     {
       description:
         'Read a Schedule, its prompt, recent configuration activity and next five times. Ordinary Sessions own execution results.',
-      inputSchema: z.object({ scheduleId: id }).strict(),
+      inputSchema: getInputSchema,
     },
     (args) => call({ action: 'show', ...args })
   );
@@ -63,7 +80,7 @@ export function registerScheduleTools(server: McpServer, deps: Dependencies): vo
     {
       description:
         'Pause a Schedule owned by the authenticated user. Already accepted Sessions continue. Reuse requestId when retrying. Resume requires a human.',
-      inputSchema: z.object({ scheduleId: id, requestId: id }).strict(),
+      inputSchema: pauseInputSchema,
     },
     (args) => call({ action: 'pause', ...args })
   );
@@ -87,16 +104,7 @@ export function registerScheduleTools(server: McpServer, deps: Dependencies): vo
         'Destination: new_session (a fresh chat per run, default), own_session (one chat this task',
         'keeps continuing), or existing_session {sessionId}. Reuse requestId when retrying.',
       ].join(' '),
-      inputSchema: z
-        .object({
-          requestId: id,
-          title: z.string().trim().min(1).max(200),
-          prompt: z.string().min(1).max(32768),
-          rule: ScheduleProposalRuleSchema,
-          destination: ScheduleProposalDestinationSchema.optional(),
-          target: ScheduleProposalTargetSchema.optional(),
-        })
-        .strict(),
+      inputSchema: proposeInputSchema,
     },
     (args) => call({ action: 'propose', ...args })
   );

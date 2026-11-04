@@ -1,5 +1,8 @@
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo } from 'react';
+import { useAtomValue } from 'jotai';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
+import { E2eeMachineSharingSettings } from './e2ee/machine-sharing-settings';
 import { useTranslation } from 'react-i18next';
 import { Bot, Folder } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
@@ -12,9 +15,11 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsSurface as surface } from './surface';
 import type { ProjectSettingsRow } from './project-settings';
+import { AgentIcon } from '@/components/icons/agent-icon';
 
 export type MachineConnectedProject = {
   key: string;
+  localProjectId?: string;
   name: string;
   rootPath: string;
   sharedWithTeam: boolean;
@@ -39,9 +44,38 @@ type MachineConnectedResourcesProps = {
  * inventory without mounting owner-only sharing controls.
  */
 export function MachineConnectedResources(props: MachineConnectedResourcesProps) {
+  const mode = useAtomValue(workspaceContentModeAtom);
+  if (
+    mode?.descriptor &&
+    'contentMode' in mode.descriptor &&
+    mode.descriptor.contentMode === 'e2ee'
+  ) {
+    return (
+      <>
+        <E2eeMachineSharingSettings
+          machineId={props.machineId}
+          projects={props.preloadedProjects.flatMap((project) =>
+            project.localProjectId
+              ? [{ id: project.localProjectId, name: project.name, rootPath: project.rootPath }]
+              : []
+          )}
+        />
+        <MachineConnectedResourcesContent
+          machineId={props.machineId}
+          configs={props.configs}
+          projects={[]}
+          projectsLoading={props.projectsLoading}
+          readOnly={!!props.readOnly}
+          hideFolders
+          onManageAgents={props.onManageAgents}
+        />
+      </>
+    );
+  }
   if (props.readOnly) {
     return (
       <MachineConnectedResourcesContent
+        machineId={props.machineId}
         configs={props.configs}
         projects={props.preloadedProjects}
         projectsLoading={props.projectsLoading}
@@ -79,6 +113,7 @@ function ManageableMachineConnectedResources({
 
   return (
     <MachineConnectedResourcesContent
+      machineId={machineId}
       configs={configs}
       projects={projects}
       projectsLoading={(isLoading || projectsLoading) && projects.length === 0}
@@ -90,17 +125,21 @@ function ManageableMachineConnectedResources({
 }
 
 function MachineConnectedResourcesContent({
+  machineId,
   configs,
   projects,
   projectsLoading,
   readOnly,
   onManageAgents,
   onSharedWithTeamChange,
+  hideFolders,
 }: {
+  machineId: MachineId;
   configs: AgentConfigMeta[];
   projects: PresentedProject[];
   projectsLoading: boolean;
   readOnly: boolean;
+  hideFolders?: boolean;
   onManageAgents: () => void;
   onSharedWithTeamChange?: (row: ProjectSettingsRow, sharedWithTeam: boolean) => Promise<void>;
 }) {
@@ -108,63 +147,78 @@ function MachineConnectedResourcesContent({
 
   return (
     <div {...stylex.props(styles.root)}>
-      <section {...stylex.props(styles.group)}>
-        <div {...stylex.props(styles.heading)}>
-          <Folder aria-hidden {...stylex.props(styles.headingIcon)} />
-          <h3 {...stylex.props(styles.title)}>
-            {t('settings.machines.connectedFolders', 'Connected folders')}
-          </h3>
-        </div>
-        {!readOnly ? (
-          <p {...stylex.props(styles.hint)}>
-            {t(
-              'settings.machines.folderSharingHint',
-              'Sharing a folder also makes this machine available to the workspace.'
-            )}
-          </p>
-        ) : null}
-        {projectsLoading ? (
-          <p {...stylex.props(styles.note)}>{t('common.loading', 'Loading...')}</p>
-        ) : projects.length === 0 ? (
-          <p {...stylex.props(styles.note)}>
-            {t('settings.machines.noConnectedFolders', 'No connected folders on this machine.')}
-          </p>
-        ) : (
-          // Inside the machine's card, so the list is a region fill with ruled
-          // rows rather than a second card.
-          <div {...stylex.props(surface.formBlock, styles.list)}>
-            {projects.map((project, index) => {
-              const adminRow = project.adminRow;
-              return (
-                <div
-                  key={project.key}
-                  {...stylex.props(styles.row, index > 0 && surface.lineRuled)}
-                >
-                  <div {...stylex.props(styles.rowText)}>
-                    <div {...stylex.props(styles.truncate, styles.name)}>{project.name}</div>
-                    <div {...stylex.props(styles.truncate, styles.path)}>{project.rootPath}</div>
-                  </div>
-                  <span {...stylex.props(styles.access)}>
-                    {project.sharedWithTeam
-                      ? t('workspace.machines.shared', 'Shared')
-                      : t('workspace.machines.private', 'Private')}
-                  </span>
-                  {!readOnly && adminRow && onSharedWithTeamChange ? (
-                    <Switch
-                      checked={project.sharedWithTeam}
-                      disabled={adminRow.isUpdating || !adminRow.canUpdateSharing}
-                      aria-label={t('workspace.projects.shareToggle', 'Share project with team')}
-                      onCheckedChange={(checked) => {
-                        void onSharedWithTeamChange(adminRow, checked);
-                      }}
-                    />
-                  ) : null}
-                </div>
-              );
-            })}
+      {!hideFolders && (
+        <section {...stylex.props(styles.group)}>
+          <div {...stylex.props(styles.heading)}>
+            <Folder aria-hidden {...stylex.props(styles.headingIcon)} />
+            <h3 {...stylex.props(styles.title)}>
+              {t('settings.machines.connectedFolders', 'Connected folders')}
+            </h3>
           </div>
-        )}
-      </section>
+          {!readOnly ? (
+            <p {...stylex.props(styles.hint)}>
+              {t(
+                'settings.machines.folderSharingHint',
+                'Sharing a folder also makes this machine available to the workspace.'
+              )}
+            </p>
+          ) : null}
+          {projectsLoading ? (
+            <p {...stylex.props(styles.note)}>{t('common.loading', 'Loading...')}</p>
+          ) : projects.length === 0 ? (
+            <p {...stylex.props(styles.note)}>
+              {t('settings.machines.noConnectedFolders', 'No connected folders on this machine.')}
+            </p>
+          ) : (
+            // Inside the machine's card, so the list is a region fill with ruled
+            // rows rather than a second card.
+            <div {...stylex.props(surface.formBlock, styles.list)}>
+              {projects.map((project, index) => {
+                const adminRow = project.adminRow;
+                return (
+                  <div
+                    key={project.key}
+                    {...stylex.props(styles.row, index > 0 && surface.lineRuled)}
+                  >
+                    <div {...stylex.props(styles.rowText)}>
+                      <div {...stylex.props(styles.truncate, styles.name)}>{project.name}</div>
+                      <div {...stylex.props(styles.truncate, styles.path)}>{project.rootPath}</div>
+                    </div>
+                    {!readOnly && adminRow && onSharedWithTeamChange ? (
+                      <>
+                        {/* Same grammar as the machine's "Share machine" row: the
+                          label names what turning the switch on does, and the
+                          switch position carries the state. State text only
+                          makes sense when no control is offered. */}
+                        <span {...stylex.props(styles.access)}>
+                          {t('workspace.projects.shareToggle', 'Share project with team')}
+                        </span>
+                        <Switch
+                          checked={project.sharedWithTeam}
+                          disabled={adminRow.isUpdating || !adminRow.canUpdateSharing}
+                          aria-label={t(
+                            'workspace.projects.shareToggle',
+                            'Share project with team'
+                          )}
+                          onCheckedChange={(checked) => {
+                            void onSharedWithTeamChange(adminRow, checked);
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <span {...stylex.props(styles.access)}>
+                        {project.sharedWithTeam
+                          ? t('workspace.machines.shared', 'Shared')
+                          : t('workspace.machines.private', 'Private')}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       <section {...stylex.props(styles.group)}>
         <div {...stylex.props(styles.headingRow)}>
@@ -175,7 +229,8 @@ function MachineConnectedResourcesContent({
             </h3>
           </div>
           {!readOnly ? (
-            <Button variant="secondary" size="small" onClick={onManageAgents}>
+            <Button data-testid="settings-machine-manage-agents"
+              data-machine-id={machineId} variant="secondary" size="small" onClick={onManageAgents}>
               {t('settings.machines.manageAgents', 'Manage in Agents')}
             </Button>
           ) : null}
@@ -187,7 +242,20 @@ function MachineConnectedResourcesContent({
         ) : (
           <div {...stylex.props(styles.chips)}>
             {configs.map((config) => (
-              <Badge key={config.id}>{config.name}</Badge>
+              <Badge
+                key={config.id}
+                icon={
+                  <AgentIcon
+                    cliType={config.cliType}
+                    agentType={config.agentType}
+                    brandId={config.brandId}
+                    env={config.env}
+                    className={stylex.props(styles.agentIcon).className}
+                  />
+                }
+              >
+                {config.name}
+              </Badge>
             ))}
           </div>
         )}
@@ -246,4 +314,5 @@ const styles = stylex.create({
   },
   access: { flexShrink: 0, fontSize: '11px', color: colors.secondaryLabel },
   chips: { display: 'flex', flexWrap: 'wrap', gap: space[1.5] },
+  agentIcon: { width: '100%', height: '100%' },
 });

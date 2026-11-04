@@ -1,4 +1,9 @@
-import type { LodyClientExtensionCapabilities, LodyWorktreeProject } from 'acp-extension-core';
+import { daemonLossObserver } from '@/lib/e2ee/client-loss-observer';
+import type {
+  LodyClientExtensionCapabilities,
+  LodyWorktreeProject,
+  LodySessionConfig,
+} from 'acp-extension-core';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -12,17 +17,19 @@ import {
   type LodyExtensionCapabilities,
   type LodyElicitationMeta,
   type LodyGoalCapability,
+  type LodySessionActivityUpdate,
   type LodySubagentSnapshot,
-  type RateLimit,
   type RateLimitsGetRequest,
   type RateLimitsSnapshot,
   type SessionUsageUpdate,
+  type LodyPromptSuggestion,
 } from 'acp-extension-core';
 import {
   ACPSessionId,
   MODEL_THOUGHT_LEVEL_META_KEY,
   type MachineId,
   type AcpConfigOptionValue,
+  type AcpCommandSummary,
   type AcpSessionNotification,
   type AgentConfigCliType,
   type SessionGoalAction,
@@ -69,6 +76,7 @@ import { filterAcpConfigOptions } from './acp-config-option-filter';
 import { summarizeNewSessionResponse } from './acp-session-response-summary';
 import {
   readLegacySessionModelState,
+  readSessionAvailableCommands,
   type LegacySessionModelState,
 } from './acp-capability-normalization';
 import { convertClaudeTaskLifecycleNotification } from './claude-task-lifecycle';
@@ -81,6 +89,7 @@ import {
   type AcknowledgedSteerCapability,
 } from './acknowledged-steer';
 import type { SessionMcpCatalogSelector } from './session-mcp-resolver';
+import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
 import {
   getBuiltinToolPermissionOutcome,
   parseLodyExtensionCapabilities,
@@ -341,11 +350,6 @@ export type AcpStartupTimeoutOptions = {
   resumeSessionTimeoutMs?: number;
 };
 
-export type AcpSessionStartTarget = {
-  workdir: string;
-  resumeSessionId?: ACPSessionId;
-};
-
 const LegacyCodexGoalStatusSchema = z.enum([
   'active',
   'paused',
@@ -567,6 +571,7 @@ function extractImageGenerationContentFields(content: unknown): {
 export interface AgentClientOptions {
   /** Resolve logical project identity only after worktreeProject capability negotiation. */
   resolveWorktreeProject?: () => Promise<LodyWorktreeProject>;
+  resolveAdditionalDirectories?: (supported: boolean) => Promise<string[]>;
   sessionId: SessionId;
   workspaceId?: WorkspaceId;
   machineId?: MachineId;
@@ -577,6 +582,7 @@ export interface AgentClientOptions {
     agentType: string;
   };
   /** Config selected before ACP session establishment. */
+  modelId?: SessionTurnInputConfig['modelId'];
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
@@ -593,7 +599,8 @@ export interface AgentClientOptions {
   ): Promise<acp.RequestPermissionResponse>;
   onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
-  onRateLimitUpdate?(limits: RateLimit): void;
+  onRateLimitUpdate?(snapshot: RateLimitsSnapshot): void;
+  onPromptSuggestion?(suggestion: LodyPromptSuggestion): void;
   onThreadGoalUpdated?(goal: SessionGoalContent): void;
   onThreadGoalCleared?(threadId: string): void;
   onSessionTitleUpdate?(title: string): void;
@@ -608,6 +615,9 @@ export interface AgentClientOptions {
   onImageGenerationEnd?(event: ImageGenerationEndEvent): void;
   onWriteTextFile?(event: AcpWriteTextFileEvidence): void | Promise<void>;
 }
+
+/** See {@link AgentClient.getNativeWork}. */
+export type NativeAgentWork = 'running' | 'background' | null;
 
 export type AcpWriteTextFileEvidence = {
   readonly path: string;
@@ -630,8 +640,11 @@ export class AgentClient implements acp.Client {
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
   private readonly subagentSnapshots = new Map<string, LodySubagentSnapshot>();
+  /** Latest Core activity level, kept with the ACP session it describes. */
+  private nativeActivity: LodySessionActivityUpdate | null = null;
   private readonly devinSubagentTaskIds = new Set<string>();
   private worktreeProject?: LodyWorktreeProject;
+  private additionalDirectories: string[] = [];
   private authMethods: acp.AuthMethod[] = [];
   private authenticationRequired = false;
   private acknowledgedSteerCapability: AcknowledgedSteerCapability | null = null;
@@ -643,12 +656,18 @@ export class AgentClient implements acp.Client {
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
   private configOptions: acp.SessionConfigOption[] = [];
+  private availableCommands: AcpCommandSummary[] | undefined;
   private readonly configOptionsListeners = new Set<() => void>();
   /** Desired config retained across same-client replacement sessions. */
   private readonly configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
   /** Legacy top-level `models` state proves that `session/set_model` is supported. */
   private legacySessionModelState: LegacySessionModelState | null = null;
   public currentModel?: ModelInfo;
+  private latestCapacityObservation: RateLimitsSnapshot | undefined;
+  private latestContextObservation: SessionContextWindowUsage | undefined;
+  getAutomationObservations() {
+    return { capacity: this.latestCapacityObservation, context: this.latestContextObservation };
+  }
   /**
    * Tool-call IDs identified by the canonical Lody tool name. We need this so the
    * follow-up `tool_call_update` notifications — which never repeat the title —
@@ -757,9 +776,20 @@ export class AgentClient implements acp.Client {
     }
 
     try {
-      const external = (await externalLoad)({
+      const select = await externalLoad.catch((error: unknown) => {
+        if (error instanceof WorkspaceSyncUnavailableError && this.options.loadExternalMcpServers) {
+          // The initial bounded wait overlaps initialize. The daemon may have
+          // caught up since it expired; recheck once at the actual use point.
+          return this.options.loadExternalMcpServers();
+        }
+        throw error;
+      });
+      const external = select({
         http: this.agentMcpCapabilities?.http === true,
       });
+      for (const message of external.warnings ?? []) {
+        this.options.onAgentWarning?.({ message, source: 'configWarning' });
+      }
       for (const problem of external.problems) {
         this.options.onAgentWarning?.({
           message: formatMcpResolutionProblem(problem),
@@ -768,6 +798,9 @@ export class AgentClient implements acp.Client {
       }
       return [...builtin, ...(external.servers as acp.McpServer[])];
     } catch (error) {
+      // A second cold result must leave initialization retryable, before any
+      // provider session or Prompt can be created with a false empty selection.
+      if (error instanceof WorkspaceSyncUnavailableError) throw error;
       const message = `Workspace MCP servers could not be loaded (${formatErrorMessage(
         error
       )}). The agent started with only the built-in Lody server.`;
@@ -943,6 +976,15 @@ export class AgentClient implements acp.Client {
     }
 
     const notification = parseSessionNotification(params);
+
+    if (notification.update.sessionUpdate === 'available_commands_update') {
+      this.availableCommands = notification.update.availableCommands.map(
+        ({ name, description }) => ({
+          name,
+          description: description ?? undefined,
+        })
+      );
+    }
 
     if (notification.update.sessionUpdate === 'config_option_update') {
       this.applyConfigOptionsState(notification.update.configOptions, true);
@@ -1175,11 +1217,10 @@ export class AgentClient implements acp.Client {
       this.options.onImageGenerationBegin?.({ acpSessionId, callId });
     }
 
-    // Any notification that arrives after begin (or a fresh `tool_call` with
-    // a terminal status, which upstream emits when the begin event was lost
-    // on session resume) carries the end-state payload.
-    const carriesEndPayload = !isBegin || isTerminalStatus || Array.isArray(update.content);
-    if (carriesEndPayload && status) {
+    // Publish status on begin as well as updates, even when content is omitted.
+    // This callback also carries in-progress state; it must not depend on the
+    // history schema manufacturing an empty content list.
+    if (status) {
       const contentFields = extractImageGenerationContentFields(update.content);
       const image =
         contentFields.image ??
@@ -1222,6 +1263,7 @@ export class AgentClient implements acp.Client {
       size >= 0 &&
       used >= 0
     ) {
+      this.latestContextObservation = { size, used };
       this.options.onContextWindowUsageUpdate?.({ size, used });
     }
     return true;
@@ -1358,6 +1400,10 @@ export class AgentClient implements acp.Client {
     this.ensureSessionMatch(params.sessionId as ACPSessionId);
     await this.terminalManager.killTerminal(params.sessionId, params.terminalId);
     return {};
+  }
+
+  getRateLimitsCapability() {
+    return this.lodyExtensionCapabilities.rateLimits;
   }
 
   async getRateLimits(request: RateLimitsGetRequest = {}): Promise<RateLimitsSnapshot> {
@@ -1577,10 +1623,27 @@ export class AgentClient implements acp.Client {
         );
         return;
       }
-      case 'rateLimits':
-        for (const rateLimit of event.snapshot.rateLimits) {
-          this.options.onRateLimitUpdate?.(rateLimit);
+      case 'promptSuggestion':
+        if (
+          this.lodyExtensionCapabilities.promptSuggestions?.version === 1 &&
+          this.acpSessionId !== null &&
+          event.update.sessionId === this.acpSessionId
+        ) {
+          this.options.onPromptSuggestion?.(event.update);
         }
+        return;
+      case 'sessionActivity':
+        if (
+          this.reportsSessionActivity() &&
+          this.acpSessionId !== null &&
+          event.update.sessionId === this.acpSessionId
+        ) {
+          this.nativeActivity = event.update;
+        }
+        return;
+      case 'rateLimits':
+        this.latestCapacityObservation = event.snapshot;
+        if (event.snapshot.rateLimits.length) this.options.onRateLimitUpdate?.(event.snapshot);
         return;
       case 'legacyProposedPlan':
         this.options.onUpdateMessage(
@@ -1758,22 +1821,28 @@ export class AgentClient implements acp.Client {
 
   private getSessionStartMeta(forkSessionTurnId?: string) {
     const clientIdentifier = this.getGrokClientIdentifier();
+    const modelId = this.currentModel?.modelId ?? this.options.modelId;
     const lody = {
       ...(this.worktreeProject ? { worktreeProject: this.worktreeProject } : {}),
       ...(forkSessionTurnId !== undefined
         ? { forkAtTurn: { version: 1 as const, turnId: forkSessionTurnId } }
         : {}),
-      ...(Object.keys(this.configOptionValues).length > 0
+      ...(modelId || Object.keys(this.configOptionValues).length > 0
         ? {
             sessionConfig: {
               version: 1 as const,
+              ...(modelId ? { modelId } : {}),
               configOptionValues: { ...this.configOptionValues },
-            },
+            } satisfies LodySessionConfig,
           }
         : {}),
     };
-    if (clientIdentifier === undefined && Object.keys(lody).length === 0) return {};
+    const roots = this.additionalDirectories.length
+      ? { additionalDirectories: this.additionalDirectories }
+      : {};
+    if (clientIdentifier === undefined && Object.keys(lody).length === 0) return roots;
     return {
+      ...roots,
       _meta: {
         ...(clientIdentifier !== undefined ? { clientIdentifier } : {}),
         ...(Object.keys(lody).length > 0 ? { lody } : {}),
@@ -1786,10 +1855,14 @@ export class AgentClient implements acp.Client {
   }
 
   private applySessionResponseState(sessionResponse: acp.NewSessionResponse): void {
+    this.availableCommands =
+      readSessionAvailableCommands(sessionResponse) ?? this.availableCommands;
     // Drop config options the current version intentionally skips (e.g. the
     // `agent` option from acp-extension-claude). See backward-compatibility doc
     // entry BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
     this.currentModel = undefined;
+    this.latestCapacityObservation = undefined;
+    this.latestContextObservation = undefined;
     this.applyConfigOptionsState(
       sessionResponse.configOptions ?? [],
       sessionResponse.configOptions !== undefined
@@ -1854,10 +1927,10 @@ export class AgentClient implements acp.Client {
     resumeSessionId?: ACPSessionId,
     timeoutOptions: AcpStartupTimeoutOptions = {},
     startupAbort?: Promise<never>,
-    resolveSessionStart?: () => Promise<AcpSessionStartTarget>,
     forkSessionId?: ACPSessionId,
     forkSessionTurnId?: string
   ): Promise<acp.NewSessionResponse> {
+    this.availableCommands = undefined;
     this.markSubagentsDisconnected();
     this.subagentSnapshots.clear();
     const connection = new acp.ClientSideConnection(() => this, stream);
@@ -1872,6 +1945,7 @@ export class AgentClient implements acp.Client {
     const grokClientIdentifier = this.getGrokClientIdentifier();
     const devinClientCapabilitiesMeta = this.getDevinClientCapabilitiesMeta();
     this.worktreeProject = undefined;
+    this.additionalDirectories = [];
     this.logger.debug(
       `[${this.options.sessionId}] Starting ACP client (workdir=${workdir} resumeSessionId=${
         resumeSessionId ?? 'none'
@@ -1898,7 +1972,7 @@ export class AgentClient implements acp.Client {
     const startupStart = performance.now();
 
     // Off the critical path on purpose: loading the workspace MCP catalog is a
-    // remote sync plus a document read, and nothing in it depends on the
+    // first-baseline wait plus local preparation, and nothing in it depends on the
     // `initialize` response — only the selection applied afterwards does. Start
     // it here so it overlaps the handshake instead of stalling `newSession`.
     // The rejection handler is attached immediately because an `initialize`
@@ -1952,6 +2026,7 @@ export class AgentClient implements acp.Client {
                 lody: {
                   elicitation: { version: 1, answerNotes: true },
                   subagentEvents: { version: 1 },
+                  promptSuggestions: { version: 1 },
                 } satisfies LodyClientExtensionCapabilities,
               },
             },
@@ -2018,17 +2093,19 @@ export class AgentClient implements acp.Client {
       } fork=${this.supportsFork ? 'yes' : 'no'} forkMethod=${hasForkMethod ? 'yes' : 'no'})`
     );
 
-    if (resolveSessionStart) {
-      const target = await withAbort(resolveSessionStart(), startupAbort);
-      workdir = target.workdir;
-      resumeSessionId = target.resumeSessionId;
-    }
-
     if (
       this.lodyExtensionCapabilities.worktreeProject?.version === 1 &&
       this.options.resolveWorktreeProject
     ) {
       this.worktreeProject = await withAbort(this.options.resolveWorktreeProject(), startupAbort);
+    }
+    if (this.options.resolveAdditionalDirectories) {
+      this.additionalDirectories = await withAbort(
+        this.options.resolveAdditionalDirectories(
+          initResponse.agentCapabilities?.sessionCapabilities?.additionalDirectories != null
+        ),
+        startupAbort
+      );
     }
     const sessionStartMeta = this.getSessionStartMeta();
 
@@ -2413,6 +2490,7 @@ export class AgentClient implements acp.Client {
   }
 
   adoptPreparedSession(sessionResponse: acp.NewSessionResponse): void {
+    this.availableCommands = undefined;
     this.applySessionResponseState(sessionResponse);
     this.acpSessionId = sessionResponse.sessionId;
     this.devinSubagentTaskIds.clear();
@@ -2594,6 +2672,35 @@ export class AgentClient implements acp.Client {
     }
   }
 
+  /**
+   * What the agent does that no Lody turn accounts for, from the Core
+   * `sessionActivity` level: `running` while it works by itself or waits on a
+   * permission request, else `background` while background tasks it will be
+   * woken by are live. Null when it is idle, reported nothing for the current
+   * ACP session, or does not advertise the capability.
+   */
+  /** Whether the agent advertised the Core `sessionActivity` level. */
+  reportsSessionActivity(): boolean {
+    return this.lodyExtensionCapabilities.sessionActivity?.version === 1;
+  }
+
+  getNativeWork(): NativeAgentWork {
+    const activity = this.nativeActivity;
+    if (!activity || activity.sessionId !== this.acpSessionId) return null;
+    if (activity.state !== 'idle') return 'running';
+    return activity.backgroundTaskCount > 0 ? 'background' : null;
+  }
+
+  getNativeActivityObservation(): 'idle' | 'running' | 'background' | 'unknown' {
+    if (
+      !this.reportsSessionActivity() ||
+      !this.nativeActivity ||
+      this.nativeActivity.sessionId !== this.acpSessionId
+    )
+      return 'unknown';
+    return this.getNativeWork() ?? 'idle';
+  }
+
   /** Raw prompts and steer submissions remain owned after their local waits end. */
   get pendingPromptCompletion(): Promise<void> | null {
     return this.pendingPrompts.size > 0
@@ -2602,6 +2709,7 @@ export class AgentClient implements acp.Client {
   }
 
   private trackPendingExecution(request: Promise<unknown>): void {
+    if (this.options.workspaceId) daemonLossObserver.trackRaw(this.options.workspaceId, request);
     this.pendingPrompts.add(request);
     const release = () => {
       this.pendingPrompts.delete(request);
@@ -2813,6 +2921,10 @@ export class AgentClient implements acp.Client {
       `[${this.options.sessionId}] ACP session config option set: ${configId}=${value}`
     );
     return result?.configOptions;
+  }
+
+  getAvailableCommands(): AcpCommandSummary[] | undefined {
+    return this.availableCommands;
   }
 
   /** Returns the config options currently known for this session. */

@@ -9,17 +9,19 @@ import {
   prependGhShimBinDirToPath,
 } from './gh-shim-script';
 import { toSingleQuotedShellString, writeIfChanged } from './shell-file-utils';
+import type { GitTransportLogger } from './github-git-transport';
 
 /** Keep shell startup from restoring credentials scrubbed at the Session boundary. */
 export const applyNonOwnerShellEnv = (
   env: NodeJS.ProcessEnv,
-  brokerStateFilePath?: string
+  brokerStateFilePath?: string,
+  logger?: GitTransportLogger
 ): void => {
   // A repository-less or offline session must not fall through to native gh's
   // saved owner login. Never use the ambient, shared broker as a fallback.
   const statePath =
     brokerStateFilePath ?? path.join(getLodyDataDir(), 'shell-env', 'unavailable-broker.json');
-  ensureGhShimScript(statePath);
+  ensureGhShimScript(statePath, logger);
   // Windows environment keys are case-insensitive; Node forwards only one
   // spelling, so an overlaid Path must not bypass the protected PATH.
   if (process.platform === 'win32') {

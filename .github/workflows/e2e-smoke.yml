@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: 22
+  NODE_VERSION: '22.23.4'
   COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
 
 jobs:
@@ -99,8 +99,17 @@ jobs:
       - name: Check suite contract
         run: pnpm --filter @lody/e2e check
 
-      - name: Build OSS desktop and bundled CLI
-        run: pnpm --dir apps/electron build
+      - name: Build and stage bundled CLI
+        env:
+          # Match the CLI's documented 2 GiB build budget instead of Node's host-derived default.
+          NODE_OPTIONS: --max-old-space-size=2048
+        run: |
+          pnpm --dir apps/electron build:cli
+          pnpm --dir apps/electron sync:cli
+
+      - name: Build OSS desktop
+        # Keep build-app.mjs's renderer heap budget independent of the CLI's.
+        run: pnpm --dir apps/electron build:app
 
       - name: Run selected desktop journeys
         shell: bash

@@ -35,6 +35,7 @@ export function useMessageQueueEditing(
   const [editingCid, setEditingCid] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [pendingCid, setPendingCid] = useState<string | null>(null);
+  const operationRef = useRef<symbol | null>(null);
 
   // Refs so the unmount cleanup can fire onEditCancel without re-subscribing on every render.
   const itemsRef = useRef(items);
@@ -54,10 +55,9 @@ export function useMessageQueueEditing(
   // On unmount, if a row is mid-edit, surface a cancel so the doc-side `isEditing` flag clears.
   useEffect(() => {
     return () => {
+      operationRef.current = null;
       const cid = editingCidRef.current;
-      const item = cid
-        ? itemsRef.current.find((candidate) => candidate.$cid === cid)
-        : undefined;
+      const item = cid ? itemsRef.current.find((candidate) => candidate.$cid === cid) : undefined;
       if (item?.isEditing) {
         void onEditCancelRef.current(item);
       }
@@ -89,18 +89,24 @@ export function useMessageQueueEditing(
         editingCid && editingCid !== item.$cid
           ? items.find((candidate) => candidate.$cid === editingCid)
           : undefined;
+      // A blur-save may finish after the user has opened the next row. Only
+      // the latest operation owns the local editor and its pending state.
+      const operation = Symbol();
+      operationRef.current = operation;
       setPendingCid(item.$cid);
       try {
         if (previous) {
           await onEditCancel(previous);
+          if (operationRef.current !== operation) return;
         }
         await onEditStart(item);
+        if (operationRef.current !== operation) return;
         setEditingCid(item.$cid);
         setEditValue(getEditableTaskText(item));
       } catch (error) {
         console.error('Failed to start queued message edit', error);
       } finally {
-        setPendingCid(null);
+        if (operationRef.current === operation) setPendingCid(null);
       }
     },
     [editingCid, items, onEditCancel, onEditStart]
@@ -108,15 +114,18 @@ export function useMessageQueueEditing(
 
   const cancelEdit = useCallback(
     async (item: MessageQueueItem) => {
+      const operation = Symbol();
+      operationRef.current = operation;
       setPendingCid(item.$cid);
       try {
         await onEditCancel(item);
+        if (operationRef.current !== operation) return;
         setEditingCid(null);
         setEditValue('');
       } catch (error) {
         console.error('Failed to cancel queued message edit', error);
       } finally {
-        setPendingCid(null);
+        if (operationRef.current === operation) setPendingCid(null);
       }
     },
     [onEditCancel]
@@ -124,15 +133,18 @@ export function useMessageQueueEditing(
 
   const saveEdit = useCallback(
     async (item: MessageQueueItem) => {
+      const operation = Symbol();
+      operationRef.current = operation;
       setPendingCid(item.$cid);
       try {
         await onEditSave(item, editValue.trim());
+        if (operationRef.current !== operation) return;
         setEditingCid(null);
         setEditValue('');
       } catch (error) {
         console.error('Failed to save queued message edit', error);
       } finally {
-        setPendingCid(null);
+        if (operationRef.current === operation) setPendingCid(null);
       }
     },
     [editValue, onEditSave]

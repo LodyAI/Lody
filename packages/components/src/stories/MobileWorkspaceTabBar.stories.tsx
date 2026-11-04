@@ -59,20 +59,34 @@ function ShellShared<T extends string>({
   theme,
   hideNewChat,
   scrollable,
+  signalScrolling,
+  noSelection,
 }: {
   tabs: MobileBottomTabBarTabSpec<T>[];
   theme: 'ios' | 'material';
   hideNewChat?: boolean;
   scrollable?: boolean;
+  signalScrolling?: boolean;
+  noSelection?: boolean;
 }) {
-  const [selected, setSelected] = useState<T>(tabs[0]!.key);
+  const [selected, setSelected] = useState<T | null>(noSelection ? null : tabs[0]!.key);
+  const [scrollSignal, setScrollSignal] = useState({ scrollTop: 0, seq: 0 });
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="relative h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+      <div className="relative translate-z-0 h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[min(852px,calc(100dvh-3rem))] sm:w-[393px] sm:rounded-[34px]">
         <div
           ref={scrollRef}
+          data-testid="dock-scroll"
+          onScroll={
+            signalScrolling
+              ? (event) => {
+                  const scrollTop = event.currentTarget.scrollTop;
+                  setScrollSignal((previous) => ({ scrollTop, seq: previous.seq + 1 }));
+                }
+              : undefined
+          }
           className="h-full overflow-y-auto p-4 pb-32"
         >
           <div className="mb-4 text-xs text-muted-foreground">
@@ -102,7 +116,8 @@ function ShellShared<T extends string>({
           onTabSelect={setSelected}
           onNewChat={hideNewChat ? undefined : fn()}
           theme={theme}
-          scrollContainerRef={scrollable ? scrollRef : undefined}
+          scrollContainerRef={scrollable && !signalScrolling ? scrollRef : undefined}
+          scrollSignal={signalScrolling ? scrollSignal : undefined}
         />
       </div>
     </div>
@@ -136,4 +151,20 @@ export const WithoutNewChat: Story = {
 
 export const ScrollCollapsing: Story = {
   render: () => <ShellShared tabs={homeTabs} theme="ios" scrollable />,
+};
+
+export const ScrollMaterial: Story = {
+  render: () => <ShellShared tabs={homeTabs} theme="material" scrollable />,
+};
+
+export const SignalScrolling: Story = {
+  render: () => <ShellShared tabs={projectTabs} theme="material" scrollable signalScrolling />,
+};
+
+export const ScrollWithoutNewChat: Story = {
+  render: () => <ShellShared tabs={homeTabs.slice(0, 2)} theme="ios" scrollable hideNewChat />,
+};
+
+export const NoSelection: Story = {
+  render: () => <ShellShared tabs={homeTabs} theme="ios" scrollable noSelection />,
 };

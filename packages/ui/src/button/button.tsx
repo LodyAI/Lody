@@ -168,30 +168,80 @@ const styles = stylex.create({
    * outer corners and squares the ones it shares with a neighbour. Longhands,
    * so they win over the size's `borderRadius` shorthand; the corner a segment
    * keeps is restated because StyleX has no "unset on this condition".
+   * Count only marked segments: an open menu inserts focus guards around its
+   * trigger, which must not take away the last button's outer corners.
    */
   segmentMini: {
-    borderStartStartRadius: { default: 0, ':first-child': button.radiusMini },
-    borderEndStartRadius: { default: 0, ':first-child': button.radiusMini },
-    borderStartEndRadius: { default: 0, ':last-child': button.radiusMini },
-    borderEndEndRadius: { default: 0, ':last-child': button.radiusMini },
+    borderStartStartRadius: {
+      default: 0,
+      ':nth-child(1 of [data-ui-button-group-item])': button.radiusMini,
+    },
+    borderEndStartRadius: {
+      default: 0,
+      ':nth-child(1 of [data-ui-button-group-item])': button.radiusMini,
+    },
+    borderStartEndRadius: {
+      default: 0,
+      ':nth-last-child(1 of [data-ui-button-group-item])': button.radiusMini,
+    },
+    borderEndEndRadius: {
+      default: 0,
+      ':nth-last-child(1 of [data-ui-button-group-item])': button.radiusMini,
+    },
   },
   segmentSmall: {
-    borderStartStartRadius: { default: 0, ':first-child': button.radiusSmall },
-    borderEndStartRadius: { default: 0, ':first-child': button.radiusSmall },
-    borderStartEndRadius: { default: 0, ':last-child': button.radiusSmall },
-    borderEndEndRadius: { default: 0, ':last-child': button.radiusSmall },
+    borderStartStartRadius: {
+      default: 0,
+      ':nth-child(1 of [data-ui-button-group-item])': button.radiusSmall,
+    },
+    borderEndStartRadius: {
+      default: 0,
+      ':nth-child(1 of [data-ui-button-group-item])': button.radiusSmall,
+    },
+    borderStartEndRadius: {
+      default: 0,
+      ':nth-last-child(1 of [data-ui-button-group-item])': button.radiusSmall,
+    },
+    borderEndEndRadius: {
+      default: 0,
+      ':nth-last-child(1 of [data-ui-button-group-item])': button.radiusSmall,
+    },
   },
   segmentMedium: {
-    borderStartStartRadius: { default: 0, ':first-child': button.radiusMedium },
-    borderEndStartRadius: { default: 0, ':first-child': button.radiusMedium },
-    borderStartEndRadius: { default: 0, ':last-child': button.radiusMedium },
-    borderEndEndRadius: { default: 0, ':last-child': button.radiusMedium },
+    borderStartStartRadius: {
+      default: 0,
+      ':nth-child(1 of [data-ui-button-group-item])': button.radiusMedium,
+    },
+    borderEndStartRadius: {
+      default: 0,
+      ':nth-child(1 of [data-ui-button-group-item])': button.radiusMedium,
+    },
+    borderStartEndRadius: {
+      default: 0,
+      ':nth-last-child(1 of [data-ui-button-group-item])': button.radiusMedium,
+    },
+    borderEndEndRadius: {
+      default: 0,
+      ':nth-last-child(1 of [data-ui-button-group-item])': button.radiusMedium,
+    },
   },
   segmentPill: {
-    borderStartStartRadius: { default: 0, ':first-child': radius.full },
-    borderEndStartRadius: { default: 0, ':first-child': radius.full },
-    borderStartEndRadius: { default: 0, ':last-child': radius.full },
-    borderEndEndRadius: { default: 0, ':last-child': radius.full },
+    borderStartStartRadius: {
+      default: 0,
+      ':nth-child(1 of [data-ui-button-group-item])': radius.full,
+    },
+    borderEndStartRadius: {
+      default: 0,
+      ':nth-child(1 of [data-ui-button-group-item])': radius.full,
+    },
+    borderStartEndRadius: {
+      default: 0,
+      ':nth-last-child(1 of [data-ui-button-group-item])': radius.full,
+    },
+    borderEndEndRadius: {
+      default: 0,
+      ':nth-last-child(1 of [data-ui-button-group-item])': radius.full,
+    },
   },
   /**
    * The segments sit a hairline apart rather than touching: each keeps its own
@@ -268,6 +318,7 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
       data-variant={variant}
       data-size={size}
       {...rest}
+      data-ui-button-group-item={segment ? '' : undefined}
       className={className ? `${sx.className} ${className}` : sx.className}
       style={sx.style}
     >
@@ -295,8 +346,8 @@ export interface ButtonGroupProps extends Omit<ComponentProps<'div'>, 'className
  * nothing of its own.
  *
  * A segment must be a direct child, which a Base UI trigger rendered as a
- * Button is (`<Menu.Trigger render={<Button … />} />`): the corners follow
- * `:first-child` and `:last-child`.
+ * Button is (`<Menu.Trigger render={<Button … />} />`). Only marked segments
+ * count when assigning outer corners, so menu focus guards are ignored.
  */
 export const ButtonGroup = forwardRef<HTMLDivElement, ButtonGroupProps>(function ButtonGroup(
   { className, children, ...rest },

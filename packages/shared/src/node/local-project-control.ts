@@ -1,3 +1,4 @@
+import { ProjectLocalMemberProbeSchema } from '../workspace-project';
 import type { LocalProjectControlRequest, LocalProjectControlResponse } from '../message';
 
 export const LOCAL_PROJECT_CONTROL_PATH = '/project-control';
@@ -39,7 +40,7 @@ function isStringArray(value: unknown): value is string[] {
 function isLocalProjectHistoryProvider(value: unknown): boolean {
   return (
     isObjectRecord(value) &&
-    (value.cliType === 'builtin' || value.cliType === 'registry') &&
+    (value.cliType === 'builtin' || value.cliType === 'registry' || value.cliType === 'custom') &&
     typeof value.agentType === 'string' &&
     value.agentType.trim().length > 0
   );
@@ -309,7 +310,11 @@ export function isLocalProjectControlRequest(value: unknown): value is LocalProj
   }
 
   if (value.type === 'local-project/prepare-add') {
-    return typeof value.workspaceId === 'string' && typeof value.rootPath === 'string';
+    return (
+      typeof value.workspaceId === 'string' &&
+      typeof value.rootPath === 'string' &&
+      isOptionalBoolean(value.inspect)
+    );
   }
 
   if (value.type === 'local-project/list-roots') {
@@ -323,6 +328,14 @@ export function isLocalProjectControlRequest(value: unknown): value is LocalProj
       isOptionalBoolean(value.showHidden) &&
       isOptionalInteger(value.limit) &&
       isOptionalString(value.cursor)
+    );
+  }
+
+  if (value.type === 'local-project/create-directory') {
+    return (
+      typeof value.workspaceId === 'string' &&
+      typeof value.parentPath === 'string' &&
+      typeof value.name === 'string'
     );
   }
 
@@ -507,7 +520,9 @@ export function isLocalProjectControlResponse(
       typeof value.result.localProjectId === 'string' &&
       typeof value.result.name === 'string' &&
       typeof value.result.rootPath === 'string' &&
-      typeof value.result.alreadyRegistered === 'boolean'
+      typeof value.result.alreadyRegistered === 'boolean' &&
+      (value.result.inspection === undefined ||
+        ProjectLocalMemberProbeSchema.safeParse(value.result.inspection).success)
     );
   }
 
@@ -517,6 +532,10 @@ export function isLocalProjectControlResponse(
 
   if (value.type === 'local-project/browse-dir') {
     return isLocalProjectBrowseDirectoryResult(value.result);
+  }
+
+  if (value.type === 'local-project/create-directory') {
+    return isObjectRecord(value.result) && typeof value.result.path === 'string';
   }
 
   if (value.type === 'local-project/delete') {

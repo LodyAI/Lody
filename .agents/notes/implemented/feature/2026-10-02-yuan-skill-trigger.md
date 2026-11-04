@@ -33,3 +33,18 @@ assertion (missing `githubRepoFullName`); that failure also reproduces in isolat
 The full test run therefore did not complete.
 
 PR: [#1208](https://github.com/LodyAI/Lody/pull/1208).
+
+## Halfwidth alias correction (2026-10-15)
+
+The original registration and routing recognized only fullwidth `￥` (U+FFE5),
+leaving halfwidth `¥` (U+00A5) unable to open Skills. Both now use one alias list
+for composer registration and registry routing. Selection still inserts `$token`;
+unselected aliases remain ordinary text. The composer suite now covers all three
+triggers and dismissal of both yuan/yen forms. Native IME verification remains manual.
+
+The focused composer, registry, and skill-source suites pass all 80 tests;
+formatting, changed-file lint, and documentation checks pass.
+
+Workspace typechecking and lint pass. `pnpm check` stops at the unchanged
+`code-review-helper` renderer test (`act is not a function`); that test passes
+when rerun with `NODE_ENV=test`. The full workspace test run did not complete.

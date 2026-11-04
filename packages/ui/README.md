@@ -204,6 +204,10 @@ had there, through Base UI's `render`:
 `width="compact"` for a short two-choice menu; the regular width remains the
 default. Width is a primitive variant, not a caller class override.
 
+`Menu.CheckboxItem indicatorSide="end"` places the tick after the label for
+compact filters. It reserves the trailing mark box in both states, keeping the
+label aligned without a leading indent. The default remains `start`.
+
 `ContextMenu` and `Menubar` restate only the way in — a right click or a long
 press, and a bar of names — and re-export `Menu`'s rows rather than rebuilding
 them, so a command looks and behaves the same wherever a person meets it. A row
@@ -331,8 +335,15 @@ A popup mounts on the document by default, and a modal panel is the exception. A
 surface that owns a focus scope and a scroll lock states its panel once with
 `PopupContainerProvider`, and every Select, Combobox, Menu and Popover under it
 mounts inside the panel instead of being treated as outside it. `Dialog.Content`,
-`AlertDialog.Content` and `Sheet.Content` do this for their own panel, so a
+`AlertDialog.Content` and `Drawer.Content` do this for their own panel, so a
 product surface never has to.
+
+A host using another modal implementation can publish `ModalContainerProvider`
+(from `@lody/ui/popup-container`) inside its interaction scope. Dialog, AlertDialog
+and Drawer inherit that host unless `container` is explicitly provided (including Base UI’s `null`
+unmounted state). This context is separate from floating popup containers:
+opening another modal must not anchor it to a centered panel's transform.
+Legacy Vaul drawers provide their existing boxless no-drag host to both contexts.
 
 A `Tooltip` stands on the floating rung with a menu, a popover and a list: the
 raised background under the popover shadow, with the page's own ink, so it is
@@ -545,7 +556,9 @@ toasts.add({ title: 'Sync failed', description: 'No answer.', type: 'danger' });
 `Toast.Provider` renders the viewport itself, so a surface wraps its app once
 rather than keeping a provider, a portal, a viewport and a list in step. The
 viewport takes no pointer, so the page under a toast stays usable; each toast
-takes it back for its own close button.
+takes it back for its own close button. Each toast also excludes its card from
+Electron's native window drag region, so controls remain clickable where the
+portalled card overlaps the titlebar; gaps between cards do not claim that region.
 
 The other half is the wait. A `Progress` is a well-rung track with `accent`
 running in it, because the rules give that colour to live state and name the
@@ -762,6 +775,11 @@ is the second part here on no rung and the one that is not a film — what it
 stands in for is opaque, so the fallback takes a **gray**, which is what the
 rules reserve the gray ramp for: a thing with no role.
 
+`ThemeRoot` binds the fallback colours to its palette. A custom product palette
+scope also applies `avatarPaletteTheme` from `@lody/ui/avatar/avatar.tokens.stylex`
+on the scope element so the fallback uses that palette rather than inherited
+colours resolved at the document root.
+
 ```tsx
 <Avatar.Root size="small">
   <Avatar.Image src={user.image} alt={user.name} />
@@ -843,6 +861,38 @@ that draws nothing are recorded in the
 the range that clamps itself, the shell an input builds out of its own `render`,
 and the two Base UI gaps they close are recorded in the
 [UI number and password fields note](../../.agents/notes/implemented/feature/2026-09-20-ui-number-password-fields.md).
+
+## Scroll area
+
+`ScrollArea` uses Base UI for native wheel/touch scrolling, thumb dragging,
+overflow measurement and cleanup. Its transparent track and rounded thumb use
+the neutral gray ramp, shared by Menu, Select, Textarea, Table and Drawer native
+scroll regions. The component's tokens own width, inset and interaction colors.
+
+```tsx
+import { ScrollArea } from '@lody/ui/scroll-area';
+
+<ScrollArea className={panelHeight} viewportRef={scrollViewportRef}>
+  {content}
+</ScrollArea>
+<ScrollArea axis="horizontal" compact visibility="scroll">
+  {tabs}
+</ScrollArea>
+```
+
+`axis` is `vertical` (default), `horizontal` or `both`. `visibility` is `hover`
+(default), `scroll` or `always`; bars still require overflow. `compact` provides
+a narrow track for tab strips. The viewport ref remains the real native scroll
+element for virtualization, keyboard handling and scroll restoration. Root and
+viewport classes/styles carry caller layout, not thumb appearance.
+`scrollbarClassName` carries layout or interaction constraints on both tracks,
+such as hiding them during a parent frame's animation; track appearance stays token-owned.
+
+`nativeScrollbar` is a StyleX style for existing scroll owners, including native
+text controls and the popup lists that own keyboard selection. Product-wide CSS
+may use the variables supplied by `scrollbarNativeTheme` from
+`@lody/ui/scroll-area/scroll-area.tokens.stylex`; apply it with
+`scrollbarPaletteTheme` on the palette scope. `ThemeRoot` includes both.
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the

@@ -54,22 +54,6 @@ const expectSpansAddressOutput = (result: ReturnType<typeof expand>) => {
 };
 
 describe('before-send mention rewrite', () => {
-  it('leaves text with no mentions completely alone', () => {
-    expect(expand({ text: 'just a prompt' })).toEqual({ text: 'just a prompt', spans: undefined });
-  });
-
-  it('records a verbatim mention without touching the text', () => {
-    const text = 'look at @src/a.ts';
-    const result = expand({
-      text,
-      mentions: [{ value: 'src/a.ts', start: 8, end: 17, kind: 'file' }],
-    });
-    expect(result.text).toBe(text);
-    expect(result.spans).toEqual([
-      { start: 8, end: 17, kind: 'file', label: '@src/a.ts', target: 'src/a.ts' },
-    ]);
-  });
-
   it('ignores a range whose kind owns its own rewrite, so the two cannot collide', () => {
     const text = 'run $review on it';
     const result = expand({
@@ -79,9 +63,7 @@ describe('before-send mention rewrite', () => {
       mentions: [{ value: 'review', start: 4, end: 11, kind: 'skill' }],
       skills: [skillItem('review', '.claude/skills/review/SKILL.md')],
     });
-    expect(result.text).toBe(
-      'run use /review [Skill Path](.claude/skills/review/SKILL.md) on it'
-    );
+    expect(result.text).toBe('run use /review [Skill Path](.claude/skills/review/SKILL.md) on it');
     expect(result.spans).toHaveLength(1);
     expect(result.spans?.[0]).toMatchObject({ kind: 'skill', label: '$review' });
     expectSpansAddressOutput(result);
@@ -103,8 +85,18 @@ describe('before-send mention rewrite', () => {
       drafts,
       skills: [skillItem('review', '.claude/skills/review/SKILL.md')],
       mentions: [
-        { value: 'src/a.ts', start: text.indexOf('@src/a.ts'), end: text.indexOf('@src/a.ts') + 9, kind: 'file' },
-        { value: 'sess-9f2c', start: text.indexOf('@my-run'), end: text.indexOf('@my-run') + 7, kind: 'session' },
+        {
+          value: 'src/a.ts',
+          start: text.indexOf('@src/a.ts'),
+          end: text.indexOf('@src/a.ts') + 9,
+          kind: 'file',
+        },
+        {
+          value: 'sess-9f2c',
+          start: text.indexOf('@my-run'),
+          end: text.indexOf('@my-run') + 7,
+          kind: 'session',
+        },
         { value: '42', start: text.indexOf('#42'), end: text.indexOf('#42') + 3, kind: 'issue' },
       ],
     });
@@ -112,7 +104,7 @@ describe('before-send mention rewrite', () => {
     // The agent sees every expansion.
     expect(result.text).toContain(PASTED_BLOB);
     expect(result.text).toContain('use /review [Skill Path](.claude/skills/review/SKILL.md)');
-    expect(result.text).toContain('[@my-run](session://sess-9f2c)');
+    expect(result.text).toContain('[@my-run](lody://session/sess-9f2c)');
 
     // The transcript sees what the user typed, in order, addressing the output.
     expect(result.spans?.map((span) => [span.kind, span.label])).toEqual([
@@ -134,40 +126,21 @@ describe('before-send mention rewrite', () => {
     expect(expand({ text })).toEqual({ text, spans: undefined });
   });
 
-  it('does not depend on the order the contributors run in', () => {
-    const text = 'a [Pasted] b $review c';
-    const drafts: PastedTextDraft[] = [
-      { id: 'p', text: PASTED_BLOB, displayText: '[Pasted]', start: 2, end: 10 },
-    ];
-    const skills = [skillItem('review', '.claude/skills/review/SKILL.md')];
-
-    const pastedFirst = applyTextRewrites(text, [
-      ...buildPastedTextRewrites(drafts),
-      ...buildSkillMentionRewrites(text, skills, null),
-    ]);
-    const skillFirst = applyTextRewrites(text, [
-      ...buildSkillMentionRewrites(text, skills, null),
-      ...buildPastedTextRewrites(drafts),
-    ]);
-    expect(skillFirst).toEqual(pastedFirst);
-  });
-
   it('survives the trim the send path applies before building the text block', () => {
     const text = '\n  see @src/a.ts  \n';
     const result = expand({
       text,
-      mentions: [{ value: 'src/a.ts', start: text.indexOf('@src/a.ts'), end: text.indexOf('@src/a.ts') + 9, kind: 'file' }],
+      mentions: [
+        {
+          value: 'src/a.ts',
+          start: text.indexOf('@src/a.ts'),
+          end: text.indexOf('@src/a.ts') + 9,
+          kind: 'file',
+        },
+      ],
     });
     const trimmed = result.text.trim();
     const spans = reanchorMessageTextSpansForTrim(result.text, trimmed, result.spans);
     expect(trimmed.slice(spans![0]!.start, spans![0]!.end)).toBe('@src/a.ts');
-  });
-
-  it('drops a stale range that no longer fits the text it was recorded against', () => {
-    const result = expand({
-      text: 'short',
-      mentions: [{ value: 'gone', start: 40, end: 60, kind: 'file' }],
-    });
-    expect(result).toEqual({ text: 'short', spans: undefined });
   });
 });

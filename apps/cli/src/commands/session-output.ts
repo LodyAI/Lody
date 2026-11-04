@@ -1,4 +1,5 @@
 import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/shared';
+import { readChatFailureNotice } from '@lody/shared';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { SessionBackend } from '@/session/session-backend';
 
@@ -31,6 +32,26 @@ export type CompletedAssistantTurn = {
 };
 
 export type SessionTurnWaitErrorCode = 'failed' | 'canceled' | 'timeout';
+
+export type SessionTurnOutcome = 'completed' | 'failed' | 'canceled';
+
+/** Durable turn evidence shared by one-turn waits and independent observers. */
+export function classifySessionTurnOutcome(
+  userTurn: Pick<SessionHistoryInput, 'status'> | undefined,
+  assistantTurn: Pick<SessionHistoryInput, 'finished' | 'endedAt'> | undefined
+): SessionTurnOutcome | undefined {
+  if (userTurn?.status === 'failed' || userTurn?.status === 'canceled') {
+    return userTurn.status;
+  }
+  if (
+    userTurn?.status === 'handled' &&
+    assistantTurn &&
+    (assistantTurn.finished === true || typeof assistantTurn.endedAt === 'number')
+  ) {
+    return 'completed';
+  }
+  return undefined;
+}
 
 export class SessionTurnWaitError extends Error {
   constructor(
@@ -84,33 +105,8 @@ const findChatFailureMessage = (
   userTurnId: string
 ): string | undefined => {
   const userTurnIndex = findUserTurnIndex(history, userTurnId);
-  if (userTurnIndex < 0) {
-    return undefined;
-  }
-
-  for (let index = history.length - 1; index > userTurnIndex; index -= 1) {
-    const entry = history[index];
-    if (entry?.role !== 'system' || !Array.isArray(entry.items)) {
-      continue;
-    }
-
-    for (const item of entry.items as MessageContent[]) {
-      const noticeMeta = item.type === 'system_notice' ? item.meta : undefined;
-      if (
-        item.type === 'system_notice' &&
-        item.name === 'chat_failed' &&
-        noticeMeta &&
-        typeof noticeMeta === 'object' &&
-        'message' in noticeMeta &&
-        typeof noticeMeta.message === 'string' &&
-        noticeMeta.message.trim()
-      ) {
-        return noticeMeta.message.trim();
-      }
-    }
-  }
-
-  return undefined;
+  if (userTurnIndex < 0) return undefined;
+  return readChatFailureNotice(history.slice(userTurnIndex + 1))?.message;
 };
 
 export function calculateTurnDurationMs(
@@ -172,7 +168,9 @@ export async function waitForTurnCompletion(options: {
       }
 
       const userTurn = findUserTurn(history, options.userTurnId);
-      if (userTurn?.status === 'failed') {
+      const assistantEntry = findAssistantEntryForUserTurn(history, options.userTurnId);
+      const outcome = classifySessionTurnOutcome(userTurn, assistantEntry);
+      if (outcome === 'failed') {
         rejectWith(
           new SessionTurnWaitError(
             'failed',
@@ -184,7 +182,7 @@ export async function waitForTurnCompletion(options: {
         return;
       }
 
-      if (userTurn?.status === 'canceled') {
+      if (outcome === 'canceled') {
         rejectWith(
           new SessionTurnWaitError(
             'canceled',
@@ -195,8 +193,6 @@ export async function waitForTurnCompletion(options: {
         );
         return;
       }
-
-      const assistantEntry = findAssistantEntryForUserTurn(history, options.userTurnId);
 
       if (assistantEntry) {
         const items = normalizeMessageItems(assistantEntry.items);
@@ -220,10 +216,7 @@ export async function waitForTurnCompletion(options: {
           lastSerializedItems = nextSerializedItems;
         }
 
-        if (
-          userTurn?.status === 'handled' &&
-          (assistantEntry.finished === true || typeof assistantEntry.endedAt === 'number')
-        ) {
+        if (outcome === 'completed') {
           const completedTurn: CompletedAssistantTurn = {
             sessionId: options.sessionDoc.sessionId,
             userTurnId: options.userTurnId,
@@ -291,4 +284,19 @@ export async function waitForTurnCompletion(options: {
 
     refresh();
   });
+}
+
+/** Summary activity time; creation timestamps remain untouched for ordering/duration. */
+export function sessionHistoryActivityAt(
+  entry: Pick<SessionHistoryInput, 'role' | 'timestamp' | 'finished' | 'endedAt'> | undefined
+): string | undefined {
+  if (
+    entry?.role === 'assistant' &&
+    entry.finished === true &&
+    typeof entry.endedAt === 'number' &&
+    Number.isFinite(entry.endedAt) &&
+    Math.abs(entry.endedAt) <= 8_640_000_000_000_000
+  )
+    return new Date(entry.endedAt).toISOString();
+  return entry?.timestamp;
 }

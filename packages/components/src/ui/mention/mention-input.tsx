@@ -1,6 +1,7 @@
 import { composeEventHandlers, Primitive, useComposedRefs } from '@diceui/shared';
 import type { VirtualElement } from '@floating-ui/react';
 import * as React from 'react';
+import { getPlatform } from '@/lib/commands/platform';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import {
@@ -32,6 +33,34 @@ type VirtualAnchorSnapshot = {
   cursorPosition: number;
   anchor: VirtualElement;
 };
+
+type HorizontalCaretMove = { direction: 'left' | 'right'; isWordJump: boolean };
+
+const MAC_EMACS_CHARACTER_MOVES: Readonly<Record<string, HorizontalCaretMove['direction']>> = {
+  b: 'left',
+  f: 'right',
+};
+
+function getHorizontalCaretMove(
+  event: React.KeyboardEvent<InputElement>
+): HorizontalCaretMove | null {
+  if (event.shiftKey) return null;
+
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    return {
+      direction: event.key === 'ArrowLeft' ? 'left' : 'right',
+      isWordJump: event.metaKey || event.ctrlKey,
+    };
+  }
+
+  // Other macOS Emacs bindings move by line or change text. Only B/F have the
+  // same one-character movement as the arrows at an atomic mention edge.
+  const direction = MAC_EMACS_CHARACTER_MOVES[event.key];
+  if (!direction || !event.ctrlKey || event.metaKey || event.altKey || getPlatform() !== 'mac') {
+    return null;
+  }
+  return { direction, isWordJump: false };
+}
 
 function normalizeTextareaValue(
   value: React.ComponentPropsWithoutRef<typeof Primitive.textarea>['value']
@@ -262,7 +291,8 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     mirror.appendChild(marker);
     // Measure outside zoomed/transformed app containers; the scale below
     // then maps the unscaled mirror back into the textarea's viewport rect.
-    document.documentElement.appendChild(mirror);
+    // Keep body's :last-child state stable to avoid restyling the app on every read.
+    document.documentElement.insertBefore(mirror, document.body);
     const markerRect = marker.getBoundingClientRect();
     const mirrorRect = mirror.getBoundingClientRect();
     mirror.remove();
@@ -567,30 +597,35 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         return;
       }
 
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'z') {
+        if (context.onHistoryMove(event.shiftKey ? 1 : -1)) event.preventDefault();
+        return;
+      }
+      if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === 'y') {
+        if (context.onHistoryMove(1)) event.preventDefault();
+        return;
+      }
+
       const input = event.currentTarget;
       const cursorPosition = input.selectionStart ?? 0;
       const selectionEnd = input.selectionEnd ?? cursorPosition;
       const hasSelection = cursorPosition !== selectionEnd;
+      const horizontalMove = hasSelection ? null : getHorizontalCaretMove(event);
 
-      if (
-        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
-        !hasSelection &&
-        !event.shiftKey
-      ) {
-        const isCtrlOrCmd = event.metaKey || event.ctrlKey;
-        const direction = event.key === 'ArrowLeft' ? 'left' : 'right';
+      if (horizontalMove) {
+        const { direction, isWordJump } = horizontalMove;
 
         const adjacentMention = findAdjacentMentionForHorizontalNavigation({
           mentions: context.mentions,
           value: input.value,
           cursorPosition,
           direction,
-          isWordJump: isCtrlOrCmd,
+          isWordJump,
         });
 
         if (adjacentMention) {
           event.preventDefault();
-          const newPosition = isCtrlOrCmd
+          const newPosition = isWordJump
             ? direction === 'left'
               ? adjacentMention.start
               : adjacentMention.end
@@ -606,11 +641,23 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           return;
         }
 
-        if (isCtrlOrCmd) {
+        if (event.metaKey || event.ctrlKey) {
           return;
         }
       }
 
+      if (event.key === 'Delete' && !context.open && !hasSelection && !context.readonly) {
+        const next = context.mentions.find(
+          (mention) => cursorPosition >= mention.start && cursorPosition < mention.end
+        );
+        if (next) {
+          event.preventDefault();
+          applyInputValue(removeMentionText(input.value, next, false), next.start, {
+            mentionsToRemove: [next],
+          });
+          return;
+        }
+      }
       if (event.key === 'Backspace' && !context.open && !hasSelection) {
         const isCtrlOrCmd = event.metaKey || event.ctrlKey;
 
@@ -824,6 +871,11 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       const cursorPosition = input.selectionStart ?? 0;
 
       const inputType = event.inputType ?? (event.nativeEvent as InputEvent).inputType;
+      if (inputType === 'historyUndo' || inputType === 'historyRedo') {
+        if (isComposingRef.current) return;
+        if (context.onHistoryMove(inputType === 'historyUndo' ? -1 : 1)) event.preventDefault();
+        return;
+      }
       if (inputType === 'deleteContentBackward') {
         const mentionAtCursor = context.mentions.find(
           (mention) => cursorPosition > mention.start && cursorPosition <= mention.end

@@ -21,7 +21,7 @@ import {
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
-import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
+import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import { cn } from '@/lib/utils';
 
 /**
@@ -207,7 +207,7 @@ export function AgentRoleDetailPane({
                   <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.8} />
                 )
               }
-              label={t('chat.runConfig.permissionLabel', 'Permission')}
+              label={permissionModeControlLabel(permissionFace, t)}
               value={permissionOption?.label ?? permissionValue}
               tone={permissionIsWarning ? 'warning' : undefined}
             />

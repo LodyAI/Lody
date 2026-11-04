@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { createAcpStartupMonitor } from './acp-startup-monitor';
+import {
+  AcpStartupProcessError,
+  AcpStartupProcessExitError,
+  createAcpStartupMonitor,
+} from './acp-startup-monitor';
 
 function createFakeMonitoredProcess() {
   const exitListeners = new Set<(exitCode: number | null, signal: NodeJS.Signals | null) => void>();
@@ -50,17 +54,32 @@ describe('createAcpStartupMonitor', () => {
 
     await expect(monitor.abortPromise).rejects.toThrow(/Cannot find package 'zod'/);
   });
-
-  it('rejects startup when process creation emits an error', async () => {
-    const fakeProcess = createFakeMonitoredProcess();
-    const monitor = createAcpStartupMonitor(fakeProcess.processHandle, {
-      sessionId: 'session-2',
-      command: 'claude-agent-acp',
-      args: ['--debug'],
-    });
-
-    fakeProcess.emitError(new Error('spawn ENOENT'));
-
-    await expect(monitor.abortPromise).rejects.toThrow(/spawn ENOENT/);
-  });
+  it.each([false, true])(
+    'preserves stderr when transport closes first (exit observed: %s)',
+    async (exitObserved) => {
+      const fakeProcess = createFakeMonitoredProcess();
+      const monitor = createAcpStartupMonitor(fakeProcess.processHandle, {
+        sessionId: 'synthetic-startup',
+        command: 'npx',
+        args: [],
+        getStderrTail: () => 'npm error EBADDEVENGINES: Node v22.23.1 requires >=22.23.4',
+      });
+      const disconnected = new Error('write EPIPE');
+      // Handle the monitor promise even when the transport wins the startup race.
+      const processResult = monitor.abortPromise.catch((error: unknown) => error);
+      if (exitObserved) fakeProcess.emitExit(1, null);
+      const failure = monitor.resolveError(disconnected);
+      expect(failure).toBeInstanceOf(
+        exitObserved ? AcpStartupProcessExitError : AcpStartupProcessError
+      );
+      expect(failure).toHaveProperty('stderrTail', expect.stringContaining('EBADDEVENGINES'));
+      expect(failure).toHaveProperty('message', expect.stringContaining('requires >=22.23.4'));
+      if (!exitObserved) {
+        expect(failure).toHaveProperty('cause', disconnected);
+        fakeProcess.emitExit(1, null);
+      }
+      await processResult;
+      monitor.dispose();
+    }
+  );
 });

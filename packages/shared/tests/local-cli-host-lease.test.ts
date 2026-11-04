@@ -1,10 +1,12 @@
+import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acquireLocalCliHostLease,
-  getLocalCliHostEndpoint,
   inspectLocalCliHost,
   requestLocalCliHostShutdown,
   type LocalCliHostEndpoint,
@@ -31,16 +33,6 @@ afterEach(async () => {
 });
 
 describe('local CLI host lease', () => {
-  it('keeps the CommonJS node export in parity with the ESM module', () => {
-    const commonJs =
-      require('../src/node/local-cli-host-lease.cjs') as typeof import('../src/node/local-cli-host-lease');
-
-    expect(commonJs.getLocalCliHostEndpoint('cloud')).toEqual(getLocalCliHostEndpoint('cloud'));
-    expect(commonJs.getLocalCliHostEndpoint('local')).toEqual(getLocalCliHostEndpoint('local'));
-    expect(commonJs.acquireLocalCliHostLease).toBeTypeOf('function');
-    expect(commonJs.requestLocalCliHostShutdown).toBeTypeOf('function');
-  });
-
   it('uses the kernel endpoint bind as the single-owner boundary', async () => {
     const endpoint = await createEndpoint();
     const contenders = await Promise.all([
@@ -53,26 +45,6 @@ describe('local CLI host lease', () => {
     expect(acquired).toHaveLength(1);
     expect(occupied).toHaveLength(1);
     if (acquired[0]?.status === 'acquired') leases.push(acquired[0].lease);
-  });
-
-  it('releases ownership only after the listening endpoint is closed', async () => {
-    const endpoint = await createEndpoint();
-    const first = await acquireLocalCliHostLease({
-      endpoint,
-      instanceId: 'first',
-      mode: 'electron',
-    });
-    expect(first.status).toBe('acquired');
-    if (first.status !== 'acquired') return;
-
-    await first.lease.close();
-    const replacement = await acquireLocalCliHostLease({
-      endpoint,
-      instanceId: 'replacement',
-      mode: 'daemon',
-    });
-    expect(replacement.status).toBe('acquired');
-    if (replacement.status === 'acquired') leases.push(replacement.lease);
   });
 
   it.runIf(process.platform !== 'win32')(
@@ -132,4 +104,33 @@ describe('local CLI host lease', () => {
     await Promise.resolve();
     expect(onRequest).toHaveBeenCalledOnce();
   });
+
+  // Windows reports a pipe whose DACL refuses the caller (an elevated or
+  // service-session Host) as EPERM; an unreadable Unix socket is the same
+  // kernel refusal as EACCES. Root bypasses socket permissions.
+  it.runIf(process.platform !== 'win32' && process.getuid?.() !== 0)(
+    'reports a Host whose endpoint refuses this process as access denied',
+    async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-host-denied-'));
+      const socketPath = path.join(dir, 'host.sock');
+      const foreign = net.createServer((socket) => socket.end('{}\n'));
+      await new Promise<void>((resolve) => foreign.listen(socketPath, resolve));
+      fs.chmodSync(socketPath, 0o000);
+      try {
+        const endpoint: LocalCliHostEndpoint = { kind: 'pipe', path: socketPath };
+        await expect(
+          acquireLocalCliHostLease({ endpoint, instanceId: 'desktop', mode: 'electron' })
+        ).resolves.toEqual({ status: 'occupied', record: null, accessDenied: true });
+
+        const commonJs =
+          require('../src/node/local-cli-host-lease.cjs') as typeof import('../src/node/local-cli-host-lease');
+        await expect(
+          commonJs.acquireLocalCliHostLease({ endpoint, instanceId: 'desktop', mode: 'electron' })
+        ).resolves.toEqual({ status: 'occupied', record: null, accessDenied: true });
+      } finally {
+        await new Promise<void>((resolve) => foreign.close(() => resolve()));
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  );
 });

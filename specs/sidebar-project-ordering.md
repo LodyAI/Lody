@@ -10,6 +10,13 @@ the desktop sidebar lets the user reorder peers within their section by dragging
 the row handle. Local projects remain grouped by their owning machine; dragging
 does not move a project between machine sections.
 
+Once the desktop identifies its local machine, that machine's section stays first
+through CLI disconnects and restarts. Other owned machines follow, then teammates'
+machines, ordered by name with machine id breaking ties. Clicking a conversation
+or clearing its unread state does not move machine sections. A remembered position
+does not make local operations available while the live runtime is unavailable;
+disabling the local agent clears the local-machine preference.
+
 The chosen order persists separately for each workspace. A local project's stored
 identity includes both its machine id and project id. Projects that temporarily
 disappear while a machine reconnects retain their saved position, and newly

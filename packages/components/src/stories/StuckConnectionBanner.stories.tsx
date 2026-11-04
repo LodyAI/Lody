@@ -5,15 +5,15 @@ import { StuckConnectionBanner } from '@/components/stuck-connection-banner';
 
 const labels = {
   title: 'Still connecting…',
-  description: 'Often caused by broken local cache.',
-  clearCache: 'Clear cache',
+  description: 'This can be a sign-in, network or local data problem.',
+  recover: 'Recover…',
   dismissAriaLabel: 'Dismiss',
 };
 
 const zhLabels = {
   title: '连接时间较长',
-  description: '通常是本地缓存异常导致',
-  clearCache: '清空缓存',
+  description: '可能是登录、网络或本地数据异常',
+  recover: '恢复选项',
   dismissAriaLabel: '关闭',
 };
 
@@ -22,7 +22,7 @@ const meta = {
   component: StuckConnectionBanner,
   args: {
     labels,
-    onClearCache: fn(),
+    onRecover: fn(),
     onDismiss: fn(),
   },
   parameters: {

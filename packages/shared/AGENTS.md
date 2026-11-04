@@ -1,19 +1,17 @@
 # Shared contracts
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+`CLAUDE.md` symlinks here. Edit `AGENTS.md` only.
 
-Discover archive/restore/delete targets from one ready Repo snapshot, never UI caches.
+Discover archive/restore/delete from one ready Repo snapshot, never UI caches.
 Archive uses `collectSessionArchiveTargets`; restore/delete keep direct containment.
-Exact deletion bypasses discovery. See [relations](../../specs/session-relations.md).
+Exact deletion bypasses discovery: [relations](../../specs/session-relations.md).
 
 ## Session history
 
-- Session history storage tolerates unknown string item types from newer peers without
-  rewriting them or blocking unrelated writes. Keep known-type guards and external-input
-  parsing; `tests/session-doc-forward-compat.test.ts` covers this separately from unknown root keys.
-- `createSessionMirror` is the renderer/CLI session entrypoint. Its `HistoryWriter`
-  owns local history writes, including legacy callback updates; no raw history writes
-  or second Mirror writer. Read-path feature flags must never change this owner.
+- History tolerates unknown string item types without rewriting or blocking unrelated writes.
+  Keep known-type guards and input parsing; test: `tests/session-doc-forward-compat.test.ts`.
+- `createSessionMirror` owns renderer/CLI history through one `HistoryWriter`, including
+  legacy callbacks. No raw history writes or second writer; read flags never change ownership.
 - Validate new turns and changed known fields/items before applying a command, never
   unchanged history. Invalid commands preserve the old values and throw content-free
   diagnostics; they must not leave partial history writes. Keep stored unknown fields
@@ -34,8 +32,7 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   edits in that range, except pending-to-seen on newly inserted user rows.
   External ACP imports remain new input.
 - Session data ports (`src/session-data`): UI/CLI business depends on `SessionData`
-  (explicit set/clear and shared writer validation), never a second history writer.
-  Invariants: [session-data scope](src/session-data/AGENTS.md).
+  (set/clear and shared validation), never a second writer. Invariants: [session-data scope](src/session-data/AGENTS.md).
 - Tool fields other than type/toolCallId are independent
   edits: derive their parsers from the tool message schema and validate changed fields,
   not untouched stored payloads. Content-list edits retain unchanged blocks and parse
@@ -52,9 +49,9 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   never mutate the original RPC schemas. Parsing filters and validates in one pass.
   `readStored` returns detached JSON for hashing, not stored-copy provenance. Keep `capture`
   protection for callers that can author copies from an old snapshot.
-- Target-local streaming uses `updateEntry`; it must not produce/plan the entire history.
-  Resolve the live turn on each call, preserve immutable ids, and preflight before writing.
-  Generic history updates remain for operations with cross-turn ownership or structural edits.
+- Streaming/mixed writes use indexed `updateTail`/`updateEntry`, with child output windows;
+  snapshot/progress never reads transcripts. Preserve ownership/ids, preflight all writes,
+  invalidate stale indexes. Full-history updates: structural commands or unwindowable storage.
 - Permission responses inspect request metadata and materialize only the matching turn;
   a supplied turn id restricts lookup to that turn. Preserve legacy JSON metadata on lookup.
 - Mirror's text-event optimization ships upstream in pinned `loro-mirror`; no local patch
@@ -71,14 +68,19 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   default/plan only for agents that advertise the legacy option; planning must not
   change permission policy.
 
+- Session automation readers require `sessionAutomations` locally or `remoteAutomationControl` remotely; unsupported machines expose no controls, polling or connection warning.
 - Daemon workflows gate on `MachineMeta.protocolCapabilities`, never CLI version.
-  Missing means unsupported; keep key/version pairs in `machine-protocol-capabilities.ts`.
-- ACP capability `cacheVersion` controls refresh freshness, never readability. Consumers
-  preserve understood fields from parsed older or newer entries during mixed-version
-  operation, adapting only fields with known incompatible semantics; runtime-override source
-  matching remains a separate applicability gate.
-- Rate limits use `agentConfigId + limitId`; bound Providers ignore legacy
-  machine/type rows, and deletion removes scoped rows.
+  Missing means unsupported. Full-message schedules require v3 and `messageVersion: 1`.
+- An ACP capability entry may carry the agent's advertised `authMethods`; absence means no probe
+  has asked, and an empty list records that the agent advertises none. The same list is returned
+  by a capability refresh. `methodId` on an authenticate `start` request is negotiated by
+  `acpAuthenticationMethodSelection`, because the strict request schema rejects an unknown field
+  on older daemons.
+- ACP `cacheVersion` gates freshness, not readability. Preserve understood fields across
+  versions and runtime-override matching; omit known-incompatible fields. Pre-v11 commands
+  can contain project data: Machine Flock owns probe previews, Sessions own actual lists.
+- Quota: share `src/subscription-quota.ts`; key `agentConfigId + limitId`.
+  Bound Providers ignore legacy; delete scoped rows.
 
 ## Session goal control
 
@@ -92,25 +94,35 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   provider name check. A goal turn carries no run configuration, so resuming cannot
   change model or mode. Behavior: [goal control Spec](../../specs/session-goal-control.md).
 
-## Workspace MCP and Agent Roles
+## Workspace MCP / Roles
 
-- Workspace MCP has exactly two durable layers: catalog entries in the workspace Flock
-  document and selected ids in each user turn input config. Do not add machine bindings.
-  Preserve `mcpServerIds: []` as an explicit empty selection; dispatch must carry the
-  driving turn's selection into ACP startup rather than rereading session history.
+- MCP/UI: read [auth contracts](src/AGENTS.md).
+  Catalog/defaults: workspace Flock; selections: turns. Missing project rows inherit
+  workspace defaults; `[]` disables all. Resolve defaults only at authoring; no machine
+  bindings. Preserve `mcpServerIds: []`; send the driving turn's selection to ACP,
+  never reread history.
 - MCP/Role catalog writes resolve on local Flock durability, followed by explicit
-  upload. Settings neither await nor report upload; upload failure must not fail or
-  roll back a durable write. CLI reports its sync result. See
+  upload. Settings neither await nor report upload; its failure never fails or rolls
+  back a durable write. CLI reports its sync result. See
   [catalog explanation](../../.agents/docs/workspace-catalog-durability.md).
-- Roles use one workspace Flock `agentRole` family; sharing updates `visibility`.
-  Store no secrets, API keys, MCP selections, or memory; apply
-  `isSensitiveAgentRoleConfigOptionKey` on read and write. Roles pin permission via
-  `runConfig.modeId` or `_permission`; hide the separate composer permission button
-  when pinned, but keep warning-tone modes visibly marked on every such surface.
-  Role-level auto-approval policy is out of scope. Settings/mentions use
-  `canReadAgentRole`/`canManageAgentRole`; MCP resolves explicit Role ids from the
-  catalog without requiring mention-scoped authorization.
-- Roles bind exact `machineId + agentConfigId`, without fallback. Unavailable machine,
-  config, model or mode leaves them listed with reasons but unmentionable. MCP acceptance freezes
-  Role revision, Prompt, target and dispatch config; recovery/retry reuse them. Session Role metadata is creation provenance only.
-- Frozen `author`, human `userId`, and recipient execution config stay separate. [Contract](../../specs/message-author-identity.md).
+- Roles use one workspace Flock `agentRole` family; sharing changes `visibility`.
+  No secrets, API keys, MCP selections or memory contents. Apply
+  `isSensitiveAgentRoleConfigOptionKey` on read/write. Permission pins use
+  `runConfig.modeId` or `_permission`: hide the composer permission button,
+  keep warning-tone markings. No Role-level auto-approval policy.
+  Settings/mentions use `canReadAgentRole`/`canManageAgentRole`; explicit MCP
+  lookup needs no mention grant.
+- Each Role target binds `machineId + agentConfigId`; never guess or fall back. One
+  target is a v1 row, more are v2 ([Spec](../../specs/agent-role-machine-targets.md)).
+  Unavailable targets stay listed, unmentionable. Freeze prompt/target/revision/config
+  at acceptance; retries ignore edits. Session Role metadata: provenance only.
+  `resolveSessionExecutionInputBlocks` owns text; raw blocks supply attachments.
+- Memory stores provider/id references, frozen per turn; daemon/env rules:
+  [memory contract](../../specs/agent-role-memory.md).
+- Keep `author`, human `userId`, and recipient execution config separate.
+  [Contract](../../specs/message-author-identity.md).
+
+Presence: E2EE requires UUID session IDs and bounded plaintext allowlists on publish/receive;
+ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-presence.md).
+
+Encrypted attachment manifests contain secret per-file keys and belong only in protected conversation content or local recovery receipts. Relay requests use opaque metadata and attachment-only grants; never publish a manifest or key in a URL. Format and recovery rationale: [attachment decision](../../.agents/notes/implemented/architecture/2026-10-28-encrypted-attachments.md).

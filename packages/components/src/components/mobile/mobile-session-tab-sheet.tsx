@@ -22,6 +22,7 @@ import { ChatsIcon } from '@/components/icons/chats-icon';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 /**
  * Bottom sheet that replaces the mobile `SessionTabBar`. Opened by the header
@@ -73,7 +74,7 @@ export type ArchivedConversationEntry = {
 export type ViewerTabEntry = {
   id: string;
   label: string;
-  kind: 'file' | 'diff' | 'pr' | 'browser' | 'ios-simulator' | 'files';
+  kind: 'file' | 'diff' | 'pr' | 'browser' | 'ios-simulator' | 'android-emulator' | 'files';
   active: boolean;
 };
 
@@ -125,6 +126,7 @@ const VIEWER_ICON: Record<ViewerTabEntry['kind'], typeof FileIcon> = {
   pr: GitPullRequest,
   browser: MonitorPlay,
   'ios-simulator': Smartphone,
+  'android-emulator': Smartphone,
   files: FolderOpen,
 };
 
@@ -142,6 +144,7 @@ export function MobileSessionTabSheet({
 }: MobileSessionTabSheetProps) {
   const { t } = useTranslation();
   const title = t('sessions.tabs.sheetTitle', 'Tabs');
+  const maxHeight = useFoldAwareSheetHeight();
   // Collapsed by default on every open (content unmounts with the drawer).
   const [archivedOpen, setArchivedOpen] = useState(false);
   const showArchived = archivedConversations.length > 0 && onRestoreConversation != null;
@@ -153,7 +156,7 @@ export function MobileSessionTabSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent className="h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60">
+      <DrawerContent style={{ maxHeight }} className="h-auto! rounded-t-2xl border-border/60">
         <DrawerTitle className="sr-only">{title}</DrawerTitle>
         <DrawerDescription className="sr-only">{title}</DrawerDescription>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(16px+var(--safe-area-bottom,0px))] pt-3">

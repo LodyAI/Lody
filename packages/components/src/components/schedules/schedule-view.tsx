@@ -1,4 +1,11 @@
-import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type ComponentPropsWithRef,
+} from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle } from 'lucide-react';
@@ -132,7 +139,9 @@ const styles = stylex.create({
     boxSizing: 'border-box',
     width: '100%',
     minHeight: 'calc(4lh)',
-    maxHeight: 'calc(6lh)',
+    // Long prompts are normal here: grow to half the window before scrolling,
+    // so the Agent controls under the box stay within reach.
+    maxHeight: 'max(6lh, 50dvh)',
     resize: 'none',
     overflowY: 'auto',
     backgroundColor: 'transparent',
@@ -226,6 +235,22 @@ const styles = stylex.create({
     borderTopColor: 'hsl(var(--border) / 1)',
     paddingTop: 'calc(var(--spacing) * 4)',
   },
+  // In the open-schedule modal the footer stays on screen while the body scrolls.
+  footerSticky: {
+    position: 'sticky',
+    bottom: 0,
+    zIndex: 1,
+    marginBottom: 'calc(var(--spacing) * -5)',
+    paddingBottom: 'calc(var(--spacing) * 4)',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  footerButtons: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    alignSelf: { default: 'flex-end', [WIDE]: 'auto' },
+  },
   footerNote: { minWidth: 0, flex: '1', paddingInline: 'calc(var(--spacing) * 3)' },
   footerMessage: { margin: 0, fontSize: '0.85em', color: 'hsl(var(--destructive) / 1)' },
   footerIssues: {
@@ -255,9 +280,17 @@ const styles = stylex.create({
 export {
   ScheduleListView,
   matchingScheduleRuntime,
-  type ScheduleColumnWidths,
   type ScheduleRowContext,
 } from './schedule-list';
+
+export type SchedulePromptProps = Omit<ComponentPropsWithRef<'textarea'>, 'value' | 'onChange'> & {
+  value: string;
+  onValueChange: (value: string) => void;
+};
+
+function PlainSchedulePrompt({ onValueChange, ...props }: SchedulePromptProps) {
+  return <textarea {...props} onChange={(event) => onValueChange(event.target.value)} />;
+}
 
 export type ScheduleFormValue = {
   title: string;
@@ -299,6 +332,7 @@ export function ScheduleForm({
   agentBar,
   contextBar,
   contextNote,
+  renderPrompt,
   destination,
   issues = [],
   saving,
@@ -306,9 +340,13 @@ export function ScheduleForm({
   autoFocus,
   revealIssues = false,
   now = getServerNow(),
+  stickyFooter = false,
+  onCancel,
   onSave,
 }: {
   initial: ScheduleFormValue;
+  /** Connected hosts supply the shared mention editor without coupling the view to catalogs. */
+  renderPrompt?: (props: SchedulePromptProps) => ReactNode;
   /** IANA zone of the machine that runs the schedule. */
   timeZone?: string;
   /** That machine's name, for "Next runs … (MacBook Pro time)". */
@@ -330,6 +368,10 @@ export function ScheduleForm({
   revealIssues?: boolean;
   /** Injected so previews and tests are deterministic. */
   now?: number;
+  /** Keep Save on screen at the bottom of a scrolling modal body. */
+  stickyFooter?: boolean;
+  /** Shows Cancel beside Save. */
+  onCancel?: () => void;
   onSave: (value: ScheduleFormValue) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -418,27 +460,23 @@ export function ScheduleForm({
             </div>
             <div {...stylex.props(styles.separator)} />
             <div {...stylex.props(styles.promptWrap)}>
-              {/* A bare field inside the composer-style box, like the title
-                  input: the box is the edge, so this is not a styled Textarea. */}
-              <textarea
-                ref={promptRef}
-                required
-                rows={4}
-                aria-label={t('schedules.prompt', 'What should the Agent do?')}
-                aria-invalid={attempted && promptMissing ? true : undefined}
-                placeholder={t(
+              {(renderPrompt ?? ((props) => <PlainSchedulePrompt {...props} />))({
+                ref: promptRef,
+                required: true,
+                rows: 4,
+                'aria-label': t('schedules.prompt', 'What should the Agent do?'),
+                'aria-invalid': attempted && promptMissing ? true : undefined,
+                placeholder: t(
                   'schedules.promptPlaceholder',
                   'What should the agent do on every run? For example: review yesterday’s commits and summarise anything that looks risky.'
-                )}
-                // Grows with its text from 4 to 6 lines, then scrolls; no
-                // resize handle. `field-sizing` is CSS-only (Chromium).
-                {...stylex.props(
+                ),
+                ...stylex.props(
                   styles.prompt,
                   attempted && promptMissing && styles.promptIssueSpace
-                )}
-                value={value.prompt}
-                onChange={(event) => setValue({ ...value, prompt: event.target.value })}
-              />
+                ),
+                value: value.prompt,
+                onValueChange: (prompt) => setValue((current) => ({ ...current, prompt })),
+              })}
               {attempted && promptMissing ? (
                 // Floats in the corner so it never narrows the text.
                 <FieldIssueMark
@@ -522,7 +560,7 @@ export function ScheduleForm({
           )}
         </div>
 
-        <div {...stylex.props(styles.footer)}>
+        <div {...stylex.props(styles.footer, stickyFooter && styles.footerSticky)}>
           <div id={noteId} aria-live="polite" {...stylex.props(styles.footerNote)}>
             {error ? (
               <p {...stylex.props(styles.footerMessage)} role="alert">
@@ -539,16 +577,23 @@ export function ScheduleForm({
               </p>
             ) : null}
           </div>
-          <Button
-            type="submit"
-            variant="primary"
-            size="small"
-            {...stylex.props(styles.saveButton)}
-            disabled={saving || formIssues.length > 0}
-            aria-describedby={noteId}
-          >
-            {saving ? t('schedules.saving', 'Saving…') : t('schedules.save', 'Save schedule')}
-          </Button>
+          <div {...stylex.props(styles.footerButtons)}>
+            {onCancel ? (
+              <Button type="button" variant="ghost" size="small" onClick={onCancel}>
+                {t('schedules.cancel', 'Cancel')}
+              </Button>
+            ) : null}
+            <Button
+              type="submit"
+              variant="primary"
+              size="small"
+              {...stylex.props(styles.saveButton)}
+              disabled={saving || formIssues.length > 0}
+              aria-describedby={noteId}
+            >
+              {saving ? t('schedules.saving', 'Saving…') : t('schedules.save', 'Save schedule')}
+            </Button>
+          </div>
         </div>
       </form>
     </Tooltip.Provider>

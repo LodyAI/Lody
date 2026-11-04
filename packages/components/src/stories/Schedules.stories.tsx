@@ -6,9 +6,17 @@ import {
 } from '../components/schedules/schedule-view';
 import { ScheduleAgentControls } from '../components/schedules/schedule-agent-controls';
 import {
-  ScheduleDetailToolbar,
-  ScheduleSplitView,
-} from '../components/schedules/schedule-split-view';
+  ScheduleDetailFrame,
+  ScheduleDetailHeader,
+  ScheduleDetailModal,
+  ScheduleDetailPage,
+  ScheduleRunList,
+  type ScheduleDetailTab,
+} from '../components/schedules/schedule-detail';
+import { describeScheduleState } from '../components/schedules/schedule-format';
+import { matchingScheduleRuntime } from '../components/schedules/schedule-list';
+import { MessageSquare, Play, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { ScheduleDestinationRows } from '../components/schedules/schedule-destination-rows';
 import { FieldIssueMark } from '../components/schedules/schedule-field-issue-mark';
 import type { ScheduleSaveIssue } from '../components/schedules/schedule-save-blockers';
@@ -26,9 +34,11 @@ import type {
   ScheduleRegistryRow,
   ScheduleRuntimeRow,
 } from '@lody/shared';
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useState, type ReactNode } from 'react';
+import { createStore, Provider } from 'jotai';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
+import { sidebarCollapsedAtom } from '../atoms/sidebar-state';
 
 /** Frozen clock so "Next run" and the editor preview never drift. */
 const NOW = Date.parse('2026-09-06T09:12:00+08:00');
@@ -115,11 +125,17 @@ const rows: ScheduleRegistryRow[] = [
 ];
 
 const context = (target: ScheduleRegistryRow): ScheduleRowContext => ({
-  machine: 'MacBook Pro',
+  machine: target.scheduleId === 'weekly-summary' ? 'Mac mini' : 'MacBook Pro',
   agent: target.scheduleId === 'standup' ? 'Writer' : 'Code reviewer',
   project: target.projectKey ? (target.projectKind === 'local' ? 'lody' : target.projectKey) : null,
   presence: target.scheduleId === 'weekly-summary' ? 'offline' : 'online',
   canToggle: true,
+  chat:
+    target.destination.kind === 'own_session'
+      ? { title: 'Daily journal', sessionId: 'journal-chat' }
+      : target.destination.kind === 'existing_session'
+        ? { title: 'Release planning', sessionId: target.destination.sessionId }
+        : undefined,
 });
 
 const runtimes: ScheduleRuntimeRow[] = [
@@ -167,12 +183,80 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+function CollapsedSidebar({ children }: { children: ReactNode }) {
+  const [store] = useState(() => {
+    const next = createStore();
+    next.set(sidebarCollapsedAtom, true);
+    return next;
+  });
+  return <Provider store={store}>{children}</Provider>;
+}
+
+function MacElectronCollapsedSidebar({ children }: { children: ReactNode }) {
+  const [store] = useState(() => {
+    window.__LODY_ELECTRON__ = true;
+    window.__LODY_PLATFORM__ = {
+      os: 'darwin',
+      homeDir: '/Users/story',
+      machineName: 'storybook',
+    };
+    const next = createStore();
+    next.set(sidebarCollapsedAtom, true);
+    return next;
+  });
+  useLayoutEffect(
+    () => () => {
+      delete window.__LODY_ELECTRON__;
+      delete window.__LODY_PLATFORM__;
+    },
+    []
+  );
+  return (
+    <Provider store={store}>
+      <div className="relative h-dvh bg-background text-foreground">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute top-[16px] left-[16px] z-30 flex gap-2"
+        >
+          <span className="size-[14px] rounded-full bg-[#ff5f57]" />
+          <span className="size-[14px] rounded-full bg-[#febc2e]" />
+          <span className="size-[14px] rounded-full bg-[#28c840]" />
+        </div>
+        {children}
+      </div>
+    </Provider>
+  );
+}
+
 export const List: Story = {};
+export const SidebarHidden: Story = {
+  render: (args) => (
+    <CollapsedSidebar>
+      <ScheduleListView {...args} />
+    </CollapsedSidebar>
+  ),
+};
+export const SidebarHiddenBesideTrafficLights: Story = {
+  render: (args) => (
+    <MacElectronCollapsedSidebar>
+      <ScheduleListView {...args} />
+    </MacElectronCollapsedSidebar>
+  ),
+};
 export const Narrow: Story = {
   parameters: { viewport: { defaultViewport: 'mobile1' } },
 };
 export const Empty: Story = { args: { rows: [], runtimes: [] } };
 export const Loading: Story = { args: { ready: false } };
+export const LoadFailed: Story = {
+  args: { rows: [], runtimes: [], error: 'REGISTRY_UNAVAILABLE', onRetry: () => {} },
+};
+export const SyncFailedWithSavedTasks: Story = {
+  args: { error: 'REGISTRY_UNAVAILABLE', onRetry: () => {} },
+};
+export const Retrying: Story = {
+  args: { error: 'REGISTRY_UNAVAILABLE', retrying: true, onRetry: () => {} },
+};
 export const LoadError: Story = { args: { error: 'boom' } };
 export const AllOffline: Story = {
   args: { contextForRow: (item) => ({ ...context(item), presence: 'offline' }) },
@@ -184,6 +268,85 @@ export const ReadOnly: Story = {
   args: { contextForRow: (item) => ({ ...context(item), canToggle: false }) },
 };
 export const AwaitingMachine: Story = { args: { runtimes: [] } };
+
+/** One-time scheduled messages in each state; sent and cancelled ones are finished. */
+const messageRows: ScheduleRegistryRow[] = (
+  [
+    ['message-pending', 'Remind me to ship the release', true],
+    ['message-sent', 'Ask for the CI summary', true],
+    ['message-cancelled', 'Follow up on the review', false],
+    ['message-failed', 'Ping the design thread', true],
+  ] as const
+).map(([scheduleId, title, enabled]) => ({
+  ...row,
+  scheduleId,
+  title,
+  enabled,
+  scheduledMessage: true,
+  trigger: { kind: 'once', at: '2026-09-06T18:00:00+08:00' },
+  destination: { kind: 'existing_session', sessionId: 'c1' },
+  projectKind: undefined,
+  projectKey: undefined,
+}));
+const messageContents = new Map<string, string>([
+  ['message-pending', 'Ship the release once the CI run passes'],
+  ['message-sent', 'Summarize today’s CI failures for the team'],
+  ['message-cancelled', 'Ask for another review pass on the auth change'],
+  ['message-failed', 'Ping the design thread about the empty state'],
+]);
+const contentForRow = (target: ScheduleRegistryRow) => messageContents.get(target.scheduleId);
+const messageRuntimes: ScheduleRuntimeRow[] = [
+  runtimeFor(messageRows[0]!, {
+    messageState: 'pending',
+    nextScheduledAt: Date.parse('2026-09-06T18:00:00+08:00'),
+  }),
+  runtimeFor(messageRows[1]!, {
+    messageState: 'sent',
+    lastDispatch: {
+      scheduledFor: Date.parse('2026-09-05T18:00:00+08:00'),
+      dispatchedAt: Date.parse('2026-09-05T18:00:02+08:00'),
+      sessionId: 'c1',
+    },
+  }),
+  runtimeFor(messageRows[2]!, { messageState: 'cancelled' }),
+  runtimeFor(messageRows[3]!, { messageState: 'failed' }),
+];
+export const WithScheduledMessages: Story = {
+  args: {
+    rows: [...rows, ...messageRows],
+    runtimes: [...runtimes, ...messageRuntimes],
+    contentForRow,
+  },
+};
+export const ProtectedMessageNeedsOwnerSave: Story = {
+  args: {
+    rows: [messageRows[0]!],
+    runtimes: [
+      runtimeFor(messageRows[0]!, {
+        messageState: 'pending',
+        queueState: 'blocked',
+        blockedCode: 'E2EE_SCHEDULE_NOT_AUTHORIZED',
+      }),
+    ],
+  },
+};
+/** One project picked, sorted by name. */
+export const Filtered: Story = {
+  args: {
+    rows: [...rows, ...messageRows],
+    runtimes: [...runtimes, ...messageRuntimes],
+    contentForRow,
+    initialFilters: { project: { kind: 'project', name: 'loro-dev/lody' }, sort: 'name' },
+  },
+};
+export const MobileList: Story = {
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  args: {
+    rows: [...rows, ...messageRows],
+    runtimes: [...runtimes, ...messageRuntimes],
+    contentForRow,
+  },
+};
 
 const chats = [
   { id: 'c1', title: 'Release planning', detail: 'Code reviewer · MacBook Pro' },
@@ -436,6 +599,16 @@ export const EditorEveryFewHours: Story = editor({
     overlap: 'skip',
   },
 });
+/** A typed step the menu does not offer: the "Every" row shows the custom field. */
+export const EditorCustomInterval: Story = editor({
+  initial: {
+    title: 'Queue drain check',
+    prompt: 'Check whether the review queue has drained.',
+    trigger: { kind: 'interval', everyMs: 45 * 60_000, anchorAt: '2026-09-06T00:00:00Z' },
+    misfire: 'skip',
+    overlap: 'skip',
+  },
+});
 export const EditorMonthly: Story = editor({
   initial: {
     title: 'Invoice reminder',
@@ -523,49 +696,213 @@ export const EditorWorkspaceLoading: Story = editor({
 export const EditorSaving: Story = editor({ saving: true });
 export const EditorError: Story = editor({ error: 'The schedule could not be saved.' });
 
+const journal = rows.find((entry) => entry.scheduleId === 'daily-journal')!;
+const journalRuns = [
+  {
+    id: 'r4',
+    title: 'Run 4',
+    when: 'Today 9:00 PM',
+    state: 'running' as const,
+    sessionId: 'journal-chat',
+  },
+  {
+    id: 'r3',
+    title: 'Run 3',
+    when: 'Yesterday 9:00 PM',
+    state: 'done' as const,
+    sessionId: 'journal-chat',
+  },
+  {
+    id: 'r2',
+    title: 'Run 2',
+    when: 'Thu 9:00 PM',
+    state: 'done' as const,
+    sessionId: 'journal-chat',
+  },
+  {
+    id: 'r1',
+    title: 'Run 1',
+    when: 'Wed 9:00 PM',
+    state: 'done' as const,
+    sessionId: 'journal-chat',
+  },
+];
+const reviewRuns = [
+  {
+    id: 's3',
+    title: 'Review of Sep 5 changes',
+    when: 'Yesterday 9:00 AM',
+    state: 'done' as const,
+    sessionId: 's3',
+  },
+  {
+    id: 's2',
+    title: 'Review of Sep 4 changes',
+    when: 'Thu 9:00 AM',
+    state: 'failed' as const,
+    sessionId: 's2',
+  },
+  {
+    id: 's1',
+    title: 'Review of Sep 3 changes',
+    when: 'Wed 9:00 AM',
+    state: 'done' as const,
+    sessionId: 's1',
+  },
+];
+
 /**
- * Desktop: list and schedule on one level. Opening one narrows the list to its
- * names and slides the schedule in from the right; closing reverses it.
+ * The open schedule as production composes it (`schedules-workspace.tsx`):
+ * header, Settings / Run history tabs and body, in the desktop modal over the
+ * list or as the phone page. The editor is the real form over fixture data.
  */
-export const EditorBesideList: Story = {
-  render: function Render(args) {
-    const [open, setOpen] = useState(true);
-    return (
-      <WithPlatform>
+function DetailStory({
+  target = row,
+  initialTab = 'settings',
+  mobile = false,
+  history,
+}: {
+  target?: ScheduleRegistryRow;
+  initialTab?: ScheduleDetailTab;
+  mobile?: boolean;
+  history?: ReactNode;
+}) {
+  const { t, i18n } = useTranslation();
+  const [tab, setTab] = useState<ScheduleDetailTab>(initialTab);
+  const runtime = matchingScheduleRuntime(target, [...runtimes, ...messageRuntimes]);
+  const ctx = context(target);
+  const header = (
+    <ScheduleDetailHeader
+      kind={target.scheduledMessage ? 'message' : 'task'}
+      title={target.title}
+      status={describeScheduleState(t, target, runtime, {
+        timeZone: 'Asia/Shanghai',
+        now: NOW,
+        locale: i18n.language,
+      })}
+      enabled={
+        target.scheduledMessage || target.trigger.kind === 'manual'
+          ? undefined
+          : { value: target.enabled, onChange: () => {} }
+      }
+      actions={[
+        { key: 'run', label: t('schedules.runNow'), icon: Play, onClick: () => {} },
+        ...(ctx.chat
+          ? [
+              {
+                key: 'chat',
+                label: t('schedules.openChat', { title: ctx.chat.title }),
+                icon: MessageSquare,
+                onClick: () => {},
+              },
+            ]
+          : []),
+        {
+          key: 'delete',
+          label: t('schedules.delete'),
+          icon: Trash2,
+          destructive: true,
+          onClick: () => {},
+        },
+      ]}
+      onClose={() => {}}
+      mobile={mobile}
+    />
+  );
+  const frame = (
+    <ScheduleDetailFrame
+      header={header}
+      tab={target.scheduledMessage ? undefined : tab}
+      onTabChange={setTab}
+    >
+      {tab === 'history' ? (
+        (history ?? <ScheduleRunList runs={reviewRuns} onOpen={() => {}} />)
+      ) : (
+        <EditorStory
+          bare
+          stickyFooter
+          onCancel={() => {}}
+          fixture={
+            target.destination.kind === 'own_session'
+              ? { destination: target.destination, ownChatExists: true }
+              : {}
+          }
+        />
+      )}
+    </ScheduleDetailFrame>
+  );
+  return (
+    <WithPlatform>
+      {mobile ? (
+        <div className="h-dvh">
+          <ScheduleDetailPage>{frame}</ScheduleDetailPage>
+        </div>
+      ) : (
         <div className="h-dvh">
           <ScheduleListView
-            {...args}
-            selectedId={open ? 'daily-review' : undefined}
-            onOpen={() => setOpen(true)}
-            onBlankClick={open ? () => setOpen(false) : undefined}
-            renderBody={(table) => (
-              <ScheduleSplitView
-                open={open}
-                list={table}
-                detail={
-                  <>
-                    <ScheduleDetailToolbar
-                      onClose={() => setOpen(false)}
-                      actions={{
-                        enabled: true,
-                        canToggle: true,
-                        canRun: true,
-                        canDelete: true,
-                        onToggle: () => {},
-                        onRun: () => {},
-                        onDelete: () => {},
-                      }}
-                    />
-                    <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
-                      <EditorStory bare fixture={{ chatOnly: true }} />
-                    </div>
-                  </>
-                }
-              />
-            )}
+            rows={[...rows, ...messageRows]}
+            runtimes={[...runtimes, ...messageRuntimes]}
+            contentForRow={contentForRow}
+            ready
+            now={NOW}
+            contextForRow={context}
+            selectedId={target.scheduleId}
+            onOpen={() => {}}
+            onNew={() => {}}
           />
+          <ScheduleDetailModal open title={target.title} onClose={() => {}}>
+            {frame}
+          </ScheduleDetailModal>
         </div>
-      </WithPlatform>
-    );
-  },
+      )}
+    </WithPlatform>
+  );
+}
+
+/** Desktop: the open schedule is a modal over the list. */
+export const DetailModal: Story = { render: () => <DetailStory /> };
+/** Run history of a schedule that starts a new chat per run. */
+export const DetailRunHistory: Story = { render: () => <DetailStory initialTab="history" /> };
+/** Run history of a schedule that posts into one chat: the chat first, then each run in it. */
+export const DetailRunHistoryInChat: Story = {
+  render: () => (
+    <DetailStory
+      target={journal}
+      initialTab="history"
+      history={
+        <ScheduleRunList
+          runs={journalRuns}
+          chat={{ title: 'Daily journal', sessionId: 'journal-chat' }}
+          onOpen={() => {}}
+        />
+      }
+    />
+  ),
+};
+export const DetailRunHistoryEmpty: Story = {
+  render: () => (
+    <DetailStory initialTab="history" history={<ScheduleRunList runs={[]} onOpen={() => {}} />} />
+  ),
+};
+/** Phone: the open schedule is a pushed page with a back button. */
+export const MobileDetail: Story = {
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  render: () => <DetailStory mobile />,
+};
+export const MobileRunHistory: Story = {
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  render: () => (
+    <DetailStory
+      mobile
+      target={journal}
+      initialTab="history"
+      history={
+        <ScheduleRunList
+          runs={journalRuns}
+          chat={{ title: 'Daily journal', sessionId: 'journal-chat' }}
+          onOpen={() => {}}
+        />
+      }
+    />
+  ),
 };

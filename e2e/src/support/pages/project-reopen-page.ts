@@ -84,9 +84,7 @@ export class ProjectReopenPage {
 
     await this.openProjectPicker();
     for (const project of [this.fixture.firstProject, this.fixture.secondProject]) {
-      await expect(
-        this.page.getByRole('menuitem', { name: project.name, exact: true })
-      ).toHaveCount(1);
+      await expect(this.projectPickerOption(project)).toHaveCount(1);
     }
     await this.page.keyboard.press('Escape');
 
@@ -123,7 +121,7 @@ export class ProjectReopenPage {
 
   private async selectProjectFromPicker(project: ProjectReopenFixtureProject): Promise<void> {
     await this.openProjectPicker();
-    await this.page.getByRole('menuitem', { name: project.name, exact: true }).click();
+    await this.projectPickerOption(project).click();
     await expect(this.selectedProjectTrigger(project)).toBeVisible();
   }
 
@@ -163,6 +161,10 @@ export class ProjectReopenPage {
 
   private selectedProjectTrigger(project: ProjectReopenFixtureProject): Locator {
     return this.page.getByRole('button', { name: project.name, exact: true });
+  }
+
+  private projectPickerOption(project: ProjectReopenFixtureProject): Locator {
+    return this.page.getByRole('menuitemradio', { name: project.name, exact: true });
   }
 
   private projectRow(project: ProjectReopenFixtureProject): Locator {

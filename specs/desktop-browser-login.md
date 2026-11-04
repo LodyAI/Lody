@@ -12,6 +12,15 @@ this flow.
 
 ## Ownership and recovery
 
+New Stable attempts return to `ai.lody.stable://auth/callback`; Nightly keeps
+`ai.lody.nightly://auth/callback`. Both explicitly carry their browser channel.
+Stable retains legacy `lody://auth/callback` reads, but new resource links use
+that common scheme and may open any user-selected default installation.
+Non-Stable receivers hand legacy common callbacks to Stable's private alias,
+without exchanging credentials locally; unavailable handoff shows a redacted error.
+Update browser callback pages and packaged protocol declarations together;
+see [resource deep links](deep-links.md).
+
 Separately installed cloud desktop channels have distinct callback schemes and
 desktop credential directories. Each attempt carries a validated desktop channel selector and accepts only that
 application's callback scheme. Both channels use the same authentication client.
@@ -50,6 +59,21 @@ local error name, message and system code). The login page shows it and main log
 reports it. Diagnostics contain the attempt id, phase, error category and that detail,
 never callback, PKCE or session credentials.
 
+## Desktop authentication transport
+
+Main-process authentication requests use Electron's Chromium networking after
+application readiness, including system proxy/PAC handling and Chromium certificate
+verification with platform trust. They retain the existing Better Auth cookie storage
+hooks and abort signal; switching transport must not introduce a second credential
+store or bypass certificate validation. The 25-second exchange deadline cancels the
+transport as well as fencing the result.
+
+Certificate validation failures have their own localized error category. The message
+asks the user to check the system clock, proxy/firewall and certificate configuration
+before starting a fresh attempt; VPN users may check TUN mode. A certificate failure
+does not establish interception: an expired certificate or hostname mismatch can also
+cause it. Both Chromium certificate errors and nested Node TLS errors are recognized.
+
 ## Local credential store
 
 The desktop credential store (`userData/config.json`) is a cache of the server
@@ -70,7 +94,7 @@ post-authentication action, not a login prerequisite.
 
 The browser still confirms which account to transfer. Both its automatic handoff
 and manual app link can deliver the same callback safely. Starting a fresh desktop
-attempt generates fresh state and verifier. The existing Better Auth 1.5.5
+attempt generates fresh state and verifier. The pinned Better Auth 1.6.33
 `/electron/token` contract and cookie/session plugins remain the exchange boundary;
 the desktop owns PKCE bookkeeping instead of the SDK's separate in-memory attempt
 map. The browser's callback payload remains `{ identifier, state }` in base64url.
@@ -78,11 +102,15 @@ map. The browser's callback payload remains `{ identifier, state }` in base64url
 ## Evidence and limits
 
 - Main coordinator: [desktop-login.ts](../apps/electron/src/main/services/desktop-login.ts).
+- Transport: [auth-fetch.ts](../apps/electron/src/main/auth-fetch.ts), wired by
+  [auth.ts](../apps/electron/src/main/auth.ts).
 - Renderer projection: [auth.ts](../apps/electron/src/renderer/src/auth.ts).
 - Credential store recovery: [auth-storage.ts](../apps/electron/src/main/auth-storage.ts).
 - Behavioral tests: [callback suite](../apps/electron/src/renderer/src/auth-callback-transaction.test.mjs),
   [store suite](../apps/electron/src/main/auth-storage.test.mjs).
 - Decision and validation: [note](../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.md);
   [unreadable store](../.agents/notes/implemented/bug-fix/2026-09-19-desktop-login-unreadable-credential-store.md).
+- Transport decision and validation:
+  [Chromium authentication](../.agents/notes/implemented/bug-fix/2026-10-08-desktop-auth-chromium-transport.md).
 - Actual hosted authentication and OS protocol dispatch require packaged-app acceptance;
   synthetic tests do not establish them.

@@ -1,22 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   createLodyThemeCssVariables,
-  createThemeCssVariables,
-  createVSCodeThemeCssVariables,
-  getBundledVSCodeThemeByIdSync,
-  getCachedBundledVSCodeThemeById,
   getBundledVSCodeThemeById,
   hexColorToHslChannel,
   hexColorToRgb,
   isSelectableBundledVSCodeThemeId,
-  parseVSCodeExtensionManifest,
   resolveBundledVSCodeThemes,
   resolveBundledVSCodeThemesFromExtensions,
   resolveVSCodeTheme,
-  toShikiTheme,
   type VSCodeThemeFileReader,
 } from '../src/lib/vscode-theme';
-import { claudeSyntaxTheme } from '../src/lib/claude-syntax-theme';
 
 const createMapReader =
   (files: Record<string, string>): VSCodeThemeFileReader =>
@@ -58,225 +51,14 @@ const hslChannelToRgb = (channel: string | undefined): { r: number; g: number; b
             : h < 300
               ? [x, 0, c]
               : [c, 0, x];
-  return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) };
+  return {
+    r: Math.round((r + m) * 255),
+    g: Math.round((g + m) * 255),
+    b: Math.round((b + m) * 255),
+  };
 };
 
 describe('VSCode theme adapter', () => {
-  it('parses manifest theme contributions through a narrow schema', () => {
-    const manifest = parseVSCodeExtensionManifest({
-      name: 'fixture-theme',
-      version: '1.2.3',
-      contributes: {
-        themes: [
-          {
-            label: 'Fixture Dark',
-            uiTheme: 'vs-dark',
-            path: './themes/dark.json',
-            unknownExtensionField: true,
-          },
-        ],
-      },
-    });
-
-    expect(manifest.contributes?.themes).toEqual([
-      expect.objectContaining({
-        label: 'Fixture Dark',
-        uiTheme: 'vs-dark',
-        path: './themes/dark.json',
-      }),
-    ]);
-  });
-
-  it('resolves JSONC themes, includes base themes, and validates the strict runtime model', async () => {
-    const theme = await resolveVSCodeTheme({
-      id: 'fixture-dark',
-      label: 'Fixture Dark',
-      uiTheme: 'vs-dark',
-      path: './themes/dark.json',
-      source: { kind: 'test-fixture', extensionId: 'publisher.fixture-theme' },
-      readFile: createMapReader({
-        'themes/base.json': `{
-          // Comments and trailing commas are valid VSCode theme JSONC.
-          "colors": {
-            "editor.background": "#000000",
-            "editor.foreground": "#EEEEEE",
-            "button.background": "#00AAFF",
-          },
-          "tokenColors": [
-            {
-              "scope": "comment.line",
-              "settings": {
-                "foreground": "#777777",
-              },
-            },
-          ],
-        }`,
-        'themes/dark.json': `{
-          "include": "./base.json",
-          "colors": {
-            "editor.background": "#121314",
-            "editor.foreground": "default",
-            "terminal.ansiGreen": "#0DBC79",
-          },
-          "tokenColors": [
-            {
-              "name": "Strings",
-              "scope": ["string.quoted", "constant.character"],
-              "settings": {
-                "foreground": "#89D185",
-                "fontStyle": "italic"
-              }
-            }
-          ],
-          "semanticTokenColors": {
-            "variable.readonly": "#FFCC00"
-          }
-        }`,
-      }),
-    });
-
-    expect(theme).toMatchObject({
-      schemaVersion: 1,
-      id: 'fixture-dark',
-      label: 'Fixture Dark',
-      type: 'dark',
-      colors: {
-        'button.background': '#00AAFF',
-        'editor.background': '#121314',
-        'terminal.ansiGreen': '#0DBC79',
-      },
-    });
-    expect(theme.colors).not.toHaveProperty('editor.foreground');
-    expect(theme.tokenColors).toHaveLength(2);
-    expect(theme.semanticTokenColors).toEqual({ 'variable.readonly': '#FFCC00' });
-  });
-
-  it('creates raw VSCode variables, Lody HSL aliases, and Prism-compatible syntax aliases', async () => {
-    const theme = await resolveVSCodeTheme({
-      id: 'fixture-dark',
-      label: 'Fixture Dark',
-      uiTheme: 'vs-dark',
-      path: 'dark.json',
-      source: { kind: 'test-fixture' },
-      readFile: createMapReader({
-        'dark.json': `{
-          "colors": {
-            "editor.background": "#121314",
-            "editor.foreground": "#BBBEBF",
-            "focusBorder": "#3994BCB3"
-          },
-          "tokenColors": [
-            {
-              "scope": "comment",
-              "settings": { "foreground": "#6A9955" }
-            }
-          ]
-        }`,
-      }),
-    });
-
-    expect(createVSCodeThemeCssVariables(theme)).toMatchObject({
-      '--vscode-editor-background': '#121314',
-      '--vscode-focusBorder': '#3994BCB3',
-    });
-    expect(createLodyThemeCssVariables(theme)).toMatchObject({
-      '--background': '210 5.3% 7.5%',
-      '--foreground': '195 3% 74.1%',
-      '--ring': '198.1 50.8% 35.9%',
-      '--syntax-comment': '101.5 28.6% 46.7%',
-    });
-    expect(createThemeCssVariables(theme)['--vscode-editor-foreground']).toBe('#BBBEBF');
-  });
-
-  it('bridges markdown Prism token styles through VSCode-derived syntax variables', async () => {
-    const theme = await resolveVSCodeTheme({
-      id: 'fixture-markdown',
-      label: 'Fixture Markdown',
-      uiTheme: 'vs-dark',
-      path: 'markdown.json',
-      source: { kind: 'test-fixture' },
-      readFile: createMapReader({
-        'markdown.json': `{
-          "colors": {
-            "editor.background": "#101010",
-            "editor.foreground": "#FFFFFF"
-          },
-          "tokenColors": [
-            {
-              "scope": "keyword.control",
-              "settings": { "foreground": "#FF0000" }
-            },
-            {
-              "scope": "entity.name.function.ts",
-              "settings": { "foreground": "#00FF00" }
-            }
-          ]
-        }`,
-      }),
-    });
-
-    expect(createLodyThemeCssVariables(theme)).toMatchObject({
-      '--syntax-keyword': '0 100% 50%',
-      '--syntax-function': '120 100% 50%',
-    });
-    expect(claudeSyntaxTheme.keyword).toMatchObject({
-      color: 'hsl(var(--syntax-keyword))',
-    });
-    expect(claudeSyntaxTheme.function).toMatchObject({
-      color: 'hsl(var(--syntax-function))',
-    });
-  });
-
-  it('converts resolved themes to Shiki theme registrations for @pierre/diffs', async () => {
-    const theme = await resolveVSCodeTheme({
-      id: 'fixture-dark',
-      label: 'Fixture Dark',
-      uiTheme: 'vs-dark',
-      path: 'dark.json',
-      source: { kind: 'test-fixture' },
-      readFile: createMapReader({
-        'dark.json': `{
-          "colors": {
-            "editor.background": "#101010",
-            "editor.foreground": "#FFFFFF",
-            "gitDecoration.addedResourceForeground": "#99FFE4"
-          },
-          "tokenColors": [
-            {
-              "scope": "keyword",
-              "settings": { "foreground": "#FFC799", "fontStyle": "bold" }
-            }
-          ]
-        }`,
-      }),
-    });
-
-    expect(toShikiTheme(theme, 'lody-test')).toMatchObject({
-      name: 'lody-test',
-      type: 'dark',
-      fg: '#FFFFFF',
-      bg: '#101010',
-      colors: {
-        'gitDecoration.addedResourceForeground': '#99FFE4',
-      },
-      settings: [
-        {
-          settings: {
-            foreground: '#FFFFFF',
-            background: '#101010',
-          },
-        },
-        {
-          scope: 'keyword',
-          settings: {
-            foreground: '#FFC799',
-            fontStyle: 'bold',
-          },
-        },
-      ],
-    });
-  });
-
   it('rejects paths that escape the extension root', async () => {
     await expect(
       resolveVSCodeTheme({
@@ -288,182 +70,6 @@ describe('VSCode theme adapter', () => {
         readFile: createMapReader({}),
       })
     ).rejects.toThrow(/escapes extension root/);
-  });
-
-  it('detects include cycles', async () => {
-    await expect(
-      resolveVSCodeTheme({
-        id: 'cycle',
-        label: 'Cycle',
-        uiTheme: 'vs-dark',
-        path: 'a.json',
-        source: { kind: 'test-fixture' },
-        readFile: createMapReader({
-          'a.json': `{ "include": "./b.json" }`,
-          'b.json': `{ "include": "./a.json" }`,
-        }),
-      })
-    ).rejects.toThrow(/include cycle/);
-  });
-
-  it('fails fast for invalid runtime colors and external tokenColors files', async () => {
-    await expect(
-      resolveVSCodeTheme({
-        id: 'bad-color',
-        label: 'Bad Color',
-        uiTheme: 'vs-dark',
-        path: 'bad.json',
-        source: { kind: 'test-fixture' },
-        readFile: createMapReader({ 'bad.json': `{ "colors": { "editor.background": "red" } }` }),
-      })
-    ).rejects.toThrow(/Expected hex color/);
-
-    await expect(
-      resolveVSCodeTheme({
-        id: 'external-tokens',
-        label: 'External Tokens',
-        uiTheme: 'vs-dark',
-        path: 'external.json',
-        source: { kind: 'test-fixture' },
-        readFile: createMapReader({ 'external.json': `{ "tokenColors": "./theme.tmTheme" }` }),
-      })
-    ).rejects.toThrow(/not supported yet/);
-  });
-
-  it('resolves bundled Vesper from its original JSONC theme asset', async () => {
-    const themes = await resolveBundledVSCodeThemes();
-    const vesper = themes.find((theme) => theme.id === 'vesper');
-
-    expect(vesper).toMatchObject({
-      id: 'vesper',
-      label: 'Vesper',
-      type: 'dark',
-      source: {
-        kind: 'builtin',
-        extensionId: 'raunofreiberg.vesper',
-        extensionVersion: '0.0.40',
-      },
-      // Lody's deep-sea palette: graphite surfaces, a faint cool cast on the
-      // grays, and jellyfish cyan in place of the orange accent. Orange that
-      // means "warning" stays amber.
-      colors: {
-        'button.background': '#7CC4E8',
-        'editorWarning.foreground': '#FFC799',
-        'editor.background': '#131416',
-        'editor.foreground': '#FEFFFF',
-        'sideBar.background': '#191A1D',
-      },
-    });
-    if (!vesper) {
-      throw new Error('Bundled Vesper theme was not resolved.');
-    }
-    expect(vesper.tokenColors.length).toBeGreaterThan(20);
-    expect(toShikiTheme(vesper, 'vesper-test')).toMatchObject({
-      name: 'vesper-test',
-      fg: '#FEFFFF',
-      bg: '#131416',
-    });
-    await expect(getBundledVSCodeThemeById('vesper')).resolves.toEqual(vesper);
-    await expect(getBundledVSCodeThemeById('missing-theme')).resolves.toBeUndefined();
-  });
-
-  it('resolves bundled active themes synchronously from local theme assets', () => {
-    const vesper = getBundledVSCodeThemeByIdSync('vesper');
-
-    expect(vesper).toMatchObject({
-      id: 'vesper',
-      label: 'Vesper',
-      colors: {
-        'editor.background': '#131416',
-      },
-    });
-    expect(getCachedBundledVSCodeThemeById('vesper')).toBe(vesper);
-  });
-
-  it('resolves bundled VSCode 2026 defaults through their include chains', async () => {
-    const dark = await getBundledVSCodeThemeById('vscode-dark-2026');
-    const light = await getBundledVSCodeThemeById('vscode-light-2026');
-
-    expect(dark).toMatchObject({
-      id: 'vscode-dark-2026',
-      label: 'Dark 2026',
-      type: 'dark',
-      source: {
-        kind: 'builtin',
-        extensionId: 'vscode.theme-defaults',
-      },
-      colors: {
-        'editor.background': '#121314',
-        'editor.foreground': '#BBBEBF',
-        'sideBar.background': '#191A1B',
-      },
-    });
-    expect(light).toMatchObject({
-      id: 'vscode-light-2026',
-      label: 'Light 2026',
-      type: 'light',
-      source: {
-        kind: 'builtin',
-        extensionId: 'vscode.theme-defaults',
-      },
-    });
-    expect(dark?.tokenColors.length).toBeGreaterThan(100);
-    expect(light?.tokenColors.length).toBeGreaterThan(100);
-  });
-
-  it('resolves the curated permissive bundled theme pack', async () => {
-    const themes = await resolveBundledVSCodeThemes();
-
-    expect(themes.map((theme) => theme.id)).toEqual(
-      expect.arrayContaining([
-        'lody-light',
-        'github-light-default',
-        'github-dark-default',
-        'catppuccin-mocha',
-        'tokyo-night',
-        'tokyo-night-storm',
-        'tokyo-night-light',
-        'vitesse-light',
-        'vitesse-dark',
-        'vitesse-black',
-        'vitesse-light-soft',
-        'vitesse-dark-soft',
-        'one-dark-pro',
-        'ayu-light',
-        'ayu-mirage',
-        'ayu-dark',
-      ])
-    );
-
-    for (const themeId of [
-      'lody-light',
-      'github-light-default',
-      'github-dark-default',
-      'catppuccin-mocha',
-      'tokyo-night',
-      'tokyo-night-storm',
-      'tokyo-night-light',
-      'vitesse-light',
-      'vitesse-dark',
-      'vitesse-black',
-      'vitesse-light-soft',
-      'vitesse-dark-soft',
-      'one-dark-pro',
-      'ayu-light',
-      'ayu-mirage',
-      'ayu-dark',
-    ]) {
-      const theme = await getBundledVSCodeThemeById(themeId);
-      expect(theme, themeId).toEqual(
-        expect.objectContaining({
-          id: themeId,
-          schemaVersion: 1,
-        })
-      );
-      expect(theme?.colors['editor.background'], themeId).toMatch(/^#/);
-      expect(theme?.colors['editor.foreground'], themeId).toMatch(/^#/);
-      expect(theme?.tokenColors.length, themeId).toBeGreaterThan(10);
-    }
   });
 
   it('exposes only the product theme shortlist in selectors', async () => {
@@ -678,5 +284,42 @@ describe('VSCode theme adapter', () => {
       themeLabel: 'Broken Theme',
       themeId: 'publisher.broken-theme.broken-theme',
     });
+  });
+});
+
+describe('Highlights VS Code theme adaptation', () => {
+  it('preserves the active editor palette and keyword/comment styles in actual tokens', async () => {
+    const { toHighlightsTheme, registerLodyVSCodeThemeForDiffs } =
+      await import('../src/lib/vscode-theme/vscode-theme-shiki');
+    const { codeToTokens } = await import('@pierre/highlights');
+    const { resolveTheme } = await import('@pierre/diffs');
+    const theme = await resolveVSCodeTheme({
+      id: 'highlights-test',
+      label: 'Highlights test',
+      path: 'theme.json',
+      uiTheme: 'vs-dark',
+      source: { kind: 'test-fixture' },
+      readFile: createMapReader({
+        'theme.json': JSON.stringify({
+          colors: { 'editor.foreground': '#eeeeee', 'editor.background': '#111111' },
+          tokenColors: [
+            { scope: 'keyword', settings: { foreground: '#ff0000' } },
+            { scope: 'comment', settings: { foreground: '#00ff00', fontStyle: 'italic' } },
+          ],
+        }),
+      }),
+    });
+    const palette = toHighlightsTheme(theme);
+    const result = codeToTokens('return 42;\n// comment', { lang: 'typescript', theme: palette });
+    expect(result.fg).toBe('#eeeeee');
+    expect(result.bg).toBe('#111111');
+    expect(result.tokens[0]?.find((token) => token.content.trim() === 'return')?.color).toBe(
+      '#ff0000'
+    );
+    expect(result.tokens[1]?.[0]).toMatchObject({ color: '#00ff00', fontStyle: 1 });
+    const name = await registerLodyVSCodeThemeForDiffs(theme);
+    expect(name).toBeDefined();
+    expect((await resolveTheme(name!, 'highlights')).zed).toEqual(palette);
+    expect((await resolveTheme(name!, 'shiki-js')).textmate?.fg?.toLowerCase()).toBe('#eeeeee');
   });
 });

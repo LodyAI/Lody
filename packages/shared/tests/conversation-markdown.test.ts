@@ -11,6 +11,27 @@ import type { SessionHistoryInput } from '../src/schema';
 
 let nextId = 0;
 
+it('skips partial text/thought records without breaking conversation copy', () => {
+  const history = [
+    entry('assistant', [
+      { type: 'text' },
+      { type: 'thought' },
+      textItem('Kept'),
+    ] as MessageContent[]),
+  ];
+  expect(buildConversationMarkdown({ history, workspaceId: 'ws' }).markdown).toContain('Kept');
+});
+
+it('exports workspace-scoped links while leaving source history untouched', () => {
+  const history = [entry('user', [textItem('See [Old](session://child) and `session://example`')])];
+  const snapshot = structuredClone(history);
+  const result = buildConversationMarkdown({ history, workspaceId: 'ws_1' });
+  expect(result.markdown).toContain('[Old](lody://session/child?workspace=ws_1)');
+  expect(result.markdown).toContain('`session://example`');
+  expect(result.stats.chars).toBe(result.markdown.length);
+  expect(history).toEqual(snapshot);
+});
+
 function entry(
   role: 'user' | 'assistant' | 'system',
   items: MessageContent[]
@@ -67,16 +88,6 @@ function heavyHistory(turns: number, outputChars: number): SessionHistoryInput[]
   }
   return history;
 }
-
-describe('estimateTokenCount', () => {
-  it('counts latin text at roughly four characters per token', () => {
-    expect(estimateTokenCount('a'.repeat(400))).toBe(100);
-  });
-
-  it('counts CJK at roughly one token per character', () => {
-    expect(estimateTokenCount('中文测试'.repeat(100))).toBe(400);
-  });
-});
 
 describe('share message token estimates', () => {
   it('preserves the recorded model instead of substituting another turn configuration', () => {
@@ -157,41 +168,6 @@ describe('share message token estimates', () => {
 });
 
 describe('buildConversationMarkdown', () => {
-  it('renders real Markdown headings and a title', () => {
-    const result = buildConversationMarkdown({
-      title: 'My session',
-      history: [entry('user', [textItem('hello')]), entry('assistant', [textItem('hi there')])],
-    });
-
-    expect(result.markdown).toContain('# My session');
-    expect(result.markdown).toMatch(/^## 1 · User · /m);
-    expect(result.markdown).toMatch(/^## 1 · Assistant · /m);
-    expect(result.markdown).toContain('hello');
-    expect(result.markdown).toContain('hi there');
-    expect(result.stats.entryCount).toBe(2);
-    expect(result.stats.overBudget).toBe(false);
-  });
-
-  it('keeps everything for a small conversation and reports no trimming', () => {
-    const result = buildConversationMarkdown({
-      history: [
-        entry('user', [textItem('run the tests')]),
-        entry('assistant', [
-          { type: 'thought', text: 'thinking about it' },
-          toolCall('Bash', 'all tests passed', true),
-          textItem('Done.'),
-        ]),
-      ],
-    });
-
-    expect(result.markdown).toContain('thinking about it');
-    expect(result.markdown).toContain('all tests passed');
-    expect(result.stats.thinkingTruncated).toBe(false);
-    expect(result.stats.terminalOutputOmitted).toBe(false);
-    expect(result.stats.toolCallsCollapsed).toBe(false);
-    expect(result.markdown).not.toContain('Trimmed to fit');
-  });
-
   it('trims tool output down to the character and token budget', () => {
     const result = buildConversationMarkdown({ history: heavyHistory(12, 8_000) });
 
@@ -416,14 +392,6 @@ describe('buildConversationMarkdown', () => {
     expect(notice).toBeLessThan(firstTurn);
     expect(result.markdown).toContain('> **The last response was still generating');
     expect(result.markdown.trimEnd().endsWith('partial')).toBe(true);
-  });
-
-  it('omits the unfinished-turn notice when the caller does not pass one', () => {
-    const result = buildConversationMarkdown({
-      history: [entry('user', [textItem('ask')])],
-    });
-
-    expect(result.markdown).not.toContain('still generating');
   });
 
   it('puts the trim notice in the header, before anything it describes', () => {

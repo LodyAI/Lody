@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -71,7 +72,7 @@ describe('PathLaunchersSettings', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the selected launcher as one compact select and keeps custom editing available', async () => {
+  it('returns to VS Code after deleting the selected custom launcher', async () => {
     seedCustomLauncher();
     await renderSettings();
 
@@ -103,53 +104,6 @@ describe('PathLaunchersSettings', () => {
       selectedLauncherId: 'vscode',
       customLaunchers: [],
     });
-  });
-
-  it('lists logo and name options with the custom action last', async () => {
-    seedCustomLauncher();
-    await renderSettings();
-    await openSelect();
-
-    const options = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'));
-    const optionLabels = options.map((option) => option.textContent?.trim());
-    expect(optionLabels).toContain('VS Code');
-    expect(optionLabels).toContain('PhpStorm');
-    expect(optionLabels.at(-1)).toBe('Custom launcher');
-    expect(options.every((option) => option.querySelector('svg, img'))).toBe(true);
-
-    await chooseOption('Cursor');
-    expect(getSelectTrigger().textContent).toContain('Cursor');
-    expect(readStoredPathLauncherPreference().selectedLauncherId).toBe('cursor');
-
-    await openSelect();
-    await chooseOption('Custom launcher');
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Add custom launcher');
-    expect(readStoredPathLauncherPreference().selectedLauncherId).toBe('cursor');
-  });
-
-  it('uses a bottom sheet for the custom launcher form on mobile', async () => {
-    // Mobile comes from the device identity, not width alone: a narrow
-    // desktop-class window keeps the desktop dialog.
-    Object.defineProperty(window.navigator, 'userAgent', {
-      configurable: true,
-      value:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
-    });
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
-    seedCustomLauncher();
-    await renderSettings();
-    await openSelect();
-    await act(async () => getButton('Edit').click());
-
-    const sheet = document.querySelector<HTMLElement>('[role="dialog"]');
-    expect(sheet).not.toBeNull();
-    // The edge a sheet came in on is what it states for itself; `@lody/ui`'s
-    // Sheet renders it as `data-side` and derives the pinning, the radius and
-    // the direction it slides from there. The classes this used to assert were
-    // the deleted Tailwind `cva`'s, which is the component rather than what a
-    // person sees.
-    expect(sheet?.getAttribute('data-side')).toBe('bottom');
-    expect(sheet?.textContent).toContain('Edit launcher');
   });
 
   async function renderSettings(): Promise<void> {

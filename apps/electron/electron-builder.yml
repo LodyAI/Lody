@@ -3,6 +3,7 @@ productName: Lody OSS
 protocols:
   - name: Lody OSS Desktop
     schemes:
+      - lody
       - lody-oss
 directories:
   buildResources: build
@@ -19,6 +20,7 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!**/node_modules/electron-sparkle-updater/native/vendor/**'
+  - '!**/node_modules/electron-sparkle-updater/native/sparkle-chain.tar.xz'
   - '!**/*.map'
   - '!**/*.{md,markdown,mkd}'
   - '!**/{test,tests,__tests__,testing,__mocks__,mocks,spec,examples,example,stories,storybook}/**'
@@ -49,6 +51,8 @@ files:
   - '!node_modules/better-auth/dist/test-utils/**'
 asarUnpack:
   - resources/**
+  # Main E2EE storage loads prebuilds relative to the installed JS package.
+  - '**/node_modules/better-sqlite3/**'
   - '**/node_modules/electron-sparkle-updater/native/build/Release/*.node'
 # Keep only the app locales we actually ship to reduce Chromium locale payload.
 # Both naming forms are required: macOS resources use the underscore form
@@ -88,6 +92,7 @@ mac:
   extendInfo:
     NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    NSCameraUsageDescription: Lody uses the camera only when you scan another member's ledger verification QR code.
     NSUserNotificationAlertStyle: banner
     SUFeedURL: https://github.com/LodyAI/Lody/releases/latest/download/appcast.xml
     SUPublicEDKey: SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER

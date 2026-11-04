@@ -1,3 +1,6 @@
+import { inheritHistoryStreamText } from './history-stream-text';
+import { historyValuesEqual } from './history-values-equal';
+export { historyValuesEqual } from './history-values-equal';
 import { Immer } from 'immer';
 import { isContainer, LoroMap, type LoroDoc, type LoroList } from 'loro-crdt';
 import { z } from 'zod';
@@ -20,6 +23,13 @@ import {
 } from './history-write-schema';
 import { diffHistoryContainer, populateContainer } from './history-materializer';
 import { applyRespondPermission } from './session-data/planner';
+import { createAgentHistoryWindow, type AgentHistoryTargets } from './history-agent-window';
+import {
+  getOperationProgressTurnId,
+  planOperationProgress,
+} from './session-data/operation-progress';
+import type { HistoryAction } from './session-data/history-actions';
+import { historyQueryRow, type HistoryQueryRow } from './session-data/history-selection';
 
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -35,7 +45,7 @@ const storedField = (value: unknown, key: string): unknown =>
       ? value[key]
       : undefined;
 const storedScalar = (value: unknown): unknown =>
-  isContainer(value) && value.kind() === 'Text' ? value.toJSON() : value;
+  isContainer(value) && value.kind() === 'Text' ? value.toString() : value;
 
 declare const storedHistoryBrand: unique symbol;
 /** Provenance, not a way to bless caller-supplied JSON. history is a detached copy. */
@@ -45,18 +55,42 @@ export interface StoredHistorySnapshot {
 }
 const storedHistories = new WeakMap<StoredHistorySnapshot, SessionHistoryInput[]>();
 
-/** Ignore Mirror's transport identity, never the contents of a historical item. */
-export function historyValuesEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (Array.isArray(a) && Array.isArray(b))
-    return a.length === b.length && a.every((v, i) => historyValuesEqual(v, b[i]));
-  if (!record(a) || !record(b)) return false;
-  const ak = Object.keys(a).filter((k) => k !== '$cid' && a[k] !== undefined);
-  const bk = Object.keys(b).filter((k) => k !== '$cid' && b[k] !== undefined);
-  return (
-    ak.length === bk.length &&
-    ak.every((k) => Object.hasOwn(b, k) && historyValuesEqual(a[k], b[k]))
-  );
+/** Capture a backend's stored values using the writer's common provenance registry. */
+export function captureStoredHistory(
+  history: readonly SessionHistoryInput[]
+): StoredHistorySnapshot {
+  const stored = structuredClone(history) as SessionHistoryInput[];
+  const snapshot = Object.freeze({
+    get history() {
+      return structuredClone(stored);
+    },
+  }) as StoredHistorySnapshot;
+  storedHistories.set(snapshot, stored);
+  return snapshot;
+}
+
+/** Preflight the complete copy before either backend changes its target. */
+export function prepareStoredHistoryCopy(
+  snapshot: StoredHistorySnapshot,
+  selection: readonly SessionHistoryInput[],
+  previous: readonly SessionHistoryInput[]
+): SessionHistoryInput[] {
+  const source = storedHistories.get(snapshot);
+  if (!source) throw new HistoryWriteError([{ path: ['history'], code: 'invalid_snapshot' }]);
+  const ids = new Set(previous.map((entry) => entry.id));
+  for (const entry of selection) {
+    if (ids.has(entry.id))
+      throw new HistoryWriteError([{ path: ['history'], code: 'copy_target_conflict' }]);
+    ids.add(entry.id);
+  }
+  const sourceById = new Map<string, SessionHistoryInput>();
+  for (const old of source) if (!sourceById.has(old.id)) sourceById.set(old.id, old);
+  return selection.map((entry) => {
+    const old = sourceById.get(entry.id);
+    return (
+      old ? prepareReplacement(old, entry) : cleanNew(HistoryEntryWriteSchema, entry)
+    ) as SessionHistoryInput;
+  });
 }
 
 /** New unknown keys are filtered; unknown keys already stored are never scrubbed. */
@@ -131,7 +165,9 @@ function preserveUnknown(
 const cleanNew = (schema: z.ZodType, input: unknown, old?: unknown): unknown => {
   const parsed = parseHistoryWrite(schema, input);
   // There is no stored extension to merge for a newly authored value.
-  return old === undefined ? parsed : preserveUnknown(schema, old, input, parsed);
+  const result = old === undefined ? parsed : preserveUnknown(schema, old, input, parsed);
+  inheritHistoryStreamText(input, result);
+  return result;
 };
 
 // One independently editable group, derived from the message definition rather
@@ -203,7 +239,7 @@ function prepareToolState(old: unknown, input: unknown): Record<string, unknown>
 }
 
 /** Only a read acknowledgement on a newly inserted pending user row is benign. */
-function matchesRollbackReceipt(
+export function matchesRollbackReceipt(
   before: readonly unknown[],
   after: readonly unknown[],
   current: readonly unknown[]
@@ -316,6 +352,21 @@ export function prepareReplacement(previous: unknown, incoming: unknown): Record
 }
 
 export interface HistoryWriter {
+  forEachStored(visit: (entry: SessionHistoryInput) => void): void;
+  readQuery(options?: { transcriptVisibility?: boolean }): HistoryQueryRow[];
+  readSelected(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    options?: { transcriptVisibility?: boolean }
+  ): SessionHistoryInput[];
+  /** Plan selected bodies; changes to metadata-only rows are rejected. */
+  updateSelected(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): void;
+  updateSelectedWithRollback(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): () => void;
   /** Detached stored JSON for inspection/hashing; not copy/rollback provenance. */
   readStored(): SessionHistoryInput[];
   capture(): StoredHistorySnapshot;
@@ -337,8 +388,24 @@ export interface HistoryWriter {
   read(turnId: string): SessionHistory | undefined;
   /** Existing typed callback API; only its changed turns/items reach the writer. */
   update(updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]): void;
+  /** Read only this operation's cards, once each; never export the history. */
+  updateOperationProgress(action: Extract<HistoryAction, { kind: 'operation-progress' }>): boolean;
   /** Mutate an existing turn without producing/planning the entire history. */
   updateEntry(id: string, updater: (entry: SessionHistoryInput) => SessionHistoryInput): boolean;
+  /**
+   * Streaming output over sparse rows in stored order: requested tools/tasks/runs
+   * and each owning turn's contiguous text/thought tail. Runs themselves expose
+   * only requested child tools/plans and their output tail. Appends stay at the
+   * actual end of the owning list. All changes are preflighted together.
+   * Returns false without writing for missing/duplicated target turns or inline
+   * turn/item-list storage; structural legacy updates may then use `update`.
+   * A string array retains the original tool-only call contract.
+   */
+  updateTail(
+    turnId: string,
+    targets: readonly string[] | AgentHistoryTargets,
+    updater: (rows: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): boolean;
   /**
    * Mutate every stored row carrying `id`, oldest first. Concurrent producers
    * can insert the same turn twice; this keeps those copies in step. Every
@@ -361,6 +428,30 @@ export interface HistoryWriter {
 export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly SessionHistory[]) {
   const list = doc.getList('history');
   const readAll = () => readHistory?.() ?? (list.toJSON() as SessionHistory[]);
+  // No subscription lifetime to manage. Unknown writes/imports/checkout invalidate
+  // this metadata-only directory, including edits in an uncommitted transaction.
+  let progressDirectory: { stamp: string; rows: Map<string, number[]> } | undefined;
+  const progressPositions = (id: string) => {
+    const stamp = JSON.stringify([doc.opCount(), doc.frontiers(), doc.getPendingTxnLength()]);
+    if (progressDirectory?.stamp !== stamp) {
+      const rows = new Map<string, number[]>();
+      for (let index = 0; index < list.length; index++) {
+        const value = list.get(index);
+        const rowId = storedScalar(storedField(value, 'id'));
+        if (typeof rowId !== 'string' || !rowId.startsWith('operation-progress:')) continue;
+        if (storedScalar(storedField(value, 'role')) !== 'system') continue;
+        const copies = rows.get(rowId) ?? [];
+        copies.push(index);
+        rows.set(rowId, copies);
+      }
+      progressDirectory = { stamp, rows };
+    }
+    const prefix = `${id}:duplicate:`;
+    const positions = [...(progressDirectory.rows.get(id) ?? [])];
+    for (const [rowId, copies] of progressDirectory.rows)
+      if (rowId.startsWith(prefix)) positions.push(...copies);
+    return positions.sort((a, b) => a - b);
+  };
   const rowWithId = (index: number, id: string) => {
     const map = list.get(index);
     if (isContainer(map) && map.kind() === 'Map' && (map as LoroMap).get('id') === id)
@@ -376,6 +467,11 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     }
     return undefined;
   };
+  const agentWindow = createAgentHistoryWindow(
+    doc,
+    (old, next) => prepareReplacement(old, next),
+    historyValuesEqual
+  );
 
   // Preparation is separate so a malformed update cannot leave half-written CRDT ops.
   const planWrite = (
@@ -385,7 +481,8 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       old,
       value
     ) =>
-      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value)
+      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value),
+    offset = 0
   ) => {
     const used = new Set<number>();
     const byId = new Map<unknown, number[]>();
@@ -409,7 +506,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       last = index;
       used.add(index);
       if (historyValuesEqual(previous[index], entry)) return { index };
-      const map = list.get(index);
+      const map = list.get(offset + index);
       if (!isContainer(map) && record(map))
         return { index, inline: true, value: prepareValue(previous[index], entry) };
       if (!isContainer(map) || map.kind() !== 'Map')
@@ -417,18 +514,18 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       return { index, map, value: prepareValue(previous[index], entry) };
     });
     return () => {
-      for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(i, 1);
+      for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(offset + i, 1);
       plan.forEach((op, i) => {
         if (op.index < 0)
           populateContainer(
-            list.insertContainer(i, new LoroMap()),
+            list.insertContainer(offset + i, new LoroMap()),
             sessionHistorySchema,
             op.value,
             undefined
           );
         else if ('inline' in op && op.inline) {
-          list.delete(i, 1);
-          list.insert(i, op.value as Parameters<LoroList['insert']>[1]);
+          list.delete(offset + i, 1);
+          list.insert(offset + i, op.value as Parameters<LoroList['insert']>[1]);
         } else if (op.value !== undefined && isContainer(op.map))
           diffHistoryContainer(
             op.map,
@@ -444,40 +541,161 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
   const prepare = (previous: readonly SessionHistory[], next: readonly SessionHistory[]) =>
     planWrite(previous, next);
 
+  const readQuery = (options?: { transcriptVisibility?: boolean }): HistoryQueryRow[] =>
+    Array.from({ length: list.length }, (_, index) =>
+      historyQueryRow(
+        list.get(index),
+        {
+          field: storedField,
+          scalar: (value) => {
+            const scalar = storedScalar(value);
+            if (isContainer(scalar)) return scalar.kind() === 'List' ? [] : {};
+            return scalar && typeof scalar === 'object'
+              ? Array.isArray(scalar)
+                ? []
+                : {}
+              : scalar;
+          },
+          keys: (value) =>
+            isContainer(value) && value.kind() === 'Map'
+              ? [...(value as LoroMap).keys()]
+              : record(value)
+                ? Object.keys(value)
+                : [],
+          length: (value) =>
+            Array.isArray(value)
+              ? value.length
+              : isContainer(value) && value.kind() === 'List'
+                ? (value as LoroList).length
+                : 0,
+          at: (value, itemIndex) =>
+            Array.isArray(value) ? value[itemIndex] : (value as LoroList).get(itemIndex),
+        },
+        options?.transcriptVisibility
+      )
+    );
+  const storedAt = (index: number): SessionHistoryInput => {
+    const value = list.get(index);
+    return structuredClone(isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
+  };
+  const storedRange = (from: number, to: number) =>
+    Array.from({ length: to - from }, (_, index) => storedAt(from + index));
+  const membership = () =>
+    Array.from({ length: list.length }, (_, index) => {
+      const row = list.get(index);
+      return {
+        id: storedScalar(storedField(row, 'id')),
+        record: isContainer(row) ? row.kind() === 'Map' : record(row),
+      };
+    });
+  const selectedPlan = (
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ) => {
+    const query = readQuery();
+    const positions = new Set(select(query));
+    for (const index of positions)
+      if (!Number.isSafeInteger(index) || index < 0 || index >= query.length)
+        throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
+    const untouched = new Set<unknown>();
+    const before = query.map((row, index) => {
+      if (positions.has(index)) return storedAt(index);
+      untouched.add(row);
+      return row as unknown as SessionHistoryInput;
+    });
+    const next = immer.produce(before, (draft) => {
+      const result = updater(draft);
+      if (result && result !== draft) draft.splice(0, draft.length, ...result);
+    });
+    const commit = planWrite(before, next, (old, value) => {
+      if (untouched.has(old))
+        throw new HistoryWriteError([{ path: ['history'], code: 'unselected_change' }]);
+      return old === undefined
+        ? cleanNew(HistoryEntryWriteSchema, value)
+        : prepareReplacement(old, value);
+    });
+    return { before, next, commit };
+  };
+
   const writer: HistoryWriter = {
+    forEachStored(visit) {
+      for (let index = 0; index < list.length; index++) {
+        const value = storedAt(index);
+        if (record(value)) visit(value);
+      }
+    },
+    readQuery,
+    readSelected(select, options) {
+      const rows = readQuery(options);
+      return select(rows).map((index) => {
+        if (!Number.isSafeInteger(index) || index < 0 || index >= list.length)
+          throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
+        return storedAt(index);
+      });
+    },
+    updateSelected(select, updater) {
+      selectedPlan(select, updater).commit();
+    },
+    updateSelectedWithRollback(select, updater) {
+      const beforeMembers = membership();
+      const { before, next, commit } = selectedPlan(select, updater);
+      let start = 0,
+        suffix = 0;
+      while (
+        start < before.length &&
+        start < next.length &&
+        historyValuesEqual(before[start], next[start])
+      )
+        start++;
+      while (
+        suffix < before.length - start &&
+        suffix < next.length - start &&
+        historyValuesEqual(before[before.length - 1 - suffix], next[next.length - 1 - suffix])
+      )
+        suffix++;
+      const removed = storedRange(start, before.length - suffix);
+      commit();
+      const afterMembers = membership();
+      const end = afterMembers.length - suffix;
+      const after = storedRange(start, end);
+      let consumed = false;
+      return () => {
+        const currentMembers = membership();
+        const sameRows =
+          currentMembers.length >= afterMembers.length &&
+          afterMembers.every(
+            (row, index) =>
+              row.record && currentMembers[index]?.record && row.id === currentMembers[index]!.id
+          );
+        if (consumed || !sameRows)
+          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        const currentRange = storedRange(start, end);
+        if (
+          !matchesRollbackReceipt(
+            beforeMembers.filter((row) => row.record),
+            after,
+            currentRange
+          )
+        )
+          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        // Align only complete values in the owned range. Later appends cannot
+        // consume restored IDs; unchanged containers inside the range survive.
+        planWrite(currentRange, removed, (_old, value) => value, start)();
+        consumed = true;
+      };
+    },
     readStored() {
       return list.toJSON() as SessionHistoryInput[];
     },
     capture() {
       // Read the actual document, not a normalized projection or caller-owned array.
-      const history = writer.readStored();
-      const snapshot = Object.freeze({
-        get history() {
-          return structuredClone(history);
-        },
-      }) as StoredHistorySnapshot;
-      storedHistories.set(snapshot, history);
-      return snapshot;
+      return captureStoredHistory(writer.readStored());
     },
     copyFrom(snapshot, history) {
-      const source = storedHistories.get(snapshot);
-      if (!source) throw new HistoryWriteError([{ path: ['history'], code: 'invalid_snapshot' }]);
       const previous = list.toJSON() as SessionHistory[];
-      const ids = new Set(previous.filter(record).map((entry) => entry.id));
-      for (const entry of history) {
-        if (ids.has(entry.id))
-          throw new HistoryWriteError([{ path: ['history'], code: 'copy_target_conflict' }]);
-        ids.add(entry.id);
-      }
       // Incoming ids were proven unique above. Match each to the first stored
       // occurrence once instead of rescanning the entire source for every turn.
-      const sourceById = new Map<string, SessionHistoryInput>();
-      for (const old of source) if (!sourceById.has(old.id)) sourceById.set(old.id, old);
-      const values = history.map((entry) => {
-        const old = sourceById.get(entry.id);
-        if (!old) return cleanNew(HistoryEntryWriteSchema, entry);
-        return prepareReplacement(old, entry);
-      });
+      const values = prepareStoredHistoryCopy(snapshot, history, previous);
       // Values are either unchanged stored data or preflighted authored changes.
       planWrite(previous, [...values, ...previous] as SessionHistory[], (_old, value) => value)();
     },
@@ -594,6 +812,51 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       });
       prepare(previous, next)();
     },
+    updateOperationProgress(action) {
+      const { operation } = action;
+      if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many')
+        return false;
+      const id = getOperationProgressTurnId(operation.requesterSessionId, operation.operationId);
+      const positions = progressPositions(id);
+      const previous = positions.map((index) => {
+        const value = list.get(index);
+        // The planner needs detached values to preserve legacy/unknown card fields.
+        // Export each matching card once; unrelated turns are never materialized.
+        return (isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
+      });
+      const next = planOperationProgress(previous, operation, action.timestamp, action.statuses);
+      if (next === previous) return false;
+      // A changed operation projection contains exactly one canonical card.
+      // Keep that card's container/position, or rename the first legacy alias.
+      const canonicalIndex = previous.findIndex((entry) => entry.id === id);
+      const retainedIndex = canonicalIndex >= 0 ? canonicalIndex : previous.length ? 0 : -1;
+      const old = previous[retainedIndex];
+      const prepared = old
+        ? prepareReplacement(old, next[0])
+        : cleanNew(HistoryEntryWriteSchema, next[0]);
+      // Preflight above must finish before replacing or deleting any stored row.
+      if (retainedIndex < 0) {
+        populateContainer(
+          list.insertContainer(list.length, new LoroMap()),
+          sessionHistorySchema,
+          prepared,
+          undefined
+        );
+      } else {
+        const position = positions[retainedIndex]!;
+        const value = list.get(position);
+        if (isContainer(value)) {
+          diffHistoryContainer(value, sessionHistorySchema, old, prepared, undefined);
+        } else {
+          list.delete(position, 1);
+          list.insert(position, prepared as Parameters<LoroList['insert']>[1]);
+        }
+        for (let i = positions.length - 1; i >= 0; i--)
+          if (i !== retainedIndex) list.delete(positions[i]!, 1);
+      }
+      doc.commit();
+      return true;
+    },
     updateEntry(id, updater) {
       const target = locate(id);
       if (!target) return false;
@@ -621,6 +884,15 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       }
       doc.commit();
       return true;
+    },
+    updateTail(id, targets, updater) {
+      return agentWindow.update(
+        id,
+        Array.isArray(targets)
+          ? { toolCallIds: targets, taskIds: [], runs: [] }
+          : (targets as AgentHistoryTargets),
+        updater
+      );
     },
     updateCopies(id, updater) {
       const targets: NonNullable<ReturnType<typeof rowWithId>>[] = [];
@@ -681,15 +953,17 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       const previous = isContainer(stored) ? stored.toJSON() : stored;
       if (historyValuesEqual(previous, value)) return true;
       const parsed = cleanNew(field, value, previous);
-      // A partial map diff only visits this key; it neither reads nor authors items.
-      diffHistoryContainer(
-        map,
-        sessionHistorySchema,
-        { [key]: previous },
-        { [key]: parsed },
-        undefined
-      );
-      doc.commit();
+      // A partial field diff cannot add or move an indexed item.
+      agentWindow.preserveIndex(() => {
+        diffHistoryContainer(
+          map,
+          sessionHistorySchema,
+          { [key]: previous },
+          { [key]: parsed },
+          undefined
+        );
+        doc.commit();
+      });
       return true;
     },
     respondPermission(requestId, outcome, options) {

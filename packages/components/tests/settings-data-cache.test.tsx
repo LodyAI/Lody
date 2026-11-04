@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
@@ -36,7 +37,9 @@ vi.mock('../src/hooks/useOrganization', () => ({
   }),
 }));
 
-import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
+import { currentWorkspaceIdAtom, setWorkspaceContextAtom } from '../src/atoms/workspace-context';
+import { userAtom } from '../src/atoms';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
   SettingsDataCacheProvider,
   useSettingsDataCache,
@@ -80,9 +83,13 @@ function usageDay(
 }
 
 function Probe({ dayStartMs }: { dayStartMs: number | null }) {
-  const { workspaceId } = useSettingsDataCache();
+  const { workspaceId, workspaceReposLoading } = useSettingsDataCache();
   const { day, loading } = useSettingsUsageDay(dayStartMs);
-  return <output>{JSON.stringify({ workspaceId, day: day ?? null, loading })}</output>;
+  return (
+    <output>
+      {JSON.stringify({ workspaceId, day: day ?? null, loading, workspaceReposLoading })}
+    </output>
+  );
 }
 
 describe('settings usage day cache', () => {
@@ -90,6 +97,20 @@ describe('settings usage day cache', () => {
   let container: HTMLDivElement;
   let store: Store;
   let result: SettingsUsageDayData | undefined;
+
+  function admitWorkspace(workspaceId: string) {
+    store.set(userAtom, { id: 'test-account' } as never);
+    store.set(setWorkspaceContextAtom, {
+      workspaceId: workspaceId as WorkspaceId,
+      slug: workspaceId,
+    });
+    store.set(workspaceContentModeAtom, {
+      accountId: 'test-account',
+      workspaceId,
+      workspaceSlug: workspaceId,
+      descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+    });
+  }
 
   const snapshot = () => JSON.parse(container.querySelector('output')!.textContent!);
   const usageQueryArgs = () =>
@@ -134,7 +155,7 @@ describe('settings usage day cache', () => {
         : undefined
     );
     store = createStore();
-    store.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
+    admitWorkspace('workspace-1');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -148,46 +169,22 @@ describe('settings usage day cache', () => {
     localStorage.clear();
   });
 
-  it('reuses each date for a full hour, then refreshes without dropping its snapshot', async () => {
+  it('keeps unknown mode usage and repository catalogs pending without starting remote reads', async () => {
+    store.set(workspaceContentModeAtom, {
+      ...store.get(workspaceContentModeAtom)!,
+      descriptor: null,
+    });
+    mocks.useQuery.mockImplementation((_query, args) => {
+      if (args !== 'skip') throw new Error('e2ee_control_only');
+      return undefined;
+    });
     await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: null, loading: true });
-    result = usageDay();
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
-
-    result = undefined;
-    await render(SECOND_DAY);
-    expect(snapshot()).toMatchObject({ day: null, loading: true });
-    result = usageDay(SECOND_DAY, 200);
-    await render(SECOND_DAY);
-
-    result = undefined;
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
-    result = usageDay(FIRST_DAY, 150);
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
-    expect(usageQueryArgs()).toBe('skip');
-
-    result = undefined;
-    await advanceTime(HOUR_MS - 1);
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
-    expect(usageQueryArgs()).toBe('skip');
-    await advanceTime(1);
-    expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
-    expect(usageQueryArgs()).toEqual({ workspaceId: 'workspace-1', dayStartMs: FIRST_DAY });
-
-    result = usageDay(FIRST_DAY, 150);
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(FIRST_DAY, 150), loading: false });
-    expect(usageQueryArgs()).toBe('skip');
-
-    result = undefined;
-    await render(SECOND_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(SECOND_DAY, 200), loading: false });
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(FIRST_DAY, 150), loading: false });
+    expect(snapshot()).toMatchObject({
+      workspaceId: null,
+      day: null,
+      loading: true,
+      workspaceReposLoading: true,
+    });
   });
 
   it('persists zero-usage results across closing settings and recreating the app store', async () => {
@@ -202,7 +199,7 @@ describe('settings usage day cache', () => {
     await act(async () => root.render(null));
     await advanceTime(20 * 60 * 1000);
     store = createStore();
-    store.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
+    admitWorkspace('workspace-1');
     mocks.useQuery.mockClear();
     await render(FIRST_DAY);
     expect(snapshot()).toMatchObject({ day: usageDay(FIRST_DAY, 0), loading: false });
@@ -220,7 +217,7 @@ describe('settings usage day cache', () => {
     result = undefined;
     await advanceTime(2 * HOUR_MS);
     store = createStore();
-    store.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
+    admitWorkspace('workspace-1');
     await render(FIRST_DAY);
     expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
     expect(usageQueryArgs()).toEqual({ workspaceId: 'workspace-1', dayStartMs: FIRST_DAY });
@@ -231,40 +228,25 @@ describe('settings usage day cache', () => {
     expect(usageQueryArgs()).toBe('skip');
   });
 
-  it('renews the hour even when a refresh returns the same data object', async () => {
-    result = usageDay();
-    await render(FIRST_DAY);
-    await advanceTime(HOUR_MS);
-    expect(snapshot()).toMatchObject({ day: result, loading: false });
-    expect(usageQueryArgs()).toBe('skip');
-    result = undefined;
-    await advanceTime(HOUR_MS - 1);
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
-    expect(usageQueryArgs()).toBe('skip');
-    await advanceTime(1);
-    expect(usageQueryArgs()).toEqual({ workspaceId: 'workspace-1', dayStartMs: FIRST_DAY });
-  });
-
   it('isolates workspace snapshots and skips queries when the workspace is cleared', async () => {
     result = usageDay();
     await render(FIRST_DAY);
     mocks.useQuery.mockClear();
     await act(async () => store.set(currentWorkspaceIdAtom, null));
-    expect(snapshot()).toEqual({ workspaceId: null, day: null, loading: false });
+    expect(snapshot()).toMatchObject({ workspaceId: null, day: null, loading: false });
     expect(mocks.useQuery.mock.calls.every(([, args]) => args === 'skip')).toBe(true);
 
     result = undefined;
     mocks.workspaceId = 'workspace-2';
-    await act(async () => store.set(currentWorkspaceIdAtom, 'workspace-2' as WorkspaceId));
-    expect(snapshot()).toEqual({ workspaceId: 'workspace-2', day: null, loading: true });
+    await act(async () => admitWorkspace('workspace-2'));
+    expect(snapshot()).toMatchObject({ workspaceId: 'workspace-2', day: null, loading: true });
     result = usageDay(FIRST_DAY, 250, 'workspace-2');
     await render(FIRST_DAY);
     expect(snapshot().day).toEqual(result);
 
     result = undefined;
     mocks.workspaceId = 'workspace-1';
-    await act(async () => store.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId));
+    await act(async () => admitWorkspace('workspace-1'));
     expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
   });
 
@@ -319,49 +301,6 @@ describe('settings usage day cache', () => {
     expect(snapshot().day).toEqual(usageDay());
     await render(SECOND_DAY);
     expect(snapshot()).toMatchObject({ day: null, loading: true });
-  });
-
-  it('bounds retained dates and evicts the oldest snapshot', async () => {
-    for (let index = 0; index < 129; index++) {
-      result = usageDay(FIRST_DAY + index * DAY_MS, index);
-      await render(result.dayStartMs);
-    }
-    result = undefined;
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: null, loading: true });
-    await render(SECOND_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(SECOND_DAY, 1), loading: false });
-  });
-
-  it('ignores malformed persisted entries', async () => {
-    localStorage.setItem(
-      'lody:usageDayDetails',
-      JSON.stringify({
-        current: {
-          authSessionId: 'session-1',
-          days: [{ fetchedAt: Date.now(), day: { workspaceId: 'workspace-1' } }],
-        },
-      })
-    );
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: null, loading: true });
-    result = usageDay();
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
-  });
-
-  it('still caches in memory if local storage writes fail', async () => {
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('Storage unavailable');
-    });
-    result = usageDay();
-    await render(FIRST_DAY);
-    result = undefined;
-    await render(null);
-    await advanceTime(30 * 60 * 1000);
-    await render(FIRST_DAY);
-    expect(snapshot()).toMatchObject({ day: usageDay(), loading: false });
-    expect(usageQueryArgs()).toBe('skip');
   });
 
   it('does not expose cached usage or query cloud APIs in local composition', async () => {

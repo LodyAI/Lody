@@ -2,101 +2,70 @@ import { describe, expect, it } from 'vitest';
 import { SessionStatusFactory } from '@lody/shared';
 
 import {
-  resolveImageGenerationStatusWrite,
+  resolveImageGenerationPresencePhase,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
 
-describe('resolveImageGenerationStatusWrite', () => {
-  it('marks image generation while active presence is live', () => {
+describe('resolveImageGenerationPresencePhase', () => {
+  it('does not retarget missing, initializing, or permission presence', () => {
     expect(
-      resolveImageGenerationStatusWrite({
+      resolveImageGenerationPresencePhase({
         hasActiveImageGeneration: true,
-        hasActivePresence: true,
-        status: SessionStatusFactory.running(),
-      })
-    ).toEqual(SessionStatusFactory.running('image_generation'));
-  });
-
-  it('never writes a working status without active presence', () => {
-    // The status chain rides on ACP events and can drain after the turn scope
-    // released active presence; meta must not stay stuck non-idle.
-    expect(
-      resolveImageGenerationStatusWrite({
-        hasActiveImageGeneration: true,
-        hasActivePresence: false,
-        status: SessionStatusFactory.running(),
+        current: null,
       })
     ).toBeNull();
     expect(
-      resolveImageGenerationStatusWrite({
-        hasActiveImageGeneration: false,
-        hasActivePresence: false,
-        status: SessionStatusFactory.running('image_generation'),
+      resolveImageGenerationPresencePhase({
+        hasActiveImageGeneration: true,
+        current: SessionStatusFactory.initializing(),
+      })
+    ).toBeNull();
+    expect(
+      resolveImageGenerationPresencePhase({
+        hasActiveImageGeneration: true,
+        current: SessionStatusFactory.requestPermission(),
       })
     ).toBeNull();
   });
 
-  it('does not override a permission request', () => {
+  it('does not retarget finalizing presence', () => {
     expect(
-      resolveImageGenerationStatusWrite({
+      resolveImageGenerationPresencePhase({
         hasActiveImageGeneration: true,
-        hasActivePresence: true,
-        status: SessionStatusFactory.requestPermission(),
+        current: { type: 'running', phase: 'finalizing' },
+      })
+    ).toBeNull();
+    expect(
+      resolveImageGenerationPresencePhase({
+        hasActiveImageGeneration: false,
+        current: { type: 'running', phase: 'finalizing' },
       })
     ).toBeNull();
   });
 
-  it('does not resurrect an idle session while finalization still owns presence', () => {
+  it('restores thinking only from the image-generation activity', () => {
     expect(
-      resolveImageGenerationStatusWrite({
-        hasActiveImageGeneration: true,
-        hasActivePresence: true,
-        status: SessionStatusFactory.idle(),
-      })
-    ).toBeNull();
-  });
-
-  it('restores plain running only from the image-generation activity', () => {
-    expect(
-      resolveImageGenerationStatusWrite({
+      resolveImageGenerationPresencePhase({
         hasActiveImageGeneration: false,
-        hasActivePresence: true,
-        status: SessionStatusFactory.running('image_generation'),
+        current: SessionStatusFactory.running('image_generation'),
       })
-    ).toEqual(SessionStatusFactory.running());
+    ).toBe('thinking');
     expect(
-      resolveImageGenerationStatusWrite({
+      resolveImageGenerationPresencePhase({
         hasActiveImageGeneration: false,
-        hasActivePresence: true,
-        status: SessionStatusFactory.running(),
+        current: SessionStatusFactory.running(),
       })
     ).toBeNull();
     expect(
-      resolveImageGenerationStatusWrite({
+      resolveImageGenerationPresencePhase({
         hasActiveImageGeneration: false,
-        hasActivePresence: true,
-        status: SessionStatusFactory.idle(),
+        current: SessionStatusFactory.idle(),
       })
     ).toBeNull();
   });
 });
 
 describe('shouldRestoreRunningAfterPermission', () => {
-  it('restores running while active presence is live', () => {
-    expect(
-      shouldRestoreRunningAfterPermission({
-        hasActivePresence: true,
-        status: SessionStatusFactory.requestPermission(),
-      })
-    ).toBe(true);
-    expect(
-      shouldRestoreRunningAfterPermission({
-        hasActivePresence: true,
-        status: SessionStatusFactory.running(),
-      })
-    ).toBe(true);
-  });
-
   it('never restores running without active presence', () => {
     // Permission resolution arrives via a mirror subscription and can fire
     // after the turn ended (e.g. cancelled or crashed while waiting).
@@ -127,14 +96,5 @@ describe('shouldRestoreRunningAfterPermission', () => {
         status: undefined,
       })
     ).toBe(false);
-  });
-
-  it('defaults to restoring when the doc cannot report a status', () => {
-    expect(
-      shouldRestoreRunningAfterPermission({
-        hasActivePresence: true,
-        status: 'unknown',
-      })
-    ).toBe(true);
   });
 });

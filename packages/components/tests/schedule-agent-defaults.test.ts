@@ -73,12 +73,18 @@ describe('a new schedule starts from the chat landing’s choices', () => {
     agentDefaultsCache.set('reviewer', {
       modeId: null,
       modelId: 'sonnet',
-      configOptionValues: { mode: 'auto', verbose: true, api_key: 'secret' },
+      configOptionValues: {
+        mode: 'auto',
+        verbose: true,
+        plan_mode: false,
+        select_flag: 'false',
+        api_key: 'secret',
+      },
     });
     expect(seedScheduleAgentRunRef(config, host)).toEqual({
       agentConfigId: 'reviewer',
       modelId: 'sonnet',
-      configOptionValues: { mode: 'auto', verbose: 'true' },
+      configOptionValues: { mode: 'auto', verbose: true, plan_mode: false, select_flag: 'false' },
     });
   });
 

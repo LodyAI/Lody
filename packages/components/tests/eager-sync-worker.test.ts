@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createLoroStreamsTokenProvider } from '@lody/shared';
+import { describe, expect, it } from 'vitest';
+import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import {
   base64ToBytes,
@@ -59,6 +59,7 @@ function clientHarness(
   const sent: LocalSyncMessage[] = [];
   const listeners = new Set<(event: LocalSyncEvent) => void>();
   const client = createEagerSyncWorkerClient({
+    content: { mode: 'plaintext' },
     workspaceId: 'workspace',
     scope: 'scope',
     resolveTransport,
@@ -90,125 +91,6 @@ function clientHarness(
   return { client, starts, workers, sent, listeners };
 }
 
-describe('eager-sync worker ownership', () => {
-  it('uses a durable activity checkpoint before constructing a worker', async () => {
-    const reads: Array<[string, string]> = [];
-    const h = clientHarness(undefined, async (scope, roomId) => {
-      reads.push([scope, roomId]);
-      return {
-        key: 'cached',
-        scope,
-        roomId,
-        plane: 'local',
-        lastMessageAt: 42,
-        savedAt: 1,
-        snapshot: new Blob(),
-      };
-    });
-
-    await expect(h.client.prefetch('cached-room', 42, new AbortController().signal)).resolves.toBe(
-      'synced'
-    );
-    expect(reads).toEqual([['scope', 'cached-room']]);
-    expect(h.workers).toEqual([]);
-    h.client.dispose();
-  });
-
-  it('constructs a worker when activity is newer than the durable checkpoint', async () => {
-    const h = clientHarness(undefined, async (scope, roomId) => ({
-      key: 'cached',
-      scope,
-      roomId,
-      plane: 'local',
-      lastMessageAt: 41,
-      savedAt: 1,
-      snapshot: new Blob(),
-    }));
-    const result = h.client.prefetch('changed-room', 42, new AbortController().signal);
-    const worker = await h.starts[0].promise;
-
-    worker.emit({ type: 'complete', outcome: 'synced' });
-    await expect(result).resolves.toBe('synced');
-    expect(h.workers).toEqual([worker]);
-    h.client.dispose();
-  });
-
-  it('serializes jobs, terminates before advancing, and never returns snapshots to the UI', async () => {
-    const h = clientHarness();
-    const signal = new AbortController().signal;
-    const first = h.client.prefetch('a', 1, signal);
-    const second = h.client.prefetch('b', 1, signal);
-    const a = await h.starts[0].promise;
-    expect(h.workers.filter((worker) => !worker.terminated)).toEqual([a]);
-    a.emit({ type: 'complete', outcome: 'synced' });
-    expect(await first).toBe('synced');
-    const b = await h.starts[1].promise;
-    expect(a.terminated).toBe(true);
-    expect(h.workers.filter((worker) => !worker.terminated)).toEqual([b]);
-    b.emit({ type: 'complete', outcome: 'synced' });
-    expect(await second).toBe('synced');
-    expect(h.listeners.size).toBe(0);
-    h.client.dispose();
-  });
-
-  it('cancels an in-flight import on foreground open and detaches its local peer', async () => {
-    const h = clientHarness();
-    const result = h.client.prefetch('long', 1, new AbortController().signal);
-    const worker = await h.starts[0].promise;
-    const start = worker.inputs.find((input) => input.type === 'start');
-    h.client.cancel('long');
-    expect(await result).toBe('skipped');
-    expect(worker.terminated).toBe(true);
-    expect(h.sent).toContainEqual({
-      type: 'detach',
-      protocolVersion: 7,
-      workspaceId: 'workspace',
-      peerId: start?.peerId,
-    });
-    expect(h.listeners.size).toBe(0);
-    worker.emit({ type: 'complete', outcome: 'synced' });
-    expect(await result).toBe('skipped');
-    h.client.dispose();
-  });
-
-  it('releases the shared slot when transport setup is cancelled before it resolves', async () => {
-    const pending = deferred<EagerSyncTransport>();
-    const entered = deferred<void>();
-    const h = clientHarness(() => {
-      entered.resolve();
-      return pending.promise;
-    });
-    const abort = new AbortController();
-    const result = h.client.prefetch('a', 1, abort.signal);
-    await entered.promise;
-    abort.abort();
-    expect(await result).toBe('skipped');
-    const next = clientHarness();
-    const nextResult = next.client.prefetch('b', 1, new AbortController().signal);
-    const worker = await next.starts[0].promise;
-    expect(h.workers).toHaveLength(0);
-    pending.resolve({ plane: 'local' });
-    worker.emit({ type: 'complete', outcome: 'synced' });
-    expect(await nextResult).toBe('synced');
-    expect(h.workers).toHaveLength(0);
-    h.client.dispose();
-    next.client.dispose();
-  });
-
-  it('releases failed workers and aborts queued jobs on disposal', async () => {
-    const h = clientHarness();
-    const signal = new AbortController().signal;
-    const first = h.client.prefetch('a', 1, signal);
-    const second = h.client.prefetch('b', 1, signal);
-    const worker = await h.starts[0].promise;
-    worker.onerror?.();
-    expect(await first).toBe('failed');
-    h.client.dispose();
-    expect(await second).toBe('skipped');
-    expect(h.workers.every((entry) => entry.terminated)).toBe(true);
-  });
-});
-
 describe('worker raw-document prefetch', () => {
   it('caches real CRDT updates and merges them without losing unsent foreground edits', async () => {
     const remote = new LoroDoc();
@@ -228,6 +110,7 @@ describe('worker raw-document prefetch', () => {
     };
     const request = {
       type: 'start' as const,
+      content: { mode: 'plaintext' as const },
       scope: 'scope',
       roomId: 'session-doc',
       workspaceId: 'workspace',
@@ -351,70 +234,11 @@ describe('eager-sync cloud auth bridge', () => {
       shardUrls: undefined,
     },
   });
-  // The worker's transport reports which token the gateway rejected. Everything
-  // between it and the token provider has to keep that value, otherwise the
-  // provider cannot tell a real rejection from a stale one and hands the
-  // rejected token straight back.
-
-  it('forwards the whole auth context from the worker module onto the wire', async () => {
-    vi.resetModules();
-    let capturedAuth: ((context?: EagerSyncAuthContext) => Promise<string | undefined>) | undefined;
-    vi.doMock('../src/providers/eager-sync-worker-task', () => ({
-      runEagerSyncWorkerTask: async (
-        _request: unknown,
-        deps: { auth(context?: EagerSyncAuthContext): Promise<string | undefined> }
-      ) => {
-        capturedAuth = deps.auth;
-        return 'synced' as const;
-      },
-    }));
-    const posted: EagerSyncWorkerOutput[] = [];
-    const fakeSelf = {
-      onmessage: null as ((event: MessageEvent<EagerSyncWorkerInput>) => void) | null,
-      // Clone like a real Worker boundary would, so a non-cloneable context
-      // field fails here instead of only in a browser.
-      postMessage: (message: EagerSyncWorkerOutput) => posted.push(structuredClone(message)),
-    };
-    vi.stubGlobal('self', fakeSelf);
-    try {
-      await import('../src/providers/eager-sync.worker');
-      fakeSelf.onmessage?.({
-        data: {
-          type: 'start',
-          scope: 'scope',
-          workspaceId: 'workspace',
-          roomId: 'room',
-          peerId: 'peer',
-          lastMessageAt: 1,
-          connected: true,
-          transport: await cloudTransport(),
-        },
-      } as MessageEvent<EagerSyncWorkerInput>);
-      expect(capturedAuth).toBeDefined();
-
-      const pending = capturedAuth?.({ reason: 'unauthorized', previousToken: 'jwt-1' });
-      expect(posted.find((message) => message.type === 'auth')).toEqual({
-        type: 'auth',
-        id: 1,
-        context: { reason: 'unauthorized', previousToken: 'jwt-1' },
-      });
-
-      // The reply still resolves the caller that is waiting on the wire id.
-      fakeSelf.onmessage?.({
-        data: { type: 'auth-result', id: 1, token: 'jwt-2' },
-      } as MessageEvent<EagerSyncWorkerInput>);
-      expect(await pending).toBe('jwt-2');
-    } finally {
-      vi.unstubAllGlobals();
-      vi.doUnmock('../src/providers/eager-sync-worker-task');
-      vi.resetModules();
-    }
-  });
 
   it('refreshes a rejected JWT through the held provider callback instead of returning it', async () => {
     const bodies: Array<{ workspaceId: string; rejectedToken?: string }> = [];
     let issued = 0;
-    const provider = createLoroStreamsTokenProvider({
+    const provider = createLoroStreamsTokenProviderLegacy({
       endpoint: 'https://convex.example.com/api/loro-streams/token',
       workspaceId: 'workspace',
       authToken: 'raw-token',

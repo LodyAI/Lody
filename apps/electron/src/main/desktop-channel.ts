@@ -1,4 +1,5 @@
 import type { InstallationProfile } from '@lody/shared/node/installation-profile'
+import { LODY_PROTOCOLS } from '../../../../packages/shared/src/session-link-schemes.mjs'
 
 export type DesktopProfile = Omit<
   InstallationProfile,
@@ -10,6 +11,15 @@ export type DesktopProfile = Omit<
   desktopUserDataName: string | null
   desktopIpcNamespace: string
   releaseChannel: 'local' | 'stable' | 'staging' | 'nightly'
+}
+
+/** The shared lody scheme is a resource entry, never a new login's return address. */
+export function getDesktopCallbackProtocol(
+  profile: Pick<DesktopProfile, 'desktopProtocol'>
+): string {
+  return profile.desktopProtocol === LODY_PROTOCOLS.resource
+    ? LODY_PROTOCOLS.stable
+    : profile.desktopProtocol
 }
 
 /** Desktop identity is separate from the CLI's shared installation namespace. */

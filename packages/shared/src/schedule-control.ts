@@ -4,7 +4,7 @@ import {
   ScheduleProposalRuleSchema,
   ScheduleProposalTargetSchema,
 } from './message-schemas';
-import { ScheduleDefinitionSchema } from './schedule-types';
+import { ScheduleDefinitionSchema, ScheduledMessageSchema } from './schedule-types';
 
 const id = z
   .string()
@@ -22,7 +22,7 @@ export const ScheduleDraftSchema = ScheduleDefinitionSchema.pick({
   destination: true,
   retryPolicy: true,
 })
-  .extend({ prompt: z.string().min(1).max(32768) })
+  .extend({ prompt: z.string().max(32768), message: ScheduledMessageSchema.optional() })
   .strict();
 
 export const ScheduleCommandSchema = z.discriminatedUnion('action', [

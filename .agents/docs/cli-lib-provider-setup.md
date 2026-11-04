@@ -14,14 +14,13 @@ runtime, auth, and live-probe work is incomplete, and only the target CLI may pu
 it — by writing `agentConfig` and deleting `providerSetup` in one commit. Setup rows
 with executable runtime overrides are invalid.
 
-Only managed builtins enter binary status/download handling. Dimcode installs its
-pinned npm package during the live npx probe; it has no managed-artifact phase.
-Bub is user-installed, so
-its queued setup advances directly to the live ACP probe. A missing or broken `bub`
-command leaves a failed, retryable setup row and never publishes an `agentConfig`.
-Missing-executable and missing-ACP-plugin signatures are classified as
-`runtime-unavailable`, allowing the UI to offer the copyable Bub ACP preset installer;
-other startup/protocol failures remain `verification-failed`.
+Only managed builtins enter binary status/download handling. Bub and Dimcode use
+user-installed commands, so their queued setup advances directly to the live ACP probe.
+Missing-executable or missing-ACP support leaves a failed, retryable setup row with
+`runtime-unavailable` and never publishes an `agentConfig`. The UI offers the Bub ACP
+preset installer or a copyable `npm install -g dimcode` command. Other startup/protocol failures
+remain `verification-failed`. Dimcode versions belong to the user; its builtin launch
+disables upstream auto-update, and a manual refresh re-probes capabilities after upgrades.
 
 Bub's configuration dialog can explicitly start this queue with Test and observe
 its setup row in place, including installation guidance, retry, and deletion.
@@ -45,6 +44,9 @@ trigger the same queue. Never make local mode wait on `firstSyncedWithRemote`.
 
 The durable command subscription that delivers these rows is described in
 [`apps/cli/src/lib/loro/AGENTS.md`](../../apps/cli/src/lib/loro/AGENTS.md).
+
+Unreadable profile records are skipped with one warning per file and scanned again next time.
+A failed full scan warns and leaves the setup queue running; targeted account validation remains strict.
 
 ## Secrets
 

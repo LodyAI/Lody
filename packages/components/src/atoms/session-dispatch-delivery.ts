@@ -1,8 +1,8 @@
 import { atom } from 'jotai';
 
 /**
- * User turns acked by the machine over the `session/dispatch-turn` RPC fast
- * path, keyed `${sessionId}:${userTurnId}`.
+ * User turns acked by the machine over the `session/dispatch-turn` fast path
+ * or Roost immutable owner acceptance, keyed `${sessionId}:${userTurnId}`.
  *
  * Transient client-side delivery overlay: the entry's durable CRDT status
  * stays `pending` until the machine can see the history entry, so without

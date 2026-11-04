@@ -31,7 +31,8 @@ export const useWorktreeManagerTestFixture = (
   let originalLocksDir: string | undefined;
 
   beforeEach(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-worktree-test-'));
+    // Match the canonical paths returned by Git and Project worktree preparation.
+    testDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'lody-worktree-test-')));
     const repoId = `test-repo-${Date.now()}` as RepoId;
 
     originalLocksDir = process.env.LODY_LOCKS_DIR;

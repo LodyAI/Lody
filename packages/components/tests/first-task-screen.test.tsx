@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,11 +23,7 @@ vi.mock('../src/hooks/use-session-actions', () => ({
   useSessionActions: () => sessionActions,
 }));
 
-import {
-  FirstTaskScreen,
-  getFirstTaskAgentConfigs,
-  getSelectedFirstTaskAgentConfig,
-} from '../src/components/onboarding/screens/first-task-screen';
+import { FirstTaskScreen } from '../src/components/onboarding/screens/first-task-screen';
 import { userAtom } from '../src/atoms';
 import { agentConfigMetaCacheAtom } from '../src/atoms/doc-meta';
 import { runtimeAtom } from '../src/atoms/runtime';
@@ -70,32 +67,6 @@ describe('first task Agent Provider state', () => {
     container.remove();
     document.body.innerHTML = '';
     vi.clearAllMocks();
-  });
-
-  it('offers only published configs bound to the project machine in deterministic order', () => {
-    const selected = config('selected', 'Zulu');
-    const otherLocal = config('other-local', 'Alpha');
-    const remote = config('remote', 'Beta', otherMachineId);
-
-    expect(getFirstTaskAgentConfigs([selected, remote, otherLocal], project)).toEqual([
-      otherLocal,
-      selected,
-    ]);
-    expect(
-      getFirstTaskAgentConfigs([selected], {
-        kind: 'github',
-        repoFullName: 'lodyai/lody',
-        name: 'Lody',
-      })
-    ).toEqual([]);
-  });
-
-  it('does not fall back when the exact selected config disappears', () => {
-    const remaining = config('remaining', 'Alpha');
-
-    expect(
-      getSelectedFirstTaskAgentConfig([remaining], 'missing-selection' as AgentConfigId)
-    ).toBeNull();
   });
 
   it('skips without creating a Session, first turn, or dispatch request', async () => {

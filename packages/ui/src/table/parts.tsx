@@ -1,3 +1,4 @@
+import { nativeScrollbar } from '../scroll-area/surface';
 import * as stylex from '@stylexjs/stylex';
 import {
   createContext,
@@ -146,6 +147,7 @@ export const TableRoot = forwardRef<HTMLTableElement, TableRootProps>(function T
   ref
 ) {
   const scroller = stylex.props(
+    nativeScrollbar,
     surface.scroller,
     maxHeight != null && surface.scrollerBounded,
     maxHeight != null && scrollerHeight.maxHeight(maxHeight)

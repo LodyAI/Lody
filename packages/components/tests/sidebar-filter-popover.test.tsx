@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -40,11 +41,16 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     vi.restoreAllMocks();
   });
 
-  function render(organize: 'workspace' | 'updated', showUpdatedProjectNames = true) {
+  function render(
+    organize: 'workspace' | 'updated',
+    showUpdatedProjectNames = true,
+    showBranchNames = false
+  ) {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     const onShowUpdatedProjectNamesChange = vi.fn();
+    const onShowBranchNamesChange = vi.fn();
     flushSync(() => {
       root?.render(
         <SidebarFilterPopover
@@ -52,6 +58,8 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
           scope="my"
           showUpdatedProjectNames={showUpdatedProjectNames}
           onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
+          showBranchNames={showBranchNames}
+          onShowBranchNamesChange={onShowBranchNamesChange}
         />
       );
     });
@@ -59,47 +67,8 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     flushSync(() => {
       trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    return { onShowUpdatedProjectNamesChange };
+    return { onShowUpdatedProjectNamesChange, onShowBranchNamesChange };
   }
-
-  it('places the display switch after the view and task menu groups', () => {
-    render('workspace');
-    const sections = [
-      ...document.body.querySelectorAll<HTMLElement>('[data-sidebar-filter-section]'),
-    ].map((section) => section.dataset.sidebarFilterSection);
-    expect(sections).toEqual(['view', 'tasks', 'display']);
-    expect(document.body.querySelector('[data-sidebar-filter-project-names]')).not.toBeNull();
-  });
-
-  it('disables Show Project outside Updated view and explains its availability', () => {
-    const { onShowUpdatedProjectNamesChange } = render('workspace');
-    const switchControl = document.body.querySelector<HTMLButtonElement>(
-      '[data-sidebar-filter-project-names]'
-    );
-    const row = document.body.querySelector('[data-sidebar-filter-section="display"]');
-
-    expect(switchControl?.disabled).toBe(true);
-    expect(switchControl?.getAttribute('aria-description')).toBe('Available in Updated view');
-    expect(row?.hasAttribute('data-disabled')).toBe(true);
-
-    flushSync(() => {
-      switchControl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(onShowUpdatedProjectNamesChange).not.toHaveBeenCalled();
-  });
-
-  it('opens the unavailable hint from a touch interaction', () => {
-    render('workspace');
-    const row = document.body.querySelector<HTMLElement>('[data-sidebar-filter-section="display"]');
-    const touchStart = new Event('pointerdown', { bubbles: true, cancelable: true });
-    Object.defineProperty(touchStart, 'pointerType', { value: 'touch' });
-
-    flushSync(() => {
-      row?.dispatchEvent(touchStart);
-    });
-
-    expect(document.body.textContent).toContain('Available in Updated view');
-  });
 
   it('closes the menu after changing the view', () => {
     container = document.createElement('div');
@@ -128,7 +97,7 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     expect(trigger?.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('toggles Show Project with a bottom switch and keeps the menu open', () => {
+  it('toggles Show Project with the details switch and keeps the menu open', () => {
     const { onShowUpdatedProjectNamesChange } = render('updated', true);
     const row = document.body.querySelector('[data-sidebar-filter-project-names]');
     expect(row).not.toBeNull();

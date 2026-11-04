@@ -12,6 +12,8 @@ import type {
   GitHubUser,
 } from '@lody/shared';
 import { PrTabView, type PrTabViewData } from '@/components/sessions/pr-tab-view';
+import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
+import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
 import type { PrCommitSelection } from '@/lib/github-pr-diff';
 
@@ -416,6 +418,31 @@ export const OpenCiPassed: Story = {
   },
 };
 
+export const Stack: Story = {
+  args: {
+    repoFullName: 'loro-dev/lody',
+    prNumber: 42,
+    state: 'ready',
+    data: {
+      ...baseData,
+      pullRequest: {
+        ...basePr,
+        stack: {
+          number: 7,
+          position: 2,
+          size: 3,
+          baseRef: 'main',
+          pullRequests: [
+            { number: 41, title: 'Add the data model', state: 'closed', draft: false, merged: true },
+            { number: 42, title: 'Add the API endpoints', state: 'open', draft: false, merged: false },
+            { number: 43, title: 'Build the settings UI', state: 'open', draft: true, merged: false },
+          ],
+        },
+      },
+    },
+  },
+};
+
 export const Changes: Story = {
   args: {
     repoFullName: 'loro-dev/lody',
@@ -538,6 +565,16 @@ export const LongBody: Story = {
       },
     },
     ...storyCallbacks,
+  },
+};
+
+export const PublicReadOnly: Story = {
+  args: {
+    repoFullName: 'owner/public-repo',
+    prNumber: 42,
+    state: 'ready',
+    data: baseData,
+    onRefresh: async () => {},
   },
 };
 
@@ -899,6 +936,27 @@ export const MobileWithBackButton: Story = {
       >
         <Story />
       </div>
+    ),
+  ],
+};
+
+/** A native phone's PR drawer owns its keyboard inset outside the workspace root. */
+export const MobileNativeKeyboardDrawer: Story = {
+  args: MobileWithBackButton.args,
+  decorators: [
+    (Story) => (
+      <Drawer direction="right" open repositionInputs>
+        <DrawerContent
+          nativeKeyboardInset
+          className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+          aria-describedby={undefined}
+        >
+          <DrawerTitle className="sr-only">Pull request</DrawerTitle>
+          <VaulDrawerBody topInset="0px">
+            <Story />
+          </VaulDrawerBody>
+        </DrawerContent>
+      </Drawer>
     ),
   ],
 };

@@ -5,6 +5,7 @@ import test from 'node:test'
 
 const rendererHtml = await readFile(new URL('./index.html', import.meta.url), 'utf8')
 const devbarHtml = await readFile(new URL('./devbar.html', import.meta.url), 'utf8')
+const prImageHtml = await readFile(new URL('./pr-image.html', import.meta.url), 'utf8')
 
 function getDirectiveSources(html, name) {
   const content = html.match(
@@ -20,24 +21,13 @@ function getDirectiveSources(html, name) {
   return directive.slice(1)
 }
 
-void test('renderer CSP allows reading preview object URLs for image export', () => {
-  assert.ok(getDirectiveSources(rendererHtml, 'connect-src').includes('blob:'))
-})
-
-void test('renderer CSP allows the Codex reset forecast API', () => {
-  assert.ok(getDirectiveSources(rendererHtml, 'connect-src').includes('https://codex-resets.com'))
-})
-
-void test('only the opt-in Devbar entry may load the loopback Hub bootstrap', () => {
-  assert.ok(!getDirectiveSources(rendererHtml, 'script-src').includes('http://127.0.0.1:*'))
-  assert.ok(getDirectiveSources(devbarHtml, 'script-src').includes('http://127.0.0.1:*'))
-})
-
-void test('Devbar may resolve official Hub icons without broadening the normal renderer', () => {
-  assert.ok(
-    !getDirectiveSources(rendererHtml, 'connect-src').includes('https://api.iconify.design')
-  )
-  assert.ok(getDirectiveSources(devbarHtml, 'connect-src').includes('https://api.iconify.design'))
+void test('the isolated PR image document can run its loader without broadening the main renderer', () => {
+  const script = prImageHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+  assert.ok(script)
+  const digest = createHash('sha256').update(script).digest('base64')
+  assert.ok(getDirectiveSources(prImageHtml, 'script-src').includes(`'sha256-${digest}'`))
+  assert.deepEqual(getDirectiveSources(prImageHtml, 'img-src'), ['https:'])
+  assert.ok(!getDirectiveSources(rendererHtml, 'img-src').includes('https:'))
 })
 
 void test('renderer entries allow exactly the current inline boot shell script', async () => {

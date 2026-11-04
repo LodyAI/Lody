@@ -58,6 +58,13 @@ export const SCHEDULE_WEEKDAYS: readonly ScheduleWeekday[] = [0, 1, 2, 3, 4, 5, 
 export const SCHEDULE_MINUTE_STEPS = [5, 10, 15, 20, 30] as const;
 /** Hour steps offered for "every N hours"; all divide the day evenly. */
 export const SCHEDULE_HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12] as const;
+/**
+ * Bounds for a typed ("Custom") step. A step that does not divide the clock is
+ * stored as an anchored interval by `recurrenceToTrigger`; the caps only keep
+ * the field to sizes the other rules do not already name better (a day, a week).
+ */
+export const SCHEDULE_CUSTOM_MINUTES_MAX = 1440;
+export const SCHEDULE_CUSTOM_HOURS_MAX = 168;
 
 const CRON_DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 const WORKWEEK: readonly ScheduleWeekday[] = [1, 2, 3, 4, 5];
@@ -144,8 +151,29 @@ function sameNumberSet(a: readonly number[], b: readonly number[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-export function getDeviceTimeZone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+/**
+ * Node can know the local UTC offset without exposing an Intl zone name when
+ * TZ uses a zoneinfo path or a fixed POSIX zone (for example HKT-8). Daemon
+ * callers supply that hint; browser callers continue to use Intl alone.
+ */
+export function getDeviceTimeZone(timeZoneHint?: string): string {
+  const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (detected) return detected;
+  if (timeZoneHint) {
+    const hint = timeZoneHint.replace(/^:/, '');
+    const zone = hint.replace(/^.*\/zoneinfo\/(?:posix\/|right\/)?/, '');
+    // POSIX and Etc/GMT both use the inverse sign: HKT-8 means UTC+08:00.
+    // Only accept fixed whole-hour rules; never freeze a DST rule to today's offset.
+    const fixed = /^[A-Za-z]{3,}([+-]?\d{1,2})(?::00(?::00)?)?$/.exec(zone);
+    const hours = fixed ? Number(fixed[1]) : undefined;
+    const candidate = hours === undefined ? zone : `Etc/GMT${hours >= 0 ? '+' : ''}${hours}`;
+    try {
+      return new Intl.DateTimeFormat('en', { timeZone: candidate }).resolvedOptions().timeZone;
+    } catch {
+      // Preserve the existing fallback for hints Intl cannot represent.
+    }
+  }
+  return 'UTC';
 }
 
 /** Interpretation of a timed trigger a person can read and edit field by field. */
@@ -387,8 +415,9 @@ export function scheduleRecurrenceTimeZone(recurrence: ScheduleRecurrence): stri
 /**
  * A proposed rule as the editor's recurrence, or `null` for `manual`.
  *
- * The proposal leaves the zone to the person's device unless the agent was told
- * one; steps take the same zone so `0 *​/6` stays aligned to that clock.
+ * The caller supplies the execution machine's zone (viewer zone for older
+ * machines). An explicit user-requested zone overrides it; steps take the
+ * machine zone so `0 *​/6` stays aligned to that clock.
  */
 export function scheduleProposalRuleToRecurrence(
   rule: ScheduleProposalRule,

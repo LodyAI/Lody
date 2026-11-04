@@ -9,7 +9,7 @@ this page is the full text of the rules summarised there.
 
 - Desktop top bar is ONE merged row (no repo-title header row): `SessionTabBar`
   with `leftSlot` (sidebar expand + macOS traffic-light inset via `className`)
-  and `rightSlot` = a `SessionChatInterface headerVariant="toolbar"` instance
+  and `rightSlot` receives a portal from the existing root chat controller
   (IDE launcher / Browser / "…" menu / sidebar toggle — no title, no PR badge).
   All macOS traffic-light insets (sidebar `h-11 pt-[2px]` header, this bar's
   `pl-[4.5rem]`, `reserveMacTrafficLightInset`, landing `left-[96px]`, and the
@@ -27,8 +27,10 @@ this page is the full text of the rules summarised there.
     navigation, project, repository and flat session labels share a +37px text
     column (see the [baseline correction](../notes/implemented/bug-fix/2026-09-30-macos-traffic-light-baseline.md)).
     On Windows the native title bar is
-    hidden (`titleBarStyle: 'hidden'` + theme-tinted `titleBarOverlay`, see
-    `apps/electron/src/main/window-theme.ts`): the OS draws the caption buttons
+    hidden (`titleBarStyle: 'hidden'` + transparent `titleBarOverlay` with
+    theme-tinted glyphs, see `apps/electron/src/main/window-theme.ts`). The
+    transparent background lets renderer Modal/Dialog backdrops dim the area
+    beneath the native controls. The OS draws the caption buttons
     in a 36px strip (centerline y=18) OVER the window-top rows. Rows reaching
     the right edge pad `pr-[144px]` (`useWindowsCaptionPadClass`, ~3 × 46px
     buttons), and `useWindowsCaptionRowPadClass` (`pb-2`, or `pb-[7px]` with a
@@ -43,7 +45,9 @@ this page is the full text of the rules summarised there.
     A lone parent Session tab is not draggable; enable tab drag only once a
     second visible tab exists. On desktop, Cmd/Ctrl+W is the native Close
     accelerator. The default-off Developer Mode beta can select its close scope
-    from pointer and keyboard intent; the [semantic targeting Spec](../../specs/semantic-action-targeting.md)
+    from persistent explicit interactions, with hover dwell only before explicit
+    ownership. Weak selection cannot close the window while another close scope
+    is visible; the [semantic targeting Spec](../../specs/semantic-action-targeting.md)
     owns the experiment and empty-panel behavior. Session-detail registers a tab closer: focused side panel or
     conversation tab closes, including the parent when siblings remain. With only
     one conversation tab, the conversation region yields to window close without
@@ -140,7 +144,7 @@ this page is the full text of the rules summarised there.
     In a multi-member workspace, `SessionAccessControl` sits in the desktop toolbar
     before the "…" menu only while effective access is `Private`; Team and unresolved
     states stay hidden. Single-member workspaces do not resolve or pass sharing state.
-    Its menu action enters the existing parent-owned confirmation flow. Keep the full
+    Its popover's team action enters the existing parent-owned confirmation flow. Keep the full
     status/action in `SessionHeaderMenu` as the mobile/compact fallback.
     The "…" menu's `Change owner` submenu writes `SessionMeta.userId` — the OWNER
     field, which drives the sidebar My/Team split, the row author avatar, CLI
@@ -149,6 +153,12 @@ this page is the full text of the rules summarised there.
     must stay separate actions. Gated on `useWorkspaceMembers().isMultiMember`:
     a solo workspace has nobody to hand the session to, so no owner UI renders.
     Any member may transfer, mirroring task owner assignment.
+- Rename from the mobile menu, desktop toolbar and command uses
+  `handleRenameCurrentSession` and its shared `canRenameCurrentSession` check.
+  Metadata must match `activeTabSessionId` and be unarchived; mobile replacement
+  viewers suppress Rename while desktop side viewers do not. The ID match also
+  rejects a draft or pending child's display fallback to the parent. Opening the
+  existing dialog snapshots its target; saving does not re-read the active tab.
 - **The `?tab` search value is the single source of truth for the active
   conversation tab.** `session-detail.tsx` DERIVES the active tab from the
   route search (`resolveActiveSessionTab` in `lib/session-tab-url.ts`; drafts

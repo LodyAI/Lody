@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { recordBootRequestResult } from '@/lib/boot-request-failures';
 import { useAuthClient } from '../providers/convex-provider';
 import {
   readAuthBootstrapSnapshot,
@@ -52,7 +53,19 @@ function readAuthResponseError(value: unknown): unknown {
 
 export function useStableSessionInternal(options?: UseStableSessionOptions): StableSessionValue {
   const authClient = useAuthClient();
-  const { data, isPending, error, refetch } = authClient.useSession();
+  const session = authClient.useSession();
+  const { data, error, refetch } = session;
+  // A refetch that has not yet resolved a user is an unanswered check, not a
+  // "no user" answer. The Electron store clears `error` while it refetches, and
+  // a slow network (proxy at startup) can outlast the retry backoff and grace;
+  // reading that window as settled confirms sign-out and revokes the cookie.
+  const isPending =
+    session.isPending || (Boolean(session.isRefetching) && !hasAuthenticatedUser(data));
+  // Retryable failures never sign the person out; the recovery screen reads
+  // this record so a wait stuck on them can say what failed.
+  useEffect(() => {
+    recordBootRequestResult('session', error);
+  }, [error]);
   const maxRetries = options?.maxRetries ?? 2;
   const baseDelayMs = options?.baseDelayMs ?? 300;
   const maxDelayMs = options?.maxDelayMs ?? 3000;

@@ -38,12 +38,35 @@ live outside it.
 
 ## Nesting inside one rendered list
 
-Nesting is resolved inside a single rendered list, which is what keeps section
-boundaries intact: a pinned opener and an unpinned opened Session are in different
-arrays, so both stay top-level. The tree never hides a Session — a missing,
-cross-section, cross-group, cycling, or deeper-than-one-level opener degrades to a
-top-level row — and the preview cap counts top-level rows so a bucket's visible size
-does not depend on how deeply it happens to nest.
+Desktop section membership is resolved before nesting: `getPinnedSessionTreeIds`
+keeps a pinned opener and its visible opened-by descendants together in Pinned.
+Workspace and Updated exclude that same set, so rows never appear twice. This
+does not change descendants' own pin flags: unpinning an opener returns its tree
+to the ordinary list, while an independently pinned descendant keeps its subtree
+in Pinned. Missing or filtered openers do not pull otherwise visible rows into Pinned.
+Nesting is then resolved inside each rendered list. The tree never hides a Session — a missing,
+cross-section, cycling, or deeper-than-one-level opener degrades to a top-level
+row — and the preview cap counts top-level rows so a bucket's visible size does not
+depend on how deeply it happens to nest.
+
+Workspace mode groups rows by work context, so an opened Session often lives in
+another group than its opener: a Role dispatched from a Local Project to another
+Machine becomes a plain chat or a GitHub-repository Session. Before the groups build
+their trees, `placeWorkspaceSessionsWithOpeners` (`sessions/session-list-rows.ts`)
+moves each such row into the group of its topmost rendered ancestor, so the fan-out
+stays legible. The row leaves its own group, keeping every Session in exactly one
+place for keyboard navigation and counts; it travels with its opener when that group
+is folded. Only rendered groups take part, so an opener in a hidden project, the
+archive leaves the row where it was. Pinned trees have already been removed from
+Workspace groups before this placement. A Local Project Session
+joining a task group becomes a task row, and a local group's hover card names the
+moved row's own Machine rather than the project's. Two alternatives were rejected:
+making the remote Session a `parentSessionId` child, which would break the child
+contract of one shared machine and workspace, and showing the row in both groups,
+which would duplicate navigation targets. Updated mode is one list and already nests
+across contexts. Mobile project buckets follow the same placement, and mobile date
+buckets file a whole tree under the day of its freshest member, the time that already
+ranks its opener, so a stale opener and its fresh fan-out are not split across days.
 
 Every list here is sorted by latest activity, so each surface passes `rootRank` and an
 opener is ranked by its freshest opened Session. Without that, nesting would bury a
@@ -57,6 +80,22 @@ project keys are namespaced by machine and project because the same state map al
 contains repository full names. See the
 [decision note](../notes/implemented/feature/2026-09-17-local-project-session-preview.md).
 
+## Two-line desktop rows
+
+When `Show Branch` is on, GitHub worktree sessions show a second line with branch and relative time. A local-project
+session gets that line only when `isWorktree` is true; a GitHub repo association on a direct
+local session does not make it a worktree. Direct local rows stay one line even when they carry
+repo or PR metadata, while the hover card retains the branch and time details. Chats, mobile
+rows and nested children also stay one line. `Show Branch` starts off when no choice has been
+saved; a persisted user choice remains in effect. In Workspace mode it controls the combined
+branch/time line. See the [default decision](../notes/implemented/feature/2026-10-19-sidebar-branch-details-off-by-default.md).
+The loading skeleton keeps its single-line anatomy; the optional meta line appears when the
+rows load and the branch preference is on. Two-line local worktree rows use
+`sidebarSurface.tall`; the leading and end slots sit in a box one title line high so they stay
+on the title line. The first child climbs the opener's metadata line only when that local opener
+is a worktree and `Show Branch` is on; Updated-mode openers keep their own two-line geometry.
+Work, wait, unread and send status is still the end slot's alone; +/- totals stay in the hover card.
+
 ## The leading slot, and why status left it
 
 The opener and unrelated top-level rows keep the exact flat-list alignment; only a child
@@ -66,13 +105,23 @@ replacing a disclosure or connector with ⋯ therefore leaves the title in place
 context-menu expand/collapse action uses the disclosure's callback, so either route
 changes the same tree state.
 
-The connector is drawn from the slot, but its length encodes the ROW: the trunk
-reaches 8px above and 9px below the 14px slot, which is exactly one 30px row (a 1px
-border, `py-1`, and a 20px title line) plus the list's 1px `gap-px`. So one row's
-trunk ends where the next one's begins and a nested group reads as one continuous
-line. A caller that gives its rows a different box — taller padding, a larger title
-line, no gap — gets a dash per row instead, which is how the anonymous share reader's
-tree first shipped. Reuse the slot and the row box together, or neither.
+The connector is drawn from the slot, but its length encodes the ROW, and it reads the
+row's height instead of assuming one. A row is a 1px border, 3px of padding and one title line
+(the subheadline leading: `8px + leading`, 26px at the default size), and the slot is
+centered in it, so the trunk reaches `(row - 14px) / 2` above the slot and that plus the
+list's 1px `gap-px` below it. One row's trunk then ends where the next one's begins and a
+nested group reads as one continuous line. The row height is `--sidebar-row-height`;
+unset, it is the app's one-line row, and a list with a different box (the anonymous
+share reader's `py-1` around a body line) publishes its own on its row container. A
+first child under a two-line Updated-mode opener also climbs the opener's project line
+(4px gap plus one footnote line). Every row type draws its title, leading slot and end
+slot in `SIDEBAR_ROW_LINE_CLASS` (one subheadline line), never a fixed `h-5`: a fixed
+height is how Updated rows stayed 30px after Workspace rows became 28px and the trunk
+began to overlap into a darker notch at every row. Row lists also paint-contain every
+direct child (`content-visibility: auto`), so a trunk cannot cross the `gap-px` between
+rows by overflowing; `SessionOpenedByTreeRow` owns that pixel as padding and returns it
+with a negative margin, which keeps the pitch and puts the trunk's last pixel inside the
+box that clips it.
 
 Row selection is painted by the TITLE box, not by the row: the trunk and elbow pass
 through the gutter of rows they do not belong to, and a tint stretched across that

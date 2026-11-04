@@ -1,9 +1,18 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import type { MachineId, SupportedLanguage } from '@lody/shared';
+
+import type { CodeCollabAllChangesScope, MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { isSymbolFontFamily } from '@/lib/local-fonts';
 import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
+
+/** Automatically load external HTTPS images in GitHub review content on this device. */
+export const prRemoteImagesEnabledAtom = atomWithStorage<boolean>(
+  'lody-pr-remote-images-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
 
 export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 'en');
 
@@ -226,6 +235,21 @@ export const sessionSidebarCodeChangesOnlyAtom = atomWithStorage<boolean>(
   false
 );
 
+// All Changes workspace diff: branch cumulative (merge-base -> disk) vs uncommitted
+// (HEAD -> disk). Persisted globally; default preserves the existing branch view.
+const allChangesDiffScopeStorageAtom = atomWithStorage<string>(
+  'lody-all-changes-diff-scope',
+  'branch'
+);
+
+export const allChangesDiffScopeAtom = atom(
+  (get): CodeCollabAllChangesScope =>
+    get(allChangesDiffScopeStorageAtom) === 'uncommitted' ? 'uncommitted' : 'branch',
+  (_get, set, nextValue: CodeCollabAllChangesScope) => {
+    set(allChangesDiffScopeStorageAtom, nextValue);
+  }
+);
+
 export const QUEUED_MESSAGE_BEHAVIOR_VALUES = ['queue', 'guide'] as const;
 export type QueuedMessageBehavior = (typeof QUEUED_MESSAGE_BEHAVIOR_VALUES)[number];
 
@@ -240,18 +264,6 @@ export const queuedMessageBehaviorAtom = atom(
   (_get, set, nextValue: QueuedMessageBehavior) => {
     set(queuedMessageBehaviorStorageAtom, nextValue);
   }
-);
-
-// Auto-archive a session when its linked PR is merged. Per-user, browser-local.
-export const autoArchiveOnPrMergedAtom = atomWithStorage<boolean>(
-  'lody-auto-archive-on-pr-merged',
-  false
-);
-
-// Auto-archive a session when its linked PR is closed (without merge). Per-user, browser-local.
-export const autoArchiveOnPrClosedAtom = atomWithStorage<boolean>(
-  'lody-auto-archive-on-pr-closed',
-  false
 );
 
 /** localStorage keys for developer-only beta gates — keep in sync with the atoms below. */
@@ -281,6 +293,18 @@ export const inboxFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(inboxBetaEnabledAtom)
 );
 
+/** Enables creation only. Existing encrypted workspaces retain their immutable mode. */
+export const e2eeWorkspaceCreationEnabledAtom = atomWithStorage<boolean>(
+  'lody-e2ee-workspace-creation-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const e2eeWorkspaceCreationFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(e2eeWorkspaceCreationEnabledAtom)
+);
+
 export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
   'lody-semantic-shortcuts-beta-enabled',
   false,
@@ -294,7 +318,7 @@ export const semanticShortcutsFeatureEnabledAtom = atom(
 
 /** localStorage keys for the experimental features gate. */
 export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'lody-experimental-features-enabled';
-export const REVIEW_AGENT_EXPERIMENT_STORAGE_KEY = 'lody-review-agent-enabled';
+export const ROOST_HISTORY_EXPERIMENT_STORAGE_KEY = 'lody-roost-history-enabled';
 
 /**
  * Master switch for user-facing experimental features.
@@ -311,23 +335,15 @@ export const experimentalFeaturesEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true }
 );
 
-/** Opt-in for the review agent, listed once experimental features are on. */
-export const reviewAgentExperimentEnabledAtom = atomWithStorage<boolean>(
-  REVIEW_AGENT_EXPERIMENT_STORAGE_KEY,
+/** Opt-in for Roost-backed history on newly created sessions. */
+export const roostHistoryExperimentEnabledAtom = atomWithStorage<boolean>(
+  ROOST_HISTORY_EXPERIMENT_STORAGE_KEY,
   false,
   undefined,
   { getOnInit: true }
 );
 
-/**
- * The single gate every review-agent surface reads.
- *
- * Note what this gate does NOT control: a run already authorized on a session
- * keeps going, because the authorization is durable session state that the
- * machine acts on, and this switch is per-device UI visibility. Turning the
- * experiment off hides the controls; it does not silently abandon a branch the
- * user was told would be merged.
- */
-export const reviewAgentFeatureEnabledAtom = atom(
-  (get) => get(experimentalFeaturesEnabledAtom) && get(reviewAgentExperimentEnabledAtom)
+/** The single gate for selecting Roost when a new session is accepted. */
+export const roostHistoryFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(roostHistoryExperimentEnabledAtom)
 );

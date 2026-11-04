@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { resolveDesktopProfile } from './desktop-channel.ts'
+import { getDesktopCallbackProtocol, resolveDesktopProfile } from './desktop-channel.ts'
 
 const cloud = {
   platform: 'cloud',
@@ -15,6 +15,7 @@ const cloud = {
 void test('Nightly separates desktop identity while retaining the shared CLI owner', () => {
   const nightly = resolveDesktopProfile(cloud, 'nightly')
   assert.equal(nightly.desktopProtocol, 'ai.lody.nightly')
+  assert.equal(getDesktopCallbackProtocol(nightly), 'ai.lody.nightly')
   assert.equal(nightly.desktopUserDataName, 'Lody Nightly')
   assert.equal(nightly.desktopAppId, 'ai.lody.desktop.nightly')
   assert.equal(nightly.desktopIpcNamespace, 'lody-nightly')
@@ -28,10 +29,12 @@ void test('Stable preserves existing desktop paths and local builds reject cloud
   const stable = resolveDesktopProfile(cloud)
   assert.equal(stable.desktopUserDataName, null)
   assert.equal(stable.desktopProtocol, 'lody')
+  assert.equal(getDesktopCallbackProtocol(stable), 'ai.lody.stable')
   assert.equal(stable.desktopIpcNamespace, 'lody')
   assert.throws(() => resolveDesktopProfile(cloud, 'unknown'))
   assert.throws(() => resolveDesktopProfile(cloud, 'local'))
   const local = { ...cloud, platform: 'local', namespace: 'lody-oss', desktopProtocol: 'lody-oss' }
   assert.equal(resolveDesktopProfile(local).releaseChannel, 'local')
+  assert.equal(getDesktopCallbackProtocol(local), 'lody-oss')
   assert.throws(() => resolveDesktopProfile(local, 'nightly'))
 })

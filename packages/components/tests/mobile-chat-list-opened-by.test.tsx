@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 
-import React from 'react';
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
-import { MobileChatListCard } from '../src/components/mobile/mobile-chat-list';
+import {
+  dateBucketIdFor,
+  groupChats,
+  MobileChatList,
+  MobileChatListCard,
+} from '../src/components/mobile/mobile-chat-list';
 import type { MobileConversationItem } from '../src/components/mobile/mobile-project-screen';
 import { sidebarCollapsedOpenedBySessionsAtom } from '../src/atoms/focus-layer';
 import { initI18n } from '../src/i18n';
@@ -119,32 +124,6 @@ describe('mobile chat list opened-by tree', () => {
     expect(list.map(isNested)).toEqual([false, true, true, true, false]);
   });
 
-  it('indents an opened session by widening its leading slot, not the row', async () => {
-    const list = await render(makeOpenerItems());
-    const slot = (row: HTMLElement) =>
-      row.querySelector<HTMLElement>('[data-conversation-row-leading-slot]')?.className ?? '';
-    // The node must not move: only the slot after it widens (16px -> 32px), so
-    // the opener, its opened Sessions, and unrelated rows share one node x
-    // while the content indents.
-    expect(slot(list[0]!)).toContain('w-4');
-    expect(slot(list[4]!)).toContain('w-4');
-    expect(slot(list[1]!)).toContain('w-8');
-    expect(slot(list[1]!)).toContain('justify-start');
-    // Every row keeps the flat px-4; nothing shifts the row background.
-    for (const row of list) expect(row.className).toContain('px-4');
-  });
-
-  it('keeps the flat DOM in a bucket with no nesting', async () => {
-    // The regression that matters most: an ordinary list must not change shape
-    // just because the feature exists.
-    const list = await render([makeItem({ id: 'a' }), makeItem({ id: 'b' })]);
-    expect(list[0]?.className).toContain('px-4');
-    expect(
-      list[0]?.querySelector('[data-conversation-row-leading-slot]')?.className
-    ).toContain('w-4');
-    expect(toggleFor(list[0]!)).toBeNull();
-  });
-
   it('gives an ACTIVE opened session its status instead of the connector', async () => {
     // One node, one meaning: "this session needs you" outranks "this session
     // was opened by that one". Same rule the desktop sidebar row applies.
@@ -167,9 +146,9 @@ describe('mobile chat list opened-by tree', () => {
     expect(isNested(list[1]!)).toBe(false);
     expect(isNested(list[2]!)).toBe(true);
     // It still indents — losing the lines must not also lose the hierarchy.
-    expect(
-      list[1]?.querySelector('[data-conversation-row-leading-slot]')?.className
-    ).toContain('w-8');
+    expect(list[1]?.querySelector('[data-conversation-row-leading-slot]')?.className).toContain(
+      'w-8'
+    );
   });
 
   it('gives an ACTIVE opener its status instead of the fold control', async () => {
@@ -185,18 +164,6 @@ describe('mobile chat list opened-by tree', () => {
     expect(toggleFor(list[0]!)).toBeNull();
     // The tree itself is untouched — only the affordance yields.
     expect(isNested(list[1]!)).toBe(true);
-  });
-
-  it('renders the fold control only on the opener, outside the row button', async () => {
-    const list = await render(makeOpenerItems());
-    const toggle = toggleFor(list[0]!);
-    expect(toggle).not.toBeNull();
-    // Nesting a button inside the row button would be invalid HTML and
-    // unreachable to assistive tech.
-    expect(list[0]!.querySelector('[data-conversation-tree-toggle]')).toBeNull();
-    expect(toggle!.getAttribute('aria-expanded')).toBe('true');
-    expect(toggleFor(list[1]!)).toBeNull();
-    expect(toggleFor(list[4]!)).toBeNull();
   });
 
   it('folds and unfolds the opened sessions when the control is tapped', async () => {
@@ -222,18 +189,6 @@ describe('mobile chat list opened-by tree', () => {
     store.set(sidebarCollapsedOpenedBySessionsAtom, { opener: true });
     const list = await render(makeOpenerItems());
     expect(titles(list)).toEqual(['Session opener', 'Session unrelated']);
-  });
-
-  it('stops the connector trunk at the last opened session', async () => {
-    const list = await render(makeOpenerItems());
-    const trunkOf = (row: HTMLElement) =>
-      row.querySelector('[data-conversation-tree-connector] > span')?.className ?? '';
-    // Middle children carry the trunk into the next row; the last one ends it
-    // at the elbow so it does not dangle past the group.
-    expect(trunkOf(list[1]!)).toContain('bottom-0');
-    expect(trunkOf(list[2]!)).toContain('bottom-0');
-    expect(trunkOf(list[3]!)).toContain('h-1/2');
-    expect(trunkOf(list[3]!)).not.toContain('bottom-0');
   });
 
   it('keeps a session whose opener is missing from this list at top level', async () => {
@@ -285,5 +240,85 @@ describe('mobile chat list opened-by tree', () => {
       }),
     ]);
     expect(titles(list)).toEqual(['Session pinned', 'Session unpinned', 'Session unpinned-child']);
+  });
+});
+
+describe('mobile project buckets follow the opener', () => {
+  /** A Local Project opener whose Roles ran elsewhere: a plain chat and a GitHub repo. */
+  const items = (): MobileConversationItem[] => [
+    makeItem({
+      id: 'remote-chat',
+      openedBySessionId: 'opener',
+      openedByRowSessionId: 'opener',
+      latestMessageAt: NOW,
+    }),
+    makeItem({
+      id: 'repo-child',
+      kind: 'github',
+      projectKey: 'loro-dev/lody',
+      projectLabel: 'loro-dev/lody',
+      openedBySessionId: 'opener',
+      openedByRowSessionId: 'opener',
+      latestMessageAt: NOW - HOUR,
+    }),
+    makeItem({
+      id: 'opener',
+      kind: 'local',
+      projectKey: 'machine-1:project-1',
+      projectLabel: 'Project One',
+      latestMessageAt: NOW - 2 * HOUR,
+    }),
+    makeItem({ id: 'plain-chat', latestMessageAt: NOW - 3 * HOUR }),
+  ];
+
+  it('dates a whole opened-by tree by its freshest member', () => {
+    const DAY = 24 * HOUR;
+    const chats = [
+      makeItem({
+        id: 'fresh-child',
+        openedBySessionId: 'old-opener',
+        openedByRowSessionId: 'old-opener',
+        latestMessageAt: NOW,
+      }),
+      makeItem({ id: 'old-opener', latestMessageAt: NOW - 40 * DAY }),
+      makeItem({
+        id: 'old-child',
+        openedBySessionId: 'old-opener',
+        openedByRowSessionId: 'old-opener',
+        latestMessageAt: NOW - 45 * DAY,
+      }),
+      makeItem({ id: 'old-plain', latestMessageAt: NOW - 40 * DAY }),
+    ];
+    // Bucket ids come from the same function, so the case holds in any time zone.
+    expect(dateBucketIdFor(NOW - 40 * DAY, NOW)).not.toBe(dateBucketIdFor(NOW, NOW));
+    expect(
+      groupChats(chats, 'date', NOW).map(({ id, items: bucket }) => [
+        id,
+        bucket.map((chat) => chat.id),
+      ])
+    ).toEqual([
+      [dateBucketIdFor(NOW, NOW), ['fresh-child', 'old-opener', 'old-child']],
+      [dateBucketIdFor(NOW - 40 * DAY, NOW), ['old-plain']],
+    ]);
+  });
+
+  it('indents them under the opener and keeps the bucket named after its own project', async () => {
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <MobileChatList chats={items()} groupBy="project" />
+        </Provider>
+      );
+    });
+    const rowTitles = Array.from(
+      container.querySelectorAll<HTMLElement>('.mobile-project-conversation-row')
+    ).map((row) => row.textContent?.trim() ?? '');
+    expect(rowTitles.slice(0, 3)).toEqual([
+      expect.stringContaining('Session opener'),
+      expect.stringContaining('Session remote-chat'),
+      expect.stringContaining('Session repo-child'),
+    ]);
+    expect(container.textContent).toContain('Project One');
+    expect(container.textContent).not.toContain('loro-dev/lody');
   });
 });

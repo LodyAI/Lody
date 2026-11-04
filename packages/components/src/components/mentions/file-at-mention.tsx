@@ -2,14 +2,8 @@ import { useMentionFileSearch } from './file-search/use-file-search';
 import * as React from 'react';
 import { forEachAtTokenSpan, type HydratedMentions } from '@/components/mentions/mention-hydration';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
 
 import { currentWorkspaceIdAtom } from '@/atoms';
-import {
-  captureMentionFileFetchError,
-  getRepoMentionAnalyticsId,
-  normalizeGithubFetchErrorCode,
-} from '@/components/mentions/mention-analytics';
 import { buildPathSuggestions } from './file-search/engine';
 export * from './file-search/engine';
 import {
@@ -65,8 +59,6 @@ export function hydrateFileMentionsFromText(text: string, knownPaths: Set<string
 
 export function useRepoFilePaths(repoFullName?: string) {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const postHog = usePostHog();
-
   const [data, setData] = React.useState<{
     entry: RepoFilePathsCacheEntry | null;
     status: 'idle' | 'loading' | 'ready' | 'refreshing' | 'error';
@@ -84,7 +76,6 @@ export function useRepoFilePaths(repoFullName?: string) {
 
     let cancelled = false;
     const now = Date.now();
-    const fetchStartedAt = Date.now();
     const key = getRepoFilePathsCacheKey(workspaceIdValue, repoFullNameValue);
 
     async function run() {
@@ -97,7 +88,7 @@ export function useRepoFilePaths(repoFullName?: string) {
         });
         if (!isRepoFilePathsStale(cached, Date.now())) return;
       } else {
-        setData((prev) => ({ ...prev, status: 'loading' }));
+        setData({ entry: null, status: 'loading' });
       }
 
       try {
@@ -112,17 +103,6 @@ export function useRepoFilePaths(repoFullName?: string) {
           status: 'error',
           error: message,
         }));
-        // Repo visibility is unknown in this hook, so hash the repo id (treat as
-        // private) — never send the raw repo name (spec §2.3).
-        captureMentionFileFetchError(
-          postHog,
-          { workspaceId: workspaceIdValue },
-          {
-            errorCode: normalizeGithubFetchErrorCode(err),
-            repo: getRepoMentionAnalyticsId(repoFullNameValue, false),
-            durationMs: Date.now() - fetchStartedAt,
-          }
-        );
       }
     }
 
@@ -131,7 +111,7 @@ export function useRepoFilePaths(repoFullName?: string) {
     return () => {
       cancelled = true;
     };
-  }, [postHog, repoFullName, workspaceId]);
+  }, [repoFullName, workspaceId]);
 
   return data;
 }

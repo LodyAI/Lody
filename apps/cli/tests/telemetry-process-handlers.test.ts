@@ -1,4 +1,15 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+
+const logDir = vi.hoisted(() => ({ current: '' }));
+
+vi.mock('@/utils/log-retention', () => ({
+  get LODY_LOG_DIR() {
+    return logDir.current;
+  },
+}));
 
 vi.mock('@/instrument', () => ({
   captureException: vi.fn(async () => {}),
@@ -61,5 +72,50 @@ describe('registerProcessErrorHandlers', () => {
     }
 
     process.exitCode = previousExitCode;
+  });
+
+  it('runs the fatal path once when stdio EPIPE errors repeat during shutdown', async () => {
+    logDir.current = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-telemetry-epipe-'));
+    const exited = Promise.withResolvers<void>();
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      exited.resolve();
+      return undefined as never;
+    });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const uncaughtBefore = new Set(process.listeners('uncaughtException'));
+    const rejectionBefore = new Set(process.listeners('unhandledRejection'));
+
+    vi.resetModules();
+    const telemetry = await import('@/utils/telemetry');
+    telemetry.registerProcessErrorHandlers();
+    const added = process.listeners('uncaughtException').filter((l) => !uncaughtBefore.has(l));
+    expect(added).toHaveLength(1);
+    const onUncaught = added[0] as (error: unknown) => void;
+
+    const epipe = () => Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+    for (let i = 0; i < 1_000; i += 1) {
+      onUncaught(epipe());
+    }
+    await exited.promise;
+
+    const logText = fs
+      .readdirSync(logDir.current)
+      .map((file) => fs.readFileSync(path.join(logDir.current, file), 'utf8'))
+      .join('');
+    expect(logText.match(/\[process-fatal\] uncaughtException/g)).toHaveLength(2);
+    expect(logText).toContain('write EPIPE (code=EPIPE)');
+    expect(logText).toContain('suppressed 999 further uncaught exception(s)');
+    // Writing the broken pipe again is what re-entered the handler.
+    expect(consoleSpy).not.toHaveBeenCalled();
+
+    for (const listener of added) {
+      process.off('uncaughtException', listener);
+    }
+    for (const listener of process.listeners('unhandledRejection')) {
+      if (!rejectionBefore.has(listener)) process.off('unhandledRejection', listener);
+    }
+    exitSpy.mockRestore();
+    consoleSpy.mockRestore();
+    fs.rmSync(logDir.current, { recursive: true, force: true });
   });
 });

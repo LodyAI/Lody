@@ -10,7 +10,6 @@ import {
   type GitHubReadRequestOptions,
 } from '@lody/shared';
 import { useGitHubPrIdentity } from './use-github-pr-identity';
-import { withGitHubTokenRetry } from '@/lib/github-token';
 import { resolvePrCompareRange, type PrCommitSelection } from '@/lib/github-pr-diff';
 
 export type GitHubPrDiffState = 'idle' | 'loading' | 'ready' | 'error';
@@ -49,8 +48,9 @@ export function useGitHubPrDiff(input: {
     prNumber: input.prNumber,
     visible: input.visible,
   });
+  const { runRead: withGitHubTokenRetry } = identity;
   const enabled = Boolean(
-    identity.ready && input.repoFullName && input.prNumber && input.baseRef && input.headSha
+    identity.readReady && input.repoFullName && input.prNumber && input.baseRef && input.headSha
   );
   const [state, setState] = useState<GitHubPrDiffState>('idle');
   const [commits, setCommits] = useState<GitHubPullRequestCommit[]>([]);
@@ -59,6 +59,7 @@ export function useGitHubPrDiff(input: {
   const [error, setError] = useState<Error | null>(null);
   const [contentByPath, setContentByPath] = useState<Map<string, GitHubPrFileContent>>(new Map());
   const requestKey = JSON.stringify([
+    identity.publicRead,
     identity.repositoryId,
     identity.repoFullName,
     input.prNumber,
@@ -143,6 +144,7 @@ export function useGitHubPrDiff(input: {
     return run;
   }, [
     enabled,
+    withGitHubTokenRetry,
     identity.repoFullName,
     identity.repositoryId,
     input.baseRef,
@@ -228,6 +230,7 @@ export function useGitHubPrDiff(input: {
     [
       contentByPath,
       enabled,
+      withGitHubTokenRetry,
       identity.repoFullName,
       identity.repositoryId,
       input.workspaceId,

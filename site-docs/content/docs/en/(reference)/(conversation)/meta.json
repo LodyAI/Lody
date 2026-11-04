@@ -1,0 +1,15 @@
+{
+  "title": "Conversation & files",
+  "pages": [
+    "image-input",
+    "image-output",
+    "preview",
+    "file-attachments",
+    "file-list",
+    "diff-viewer",
+    "session-search",
+    "mention",
+    "slash-commands",
+    "copy-md"
+  ]
+}

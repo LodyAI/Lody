@@ -1,3 +1,5 @@
+import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
+import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
 import * as stylex from '@stylexjs/stylex';
 import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
@@ -45,8 +47,8 @@ import type { ConversationView } from '@/lib/conversation-view';
 import {
   getCopyTextFromMessageItems,
   getTextContentFromMessageItems,
+  getMessageQuoteEditDraft,
   getUserTextRenderSlice,
-  getVisibleAssistantTextContent,
   hasTextContentFromMessageItems,
 } from './message-copy';
 import { useAtomValue, useStore } from 'jotai';
@@ -95,7 +97,7 @@ import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { machineSupportsSubagentCancellation, machineSupportsSubagentEvents } from '@lody/shared';
 import { scrollDebug } from '@/hooks/scroll-debug-log';
 import { readSessionTurnTokenUsage, type SessionTurnTokenUsage } from '@lody/shared/session-data';
-import { formatCompactNumber } from '@/lib/format-compact-number';
+import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import type { EngineRow } from '@/lib/conversation-scroll/types';
 import { EngineConversationScroller } from './conversation-list/engine-conversation-scroller';
@@ -178,10 +180,14 @@ import {
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './subagent-task-panel';
+import { isRunning as isSubagentTaskRunning } from './subagent-task-state';
 import { SubagentRunMessageList } from './subagent-run-history';
 import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
 import { SessionReadonlyContext } from './session-readonly-context';
-import { UserMessageEditor } from './user-message-editor';
+import { PendingImageMarkupDialog } from '../sessions/pending-image-markup-dialog';
+import type { DocumentSelection } from '@/lib/document-selection';
+import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
+import { UserMessageEditor, type UserMessageEditorProps } from './user-message-editor';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import type { SkillMentionAgent } from '@/components/mentions/mention-skill-source';
 import type { Mention as MentionRange } from '@/ui/mention/index';
@@ -222,10 +228,19 @@ import {
 import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
 import { conversationSurface } from './surface';
+import {
+  isMessageActionsToggleTap,
+  toggleMobileMessageActions,
+  useMobileMessageActionsRevealed,
+} from './mobile-message-actions';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import type { TurnIndexRow } from '@/lib/conversation-view';
 import { TurnPlaceholderRow, estimatePlaceholderHeight } from './turn-placeholder-row';
-import { CreatedSessionOperationCard } from './created-session-operation-card';
+import {
+  CreatedSessionList,
+  getCreatedSessionCards,
+  summarizeOperationOutput,
+} from './created-session-list';
 import { OperationReplyCard } from './operation-reply-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
@@ -267,21 +282,39 @@ import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
-import { shouldRenderSystemRowItem } from './message-content-guards';
+import { SessionLimitContinueAction } from '@/components/schedules/quota-continue-action';
+import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
+import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
+import {
+  getOperationCompletionItems,
+  hasVisibleOperationContent,
+} from './operation-completion-visibility';
+import { openExternalUrl } from '@/lib/native-browser';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import {
   buildChatFailedErrorReport,
-  extractReadableChatFailedMessage,
+  buildChatFailedNoticeDetail,
 } from './chat-failed-error-report';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
   conversationTextFontSizeStyle,
   conversationReadingFontSizeStyle,
-  userTextCollapsedHeight,
+  userTextCollapsedStyle,
 } from './conversation-font-size-classes';
 import { useSessionPin } from '@/components/sessions/session-pin-context';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
+import {
+  buildAssistantTurnTimingRows,
+  formatSilenceCompact,
+  formatTurnClockTime,
+  resolveTurnLiveness,
+  resolveTurnSilenceMs,
+  type AssistantTurnTimingRow,
+  type HistoryLiveWindow,
+  type LiveTurnActivity,
+  type TurnLiveness,
+} from './assistant-turn-timing';
 import {
   SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME,
   SEARCH_HIGHLIGHT_CONTAINER_MATCHED_CLASS_NAME,
@@ -304,6 +337,12 @@ import {
 } from '@/lib/session-chat-search';
 
 const EMPTY_GALLERY_ENTRIES: readonly SessionImageGalleryEntry[] = [];
+
+function useSessionCopyWorkspaceId(): string | undefined {
+  const readonlyPresentation = useContext(SessionReadonlyContext);
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  return readonlyPresentation ? undefined : (workspaceId ?? undefined);
+}
 
 // ── Expand/collapse state cache ──────────────────────────────────────────────
 // Survives virtual-scroll unmount/remount so expand/collapse state is not lost
@@ -431,6 +470,7 @@ type AssistantChatVirtualRow = {
 };
 
 type StandardChatVirtualRow = {
+  groupedItems?: SessionMessageItem[];
   type: 'standard';
   key: string;
   /** Absolute turn index (the `empty` item uses its list position). */
@@ -445,7 +485,19 @@ type PlaceholderChatVirtualRow = {
   item: PlaceholderSessionItem;
 };
 
-type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | PlaceholderChatVirtualRow;
+type LocalUserChatVirtualRow = {
+  type: 'local-user';
+  key: string;
+  /** -1 until the authoritative directory contains this input. */
+  messageIndex: number;
+  content: ReactNode;
+};
+
+type ChatVirtualRow =
+  | AssistantChatVirtualRow
+  | StandardChatVirtualRow
+  | PlaceholderChatVirtualRow
+  | LocalUserChatVirtualRow;
 
 /** One row per placeholder item, identity-stable while the item is. */
 
@@ -487,6 +539,7 @@ export type UserMessageEditSubmission = {
  * editor degrades to a plain textarea.
  */
 export type UserMessageEditMentionContext = {
+  sessionSource?: UserMessageEditorProps['sessionSource'];
   mentionSource?: MentionProjectSource;
   availableCommands?: AcpCommandSummary[];
   skillAgent?: SkillMentionAgent;
@@ -579,7 +632,9 @@ export interface SessionChatStreamViewProps {
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
-  /** Scrolls after history as a local, not-yet-committed user message. */
+  /** UI-only accepted inputs; never added to history, outline, export or dispatch facts. */
+  localUserMessages?: readonly { id: string; content: ReactNode }[];
+  /** Attachment preparation and action errors after the message rows. */
   trailingContent?: ReactNode;
   emptyState?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
@@ -590,6 +645,7 @@ export interface SessionChatStreamViewProps {
   onFilePathClick?: (filePath: string) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
+  onAnnotateImage?: (selection: DocumentSelection) => boolean;
   lastAssistantMessageId?: string | null;
   lastCompletedAssistantMessageId?: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
@@ -604,6 +660,13 @@ export interface SessionChatStreamViewProps {
   agentActivityTone?: AgentActivityTone;
   /** The status is live work (not waiting on the user): shimmer it. */
   agentActivityShimmer?: boolean;
+  /**
+   * What presence says the session is doing. Only a running session's newest
+   * turn reports a running time and a last update; `null` when nothing runs.
+   */
+  liveTurnActivity?: LiveTurnActivity | null;
+  /** Whether, and since when, this client receives the session's history live. */
+  historyLive?: HistoryLiveWindow;
   conversationFontSize?: ConversationFontSize;
   /** Full-page overlay that keeps the conversation outline independent of composer height. */
   outlineOverlayRoot?: HTMLElement | null;
@@ -626,6 +689,35 @@ export const SessionChatActionContext = createContext<{
 const SessionImagePreviewContext = createContext<{
   openImagePreview: (imageKey: string) => void;
 } | null>(null);
+
+/**
+ * Everything the liveness labels need to judge a running turn. `clock` is the
+ * stream's `ConversationView`, whose `lastUpdateAt` is an in-memory stamp read
+ * on each label's own tick; the rest changes only with presence or sync state.
+ */
+type LiveTurnContextValue = {
+  clock: Pick<ConversationView, 'lastUpdateAt'> | null;
+  activity: LiveTurnActivity | null;
+  live: HistoryLiveWindow;
+};
+
+const LiveTurnContext = createContext<LiveTurnContextValue | null>(null);
+
+/** Callers that do not track live sync report no live window. */
+const NOT_LIVE: HistoryLiveWindow = { sync: 'syncing', since: null };
+
+/** The running turn's liveness at `nowMs`, or `null` when presence says nothing runs. */
+const useRunningTurnLiveness = (nowMs: number): TurnLiveness | null => {
+  const live = useContext(LiveTurnContext);
+  if (!live?.activity) return null;
+  return resolveTurnLiveness({
+    activity: live.activity,
+    sync: live.live.sync,
+    liveSince: live.live.since,
+    lastUpdateAt: live.clock?.lastUpdateAt ?? null,
+    nowMs,
+  });
+};
 
 /** Live work reads in the process tone; waiting on the user in the warning tone. */
 export type AgentActivityTone = 'primary' | 'warning';
@@ -677,8 +769,9 @@ const AgentActivityStatus = ({
       aria-live="polite"
       data-agent-activity-status=""
       className={cn(
-        'flex w-full items-center py-0.5 text-muted-foreground',
-        isMobile ? 'gap-1.5 pr-1' : 'px-[4px]'
+        /* `px-[4px]` is `conversation.railInset`: the status sits on the prose rail. */
+        'flex w-full items-center px-[4px] py-0.5 text-muted-foreground',
+        isMobile && 'gap-1.5'
       )}
     >
       <span
@@ -688,7 +781,11 @@ const AgentActivityStatus = ({
           shimmer && 'agent-shimmer'
         )}
       >
-        {message ? <LiveActivityLabel label={label} message={message} /> : label}
+        {message && tone !== 'warning' ? (
+          <LiveActivityLabel label={label} message={message} />
+        ) : (
+          label
+        )}
       </span>
     </div>
   );
@@ -918,7 +1015,10 @@ const ChatItem = memo(function ChatItem({
       <ConversationColumn
         {...stylex.props(
           conversationSurface.message,
-          msg.role === 'user' && conversationSurface.userMessage
+          msg.role === 'user' && conversationSurface.userMessage,
+          msg.role === 'system' &&
+            msg.items.some(isOperationSurfaceItem) &&
+            conversationSurface.operationSurface
         )}
       >
         {renderMessageRow({
@@ -1004,7 +1104,7 @@ const shouldRenderAssistantFooter = ({
   if (message.finished !== true) return false;
   const visibleContentItems = renderEntries.map((entry) => entry.content);
   return (
-    getVisibleAssistantTextContent(visibleContentItems, true).trim().length > 0 ||
+    getTextContentFromMessageItems(visibleContentItems).trim().length > 0 ||
     fileDiffs.length > 0 ||
     hasAssistantTurnConfigInfo(message) ||
     (typeof message.endedAt === 'number' && Number.isFinite(message.endedAt)) ||
@@ -1019,21 +1119,32 @@ type AssistantTurnLayout = ReturnType<typeof buildAssistantTurnRenderLayout> & {
 const EMPTY_SUBAGENT_TASKS: ReturnType<typeof collectSubagentTasks> = [];
 
 // Assistant-turn layout (block grouping + subagent-task collection) is derived
-// purely from the message's id/items/finished state, and `buildChatStreamItems`
+// from the message and provider display policy. `buildChatStreamItems`
 // hands back a stable parsed-message object for unchanged turns and a fresh one
 // whenever the turn changes. Keying the cache by that reference lets only the
 // streaming turn recompute; without it, each streamed token re-runs these
 // O(items) passes for every turn in the whole conversation.
-const assistantTurnLayoutCache = new WeakMap<SessionHistoryParsed, AssistantTurnLayout>();
+const assistantTurnLayoutCache = new WeakMap<
+  SessionHistoryParsed,
+  { showThoughts: boolean; layout: AssistantTurnLayout }
+>();
 
-const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLayout => {
+const getAssistantTurnLayout = (
+  message: SessionHistoryParsed,
+  showThoughts: boolean
+): AssistantTurnLayout => {
   const cached = assistantTurnLayoutCache.get(message);
-  if (cached) return cached;
+  if (cached?.showThoughts === showThoughts) return cached.layout;
   const layout: AssistantTurnLayout = {
-    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true),
+    ...buildAssistantTurnRenderLayout(
+      message.id,
+      message.items,
+      message.finished === true,
+      showThoughts
+    ),
     subagentTasks: collectSubagentTasks(message.items),
   };
-  assistantTurnLayoutCache.set(message, layout);
+  assistantTurnLayoutCache.set(message, { showThoughts, layout });
   return layout;
 };
 
@@ -1069,6 +1180,7 @@ export const buildChatVirtualRows = ({
   activeSearchBlockId,
   expansionVersion,
   copyContextAvailable = false,
+  groupCreatedSessions = true,
   showThoughts = false,
   selectionLayouts,
 }: {
@@ -1081,6 +1193,7 @@ export const buildChatVirtualRows = ({
   activeSearchBlockId?: string | null;
   expansionVersion: number;
   copyContextAvailable?: boolean;
+  groupCreatedSessions?: boolean;
   showThoughts?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
@@ -1099,12 +1212,42 @@ export const buildChatVirtualRows = ({
     // Rows speak in absolute turn indexes so outline anchors and scroll
     // targets are independent of which turns happen to be hydrated.
     const messageIndex = item.turnIndex;
+    if (
+      item.message.role === 'system' &&
+      item.message.items.length > 0 &&
+      !item.message.items.some(hasVisibleOperationContent)
+    )
+      continue;
     if (item.message.role !== 'assistant') {
+      const groupedItems = [item];
+      if (groupCreatedSessions && getCreatedSessionCards(item.message)) {
+        while (position + 1 < items.length) {
+          const next = items[position + 1];
+          if (
+            next?.type !== 'message' ||
+            next.sessionId !== item.sessionId ||
+            !getCreatedSessionCards(next.message)
+          )
+            break;
+          groupedItems.push(next);
+          position += 1;
+        }
+      }
       rows.push({
         type: 'standard',
         key: item.message.id,
         messageIndex,
-        item,
+        groupedItems: groupedItems.length > 1 ? groupedItems : undefined,
+        item:
+          groupedItems.length === 1
+            ? item
+            : {
+                ...item,
+                message: {
+                  ...item.message,
+                  items: groupedItems.flatMap((entry) => entry.message.items),
+                },
+              },
       });
       continue;
     }
@@ -1147,7 +1290,10 @@ export const buildChatVirtualRows = ({
       continue;
     }
 
-    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
+    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(
+      message,
+      showThoughts
+    );
     const cachedState = selectionLayout?.expandState ?? getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
@@ -1273,6 +1419,7 @@ export const buildChatVirtualRows = ({
       const [segmentStart, segmentEnd] = segment.blockRange;
       const isLastSegment = segmentIndex === lastSegmentIndex;
       const segmentSubagentTasks = isLastSegment ? subagentTasks : EMPTY_SUBAGENT_TASKS;
+      const hasRunningSubagentTasks = segmentSubagentTasks.some(isSubagentTaskRunning);
 
       let hasVisibleFinalContent = false;
       for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
@@ -1325,22 +1472,9 @@ export const buildChatVirtualRows = ({
         continue;
       }
 
-      // Collapsed is the default state, and the detail rows of a collapsed
-      // group are discarded unrendered — don't pay for building them. Initial
-      // mount of a long finished session hits this for every turn.
-      const workedRows: AssistantChatVirtualRow[] = [];
-      if (isWorkedGroupExpanded) {
-        for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
-          const block = blocks[blockIndex];
-          if (block && segment.workBlockKeys.has(block.key)) {
-            appendBlockRows(workedRows, block, blockIndex, true);
-          }
-        }
-        if (segmentSubagentTasks.length > 0) {
-          appendSubagentTasksRow(workedRows, true);
-        }
-      }
-
+      // Collapsed is the default state, and a collapsed group renders no detail
+      // rows at all. Expanded details stay where they happened: hoisting them to
+      // the header would reorder them past the prose between two steps.
       const insertWorkedGroup = () => {
         assistantRows.push({
           type: 'assistant',
@@ -1357,9 +1491,6 @@ export const buildChatVirtualRows = ({
           },
           isLastRowForMessage: false,
         });
-        if (isWorkedGroupExpanded) {
-          assistantRows.push(...workedRows);
-        }
       };
 
       const insertionBlockIndex =
@@ -1372,12 +1503,20 @@ export const buildChatVirtualRows = ({
           insertWorkedGroup();
           didInsertWorkedGroup = true;
         }
-        if (!segment.workBlockKeys.has(block.key)) {
-          appendBlockRows(assistantRows, block, blockIndex, false);
+        if (segment.workBlockKeys.has(block.key)) {
+          if (isWorkedGroupExpanded) appendBlockRows(assistantRows, block, blockIndex, true);
+          continue;
         }
+        appendBlockRows(assistantRows, block, blockIndex, false);
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
+      }
+      if (isWorkedGroupExpanded && segmentSubagentTasks.length > 0 && !hasRunningSubagentTasks) {
+        appendSubagentTasksRow(assistantRows, true);
+      }
+      if (hasRunningSubagentTasks) {
+        appendSubagentTasksRow(assistantRows, false);
       }
     }
 
@@ -1468,6 +1607,9 @@ const engineRowOf = (row: ChatVirtualRow): EngineRow => {
     placeholder: false,
     fixed: null,
   };
+  if (row.type === 'local-user') {
+    return { ...base, turnId: row.key, estimate: ENGINE_ROW_ESTIMATE_PX.standard };
+  }
   if (row.type === 'placeholder') {
     return {
       ...base,
@@ -1481,6 +1623,7 @@ const engineRowOf = (row: ChatVirtualRow): EngineRow => {
     return {
       ...base,
       turnId: row.item.type === 'message' ? row.item.message.id : null,
+      groupTurnIds: row.groupedItems?.slice(1).map((entry) => entry.message.id),
       estimate: ENGINE_ROW_ESTIMATE_PX.standard,
     };
   }
@@ -1583,6 +1726,24 @@ const INITIAL_SCROLLER_STATE: ConversationScrollerState = {
   isSticky: true,
 };
 
+const scrollToLatestStyles = stylex.create({
+  icon: { width: space[4], height: space[4] },
+  workingSpinner: {
+    display: {
+      default: 'inline-flex',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):hover')]: 'none',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):focus-visible')]: 'none',
+    },
+  },
+  workingArrow: {
+    display: {
+      default: 'none',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):hover')]: 'block',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):focus-visible')]: 'block',
+    },
+  },
+});
+
 /**
  * The conversation: a virtualized list of keyed rows, rendered and scrolled by
  * the conversation scroll engine (`lib/conversation-scroll`,
@@ -1603,6 +1764,7 @@ export const SessionChatStreamView = forwardRef<
       isVisible = true,
       className,
       leadingContent,
+      localUserMessages,
       trailingContent,
       emptyState,
       onAtBottomChange,
@@ -1612,6 +1774,7 @@ export const SessionChatStreamView = forwardRef<
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onAnnotateImage,
       lastAssistantMessageId = null,
       lastCompletedAssistantMessageId = null,
       messageFileDiffEntriesByTurn,
@@ -1626,6 +1789,8 @@ export const SessionChatStreamView = forwardRef<
       agentActivityTone = 'primary',
       // Waiting on the user (warning tone) is not work in progress.
       agentActivityShimmer = agentActivityTone !== 'warning',
+      liveTurnActivity = null,
+      historyLive = NOT_LIVE,
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
@@ -1664,6 +1829,16 @@ export const SessionChatStreamView = forwardRef<
             item.message.finished !== true
         )?.message ?? null,
       [items, lastAssistantMessageId]
+    );
+    // Keyed on the window's fields: callers rebuild its object every render.
+    const { sync: liveSync, since: liveSince } = historyLive;
+    const liveTurnContextValue = useMemo<LiveTurnContextValue>(
+      () => ({
+        clock: conversationView ?? null,
+        activity: liveTurnActivity,
+        live: { sync: liveSync, since: liveSince },
+      }),
+      [conversationView, liveSince, liveSync, liveTurnActivity]
     );
     const [assistantExpansionVersion, setAssistantExpansionVersion] = useState(0);
     const [hoveredAssistantMessageId, setHoveredAssistantMessageId] = useState<string | null>(null);
@@ -1729,7 +1904,7 @@ export const SessionChatStreamView = forwardRef<
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
       // signal and also busts the per-turn row cache.
-      return buildChatVirtualRows({
+      const rows = buildChatVirtualRows({
         items,
         lastAssistantMessageId,
         messageFileDiffEntriesByTurn,
@@ -1740,8 +1915,35 @@ export const SessionChatStreamView = forwardRef<
         copyContextAvailable,
         showThoughts,
         selectionLayouts,
+        groupCreatedSessions: messageSelection === null,
       });
+      if (!localUserMessages?.length) return rows;
+      const local = new Map(localUserMessages.map((message) => [message.id, message]));
+      // Keep the exact turn key through directory-only and hydrated history.
+      // A placeholder must not evict the only available body of a local input.
+      const merged = rows.map((row): ChatVirtualRow => {
+        const message = local.get(row.key);
+        local.delete(row.key);
+        return message && row.type === 'placeholder'
+          ? {
+              type: 'local-user',
+              key: row.key,
+              messageIndex: row.messageIndex,
+              content: message.content,
+            }
+          : row;
+      });
+      for (const message of local.values()) {
+        merged.push({
+          type: 'local-user',
+          key: message.id,
+          messageIndex: -1,
+          content: message.content,
+        });
+      }
+      return merged;
     }, [
+      messageSelection,
       showThoughts,
       selectionLayouts,
       activeSearchBlockId,
@@ -1750,6 +1952,7 @@ export const SessionChatStreamView = forwardRef<
       assistantExpansionVersion,
       copyContextAvailable,
       items,
+      localUserMessages,
       lastAssistantMessageId,
       messageFileDiffEntriesByTurn,
     ]);
@@ -1796,15 +1999,6 @@ export const SessionChatStreamView = forwardRef<
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
-     * The gap between the viewport's scroll space and Virtua's item-offset
-     * space — the viewport's top padding (`--conversation-top-inset` plus
-     * `py-6`), which Virtua does not account for. Measured from the DOM rather
-     * than assumed, and only on mount / viewport resize; see
-     * `measureItemOffsetDelta`.
-     */
-    const itemOffsetDeltaRef = useRef(0);
-
-    /**
      * Put a row's top at the viewport's top edge.
      *
      * THE one place that turns a row index into a scroll, so every jump in this
@@ -1818,7 +2012,7 @@ export const SessionChatStreamView = forwardRef<
       (rowIndex: number, smooth = false) => {
         listRef.current?.scrollRowToTop(rowIndex + leadingRowCount, {
           smooth,
-          offset: itemOffsetDeltaRef.current,
+          offset: listRef.current?.contentOffset ?? 0,
         });
       },
       [leadingRowCount]
@@ -1891,9 +2085,12 @@ export const SessionChatStreamView = forwardRef<
       (messageId: string) => {
         const rowIndex = virtualRows.findIndex(
           (row) =>
-            row.type === 'standard' &&
-            row.item.type === 'message' &&
-            row.item.message.id === messageId
+            (row.type === 'local-user' && row.key === messageId) ||
+            (row.type === 'placeholder' && row.key === messageId) ||
+            (row.type === 'standard' &&
+              row.item.type === 'message' &&
+              (row.item.message.id === messageId ||
+                row.groupedItems?.some((entry) => entry.message.id === messageId)))
         );
         return rowIndex === -1 ? -1 : rowIndex + leadingRowCount;
       },
@@ -1930,13 +2127,16 @@ export const SessionChatStreamView = forwardRef<
         virtualRows.map((row) => ({
           key: row.key,
           turnId:
-            row.type === 'placeholder'
-              ? row.item.row.id
-              : row.item.type === 'message'
-                ? row.item.message.id
-                : row.key,
+            row.type === 'local-user'
+              ? row.key
+              : row.type === 'placeholder'
+                ? row.item.row.id
+                : row.item.type === 'message'
+                  ? row.item.message.id
+                  : row.key,
           turnIndex: row.messageIndex,
           ready: row.type !== 'placeholder',
+          local: row.type === 'local-user',
         })),
       [virtualRows]
     );
@@ -2028,18 +2228,6 @@ export const SessionChatStreamView = forwardRef<
     }, [outlineEntries, virtualRows]);
     const [activeOutlineIndex, setActiveOutlineIndex] = useState(-1);
 
-    // Measured, not assumed: the rect difference also absorbs any border or
-    // start spacer, which a `padding-top` read would miss. Never on a scroll
-    // path — `getBoundingClientRect` forces layout.
-    const measureItemOffsetDelta = useCallback(() => {
-      const content = scrollViewportElement?.firstElementChild;
-      if (!scrollViewportElement || !(content instanceof HTMLElement)) return;
-      itemOffsetDeltaRef.current =
-        content.getBoundingClientRect().top -
-        scrollViewportElement.getBoundingClientRect().top +
-        scrollViewportElement.scrollTop;
-    }, [scrollViewportElement]);
-
     const syncActiveOutlineIndex = useCallback(() => {
       const vlist = listRef.current;
       if (!initialScrollRestored || !vlist || outlineAnchors.length === 0) {
@@ -2055,32 +2243,23 @@ export const SessionChatStreamView = forwardRef<
       const next = resolveActiveOutlineIndex(
         outlineAnchors,
         (rowIndex) => vlist.getItemOffset(rowIndex + leadingRowCount),
-        vlist.scrollOffset - itemOffsetDeltaRef.current,
+        vlist.scrollOffset - vlist.contentOffset,
         isAtEnd
       );
       setActiveOutlineIndex(next);
     }, [initialScrollRestored, leadingRowCount, outlineAnchors]);
 
-    // Read the sync through refs so this effect only re-runs when the viewport
-    // is bound or its one-time initial position restore completes. Depending on
-    // the callback would re-run it on every streamed delta, which is exactly the
-    // forced layout the measurement comment above rules out.
+    // The handle owns the unshifted content origin. Observe viewport resizes
+    // through a stable callback instead of sampling shifted DOM rectangles.
     const syncActiveOutlineIndexRef = useLatestRef(syncActiveOutlineIndex);
-    const measureItemOffsetDeltaRef = useLatestRef(measureItemOffsetDelta);
     useEffect(() => {
       if (!scrollViewportElement) return undefined;
       const remeasure = () => {
-        measureItemOffsetDeltaRef.current();
         syncActiveOutlineIndexRef.current();
       };
       remeasure();
       return observeResizeOnAnimationFrame(scrollViewportElement, remeasure);
-    }, [
-      initialScrollRestored,
-      measureItemOffsetDeltaRef,
-      scrollViewportElement,
-      syncActiveOutlineIndexRef,
-    ]);
+    }, [initialScrollRestored, scrollViewportElement, syncActiveOutlineIndexRef]);
 
     /**
      * Jump to a round. The engine holds the round's row at the top as the rows
@@ -2103,7 +2282,7 @@ export const SessionChatStreamView = forwardRef<
     // boolean bails out, so per-scroll-event updates are effectively free.
     const [isScrolledFromTop, setIsScrolledFromTop] = useState(false);
 
-    // Which turns are in the viewport, from Virtua's own index math; the only
+    // Which turns are in the viewport, from the engine's item-space offsets; the only
     // input the hydration window has. Read through refs so a report never
     // re-creates the scroll handler, and deduplicated so a settled viewport
     // stops producing updates.
@@ -2117,12 +2296,20 @@ export const SessionChatStreamView = forwardRef<
       const rows = virtualRowsRef.current;
       if (rows.length === 0) return;
       const clampRow = (index: number) => Math.max(0, Math.min(rows.length - 1, index));
-      const startRow = clampRow(vlist.findItemIndex(vlist.scrollOffset) - leadingRowCount);
+      const itemOffset = vlist.scrollOffset - vlist.contentOffset;
+      const startRow = clampRow(vlist.findItemIndex(itemOffset) - leadingRowCount);
       const endRow = clampRow(
-        vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
+        vlist.findItemIndex(itemOffset + vlist.viewportSize) - leadingRowCount
       );
-      const from = rows[startRow]?.messageIndex;
-      const to = rows[endRow]?.messageIndex;
+      // Local rows have no history index. They must not request a bogus
+      // hydration range when the viewport contains only accepted inputs.
+      const historyRows = rows.slice(startRow, endRow + 1).filter((row) => row.messageIndex >= 0);
+      const from = historyRows[0]?.messageIndex;
+      const end = historyRows.at(-1);
+      const to =
+        end?.type === 'standard'
+          ? (end.groupedItems?.at(-1)?.turnIndex ?? end.messageIndex)
+          : end?.messageIndex;
       if (from === undefined || to === undefined) return;
       const next = { from: Math.min(from, to), to: Math.max(from, to) + 1 };
       const last = lastVisibleRangeRef.current;
@@ -2133,7 +2320,7 @@ export const SessionChatStreamView = forwardRef<
     useEffect(() => {
       if (!initialScrollRestored) return;
       reportVisibleTurnRange();
-    }, [initialScrollRestored, reportVisibleTurnRange, virtualRows.length]);
+    }, [initialScrollRestored, reportVisibleTurnRange, virtualRows]);
 
     // The top fade's bottom counterpart, above the info bar: shown while
     // conversation content continues past the bottom edge. The reply room under
@@ -2207,7 +2394,12 @@ export const SessionChatStreamView = forwardRef<
           }
         }
         if (virtualIndex === -1) {
-          virtualIndex = virtualRows.findIndex((row) => row.messageIndex === messageIndex);
+          virtualIndex = virtualRows.findIndex(
+            (row) =>
+              row.messageIndex === messageIndex ||
+              (row.type === 'standard' &&
+                row.groupedItems?.some((entry) => entry.turnIndex === messageIndex))
+          );
         }
         if (virtualIndex === -1) return;
         scrollRowToTop(virtualIndex, smooth ?? true);
@@ -2270,7 +2462,7 @@ export const SessionChatStreamView = forwardRef<
 
     // A non-null leading Fragment may render no DOM. Keep the entire empty
     // state outside Virtua even then, and mount it only with real messages.
-    if (!items.length || hasOnlyEmptyItem) {
+    if ((!items.length || hasOnlyEmptyItem) && !localUserMessages?.length) {
       return (
         <SessionChatActionContext.Provider value={chatActionContextValue}>
           <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
@@ -2323,7 +2515,7 @@ export const SessionChatStreamView = forwardRef<
     }
 
     // Keyed rows in list order: the leading row, the conversation, the activity
-    // row, and the pending (not yet committed) messages.
+    // row, and attachment preparation/action errors.
     const listRows = [
       leadingContent == null ? null : (
         <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
@@ -2331,6 +2523,9 @@ export const SessionChatStreamView = forwardRef<
         </div>
       ),
       ...virtualRows.map((row, rowIndex) => {
+        if (row.type === 'local-user') {
+          return <div key={row.key}>{row.content}</div>;
+        }
         if (row.type === 'placeholder') {
           return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
         }
@@ -2387,6 +2582,7 @@ export const SessionChatStreamView = forwardRef<
               onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
               isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
               onTurnHoverChange={handleAssistantTurnHoverChange}
+              isLatestTurn={row.item.message.id === lastAssistantMessageId}
               conversationFontSize={conversationFontSize}
               shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
               liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
@@ -2422,109 +2618,130 @@ export const SessionChatStreamView = forwardRef<
     return (
       <SessionChatActionContext.Provider value={chatActionContextValue}>
         <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
-          <ContainerQueryProvider
-            ref={scrollRootRef}
-            className={cn('relative bg-background', className)}
-          >
-            <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
-              <EngineConversationScroller
-                sessionId={sessionId}
-                rows={listRows}
-                rowMeta={engineRowMeta}
-                item={ConversationVirtualRow}
-                keepMounted={nativeTextSelection.keepMounted}
-                initialWindowReady={initialWindowReady}
-                hidden={!isVisible}
-                suppressAutoScrollRef={autoScrollSuppressedRef}
-                onAtBottomChange={onAtBottomChange}
-                onScroll={handleStreamScroll}
-                onStateChange={handleListStateChange}
-                layoutKey={String(conversationFontSize)}
-                // Keep x overflow explicit: overflow-y:auto otherwise computes
-                // the untouched x axis to auto too, letting any wide row pan the
-                // entire conversation instead of its own nested scroller.
-                // Mobile session page floats a frosted header over the list;
-                // `--conversation-top-inset` (set by session-detail's mobile
-                // branch) pads the scroll content so the first message clears the
-                // header at rest while later content scrolls under it and blurs.
-                // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
-                viewportClassName="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
-                viewportStyle={CONVERSATION_VIEWPORT_STYLE}
-                trailing={<MessageSelectionOverlay />}
-                // Pre-render extra items outside the viewport to reduce blank areas
-                // during fast scrolling (especially on mobile). This is 4x Virtua's
-                // default (200px) — generous, but deliberately not the previous 2000px:
-                // an oversized buffer keeps a huge set of still-resizing rows mounted,
-                // which widens the window where Virtua's offsets are mid-recompute and
-                // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
-                bufferSize={CONVERSATION_OVERSCAN}
-                handleRef={listRef}
-              />
-            </NativeSelectionRowsContext.Provider>
-            {/* Top fade into the bg-background canvas above (desktop only),
+          <LiveTurnContext.Provider value={liveTurnContextValue}>
+            <ContainerQueryProvider
+              ref={scrollRootRef}
+              className={cn('relative bg-background', className)}
+            >
+              <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
+                <EngineConversationScroller
+                  sessionId={sessionId}
+                  rows={listRows}
+                  rowMeta={engineRowMeta}
+                  item={ConversationVirtualRow}
+                  keepMounted={nativeTextSelection.keepMounted}
+                  initialWindowReady={initialWindowReady}
+                  hidden={!isVisible}
+                  suppressAutoScrollRef={autoScrollSuppressedRef}
+                  onAtBottomChange={onAtBottomChange}
+                  onScroll={handleStreamScroll}
+                  onStateChange={handleListStateChange}
+                  layoutKey={String(conversationFontSize)}
+                  // Keep x overflow explicit: overflow-y:auto otherwise computes
+                  // the untouched x axis to auto too, letting any wide row pan the
+                  // entire conversation instead of its own nested scroller.
+                  // Mobile session page floats a frosted header over the list;
+                  // `--conversation-top-inset` (set by session-detail's mobile
+                  // branch) pads the scroll content so the first message clears the
+                  // header at rest while later content scrolls under it and blurs.
+                  // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
+                  viewportClassName="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
+                  viewportStyle={CONVERSATION_VIEWPORT_STYLE}
+                  trailing={<MessageSelectionOverlay />}
+                  // Pre-render extra items outside the viewport to reduce blank areas
+                  // during fast scrolling (especially on mobile). This is 4x Virtua's
+                  // default (200px) — generous, but deliberately not the previous 2000px:
+                  // an oversized buffer keeps a huge set of still-resizing rows mounted,
+                  // which widens the window where Virtua's offsets are mid-recompute and
+                  // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
+                  bufferSize={CONVERSATION_OVERSCAN}
+                  handleRef={listRef}
+                />
+              </NativeSelectionRowsContext.Provider>
+              {/* Top fade into the bg-background canvas above (desktop only),
                 hinting that the conversation continues past the top edge. */}
-            {!isMobile && isScrolledFromTop ? (
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
-            ) : null}
-            {/* Bottom fade into the same canvas over the last 40px above the
+              {!isMobile && isScrolledFromTop ? (
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
+              ) : null}
+              {/* Bottom fade into the same canvas over the last 40px above the
                 info bar (desktop only): more conversation below. */}
-            {!isMobile && hasContentBelow ? (
-              <div
-                data-conversation-bottom-fade=""
-                className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
-              />
-            ) : null}
-            {/* Round outline. Its visual layer portals to the full-page overlay
+              {!isMobile && hasContentBelow ? (
+                <div
+                  data-conversation-bottom-fade=""
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
+                />
+              ) : null}
+              {/* Round outline. Its visual layer portals to the full-page overlay
                 when supplied, so composer growth cannot move its centre. It is
                 never a Virtua row or a child of the viewport: sticky scroll
                 takes the content element from that div's `firstElementChild`.
                 Touch has no hover, so mobile is excluded rather than shipped
                 without its preview card. */}
-            {isMobile || !showOutlineRail ? null : (
-              <ConversationOutlineRail
-                entries={outlineEntries}
-                activeIndex={activeOutlineIndex}
-                onJumpToRound={handleOutlineJump}
-                onPreviewRound={handleOutlinePreview}
-                overlayRoot={outlineOverlayRoot}
-                enableArrivalIntent
-              />
-            )}
-            {showScrollToLatest && !isSticky && (
-              /* Full-bleed overlay; ConversationColumn carries the shared
+              {isMobile || !showOutlineRail ? null : (
+                <ConversationOutlineRail
+                  entries={outlineEntries}
+                  activeIndex={activeOutlineIndex}
+                  onJumpToRound={handleOutlineJump}
+                  onPreviewRound={handleOutlinePreview}
+                  overlayRoot={outlineOverlayRoot}
+                  enableArrivalIntent
+                />
+              )}
+              {showScrollToLatest && !isSticky && (
+                /* Full-bleed overlay; ConversationColumn carries the shared
                  horizontal gutter so the button lines up with the composer. */
-              <div className="pointer-events-none absolute inset-x-0 bottom-4">
-                <ConversationColumn className="flex justify-end">
-                  <Button
-                    variant="secondary"
-                    icon
-                    data-scroll-to-latest=""
-                    className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
-                    onClick={scrollToBottom}
-                    aria-label={t('sessions.scrollToLatest')}
-                  >
-                    {agentActivityLabel && agentActivityShimmer ? (
-                      <Spinner className="h-4 w-4" aria-hidden="true" />
-                    ) : (
-                      <ArrowDown className="h-4 w-4" aria-hidden="true" />
-                    )}
-                  </Button>
-                </ConversationColumn>
-              </div>
-            )}
-            <ImagePreviewDialog
-              open={findSessionImageGalleryEntryIndex(activeGalleryEntries, activeImageKey) !== -1}
-              onOpenChange={(open) => {
-                if (!open) {
-                  setActiveImageKey(null);
+                <div className="pointer-events-none absolute inset-x-0 bottom-4">
+                  <ConversationColumn className="flex justify-end">
+                    <Button
+                      variant="secondary"
+                      icon
+                      data-scroll-to-latest=""
+                      className={cn(
+                        stylex.props(stylex.defaultMarker()).className,
+                        'pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none'
+                      )}
+                      onClick={scrollToBottom}
+                      aria-label={t('sessions.scrollToLatest')}
+                    >
+                      {agentActivityLabel && agentActivityShimmer ? (
+                        <Spinner
+                          {...stylex.props(
+                            scrollToLatestStyles.icon,
+                            scrollToLatestStyles.workingSpinner
+                          )}
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      <ArrowDown
+                        {...stylex.props(
+                          scrollToLatestStyles.icon,
+                          !!agentActivityLabel &&
+                            agentActivityShimmer &&
+                            scrollToLatestStyles.workingArrow
+                        )}
+                        aria-hidden="true"
+                      />
+                    </Button>
+                  </ConversationColumn>
+                </div>
+              )}
+              <ImagePreviewDialog
+                open={
+                  findSessionImageGalleryEntryIndex(activeGalleryEntries, activeImageKey) !== -1
                 }
-              }}
-              activeImageKey={activeImageKey}
-              onActiveImageKeyChange={setActiveImageKey}
-              entries={activeGalleryEntries}
-              portalAnchorRef={scrollRootRef}
-            />
-          </ContainerQueryProvider>
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setActiveImageKey(null);
+                  }
+                }}
+                activeImageKey={activeImageKey}
+                onActiveImageKeyChange={setActiveImageKey}
+                entries={activeGalleryEntries}
+                onAnnotateImage={onAnnotateImage}
+                portalAnchorRef={scrollRootRef}
+              />
+            </ContainerQueryProvider>
+          </LiveTurnContext.Provider>
         </SessionImagePreviewContext.Provider>
       </SessionChatActionContext.Provider>
     );
@@ -2615,8 +2832,12 @@ const SystemMessageRowView = ({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
 }) => {
+  const creationCards = getCreatedSessionCards(message);
+  if (creationCards) {
+    return <CreatedSessionList cards={creationCards} onNavigateSession={onNavigateSession} />;
+  }
   const systemItems = message.items.flatMap((item, itemIndex) =>
-    shouldRenderSystemRowItem(item) ? [{ item, itemIndex }] : []
+    shouldRenderSystemRowItem(item) && hasVisibleOperationContent(item) ? [{ item, itemIndex }] : []
   );
 
   if (systemItems.length === 0) {
@@ -2626,7 +2847,15 @@ const SystemMessageRowView = ({
   return (
     <div className="flex flex-col gap-2">
       {systemItems.map(({ item, itemIndex }) =>
-        item.type === 'system_notice' && item.name === 'schedule_proposal' && item.meta ? (
+        item.type === 'system_notice' && item.name === 'agent_role_proposal' && item.meta ? (
+          <AgentRoleProposalNotice
+            key={`role-proposal-${itemIndex}`}
+            meta={item.meta as AgentRoleProposalMeta}
+            sessionId={sessionId}
+            entryId={message.id}
+            itemIndex={itemIndex}
+          />
+        ) : item.type === 'system_notice' && item.name === 'schedule_proposal' && item.meta ? (
           <ScheduleProposalNotice
             key={`schedule-proposal-${itemIndex}`}
             meta={item.meta as ScheduleProposalMeta}
@@ -2638,6 +2867,7 @@ const SystemMessageRowView = ({
           <SystemNoticeView
             key={`${item.name}-${itemIndex}`}
             notice={item}
+            entryId={message.id}
             sessionId={sessionId}
             onNavigateSession={onNavigateSession}
             capacityRetry={capacityRetry}
@@ -2647,22 +2877,22 @@ const SystemMessageRowView = ({
             key={`worktree-script-${item.phase}-${itemIndex}`}
             script={item}
           />
+        ) : item.type === 'operation_completion_batch' ? (
+          <OperationCompletionBatchView
+            key={item.batchId}
+            batch={item}
+            onNavigateSession={onNavigateSession}
+          />
         ) : item.type === 'operation_progress' ? (
-          <div
+          <CreatedSessionList
             key={item.operationId}
-            className="flex flex-col gap-2"
-            data-session-create-progress=""
-          >
-            {item.items.map((target) => (
-              <CreatedSessionOperationCard
-                key={target.target.sessionId}
-                sessionId={target.target.sessionId}
-                fallbackTitle={target.label}
-                status={target.status}
-                onNavigateSession={onNavigateSession}
-              />
-            ))}
-          </div>
+            cards={item.items.map((target) => ({
+              sessionId: target.target.sessionId,
+              fallbackTitle: target.label,
+              status: target.status,
+            }))}
+            onNavigateSession={onNavigateSession}
+          />
         ) : (
           <OperationCompletionView
             key={`${item.deliveryId}-${itemIndex}`}
@@ -2675,6 +2905,42 @@ const SystemMessageRowView = ({
   );
 };
 
+const OperationCompletionBatchView = ({
+  batch,
+  onNavigateSession,
+}: {
+  batch: Extract<MessageContent, { type: 'operation_completion_batch' }>;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
+}) => {
+  const { t } = useTranslation();
+  if (!hasVisibleOperationContent(batch)) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div>
+        {t(
+          batch.deliveryStatus === 'unknown'
+            ? 'orchestration.batchResultsUnknown'
+            : 'orchestration.batchResults',
+          {
+            defaultValue:
+              batch.deliveryStatus === 'unknown'
+                ? '{{count}} task results saved; model delivery is uncertain'
+                : '{{count}} completed task results',
+            count: batch.memberCount,
+          }
+        )}
+      </div>
+      {(batch.members ?? []).filter(hasVisibleOperationContent).map((member) => (
+        <OperationCompletionView
+          key={member.deliveryId}
+          completion={member}
+          onNavigateSession={onNavigateSession}
+        />
+      ))}
+    </div>
+  );
+};
+
 const OperationCompletionView = ({
   completion,
   onNavigateSession,
@@ -2683,21 +2949,30 @@ const OperationCompletionView = ({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
 }) => {
   const { t } = useTranslation();
-  const resultItems =
+  if (!hasVisibleOperationContent(completion)) return null;
+  const targetCards = getOperationCompletionItems(completion);
+  // Progress suppresses duplicate cards, but the summary still counts every result.
+  const results =
     completion.completion.type === 'result'
       ? completion.completion.value.items
       : completion.completion.type === 'cancelled'
         ? (completion.completion.partial?.items ?? [])
         : [];
-  const failedCompletion = completion.completion.type === 'error';
-  const cancelledCompletion = completion.completion.type === 'cancelled';
-  const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
+  const failed = results.filter((item) => item.status === 'failed').length;
+  const cancelled = results.filter((item) => item.status === 'cancelled').length;
+  const succeeded = results.filter((item) => item.status === 'succeeded').length;
+  const failedCompletion =
+    completion.completion.type === 'error' ||
+    (completion.completion.type === 'result' && failed > 0 && failed === results.length);
+  const cancelledCompletion =
+    completion.completion.type === 'cancelled' ||
+    (completion.completion.type === 'result' && cancelled > 0 && cancelled === results.length);
+  const partialCompletion = !failedCompletion && !cancelledCompletion && failed + cancelled > 0;
+  const StatusIcon =
+    failedCompletion || failed > 0 ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
   const createsSessions =
     completion.operationKind === 'session_create' ||
     completion.operationKind === 'session_create_many';
-  // A create Operation that published progress already shows each target as a
-  // live card above; repeating them here would duplicate every Session.
-  const targetCards = createsSessions && completion.progressMessageId ? [] : resultItems;
   const cards = targetCards.flatMap((item) =>
     item.target
       ? [
@@ -2732,40 +3007,17 @@ const OperationCompletionView = ({
         ]
       : []
   );
-  const continuationNotice = completion.continuation
-    ? t(
-        completion.continuation.status === 'uncertain'
-          ? 'orchestration.continuationUncertain'
-          : 'orchestration.continuationNotStarted'
-      )
-    : null;
   // The status card carries only what the cards cannot: a whole-Operation
-  // failure or cancellation, targetless failures, the continuation outcome, or
-  // the plain outcome when there is no Session to show.
+  // failure, cancellation or mixed outcomes, or targetless problems.
   const showStatusCard =
-    cards.length === 0 ||
-    failedCompletion ||
-    cancelledCompletion ||
-    untargetedProblems.length > 0 ||
-    continuationNotice !== null;
+    failedCompletion || cancelledCompletion || partialCompletion || untargetedProblems.length > 0;
 
   return (
-    <div
-      className="flex flex-col gap-2"
-      data-operation-completion={completion.operationKind}
-      {...(createsSessions && cards.length > 0 ? { 'data-session-create-completion': '' } : {})}
-    >
-      {cards.map((card) =>
-        createsSessions ? (
-          <CreatedSessionOperationCard
-            key={card.sessionId}
-            sessionId={card.sessionId}
-            fallbackTitle={card.fallbackTitle}
-            status={card.status}
-            detail={card.detail}
-            onNavigateSession={onNavigateSession}
-          />
-        ) : (
+    <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>
+      {createsSessions ? (
+        <CreatedSessionList cards={cards} onNavigateSession={onNavigateSession} />
+      ) : (
+        cards.map((card) => (
           // A message Operation reads from the sender's side: the target replied.
           <OperationReplyCard
             key={card.sessionId}
@@ -2780,7 +3032,7 @@ const OperationCompletionView = ({
                   ? { status: 'cancelled' as const }
                   : { status: 'running' as const })}
           />
-        )
+        ))
       )}
       {showStatusCard ? (
         <div
@@ -2793,7 +3045,7 @@ const OperationCompletionView = ({
           <StatusIcon
             className={cn(
               'mt-0.5 h-4 w-4 shrink-0',
-              failedCompletion ? 'text-destructive' : 'text-muted-foreground'
+              failedCompletion || failed > 0 ? 'text-destructive' : 'text-muted-foreground'
             )}
             aria-hidden="true"
           />
@@ -2804,7 +3056,10 @@ const OperationCompletionView = ({
                   ? 'orchestration.operationFailed'
                   : cancelledCompletion
                     ? 'orchestration.operationCancelled'
-                    : 'orchestration.operationCompleted'
+                    : partialCompletion
+                      ? 'orchestration.operationPartialResult'
+                      : 'orchestration.operationCompleted',
+                { succeeded, failed, cancelled }
               )}
             </div>
             {completion.completion.type === 'error' ? (
@@ -2828,28 +3083,11 @@ const OperationCompletionView = ({
                 {problem.label ? `${problem.label}: ${problem.message}` : problem.message}
               </div>
             ))}
-            {continuationNotice ? (
-              <div
-                className={cn(
-                  stylex.props(activityTypography.footnote).className,
-                  'mt-0.5 text-muted-foreground'
-                )}
-              >
-                {continuationNotice}
-              </div>
-            ) : null}
           </div>
         </div>
       ) : null}
     </div>
   );
-};
-
-/** One readable line from a reply preview: collapsed whitespace, capped length. */
-const summarizeOperationOutput = (text: string | undefined): string | undefined => {
-  const collapsed = text?.replace(/\s+/g, ' ').trim();
-  if (!collapsed) return undefined;
-  return collapsed.length > 240 ? `${collapsed.slice(0, 240)}…` : collapsed;
 };
 
 const DashedNoticeRule = () => (
@@ -2863,97 +3101,98 @@ const DashedNoticeRule = () => (
 );
 
 const noticeStyles = stylex.create({
-  /**
-   * One wrapping row for the whole banner. Above the mobile breakpoint the
-   * detail and footer keep their own rows; at phone widths the copy-only case
-   * swaps those two orders so the footer rides the header's trailing edge
-   * instead of spending a row. When a capacity retry action is present the
-   * header is already occupied, so the footer keeps its row to avoid squeezing
-   * the title between two controls.
-   */
-  row: {
+  // One header row: glyph, label, and at most one trailing owner (retry or
+  // copy). `alignItems: center` keeps the 14px glyph on the label's optical
+  // line instead of relying on a hand-tuned top margin.
+  header: {
     display: 'flex',
-    flexWrap: 'wrap',
     alignItems: 'center',
     columnGap: space[2],
-    rowGap: space[1.5],
-    paddingInline: space[2],
-    paddingTop: space[1.5],
-    paddingBottom: space[1.5],
+    paddingInline: space[3],
+    paddingTop: space[2],
+    paddingBottom: space[1],
   },
-  /** A footer button's own bottom padding replaces the plain band's. */
-  rowWithFooter: {
-    paddingBottom: space[2],
+  headerOnly: {
+    paddingBottom: space[3],
   },
   label: {
     flexGrow: 1,
     flexShrink: 1,
     flexBasis: 0,
     minWidth: 0,
-    fontSize: textScale.footnoteSize,
-    lineHeight: textScale.footnoteLeading,
+    fontSize: textScale.subheadlineSize,
+    lineHeight: textScale.subheadlineLeading,
     fontWeight: 500,
   },
-  action: { flexShrink: 0 },
-  detail: {
-    order: 4,
-    width: '100%',
-    minWidth: 0,
+  trailing: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
   },
-  /** Applied only when copy is the sole trailing control. */
-  detailAfterFooter: {
-    '@media (max-width: 767px)': { order: 5 },
+  detail: {
+    minWidth: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
+  },
+  // The follow-up row brings its own hairline and top padding, so the detail
+  // above it closes with the same space[2] the row opens with.
+  detailBeforeAfterDetail: {
+    paddingBottom: space[2],
   },
   detailText: {
     display: 'block',
     minWidth: 0,
     whiteSpace: 'pre-wrap',
-    overflowWrap: 'break-word',
-    fontSize: textScale.footnoteSize,
+    overflowWrap: 'anywhere',
+    fontSize: textScale.subheadlineSize,
     lineHeight: textScale.bodyLeading,
     color: 'hsl(var(--muted-foreground))',
   },
   footer: {
-    order: 5,
-    width: '100%',
-    flexShrink: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
-  /** Applied only when copy is the sole trailing control. */
-  footerInHeader: {
-    '@media (max-width: 767px)': { order: 4, width: 'auto' },
+  // Its own block under the detail, not a header flex child: inside the header
+  // it took the full row width and squeezed the label into a one-glyph column.
+  afterDetail: {
+    minWidth: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
 });
 
 /**
- * Renders a single system notice as a divider with tooltip
- */
-/**
  * The one banner an agent notice takes, whatever its tone.
  *
- * Shaped like a fenced code block — the conversation already embeds those, so a
- * filled, hairline-ringed block reads as part of the prose rather than as chrome
- * dropped on top of it.
+ * A soft well, not an outlined alert: every other surface in the conversation
+ * is a fill without a border, and a hairline ring made the notice read as
+ * chrome dropped on top of the prose. The body starts at the well's leading
+ * edge, under the glyph, so agent text is not pushed into a narrower column.
  *
  * Always open and the full width of the column. A notice is a short aside, so
  * hiding it behind a disclosure asked for a click to read two lines, and a
  * fit-content card left a ragged right edge against the column's otherwise
  * straight rail.
  *
- * Tone is carried by the glyph and the leading sentence: amber is warning and
- * red is failure, by convention, over a ~6% fill that stays out of the way.
+ * Tone is carried by the glyph and the label: amber is warning and red is
+ * failure, by convention, over a ~4.5% fill that stays out of the way.
  */
-const AgentNoticeBanner = ({
+export const AgentNoticeBanner = ({
   tone,
   label,
   detail,
   action,
   footer,
+  afterDetail,
 }: {
   tone: 'error' | 'warning' | 'muted';
   label: string;
   detail?: string;
   action?: ReactNode;
   footer?: ReactNode;
+  /** A full-width row under the detail, for a follow-up action the detail explains. */
+  afterDetail?: ReactNode;
 }) => {
   // Error is a cross, warning a triangle, muted an info circle — an octagon
   // with an exclamation inside still read as "notice" at 14px.
@@ -2969,69 +3208,59 @@ const AgentNoticeBanner = ({
         ? 'text-amber-600 dark:text-amber-400'
         : 'text-muted-foreground';
 
-  // The surface keeps the tone but at a fraction of its saturation: the colour
-  // is mixed toward the neutral border rather than merely faded, so the card
-  // still reads as "warning" or "failure" at a glance without a vivid slab
-  // competing with the answer it comments on.
+  // The tone only tints the well. There is no ring: a notice sits in the
+  // conversation as a block of the same material as a user bubble or code
+  // block, not as a bordered component.
   const toneColor =
     tone === 'error'
       ? 'hsl(var(--destructive))'
       : tone === 'warning'
         ? 'rgb(245 158 11)'
         : 'hsl(var(--muted-foreground))';
-  // A hairline: Chromium rounds a 0.5px BORDER up to 1px at any DPR, so every
-  // `border-[0.5px]` in the app actually paints 1px. `ui/AGENTS.md` settled on
-  // this same shadow ring for menus.
-  const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
-  const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
+  const fillColor = `color-mix(in srgb, ${toneColor} 4.5%, transparent)`;
   // Only lift copy into the header when it would be the sole trailing control.
   // A capacity retry action already owns that edge, and moving copy beside it
   // wraps a short title into a tall column on phones.
   const copyRidesHeader = !action;
+  const headerTrailing = action ?? (copyRidesHeader ? footer : undefined);
+  const bodyFooter = copyRidesHeader ? null : footer;
+  const hasBody = Boolean(detail || afterDetail || bodyFooter);
 
   return (
-    <div
-      style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
-      className="w-full overflow-hidden rounded-lg"
-    >
-      {/* Header, detail, and footer share one wrapping row. On phones without a
-          retry action the footer keeps the header's trailing edge and the detail
-          drops to its own full-width line, so copy no longer spends a separate
-          row; wider viewports keep detail and footer on their own rows below. */}
-      <div {...stylex.props(noticeStyles.row, footer ? noticeStyles.rowWithFooter : undefined)}>
+    <div style={{ background: fillColor }} className="w-full overflow-hidden rounded-lg">
+      <div {...stylex.props(noticeStyles.header, !hasBody && noticeStyles.headerOnly)}>
         <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
         <span {...withClassName(stylex.props(noticeStyles.label), accentClass)}>{label}</span>
-        {action ? <div {...stylex.props(noticeStyles.action)}>{action}</div> : null}
-        {detail ? (
-          <div
-            {...stylex.props(
-              noticeStyles.detail,
-              copyRidesHeader && noticeStyles.detailAfterFooter
-            )}
-          >
-            <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
-          </div>
-        ) : null}
-        {footer ? (
-          <div
-            {...stylex.props(noticeStyles.footer, copyRidesHeader && noticeStyles.footerInHeader)}
-          >
-            {footer}
-          </div>
+        {headerTrailing ? (
+          <div {...stylex.props(noticeStyles.trailing)}>{headerTrailing}</div>
         ) : null}
       </div>
+      {detail ? (
+        <div
+          {...stylex.props(
+            noticeStyles.detail,
+            afterDetail ? noticeStyles.detailBeforeAfterDetail : null
+          )}
+        >
+          <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
+        </div>
+      ) : null}
+      {afterDetail ? <div {...stylex.props(noticeStyles.afterDetail)}>{afterDetail}</div> : null}
+      {bodyFooter ? <div {...stylex.props(noticeStyles.footer)}>{bodyFooter}</div> : null}
     </div>
   );
 };
 
 const SystemNoticeView = ({
   notice,
+  entryId,
   sessionId,
   onNavigateSession,
   capacityRetry,
   inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  entryId: string;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
@@ -3049,6 +3278,7 @@ const SystemNoticeView = ({
       return (
         <ChatFailedNoticeView
           notice={notice}
+          entryId={entryId}
           sessionId={sessionId}
           capacityRetry={capacityRetry}
           inTurn={inTurn}
@@ -3097,13 +3327,7 @@ const SystemNoticeView = ({
       return null;
   }
 
-  const meta = notice.meta as
-    | {
-        truncated?: boolean;
-        terminalOmitted?: boolean;
-        thinkingOmitted?: boolean;
-      }
-    | undefined;
+  const meta = notice.meta as { truncated?: boolean } | undefined;
 
   // Build the main message
   let mainMessage = t(
@@ -3119,65 +3343,16 @@ const SystemNoticeView = ({
     )}`;
   }
 
-  // Build tooltip content
-  const tooltipContent = t(
-    'sessions.systemNotices.resumeFromExternalChatHistory.tooltip',
-    'Native ACP resume is not yet supported (WIP). Context is restored from chat history.'
-  );
-
   return (
     <div className="relative flex items-center gap-3 py-4">
       {/* Left divider line */}
       <div className="flex-1 h-px bg-border" />
 
-      {/* Center content */}
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border border-border/60">
-        <Tooltip.Provider>
-          <Tooltip.Root>
-            <Tooltip.Trigger
-              delay={500}
-              render={<Info className="h-4 w-4 text-muted-foreground cursor-help" />}
-            />
-            <Tooltip.Content side="top" className="max-w-xs text-center">
-              <p>{tooltipContent}</p>
-              {meta?.terminalOmitted && (
-                <p
-                  className={cn(
-                    stylex.props(activityTypography.footnote).className,
-                    'mt-1 opacity-80'
-                  )}
-                >
-                  {t(
-                    'sessions.systemNotices.resumeFromExternalChatHistory.terminalOmitted',
-                    'Terminal output was omitted to fit context.'
-                  )}
-                </p>
-              )}
-              {meta?.thinkingOmitted && (
-                <p
-                  className={cn(
-                    stylex.props(activityTypography.footnote).className,
-                    'mt-1 opacity-80'
-                  )}
-                >
-                  {t(
-                    'sessions.systemNotices.resumeFromExternalChatHistory.thinkingOmitted',
-                    'Agent thinking was omitted to fit context.'
-                  )}
-                </p>
-              )}
-            </Tooltip.Content>
-          </Tooltip.Root>
-        </Tooltip.Provider>
-        <span
-          className={cn(
-            stylex.props(activityTypography.footnote).className,
-            'text-muted-foreground'
-          )}
-        >
-          {mainMessage}
-        </span>
-      </div>
+      <span
+        className={cn(stylex.props(activityTypography.footnote).className, 'text-muted-foreground')}
+      >
+        {mainMessage}
+      </span>
 
       {/* Right divider line */}
       <div className="flex-1 h-px bg-border" />
@@ -3190,11 +3365,13 @@ const SystemNoticeView = ({
  */
 const ChatFailedNoticeView = ({
   notice,
+  entryId,
   sessionId,
   capacityRetry,
   inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  entryId: string;
   sessionId: SessionId;
   capacityRetry?: CapacityRetryControl;
   inTurn?: boolean;
@@ -3225,7 +3402,7 @@ const ChatFailedNoticeView = ({
       }
     | undefined;
 
-  const diagnosticCopy = getChatFailedDiagnosticCopy(meta?.code);
+  const diagnosticCopy = getChatFailedDiagnosticCopy(meta?.code, meta?.message);
 
   // Map reason codes to user-friendly messages
   const getReasonMessage = (reason?: string): string => {
@@ -3332,20 +3509,20 @@ const ChatFailedNoticeView = ({
   };
 
   const reasonMessage = getReasonMessage(meta?.reason);
+  const installUrl = diagnosticCopy?.installUrl;
   const actionMessage = diagnosticCopy
     ? t(diagnosticCopy.actionKey, diagnosticCopy.action)
     : undefined;
   const rawMessage = meta?.message?.trim() ? meta.message : undefined;
-  const detailMessage = (() => {
-    if (!rawMessage) return undefined;
-    const extracted = extractReadableChatFailedMessage(rawMessage);
-    return extracted !== reasonMessage ? extracted : undefined;
-  })();
-  // Unfold whenever there is a raw message at all: even one whose readable
-  // extract equals the title, the full payload (stack, upstream JSON) is worth
-  // reading.
-  const hasDetail = Boolean(rawMessage && rawMessage.trim() !== reasonMessage);
   const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
+  // Mount the quota leaf only for a message that can carry the shortcut. The
+  // leaf still proves the terminal failure and exhausted 5h reset from history
+  // and provider quota before rendering; this gate only avoids a subscription
+  // for every unrelated chat_failed banner.
+  const quotaContinue =
+    sessionMeta && isClaudeSessionLimitMessage(rawMessage) ? (
+      <SessionLimitContinueAction session={sessionMeta} entryId={entryId} />
+    ) : null;
 
   const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
   const isRetryCountdown = retryInSeconds !== null;
@@ -3423,18 +3600,25 @@ const ChatFailedNoticeView = ({
     <AgentNoticeBanner
       tone={isProviderOverloaded ? 'muted' : 'error'}
       label={reasonMessage}
-      // The readable extract first, then the untouched payload behind it.
-      detail={
-        [actionMessage, detailMessage, hasDetail ? rawMessage : null]
-          .filter((part, index, all) => Boolean(part) && all.indexOf(part) === index)
-          .join('\n\n') || undefined
-      }
+      detail={buildChatFailedNoticeDetail({
+        title: reasonMessage,
+        action: actionMessage,
+        message: rawMessage,
+      })}
       action={retryAction}
+      afterDetail={quotaContinue}
       footer={
-        <Button variant="ghost" size="medium" onClick={() => void handleCopyError()}>
-          <Copy size={14} aria-hidden="true" />
-          {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
-        </Button>
+        <>
+          {installUrl ? (
+            <Button variant="ghost" size="small" onClick={() => void openExternalUrl(installUrl)}>
+              {t('sessions.systemNotices.chatFailed.installNode', 'Download Node.js')}
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="small" onClick={() => void handleCopyError()}>
+            <Copy size={14} aria-hidden="true" />
+            {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
+          </Button>
+        </>
       }
     />
   );
@@ -3474,7 +3658,7 @@ const AgentWarningNoticeView = ({
     return null;
   }
 
-  return <AgentWarningNoticeBody message={meta.message} inTurn={inTurn} />;
+  return <AgentWarningNoticeBody message={meta.message} source={meta.source} inTurn={inTurn} />;
 };
 
 /**
@@ -3489,18 +3673,48 @@ const AgentWarningNoticeView = ({
  */
 const AgentWarningNoticeBody = ({
   message,
+  source,
   inTurn = false,
 }: {
   message: string;
+  source?: string;
   inTurn?: boolean;
 }) => {
   const { t } = useTranslation();
+  const label =
+    source === 'sessionCancelFailed'
+      ? t('sessions.systemNotices.agentWarning.stopRequestFailed', 'Stop request failed')
+      : source === 'sessionStopTimedOut'
+        ? t('sessions.systemNotices.agentWarning.stopTimedOut', 'Stopping took too long')
+        : source === 'sessionTerminationFailed'
+          ? t(
+              'sessions.systemNotices.agentWarning.stopTerminationFailed',
+              'Could not stop the task'
+            )
+          : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
+  const guidance =
+    source === 'sessionCancelFailed'
+      ? t(
+          'sessions.systemNotices.agentWarning.stopRequestFailedGuidance',
+          'The agent could not process the Stop request. Lody will keep trying to end the task.'
+        )
+      : source === 'sessionStopTimedOut'
+        ? t(
+            'sessions.systemNotices.agentWarning.stopTimedOutGuidance',
+            'The task has not stopped yet. Lody is trying to force it to end.'
+          )
+        : source === 'sessionTerminationFailed'
+          ? t(
+              'sessions.systemNotices.agentWarning.stopTerminationFailedGuidance',
+              'The task may still be running. Try restarting Lody’s background service on this machine.'
+            )
+          : undefined;
   return (
     <div className={cn('py-1', !inTurn && '@[640px]:pl-3')} role="alert">
       <AgentNoticeBanner
         tone="warning"
-        label={t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
-        detail={message}
+        label={label}
+        detail={guidance ? `${guidance}\n\n${message}` : message}
       />
     </div>
   );
@@ -3661,7 +3875,9 @@ const UserMessageRowView = ({
 }) => {
   const { t } = useTranslation();
   const { copyContext } = useContext(SessionChatActionContext);
+  const copyWorkspaceId = useSessionCopyWorkspaceId();
   const isMobile = useIsMobile();
+  const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
   // entry to flip it).
@@ -3695,6 +3911,9 @@ const UserMessageRowView = ({
   const [resendDialogOpen, setResendDialogOpen] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(() => getTextContentFromMessageItems(message.items));
+  const [editQuoteDrafts, setEditQuoteDrafts] = useState(
+    () => getMessageQuoteEditDraft(message.items).drafts
+  );
   const [didCopyMessageId, setDidCopyMessageId] = useState(message.id);
   if (didCopyMessageId !== message.id) {
     setDidCopyMessageId(message.id);
@@ -3707,13 +3926,13 @@ const UserMessageRowView = ({
     if (!hasTextContent) return;
 
     // The chip form, not the rewritten instruction the agent received.
-    const textContent = getCopyTextFromMessageItems(message.items);
+    const textContent = getCopyTextFromMessageItems(message.items, copyWorkspaceId);
     const ok = await writeTextToClipboard(textContent);
     if (!ok) return;
 
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [hasTextContent, message.items]);
+  }, [hasTextContent, message.items, copyWorkspaceId]);
 
   const handlePin = useCallback(() => {
     if (!pinCtx) return;
@@ -3785,6 +4004,13 @@ const UserMessageRowView = ({
           ),
           'group/usermsg'
         )}
+        onClick={
+          isMobile
+            ? (event) => {
+                if (isMessageActionsToggleTap(event.target)) toggleMobileMessageActions(message.id);
+              }
+            : undefined
+        }
       >
         <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
           {message.author?.kind === 'agent' ? (
@@ -3852,11 +4078,14 @@ const UserMessageRowView = ({
                 <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
               )}
               <div
-                className={cn(
-                  'min-w-0 max-w-full text-foreground',
-                  isEditing ? 'w-full' : 'w-fit',
-                  hasWideContent ? 'min-w-[480px]' : '',
-                  'sm:max-w-[800px]'
+                {...withClassName(
+                  stylex.props(isEditing ? conversationSurface.userEditContent : undefined),
+                  cn(
+                    'min-w-0 max-w-full text-foreground',
+                    isEditing ? 'w-full' : 'w-fit',
+                    hasWideContent ? 'min-w-[480px]' : '',
+                    'sm:max-w-[800px]'
+                  )
                 )}
                 data-native-selection-allow
               >
@@ -3871,11 +4100,14 @@ const UserMessageRowView = ({
                     <UserMessageEditor
                       value={editText}
                       onChange={setEditText}
+                      quoteDrafts={editQuoteDrafts}
+                      onQuoteDraftsChange={setEditQuoteDrafts}
                       onCancel={() => setIsEditing(false)}
                       onSave={(submission) => void handleSaveEdit(submission)}
                       isSaving={isSavingEdit}
                       conversationFontSize={conversationFontSize}
                       mentionSource={editMentionContext?.mentionSource}
+                      sessionSource={editMentionContext?.sessionSource}
                       availableCommands={editMentionContext?.availableCommands}
                       skillAgent={editMentionContext?.skillAgent}
                       currentSessionId={sessionId}
@@ -3895,7 +4127,15 @@ const UserMessageRowView = ({
         {/* While editing, the row's own actions (edit/pin/copy) would compete with
             the editor's Cancel / Save & resend — hide them until it closes. */}
         {(hasTextContent || copyContext) && !isEditing ? (
-          <div {...stylex.props(conversationSurface.userActions)} data-user-message-actions="">
+          <div
+            {...withClassName(
+              stylex.props(conversationSurface.userActions),
+              /* Touch has no hover: a tap on the message reveals its actions. */
+              isMobile && !mobileActionsRevealed ? 'invisible' : undefined
+            )}
+            data-user-message-actions=""
+            data-mobile-actions-hidden={isMobile && !mobileActionsRevealed ? '' : undefined}
+          >
             {copyContext && (
               <AssistantForkButton
                 turnId={message.id}
@@ -3923,7 +4163,9 @@ const UserMessageRowView = ({
                             'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
                         )}
                         onClick={() => {
-                          setEditText(getTextContentFromMessageItems(message.items));
+                          const draft = getMessageQuoteEditDraft(message.items);
+                          setEditText(draft.text);
+                          setEditQuoteDrafts(draft.drafts);
                           setIsEditing(true);
                         }}
                         aria-label={t('sessions.editMessage', 'Edit message')}
@@ -4146,12 +4388,32 @@ const ResendUndeliveredDialog = ({
   );
 };
 
-/** Tokens this turn consumed, in compact product-language units (1.2K / 1.2万). */
-const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
+type AssistantTurnUsageRow = {
+  key: string;
+  label: string;
+  value: number;
+  detail?: string;
+  /** Preformatted value for rows whose unit is not a compact token count. */
+  display?: string;
+  title?: string;
+};
+
+/** Tokens and estimated cost this turn consumed, in compact product-language units. */
+const AssistantTurnUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
   const { t, i18n } = useTranslation();
   const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const exact = new Intl.NumberFormat(locale);
-  const rows = [
+  const costUSD = usage.costUSD;
+  /* Per-turn costs are small enough that cents hide the number; keep two
+     fraction digits and spend more only where they carry information. */
+  const formatCost = (value: number): string => {
+    const abs = Math.abs(value);
+    return formatUsdAmount(value, locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: abs > 0 && abs < 0.01 ? 8 : abs < 1 ? 4 : 2,
+    });
+  };
+  const rows: AssistantTurnUsageRow[] = [
     {
       key: 'input',
       label: t('sessions.turnConfig.inputTokens', 'Input'),
@@ -4179,6 +4441,20 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
         write: exact.format(usage.cacheCreationInputTokens),
       }),
     },
+    ...(typeof costUSD === 'number'
+      ? [
+          {
+            key: 'cost',
+            label: t('sessions.turnConfig.costEstimate', 'Cost estimate'),
+            value: costUSD,
+            display: formatCost(costUSD),
+            title: t(
+              'sessions.turnConfig.costHint',
+              "Estimated from the provider's reported usage, not an invoice."
+            ),
+          },
+        ]
+      : []),
   ];
   return (
     <div className="border-t border-border/60 px-3 py-2.5">
@@ -4194,6 +4470,7 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
         {rows.map((row) => (
           <div
             key={row.key}
+            data-turn-cost={row.key === 'cost' ? '' : undefined}
             className={cn(
               stylex.props(activityTypography.caption).className,
               'flex items-start justify-between gap-3 '
@@ -4202,12 +4479,172 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
             <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
             <dd
               className="text-right font-medium tabular-nums text-foreground"
-              title={[exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
+              title={row.title ?? [exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
             >
-              {formatCompactNumber(row.value, locale)}
+              {row.display ?? formatCompactNumber(row.value, locale)}
             </dd>
           </div>
         ))}
+      </dl>
+    </div>
+  );
+};
+
+/** Ticks once a second while the popover is open; a closed popover mounts none of this. */
+const TURN_TIMING_SAMPLE_MS = 1_000;
+
+/**
+ * When the turn started, how long it has run or took, and — while it is live —
+ * how long since the conversation last received an update, so a user can tell
+ * a busy turn from a stuck one.
+ */
+const AssistantTurnTimingRows = ({
+  message,
+  isLive,
+}: {
+  message: SessionHistoryParsed;
+  isLive: boolean;
+}) => {
+  const { t, i18n } = useTranslation();
+  const nowMs = useStableNow(TURN_TIMING_SAMPLE_MS).getTime();
+  const runningLiveness = useRunningTurnLiveness(nowMs);
+  const rows = buildAssistantTurnTimingRows(message, {
+    liveness: isLive ? runningLiveness : null,
+    nowMs,
+  });
+  if (rows.length === 0) return null;
+  const locale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
+  const durationUnitLabels = getDurationUnitLabels(t);
+  const formatDuration = (ms: number) => formatDurationCompact(ms, durationUnitLabels);
+  /* Only `updated` carries a time. Every other state says why there is none
+     instead of guessing, so a catch-up import or a permission wait never reads
+     as fresh output or as a stuck agent. */
+  const displayLiveness = (
+    liveness: TurnLiveness
+  ): { value: string; title?: string; warning?: boolean } => {
+    switch (liveness.kind) {
+      case 'offline':
+        return {
+          value: t('sessions.turnTiming.offline', 'Disconnected'),
+          title: t(
+            'sessions.turnTiming.offlineHint',
+            "This device isn't receiving updates, so it can't tell whether the agent is still working."
+          ),
+          warning: true,
+        };
+      case 'awaitingUser':
+        return {
+          value: t('sessions.turnTiming.awaitingUser', 'Waiting for you'),
+          title: t(
+            'sessions.turnTiming.awaitingUserHint',
+            'The agent is waiting for your decision, not stuck.'
+          ),
+        };
+      case 'syncing':
+        return {
+          value: '—',
+          title: t('sessions.turnTiming.syncingHint', 'Catching up with this conversation.'),
+        };
+      case 'noUpdateYet':
+        return {
+          value: '—',
+          title: t(
+            'sessions.turnTiming.noUpdateYet',
+            'No new output has arrived since live updates started on this device.'
+          ),
+        };
+      case 'updated':
+        break;
+    }
+    return {
+      value: t('sessions.turnTiming.ago', {
+        duration: formatDuration(liveness.sinceMs),
+        defaultValue: '{{duration}} ago',
+      }),
+      title: liveness.stale
+        ? t(
+            'sessions.turnTiming.staleHint',
+            'No update for a while. The agent may be running a long command, or it may be stuck.'
+          )
+        : undefined,
+      warning: liveness.stale,
+    };
+  };
+  const display = (
+    row: AssistantTurnTimingRow
+  ): { label: string; value: string; title?: string; warning?: boolean } => {
+    switch (row.kind) {
+      case 'started': {
+        const clock = formatTurnClockTime(row.atMs, { locale, nowMs });
+        const running = row.runningMs === null ? '' : formatDuration(row.runningMs);
+        return {
+          label: t('sessions.turnTiming.started', 'Started'),
+          value: running
+            ? t('sessions.turnTiming.startedRunning', {
+                time: clock.short,
+                duration: running,
+                defaultValue: '{{time}} · running {{duration}}',
+              })
+            : clock.short,
+          title: clock.full,
+        };
+      }
+      case 'ended': {
+        const clock = formatTurnClockTime(row.atMs, { locale, nowMs });
+        return {
+          label: t('sessions.turnTiming.ended', 'Ended'),
+          value: clock.short,
+          title: clock.full,
+        };
+      }
+      case 'duration':
+        return {
+          label: t('sessions.turnTiming.duration', 'Duration'),
+          value: formatDuration(row.durationMs),
+        };
+      case 'lastUpdate':
+        break;
+    }
+    return {
+      label: t('sessions.turnTiming.lastUpdate', 'Last update'),
+      ...displayLiveness(row.liveness),
+    };
+  };
+  return (
+    <div className="border-t border-border/60 px-3 py-2.5" data-turn-timing="">
+      <div
+        className={cn(
+          stylex.props(activityTypography.caption).className,
+          'mb-1.5 font-medium text-foreground'
+        )}
+      >
+        {t('sessions.turnTiming.title', 'Timing')}
+      </div>
+      <dl className="space-y-1.5">
+        {rows.map((row) => {
+          const { label, value, title, warning } = display(row);
+          return (
+            <div
+              key={row.kind}
+              className={cn(
+                stylex.props(activityTypography.caption).className,
+                'flex items-start justify-between gap-3'
+              )}
+            >
+              <dt className="shrink-0 text-muted-foreground">{label}</dt>
+              <dd
+                className={cn(
+                  'min-w-0 text-right font-medium tabular-nums',
+                  warning ? 'text-status-warning' : 'text-foreground'
+                )}
+                title={title}
+                data-stale={warning ? '' : undefined}
+              >
+                {value}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
     </div>
   );
@@ -4217,11 +4654,14 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
 const AssistantTurnConfigInfoButton = ({
   message,
   sessionId,
+  isLive = false,
   className,
   iconClassName,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
+  /** The newest, unfinished turn: its timing counts up and reports liveness. */
+  isLive?: boolean;
   className?: string;
   iconClassName?: string;
 }) => {
@@ -4347,7 +4787,8 @@ const AssistantTurnConfigInfoButton = ({
             </p>
           ) : null}
         </dl>
-        {tokenUsage ? <AssistantTurnTokenUsageRows usage={tokenUsage} /> : null}
+        <AssistantTurnTimingRows message={message} isLive={isLive} />
+        {tokenUsage ? <AssistantTurnUsageRows usage={tokenUsage} /> : null}
       </Popover.Content>
     </Popover.Root>
   );
@@ -4449,7 +4890,14 @@ function ProcessDisclosureButton({
     </span>
   );
   const title = (
-    <span className={cn(ACTIVITY_GROUP_LABEL_CLASS(isMobile), shimmer && 'agent-shimmer')}>
+    <span
+      className={cn(
+        ACTIVITY_GROUP_LABEL_CLASS(isMobile),
+        /* The chevron follows the label rather than the column's far edge. */
+        'flex-initial',
+        shimmer && 'agent-shimmer'
+      )}
+    >
       {liveMessage ? <LiveActivityLabel label={label} message={liveMessage} /> : label}
     </span>
   );
@@ -4472,17 +4920,10 @@ function ProcessDisclosureButton({
       }}
       aria-expanded={expanded}
     >
-      {isMobile ? (
-        <>
-          {chevron}
-          {title}
-        </>
-      ) : (
-        <>
-          {title}
-          {chevron}
-        </>
-      )}
+      {/* Label first on every layout: it starts on the prose rail, and the
+          chevron (always shown on touch, hover-only on desktop) trails it. */}
+      {title}
+      {chevron}
     </button>
   );
 }
@@ -4583,16 +5024,19 @@ function ActivityProcessStep({
   icon,
   children,
   className,
+  flush = false,
 }: {
   icon?: ReactNode;
   children: ReactNode;
   className?: string;
+  flush?: boolean;
 }) {
   return (
     <div
       className={cn(
         /* Keep the leading icon on the same inset as tool steps and prose. */
-        stylex.props(conversationSurface.processStep).className,
+        stylex.props(conversationSurface.processStep, flush && conversationSurface.thoughtStep)
+          .className,
         ACTIVITY_PROCESS_TEXT_CLASS,
         className
       )}
@@ -4836,11 +5280,13 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* The thought is prose on the rail, with no glyph: it is the agent's own
+  /* Only builtin DSH exposes these thought rows. Reuse answer sizing,
+     preserving thought search identity and the separate disclosure label.
+     The thought is prose on the rail, with no glyph: it is the agent's own
      words, and an icon beside every paragraph of it read as a list of
      objects. The group header already says "Thought". */
   return (
-    <ActivityProcessStep>
+    <ActivityProcessStep flush>
       <span className="sr-only">
         {isThinking
           ? t('sessions.toolActivity.thinking', 'Thinking…')
@@ -4849,9 +5295,8 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
       <MarkdownRenderer
         text={text}
         size={fontSize}
-        compact
-        className={ACTIVITY_STEP_BODY_CLASS}
         isStreaming={isStreaming}
+        muted
         searchBlockId={getThoughtSearchBlockId(messageId, itemIndex)}
       />
     </ActivityProcessStep>
@@ -4928,10 +5373,27 @@ type LiveActivityMessage = Pick<SessionHistoryParsed, 'timestamp' | 'permissionW
 const LiveActivityLabel = ({ label, message }: { label: string; message: LiveActivityMessage }) => {
   const { t } = useTranslation();
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
+  const liveness = useRunningTurnLiveness(now.getTime());
+  const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
-  const duration =
-    durationMs === null ? '' : formatDurationCompact(durationMs, getDurationUnitLabels(t));
+  const duration = durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
   if (!duration) return <>{label}</>;
+  /* A long quiet stretch is not proof of a stuck turn (a lint gate can run
+     for minutes), so this only states the fact; the turn popover carries the
+     detail and the warning tone. */
+  const silenceMs = liveness ? resolveTurnSilenceMs(liveness) : null;
+  if (silenceMs !== null) {
+    return (
+      <>
+        {t('sessions.activityWithDurationSilent', {
+          label,
+          duration,
+          silence: formatSilenceCompact(silenceMs, durationUnitLabels),
+          defaultValue: '{{label}} (Worked for {{duration}} · no output for {{silence}})',
+        })}
+      </>
+    );
+  }
   return (
     <>
       {t('sessions.activityWithDuration', {
@@ -5002,6 +5464,7 @@ export const AssistantTurnFooter = ({
   showDuration,
   isLive = false,
   isTurnHovered,
+  isLatestTurn = false,
   onFork,
   forkWorktreeAvailability = 'hidden',
   onForkWorktreeMenuOpen,
@@ -5016,6 +5479,8 @@ export const AssistantTurnFooter = ({
   /** This turn is the live one: its duration slot counts up. */
   isLive?: boolean;
   isTurnHovered: boolean;
+  /** The conversation's newest assistant turn: on mobile its actions rest visible. */
+  isLatestTurn?: boolean;
   onFork?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
@@ -5024,14 +5489,17 @@ export const AssistantTurnFooter = ({
   const { t, i18n } = useTranslation();
   const { copyContext } = useContext(SessionChatActionContext);
   const isMobile = useIsMobile();
+  const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   const [didCopy, setDidCopy] = useState(false);
-  const textContent = useMemo(() => {
-    const contentItems = buildAssistantMessageRenderItems(message.items).map(
-      (entry) => entry.content
-    );
-    return getVisibleAssistantTextContent(contentItems, message.finished === true);
-  }, [message.finished, message.items]);
+  const textContent = useMemo(
+    () =>
+      getTextContentFromMessageItems(
+        buildAssistantMessageRenderItems(message.items).map((entry) => entry.content)
+      ),
+    [message.items]
+  );
   const hasCopyableText = textContent.trim().length > 0;
+  const copyWorkspaceId = useSessionCopyWorkspaceId();
   const fileDiffs = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
   const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveSessionHistoryDurationMs(message);
@@ -5064,14 +5532,20 @@ export const AssistantTurnFooter = ({
     (durationLabel.length > 0 && (isMobile || showDuration)) ||
     hasTurnConfigInfo;
   const showActionBar = hasActionBarContent || onFork !== undefined || !!copyContext;
+  /* Touch has no hover: only the newest turn's buttons rest visible, and a tap
+     on an older turn reveals its own. The duration slot always stays. */
+  const mobileButtonsHidden =
+    isMobile && !isLatestTurn && !mobileActionsRevealed && !(showFinishedMetadata && isForking);
 
   const handleCopy = useCallback(async () => {
     if (!hasCopyableText) return;
-    const ok = await writeTextToClipboard(textContent);
+    const ok = await writeTextToClipboard(
+      normalizeSessionLinksForExport(textContent, copyWorkspaceId)
+    );
     if (!ok) return;
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [hasCopyableText, textContent]);
+  }, [hasCopyableText, textContent, copyWorkspaceId]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -5103,9 +5577,9 @@ export const AssistantTurnFooter = ({
               'flex flex-wrap items-center justify-start text-muted-foreground'
             ),
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
-            !isMobile &&
-              'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
-            !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100'
+            !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
+            !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100',
+            isMobile && stylex.props(conversationSurface.mobileTurnActions).className
           )}
           data-assistant-turn-actions
         >
@@ -5135,7 +5609,14 @@ export const AssistantTurnFooter = ({
           {/* Keep the leading button inside the column; only the trailing hover
              area bleeds into the metadata gap. Mobile retains its leading slot. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
-            <div className="flex items-center gap-0.5 -mr-[7px]">
+            <div
+              className={cn(
+                'flex items-center gap-0.5 -mr-[7px]',
+                /* `invisible` keeps the row's height: revealing never shifts the list. */
+                mobileButtonsHidden && 'invisible'
+              )}
+              data-mobile-actions-hidden={mobileButtonsHidden ? '' : undefined}
+            >
               {showStreamingContextCopy ? (
                 <Tooltip.Provider>
                   <Tooltip.Root>
@@ -5197,6 +5678,7 @@ export const AssistantTurnFooter = ({
                 <AssistantTurnConfigInfoButton
                   message={message}
                   sessionId={sessionId}
+                  isLive={isLive}
                   className="h-7 w-7"
                 />
               ) : null}
@@ -5218,7 +5700,7 @@ export const AssistantTurnFooter = ({
           {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>
               {completionTimestampLabel ? <span aria-hidden="true">·</span> : null}
-              <span className="font-mono tabular-nums">{durationLabel}</span>
+              <span className="tabular-nums">{durationLabel}</span>
             </>
           ) : null}
         </div>
@@ -5289,6 +5771,8 @@ interface AssistantChatItemProps {
   onWorkedGroupExpandedChange: (messageId: string, segmentKey: string, expanded: boolean) => void;
   isTurnHovered: boolean;
   onTurnHoverChange: (messageId: string, hovered: boolean) => void;
+  /** The conversation's newest assistant turn: on mobile its actions rest visible. */
+  isLatestTurn: boolean;
   conversationFontSize: ConversationFontSize;
   /** This row is the live turn's collapsed bottom group: shimmer its label. */
   shimmerGroupHeader?: boolean;
@@ -5384,6 +5868,7 @@ const areAssistantChatItemPropsEqual = (
   prev.isForking === next.isForking &&
   prev.isTurnHovered === next.isTurnHovered &&
   prev.onTurnHoverChange === next.onTurnHoverChange &&
+  prev.isLatestTurn === next.isLatestTurn &&
   prev.conversationFontSize === next.conversationFontSize &&
   prev.shimmerGroupHeader === next.shimmerGroupHeader &&
   prev.liveStatusFollowsSurface === next.liveStatusFollowsSurface &&
@@ -5405,6 +5890,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
   onWorkedGroupExpandedChange,
   isTurnHovered,
   onTurnHoverChange,
+  isLatestTurn,
   conversationFontSize,
   shimmerGroupHeader = false,
   liveStatus = null,
@@ -5412,6 +5898,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
 }: AssistantChatItemProps) {
   const message = row.item.message;
   const { content } = row;
+  const isMobile = useIsMobile();
   const handleMouseLeave = (event: ReactMouseEvent<HTMLDivElement>) => {
     const nextTurn =
       event.relatedTarget instanceof Element
@@ -5530,6 +6017,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
               showDuration={content.showDuration}
               isLive={content.isLive}
               isTurnHovered={isTurnHovered}
+              isLatestTurn={isLatestTurn}
               onFork={onFork}
               forkWorktreeAvailability={forkWorktreeAvailability}
               onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
@@ -5588,13 +6076,20 @@ const AssistantChatItem = memo(function AssistantChatItem({
         row.isFirstRowForMessage && conversationSurface.firstRow,
         row.isLastRowForMessage && conversationSurface.lastRow,
         row.endsRound &&
-          (content.kind === 'footer'
+          (content.kind === 'footer' && !isMobile
             ? conversationSurface.roundFooterRow
             : conversationSurface.roundLastRow)
       )}
       data-assistant-turn-id={message.id}
       onMouseEnter={() => onTurnHoverChange(message.id, true)}
       onMouseLeave={handleMouseLeave}
+      onClick={
+        isMobile
+          ? (event) => {
+              if (isMessageActionsToggleTap(event.target)) toggleMobileMessageActions(message.id);
+            }
+          : undefined
+      }
     >
       <div className={cn('w-full', hasWideContent && 'scrollbar-pro overflow-x-auto')}>
         <div
@@ -5613,8 +6108,16 @@ const AssistantChatItem = memo(function AssistantChatItem({
           )}
           style={conversationTextFontSizeStyle(conversationFontSize)}
           data-native-selection-allow
+          data-message-quote-text={
+            content.kind === 'content' && content.block.entry.content.type === 'text'
+              ? ''
+              : undefined
+          }
         >
-          {row.endsRound && content.kind === 'footer' ? (
+          {/* Desktop footer actions rest hidden, so they may sit inside the round
+              reserve. Mobile always shows the footer: the reserve goes below it
+              (`roundLastRow` above) or the next round reads as crowded. */}
+          {row.endsRound && content.kind === 'footer' && !isMobile ? (
             <div {...stylex.props(conversationSurface.roundFooter)}>{rowBody}</div>
           ) : (
             rowBody
@@ -5625,7 +6128,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
   );
 }, areAssistantChatItemPropsEqual);
 
-const UserChatBubble = ({
+export const UserChatBubble = ({
   message,
   sessionId,
   conversationFontSize,
@@ -5636,7 +6139,7 @@ const UserChatBubble = ({
    */
   variant = 'full',
 }: {
-  message: SessionHistoryParsed;
+  message: Pick<SessionHistoryParsed, 'id' | 'items'>;
   sessionId: SessionId;
   conversationFontSize: ConversationFontSize;
   variant?: 'full' | 'attachments';
@@ -5894,7 +6397,7 @@ const renderAssistantContent = (
     // agent's own notices arrive here; `buildChatStreamItems` leaves every other
     // kind on its own system row, where `SystemMessageItems` renders it.
     case 'system_notice':
-      return <SystemNoticeView notice={content} sessionId={sessionId} inTurn />;
+      return <SystemNoticeView notice={content} entryId={messageId} sessionId={sessionId} inTurn />;
     default:
       return null;
   }
@@ -5928,6 +6431,7 @@ function useImageBlobUrls(
 ) {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const [blobUrls, setBlobUrls] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -5958,6 +6462,11 @@ function useImageBlobUrls(
         workspaceId,
         sessionId: entry.sessionId,
         imageId: entry.imageId,
+        encryption: entry.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         variant: 'original',
       })
@@ -5980,7 +6489,7 @@ function useImageBlobUrls(
     return () => {
       active = false;
     };
-  }, [activeIndex, authToken, entries, open, workspaceId]);
+  }, [activeIndex, authToken, entries, open, workspaceId, attachmentRuntime]);
 
   return blobUrls;
 }
@@ -5992,6 +6501,7 @@ const ImagePreviewDialog = ({
   onActiveImageKeyChange,
   entries,
   portalAnchorRef,
+  onAnnotateImage,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -5999,7 +6509,20 @@ const ImagePreviewDialog = ({
   onActiveImageKeyChange: (imageKey: string | null) => void;
   entries: ReadonlyArray<SessionImageGalleryEntry>;
   portalAnchorRef?: ImagePreviewPortalAnchorRef;
+  onAnnotateImage?: (selection: DocumentSelection) => boolean;
 }) => {
+  const { t } = useTranslation();
+  const [markupFile, setMarkupFile] = useState<File | null>(null);
+  const markupRequest = useRef(0);
+  useEffect(
+    () => () => {
+      markupRequest.current += 1;
+    },
+    []
+  );
+  useEffect(() => {
+    markupRequest.current += 1;
+  }, [open, activeImageKey]);
   const activeIndex = useMemo(
     () => findSessionImageGalleryEntryIndex(entries, activeImageKey),
     [activeImageKey, entries]
@@ -6018,6 +6541,7 @@ const ImagePreviewDialog = ({
 
   const handleIndexChange = useCallback(
     (index: number) => {
+      markupRequest.current += 1;
       const entry = entries[index];
       if (entry) {
         onActiveImageKeyChange(entry.key);
@@ -6027,18 +6551,62 @@ const ImagePreviewDialog = ({
   );
 
   const handleClose = useCallback(() => {
+    markupRequest.current += 1;
     onOpenChange(false);
   }, [onOpenChange]);
 
   return (
-    <ZoomableImageViewer
-      open={open}
-      onClose={handleClose}
-      images={images}
-      index={activeIndex}
-      onIndexChange={handleIndexChange}
-      {...(portalAnchorRef ? { portalAnchorRef } : {})}
-    />
+    <>
+      <ZoomableImageViewer
+        open={open && !markupFile}
+        onClose={handleClose}
+        images={images}
+        index={activeIndex}
+        onIndexChange={handleIndexChange}
+        onAnnotate={
+          onAnnotateImage
+            ? (item) => {
+                const request = ++markupRequest.current;
+                if (!item.src) return;
+                void fetch(item.src)
+                  .then((response) => {
+                    if (!response.ok) throw new Error('Image unavailable');
+                    return response.blob();
+                  })
+                  .then((blob) => {
+                    if (request !== markupRequest.current) return;
+                    setMarkupFile(
+                      new File([blob], item.fileName || 'image.png', { type: blob.type })
+                    );
+                  })
+                  .catch(() => {
+                    if (request === markupRequest.current)
+                      toast.error(
+                        t(
+                          'sessions.fileViewer.selection.imageFailed',
+                          'Could not open this image for markup. Your attachment is unchanged.'
+                        )
+                      );
+                  });
+              }
+            : undefined
+        }
+        {...(portalAnchorRef ? { portalAnchorRef } : {})}
+      />
+      {markupFile && onAnnotateImage && (
+        <PendingImageMarkupDialog
+          file={markupFile}
+          portalAnchorRef={portalAnchorRef}
+          onClose={() => setMarkupFile(null)}
+          onAdd={(selection) => {
+            if (!onAnnotateImage(selection)) return false;
+            setMarkupFile(null);
+            onOpenChange(false);
+            return true;
+          }}
+        />
+      )}
+    </>
   );
 };
 
@@ -6067,6 +6635,7 @@ export const WorkspaceUserImageBlock = ({
   const previewPortalAnchorRef = useRef<HTMLDivElement>(null);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailLoadingError, setThumbnailLoadingError] = useState<string | null>(null);
   const [isThumbnailLoading, setIsThumbnailLoading] = useState(true);
@@ -6131,6 +6700,11 @@ export const WorkspaceUserImageBlock = ({
       workspaceId,
       sessionId: entry.sessionId,
       imageId: entry.imageId,
+      encryption: entry.encryption,
+      attachmentToken:
+        attachmentRuntime?.workspaceId === workspaceId
+          ? attachmentRuntime.attachmentToken
+          : undefined,
       token: authToken,
       variant: 'thumbnail',
       thumbnailWidth,
@@ -6158,6 +6732,8 @@ export const WorkspaceUserImageBlock = ({
   }, [
     authToken,
     entry.imageId,
+    entry.encryption,
+    attachmentRuntime,
     entry.sessionId,
     imageLoadFailedLabel,
     imageLoadUnavailableLabel,
@@ -6371,7 +6947,7 @@ export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGr
   );
 };
 
-const WorkspaceSessionFileGroup = ({
+export const WorkspaceSessionFileGroup = ({
   files,
   sessionId,
   align = 'start',
@@ -6383,6 +6959,7 @@ const WorkspaceSessionFileGroup = ({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const { openHtmlFile } = useContext(SessionChatActionContext);
   const postHog = usePostHog();
   const [previewFile, setPreviewFile] = useState<SessionFilePayload | null>(null);
@@ -6402,6 +6979,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         fileName: file.fileName,
         mimeType: file.mimeType,
@@ -6411,7 +6993,7 @@ const WorkspaceSessionFileGroup = ({
         })
         .finally(() => setDownloadingId((current) => (current === file.fileId ? null : current)));
     },
-    [authToken, postHog, sessionId, t, workspaceId]
+    [authToken, postHog, sessionId, t, workspaceId, attachmentRuntime]
   );
 
   const handlePreview = useCallback(
@@ -6439,6 +7021,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         sizeBytes: file.sizeBytes,
       })
@@ -6459,7 +7046,7 @@ const WorkspaceSessionFileGroup = ({
           });
         });
     },
-    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId]
+    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId, attachmentRuntime]
   );
 
   // The send path caps at 8 files/message, but a block list synced from another
@@ -6796,11 +7383,10 @@ const UserPlainTextBlock = ({
           )}
           style={{
             ...conversationReadingFontSizeStyle(fontSize),
-            ...(isLong && !isFullTextVisible
-              ? { maxHeight: userTextCollapsedHeight(fontSize) }
-              : {}),
+            ...(isLong && !isFullTextVisible ? userTextCollapsedStyle(fontSize) : {}),
           }}
           data-search-block-id={searchBlockId}
+          data-message-quote-text=""
         >
           {/* Search wins over chips: both want to split the same string, and a
               match that lands inside a chip has nowhere to paint. Chips come
@@ -6966,6 +7552,7 @@ const ThoughtCard = ({
           text={text}
           size={fontSize}
           isStreaming={isStreaming}
+          muted
           searchBlockId={searchBlockId}
         />
       </div>
@@ -7031,6 +7618,7 @@ const PlanPanel = ({
   isStreaming?: boolean;
 }) => {
   const plan = { markdown, status: isStreaming ? ('delta' as const) : ('completed' as const) };
+  const copyWorkspaceId = useSessionCopyWorkspaceId();
   const handleAgentFileLinkClick = useCallback(
     (href: string) => {
       onFilePathClick?.(href);
@@ -7039,11 +7627,13 @@ const PlanPanel = ({
   );
   const [didCopy, setDidCopy] = useState(false);
   const handleCopy = useCallback(async () => {
-    const ok = await writeTextToClipboard(plan.markdown);
+    const ok = await writeTextToClipboard(
+      normalizeSessionLinksForExport(plan.markdown, copyWorkspaceId)
+    );
     if (!ok) return;
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [plan.markdown]);
+  }, [plan.markdown, copyWorkspaceId]);
 
   /* A plan is long by nature and it now sits near the TOP of its turn, above the
      work it produced — unclamped it would push everything that happened after it
@@ -7528,6 +8118,14 @@ const ToolCallCard = memo(function ToolCallCard({
         // Markdown pipeline so single-`$` math cannot eat fragments like `$(...)`.
         const verbatim =
           detectToolCallJsonText(content.text) ?? extractFencedToolText(content.text);
+        // A shell step's plain text is what the program printed (Pi histories stored
+        // it so); Markdown would fold its line breaks into one paragraph.
+        if (verbatim === null && toolCall.kind === 'execute') {
+          pushOutput(`text-${index}`, [
+            { type: 'terminal_output', output: content.text, stream: 'combined' },
+          ]);
+          continue;
+        }
         sections.push(
           isToolSearch || verbatim !== null ? (
             <ToolVerbatimSection

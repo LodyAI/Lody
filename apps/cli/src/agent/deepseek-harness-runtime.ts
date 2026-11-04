@@ -1,15 +1,20 @@
+import { z } from 'zod';
+import { fileLocksLegacy } from '@/utils/file-lock';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
-import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { getDeepSeekHarnessProviderHome } from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 import {
   ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION,
+  ACP_EXTENSION_DSH_LEGACY_HOME_ENV,
   ACP_EXTENSION_DSH_QUERY_PATH_ENV,
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
   DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION,
-  DEEPSEEK_HARNESS_PROFILE_FILENAMES,
   DEEPSEEK_HARNESS_PROFILE_NAME,
   DEEPSEEK_HARNESS_VERSION,
   createDeepSeekHarnessNpxSpecifiers,
@@ -18,12 +23,11 @@ import {
 } from 'acp-extension-dsh/profile';
 
 export { DEEPSEEK_HARNESS_VERSION, createDeepSeekHarnessProfileFiles };
-export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION =
-  ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION;
+export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION = `${ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION}:provider-home-v1:system-node-v1`;
 export const DEEPSEEK_HARNESS_HOME_ENV = 'DSH_HOME';
 
-const RAW_SESSION_ARTIFACT = 'session.jsonl';
-const ZSTD_SESSION_ARTIFACT = 'session.jsonl.zstd';
+const RAW_SESSION_ARTIFACT = /^session(?:\.v[1-9]\d*)?\.jsonl$/;
+const ZSTD_SESSION_ARTIFACT = /^session(?:\.v[1-9]\d*)?\.jsonl\.zstd$/;
 const DSH_NODE_EXECUTABLE_ENV = 'LODY_DSH_NODE_EXECUTABLE';
 const DSH_NODE_ARGS_ENV = 'LODY_DSH_NODE_ARGS';
 
@@ -64,7 +68,7 @@ export function resolveDeepSeekHarnessSpawn(options: {
       .find((candidate) => candidate.toLowerCase() === name);
     return key ? env[key] : undefined;
   };
-  const directories = [workdir, ...(envValue('path') ?? '').split(';')];
+  const directories = (envValue('path') ?? '').split(';');
   const extensions = (envValue('pathext') ?? '.COM;.EXE;.BAT;.CMD').split(';');
   for (const directory of directories) {
     if (!directory) continue;
@@ -90,7 +94,7 @@ export function resolveDeepSeekHarnessSpawn(options: {
         );
       }
       return {
-        command: process.execPath,
+        command: env[DSH_NODE_EXECUTABLE_ENV],
         args: [
           '--import',
           `data:text/javascript;base64,${encodeBase64(HIDE_WINDOWS_CHILD_CONSOLES)}`,
@@ -262,9 +266,9 @@ export async function resolveDeepSeekHarnessSessionCompression(
       const sessionPath = join(projectPath, sessionEntry.name);
       const artifactEntries = await readdir(sessionPath, { withFileTypes: true });
       for (const artifactEntry of artifactEntries) {
-        if (artifactEntry.name === RAW_SESSION_ARTIFACT) {
+        if (RAW_SESSION_ARTIFACT.test(artifactEntry.name)) {
           rawArtifact ??= join(sessionPath, artifactEntry.name);
-        } else if (artifactEntry.name === ZSTD_SESSION_ARTIFACT) {
+        } else if (ZSTD_SESSION_ARTIFACT.test(artifactEntry.name)) {
           zstdArtifact ??= join(sessionPath, artifactEntry.name);
         }
       }
@@ -287,21 +291,43 @@ async function publishFileAtomically(filePath: string, contents: string): Promis
   try {
     await rename(temporaryPath, filePath);
   } catch (error) {
-    // On Windows rename cannot replace an existing destination. The profile
-    // directory is content-addressed, so a racing writer can only have
-    // published the same immutable files.
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     await rm(temporaryPath, { force: true });
+    throw error;
   }
+}
+
+const DshProfileManifestSchema = z
+  .object({
+    dependencies: z.record(z.string(), z.string()).optional(),
+    devDependencies: z.record(z.string(), z.string()).optional(),
+    optionalDependencies: z.record(z.string(), z.string()).optional(),
+    dsh: z
+      .object({
+        profile: z.object({ bundles: z.array(z.string()) }).passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export function dshProfileLockName(rootDir: string): string {
+  return `dsh-profile-${createHash('sha256').update(resolve(rootDir)).digest('hex')}`;
 }
 
 export async function resolveDeepSeekHarnessProcessLaunch(options: {
   adapterPath: string;
   rootDir?: string;
+  providerId?: string;
+  dataRoot?: string;
   extraArgs?: string[];
+  /** Host-only plugin CLI arguments, never accepted from RPC. */
+  pluginArgs?: string[];
 }) {
-  const rootDir = options.rootDir ?? resolveDeepSeekHarnessHome();
-  const sessionsRoot = join(rootDir, 'sessions');
+  const legacyHome = options.rootDir ?? resolveDeepSeekHarnessHome();
+  const rootDir = options.providerId
+    ? getDeepSeekHarnessProviderHome(options.dataRoot ?? getLodyDataDir(), options.providerId)
+    : legacyHome;
+  // Existing native session IDs still resolve to the same artifacts and query database.
+  const sessionsRoot = join(legacyHome, 'sessions');
   const presetRoot = join(dirname(options.adapterPath), 'deepseek-agent-presets');
   const sessionCompression = await resolveDeepSeekHarnessSessionCompression(sessionsRoot);
   const profileFiles = createDeepSeekHarnessProfileFiles({
@@ -311,46 +337,104 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
     reasoningEffort: 'max',
   });
   await mkdir(sessionsRoot, { recursive: true });
-  // The adapter lives next to the installed CLI, so its absolute path can
-  // change across app upgrades. Content-address the profile directory so
-  // Windows never has to replace in-use files with a stale path.
+  // Host machinery is a generated bundle; the final profile patch belongs to the user.
+  // Bundle identity changes with the installed adapter, but the editable path never does.
+  // A last, route-neutral layer keeps the public host boundary and native history roots.
+  const guardPatch = `- id: session-telemetry-otel
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.${ACP_EXTENSION_DSH_SESSION_ROOT_ENV}
+    compression: ${sessionCompression}
+- id: session-query-sqlite
+  config:
+    path: !!js process.env.${ACP_EXTENSION_DSH_QUERY_PATH_ENV}
+    openAt: never
+- id: acp-agent
+  disabled: false
+  name: ${JSON.stringify(options.adapterPath.startsWith('file:') ? options.adapterPath : pathToFileURL(options.adapterPath).href)}
+`;
   const fingerprint = createHash('sha256')
-    .update(profileFiles.packageJson)
-    .update(profileFiles.cordisYml)
     .update(profileFiles.cordisPatchYml)
-    .update(profileFiles.pnpmWorkspaceYaml)
+    .update(guardPatch)
     .digest('hex')
-    .slice(0, 12);
-  const profileName = `${DEEPSEEK_HARNESS_PROFILE_NAME}-${fingerprint}`;
+    .slice(0, 16);
+  const bundleName = `@lody/dsh-host-${fingerprint}`;
+  const profileName = DEEPSEEK_HARNESS_PROFILE_NAME;
   const profileDir = join(rootDir, 'profiles', profileName);
-  await mkdir(profileDir, { recursive: true });
-  await Promise.all([
-    publishFileAtomically(
-      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.packageJson),
-      profileFiles.packageJson
-    ),
-    publishFileAtomically(
-      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.cordisYml),
-      profileFiles.cordisYml
-    ),
-    publishFileAtomically(
-      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.cordisPatchYml),
-      profileFiles.cordisPatchYml
-    ),
-    publishFileAtomically(
-      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.pnpmWorkspaceYaml),
-      profileFiles.pnpmWorkspaceYaml
-    ),
-  ]);
+  const bundleDir = join(profileDir, 'node_modules', bundleName);
+  await fileLocksLegacy.withLock(
+    dshProfileLockName(rootDir),
+    async () => {
+      await mkdir(bundleDir, { recursive: true });
+      await Promise.all([
+        publishFileAtomically(
+          join(bundleDir, 'package.json'),
+          JSON.stringify({
+            name: bundleName,
+            private: true,
+            dsh: { bundle: { patch: './cordis.patch.yml' } },
+          }) + '\n'
+        ),
+        publishFileAtomically(join(bundleDir, 'cordis.patch.yml'), profileFiles.cordisPatchYml),
+        publishFileAtomically(join(bundleDir, 'host.patch.yml'), guardPatch),
+      ]);
+      const generated = DshProfileManifestSchema.parse(JSON.parse(profileFiles.packageJson));
+      let manifest = generated;
+      try {
+        manifest = DshProfileManifestSchema.parse(
+          JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      // User dependencies, package-manager configuration and bundle order survive upgrades.
+      // Only the base and content-addressed host layers belong to Lody.
+      const userBundles = manifest.dsh.profile.bundles.filter(
+        (name) =>
+          !name.startsWith('@lody/dsh-host-') && !generated.dsh.profile.bundles.includes(name)
+      );
+      manifest.dsh.profile.bundles = [...generated.dsh.profile.bundles, bundleName, ...userBundles];
+      manifest.dsh.profile.patchReload = 'startup';
+      await Promise.all([
+        publishFileAtomically(
+          join(profileDir, 'package.json'),
+          JSON.stringify(manifest, null, 2) + '\n'
+        ),
+        writeFile(join(profileDir, 'pnpm-workspace.yaml'), profileFiles.pnpmWorkspaceYaml, {
+          flag: 'wx',
+          mode: 0o600,
+        }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'EEXIST') throw error;
+        }),
+        writeFile(join(profileDir, 'cordis.patch.yml'), '[]\n', { flag: 'wx', mode: 0o600 }).catch(
+          (error: NodeJS.ErrnoException) => {
+            if (error.code !== 'EEXIST') throw error;
+          }
+        ),
+      ]);
+    },
+    { locksDir: join(rootDir, 'lody-locks'), timeout: 300_000 }
+  );
 
   const dshNodeArgs = [
     '--input-type=module',
     '--eval',
     createDeepSeekHarnessBootstrapSource(),
     '--',
-    '--profile',
-    profileName,
-    ...(options.extraArgs ?? []),
+    ...(options.pluginArgs
+      ? ['plugin', '--profile', profileName, ...options.pluginArgs]
+      : [
+          '--profile',
+          profileName,
+          '--patch',
+          join(bundleDir, 'host.patch.yml'),
+          ...(options.extraArgs ?? []),
+        ]),
   ];
 
   return {
@@ -362,18 +446,20 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
       // independently of the Harness family and have no release at
       // `DEEPSEEK_HARNESS_VERSION`.
       ...createDeepSeekHarnessNpxSpecifiers().flatMap((specifier) => ['--package', specifier]),
+      // Plugin management must not require a globally installed package manager.
+      ...(options.pluginArgs ? ['--package', 'pnpm@10.20.0'] : []),
       // npm exec does not shell-quote executable paths, so a minimal Node
-      // launcher safely passes Lody Helper's space-containing path to spawn().
-      // DSH itself still runs only under process.execPath.
+      // launcher safely passes a Node path containing spaces to spawn().
+      // DSH itself uses the validated Node from the final launch PATH.
       'node',
       '-e',
       createDeepSeekHarnessNodeLauncherArg(),
     ],
     env: {
       [DEEPSEEK_HARNESS_HOME_ENV]: rootDir,
+      [ACP_EXTENSION_DSH_LEGACY_HOME_ENV]: legacyHome,
       [ACP_EXTENSION_DSH_SESSION_ROOT_ENV]: sessionsRoot,
       [ACP_EXTENSION_DSH_QUERY_PATH_ENV]: join(sessionsRoot, 'session-query.db'),
-      [DSH_NODE_EXECUTABLE_ENV]: process.execPath,
       [DSH_NODE_ARGS_ENV]: encodeBase64(JSON.stringify(dshNodeArgs)),
     },
   };

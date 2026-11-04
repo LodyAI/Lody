@@ -36,15 +36,9 @@ import type { AcpSessionSelectOption } from '@/components/shared/acp-session-sel
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { composerSurface as surface } from '@/components/shared/composer-surface';
 import { MenuOptionSearchList } from '@/components/shared/menu-option-search-list';
-import {
-  DEEPSEEK_DELEGATION_DISCUSSION_URL,
-  DeepSeekDelegationWarningContent,
-  shouldShowDeepSeekDelegationWarning,
-} from '@/components/shared/deepseek-delegation-warning';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
-import { openExternalUrl } from '@/lib/native-browser';
-import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
+import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   doesAgentRolePinPermissionMode,
   type ComposerAgentRoleItem,
@@ -90,7 +84,8 @@ const styles = stylex.create({
   agentValue: { maxWidth: '9rem' },
   machineName: { maxWidth: '8rem' },
   roleName: { maxWidth: '11rem' },
-  agentName: { maxWidth: '9rem' },
+  /** The agent keeps its (capped) width: the model is what gives way first. */
+  agentName: { flexShrink: 0, maxWidth: '9rem' },
   modelList: {
     display: 'flex',
     flexDirection: 'column',
@@ -105,8 +100,12 @@ const styles = stylex.create({
     paddingInline: 0,
     justifyContent: 'center',
   },
-  /** The model keeps its tail when it truncates: `provider/model` loses the prefix. */
-  modelName: { maxWidth: '10rem', direction: 'rtl' },
+  /**
+   * The model shows in full while the face has room, and only truncates once
+   * the slot runs out. It keeps its tail when it does: `provider/model` loses
+   * the prefix.
+   */
+  modelName: { direction: 'rtl' },
   /** The "create a Role" mark at the end of the empty Role row. */
   createMark: {
     display: 'flex',
@@ -116,16 +115,6 @@ const styles = stylex.create({
     width: '20px',
     height: '20px',
     color: colors.tertiaryLabel,
-  },
-  /** A note in a menu: it wraps, so it is not a row's one line. */
-  note: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: space[2],
-    maxWidth: '18rem',
-    paddingBlock: space[1.5],
-    whiteSpace: 'normal',
-    fontWeight: 400,
   },
 });
 
@@ -137,12 +126,14 @@ const COMPACT_OPTION_SUBMENU_CLASS = 'w-max min-w-[108px] max-w-80';
 /* Option row with a trailing check. Title only — no description — so submenus
    stay as compact as the parent. Selecting keeps the menu OPEN. */
 function OptionItem({
+  identity,
   icon,
   label,
   selected,
   disabled,
   onSelect,
 }: {
+  identity?: Pick<AgentConfigMeta, 'id' | 'machineId'>;
   icon?: ReactNode;
   label: string;
   selected: boolean;
@@ -151,6 +142,9 @@ function OptionItem({
 }) {
   return (
     <Menu.Item
+      data-testid={identity ? 'chat-agent-option' : undefined}
+      data-agent-config-id={identity?.id}
+      data-machine-id={identity?.machineId}
       disabled={disabled}
       role="menuitemradio"
       aria-checked={selected}
@@ -275,11 +269,14 @@ export function DesktopMachineMenu({
       <Menu.Trigger
         disabled={isDisabled}
         title={disabledReason}
+        data-testid="chat-machine-trigger"
         aria-label={t('chat.machineSelector.placeholder', 'Machine')}
         render={<Button type="button" variant="secondary" size="mini" />}
       >
         <Monitor {...stylex.props(surface.glyph14)} aria-hidden="true" />
-        <span {...stylex.props(surface.truncate, styles.machineName)}>{label}</span>
+        <span {...stylex.props(surface.contextLabel, surface.truncate, styles.machineName)}>
+          {label}
+        </span>
         {selectedIsLocal ? <Badge>{t('chat.machineSelector.local', 'Local')}</Badge> : null}
         {selectedOption?.isPrivate ? (
           <LockKeyhole {...stylex.props(surface.glyph12, surface.hint)} aria-hidden="true" />
@@ -295,6 +292,8 @@ export function DesktopMachineMenu({
         {options.map((option) => (
           <Menu.Item
             key={option.value}
+            data-testid="chat-machine-option"
+            data-machine-id={option.value}
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             icon={Monitor}
@@ -495,11 +494,6 @@ export function DesktopRunConfigMenu({
         : null;
   const modelLabel =
     modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue;
-  const showDeepSeekDelegationWarning = shouldShowDeepSeekDelegationWarning({
-    cliType: selectedAgentConfig?.cliType ?? fallbackAgent?.cliType,
-    agentType: selectedAgentConfig?.agentType ?? fallbackAgent?.agentType,
-    modelId: modelValue,
-  });
   const handleModelSelect = (value: string) => {
     if (modelOptions.length > 0) {
       onModelChange?.(value);
@@ -699,6 +693,8 @@ export function DesktopRunConfigMenu({
                 aria-label={runConfigButtonAriaLabel}
                 aria-disabled
                 data-run-config-trigger=""
+                data-agent-config-id={selectedAgentConfig?.id}
+                data-machine-id={selectedAgentConfig?.machineId}
                 {...stylex.props(surface.trigger, surface.triggerCompact, surface.triggerInert)}
               >
                 {triggerFace}
@@ -711,6 +707,8 @@ export function DesktopRunConfigMenu({
         <Menu.Trigger
           aria-label={runConfigButtonAriaLabel}
           data-run-config-trigger=""
+          data-agent-config-id={selectedAgentConfig?.id}
+          data-machine-id={selectedAgentConfig?.machineId}
           className={triggerClassName}
           render={<button type="button" />}
         >
@@ -813,6 +811,7 @@ export function DesktopRunConfigMenu({
                   {agentOptions.map(({ config }) => (
                     <OptionItem
                       key={`${config.id}:${config.machineId}`}
+                      identity={config}
                       icon={
                         <AgentIcon
                           cliType={config.cliType}
@@ -907,26 +906,6 @@ export function DesktopRunConfigMenu({
                 </div>
               </Menu.Content>
             </Menu.Submenu>
-          ) : null}
-
-          {showDeepSeekDelegationWarning ? (
-            <Menu.Item
-              render={
-                <a
-                  href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
-                  }}
-                >
-                  <span {...stylex.props(styles.note)}>
-                    <DeepSeekDelegationWarningContent />
-                  </span>
-                </a>
-              }
-            />
           ) : null}
 
           {interactionSelector ? (
@@ -1114,7 +1093,7 @@ export function DesktopPermissionModeButton({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (disabled && open) setOpen(false);
-  const { options, value, label, source } = useMemo(
+  const face = useMemo(
     () =>
       resolvePermissionModeFace({
         modeOptions,
@@ -1124,7 +1103,8 @@ export function DesktopPermissionModeButton({
       }),
     [configOptionSelectors, configOptionValues, modeOptions, selectedModeId]
   );
-  const permissionLabel = t('chat.runConfig.permissionLabel', 'Permission');
+  const { options, value, label, source } = face;
+  const controlLabel = permissionModeControlLabel(face, t);
 
   if (options.length === 0) return null;
 
@@ -1143,8 +1123,8 @@ export function DesktopPermissionModeButton({
           row. The mode's name is the tooltip and the accessible name. */}
       <Menu.Trigger
         disabled={disabled}
-        aria-label={label ? `${permissionLabel}: ${label}` : permissionLabel}
-        title={label ? `${permissionLabel}: ${label}` : permissionLabel}
+        aria-label={label ? `${controlLabel}: ${label}` : controlLabel}
+        title={label ? `${controlLabel}: ${label}` : controlLabel}
         className={iconOnlyTriggerClassName}
         render={<button type="button" />}
       >

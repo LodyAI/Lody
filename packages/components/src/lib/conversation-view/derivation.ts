@@ -1,5 +1,5 @@
 import type { SessionHistory } from '@lody/shared';
-import type { ConversationView, TurnIndexRow } from './types';
+import { isUnloadedTurnId, type ConversationView, type TurnIndexRow } from './types';
 
 /**
  * A per-turn fact table over a `ConversationView`, for the readers that used
@@ -27,7 +27,12 @@ export type ConversationDerivation<F> = {
   dispose(): void;
 };
 
-export type DeriveTurnFact<F> = (turn: SessionHistory, row: TurnIndexRow, index: number) => F;
+export type DeriveTurnFact<F> = (
+  turn: SessionHistory,
+  row: TurnIndexRow,
+  index: number,
+  previous?: F
+) => F;
 
 export type CreateConversationDerivationOptions = {
   /** Turns hydrated per background chunk. */
@@ -68,6 +73,9 @@ export function createConversationDerivation<F>(
   let passRunning = false;
   let passRequested = false;
   let activeRange: ReturnType<ConversationView['acquireRange']> | undefined;
+  let directoryLease = view.acquireDirectory?.();
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = 250;
 
   const notify = () => {
     version += 1;
@@ -89,12 +97,17 @@ export function createConversationDerivation<F>(
     for (let i = Math.max(0, from); i < Math.min(to, view.turnCount); i += 1) {
       const row = view.index(i);
       if (!row) continue;
+      // Reverse-paged views keep absolute slots with sentinel rows until the
+      // older page arrives.  A sentinel has no body or facts to derive.
+      if (isUnloadedTurnId(row.id)) continue;
       const turn = view.turn(i);
       if (turn) {
         if (derivedFrom.get(row.id)?.deref() === turn) continue;
-        facts.set(row.id, derive(turn, row, i));
+        const previous = facts.get(row.id);
+        const next = derive(turn, row, i, previous);
+        facts.set(row.id, next);
         derivedFrom.set(row.id, new WeakRef(turn));
-        changed = true;
+        changed = next !== previous || changed;
       } else if (dropStale && facts.delete(row.id)) {
         derivedFrom.delete(row.id);
         changed = true;
@@ -124,12 +137,15 @@ export function createConversationDerivation<F>(
       requestPass();
     } else {
       for (const id of change.ids) {
-        changed = facts.delete(id) || changed;
         derivedFrom.delete(id);
         const position = view.indexOf(id);
-        if (position >= 0) {
+        if (position >= 0 && view.isHydrated(position)) {
+          // Keep the previous small fact only during this synchronous derive.
+          // A derivation may reuse it when a text delta changed no business fact.
           changed = deriveRange(position, position + 1) || changed;
-          if (!view.isHydrated(position)) requestPass();
+        } else {
+          changed = facts.delete(id) || changed;
+          if (position >= 0) requestPass();
         }
       }
     }
@@ -146,7 +162,7 @@ export function createConversationDerivation<F>(
       while (cursor > 0 && pending.length < chunkSize) {
         cursor -= 1;
         const row = view.index(cursor);
-        if (row && !facts.has(row.id)) pending.push(cursor);
+        if (row && !isUnloadedTurnId(row.id) && !facts.has(row.id)) pending.push(cursor);
       }
       end = cursor;
       if (pending.length === 0) continue;
@@ -192,8 +208,23 @@ export function createConversationDerivation<F>(
         }
       }
       if (disposed) return;
-      complete = true;
+      // A finished pass covers loaded rows only; the unloaded prefix remains
+      // unknown until reverse pagination reaches the beginning.
+      complete = view.hasMoreOlder !== true;
+      retryDelay = 250;
       notify();
+    } catch (error) {
+      // A failed page/body read is incomplete coverage, never an empty fact
+      // table. A later view change or renewed lease retries the pass.
+      passRequested = true;
+      console.error('Failed to derive conversation history', error);
+      if (!disposed && active && !retryTimer) {
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          if (active && !disposed) void runPasses();
+        }, retryDelay);
+        retryDelay = Math.min(2_000, retryDelay * 2);
+      }
     } finally {
       passRunning = false;
     }
@@ -228,10 +259,20 @@ export function createConversationDerivation<F>(
     setActive: (next: boolean) => {
       if (active === next || disposed) return;
       active = next;
+      if (active) directoryLease = view.acquireDirectory?.();
+      else {
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = undefined;
+        directoryLease?.release();
+        directoryLease = undefined;
+        activeRange?.release();
+      }
       if (active && passRequested && !passRunning) void runPasses();
     },
     dispose: () => {
       disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      directoryLease?.release();
       activeRange?.release();
       unsubscribe();
       listeners.clear();
@@ -243,7 +284,7 @@ export function createConversationDerivation<F>(
 
 const sharedDerivations = new WeakMap<
   ConversationView,
-  Map<DeriveTurnFact<unknown>, { table: ConversationDerivation<unknown>; users: number }>
+  Map<object, { table: ConversationDerivation<unknown>; users: number }>
 >();
 
 /**

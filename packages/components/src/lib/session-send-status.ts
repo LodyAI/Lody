@@ -98,6 +98,7 @@ export function deriveSessionSendStatuses(
 ): Record<string, SessionSendStatus> {
   const bySession = new Map<string, PendingSessionSend[]>();
   for (const send of sends) {
+    if (send.inputState) continue;
     const list = bySession.get(send.sessionId);
     if (list) list.push(send);
     else bySession.set(send.sessionId, [send]);

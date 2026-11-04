@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LodyGoalCapability } from 'acp-extension-core';
-import {
-  buildGoalPromptMeta,
-  buildGoalSlashCommandText,
-  resolveGoalActionTransport,
-} from './goal-control';
+import { resolveGoalActionTransport } from './goal-control';
 
 const capability = (overrides: Partial<LodyGoalCapability> = {}): LodyGoalCapability => ({
   version: 1,
@@ -44,23 +40,5 @@ describe('resolveGoalActionTransport', () => {
         'resume'
       )
     ).toBeNull();
-  });
-});
-
-describe('goal prompt payloads', () => {
-  it('carries the action as metadata so no command text enters the conversation', () => {
-    expect(buildGoalPromptMeta({ action: 'resume' })).toEqual({
-      lody: { goalControl: { version: 1, action: 'resume' } },
-    });
-    expect(buildGoalPromptMeta({ action: 'set', objective: 'Ship it' })).toEqual({
-      lody: { goalControl: { version: 1, action: 'set', objective: 'Ship it' } },
-    });
-  });
-
-  it('writes the slash bridge text a legacy runtime understands', () => {
-    expect(buildGoalSlashCommandText({ action: 'resume' })).toBe('/goal resume');
-    expect(buildGoalSlashCommandText({ action: 'set', objective: ' Ship it ' })).toBe(
-      '/goal Ship it'
-    );
   });
 });

@@ -23,8 +23,52 @@ reasoning behind those rules.
 
 Attachment preparation and history publication share the final card layout;
 see [attachment rendering](../ai-gui/session-files-rendering.md#upload-to-history-continuity).
+`useSessionPendingMessages` separates ready accepted inputs into individually keyed
+UI rows and leaves attachment preparation in the trailing slot. It retains local
+bodies until matching formal history is hydrated; only real owner receipts mark
+delivery. The wrapper component keeps the standalone pending-message surface.
+
+## Home dashboard transitions
+
+The Now summary and running session rows reuse the sidebar's
+[`WorkingGrid`](../../ui/working-grid.tsx): a 12px grid centred in the existing
+14px icon slot, with the shared animation and reduced-motion behavior. A zero
+running count keeps a muted static grid, without the active accent colour.
+
+[`home/home-dashboard.tsx`](home/home-dashboard.tsx) owns board selection, the summary
+segments and their typed View Transition; [`home/home-dashboard-host.tsx`](home/home-dashboard-host.tsx)
+supplies the live models and device-local preference. The landing stage in
+[`web-chat-landing-screen.tsx`](web-chat-landing-screen.tsx) re-centres when board height changes.
+The transition rules in [`../../tailwind/index.css`](../../tailwind/index.css) move the
+segments, labels, fold control and pill with that same stage change. Snapshot stacking
+is explicit: pill below segments, persistent labels above both. Changing summaries
+cross-fade at natural size inside the segments' animated bounds, so their text never
+scales or covers a neighbouring label. DOM z-index alone cannot order extracted snapshots.
+The [owning note](../../../../../.agents/notes/implemented/feature/2026-10-16-home-week-tiles.md#transition-layering-correction-2026-10-18)
+records the failure and browser verification.
+
+[`home/week-bento.tsx`](home/week-bento.tsx) keeps each agent's icon beside its name and
+session share, above its own meter, rather than collecting icons in the tile header.
+
+The plan-usage Provider picker in [`home/tiles.tsx`](home/tiles.tsx) closes when a
+Provider is selected, including the current selection. Its radio items explicitly
+set `closeOnClick`; Base UI otherwise keeps radio menus open.
+
+The stage also tells its group how tall it is: [`landing-stage.ts`](landing-stage.ts) provides
+the stage and group elements, and `useLandingRoom` turns them into the height the dashboard may
+take (the stage less the rest of the group, independent of the dashboard's own height). The
+dashboard converts that to rows for `layoutHomeNow`, folds the "now" board when one row per list
+does not fit, and `now-board.tsx` opens a whole list by growing the pressed tile over the board
+while the rest steps back (`home/focus-motion.ts`). [Why](../../../../../.agents/notes/implemented/feature/2026-10-16-home-week-tiles.md#fitting-the-window-2026-10-18).
 
 ## Why the rules read the way they do
+
+- **Composer measurement outside layout.** `chat-composer.tsx` uses
+  `textarea-measurement.ts` to measure a hidden fixed textarea with resolved text
+  and box metrics. The live textarea receives its final height once. Resetting
+  the live height to `auto` temporarily expands the sibling conversation viewport
+  and can clamp its reading offset even if the final height does not change.
+  Empty drafts still skip measurement and use the minimum height.
 
 - **MCP as a second menu level.** The workspace MCP catalog is multi-select and
   unbounded, so it cannot sit in the footer selector row. Desktop has hover and
@@ -34,6 +78,9 @@ see [attachment rendering](../ai-gui/session-files-rendering.md#upload-to-histor
   the menu mountable while search still ranks over everything. The project
   picker uses `DropdownMenuSearchInput` for mount-owned autofocus and to route
   typing back to search after pointer movement focuses a project row.
+- **Composer and queue typography.** Prompt and queued-message text share the
+  scalable body size; peer context selectors use regular-weight subheadline text.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-composer-queue-typography.md).
 - **Project context material.** The selected project and its Private segment use
   the same raised tokens as the machine and worktree controls above the composer.
   [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-09-27-project-context-pill-elevation.md).
@@ -59,5 +106,7 @@ see [attachment rendering](../ai-gui/session-files-rendering.md#upload-to-histor
   sidebar writes a mention into the composer this layout renders, and nothing above
   it participates, so plumbing the handle up to `chat-landing.tsx` would buy
   nothing.
-- Draft ACP preparation has a longer contract that remains in the private
-  architecture context.
+
+Chat Landing no longer emits the legacy onboarding project-source, project-selection,
+or agent-selection events. Onboarding owns its route-scoped flow, step and operation
+telemetry; see [event semantics](../../../../../specs/onboarding-analytics.md).

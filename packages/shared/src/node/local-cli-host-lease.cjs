@@ -92,19 +92,29 @@ function listen(server, endpoint) {
   else server.listen(endpoint.port, endpoint.host);
 }
 
+function isAccessDenied(error) {
+  // libuv reports Win32 ERROR_ACCESS_DENIED on a pipe connect as EPERM; a Unix
+  // socket the caller may not open fails with EACCES.
+  return error?.code === 'EPERM' || error?.code === 'EACCES';
+}
+
 async function inspectLocalCliHost(
   endpoint = getLocalCliHostEndpoint(),
   timeoutMs = HOST_REQUEST_TIMEOUT_MS
 ) {
+  return (await probeLocalCliHost(endpoint, timeoutMs)).record;
+}
+
+async function probeLocalCliHost(endpoint, timeoutMs = HOST_REQUEST_TIMEOUT_MS) {
   return await new Promise((resolve) => {
     const socket = connect(endpoint);
     let buffer = '';
     let settled = false;
-    const finish = (record) => {
+    const finish = (record, accessDenied = false) => {
       if (settled) return;
       settled = true;
       socket.destroy();
-      resolve(record);
+      resolve({ record, accessDenied });
     };
     socket.setTimeout(timeoutMs, () => finish(null));
     socket.on('data', (chunk) => {
@@ -118,9 +128,15 @@ async function inspectLocalCliHost(
         finish(null);
       }
     });
-    socket.once('error', () => finish(null));
+    socket.once('error', (error) => finish(null, isAccessDenied(error)));
     socket.once('end', () => finish(null));
   });
+}
+
+function occupiedBy(probe) {
+  return probe.accessDenied
+    ? { status: 'occupied', record: probe.record, accessDenied: true }
+    : { status: 'occupied', record: probe.record };
 }
 
 function isShutdownRequest(value) {
@@ -216,9 +232,9 @@ async function closeListeningHost(host) {
 async function acquireLocalCliHostLease(options) {
   const endpoint = options.endpoint ?? getLocalCliHostEndpoint();
   throwIfAborted(options.signal);
-  const observed = await inspectLocalCliHost(endpoint);
+  const observed = await probeLocalCliHost(endpoint);
   throwIfAborted(options.signal);
-  if (observed) return { status: 'occupied', record: observed };
+  if (observed.record || observed.accessDenied) return occupiedBy(observed);
   const record = {
     version: 1,
     instanceId: options.instanceId,
@@ -228,7 +244,7 @@ async function acquireLocalCliHostLease(options) {
   };
   const listening = await createListeningHost(endpoint, record, options.shutdownControl);
   if (!listening) {
-    return { status: 'occupied', record: await inspectLocalCliHost(endpoint) };
+    return occupiedBy(await probeLocalCliHost(endpoint));
   }
   if (options.signal?.aborted) {
     await closeListeningHost(listening);

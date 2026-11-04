@@ -7,6 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { createMcpHandler } from '@modelcontextprotocol/server';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
@@ -75,7 +76,6 @@ const {
   loadWorkspaceAgentRoleCatalog,
   resolveMcpSessionCreate,
   buildResolvedMcpCreateCanonicalCommand,
-  buildOperationTargetCancelArgs,
   summarizeAgentConfig,
   getSessionContext,
   resolveOperationStorePathForContext,
@@ -174,6 +174,117 @@ const listPublishedToolNames = async (): Promise<string[]> => {
 };
 
 describe('Lody MCP tool catalog', () => {
+  it('serves Skills discovery and on-demand content through the App modern HTTP handler', async () => {
+    const handler = createMcpHandler(buildLodyMcpServer);
+    const request = async (method: string, params: Record<string, unknown> = {}) => {
+      const response = await handler.fetch(
+        new Request('http://localhost/mcp', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            'mcp-method': method,
+            'mcp-protocol-version': '2026-07-28',
+            ...(typeof params.name === 'string' ? { 'mcp-name': params.name } : {}),
+            ...(method === 'resources/read' && typeof params.uri === 'string'
+              ? { 'mcp-name': params.uri }
+              : {}),
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method,
+            params: {
+              ...params,
+              _meta: {
+                'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                'io.modelcontextprotocol/clientInfo': { name: 'lody-test', version: '1' },
+                'io.modelcontextprotocol/clientCapabilities': {},
+              },
+            },
+          }),
+        })
+      );
+      const body: unknown = await response.json();
+      expect(response.status, JSON.stringify(body)).toBe(200);
+      return body;
+    };
+    try {
+      expect(await request('server/discover')).toMatchObject({
+        result: {
+          capabilities: { resources: {}, extensions: { 'io.modelcontextprotocol/skills': {} } },
+        },
+      });
+      expect(await request('skills/list')).toMatchObject({
+        result: {
+          resultType: 'complete',
+          cacheScope: 'public',
+          ttlMs: 300_000,
+          skills: [
+            {
+              uri: 'skill://lody-automations/SKILL.md',
+              frontmatter: { name: 'lody-automations' },
+              resources: expect.any(Array),
+            },
+          ],
+        },
+      });
+      expect(
+        await request('skills/get', { uri: 'skill://lody-automations/SKILL.md' })
+      ).toMatchObject({
+        result: {
+          resultType: 'complete',
+          skill: { uri: 'skill://lody-automations/SKILL.md' },
+        },
+      });
+      expect(
+        await request('resources/read', {
+          uri: 'skill://lody-automations/references/commands.schema.json',
+        })
+      ).toMatchObject({
+        result: {
+          contents: [{ mimeType: 'application/json', text: expect.any(String) }],
+        },
+      });
+      expect(
+        await request('resources/read', {
+          uri: 'skill://lody-automations/SKILL.md',
+        })
+      ).toMatchObject({
+        result: {
+          contents: [{ mimeType: 'text/markdown', text: expect.any(String) }],
+        },
+      });
+    } finally {
+      await handler.close();
+    }
+  });
+
+  it('publishes bounded catalog retry guidance on every create/chat tool', async () => {
+    const server = buildLodyMcpServer();
+    const client = new Client({ name: 'retry-guidance-test-client', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const { tools } = await client.listTools();
+      for (const name of [
+        'lody_session_create',
+        'lody_session_create_many',
+        'lody_session_chat',
+        'lody_session_chat_many',
+      ]) {
+        const description = tools.find((tool) => tool.name === name)?.description;
+        expect(description).toContain('wait at least 5 seconds between attempts');
+        expect(description).toContain('at most 3 total attempts (the initial call plus 2 retries)');
+        expect(description).toContain('reuse the identical request and operationId');
+        expect(description).toContain('do not create a new operationId to retry');
+        expect(description).toContain('let the daemon recover it and await automatic completion');
+      }
+    } finally {
+      await Promise.all([client.close(), server.close()]);
+    }
+  });
+
   it('publishes session tools and never advertises a Task family', async () => {
     const names = await listPublishedToolNames();
     expect(names).toContain('lody_feedback');
@@ -185,6 +296,7 @@ describe('Lody MCP tool catalog', () => {
       ])
     );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
+    expect(names).not.toContain('lody_review_submit');
   });
 
   it('always advertises only the bounded Schedule family', async () => {
@@ -428,8 +540,7 @@ describe('session MCP input schemas', () => {
         type: 'object',
         properties: {
           useCurrentSessionAsParent: {
-            description:
-              'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+            type: 'boolean',
           },
           workContext: workContextSchema,
         },
@@ -441,8 +552,7 @@ describe('session MCP input schemas', () => {
             type: 'object',
             properties: {
               useCurrentSessionAsParent: {
-                description:
-                  'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+                type: 'boolean',
               },
               workContext: workContextSchema,
             },
@@ -453,8 +563,7 @@ describe('session MCP input schemas', () => {
               type: 'object',
               properties: {
                 useCurrentSessionAsParent: {
-                  description:
-                    'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+                  type: 'boolean',
                 },
                 workContext: workContextSchema,
               },
@@ -642,7 +751,7 @@ describe('session MCP input schemas', () => {
     );
 
     expect(role.revision).toBe(7);
-    expect(resolved.prompt).toBe('Act as a careful reviewer.\n\nReview the current diff.');
+    expect(resolved.prompt).toBe('Review the current diff.');
     expect(resolved.input).toMatchObject({
       machineId: 'remote-machine',
       agentConfigId: 'claude-opus',
@@ -664,7 +773,10 @@ describe('session MCP input schemas', () => {
       inheritSessionDefaults: false,
     });
     expect(buildResolvedMcpCreateCanonicalCommand(resolved)).toMatchObject({
-      prompt: 'Act as a careful reviewer.\n\nReview the current diff.',
+      // Recovery replays the canonical command, so the frozen prefix travels
+      // beside the authored prompt instead of inside it.
+      prompt: 'Review the current diff.',
+      agentRolePromptPrefix: 'Act as a careful reviewer.',
       agentRoleId: 'reviewer',
       agentRoleRevision: 7,
       machineId: 'remote-machine',
@@ -710,7 +822,7 @@ describe('session MCP input schemas', () => {
     expect(catalog.get(role.id)).toEqual(role);
     expect(syncFlockDocOrThrow).toHaveBeenCalledWith('workspace-id:wf:workspace', {
       timeoutMs: 10_000,
-      reason: 'mcp-agent-role-read',
+      reason: 'agent-role-catalog-read',
     });
   });
 
@@ -771,6 +883,75 @@ describe('session MCP input schemas', () => {
     expect(remote).not.toHaveProperty('useCurrentSessionAsParent');
     expect(remote).not.toHaveProperty('workContext');
     expect(composeAgentRolePrompt('  ', 'Implement this.')).toBe('Implement this.');
+  });
+
+  it('runs a remote Role in the Local Project linked GitHub repository only when the workspace enables it', () => {
+    const frozenInputConfig = {} as SessionTurnInputConfig;
+    const input = {
+      operationId: 'role-review-linked-1',
+      prompt: 'Review this.',
+      agentRoleId: 'reviewer',
+    } as const;
+    const requester = {
+      machineId: 'current-machine',
+      project: {
+        kind: 'local',
+        localProjectId: 'project-id',
+        branch: 'feature/unpushed',
+        githubRepoFullName: 'loro-dev/lody-oss',
+        useWorktree: true,
+      },
+    } as const;
+
+    const linked = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole(),
+      'loro-dev/lody-oss'
+    ).input;
+    // The local branch may exist only on the requester's Machine, so the
+    // clone starts from the repository's default branch.
+    expect(linked).toMatchObject({
+      machineId: 'remote-machine',
+      workContext: { kind: 'github', repo: 'loro-dev/lody-oss' },
+    });
+    expect(linked.workContext).not.toHaveProperty('branch');
+    expect(linked).not.toHaveProperty('useCurrentSessionAsParent');
+    expect(
+      buildMcpCreateOptions(linked, {
+        sessionId: 'current-session',
+        machineId: 'current-machine',
+      })
+    ).toMatchObject({ repo: 'loro-dev/lody-oss', machine: 'remote-machine' });
+
+    // An unlisted repository keeps the plain-chat placement.
+    const unlisted = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole()
+    ).input;
+    expect(unlisted).not.toHaveProperty('workContext');
+
+    // An explicit work context or a same-Machine Role is unaffected.
+    const explicit = resolveMcpSessionCreate(
+      { ...input, workContext: { kind: 'chat' } },
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole(),
+      'loro-dev/lody-oss'
+    ).input;
+    expect(explicit.workContext).toEqual({ kind: 'chat' });
+    const sameMachine = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      { ...requester, machineId: 'remote-machine' },
+      agentRole(),
+      'loro-dev/lody-oss'
+    ).input;
+    expect(sameMachine.useCurrentSessionAsParent).toBe(true);
+    expect(sameMachine).not.toHaveProperty('workContext');
   });
 
   it('requires only that the Role id exists in the workspace catalog', () => {
@@ -884,6 +1065,12 @@ describe('session MCP input schemas', () => {
       modeId: 'agent',
       modelId: 'gpt-5.6-sol',
       configOptionValues: { 'fast-mode': true },
+      mcpServerIds: [],
+      inheritedDispatchConfig: {
+        modeId: 'agent',
+        modelId: 'gpt-5.6-sol',
+        configOptionValues: { 'fast-mode': true },
+      },
       inheritSessionDefaults: false,
     });
     await expect(
@@ -892,6 +1079,7 @@ describe('session MCP input schemas', () => {
       modeId: undefined,
       modelId: undefined,
       configOptionValues: { mode: 'read-only', model: 'gpt-5.5' },
+      mcpServerIds: [],
       inheritSessionDefaults: false,
     });
     await expect(
@@ -906,6 +1094,7 @@ describe('session MCP input schemas', () => {
       modeId: 'read-only',
       modelId: 'gpt-5.5',
       configOptionValues: { 'fast-mode': false, reasoning_effort: 'high', plan_mode: true },
+      mcpServerIds: [],
       inheritSessionDefaults: false,
     });
   });
@@ -1335,6 +1524,7 @@ describe('session MCP input schemas', () => {
     expect(waitUntilMetaSynced).toHaveBeenCalledOnce();
     expect(waitUntilMetaSynced).toHaveBeenCalledWith({
       reason: 'mcp.session_rename_many:current-session-id',
+      timeoutMs: 30_000,
     });
   });
 
@@ -1367,25 +1557,6 @@ describe('session MCP input schemas', () => {
     ]);
     expect(manager.repo.upsertDocMeta).not.toHaveBeenCalled();
     expect(waitUntilMetaSynced).not.toHaveBeenCalled();
-  });
-
-  it('cancels only the assistant turn created by the Operation item', () => {
-    expect(
-      buildOperationTargetCancelArgs('workspace-1', {
-        status: 'active',
-        inputDurable: true,
-        target: { sessionId: 'target-session' as SessionId, userTurnId: 'target-user-turn' },
-      })
-    ).toEqual([
-      'session',
-      'cancel',
-      '--workspace',
-      'workspace-1',
-      '--json',
-      '--turn-id',
-      'assistant:target-user-turn',
-      'target-session',
-    ]);
   });
 
   it('accepts only the finite list filters and bounded batch shapes', () => {

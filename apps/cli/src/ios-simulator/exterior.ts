@@ -1,5 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { Effect } from 'effect';
+import { processLayer, runCommandOk } from '@lody/shared/node/process';
 import { z } from 'zod';
 import {
   IosSimulatorExteriorSchema,
@@ -107,21 +107,18 @@ export async function readSimulatorExterior(options: {
 
 /** Read immutable DeviceKit artwork without booting, streaming, leasing or opening a server. */
 export async function readIdleSimulatorExterior(binary: string, udid: string, signal: AbortSignal) {
-  const exec = promisify(execFile);
   const target = z.string().uuid().parse(udid);
-  const { stdout: layout } = await exec(binary, ['chrome', 'layout', '--udid', target], {
-    signal,
-    timeout: 10000,
-    maxBuffer: 65536,
-    encoding: 'utf8',
-  });
-  const { stdout: png } = await exec(binary, ['chrome', 'composite', '--udid', target], {
-    signal,
-    timeout: 10000,
-    maxBuffer: 256 * 1024,
-    encoding: 'buffer',
-  });
-  return parseIdleSimulatorExterior(layout, png);
+  const run = (args: string[], maxOutputBytes: number) =>
+    Effect.runPromise(
+      Effect.provide(
+        runCommandOk({ command: binary, args, timeout: 10000, maxOutputBytes }),
+        processLayer({})
+      ),
+      { signal }
+    );
+  const { stdout: layout } = await run(['chrome', 'layout', '--udid', target], 65536);
+  const { stdout: png } = await run(['chrome', 'composite', '--udid', target], 256 * 1024);
+  return parseIdleSimulatorExterior(layout.toString('utf8'), png);
 }
 
 export function parseIdleSimulatorExterior(layout: string, png: Buffer) {

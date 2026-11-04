@@ -34,10 +34,10 @@ export function injectBootShell(html: string): string {
       `Boot shell entries need both ${BOOT_SHELL_HEAD_MARKER} and ${BOOT_SHELL_ROOT_MARKER}.`
     );
   }
-  // `data-href`/`data-precedence` let React adopt this sheet for the
-  // `<style href precedence>` that `BootShell` renders instead of adding a copy.
+  // The marker lets DocumentStyle retire this first-paint sheet after the live
+  // stylesheet commits. Live sheets stay mutable rather than using style href.
   const head =
-    `<style data-href="lody-boot-shell" data-precedence="lody-boot-shell">${BOOT_SHELL_CSS}</style>` +
+    `<style data-href="lody-boot-shell">${BOOT_SHELL_CSS}</style>` +
     `<script>${createBootShellScript()}</script>`;
   return html
     .replace(BOOT_SHELL_HEAD_MARKER, head)

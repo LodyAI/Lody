@@ -37,6 +37,8 @@ interface CompactSectionProps {
 
 interface CompactRowProps {
   label: string;
+  /** Optional identity mark beside the label and helper. */
+  leading?: ReactNode;
   /** Controls associate these IDs through aria-labelledby / aria-describedby. */
   labelId?: string;
   helperId?: string;
@@ -135,6 +137,7 @@ export function CompactSection({
 
 export function CompactRow({
   label,
+  leading,
   labelId,
   helperId,
   helper,
@@ -143,22 +146,33 @@ export function CompactRow({
   alignTop = false,
   disabled = false,
 }: CompactRowProps) {
+  const text = (
+    <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
+      <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
+        {label}
+      </p>
+      {helper ? (
+        <p id={helperId} {...stylex.props(surface.rowHelper)}>
+          {helper}
+        </p>
+      ) : null}
+    </div>
+  );
+
   return (
     <div
       {...withClassName(stylex.props(surface.row, alignTop && surface.rowTop), className)}
       data-disabled={disabled ? '' : undefined}
     >
       {/* A bare label may use the whole column: long command names should not wrap early. */}
-      <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
-        <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
-          {label}
-        </p>
-        {helper ? (
-          <p id={helperId} {...stylex.props(surface.rowHelper)}>
-            {helper}
-          </p>
-        ) : null}
-      </div>
+      {leading ? (
+        <div {...stylex.props(surface.rowIdentity)}>
+          {leading}
+          {text}
+        </div>
+      ) : (
+        text
+      )}
       {children ? (
         <div {...stylex.props(surface.rowControl, alignTop && surface.rowControlTop)}>
           {children}
@@ -171,6 +185,8 @@ export function CompactRow({
 interface CompactLinkRowProps extends Omit<ComponentProps<'button'>, 'className' | 'children'> {
   label: string;
   helper?: ReactNode;
+  /** The row's answer, before its end mark (an amount, a count). */
+  detail?: ReactNode;
   /** Where the row leads: out of Lody (`external`) or into a dialog (`open`). */
   to?: 'external' | 'open';
 }
@@ -182,7 +198,10 @@ interface CompactLinkRowProps extends Omit<ComponentProps<'button'>, 'className'
  * A dialog trigger may render it (`render={<CompactLinkRow …/>}`).
  */
 export const CompactLinkRow = forwardRef<HTMLButtonElement, CompactLinkRowProps>(
-  function CompactLinkRow({ label, helper, to = 'external', type = 'button', ...rest }, ref) {
+  function CompactLinkRow(
+    { label, helper, detail, to = 'external', type = 'button', ...rest },
+    ref
+  ) {
     const Mark = to === 'external' ? ArrowUpRight : ChevronRight;
     return (
       <button
@@ -196,6 +215,7 @@ export const CompactLinkRow = forwardRef<HTMLButtonElement, CompactLinkRowProps>
           {helper ? <p {...stylex.props(surface.rowHelper)}>{helper}</p> : null}
         </div>
         <span {...stylex.props(surface.rowControl, surface.linkEnd)}>
+          {detail != null ? <span {...stylex.props(surface.linkValue)}>{detail}</span> : null}
           <Mark {...stylex.props(surface.linkMark)} aria-hidden="true" />
         </span>
       </button>

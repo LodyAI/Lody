@@ -1,17 +1,20 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
+import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { act, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { ZoomableImageViewer } from '../src/components/shared/zoomable-image-viewer';
 import {
-  resolveExportFileName,
+  runTouchImagePreviewAction,
   type ImagePreviewExportBridge,
 } from '../src/lib/image-preview-export';
 import { initI18n } from '../src/i18n';
 
 const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+const PHOTO_SELECTOR_FOR_TEST = 'img.lody-photo-slider-image';
 const IMAGE_SRC = 'blob:lody/preview-image';
 
 function createBridge(action: 'copy' | 'save' | null) {
@@ -216,53 +219,6 @@ describe('image preview context menu', () => {
     }
   );
 
-  it('copies the previewed image when the menu returns copy', async () => {
-    const bridge = createBridge('copy');
-    installImageIpc(bridge);
-    stubImageFetch('image/png');
-
-    const photo = renderViewer();
-    const event = await rightClick(photo, bridge.finished);
-
-    expect(event.defaultPrevented).toBe(true);
-    expect(bridge.showMenu).toHaveBeenCalledTimes(1);
-    expect(bridge.showMenu.mock.calls[0]![0]!.items.map((item) => item.action)).toEqual([
-      'copy',
-      'save',
-    ]);
-    expect(bridge.copyToClipboard).toHaveBeenCalledTimes(1);
-    const copied = bridge.copyToClipboard.mock.calls[0]![0]!.pngBytes;
-    expect(new Uint8Array(copied)).toEqual(PNG_BYTES);
-    expect(bridge.saveAs).not.toHaveBeenCalled();
-  });
-
-  it('saves under the source file name when the menu returns save', async () => {
-    const bridge = createBridge('save');
-    installImageIpc(bridge);
-    stubImageFetch('image/png');
-
-    const photo = renderViewer();
-    await rightClick(photo, bridge.finished);
-
-    expect(bridge.saveAs).toHaveBeenCalledTimes(1);
-    expect(bridge.saveAs.mock.calls[0]![0]!.fileName).toBe('diagram.png');
-    expect(bridge.copyToClipboard).not.toHaveBeenCalled();
-  });
-
-  it('does nothing further when the menu is dismissed', async () => {
-    const bridge = createBridge(null);
-    installImageIpc(bridge);
-    stubImageFetch('image/png');
-
-    const photo = renderViewer();
-    const event = await rightClick(photo, bridge.finished);
-    expect(event.defaultPrevented).toBe(true);
-
-    expect(bridge.showMenu).toHaveBeenCalledTimes(1);
-    expect(bridge.copyToClipboard).not.toHaveBeenCalled();
-    expect(bridge.saveAs).not.toHaveBeenCalled();
-  });
-
   it('leaves the browser context menu alone without the desktop bridge', async () => {
     // No `window.ipc`: web and older preload builds keep their own menu.
     stubImageFetch('image/png');
@@ -271,6 +227,141 @@ describe('image preview context menu', () => {
     const event = await rightClick(photo);
 
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  function pointer(target: EventTarget, type: string, extra: Record<string, unknown> = {}) {
+    const event = new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clientX: 30,
+      clientY: 40,
+    });
+    Object.defineProperties(
+      event,
+      Object.fromEntries(
+        Object.entries({
+          pointerId: 1,
+          pointerType: 'touch',
+          isPrimary: true,
+          ...extra,
+        }).map(([key, value]) => [key, { value }])
+      )
+    );
+    target.dispatchEvent(event);
+    return event;
+  }
+
+  function touchBytes() {
+    delete window.__LODY_ELECTRON__;
+    vi.stubGlobal('File', NodeFile);
+    vi.stubGlobal('fetch', async () => ({
+      ok: true,
+      blob: async () => new NodeBlob([PNG_BYTES], { type: 'image/png' }),
+    }));
+    vi.useFakeTimers();
+  }
+
+  it('opens a touch menu for a stationary hold and dismisses it without closing the image', async () => {
+    touchBytes();
+    const photo = renderViewer();
+    act(() => {
+      pointer(photo, 'pointerdown');
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(499));
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    act(() => {
+      pointer(photo, 'pointerup');
+    });
+    const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+    expect(menu).not.toBeNull();
+    expect(menu.textContent).toContain('Save Image');
+    expect(menu.textContent).toContain('Image copy unavailable');
+    expect(menu.textContent).toContain('Sharing unavailable');
+    expect(menu.closest('[role="dialog"]')).not.toBeNull();
+    // The synthetic click belonging to the hold must not select a menu item.
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    act(() => {
+      photo.dispatchEvent(click);
+    });
+    expect(click.defaultPrevented).toBe(true);
+    await act(async () => {
+      menu.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      );
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('keeps failed image preparation visible without enabling export', async () => {
+    touchBytes();
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('Image no longer available');
+    });
+    const photo = renderViewer();
+    act(() => {
+      pointer(photo, 'pointerdown');
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    const menu = document.querySelector('[role="menu"]')!;
+    expect(menu.textContent).toContain('Failed to load image');
+    const save = [...menu.querySelectorAll('[role="menuitem"]')].find(
+      (item) => item.textContent === 'Save Image'
+    )!;
+    expect(save.getAttribute('aria-disabled')).toBe('true');
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('uses an outside-dismiss shield so the tap cannot reach the image backdrop', async () => {
+    touchBytes();
+    const photo = renderViewer();
+    act(() => {
+      pointer(photo, 'pointerdown');
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    act(() => {
+      pointer(photo, 'pointerup');
+    });
+    const shield = document.querySelector('[data-image-menu-dismiss]')!;
+    expect(shield).not.toBeNull();
+    let event!: MouseEvent;
+    act(() => {
+      event = pointer(shield, 'pointerdown');
+    });
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('cancels a pending hold and an open menu when the current image changes', async () => {
+    touchBytes();
+    root = createRoot(container!);
+    const render = (key: string) =>
+      act(() =>
+        root!.render(
+          <ZoomableImageViewer
+            open
+            onClose={() => {}}
+            index={0}
+            images={[{ key, src: IMAGE_SRC, fileName: key + '.png' }]}
+          />
+        )
+      );
+    render('first');
+    act(() => {
+      pointer(document.querySelector(PHOTO_SELECTOR_FOR_TEST)!, 'pointerdown');
+    });
+    render('second');
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    act(() => {
+      pointer(document.querySelector(PHOTO_SELECTOR_FOR_TEST)!, 'pointerdown');
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    render('third');
+    expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
   it('keeps a tap on the zoom surface from closing the viewer', async () => {
@@ -290,23 +381,70 @@ describe('image preview context menu', () => {
   });
 });
 
-describe('resolveExportFileName', () => {
-  it('keeps the source name when it already carries an extension', () => {
-    expect(resolveExportFileName('diagram.png', 'image/png')).toBe('diagram.png');
-    expect(resolveExportFileName('photo.jpeg', 'image/jpeg')).toBe('photo.jpeg');
+describe('touch image export', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    delete window.ipc;
+    delete window.__LODY_ELECTRON__;
+  });
+  const file = () =>
+    new NodeFile([PNG_BYTES], 'original.png', { type: 'image/png' }) as unknown as File;
+
+  it('shares the prepared original file synchronously, and preserves cancellation/failure', async () => {
+    let shared: File | undefined;
+    vi.stubGlobal('navigator', {
+      canShare: () => true,
+      share: async ({ files }: { files: File[] }) => {
+        shared = files[0];
+      },
+    });
+    const original = file();
+    const result = runTouchImagePreviewAction('share', IMAGE_SRC, original);
+    expect(shared).toBe(original);
+    expect(new Uint8Array(await shared!.arrayBuffer())).toEqual(PNG_BYTES);
+    expect(await result).toEqual({ kind: 'shared' });
+    navigator.share = async () => {
+      throw new DOMException('Dismissed', 'AbortError');
+    };
+    expect(await runTouchImagePreviewAction('share', IMAGE_SRC, original)).toEqual({
+      kind: 'dismissed',
+    });
+    navigator.share = async () => {
+      throw new Error('Permission denied');
+    };
+    expect(await runTouchImagePreviewAction('share', IMAGE_SRC, original)).toEqual({
+      kind: 'share-failed',
+      error: 'Permission denied',
+    });
   });
 
-  it('reduces a path to its base name', () => {
-    expect(resolveExportFileName('docs/assets/diagram.png', 'image/png')).toBe('diagram.png');
-  });
-
-  it('appends an extension only when the source name has none', () => {
-    expect(resolveExportFileName('pasted-image', 'image/webp')).toBe('pasted-image.webp');
-    expect(resolveExportFileName('pasted-image', 'application/octet-stream')).toBe('pasted-image');
-  });
-
-  it('falls back to a generic name when there is no source name', () => {
-    expect(resolveExportFileName(undefined, 'image/jpeg')).toBe('image.jpg');
-    expect(resolveExportFileName(undefined, undefined)).toBe('image.png');
+  it('starts image clipboard write in the click and reports unsupported bitmap copy', async () => {
+    let pending: Promise<Blob> | undefined;
+    vi.stubGlobal('Blob', NodeBlob);
+    vi.stubGlobal(
+      'ClipboardItem',
+      class {
+        constructor(readonly data: Record<string, Promise<Blob>>) {}
+      }
+    );
+    vi.stubGlobal('navigator', {
+      clipboard: {
+        write: async (items: { data: Record<string, Promise<Blob>> }[]) => {
+          pending = items[0]!.data['image/png'];
+          await pending;
+        },
+      },
+    });
+    const result = runTouchImagePreviewAction('copy', IMAGE_SRC, file());
+    expect(pending).toBeDefined();
+    expect(await result).toEqual({ kind: 'copied' });
+    expect(new Uint8Array(await (await pending!).arrayBuffer())).toEqual(PNG_BYTES);
+    vi.stubGlobal('navigator', {});
+    expect(await runTouchImagePreviewAction('copy', IMAGE_SRC, file())).toEqual({
+      kind: 'copy-failed',
+      error: 'Image clipboard is unavailable',
+    });
   });
 });

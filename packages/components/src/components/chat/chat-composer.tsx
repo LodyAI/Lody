@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import {
   useEffect,
   useLayoutEffect,
@@ -12,12 +13,13 @@ import {
   type ReactNode,
   type Ref,
 } from 'react';
-import { ClipboardPaste, RefreshCw, X } from 'lucide-react';
+import { ClipboardPaste, RefreshCw, X, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { AcpCommandSummary } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
 import { ComposerImagePeek } from './composer-image-peek';
+import { measureTextareaScrollHeight } from './textarea-measurement';
 import { CommentReferenceChip, type CommentReferenceChipItem } from './comment-reference-chip';
 import {
   VisualAnnotationReferenceChip,
@@ -40,6 +42,7 @@ import {
   getPastedTextCharacterCount,
   getPastedTextLineCount,
   updatePastedTextDraftContent,
+  removePastedTextDraft,
   type PastedTextDraft,
 } from '@/lib/pasted-text-draft';
 import { getExpandedClipboardTextForSelection } from '@/lib/composer-clipboard';
@@ -51,7 +54,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Button, type ButtonProps } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
 import { Drawer } from '@lody/ui/drawer';
-import { Textarea, type TextareaProps } from '@lody/ui/textarea';
+import type { TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
   COMPOSER_COMPACT_PLACEHOLDER_MAX_PX,
@@ -60,19 +63,84 @@ import {
   getChatComposerMobilePromptPlaceholderKey,
 } from '@/lib/chat-composer-placeholder';
 import { Kbd } from '@/components/commands/kbd';
+import { Kbd as KbdPrimitive } from '@lody/ui/kbd';
 import { commands, formatKeyBinding } from '@/lib/commands';
+import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import * as stylex from '@stylexjs/stylex';
-import { text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { text as textScale, space } from '@lody/ui/tokens/scales.stylex';
 
 const typography = stylex.create({
+  imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
   prompt: { fontSize: textScale.bodySize, lineHeight: textScale.bodyLeading },
   helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   code: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
 });
 
+const promptSuggestionStyles = stylex.create({
+  // The hint is ghost text over the empty textarea, set in the textarea's own
+  // size and line height so it sits exactly where typing will appear. The
+  // empty textarea grows to the hint's height (see the auto-resize effect), so
+  // a wrapped hint never covers the footer. Only the mobile "Apply" control
+  // takes pointer events; everything else lets the press reach the input.
+  anchor: { position: 'relative' },
+  anchorSheet: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
+  overlay: {
+    position: 'absolute',
+    insetInlineStart: space[1],
+    insetInlineEnd: space[1],
+    // The empty textarea's caret blinks at the line start; leave room so it
+    // shows just before the hint instead of under the key cap.
+    paddingInlineStart: space[1.5],
+    top: 0,
+    zIndex: 20,
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    minWidth: 0,
+    pointerEvents: 'none',
+    userSelect: 'none',
+    color: colors.secondaryLabel,
+    fontSize: textScale.bodySize,
+    // The session textarea's `leading-6`.
+    lineHeight: '1.5rem',
+  },
+  overlayLanding: {
+    insetInlineStart: 0,
+    insetInlineEnd: 0,
+    lineHeight: textScale.bodyLeading,
+  },
+  // The sheet textarea's `px-5 py-4 text-base leading-7`.
+  overlaySheet: {
+    insetInlineStart: '1.25rem',
+    insetInlineEnd: '1.25rem',
+    top: space[4],
+    fontSize: '1rem',
+    lineHeight: '1.75rem',
+  },
+  text: {
+    minWidth: 0,
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 3,
+    overflow: 'hidden',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+  },
+  // Leads the hint, away from the send button. One line tall, so the key cap or
+  // Apply control centres on the hint's first line.
+  accept: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    height: '1lh',
+  },
+  apply: { pointerEvents: 'auto' },
+});
+
 type ChatComposerTone = 'light' | 'dark';
-type ChatComposerVariant = 'landing' | 'session' | 'dialog';
+type ChatComposerVariant = 'landing' | 'session' | 'dialog' | 'sheet';
 type ChatComposerStatusTone = 'error' | 'warning' | 'info';
 
 export interface ChatComposerAction {
@@ -122,11 +190,22 @@ export interface ChatComposerProps {
   onPromptChange: (value: string) => void;
   onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  /**
+   * Advisory next-prompt text for an empty composer. Desktop accepts it with
+   * Tab; mobile only through the inline Apply control. Accepting writes the
+   * text as an ordinary editable draft and never sends or consumes the source
+   * suggestion, so clearing the draft reveals it again.
+   */
+  promptSuggestion?: string | null;
   promptPlaceholder?: string;
   /** Agent or role name for the compact-width placeholder ("Work with {{name}}"). */
   compactPlaceholderName?: string | null;
   promptDisabled?: boolean;
+  /** Block pending edits without disabling the focused mobile input/keyboard. */
+  preservePromptFocus?: boolean;
   promptRows?: number;
+  /** Focus the prompt as soon as this composer mounts (new-chat sheet). */
+  promptAutoFocus?: boolean;
   promptEnterKeyHint?: TextareaProps['enterKeyHint'];
   promptRef?: Ref<HTMLTextAreaElement>;
   pastedTextDrafts?: PastedTextDraft[];
@@ -148,6 +227,8 @@ export interface ChatComposerProps {
   imageItems?: ChatComposerImageItem[];
   attachmentAddDisabled?: boolean;
   onAttachmentAddClick?: () => void;
+  onScheduleSend?: () => void;
+  scheduleDisabledReason?: string;
   imageDropDisabled?: boolean;
   onImageDrop?: (files: File[]) => void;
   /**
@@ -156,6 +237,7 @@ export interface ChatComposerProps {
    */
   onDirectoryDrop?: (directories: File[]) => void;
   onImageRemove?: (id: string) => void;
+  onImageAnnotate?: (id: string) => void;
   onImageRetry?: (id: string) => void;
   /** Pending file attachments (non-image), rendered as a chip strip. */
   fileItems?: ChatComposerFileItem[];
@@ -206,17 +288,21 @@ export function getChatComposerTextareaClassName({
   isMobile?: boolean;
 }) {
   const isLanding = variant === 'landing';
+  const isSheet = variant === 'sheet';
 
   return cn(
     'input-scrollbar resize-none transition-shadow',
     stylex.props(typography.prompt).className,
-    isLanding
-      ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
-      : cn(
-          'border-transparent bg-transparent px-1 py-0',
-          // Mobile session composer floors at a single line; desktop keeps two.
-          isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
-        ),
+    isSheet
+      ? 'min-h-0 flex-1 border-transparent bg-transparent px-5 py-4 text-base leading-7'
+      : isLanding
+        ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
+        : cn(
+            'text-sm leading-6',
+            'border-transparent bg-transparent px-1 py-0',
+            // Mobile session composer floors at a single line; desktop keeps two.
+            isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
+          ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
     'text-input-foreground placeholder:text-input-placeholder/85'
   );
@@ -250,10 +336,13 @@ export function ChatComposer({
   onPromptChange,
   onPromptKeyDown,
   onPromptPaste,
+  promptSuggestion = null,
   promptPlaceholder,
   compactPlaceholderName,
   promptDisabled = false,
+  preservePromptFocus = false,
   promptRows = 3,
+  promptAutoFocus = false,
   promptEnterKeyHint,
   promptRef,
   pastedTextDrafts = [],
@@ -265,10 +354,13 @@ export function ChatComposer({
   imageItems = [],
   attachmentAddDisabled = false,
   onAttachmentAddClick,
+  onScheduleSend,
+  scheduleDisabledReason,
   imageDropDisabled = attachmentAddDisabled,
   onImageDrop,
   onDirectoryDrop,
   onImageRemove,
+  onImageAnnotate,
   onImageRetry,
   fileItems = [],
   onFileRemove,
@@ -294,7 +386,8 @@ export function ChatComposer({
   focusOnContainerClick = false,
 }: ChatComposerProps) {
   const { t, i18n } = useTranslation();
-  const shortcutsEnabled = variant !== 'dialog';
+  const shortcutsAllowed = useWorkspaceFeature('shortcuts');
+  const shortcutsEnabled = variant !== 'dialog' && shortcutsAllowed;
   const intlLocale = useMemo(
     () => toIntlLocale(i18n.resolvedLanguage ?? i18n.language),
     [i18n.language, i18n.resolvedLanguage]
@@ -302,10 +395,11 @@ export function ChatComposer({
   const isMobile = useIsMobile();
   const isDialog = variant === 'dialog';
   const isLanding = variant === 'landing';
+  const isSheet = variant === 'sheet';
   // Mobile session composer starts at a single line to save vertical space
   // (desktop keeps its 2-line default); it still auto-grows as the user types.
   const singleLineMobile = isMobile && variant === 'session';
-  const effectivePromptRows = singleLineMobile ? 1 : promptRows;
+  const effectivePromptRows = singleLineMobile || isSheet ? 1 : promptRows;
   // Desktop-only ⌘L discovery hint in the empty composer. Requires a fine pointer
   // AND non-mobile layout so phone frames / narrow viewports never show a
   // keyboard shortcut that doesn't exist on touch. Hidden once focused or typing.
@@ -326,9 +420,34 @@ export function ChatComposer({
   const uploadFailedLabel = t('sessions.uploadFailed', 'Upload failed');
   const uploadFailedShortLabel = t('sessions.uploadFailedShort', 'Failed');
   const imagePreviewLabel = t('sessions.imagePreview', 'Image preview');
-  const pastedTextDialogTitle = t('composer.pastedTextTitle', 'Pasted text');
-  const pastedTextEditorLabel = t('composer.pastedTextEditorLabel', 'Edit pasted text');
+  const previewIsQuote = pastedTextDrafts.some(
+    (draft) => draft.id === previewPastedTextDraftId && draft.kind === 'message_quote'
+  );
+  const pastedTextDialogTitle = previewIsQuote
+    ? t('composer.messageQuoteTitle', 'Quoted message')
+    : t('composer.pastedTextTitle', 'Pasted text');
+  const pastedTextEditorLabel = previewIsQuote
+    ? t('composer.messageQuoteOriginal', 'Original quote')
+    : t('composer.pastedTextEditorLabel', 'Edit pasted text');
   const composerBoxRef = useRef<HTMLDivElement>(null);
+  const removedQuoteCaret = useRef<{
+    key: typeof draftKey;
+    value: string;
+    position: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const removed = removedQuoteCaret.current;
+    if (!removed) return;
+    if (removed.key !== draftKey) {
+      removedQuoteCaret.current = null;
+      return;
+    }
+    if (removed.value !== promptValue) return;
+    removedQuoteCaret.current = null;
+    const input = composerBoxRef.current?.querySelector('textarea');
+    input?.focus({ preventScroll: true });
+    input?.setSelectionRange(removed.position, removed.position);
+  }, [draftKey, promptValue]);
   const [useCompactPlaceholder, setUseCompactPlaceholder] = useState(false);
   useLayoutEffect(() => {
     const box = composerBoxRef.current;
@@ -354,18 +473,22 @@ export function ChatComposer({
     const compact = getChatComposerCompactPlaceholder({ name: compactPlaceholderName });
     return compact.name ? t(compact.key, { name: compact.name }) : t(compact.key);
   })();
-  const resolvedPromptPlaceholder = useCompactPlaceholder
-    ? compactPromptPlaceholder
-    : (promptPlaceholder ??
-      (isMobile
-        ? t(getChatComposerMobilePromptPlaceholderKey({ mentionSource, skillAgent }))
-        : t(
-            getChatComposerPromptPlaceholderKey({
-              mentionSource,
-              availableCommands,
-              skillAgent,
-            })
-          )));
+  /* The sheet's writing surface is deliberately roomy and its narrow-window
+     compact placeholder ("Ask anything") drops the / @ $ discovery hints that
+     make the blank composer legible. Keep the full hint there. */
+  const resolvedPromptPlaceholder =
+    useCompactPlaceholder && !isSheet
+      ? compactPromptPlaceholder
+      : (promptPlaceholder ??
+        (isMobile
+          ? t(getChatComposerMobilePromptPlaceholderKey({ mentionSource, skillAgent }))
+          : t(
+              getChatComposerPromptPlaceholderKey({
+                mentionSource,
+                availableCommands,
+                skillAgent,
+              })
+            )));
   const numberFormatter = useMemo(() => new Intl.NumberFormat(intlLocale), [intlLocale]);
   const previewPastedTextDraft =
     pastedTextDrafts.find((item) => item.id === previewPastedTextDraftId) ?? null;
@@ -388,6 +511,29 @@ export function ChatComposer({
       })),
     [pastedTextDrafts]
   );
+  // Range history can restore an atom after deletion. Retain its immutable
+  // payload alongside the editor's bounded history, never in the DOM label.
+  const pastedTextArchive = useRef({ key: draftKey, drafts: new Map<string, PastedTextDraft>() });
+  if (pastedTextArchive.current.key !== draftKey)
+    pastedTextArchive.current = { key: draftKey, drafts: new Map() };
+  for (const draft of pastedTextDrafts) pastedTextArchive.current.drafts.set(draft.id, draft);
+  const quoteUndoEnabled = Array.from(pastedTextArchive.current.drafts.values()).some(
+    (draft) => draft.kind === 'message_quote'
+  );
+  const retainDraftPayloads = useCallback((values: ReadonlySet<string>) => {
+    for (const id of pastedTextArchive.current.drafts.keys()) {
+      if (!values.has(id)) pastedTextArchive.current.drafts.delete(id);
+    }
+  }, []);
+  const resolveDraftChip = useCallback<
+    NonNullable<Parameters<typeof CombinedMentionTextarea>[0]['getMentionChip']>
+  >((mention, text) => {
+    const draft = pastedTextArchive.current.drafts.get(mention.value);
+    return getComposerMentionChip(
+      draft?.kind === 'message_quote' ? { ...mention, kind: 'message_quote' } : mention,
+      text
+    );
+  }, []);
   // Live ranges for copy expansion. Send still owns its copy via the parent
   // callback; we mirror here so Cmd/Ctrl+C can expand without waiting on send.
   const [mentionRanges, setMentionRanges] = useState<MentionRange[]>([]);
@@ -416,7 +562,7 @@ export function ChatComposer({
       const nextDrafts = nextMentions
         .filter((mention) => mention.kind === 'pasted_text')
         .map((mention) => {
-          const currentDraft = pastedTextDrafts.find((draft) => draft.id === mention.value);
+          const currentDraft = pastedTextArchive.current.drafts.get(mention.value);
           if (!currentDraft) {
             return null;
           }
@@ -448,7 +594,12 @@ export function ChatComposer({
   const handlePastedTextDraftTextChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
       if (promptDisabled) return;
-      if (!previewPastedTextDraft || !onPastedTextDraftsChange) return;
+      if (
+        !previewPastedTextDraft ||
+        previewPastedTextDraft.kind === 'message_quote' ||
+        !onPastedTextDraftsChange
+      )
+        return;
 
       const text = event.currentTarget.value;
       setPreviewPastedTextEditorValue(text);
@@ -501,6 +652,110 @@ export function ChatComposer({
     },
     [getMentionPromptRewrites, mentionRanges, pastedTextDrafts, promptValue]
   );
+
+  // The mention input keeps IME preedit text local and commits it only at
+  // compositionend, so `promptValue` stays empty while the user composes.
+  const [promptComposing, setPromptComposing] = useState(false);
+  const visiblePromptSuggestion =
+    !promptDisabled &&
+    !promptComposing &&
+    promptValue.length === 0 &&
+    promptSuggestion !== null &&
+    promptSuggestion.trim().length > 0
+      ? promptSuggestion
+      : null;
+  // The wrapped hint's rendered height; the empty textarea grows to it.
+  const promptSuggestionRef = useRef<HTMLDivElement>(null);
+  const [promptSuggestionHeight, setPromptSuggestionHeight] = useState(0);
+  useLayoutEffect(() => {
+    const overlay = promptSuggestionRef.current;
+    if (!overlay) {
+      setPromptSuggestionHeight(0);
+      return undefined;
+    }
+    const measure = () => setPromptSuggestionHeight(overlay.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(overlay);
+    return () => observer.disconnect();
+  }, [visiblePromptSuggestion]);
+  // Written only after the owner's controlled value carries the text, so the
+  // caret lands at the end of the accepted draft. A ref, not state: acceptance
+  // is a one-shot handoff, not a rendered mode.
+  const acceptedPromptSuggestionRef = useRef<string | null>(null);
+  const acceptPromptSuggestion = useCallback(() => {
+    if (visiblePromptSuggestion === null) return;
+    // Focus inside the press itself: the mobile Apply control is a real
+    // gesture, and iOS only raises the keyboard for focus it sees there.
+    const textarea =
+      promptRef && typeof promptRef === 'object' && 'current' in promptRef
+        ? promptRef.current
+        : null;
+    textarea?.focus();
+    acceptedPromptSuggestionRef.current = visiblePromptSuggestion;
+    onPromptChange(visiblePromptSuggestion);
+  }, [onPromptChange, promptRef, visiblePromptSuggestion]);
+  useEffect(() => {
+    const accepted = acceptedPromptSuggestionRef.current;
+    if (accepted === null) return;
+    // One commit is the whole handoff window: an owner that ignores the write
+    // must not leave a stale value that later edits happen to match.
+    acceptedPromptSuggestionRef.current = null;
+    if (promptValue !== accepted) return;
+    const textarea =
+      promptRef && typeof promptRef === 'object' && 'current' in promptRef
+        ? promptRef.current
+        : null;
+    if (!textarea) return;
+    const caret = textarea.value.length;
+    textarea.focus();
+    textarea.setSelectionRange(caret, caret);
+  }, [promptRef, promptValue]);
+  const promptInputProps = {
+    disabled: promptDisabled && !preservePromptFocus,
+    'aria-disabled': promptDisabled || undefined,
+    onValueChange: (value: string) => {
+      if (!promptDisabled) onPromptChange(value);
+    },
+    onBeforeInput: (event: React.FormEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) event.preventDefault();
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) {
+        if (event.key !== 'Tab') event.preventDefault();
+        return;
+      }
+      if (
+        event.key === 'Tab' &&
+        !isMobile &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.defaultPrevented &&
+        visiblePromptSuggestion !== null &&
+        !isImeComposingKeyboardEvent(event)
+      ) {
+        // An empty composer cannot have an open mention/command menu (those
+        // require text), so this cannot take Tab from one. For the same reason
+        // it can never replace an existing draft, including whitespace.
+        event.preventDefault();
+        acceptPromptSuggestion();
+        return;
+      }
+      onPromptKeyDown?.(event);
+    },
+    onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) event.preventDefault();
+      else onPromptPaste?.(event);
+    },
+    onCompositionStart: () => setPromptComposing(true),
+    onCompositionEnd: () => setPromptComposing(false),
+    // A blur can end the textarea's composition without a compositionend in some
+    // engines; never leave the hint hidden behind a stale flag.
+    onBlur: () => setPromptComposing(false),
+  };
 
   const canHandleImageDrop = Boolean(onImageDrop) && !imageDropDisabled && !promptDisabled;
   const resetImageDragState = useCallback(() => {
@@ -591,25 +846,27 @@ export function ChatComposer({
     // When empty, the height is simply minHeight — and must be: Chromium includes
     // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
     // placeholder would grow the box past minHeight and then visibly shrink on
-    // the first keystroke. Skipping the measurement also matters for speed: an
-    // `auto` reset followed by a scrollHeight read forces a synchronous layout
-    // of the whole page, and a session switch mounts an empty composer into a
-    // freshly committed conversation (~5ms per switch).
+    // the first keystroke. Skipping measurement also avoids constructing a
+    // mirror and forcing layout while an empty composer mounts on session switch.
     const hasValue = (promptValue ?? '').length > 0;
     if (!hasValue) {
-      textarea.style.height = `${minHeight}px`;
+      // A visible prompt suggestion overlays the empty box; grow to hold it so
+      // a wrapped hint never runs over the footer.
+      const suggestionHeight =
+        promptSuggestionHeight > 0 ? promptSuggestionHeight + paddingTop + paddingBottom : 0;
+      textarea.style.height = `${Math.min(maxHeight, Math.max(minHeight, suggestionHeight))}px`;
       textarea.style.overflowY = 'hidden';
       return;
     }
 
-    // Reset height to auto to get an accurate scrollHeight, then clamp.
-    textarea.style.height = 'auto';
-    const scrollHeight = textarea.scrollHeight;
+    // Measure outside the flex layout. A temporary height:auto on the live
+    // textarea expands the conversation viewport and can clamp its scrollTop.
+    const scrollHeight = measureTextareaScrollHeight(textarea, computedStyle);
     const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
 
     textarea.style.height = `${newHeight}px`;
     textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows]);
+  }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows, promptSuggestionHeight]);
 
   const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
 
@@ -645,12 +902,14 @@ export function ChatComposer({
 
   const actionBaseClassName = cn(
     stylex.props(isLanding ? typography.caption : typography.code).className,
-    'select-none border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
+    'select-none border font-medium transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
     isDialog
       ? 'h-10 rounded-lg px-5'
       : isLanding
-        ? 'h-6 rounded-[4px] px-2'
-        : 'h-7 rounded-md px-2.5'
+        ? 'h-6 rounded-[4px] px-2 text-[11px] leading-tight'
+        : isSheet
+          ? 'h-9 rounded-full px-3 text-sm'
+          : 'h-7 rounded-md px-2.5 text-xs'
   );
 
   const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
@@ -667,7 +926,17 @@ export function ChatComposer({
 
   const sessionContainerClassName = cn(COMPOSER_SESSION_SURFACE_CLASS, mentionSurfaceClassName);
 
-  const boxContainerClassName = isLanding ? landingContainerClassName : sessionContainerClassName;
+  /* Sheet: the composer is the page, not a card floating on it. The writing
+     surface runs edge to edge; only the footer draws a separator. */
+  const sheetContainerClassName = cn(
+    'flex h-full min-h-0 flex-col px-0 py-0',
+    mentionSurfaceClassName
+  );
+  const boxContainerClassName = isSheet
+    ? sheetContainerClassName
+    : isLanding
+      ? landingContainerClassName
+      : sessionContainerClassName;
   const composerHasAttachments =
     imageItems.length > 0 ||
     fileItems.length > 0 ||
@@ -677,16 +946,25 @@ export function ChatComposer({
   // Only when the box is idle: desktop, has a focus binding, and nothing entered/attached
   // yet (so the chip never collides with text or thumbnails). focus-within hides it too.
   const showFocusHint =
-    focusHintSupported && Boolean(focusHintBinding) && !promptValue && !composerHasAttachments;
+    focusHintSupported &&
+    Boolean(focusHintBinding) &&
+    !promptValue &&
+    !composerHasAttachments &&
+    visiblePromptSuggestion === null;
   const imageDropClassName = isImageDropActive
     ? 'border-primary/50 bg-primary/[0.04] ring-2 ring-primary/25'
     : undefined;
   const boxFooterClassName = cn(
-    'flex select-none items-center gap-x-1.5',
-    isLanding ? 'pt-2' : 'pt-0.5'
+    'flex shrink-0 select-none items-center gap-x-1.5',
+    isSheet
+      ? 'border-t border-border/60 px-3 pb-[calc(8px+max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px)))] pt-2'
+      : isLanding
+        ? 'pt-2'
+        : 'pt-0.5'
   );
   const statusClassName = cn(
-    'px-1',
+    'text-xs leading-snug',
+    isSheet ? 'px-5' : 'px-1',
     stylex.props(typography.helper).className,
     statusTone === 'error'
       ? 'text-destructive'
@@ -706,7 +984,7 @@ export function ChatComposer({
       <div
         className={cn(
           'flex w-full flex-col',
-          isDialog ? 'gap-3' : isLanding ? 'gap-12' : 'gap-2',
+          isSheet ? 'min-h-0 flex-1 gap-0' : isDialog ? 'gap-3' : isLanding ? 'gap-12' : 'gap-2',
           className
         )}
       >
@@ -717,7 +995,12 @@ export function ChatComposer({
         ) : null}
 
         {!isDialog ? (
-          <div className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
+          <div
+            className={cn(
+              'flex flex-col',
+              isSheet ? 'h-full min-h-0 gap-0' : isLanding ? 'gap-2' : 'gap-1'
+            )}
+          >
             {/* Top selector (repo, branch) - shown outside and above the input box */}
             {topSelector ? (
               <div className="flex w-full min-w-0 select-none items-center gap-1">
@@ -756,7 +1039,7 @@ export function ChatComposer({
               }
             >
               {commentReferenceItems.length > 0 ? (
-                <div className="flex flex-wrap gap-2 pb-1">
+                <div className={cn('flex flex-wrap gap-2 pb-1', isSheet && 'px-5 pt-3')}>
                   {commentReferenceItems.map((item) => (
                     <CommentReferenceChip
                       key={item.localId}
@@ -769,7 +1052,7 @@ export function ChatComposer({
                 </div>
               ) : null}
               {visualAnnotationReferenceItems.length > 0 ? (
-                <div className="flex flex-wrap gap-2 pb-1">
+                <div className={cn('flex flex-wrap gap-2 pb-1', isSheet && 'px-5 pt-3')}>
                   {visualAnnotationReferenceItems.map((item) => (
                     <VisualAnnotationReferenceChip
                       key={item.localId}
@@ -784,7 +1067,12 @@ export function ChatComposer({
                 // Unified horizontal, scrollable attachment strip: image thumbnails
                 // and file cards share the same square-card shape and scroll
                 // sideways together (cards step up in size on mobile for touch).
-                <div className="input-scrollbar flex gap-2 overflow-x-auto pb-1">
+                <div
+                  className={cn(
+                    'input-scrollbar flex gap-2 overflow-x-auto pb-1',
+                    isSheet && 'px-5 pt-3'
+                  )}
+                >
                   {imageItems.map((image) => (
                     <div
                       key={image.id}
@@ -863,6 +1151,23 @@ export function ChatComposer({
                           {image.progress}%
                         </div>
                       ) : null}
+                      {onImageAnnotate && image.status !== 'uploading' ? (
+                        <div {...stylex.props(typography.imageMarkup)}>
+                          <Button
+                            size="mini"
+                            icon
+                            variant="secondary"
+                            onClick={() => onImageAnnotate(image.id)}
+                            aria-label={t(
+                              'sessions.fileViewer.selection.markupNamedImage',
+                              'Mark up {{name}}',
+                              { name: image.name }
+                            )}
+                          >
+                            <Pencil size={14} aria-hidden />
+                          </Button>
+                        </div>
+                      ) : null}
                       {image.status === 'failed' ? (
                         <button
                           type="button"
@@ -893,7 +1198,7 @@ export function ChatComposer({
                     >
                       <span
                         className={cn(
-                          'max-w-[64%] truncate font-semibold uppercase tracking-wide',
+                          'max-w-[64%] truncate font-medium uppercase tracking-wide',
                           file.status === 'failed'
                             ? 'text-destructive/80'
                             : 'text-muted-foreground',
@@ -904,7 +1209,7 @@ export function ChatComposer({
                       </span>
                       <span
                         className={cn(
-                          'mt-1 break-words text-left font-medium text-input-foreground',
+                          'mt-1 break-words text-left font-normal text-input-foreground',
                           isMobile ? 'line-clamp-3' : 'line-clamp-2',
                           stylex.props(typography.helper).className
                         )}
@@ -976,40 +1281,96 @@ export function ChatComposer({
                 </div>
               ) : null}
 
-              <CombinedMentionTextarea
-                enablePromptShortcuts={shortcutsEnabled}
-                menuSide="top"
-                id={promptId}
-                ref={promptRef}
-                mentionSource={mentionSource}
-                availableCommands={availableCommands}
-                commandsEnabled={commandsEnabled}
-                skillAgent={skillAgent}
-                currentSessionId={currentSessionId}
-                value={promptValue}
-                onValueChange={onPromptChange}
-                externalMentions={pastedTextMentions}
-                onExternalMentionsChange={handlePastedTextMentionsChange}
-                onMentionClick={handleMentionClick}
-                getMentionChip={getComposerMentionChip}
-                onMentionRangesChange={handleMentionRangesChange}
-                persistedMentions={persistedMentions}
-                draftKey={draftKey}
-                mentionActionsRef={mentionActionsRef}
-                onKeyDown={onPromptKeyDown}
-                onPaste={onPromptPaste}
-                onCopy={handlePromptCopy}
-                disabled={promptDisabled}
-                rows={effectivePromptRows}
-                enterKeyHint={promptEnterKeyHint}
-                placeholder={resolvedPromptPlaceholder}
-                // While the ⌘L focus hint is shown the box is empty, so the (long)
-                // placeholder would otherwise run under the top-right ⌘L chip. Reserve
-                // room for it so the placeholder wraps before the chip; the padding is
-                // dropped once the user types (showFocusHint → false → full width).
-                className={cn(boxTextareaClassName, showFocusHint && 'pr-16')}
-                data-keyboard-nav="composer"
-              />
+              <div
+                {...stylex.props(
+                  promptSuggestionStyles.anchor,
+                  isSheet && promptSuggestionStyles.anchorSheet
+                )}
+              >
+                <CombinedMentionTextarea
+                  enablePromptShortcuts={shortcutsEnabled}
+                  menuSide="top"
+                  id={promptId}
+                  ref={promptRef}
+                  mentionSource={mentionSource}
+                  availableCommands={availableCommands}
+                  commandsEnabled={commandsEnabled}
+                  skillAgent={skillAgent}
+                  currentSessionId={currentSessionId}
+                  value={promptValue}
+                  {...promptInputProps}
+                  externalMentions={pastedTextMentions}
+                  atomicUndoHistory={quoteUndoEnabled}
+                  onAtomicHistoryRetainValues={retainDraftPayloads}
+                  onExternalMentionsChange={handlePastedTextMentionsChange}
+                  onMentionClick={handleMentionClick}
+                  getMentionChip={resolveDraftChip}
+                  onMentionRangesChange={handleMentionRangesChange}
+                  persistedMentions={persistedMentions}
+                  draftKey={draftKey}
+                  mentionActionsRef={mentionActionsRef}
+                  onCopy={handlePromptCopy}
+                  rows={effectivePromptRows}
+                  enterKeyHint={promptEnterKeyHint}
+                  placeholder={
+                    visiblePromptSuggestion === null ? resolvedPromptPlaceholder : undefined
+                  }
+                  // While the ⌘L focus hint is shown the box is empty, so the (long)
+                  // placeholder would otherwise run under the top-right ⌘L chip. Reserve
+                  // room for it so the placeholder wraps before the chip; the padding is
+                  // dropped once the user types (showFocusHint → false → full width).
+                  className={cn(boxTextareaClassName, showFocusHint && 'pr-16')}
+                  fillHeight={isSheet}
+                  mentionPanelPlacement={isSheet ? 'bottom' : undefined}
+                  autoFocus={promptAutoFocus}
+                  data-testid="composer-input"
+                  data-keyboard-nav="composer"
+                />
+
+                {visiblePromptSuggestion !== null ? (
+                  <div
+                    {...stylex.props(
+                      promptSuggestionStyles.overlay,
+                      isLanding && promptSuggestionStyles.overlayLanding,
+                      isSheet && promptSuggestionStyles.overlaySheet
+                    )}
+                    data-prompt-suggestion=""
+                    ref={promptSuggestionRef}
+                  >
+                    {isMobile ? (
+                      <span
+                        {...stylex.props(
+                          promptSuggestionStyles.accept,
+                          promptSuggestionStyles.apply
+                        )}
+                      >
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="mini"
+                          shape="pill"
+                          onClick={acceptPromptSuggestion}
+                          aria-label={t(
+                            'chat.composer.promptSuggestion.applyAria',
+                            'Apply prompt suggestion'
+                          )}
+                        >
+                          {t('chat.composer.promptSuggestion.apply', 'Apply')}
+                        </Button>
+                      </span>
+                    ) : (
+                      <span {...stylex.props(promptSuggestionStyles.accept)}>
+                        {/* Literal "Tab": the shared binding formatter renders the
+                            Mac tab glyph, which is not the word this hint teaches. */}
+                        <KbdPrimitive>Tab</KbdPrimitive>
+                      </span>
+                    )}
+                    <span {...stylex.props(promptSuggestionStyles.text)}>
+                      {visiblePromptSuggestion}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
 
               {showFocusHint ? (
                 <div
@@ -1041,10 +1402,13 @@ export function ChatComposer({
                 <AttachmentAddMenu
                   isMobile={isMobile}
                   isLanding={isLanding}
+                  isSheet={isSheet}
                   disabled={promptDisabled}
                   onAddAttachment={onAttachmentAddClick}
                   attachmentDisabled={attachmentAddDisabled}
                   mcp={mcp}
+                  onScheduleSend={onScheduleSend}
+                  scheduleDisabledReason={scheduleDisabledReason}
                 />
 
                 {/* Single row only: long model names must shrink/truncate inside
@@ -1090,25 +1454,25 @@ export function ChatComposer({
               skillAgent={skillAgent}
               currentSessionId={currentSessionId}
               value={promptValue}
-              onValueChange={onPromptChange}
+              {...promptInputProps}
               externalMentions={pastedTextMentions}
+              atomicUndoHistory={quoteUndoEnabled}
+              onAtomicHistoryRetainValues={retainDraftPayloads}
               onExternalMentionsChange={handlePastedTextMentionsChange}
               onMentionClick={handleMentionClick}
-              getMentionChip={getComposerMentionChip}
+              getMentionChip={resolveDraftChip}
               onMentionRangesChange={handleMentionRangesChange}
               persistedMentions={persistedMentions}
               draftKey={draftKey}
               mentionActionsRef={mentionActionsRef}
-              onKeyDown={onPromptKeyDown}
-              onPaste={onPromptPaste}
               onCopy={handlePromptCopy}
-              disabled={promptDisabled}
               rows={effectivePromptRows}
               enterKeyHint={promptEnterKeyHint}
               placeholder={resolvedPromptPlaceholder}
               containerClassName={mentionContainerClassName}
               className={dialogTextareaClassName}
-              data-keyboard-nav="composer"
+              data-testid="composer-input"
+                  data-keyboard-nav="composer"
             />
 
             {statusMessage ? (
@@ -1166,6 +1530,58 @@ export function ChatComposer({
             })
           : '';
 
+        // The pasted text is still composer content, so its editor reads exactly
+        // like the prompt: same face, weight, size and leading. `@lody/ui`'s
+        // Textarea is a form control (medium weight, control tracking), which is
+        // why this is a plain textarea, as the prompt itself is.
+        const removeQuoteButton =
+          previewIsQuote && previewPastedTextDraft && onPastedTextDraftsChange ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              onClick={() => {
+                if (promptDisabled) return;
+                const result = removePastedTextDraft(
+                  promptValue,
+                  pastedTextDrafts,
+                  previewPastedTextDraft.id
+                );
+                if (!result) return;
+                removedQuoteCaret.current = {
+                  key: draftKey,
+                  value: result.nextValue,
+                  position: previewPastedTextDraft.start,
+                };
+                onPromptChange(result.nextValue);
+                onPastedTextDraftsChange(result.nextDrafts);
+                handlePastedTextOpenChange(false);
+              }}
+            >
+              {t('composer.removeMessageQuote', 'Remove quote')}
+            </Button>
+          ) : null;
+        const pastedTextEditor = (layoutClassName: string) => (
+          <textarea
+            rows={
+              previewIsQuote
+                ? Math.min(18, Math.max(3, previewPastedTextEditorValue.split('\n').length))
+                : undefined
+            }
+            aria-label={pastedTextEditorLabel}
+            value={previewPastedTextEditorValue}
+            onChange={handlePastedTextDraftTextChange}
+            readOnly={previewIsQuote || !onPastedTextDraftsChange}
+            spellCheck={false}
+            className={cn(
+              'input-scrollbar block min-h-0 w-full flex-1 resize-none overflow-auto border-0 bg-transparent',
+              stylex.props(typography.prompt).className,
+              'text-input-foreground outline-hidden',
+              layoutClassName
+            )}
+          />
+        );
+
         if (isMobile) {
           return (
             <Drawer.Root
@@ -1173,37 +1589,44 @@ export function ChatComposer({
               open={previewPastedTextDraft !== null}
               onOpenChange={handlePastedTextOpenChange}
             >
-              <Drawer.Content
-                side="bottom"
-                className="flex h-[85vh] flex-col gap-0 rounded-t-2xl p-0"
-              >
+              <Drawer.Content side="bottom" closeButton={false} className="gap-0 rounded-t-2xl p-0">
                 {previewPastedTextDraft ? (
-                  <>
+                  // Base UI wraps the children in a block box, so the column
+                  // that lets the editor fill the sheet has to be ours, with a
+                  // definite height for `flex-1` to divide.
+                  <div className="flex h-[85dvh] min-h-0 flex-col">
                     <div className="flex shrink-0 justify-center pt-2 pb-1">
                       <div className="h-1 w-9 rounded-full bg-muted-foreground/30" />
                     </div>
-                    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
-                      <Drawer.Title className="flex items-center gap-2 font-medium">
-                        <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
-                        {pastedTextDialogTitle}
-                      </Drawer.Title>
-                      <Drawer.Description className="text-muted-foreground tabular-nums">
+                    {/* The close shares the title's row so it centres on that
+                        first line; the summary sits on its own line beneath. */}
+                    <div className="flex shrink-0 flex-col border-b border-border/60 py-2 pr-2 pl-4">
+                      <div className="flex items-center gap-3">
+                        <Drawer.Title className="flex min-w-0 flex-1 items-center gap-2 font-medium">
+                          <ClipboardPaste className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          {pastedTextDialogTitle}
+                        </Drawer.Title>
+                        {removeQuoteButton}
+                        <Drawer.Close
+                          render={
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="small"
+                              icon
+                              aria-label={t('common.close', 'Close')}
+                            />
+                          }
+                        >
+                          <X className="size-4" />
+                        </Drawer.Close>
+                      </div>
+                      <Drawer.Description className="truncate pr-2 text-muted-foreground tabular-nums">
                         {summaryText}
                       </Drawer.Description>
                     </div>
-                    <Textarea
-                      aria-label={pastedTextEditorLabel}
-                      value={previewPastedTextEditorValue}
-                      onChange={handlePastedTextDraftTextChange}
-                      readOnly={!onPastedTextDraftsChange}
-                      spellCheck={false}
-                      autoFocus={false}
-                      className={cn(
-                        'input-scrollbar min-h-0 flex-1 resize-none rounded-none border-0 bg-background px-4 py-3 font-mono  text-foreground focus-visible:ring-0 focus-visible:ring-offset-0',
-                        stylex.props(typography.code).className
-                      )}
-                    />
-                  </>
+                    {pastedTextEditor('px-4 py-3')}
+                  </div>
                 ) : null}
               </Drawer.Content>
             </Drawer.Root>
@@ -1218,7 +1641,11 @@ export function ChatComposer({
             <Dialog.Content
               closeButton={false}
               width="48rem"
-              className="flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0"
+              className={
+                previewIsQuote
+                  ? undefined
+                  : 'flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0'
+              }
             >
               {previewPastedTextDraft ? (
                 <>
@@ -1228,6 +1655,7 @@ export function ChatComposer({
                       {pastedTextDialogTitle}
                     </Dialog.Title>
                     <div className="flex items-center gap-3">
+                      {removeQuoteButton}
                       <Dialog.Description className="text-muted-foreground tabular-nums">
                         {summaryText}
                       </Dialog.Description>
@@ -1240,17 +1668,9 @@ export function ChatComposer({
                     </div>
                   </div>
                   <div className="flex min-h-0 flex-1 px-5 py-4">
-                    <Textarea
-                      aria-label={pastedTextEditorLabel}
-                      value={previewPastedTextEditorValue}
-                      onChange={handlePastedTextDraftTextChange}
-                      readOnly={!onPastedTextDraftsChange}
-                      spellCheck={false}
-                      className={cn(
-                        'input-scrollbar h-full min-h-0 w-full resize-none overflow-auto rounded-md border-transparent bg-muted/30 px-4 py-3 font-mono  text-foreground focus-visible:ring-1 focus-visible:ring-ring/50',
-                        stylex.props(typography.code).className
-                      )}
-                    />
+                    {pastedTextEditor(
+                      'h-full rounded-md bg-muted/30 px-4 py-3 focus-visible:ring-1 focus-visible:ring-ring/50'
+                    )}
                   </div>
                 </>
               ) : null}

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getServerNow, githubFetchPRReviewComments, type GitHubReviewThread } from '@lody/shared';
-import { withGitHubOperationTokenRetry, withGitHubTokenRetry } from '@/lib/github-token';
 import { useGitHubPrIdentity } from './use-github-pr-identity';
 
 type GitHubReviewCommentsStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -116,17 +115,20 @@ export function useGitHubReviewComments({
   const identity = useGitHubPrIdentity({ workspaceId, sessionId, repoFullName, prNumber, enabled });
   const {
     serverVersions,
+    publicRead,
     repositoryId,
     repoFullName: normalizedRepoFullName,
-    ready: enabledWithInputs,
+    readReady: enabledWithInputs,
+    runRead: withGitHubTokenRetry,
+    runOperation: withGitHubOperationTokenRetry,
     retry: retryIdentity,
   } = identity;
   const cacheKey = useMemo(
     () =>
       workspaceId && normalizedRepoFullName && prNumber
-        ? getCacheKey(workspaceId, normalizedRepoFullName, prNumber, serverVersions?.repositoryId)
+        ? `${publicRead ? 'public:' : ''}${getCacheKey(workspaceId, normalizedRepoFullName, prNumber, repositoryId)}`
         : null,
-    [workspaceId, normalizedRepoFullName, prNumber, serverVersions?.repositoryId]
+    [workspaceId, normalizedRepoFullName, prNumber, repositoryId, publicRead]
   );
 
   const [threads, setThreads] = useState<GitHubReviewThread[]>([]);
@@ -184,7 +186,7 @@ export function useGitHubReviewComments({
           workspaceId,
           normalizedRepoFullName,
           (token) => githubFetchPRReviewComments(token, normalizedRepoFullName, prNumber),
-          serverVersions?.repositoryId
+          repositoryId
         );
         if (requestSeqRef.current !== seq) {
           return;
@@ -213,7 +215,8 @@ export function useGitHubReviewComments({
       normalizedRepoFullName,
       prNumber,
       workspaceId,
-      serverVersions?.repositoryId,
+      repositoryId,
+      withGitHubTokenRetry,
     ]
   );
 
@@ -284,7 +287,14 @@ export function useGitHubReviewComments({
         repositoryId
       );
     },
-    [enabledWithInputs, workspaceId, normalizedRepoFullName, repositoryId, identity.error]
+    [
+      enabledWithInputs,
+      workspaceId,
+      normalizedRepoFullName,
+      repositoryId,
+      identity.error,
+      withGitHubOperationTokenRetry,
+    ]
   );
 
   return {

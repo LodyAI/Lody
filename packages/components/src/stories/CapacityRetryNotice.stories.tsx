@@ -266,3 +266,61 @@ export const TitleOnlyFailure: Story = {
   },
   render: renderRow,
 };
+
+const restoreFailure =
+  'Internal error: connection setup timed out\n\nCheck your connection and retry.';
+
+export const RestoreFailure: Story = {
+  args: {
+    sessionId,
+    message: {
+      ...message,
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: { reason: 'session_restore_failed', message: restoreFailure },
+        },
+      ],
+    },
+  },
+  render: renderRow,
+  play: async ({ canvasElement }) => {
+    const banner = within(canvasElement).getByRole('alert');
+    await expect(banner.textContent?.split('connection setup timed out')).toHaveLength(2);
+    await expect(banner.textContent?.split('Check your connection and retry.')).toHaveLength(2);
+    await expect(within(banner).getByRole('button', { name: /Copy error|复制错误/ })).toBeVisible();
+  },
+};
+
+export const DeepSeekNodeMissing: Story = {
+  args: {
+    sessionId,
+    message: {
+      ...message,
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'turn_pre_prompt_failed',
+            message:
+              'Starting the agent failed: [DSH_NODE_NOT_FOUND] DeepSeek Harness requires Node.js, but node was not found on the target machine PATH.',
+          },
+        },
+      ],
+    },
+  },
+  render: renderRow,
+  play: async ({ canvasElement }) => {
+    const banner = within(canvasElement).getByRole('alert');
+    await expect(banner.textContent).toMatch(
+      /needs Node.js on the target machine|需要在目标机器上安装 Node.js/
+    );
+    await expect(banner.textContent).toContain('PATH');
+    await expect(
+      within(banner).getByRole('button', { name: /Download Node.js|下载 Node.js/ })
+    ).toBeVisible();
+    await expect(within(banner).getByRole('button', { name: /Copy error|复制错误/ })).toBeVisible();
+  },
+};

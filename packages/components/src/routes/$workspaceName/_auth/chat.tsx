@@ -60,6 +60,7 @@ function ChatRoute() {
         preSelectedMachine={search.machine}
         preSelectedProject={search.project}
         preSelectedRepo={search.repo}
+        preSelectedGroup={search.group}
         onSelectionUrlSync={handleSelectionUrlSync}
       />
     </div>

@@ -1,10 +1,12 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { userEvent, within } from 'storybook/test';
 import { Provider, createStore } from 'jotai';
 import type { MessageQueueItem, SessionHistory, SessionId, WorkspaceId } from '@lody/shared';
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { MessageQueueDisplay } from '@/components/sessions/message-queue';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 
 const TASKS = [
@@ -105,6 +107,109 @@ export const MobileWidth: Story = {
   parameters: {
     containerWidth: 'w-[320px]',
   },
+};
+
+/** A local wall-clock time `days` from today, so the labels read the same on any day. */
+function at(days: number, hour: number): number {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  date.setHours(hour, 0, 0, 0);
+  return date.getTime();
+}
+
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const scheduledItems = [
+  {
+    scheduleId: 'scheduled-tomorrow',
+    content: 'Review these files tomorrow morning',
+    at: at(1, 9),
+    timeZone,
+    state: 'pending' as const,
+  },
+  {
+    scheduleId: 'scheduled-week',
+    content: 'Send the weekly summary to the team channel with the release notes',
+    at: at(3, 17),
+    timeZone,
+    state: 'pending' as const,
+  },
+  {
+    scheduleId: 'scheduled-failed',
+    content: 'Re-run the nightly benchmark',
+    at: at(0, 23),
+    timeZone,
+    state: 'failed' as const,
+  },
+];
+
+const scheduledArgs = {
+  onOpenScheduled: () => {},
+  onEditScheduledTime: () => {},
+  onCancelScheduled: () => {},
+};
+
+/** Production mobile: the touch layout, roomy rows and inline footers. */
+const mobileDecorator: NonNullable<Story['decorators']> = [
+  (Story) => (
+    <ForceMobileLayoutProvider force>
+      <Story />
+    </ForceMobileLayoutProvider>
+  ),
+];
+
+export const ScheduledSection: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: makeItems(2),
+    scheduledItems,
+  },
+};
+
+/** A full conversation column: actions fit inline at the row's end. */
+export const ScheduledSectionWide: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: makeItems(2),
+    scheduledItems,
+  },
+  parameters: { containerWidth: 'w-[720px]' },
+};
+
+export const ScheduledOnly: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: [],
+    scheduledItems: scheduledItems.slice(0, 1),
+  },
+};
+
+export const ScheduledSectionMobile: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: makeItems(2),
+    scheduledItems,
+    roomy: true,
+    footerPosition: 'inline',
+  },
+  decorators: mobileDecorator,
+  parameters: { containerWidth: 'w-[calc(100vw-48px)]' },
+};
+
+export const ScheduledOnlyMobile: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: [],
+    scheduledItems: scheduledItems.slice(0, 1),
+    roomy: true,
+    footerPosition: 'inline',
+  },
+  decorators: mobileDecorator,
+  parameters: { containerWidth: 'w-[calc(100vw-48px)]' },
 };
 
 export const EditingFirstItem: Story = {
@@ -260,5 +365,59 @@ export const InactiveSession: Story = {
     ...commonArgs,
     items: makeItems(3),
     showSteerAction: false,
+  },
+};
+
+/** Hold the first save acknowledgement while the user edits the next queued turn. */
+export const DeferredEditing: Story = {
+  args: { ...commonArgs, items: makeItems(2) },
+  render: function DeferredEditingStory(args) {
+    const [items, setItems] = useState(args.items);
+    return (
+      <MessageQueueDisplay
+        {...args}
+        items={items}
+        onEditStart={(item) => {
+          setItems((current) =>
+            current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: true } : row))
+          );
+        }}
+        onEditCancel={(item) => {
+          setItems((current) =>
+            current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: false } : row))
+          );
+        }}
+        onEditSave={async (item, task) => {
+          setItems((current) =>
+            current.map((row) =>
+              row.$cid === item.$cid
+                ? {
+                    ...row,
+                    task,
+                    isEditing: false,
+                    acpSessionConfig: { ...row.acpSessionConfig, prompt: task },
+                  }
+                : row
+            )
+          );
+          if (item.$cid === 'cid-0') {
+            await new Promise<void>((resolve) => {
+              window.addEventListener('storybook:release-queue-save', () => resolve(), {
+                once: true,
+              });
+            });
+          }
+        }}
+      />
+    );
+  },
+};
+
+/** The real disclosure keeps both recovery state and the total count visible. */
+export const CollapsedWithUploads: Story = {
+  ...LocalUploadRows,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: /Up next/ }));
   },
 };

@@ -1,18 +1,22 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState, type RefObject } from 'react';
 import { Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { downloadBytesAsFile } from '@/lib/download-file';
 import { Menu } from '@/ui/armed-overlays';
-import type { ResolvedTheme } from '../../theme-provider';
 import { CodeBlockCopyButton } from './markdown-code-block';
-import { renderMarkdownMermaidSvg } from './markdown-mermaid';
+import {
+  renderMarkdownMermaidSvg,
+  resolveMermaidColors,
+  withMermaidColors,
+} from './markdown-mermaid';
 
 const SVG_CACHE_MAX_ENTRIES = 32;
 const PNG_EXPORT_SCALE = 5;
 
-// Keyed by theme and source so a remount (the streaming renderer handing over
-// to the static one, a virtualized row scrolling back in) paints the diagram
-// in the same frame instead of flashing the empty frame while it re-renders.
+// Keyed by source so a remount (the streaming renderer handing over to the
+// static one, a virtualized row scrolling back in) paints the diagram in the
+// same frame instead of flashing the empty frame while it re-renders. Colors
+// come from the block's theme variables, so a theme switch reuses the entry.
 const svgCache = new Map<string, string>();
 
 const writeSvgCache = (key: string, svg: string) => {
@@ -24,23 +28,22 @@ const writeSvgCache = (key: string, svg: string) => {
   }
 };
 
-function useMermaidSvg(code: string, theme: ResolvedTheme): string | null {
-  const key = `${theme}\0${code}`;
+function useMermaidSvg(code: string): string | null {
   const [rendered, setRendered] = useState<string | null>(null);
 
   useEffect(() => {
-    if (svgCache.has(key)) return undefined;
+    if (svgCache.has(code)) return undefined;
     let cancelled = false;
-    void renderMarkdownMermaidSvg(code, theme).then((svg) => {
-      writeSvgCache(key, svg);
+    void renderMarkdownMermaidSvg(code).then((svg) => {
+      writeSvgCache(code, svg);
       if (!cancelled) setRendered(svg);
     });
     return () => {
       cancelled = true;
     };
-  }, [code, key, theme]);
+  }, [code]);
 
-  return svgCache.get(key) ?? rendered;
+  return svgCache.get(code) ?? rendered;
 }
 
 const encodeText = (text: string) => new TextEncoder().encode(text);
@@ -70,9 +73,20 @@ const svgToPngBytes = (svg: string): Promise<Uint8Array> =>
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   });
 
-function MermaidDownloadMenu({ code, svg }: { code: string; svg: string | null }) {
+function MermaidDownloadMenu({
+  code,
+  svg,
+  hostRef,
+}: {
+  code: string;
+  svg: string | null;
+  hostRef: RefObject<HTMLElement | null>;
+}) {
   const { t } = useTranslation();
   const label = t('sessions.diagram.download', 'Download diagram');
+  // A file leaves the themed block, so it carries the colors in effect now.
+  const exportSvg = () =>
+    svg && hostRef.current ? withMermaidColors(svg, resolveMermaidColors(hostRef.current)) : svg;
 
   return (
     <Menu.Root>
@@ -82,15 +96,19 @@ function MermaidDownloadMenu({ code, svg }: { code: string; svg: string | null }
       <Menu.Content align="end">
         <Menu.Item
           disabled={!svg}
-          onClick={() => svg && downloadBytesAsFile('diagram.svg', encodeText(svg))}
+          onClick={() => {
+            const file = exportSvg();
+            if (file) downloadBytesAsFile('diagram.svg', encodeText(file));
+          }}
         >
           {t('sessions.diagram.downloadSvg', 'SVG')}
         </Menu.Item>
         <Menu.Item
           disabled={!svg}
           onClick={() => {
-            if (!svg) return;
-            void svgToPngBytes(svg)
+            const file = exportSvg();
+            if (!file) return;
+            void svgToPngBytes(file)
               .then((bytes) => downloadBytesAsFile('diagram.png', bytes))
               .catch((error: unknown) => console.warn('[Lody] Diagram PNG export failed.', error));
           }}
@@ -105,26 +123,22 @@ function MermaidDownloadMenu({ code, svg }: { code: string; svg: string | null }
   );
 }
 
-export const MarkdownMermaidBlock = memo(function MarkdownMermaidBlock({
-  code,
-  theme,
-}: {
-  code: string;
-  theme: ResolvedTheme;
-}) {
+export const MarkdownMermaidBlock = memo(function MarkdownMermaidBlock({ code }: { code: string }) {
   const { t } = useTranslation();
-  const svg = useMermaidSvg(code, theme);
+  const svg = useMermaidSvg(code);
+  const svgHostRef = useRef<HTMLDivElement>(null);
 
   return (
     <div data-streamdown="mermaid-block">
       <div data-streamdown="mermaid-block-actions">
-        <MermaidDownloadMenu code={code} svg={svg} />
+        <MermaidDownloadMenu code={code} svg={svg} hostRef={svgHostRef} />
         <CodeBlockCopyButton code={code} />
       </div>
       <div data-streamdown="mermaid">
         <div>
           {svg ? (
             <div
+              ref={svgHostRef}
               data-streamdown="mermaid-svg"
               role="img"
               aria-label={t('sessions.diagramViewer.title', 'Diagram')}

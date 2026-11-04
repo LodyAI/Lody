@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 
 import type {
+  ACPSessionId,
   AcpSessionNotification,
   SessionHistoryInput,
   SessionId,
@@ -13,13 +14,20 @@ import { MessageHandler } from '../src/lib/message-handler';
 import { SessionDocument } from '../src/lib/loro/doc';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { SessionManager } from '../src/session/session-manager';
-import type { SessionDispatchSource } from '../src/session/session-execution-service';
+import type {
+  SessionDispatchSource,
+  SessionExecutionService,
+} from '../src/session/session-execution-service';
 import { DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS } from '../src/session/turn-history-gate';
 import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
 import { createTestCloudPort } from './test-cloud-port';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
-import type { AgentClient } from '../src/agent/agent-client';
+import type { AgentClient, AgentSessionWarning } from '../src/agent/agent-client';
+import type {
+  AcpSessionConfigTarget,
+  AcpSessionRunConfig,
+} from '../src/session/acp-session-config-applier';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -36,6 +44,13 @@ const createSilentLogger = (): Logger => ({
 const originalLodyServerUrl = process.env.LODY_SERVER_URL;
 
 type MessageHandlerHost = {
+  executionService: SessionExecutionService;
+  applyAcpModeAndModel(
+    session: AcpSessionConfigTarget,
+    config: AcpSessionRunConfig,
+    context: { sessionDoc: SessionDocument }
+  ): Promise<void>;
+  recordAgentWarning(sessionId: SessionId, warning: AgentSessionWarning): Promise<void>;
   appendACPUpdatesToAssistantEntry(...args: unknown[]): Promise<void>;
   flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
   handleAgentPermissionRequest(
@@ -138,6 +153,112 @@ const agentChunk = (sessionId: SessionId, text: string): AcpSessionNotification 
 });
 
 describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
+  it('persists Stop failures on each turn without completing the running assistant', async () => {
+    const sessionId = 'stop-failure-notices' as SessionId;
+    const { repo, doc, handler } = await createHandlerHarness(sessionId);
+    try {
+      await updateTestHistory(doc, () => [userEntry('stop-user-1')]);
+      const turnId = handler.beginConversationTurn(sessionId, 'stop-user-1', { sessionDoc: doc });
+      await handler.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, 'stop-user-1');
+      const record = handler.executionService['deps'].recordSessionStopFailure;
+      const failure = {
+        phase: 'terminate' as const,
+        message: 'Synthetic process termination failure',
+      };
+      await record(sessionId, turnId, { ...failure, phase: 'cancel' });
+      await record(sessionId, turnId, { ...failure, phase: 'timeout' });
+      await record(sessionId, turnId, failure);
+      await record(sessionId, turnId, failure);
+      await record(sessionId, 'assistant-stop-user-2', failure);
+
+      const history = await doc.sessionData.history.readAll();
+      const notices = history.filter((entry) => entry.role === 'system');
+      expect(notices.map((entry) => entry.items[0])).toEqual([
+        expect.objectContaining({
+          type: 'system_notice',
+          name: 'agent_warning',
+          meta: { source: 'sessionCancelFailed', message: failure.message },
+        }),
+        expect.objectContaining({
+          type: 'system_notice',
+          name: 'agent_warning',
+          meta: { source: 'sessionStopTimedOut', message: failure.message },
+        }),
+        expect.objectContaining({
+          type: 'system_notice',
+          name: 'agent_warning',
+          meta: { source: 'sessionTerminationFailed', message: failure.message },
+        }),
+        expect.objectContaining({
+          type: 'system_notice',
+          name: 'agent_warning',
+          meta: { source: 'sessionTerminationFailed', message: failure.message },
+        }),
+      ]);
+      expect(new Set(notices.map((entry) => entry.id)).size).toBe(4);
+      const assistant = history.find((entry) => entry.id === turnId);
+      expect(assistant?.finished).not.toBe(true);
+      expect(assistant?.endedAt).toBeUndefined();
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it.each(['codex', 'claude'])(
+    'persists a rejected %s model as a GUI notice after the driving user turn',
+    async (agentType) => {
+      const sessionId = `model-rejection-${agentType}` as SessionId;
+      const { repo, doc, handler } = await createHandlerHarness(sessionId);
+      try {
+        await updateTestHistory(doc, () => [userEntry('user-model-selection')]);
+        handler.beginConversationTurn(sessionId, 'user-model-selection', { sessionDoc: doc });
+        const recordWarning = handler.recordAgentWarning.bind(handler);
+        let noticeWrite: Promise<void> | undefined;
+        vi.spyOn(handler, 'recordAgentWarning').mockImplementation((...args) => {
+          noticeWrite = recordWarning(...args);
+          return noticeWrite;
+        });
+
+        await handler.applyAcpModeAndModel(
+          {
+            sessionId,
+            acpSessionId: 'acp-model-rejection' as ACPSessionId,
+            agentClient: {
+              isCreated: () => true,
+              getAvailableCommands: () => [],
+              getConfigOptions: () => [
+                { id: 'model', category: 'model', type: 'select', currentValue: 'active-model' },
+              ],
+              unstable_setSessionModel: async () => {
+                throw new Error('Requested model is unavailable');
+              },
+            } as unknown as AgentClient,
+          },
+          { agentType, modelId: 'requested-model' },
+          { sessionDoc: doc }
+        );
+        expect(noticeWrite).toBeDefined();
+        await noticeWrite;
+
+        const history = await doc.sessionData.history.readAll();
+        expect(history[0]?.id).toBe('user-model-selection');
+        const notice = history.find((entry) => entry.role === 'system');
+        expect(notice?.items).toEqual([
+          expect.objectContaining({
+            type: 'system_notice',
+            name: 'agent_warning',
+            meta: {
+              source: 'configWarning',
+              message: expect.stringContaining('model="requested-model"'),
+            },
+          }),
+        ]);
+      } finally {
+        await destroyRepoOnRealTimers(repo);
+      }
+    }
+  );
+
   it.each([false, true, 'write-failure', 'new-turn'] as const)(
     'drains text before a permission tool (buffered tool: %s)',
     async (includeTool) => {

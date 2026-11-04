@@ -42,6 +42,16 @@ Two dev-build choices are load-bearing:
   imports the generated `lody-code-review-viewer/manifest`, which does not exist until that
   package is built; inlining it would make `lody --version` fail.
 
+The CLI entry loads the normal command registry for public invocations, retaining
+the existing command order, help and options. An exact first argument of
+`__internal` registers only the MCP helper commands, so each MCP process avoids
+loading the daemon and interactive command implementations. Both paths share the
+existing application runtime, environment setup and cleanup. Shared application
+chunks stay at the output root in development and production so worker and adapter
+lookups still resolve flat sibling files; dependency chunks may remain in `chunks/`.
+The [internal MCP loading decision](../notes/implemented/architecture/2026-10-30-internal-mcp-command-loading.md)
+records the measured scope and why process isolation is retained.
+
 The CLI's own `version` comes from `@/pkg` because each build composition aliases it to the
 manifest that actually gets published (cloud builds point it at the private composing package). A
 relative `../package.json` import bakes the stale OSS version into the published bundle — that is
@@ -111,3 +121,79 @@ whose runtime exports point at adapter `dist/`.
 `packages/acp-extension-core` is the exception: it builds its own `dist/` through its `prepare`
 script on every install, because `packages/shared` (and every other workspace consumer) imports
 its runtime export directly. `prepare:acp-adapters` therefore only compiles the four adapters.
+
+## Machine catalog freshness during session creation
+
+Machine Flock freshness reads are best-effort: a parsed local project, provider, or ACP
+capability can still satisfy a request after freshness fails. Missing cached capabilities
+alone do not block default-only create/chat. Only current explicit selections require
+catalog-dependent validation. Inherited modes, models, and options retain main's compatible
+filtering: keep usable values, drop unsupported values, and warn after an unconfirmed read.
+Never convert an inherited cache miss into a batch-wide error or a stuck accepted chat.
+
+Effort and Fast filtering/validation use the effective target model, not merely the probe's
+current model. Explicit scalar/raw/semantic model selections win; otherwise a compatible
+inherited model supplies context. This applies both before acceptance and on frozen replay.
+Explicit option maps replace inherited maps. Explicit scalar selectors also remove shadowed
+inherited category options, including adapter-specific option ids.
+Model-dependent skips never waive raw value types; custom Fast select values still use
+the advertised option validator.
+
+A missing explicit selection after an unconfirmed read becomes `SYNC_UNAVAILABLE`.
+Typed transport retryability is preserved, including explicit permanent failures;
+unknown causes are not promoted to retryable. Public diagnostics contain only the bounded
+requested selection id and, for batch items, the index/label, never option values, cached
+records, or raw transport errors. Cache versions remain refresh hints; runtime source
+applicability is checked separately.
+
+```text
+freshness attempt → local catalog read → existing validation
+  inherited incompatibility → filter/drop + warning → accept → materialize
+  default only / usable explicit values → resolve config → accept → materialize
+  explicit miss + retryable freshness failure → abort before any batch acceptance
+  explicit miss + permanent/unknown failure → fail that item; process valid siblings
+  invalid input / permission failure → existing permanent rejection
+```
+
+Accepted target configs preserve `inheritedDispatchConfig` provenance for only the effective
+mode/model/options actually supplied by inheritance. Replay filters that frozen snapshot,
+never mutable requester history, and never promotes it to current explicit input. Values
+changed by an explicit override do not inherit the snapshot's exemption. The older
+`inheritedBuiltinDefaultModeId` remains readable but is no longer emitted.
+
+The internal `builtinDefaultModeId` separately identifies a synthesized builtin fallback.
+Before a fixed UserTurn is authored it may be re-derived or omitted when new capabilities
+exclude it. Once authored, interrupted replay preserves only inherited values reachable
+from the frozen snapshot (or a synthesized builtin mode), including already-omitted fields.
+A matching already-authored inherited model also supplies the context for explicit effort
+validation before filtering can replace it with the probe model. Explicit choices still
+require validation; an unavailable or incompatible explicit control remains an error.
+The complete prepared-input identity check still rejects all unrelated changes. These
+provenance fields are not public MCP inputs and are not written into Session history.
+
+Transient catalog errors instruct callers to wait at least five seconds, reuse the exact
+request and Operation id, and stop after three total calls. This is bounded agent guidance,
+not an enforced counter or a change to the daemon recovery budget. An active Operation
+handle means recovery is already owned by the daemon; callers must not resubmit it.
+
+`syncMachineFlockDocsForRead` opts into strict freshness confirmation for Session create
+and chat validation, then continues from the local replica. For cloud-enabled managers
+this requires an attached, unchanged Streams generation and a successful Streams report.
+A resolved no-route or partial report is not confirmation; a genuinely local-only manager
+retains its authoritative local path. Daemon-hosted MCP reads, including create options,
+session list, and session status, do not start that request-scoped sync. They read the
+daemon replica. Create options return local rows when they can answer, and retryable
+`SYNC_UNAVAILABLE` when the baseline is not ready and the agent-config catalog is empty
+or the current or queried selection is absent. A ready baseline may return an empty
+catalog. Role creation and explicit fresh discovery keep their sync requirements. Ordinary
+Flock sync callers keep their existing best-effort report semantics. Route absence is
+application-level sync unavailability, not a fabricated Repo conflict.
+The [decision note](../notes/implemented/bug-fix/2026-10-10-machine-flock-cache-insufficient.md)
+records the fallback and regression coverage.
+
+PR association membership/order has one publisher: the reconciler. Turn completion
+may detect a PR and establish hosted linkage but does not write its own array.
+Lifecycle records are independent per URL/source; shared resolution applies GitHub
+revision ordering to UI, MCP, notifications and polling targets. The legacy array
+status is a compatibility projection. See the
+[observation contract](../../specs/local-github-pr-observation.md).

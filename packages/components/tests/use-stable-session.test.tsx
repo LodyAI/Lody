@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+/** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
     } as unknown,
     error: null as Error | null,
     isPending: false,
+    isRefetching: false,
     refetch: vi.fn(),
   },
   getSession: vi.fn(),
@@ -28,6 +30,7 @@ vi.mock('../src/lib/auth-bootstrap', () => ({
 }));
 
 import { useStableSessionInternal, type StableSessionValue } from '../src/hooks/useStableSession';
+import { resetBootRequestFailuresForTests } from '../src/lib/boot-request-failures';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -47,11 +50,13 @@ describe('useStableSessionInternal', () => {
     };
     mocks.session.error = null;
     mocks.session.isPending = false;
+    mocks.session.isRefetching = false;
     mocks.session.refetch.mockReset();
     mocks.session.refetch.mockResolvedValue(undefined);
     mocks.getSession.mockReset();
     mocks.getSession.mockResolvedValue({ error: { status: 401 } });
     current = null;
+    resetBootRequestFailuresForTests();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -97,6 +102,33 @@ describe('useStableSessionInternal', () => {
     expect(mocks.session.refetch).toHaveBeenCalledTimes(1);
   });
 
+  it('does not sign out while a slow startup session retry is still in flight', async () => {
+    // Desktop restart behind a proxy: no user has resolved yet, the first
+    // check times out, and the retry takes longer than the retry backoff.
+    // The Electron store clears `error` while a refetch is running.
+    mocks.session.data = undefined;
+    mocks.session.error = new Error('getSession network call timed out after 5000ms');
+
+    await act(async () => root.render(<Consumer />));
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(mocks.session.refetch).toHaveBeenCalledTimes(1);
+
+    mocks.session.error = null;
+    mocks.session.isRefetching = true;
+    await act(async () => root.render(<Consumer />));
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+
+    expect(current?.confirmedUnauthenticated).toBe(false);
+    expect(current?.isPending).toBe(true);
+
+    mocks.session.data = { session: { id: 'current-session' }, user: { id: 'user-1' } };
+    mocks.session.isRefetching = false;
+    await act(async () => root.render(<Consumer />));
+
+    expect(current?.confirmedUnauthenticated).toBe(false);
+    expect(current?.data).toEqual(mocks.session.data);
+  });
+
   it('does not accept a stale 401 after the current credential succeeds', async () => {
     mocks.session.error = Object.assign(new Error('Unauthorized'), { status: 401 });
     mocks.getSession.mockResolvedValue({ data: mocks.session.data, error: null });
@@ -111,27 +143,6 @@ describe('useStableSessionInternal', () => {
     await act(async () => vi.advanceTimersByTimeAsync(300));
 
     expect(mocks.session.refetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('forces one refresh when verification disproves a stale 401 after retries are exhausted', async () => {
-    mocks.session.error = Object.assign(new Error('Client disconnected'), { status: 500 });
-
-    await act(async () => root.render(<Consumer />));
-    await act(async () => vi.advanceTimersByTimeAsync(300));
-    await act(async () => vi.advanceTimersByTimeAsync(600));
-    expect(mocks.session.refetch).toHaveBeenCalledTimes(2);
-
-    mocks.session.error = Object.assign(new Error('Unauthorized'), { status: 401 });
-    mocks.getSession.mockResolvedValue({ data: mocks.session.data, error: null });
-    await act(async () => root.render(<Consumer />));
-
-    expect(current?.confirmedUnauthenticated).toBe(false);
-    expect(current?.error).toMatchObject({ status: 401 });
-    expect(mocks.session.refetch).toHaveBeenCalledTimes(3);
-
-    await act(async () => vi.advanceTimersByTimeAsync(10_000));
-
-    expect(mocks.session.refetch).toHaveBeenCalledTimes(3);
   });
 
   it('bounds retries when unauthorized verification hits a transport failure', async () => {

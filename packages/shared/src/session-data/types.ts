@@ -1,10 +1,17 @@
+import type { MessageContent } from '../ai';
+
 import type { HistoryAction } from './history-actions';
 import type { SessionGoalMessage } from '../goal';
-import type { PermissionOutcome } from '../message';
+import type { PermissionOutcome, SessionHistoryChanges } from '../message';
+import type { SessionHistoryChange } from '../schema';
 import type { SessionId } from '../ids';
 import type { HistoryImportInput } from './history-import';
 import type { SessionSnapshotService } from './snapshot';
 import type { SessionEntry, SessionDirectoryRow, SessionTurn, SessionTurnRead } from './domain';
+
+export type SessionSubagentRun = NonNullable<
+  Extract<MessageContent, { type: 'subagent_task' }>['run']
+>;
 
 // History reads and shared writes use domain DTOs rather than the storage schema.
 // Ordinary commands propagate errors. Import and editable-tail replacement
@@ -120,6 +127,18 @@ export type SessionDataChange =
 
 export type SessionDataChangeListener = (change: SessionDataChange) => void;
 
+/** One bounded directory window from a backend with reverse pagination. */
+export type SessionHistoryDirectoryPage = {
+  /** Optional owner-scoped checkpoint, negotiated separately from paging. */
+  readonly checkpoint?: string;
+  readonly startPosition: number;
+  readonly totalCount: number;
+  readonly rows: readonly SessionDirectoryRow[];
+  readonly hasMoreOlder: boolean;
+  /** Opaque backend cursor for the next page toward the beginning. */
+  readonly cursor: string | null;
+};
+
 /**
  * A gap-free read-and-subscribe. The initial directory is captured at the same
  * point the listener becomes live, so a consumer never has to choose between
@@ -129,6 +148,8 @@ export type SessionDataChangeListener = (change: SessionDataChange) => void;
 export interface SessionObservation {
   /** Directory rows already including every change at or after subscribe. */
   readonly initial: Promise<readonly SessionDirectoryRow[]>;
+  /** Present when `initial` is a bounded latest window rather than the full directory. */
+  readonly initialPage?: Promise<SessionHistoryDirectoryPage>;
   /** Idempotent. */
   unsubscribe(): void;
 }
@@ -149,12 +170,26 @@ export interface SessionModelSummaryReader {
 /** Authoritative reads. In-process storage returns synchronously; the display
  * cache also accepts delayed reads and fences their results against events. */
 export interface SessionHistoryReader {
+  /** Metadata snapshot supplied by the history owner. */
+  readMetadata?():
+    | readonly import('./domain').SessionHistoryMetadata[]
+    | Promise<readonly import('./domain').SessionHistoryMetadata[]>;
   /** Raw slot count, including slots no domain turn owns. */
   count(): number | Promise<number>;
   /** Authoritative read of one raw slot. */
   readAt(position: number): SessionTurnRead | Promise<SessionTurnRead>;
   /** Authoritative read of one business turn id. */
   readTurn(turnId: string): SessionTurnRead | Promise<SessionTurnRead>;
+  /** Display-only turn: run.items contains at most the latest step's small
+   * summary, not a transcript. Never use this for export, copy, hashes or writes.
+   * Advertise only together with readSubagentRun. */
+  readTurnForDisplay?(turnId: string): SessionTurnRead | Promise<SessionTurnRead>;
+  /** Read exactly one run from its owning turn, preserving root ACP identity. */
+  readSubagentRun?(
+    turnId: string,
+    sessionId: string,
+    runId: string
+  ): SessionSubagentRun | undefined | Promise<SessionSubagentRun | undefined>;
   /** Authoritative read of raw slots `[from, to)`. */
   readRange(
     from: number,
@@ -165,6 +200,24 @@ export interface SessionHistoryReader {
     from: number,
     to: number
   ): readonly SessionDirectoryRow[] | Promise<readonly SessionDirectoryRow[]>;
+  getCheckpoint?(): Promise<string>;
+  /** Native publication and its scoped checkpoint, read as one observation. */
+  getPublication?(): Promise<{
+    readonly checkpoint: string;
+    readonly historyRevision: number;
+    readonly historyCount: number;
+    readonly historyChange: SessionHistoryChange | null;
+  }>;
+  readChanges?(
+    checkpoint: string,
+    options?: { readonly withPatches?: true }
+  ): Promise<SessionHistoryChanges>;
+  /** Bounded commit observation; it owns no database transaction while waiting. */
+  waitForChanges?(checkpoint: string, waitMs: number, signal?: AbortSignal): Promise<void>;
+  /** Latest bounded directory page for windowed-history backends. */
+  readLatestDirectoryPage?(limit: number): Promise<SessionHistoryDirectoryPage>;
+  /** Bounded page immediately older than `cursor`. */
+  readOlderDirectoryPage?(cursor: string, limit: number): Promise<SessionHistoryDirectoryPage>;
   /**
    * One consistent full read of the stored history, detached. Export/replay/hash
    * use this instead of stitching `count()` plus `readRange()` across a changing
@@ -208,7 +261,22 @@ export interface SessionHistoryCommands {
   applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult>;
 }
 
+export type SessionInputAcceptanceResult =
+  | { readonly status: 'accepted'; readonly turnId: string; readonly active: boolean }
+  | { readonly status: 'unobserved' };
+
+/** Owner receipt for immutable user input, independent of mutable history state. */
+export interface SessionInputAcceptance {
+  /** The renderer capability is bound to this owner, independently of mutable metadata. */
+  readonly targetMachineId?: string;
+  accept(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+  /** Negotiated owner-side history acceptance and ordinary dispatch handoff. */
+  acceptAndDispatch?(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+  lookup(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+}
+
 export interface SessionData {
+  readonly inputAcceptance?: SessionInputAcceptance;
   readonly sessionId: SessionId;
   readonly history: SessionHistoryReader;
   readonly commands: SessionHistoryCommands;

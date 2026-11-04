@@ -1,6 +1,11 @@
+import {
+  LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT,
+  LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT,
+} from './code-collab-rooms';
 export * from './preview-control';
 import { CliType } from './ai';
 export * from './history-writer';
+export type { AgentHistoryTargets } from './history-agent-window';
 export * from './history-write-schema';
 export * from './session-mirror';
 export * from './session-control-plane';
@@ -19,7 +24,6 @@ export type {
   MachineId,
   McpServerId,
   RepoId,
-  ReviewRunId,
   SessionId,
   TaskId,
   WorkspaceId,
@@ -28,6 +32,7 @@ export * from './message';
 export * from './ai';
 export * from './acp-model-capabilities';
 export * from './pi-provider-migration';
+export * from './message-quote';
 export * from './message-text-spans';
 export * from './deepseek-harness';
 export * from './acp-run-config';
@@ -44,6 +49,7 @@ export * from './bug-report';
 export * from './billing';
 export * from './agent-brand';
 export * from './agent-authentication';
+export * from './subscription-quota';
 export * from './acp-authentication-limits';
 export * from './schema';
 export * from './schedule-types';
@@ -51,11 +57,13 @@ export * from './schedule-time';
 export * from './schedule-recurrence';
 export * from './schedule-registry';
 export * from './schedule-schema';
+export * from './schedule-authorization';
 export * from './schedule-repository';
 export * from './cron-next-fire';
 export * from './scheduled-tasks-from-history';
 export * from './project';
 export * from './time-sync';
+export * from './time-sync-maintenance';
 export * from './session-status-machine';
 export * from './session-archive-targets';
 export * from './session-operation-targets';
@@ -73,6 +81,7 @@ export * from './acp/devin-subagent-task';
 export * from './acp/schema';
 export * from './acp/tool-call-history';
 export * from './acp/history-apply';
+export { inheritHistoryStreamText } from './history-stream-text';
 export * from './acp/history-replay-import';
 export * from './acp/ask-user-question';
 export * from './acp/lody-rate-limit-migration';
@@ -90,7 +99,7 @@ export * from './machine-protocol-capabilities';
 export * from './pi-extensions';
 export * from './repo-doc-meta';
 export * from './session-input';
-export * from './session-preparation';
+export * from './acp-config-option-sensitivity';
 export * from './session-bootstrap';
 export * from './goal';
 export * from './comment-reference-format';
@@ -99,8 +108,7 @@ export * from './preview-comment-types';
 export * from './preview-comment-schema';
 export * from './task-types';
 export * from './task-index';
-export * from './review';
-export * from './review-prompts';
+export * from './pr-prompts';
 export * from './preview-comment-mutation';
 export * from './account-data';
 export * from './visual-annotation-types';
@@ -117,9 +125,12 @@ export * from './workspace-route';
 export * from './layout';
 export * from './code-collab';
 export * from './file-preview';
+export * from './file-download';
 export * from './machine-flock';
 export * from './workspace-mcp';
+export * from './mcp-authentication';
 export * from './agent-role';
+export * from './agent-role-proposal';
 export * from './workspace-flock';
 export * from './local-machine-rpc';
 export * from './local-loro-data-plane';
@@ -147,8 +158,10 @@ export const LORO_STREAMS_REMOTE_CURSOR_HISTORICAL_ALIAS_BASE_URLS = [
 export const LORO_STREAMS_LARGE_POST_SHARD_MIN_BYTES = 64 * 1024;
 export const LORO_META_STREAM_SUFFIX = 'meta';
 export const LORO_SESSION_STREAM_SEGMENT = 's';
-export const LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT = 'fi';
-export const LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT = 'fis';
+export {
+  LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT,
+  LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT,
+} from './code-collab-rooms';
 export const CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const LORO_STREAMS_CONTROL_SHARD_IDS = ['a', 'b', 'c'] as const;
 const LORO_STREAMS_OTHER_SHARD_IDS = ['a', 'b'] as const;
@@ -493,4 +506,21 @@ export * from './codex-auth-profile';
 export * from './ios-simulator';
 export * from './session-acp-identity';
 
+export * from './memory-provider';
 export * from './message-author';
+
+export * from './magpie-import';
+
+export * from './workspace-project';
+
+export * from './project-path';
+
+export * from './session-pull-requests';
+
+export * from './prompt-suggestions';
+
+export * from './encrypted-attachment';
+
+export * from './device-preview';
+
+export * from './android-emulator';

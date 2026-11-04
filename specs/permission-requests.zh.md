@@ -25,8 +25,12 @@ Agent 工作途中询问：能否运行 `pnpm install`、编辑两个文件、�
   单次拒绝；否则建议第一个单次允许。“始终”选项不能成为建议。
 - **形态。** 使用输入框的尺度：问题和原因、操作对象、最后一行回答。拒绝和允许各用一个
   分裂按钮，直接显示单次回答（建议选项为主按钮），改变后续行为的回答放在菜单里，保留
-  提供方措辞，例如“不再询问”“阻止此主机”。
-- **键盘。** 方向键从建议选项开始遍历；Enter 或 Space 回答当前聚焦选项。Escape
+  提供方措辞，例如“不再询问”“阻止此主机”。若直接显示的回答过长，无法作为紧凑控件，
+  则该组改用菜单入口（“拒绝”“允许”或“选择回答”）。打开菜单不提交回答；菜单按提供方
+  顺序展示该组完整的选项原文，左对齐并在视口内换行。
+  直接回答与选项箭头组成同一个分段控件。权限菜单优先在入口上方展开，并避免超出视口。
+- **键盘。** 方向键从建议选项开始遍历；Enter 或 Space 激活聚焦控件：直接回答会提交，
+  分组菜单入口则先展开菜单供选择。提示卡片上的 Escape
   只单次拒绝，不选择“始终拒绝”；没有单次拒绝时不回答。在提示本身按 Enter 不回答，
   避免原本用于发送消息的 Enter 误批准刚替换输入框的请求。
 - **焦点。** 只有用户未操作其他元素时，提示出现才获取焦点。这包括被替代输入框卸载后
@@ -36,7 +40,10 @@ Agent 工作途中询问：能否运行 `pnpm install`、编辑两个文件、�
 - **失败可见。** 回答未到达 Agent 时显示错误并允许重试。工作区连接中禁用回答并说明
   原因。
 - **保留退出路径。** 提示提供 Stop，因为原输入框里的 Stop 已被隐藏。
-- AskUserQuestion 表单使用同一位置和队列，以问答表单代替权限选项。
+- AskUserQuestion 表单使用同一位置和队列，以问答表单代替权限选项。在当前会话交互面
+  保持挂载期间，切换待回答请求保留各表单的选项、替代答案、备注和当前页，仅展示中的
+  表单可以回答。回答被接受、取消被接受、请求撤回或交互面卸载后释放对应的本地草稿；
+  不保证应用重启后保留。
 
 ## 待解决问题
 
@@ -48,5 +55,7 @@ Agent 工作途中询问：能否运行 `pnpm install`、编辑两个文件、�
 
 - 实现：`packages/components/src/components/sessions/floating-permission-request.tsx`、
   `packages/components/src/lib/permission-request-presentation.ts`。
-- 验证：`packages/components/tests/permission-prompt.test.tsx`。
+- 验证：`packages/components/tests/permission-prompt.test.tsx` 与
+  `packages/components/tests/e2e/composer-submission-focus.spec.ts`。
 - 决策记录：[权限提示设计](../.agents/notes/implemented/feature/2026-09-24-permission-prompt.md)。
+- [提问恢复决策](../.agents/notes/implemented/bug-fix/2026-10-13-question-request-continuity.zh.md)。

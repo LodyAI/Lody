@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeTitleGenerationDefaults,
-  getBuiltinTitleGenerationDefaults,
   acpOwnsSessionTitleGeneration,
   trustsUntaggedAcpSessionTitle,
   type AcpConfigOptionSummary,
@@ -54,9 +53,15 @@ describe('computeTitleGenerationDefaults', () => {
     ]),
   ];
 
-  it('selects the last-listed model for claude', () => {
-    const result = computeTitleGenerationDefaults('builtin', 'claude', claudeOptions);
-    expect(result['model']).toBe('claude-opus-4-0-20250514');
+  it('leaves Amp on its current model when no title model is configured', () => {
+    const ampOptions = [
+      makeOption('model', 'model', 'medium', [
+        { value: 'medium', name: 'Medium' },
+        { value: 'ultra', name: 'Ultra' },
+      ]),
+    ];
+    const result = computeTitleGenerationDefaults('registry', 'amp', ampOptions);
+    expect(result).not.toHaveProperty('model');
   });
 
   it('selects the least-privileged mode for claude', () => {
@@ -64,22 +69,24 @@ describe('computeTitleGenerationDefaults', () => {
     expect(result['mode']).toBe('plan');
   });
 
-  it('selects the last-listed codex model', () => {
-    const result = computeTitleGenerationDefaults('builtin', 'codex', codexOptions);
-    expect(result['model']).toBe('gpt-5.3-codex-spark');
+  it('uses the requested Codex defaults regardless of catalog order or cached defaults', () => {
+    expect(computeTitleGenerationDefaults('builtin', 'codex', codexOptions)).toEqual({
+      model: 'gpt-5.6-luna',
+      reasoning_effort: 'low',
+      mode: 'agent-full-access',
+    });
+    expect(computeTitleGenerationDefaults('builtin', 'codex', [])).toEqual({
+      model: 'gpt-5.6-luna',
+      reasoning_effort: 'low',
+      mode: 'agent-full-access',
+    });
+    expect(computeTitleGenerationDefaults('registry', 'codex', codexOptions)).toEqual({
+      reasoning_effort: 'low',
+      mode: 'read-only',
+    });
   });
 
-  it('selects read-only mode for codex when available', () => {
-    const result = computeTitleGenerationDefaults('builtin', 'codex', codexOptions);
-    expect(result['mode']).toBe('read-only');
-  });
-
-  it('selects low reasoning_effort for codex', () => {
-    const result = computeTitleGenerationDefaults('builtin', 'codex', codexOptions);
-    expect(result['reasoning_effort']).toBe('low');
-  });
-
-  it('uses the last-listed model when no static preferred option exists', () => {
+  it('does not infer a model from catalog order when no static preferred option exists', () => {
     const noHaikuOptions: AcpConfigOptionSummary[] = [
       makeOption('model', 'model', 'claude-sonnet-4-5-20250514', [
         { value: 'claude-sonnet-4-5-20250514', name: 'Claude Sonnet 4.5' },
@@ -87,10 +94,10 @@ describe('computeTitleGenerationDefaults', () => {
       ]),
     ];
     const result = computeTitleGenerationDefaults('builtin', 'claude', noHaikuOptions);
-    expect(result['model']).toBe('claude-opus-4-0-20250514');
+    expect(result).not.toHaveProperty('model');
   });
 
-  it('uses the same runtime selection for other ACP agents', () => {
+  it('leaves models provider-owned for other ACP agents', () => {
     const options: AcpConfigOptionSummary[] = [
       makeOption('model', 'model', 'some-model', [
         { value: 'some-model', name: 'Some Model' },
@@ -98,31 +105,24 @@ describe('computeTitleGenerationDefaults', () => {
       ]),
     ];
     const result = computeTitleGenerationDefaults('registry', 'custom-agent', options);
-    expect(result['model']).toBe('other-model');
+    expect(result).not.toHaveProperty('model');
+  });
+
+  it('does not add a model override when the provider has no model capability', () => {
+    expect(computeTitleGenerationDefaults('registry', 'amp', [])).toEqual({});
   });
 
   it('treats Interactive Claude as a registry provider, not a builtin default source', () => {
     const result = computeTitleGenerationDefaults('registry', 'claude-p', claudeOptions);
-    expect(result['model']).toBe('claude-opus-4-0-20250514');
+    expect(result).not.toHaveProperty('model');
     expect(result['mode']).toBe('plan');
-  });
-
-  it('returns empty object for empty configOptions', () => {
-    const result = computeTitleGenerationDefaults('builtin', 'claude', []);
-    expect(result).toEqual({});
-  });
-});
-
-describe('getBuiltinTitleGenerationDefaults', () => {
-  it('does not provide static defaults to compatibility callers', () => {
-    expect(getBuiltinTitleGenerationDefaults('claude')).toBeUndefined();
   });
 });
 
 describe('acpOwnsSessionTitleGeneration', () => {
-  it('lets the builtin Claude, Codex and Grok adapters generate their own titles', () => {
+  it('lets the builtin Claude and Grok adapters generate their own titles', () => {
     expect(acpOwnsSessionTitleGeneration('builtin', 'claude')).toBe(true);
-    expect(acpOwnsSessionTitleGeneration('builtin', 'codex')).toBe(true);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex')).toBe(false);
     expect(acpOwnsSessionTitleGeneration('builtin', 'grok')).toBe(true);
   });
 
@@ -149,8 +149,8 @@ describe('acpOwnsSessionTitleGeneration', () => {
   });
 
   it('ignores an override object with no usable value', () => {
-    expect(acpOwnsSessionTitleGeneration('builtin', 'codex', {})).toBe(true);
-    expect(acpOwnsSessionTitleGeneration('builtin', 'codex', { codexPath: '  ' })).toBe(true);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'grok', {})).toBe(true);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'grok', { grokPath: '  ' })).toBe(true);
   });
 
   it('never applies to registry, custom, or unknown agents', () => {
@@ -170,20 +170,10 @@ describe('trustsUntaggedAcpSessionTitle', () => {
   // Codex tags every title and emits a first-prompt `fallback` preview before its
   // generated `explicit` one. Trusting untagged titles here would promote that
   // preview to the session title, so it must stay outside this set even though it
-  // does own its title generation.
+  // no longer owns its title generation.
   it('does not trust Codex titles that lack an explicit titleSource', () => {
-    expect(acpOwnsSessionTitleGeneration('builtin', 'codex')).toBe(true);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex')).toBe(false);
     expect(trustsUntaggedAcpSessionTitle('builtin', 'codex')).toBe(false);
-  });
-
-  // The trusted set is a subset of the owning set by construction, not by two
-  // lists kept in sync; assert the relation rather than restating the members.
-  it('never trusts an agent that does not own its title generation', () => {
-    for (const agentType of ['claude', 'codex', 'grok', 'kimi', 'deepseek', 'nope']) {
-      if (trustsUntaggedAcpSessionTitle('builtin', agentType)) {
-        expect(acpOwnsSessionTitleGeneration('builtin', agentType)).toBe(true);
-      }
-    }
   });
 
   it('never applies to registry or custom providers', () => {
@@ -196,6 +186,6 @@ it('uses advertised title ownership for custom providers and runtime overrides',
   expect(acpOwnsSessionTitleGeneration('custom', 'my-provider', undefined, true)).toBe(true);
   expect(
     acpOwnsSessionTitleGeneration('builtin', 'codex', { codexPath: '/opt/runtime' }, true)
-  ).toBe(true);
+  ).toBe(false);
   expect(acpOwnsSessionTitleGeneration('custom', 'my-provider', undefined, false)).toBe(false);
 });

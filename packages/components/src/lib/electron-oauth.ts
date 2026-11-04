@@ -14,7 +14,8 @@ export type ElectronOAuthQuery = {
 
 function desktopProtocol(channel: string | undefined): string {
   if (channel === 'nightly') return 'ai.lody.nightly';
-  if (channel === undefined || channel === 'stable') return ELECTRON_PROTOCOL_SCHEME;
+  if (channel === 'stable') return 'ai.lody.stable';
+  if (channel === undefined) return ELECTRON_PROTOCOL_SCHEME;
   throw new Error('Unsupported desktop callback channel');
 }
 
@@ -96,7 +97,11 @@ export function readElectronAuthCallbackToken(deepLinkUrl: string): string | nul
     return null;
   }
 
-  if (parsed.protocol !== `${ELECTRON_PROTOCOL_SCHEME}:`) {
+  if (
+    ![`${ELECTRON_PROTOCOL_SCHEME}:`, 'ai.lody.stable:', 'ai.lody.nightly:'].includes(
+      parsed.protocol
+    )
+  ) {
     return null;
   }
 

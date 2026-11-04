@@ -19,6 +19,12 @@ remains local-only; channel identity must not enable cloud behavior in that buil
 - Supported cloud desktop versions MUST exclude one another in both launch orders,
   including control-only mode. The losing app explains how to quit the current app;
   it MUST NOT kill it, steal execution ownership, or load credential/business stores.
+  When the launch carries a channel-neutral `session`, `chat/new` or `provider/import`
+  destination and the running owner accepts a handoff, the losing app hands that
+  normalized resource link to it over the same lease and exits instead of showing the
+  conflict. Authentication and other cloud callbacks never cross that lease. Lease
+  ownership alone is not acceptance: the owner acknowledges only after its launch
+  handler is bound, and a startup that will refuse rejects the handoff explicitly.
 - All pre-ready Electron configuration and early launch-event subscriptions precede
   asynchronous ownership acquisition. Accepted early callbacks survive that gate.
 - Per-app second-instance delivery remains distinct from cross-channel conflicts.
@@ -44,7 +50,7 @@ apps, opening the localized standalone `/download/nightly` page. The normal down
 page MUST NOT embed Nightly downloads. The standalone page MUST distinguish Nightly
 visually, explain shared live data and manual switching, and use immutable installer
 links from a complete Nightly manifest. Missing or invalid metadata MUST NOT produce
-Stable fallback links or guessed aliases. The manifest and download page MUST identify
+Stable fallback links or guessed aliases. The desktop manifest and download page MUST identify
 the verified minimum Stable version; this floor requires packaged compatibility evidence,
 not just a version comparison.
 Nightly manifest versions MUST accept the first release in a cycle, `-nightly.0`,
@@ -55,10 +61,12 @@ desktop's channel, version and both source revisions when injected by its distri
 composition. Build metadata MUST remain distinct from a remote machine's logs and
 MUST NOT expand into ambient environment, account or filesystem collection.
 
-The page MAY also display Android APK downloads when both manifest lists name the
-same immutable APK for that Nightly version. Desktop-only manifests remain valid
-during rollout; the page MUST NOT guess an Android URL or substitute Stable.
-Desktop process-switching guidance MUST be labeled as desktop-only.
+The page MUST load desktop and Android manifests independently, with separate
+availability, retry state and displayed versions. Android downloads use
+`android-version.json`; both of its file lists MUST name the same immutable APK
+for its own Nightly version. Missing or failed desktop metadata MUST NOT suppress
+a valid Android download, and vice versa. The page MUST NOT guess an Android URL
+or substitute Stable. Desktop process-switching guidance remains desktop-only.
 
 ## Evidence and limits
 

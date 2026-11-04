@@ -26,6 +26,9 @@ docked mention panel; the inline editor retains its floating menu. The docked
 panel sits above the whole composer frame, including attachments and controls
 above the textarea, and never extends behind the top viewport inset.
 
+Caret measurement must not change the body’s positional selector state and
+trigger a whole-page restyle as menus open or queries change.
+
 ## Evidence
 
 - [Main composer](../packages/components/src/components/chat/chat-composer.tsx)

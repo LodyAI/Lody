@@ -1,3 +1,11 @@
+/**
+ * Cloud token issuance may call GitHub before answering, and the host's event
+ * loop can stall for seconds; 2.5 s failed every managed source on a busy host.
+ */
+export const GITHUB_TOKEN_CLOUD_TIMEOUT_MS = 15_000;
+/** A helper must outwait the broker's cloud request plus local handling. */
+export const GITHUB_BROKER_TOKEN_TIMEOUT_MS = GITHUB_TOKEN_CLOUD_TIMEOUT_MS + 5_000;
+
 /** Dependency-free source shared by the native Git and gh adapters. */
 export const githubCredentialRuntime = String.raw`
 const credentialError = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
@@ -31,7 +39,7 @@ const readCredentialPolicy = () => {
 const readManagedCandidate = async (repoFullName, source) => {
   const response = await requestBroker('/github-token', {
     repoFullName, source, contextToken: getContext().contextToken,
-  }, 3000);
+  }, ${GITHUB_BROKER_TOKEN_TIMEOUT_MS});
   if (!response) throw credentialError('broker_unavailable');
   let body;
   try { body = await response.json(); }
@@ -45,9 +53,10 @@ const readManagedCandidate = async (repoFullName, source) => {
 // failure of the actual operation; never restart this iterator to retry a source.
 async function* githubCredentials(repo, policy, localCandidate, anonymous = false) {
   const failures = [];
-  for (const source of ['personal', 'local', 'app', ...(anonymous ? ['anonymous'] : [])]) {
+  const native = getContext().nativeRepositories?.some(name => name.toLowerCase() === repo.toLowerCase());
+  for (const source of native ? ['local'] : ['personal', 'local', 'app', ...(anonymous ? ['anonymous'] : [])]) {
     if (source === 'personal' && policy.personalEnabled === false) continue;
-    if (source === 'local' && !policy.allowLocalAuth) continue;
+    if (source === 'local' && !native && !policy.allowLocalAuth) continue;
     try {
       const candidate = source === 'anonymous' ? { token: null } : source === 'local' ? await localCandidate() : await readManagedCandidate(repo, source);
       if (!candidate) throw credentialError('credential_missing');

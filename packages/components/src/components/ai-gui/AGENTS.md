@@ -10,47 +10,49 @@ Ownership: [README.md](README.md).
   output. Never wire `searchBlockId` to tool, terminal, or diff renderers.
 - Window stream readiness must use the same hydration/initial-scroll conditions as
   viewport visibility; hydrated history alone cannot reveal a native window.
-- `SessionChatStreamView` scrolls through `conversation-list/`'s
-  `ConversationListHandle` and [scroll engine](../../lib/conversation-scroll/AGENTS.md)
-  only. Keep row keys stable; map history indexes to rows. Collapsed activity is one
-  row; expanded details are siblings, never nested scrollers or fixed-height panels.
+- Stream scrolling uses `ConversationListHandle` and the
+  [engine](../../lib/conversation-scroll/AGENTS.md) only. Use turn-ID keys through
+  local/history handoff. Local UI stays outside history/outline/export and owner
+  facts; its selection has no history lease.
+  Map history indexes to rows. Collapsed activity is one row; expanded details
+  are siblings, never nested scrollers or fixed-height panels.
 - Native selection retains its row corridor and history leases: hold prose/folding,
   keep actions live, release on clear. [Contract](README.md#native-text-selection).
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
   history ids.
 - `leadingContent` is a real first row: include it in sticky counts and scroll
   targets; never overlay or persist it.
-- Empty-state presentation stays outside the list, even with an empty leading Fragment:
-  zero-height caches can hide the first user row. Preserve live activity labels/tones.
-  Apply the header inset once to the whole scroller.
-- Create `operation_progress` cards update in place per materialized target; bind
-  status to its exact Turn and subscribe only to its title. `progressMessageId`
-  suppresses duplicate completion cards; legacy completions keep successful-target
-  cards. Rationale: [README.md](README.md#creation-progress).
+- Empty state stays outside the list even with an empty leading Fragment; zero-height
+  caches can hide the first user row. Keep activity labels/tones and one header inset.
+- Creation cards: [contract](README.md#creation-progress). Bind status to the
+  target Turn and subscribe only to its title; `progressMessageId` prevents
+  duplicates. Share a five-card scroller; retain full hydration.
+  Keep concrete cards; hide contentless successes and their empty batch rows.
 
 ## Turn Folding And Layout
 
-- Finished turns keep the answer/result tail visible and fold earlier work;
-  streaming turns stay expanded.
-- The final answer is the contiguous text run before trailing never-collapsed
-  items. Walk backward over adjacent text blocks to the first non-text boundary.
-- Plan approval cuts an `AssistantTurnRenderSegment` in a live turn. Match ACP
-  kind `switch_mode`, never a title (`plan-surface.ts`). Keep `workBlockKeys`,
-  `hasVisibleFinalContent`, last-item visibility and `expandedWorkedGroups` per
-  segment; expansion keys include it. Only the last segment shows duration;
-  earlier ones say "Finished working".
+- Finished turns fold thoughts and tool calls into the work region; streaming
+  turns stay expanded.
+- Prose never folds. Every `text` item renders wherever it falls in the turn: a
+  run may answer and then keep working, and folding by position buried that
+  answer inside "Worked for …".
+- Plan approval cuts a live turn by ACP kind `switch_mode`, never title.
+  `plan-surface.ts` prefers nonempty `rawInput.plan` over replaceable tool content.
+  Keep `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility and expansion
+  keys per segment. Only the last segment shows duration; earlier segments say
+  "Finished working".
 - `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
   final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
   turn with no answer stays expanded; `message.finished` cannot prove
-  completion alone. A reused assistant entry that
-  reopens upstream must clear `finished` and `endedAt` (see
+  completion alone. A reused entry reopening upstream
+  must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
-- Thought and tool rows share one compact transparent timeline and 13px
-  hierarchy, with no glyphs: the verb says the kind of step. Execute calls are not cards. Desktop disclosure headers use
-  body type, a hover-only trailing chevron, no fill. Only builtin DeepSeek Harness retains thought rows in expandable
-  activity groups; pure thoughts default open unless explicitly collapsed. Other providers
-  keep thoughts hidden.
-  Assistant footers show config, not author identity.
+- Thought/tool timelines are compact, transparent, 13px and glyph-free; verbs label
+  steps. Execute calls are not cards. Disclosure labels lead, chevrons trail
+  (desktop: hover-only, body type, no fill). Only builtin DSH shows thoughts:
+  separate groups default thoughts open and tools closed; explicit toggles win.
+  DSH thought prose uses answer typography, secondary ink and shared work folding. Other providers
+  hide thoughts. Footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
   the command is highlighted, via the Shiki worker; output stays ANSI text. Drop
@@ -59,18 +61,21 @@ Ownership: [README.md](README.md).
   the footer after buttons otherwise; mobile always uses the footer before
   buttons, and the worked header suppresses its copy. Preserve
   `MOBILE_TURN_ACTION_LEADING_INSET_PX` so actions clear the edge-back strip.
+  Mobile buttons rest hidden but the newest turn's; a tap reveals one message's.
 - Live status precedes a trailing subagent task summary, including when the turn
   has no footer.
 - Streaming replies use a direct Copy action and turn-config info (set at open);
   Fork controls and loading need a finished turn.
-- `ConversationColumn` owns the gutter; the list and row shells add no horizontal
-  pad. EVERY row, including expanded details, shares one left rail. Expansion never
-  shifts content right; the chevron carries hierarchy. Prose and desktop process
-  labels/steps share StyleX `conversation.railInset` (4px). Steps have no negative
-  margin; footer bleed is trailing-only (`-mr-[7px]`).
-  See `AssistantTurnAlignment.stories`.
+- `ConversationColumn` owns the gutter; row shells add no horizontal pad. EVERY
+  row shares one rail: prose, process labels/steps, live status and the mobile
+  footer sit at `conversation.railInset`; thought prose aligns with its label.
+  Footer bleed is trailing-only (`-mr-[7px]`). See `AssistantTurnAlignment.stories`.
+- The trailing row (`trailingContent`: pending sends, continuation notes) is
+  full-bleed like the scroller, so each item mounts its own `ConversationColumn`.
+  Stream rows never rely on the row shell for width or gutter.
 - Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
-  User rows own `responseGap`; assistant tails own `roundGap` including footer/metadata.
+  User rows own `responseGap`; assistant tails own `roundGap` (desktop: including
+  footer/metadata; mobile: below the footer).
   Cache/memo include boundaries. Expanded work preserves prose and summary gaps.
 
 ## Conversation Outline
@@ -81,16 +86,21 @@ Ownership: [README.md](README.md).
 
 ## Content Contracts
 
-- Child cancel needs subagentCancellation v1 and an exact parent turn; never
-  Stop the parent or invent terminal state. Runs also need subagentEvents v1
-  and `support.cancel`. Dialogs share turn renderers/grouping and one scroller:
-  [task rows and dialog](README.md#subagent-tasks).
+- Conversation file-path candidates become interactive only for an absolute path
+  or an exact match in the owning Session's file index. Unconfirmed relative paths
+  keep their text/code presentation. Open known targets directly; copy actions use
+  the authored path without file resolution or a worktree picker.
 
-- Text roles use `@lody/ui`; reading prose uses `conversation.readingLeading`.
-  Compact prose/code use subheadline, never nested `em`. Message sizes use
-  `conversation-font-size-classes.ts`; hosts require CSS typed division. Only live
-  turns load the stream engine. Remounted live rows show existing text immediately;
-  only additions animate.
+- Child cancel requires subagentCancellation/subagentEvents v1, `support.cancel`
+  and an exact parent turn; never Stop the parent or invent state. Dialogs reuse
+  parent renderers/grouping, one scroller, and read run bodies only while open:
+  [task/dialog contract](README.md#subagent-tasks).
+
+- Text roles: `@lody/ui`; prose: `conversation.readingLeading`; compact prose/code:
+  subheadline, no nested `em`. Message sizes: `conversation-font-size-classes.ts`;
+  hosts require CSS typed division. Stream engine: live turns only;
+  remounts show existing text immediately and animate only additions.
+- Rendering and search share CJK emphasis rules.
 - A Mermaid diagram in a message is a still preview until a pointer click
   activates it, and an unmodified wheel is NEVER taken — activated or not.
   Deactivation preserves pan/zoom and activation adds no outline; see the
@@ -121,6 +131,6 @@ Ownership: [README.md](README.md).
   [session-files-rendering.md](session-files-rendering.md).
 - Markdown images remember each source's natural size or failure for the page's
   life: a virtualized remount must render at its final height (failed sources show alt text).
-- Live file Markdown images use the owning file provider: same-machine reads are
-  automatic; remote reads require a per-image click. Never grant this resolver to
-  anonymous shares. Release owned Blob URLs on cleanup and ignore late reads.
+- Live file Markdown images and plain-text image links use the owning file provider:
+  same-machine reads are automatic; remote ones need a per-image click. Anonymous
+  shares never get this resolver. Release own Blob URLs; drop late reads.

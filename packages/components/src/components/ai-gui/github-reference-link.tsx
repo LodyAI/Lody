@@ -80,8 +80,9 @@ export function GitHubReferenceChip({
   return (
     <span
       data-github-reference={reference.kind}
-      className={cn('inline-flex max-w-full items-center gap-[0.35em] align-baseline', className)}
+      className={cn('inline-flex max-w-full items-baseline gap-[0.35em] align-baseline', className)}
     >
+      {/* Keep the icon out of baseline alignment so the text supplies the inline baseline. */}
       <KindIcon className="h-[0.95em] w-[0.95em] shrink-0 self-center" aria-hidden="true" />
       <span className="sr-only">{kindLabel} </span>
       <span className="min-w-0 truncate">

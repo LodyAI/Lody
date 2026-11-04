@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import type { CliRuntimeState } from '@lody/shared/electron-ipc';
+import type { ProcessFacadeOptions } from '@lody/shared/node/process';
 
 export type CliRunResult = {
   code: number | null;
@@ -15,6 +16,12 @@ export type LaunchHandle = {
   result: Promise<CliRunResult>;
   /** Cross-platform graceful shutdown channel. OS signals remain the timeout fallback. */
   requestShutdown?: () => void | Promise<void>;
+  /**
+   * Whether `child` leads its own POSIX process group, i.e. it was started with
+   * `processGroup: true`. Must match the spawn: termination signals the whole
+   * group when true and only the child when false (the default).
+   */
+  processGroup?: boolean;
 };
 
 /**
@@ -78,6 +85,8 @@ export type SupervisorOptions = {
   existingRuntimePolicy?: 'attach' | 'reject';
   terminationGraceMs?: number;
   forceKillWaitMs?: number;
+  /** Process layer used to signal the child's tree: its logger, or a fake OS in tests. */
+  processOptions?: ProcessFacadeOptions;
   fetchRuntimeState: (options: { timeoutMs: number }) => Promise<CliRuntimeState | null>;
   probeIntervalMs?: number;
   probeTimeoutMs?: number;
@@ -90,6 +99,8 @@ export type SupervisorOptions = {
   fatalFailureThreshold?: number;
   fatalOomWindowMs?: number;
   fatalOomThreshold?: number;
+  /** Pause after repeated V8 OOMs before one automatic recovery start (default 10 minutes). */
+  fatalOomCooldownMs?: number;
   healthyRunMs?: number;
 };
 
@@ -98,11 +109,15 @@ export type SupervisorStopOptions = {
 };
 
 export type SupervisorOwnership = {
-  acquire: (
-    signal: AbortSignal
-  ) => Promise<
+  acquire: (signal: AbortSignal) => Promise<
     | { status: 'acquired' }
     | { status: 'occupied'; description?: string; owner?: SupervisorHostIdentity }
+    /**
+     * A host owns the runtime and refuses this process outright (for example a
+     * Windows pipe created under an elevated or service token). It cannot be
+     * attached or outwaited, so the supervisor goes fatal instead of retrying.
+     */
+    | { status: 'inaccessible'; description: string }
   >;
   inspect?: () => Promise<SupervisorHostIdentity | null>;
   release: () => void | Promise<void>;

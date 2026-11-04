@@ -98,6 +98,30 @@ function WithSearchParam({ search, children }: { search: string; children: React
   return <>{children}</>;
 }
 
+const LAST_LOGIN_METHOD_STORAGE_KEY = 'lody.auth.last_login_method';
+
+function WithLastLoginMethod({ method, children }: { method: string; children: React.ReactNode }) {
+  // Written before the page mounts: it reads the method once, on mount.
+  const [ready, setReady] = useState(false);
+
+  useLayoutEffect(() => {
+    const previous = window.localStorage.getItem(LAST_LOGIN_METHOD_STORAGE_KEY);
+    window.localStorage.setItem(LAST_LOGIN_METHOD_STORAGE_KEY, method);
+    setReady(true);
+
+    return () => {
+      if (previous === null) {
+        window.localStorage.removeItem(LAST_LOGIN_METHOD_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(LAST_LOGIN_METHOD_STORAGE_KEY, previous);
+      }
+    };
+  }, [method]);
+
+  if (!ready) return null;
+  return <>{children}</>;
+}
+
 const meta = {
   title: 'Components/LoginPage',
   component: LoginPage,
@@ -129,6 +153,43 @@ const authenticatedSession = createStableSessionValue({
 
 export const Default: Story = {
   render: (args) => <LoginPageStoryHarness {...args} sessionValue={createStableSessionValue()} />,
+};
+
+export const LastUsedGoogle: Story = {
+  name: 'Last Used (Google)',
+  render: (args) => (
+    <WithLastLoginMethod method="google">
+      <LoginPageStoryHarness {...args} sessionValue={createStableSessionValue()} />
+    </WithLastLoginMethod>
+  ),
+};
+
+export const LastUsedEmail: Story = {
+  name: 'Last Used (Email)',
+  render: (args) => (
+    <WithLastLoginMethod method="email">
+      <LoginPageStoryHarness {...args} sessionValue={createStableSessionValue()} />
+    </WithLastLoginMethod>
+  ),
+};
+
+export const Mobile: Story = {
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  render: (args) => (
+    <WithLastLoginMethod method="github">
+      <LoginPageStoryHarness {...args} sessionValue={createStableSessionValue()} />
+    </WithLastLoginMethod>
+  ),
+};
+
+export const MobileEmailView: Story = {
+  name: 'Mobile Email View',
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  render: (args) => <LoginPageStoryHarness {...args} sessionValue={createStableSessionValue()} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: /continue with email/i }));
+  },
 };
 
 export const SessionPending: Story = {

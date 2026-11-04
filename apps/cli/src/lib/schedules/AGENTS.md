@@ -2,6 +2,12 @@
 
 `CLAUDE.md` is a symlink to this file.
 
+- Encrypted workspaces sync definitions and Registry through the existing protected
+  Repo. Generated turns use the ordinary verified-signer execution gate and shared
+  userTurnId journal claim. Both handoff and actual start require the definition's
+  verified original signer, and manual runs also require the request signer.
+  Schedule ownership fields and machine-derived turn signatures never grant that
+  authority. [Origin contract](../../../../../.agents/notes/implemented/bug-fix/2026-10-28-e2ee-schedule-origin-authorization.md).
 - Schedule definitions live in `schedule-<id>` Loro docs. The workspace `:sr`
   Flock Registry is the execution gate. A definition must match its published
   fingerprint; existence discovery must never republish or enable an orphan.
@@ -11,6 +17,8 @@
   an IMMEDIATE transaction. Preserve cursor/run ids across restarts.
 - Session history goes through `sessionData` (`readSessionHistory` reads,
   `commands.appendTurn` appends missing entries); there is no whole-list rewrite.
+- Freeze the task name in `userTurn.scheduleRun`, bound to the exact input id,
+  for notification presentation; never infer scheduled execution from Session metadata.
 - Freeze JSON `PreparedSessionInput` before Session mutation. Its fixed user turn
   uses `prepared`, inert until `latestUserMsgId` is committed. After this pointer,
   the ordinary watcher owns execution. Never retry with another Session or Turn,
@@ -19,10 +27,11 @@
   requires the initial and current connection sync; a previously resolved
   first-sync promise is insufficient after reconnect. Pure local bypasses only
   this cloud gate, never ownership/config validation.
-- `AgentExecutionSlots` is host-local, per-Agent-config Schedule admission.
-  Restore accepted occupancy before evaluating; retain it while Session
-  dispatch, queues, Operations or deliveries still have work. Release before
-  prehandoff retry.
+- Due runs do not wait for other runs of the same Schedule or Agent configuration.
+  Session dispatch owns conversation ordering; complete messages still defer while
+  their destination chat's own Turns are busy. Delegated Operations the chat still
+  awaits block run completion, never message admission, so a manager chat waiting on
+  its children still receives the message. Preserve ledger completion and recovery tracking.
 - Configuration unavailability is recoverable without consuming an attempt.
   Infrastructure failures use bounded backoff; all prehandoff work expires after
   its fixed dispatch age. Only unprepared pending automatic runs may be superseded.
@@ -39,6 +48,12 @@
   The tool description tells the agent to ask rather than guess when the
   prompt, rule or destination is unclear — that guidance is the product
   behaviour, so keep it in step with what the card can resolve.
+- Schedule v2 preserves ACP string/boolean values. At handoff, exact legacy
+  boolean literals are projected for declared boolean options and for the
+  semantic Fast IDs `fast`/`fast-mode` only when the probe omits those IDs;
+  an explicit select declaration keeps its string. Definitions and ledger rows
+  are never migrated because their fingerprints authorize execution. See the
+  [Fast compatibility decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-26-schedule-fast-compatibility.md).
 - Schedules use ordinary Session run-config defaults and validation; do not add
   a schedule-specific explicit-permission or capability-cache gate. No credentials
   or provider exception content may enter Registry runtime rows or Schedule logs.
@@ -61,7 +76,28 @@
   `SESSION_UNAVAILABLE` as a recoverable configuration problem. The command
   service applies the same rule on create/edit and rejects a project on a
   schedule that sends into a chat.
+- Notifications follow ordinary Session outcomes after handoff: success/failure/unknown
+  may notify the owner, cancellation stays silent. No schedule-specific condition
+  evaluation or aggregation yet; prehandoff failures remain Schedule runtime state.
 - Dispose Schedule workers before tearing down a workspace's Lody runtime.
   Timers and active evaluations must not survive workspace revocation.
 - Deterministic tests use injected clocks, explicit sync barriers and temporary
   SQLite files. Do not add wall-clock sleep or live-provider timing assertions.
+
+- Complete-message reservations require schedules v3 and `messageVersion: 1`.
+  Preserve their payload in the fingerprint and frozen ledger; never dispatch a
+  prompt-only projection. Published reservations retain staged local attachment
+  bytes. Cancellation is acknowledged only after durable dispatch reconciliation;
+  a committed dispatch wins. Busy destination chats defer handoff without interruption.
+- Skip unprepared legacy Claude quota-shortcut runs without a Turn association;
+  preserve prepared or dispatched work and ordinary or changed-message schedules. [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-discard-unassociated-quota-reservations.md).
+- Terminal one-time messages keep their document and Registry row for seven days
+  from the terminal runtime projection, then the owner purges the document, removes
+  schedule/runtime/manual rows and leaves a tombstone. A busy doc retries next pass;
+  pending/active messages and generic Schedules are never swept. Remote/CRDT history
+  compaction is separate.
+- A complete-message Schedule ID is consumed by durable dispatch across all later
+  activations. Consult the persistent ledger before planning/processing another run;
+  derive cross-activation sent state from that ledger, never a cached runtime row.
+  Complete-message prompt reads derive from atomic input blocks, and their activation
+  floor is the once instant so concurrent same-reservation creates share a fingerprint.

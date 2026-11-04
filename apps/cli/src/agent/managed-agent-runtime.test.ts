@@ -1,6 +1,9 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createInterface } from 'node:readline';
 import { existsSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -10,24 +13,23 @@ import * as tar from 'tar';
 import { compressStream } from 'zstd-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import claudePackageLock from '../../../../packages/acp-extension-claude/package-lock.json';
-import claudeSdkManifest from '../../node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
+import claudeSdkManifest from '../../../../packages/acp-extension-claude/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
 import claudeRuntimeManifestJson from './claude-runtime-manifest.json';
 import kimiRuntimeManifestJson from './kimi-runtime-manifest.json';
 import piRuntimeManifestJson from './pi-runtime-manifest.json';
 import grokRuntimeManifest from '../../../../packages/acp-extension-grok/runtime-manifest.json';
 
 import {
-  classifyManagedRuntimeFailureReason,
   CLAUDE_AGENT_SDK_VERSION,
   CLAUDE_CODE_RUNTIME_VERSION,
   CODEX_RUNTIME_VERSION,
   GROK_BUILD_RUNTIME_VERSION,
   KIMI_CODE_MIN_NODE_VERSION,
   KIMI_CODE_VERSION,
-  formatManagedRuntimeFailureMessage,
   isNodeVersionAtLeast,
   getHostMachineProtocolCapabilities,
   mapManagedRuntimePlatform,
+  resetMuslLibcCacheForTests,
   ManagedAgentRuntimeManager,
   ManagedRuntimeIncompatibleHostError,
   ManagedRuntimeError,
@@ -63,10 +65,13 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-async function createTinyRuntimeArchive(rootDir: string): Promise<Uint8Array> {
+async function createTinyRuntimeArchive(
+  rootDir: string,
+  commandText = 'tiny-codex'
+): Promise<Uint8Array> {
   const srcDir = await mkdtemp(join(rootDir, 'runtime-src-'));
   await mkdir(join(srcDir, 'bin'), { recursive: true });
-  await writeFile(join(srcDir, 'bin', 'codex'), 'tiny-codex');
+  await writeFile(join(srcDir, 'bin', 'codex'), commandText);
   const tarPath = join(srcDir, 'runtime.tar');
   await tar.c({ file: tarPath, cwd: srcDir }, ['bin']);
   const compressed = await compressStream(
@@ -97,6 +102,7 @@ describe('ManagedAgentRuntimeManager', () => {
   });
 
   afterEach(async () => {
+    resetMuslLibcCacheForTests();
     await rm(rootDir, { recursive: true, force: true });
   });
 
@@ -298,13 +304,19 @@ describe('ManagedAgentRuntimeManager', () => {
           kind: 'not-installed',
         });
         await expect(manager.prepareCache()).resolves.toBeUndefined();
-        await expect(manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({
-          command,
-          version: definition.version,
-          updateAvailable: false,
-        });
-        expect(await readFile(command, 'utf8')).toBe('tiny-codex');
+        const launch = await manager.resolveRuntimeForLaunch('codex');
+        expect(launch).toMatchObject({ version: definition.version, updateAvailable: false });
+        expect(launch.command).not.toBe(command);
+        expect(await readFile(command, 'utf8')).toBe(`codex-${definition.version}`);
         expect(JSON.parse(await readFile(metadataPath, 'utf8'))).toMatchObject({
+          [field]: staleValues[field],
+        });
+        expect(await readFile(launch.command, 'utf8')).toBe('tiny-codex');
+        expect(
+          JSON.parse(
+            await readFile(join(dirname(dirname(launch.command)), 'metadata.json'), 'utf8')
+          )
+        ).toMatchObject({
           archiveSha256: archive.sha256,
           archiveSize: archive.size,
           command: archive.cmd,
@@ -339,39 +351,365 @@ describe('ManagedAgentRuntimeManager', () => {
     }
   });
 
-  it('skips malformed metadata during startup but still rejects it for launch and install', async () => {
-    const command = await installCachedCodex({
-      version: CODEX_RUNTIME_VERSION,
-      installedAt: '2026-08-01T00:00:00.000Z',
-      metadataFormat: 'legacy',
-    });
-    const metadataPath = join(
+  it('selects matching pins before ranking base and same-version generations without redownloading', async () => {
+    const { archiveBytes, definition, originalArchive } =
+      await installTinyCodexArchiveDefinition('artifact-a.tar.zst');
+    const pinA = definition.platforms['linux-x64'];
+    const bytesB = await createTinyRuntimeArchive(rootDir, 'repacked-codex-b');
+    const pinB = {
+      ...pinA,
+      fileName: 'artifact-b.tar.zst',
+      sha256: await sha256(bytesB),
+      size: bytesB.byteLength,
+    };
+    const options = {
       rootDir,
-      'codex',
-      CODEX_RUNTIME_VERSION,
-      'linux-x64',
-      'metadata.json'
-    );
-    const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as Record<string, unknown>;
-    await writeFile(metadataPath, JSON.stringify({ ...metadata, unexpected: true }));
+      platform: 'linux' as const,
+      arch: 'x64',
+      runtimeBaseUrl: 'https://runtime.example.test',
+    };
+    let offline = false;
+    let downloads = 0;
+    const fetch =
+      (bytes: Uint8Array): FetchImpl =>
+      async () => {
+        downloads += 1;
+        if (offline) throw new Error('offline: cached artifacts must be reused');
+        return new Response(bytes);
+      };
+    const managerA = new ManagedAgentRuntimeManager({ ...options, fetchImpl: fetch(archiveBytes) });
+    const managerB = new ManagedAgentRuntimeManager({ ...options, fetchImpl: fetch(bytesB) });
+    try {
+      const installedA = await managerA.ensureCurrentRuntime('codex');
+      definition.platforms['linux-x64'] = pinB;
+      const installedB = await managerB.ensureCurrentRuntime('codex');
+      expect(installedB.command).not.toBe(installedA.command);
+      const versionDir = dirname(dirname(dirname(installedA.command)));
+      const directories = (await readdir(versionDir)).sort();
+      offline = true;
+      // Switch the manifest pins between calls to emulate builds A and B in one test process.
+      for (let round = 0; round < 3; round += 1) {
+        for (const build of [
+          { pin: pinA, manager: managerA, command: installedA.command },
+          { pin: pinB, manager: managerB, command: installedB.command },
+        ]) {
+          definition.platforms['linux-x64'] = build.pin;
+          await expect(build.manager.getRuntimeStatus('codex')).resolves.toMatchObject({
+            kind: 'installed',
+            command: build.command,
+          });
+          await expect(build.manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({
+            command: build.command,
+          });
+          await expect(build.manager.ensureCurrentRuntime('codex')).resolves.toMatchObject({
+            command: build.command,
+          });
+          await build.manager.prepareCache();
+        }
+      }
+      expect(downloads).toBe(2);
+      expect((await readdir(versionDir)).sort()).toEqual(directories);
+      expect(await readFile(installedA.command, 'utf8')).toBe('tiny-codex');
+      expect(await readFile(installedB.command, 'utf8')).toBe('repacked-codex-b');
+    } finally {
+      definition.platforms['linux-x64'] = originalArchive;
+    }
+  });
+
+  it('rejects corrupt launch, reports absence, and shares a verified generation without moving the original', async () => {
+    const { archiveBytes, definition, originalArchive } =
+      await installTinyCodexArchiveDefinition('repair.tar.zst');
+    try {
+      const command = await installCachedCodex({
+        version: CODEX_RUNTIME_VERSION,
+        installedAt: '2026-08-01T00:00:00.000Z',
+      });
+      const dir = dirname(dirname(command));
+      await writeFile(join(dir, 'metadata.json'), '{broken');
+      const manager = new ManagedAgentRuntimeManager({
+        rootDir,
+        platform: 'linux',
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+        fetchImpl: async () => new Response(archiveBytes),
+      });
+      await expect(manager.resolveRuntimeForLaunch('codex')).rejects.toThrow(
+        'cache metadata is invalid'
+      );
+      await expect(manager.getRuntimeStatus('codex')).resolves.toMatchObject({
+        kind: 'not-installed',
+        warning: expect.stringContaining('invalid'),
+      });
+      const installations = await Promise.all([
+        manager.ensureCurrentRuntime('codex'),
+        manager.ensureCurrentRuntime('codex'),
+      ]);
+      expect(installations[0]).toEqual(installations[1]);
+      const repaired = installations[0];
+      if (!repaired) throw new Error('Missing repaired installation');
+      expect(await readFile(repaired.command, 'utf8')).toBe('tiny-codex');
+      expect(await readFile(command, 'utf8')).toBe(`codex-${CODEX_RUNTIME_VERSION}`);
+      expect(await readFile(join(dir, 'metadata.json'), 'utf8')).toBe('{broken');
+      expect(
+        (await readdir(dirname(dir))).filter((name) => name.startsWith('linux-x64.gen-'))
+      ).toHaveLength(1);
+      await expect(manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({
+        command: repaired.command,
+      });
+    } finally {
+      definition.platforms['linux-x64'] = originalArchive;
+    }
+  });
+
+  it.each([true, false])(
+    'reuses a concurrent publisher only when complete=%s without modifying its files',
+    async (complete) => {
+      const { archiveBytes, definition, originalArchive } =
+        await installTinyCodexArchiveDefinition('concurrent.tar.zst');
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<Response>();
+      const options = {
+        rootDir,
+        platform: 'linux' as const,
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+      };
+      const progress: ManagedRuntimeProgressEvent[] = [];
+      const manager = new ManagedAgentRuntimeManager({
+        ...options,
+        fetchImpl: async () => {
+          started.resolve();
+          return release.promise;
+        },
+      });
+      const installing = manager
+        .ensureCurrentRuntime('codex', { onProgress: (event) => progress.push(event) })
+        .then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error })
+        );
+      try {
+        await started.promise;
+        const peer = await new ManagedAgentRuntimeManager({
+          ...options,
+          fetchImpl: async () => new Response(archiveBytes),
+        }).ensureCurrentRuntime('codex');
+        const dir = dirname(dirname(peer.command));
+        const metadata = await readFile(join(dir, 'metadata.json'), 'utf8');
+        await writeFile(join(dir, 'peer-resource.txt'), 'peer-owned');
+        if (complete) await writeFile(join(dir, '.lody-complete'), 'peer-marker');
+        else await rm(join(dir, '.lody-complete'));
+        release.resolve(new Response(archiveBytes));
+        const result = await installing;
+        if (complete) {
+          expect(result).toMatchObject({ value: { command: peer.command } });
+          expect(progress.at(-1)?.phase).toBe('complete');
+          expect(await readFile(join(dir, '.lody-complete'), 'utf8')).toBe('peer-marker');
+        } else {
+          expect(result).toMatchObject({ error: expect.any(ManagedRuntimeError) });
+          expect(existsSync(join(dir, '.lody-complete'))).toBe(false);
+        }
+        expect(await readFile(join(dir, 'metadata.json'), 'utf8')).toBe(metadata);
+        expect(await readFile(join(dir, 'peer-resource.txt'), 'utf8')).toBe('peer-owned');
+        expect(await readFile(peer.command, 'utf8')).toBe('tiny-codex');
+        expect((await readdir(rootDir)).filter((name) => name.startsWith('tmp-'))).toEqual([]);
+      } finally {
+        release.resolve(new Response(null, { status: 503 }));
+        await installing;
+        definition.platforms['linux-x64'] = originalArchive;
+      }
+    }
+  );
+
+  it.each([true, false])(
+    'keeps a resident resource reader alive through repair, download succeeds=%s',
+    async (succeeds) => {
+      const { archiveBytes, definition, originalArchive } =
+        await installTinyCodexArchiveDefinition('resident.tar.zst');
+      const originalVersion = definition.version;
+      const command = await installCachedCodex({
+        version: originalVersion,
+        installedAt: '2026-08-01T00:00:00.000Z',
+      });
+      const dir = dirname(dirname(command));
+      const resource = join(dir, 'resource.txt');
+      await writeFile(resource, 'resident-resource');
+      // Explicit read requests keep a real child resident across each install phase.
+      const child = spawn(
+        process.execPath,
+        [
+          '-e',
+          `
+      const fs = require('node:fs');
+      const lines = require('node:readline').createInterface({ input: process.stdin });
+      lines.on('line', () => {
+        try { console.log(JSON.stringify({ value: fs.readFileSync(process.argv[1], 'utf8') })); }
+        catch (error) { console.log(JSON.stringify({ error: error.code })); }
+      });
+    `,
+          resource,
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      const exited = once(child, 'exit');
+      const lines = createInterface({ input: child.stdout });
+      const read = async () => {
+        const answer = once(lines, 'line');
+        child.stdin.write('read\n');
+        return JSON.parse((await answer)[0] as string) as unknown;
+      };
+      const started = Promise.withResolvers<void>();
+      const response = Promise.withResolvers<Response>();
+      const options = {
+        rootDir,
+        platform: 'linux' as const,
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+        fetchImpl: async () => {
+          started.resolve();
+          return response.promise;
+        },
+      };
+      const manager = new ManagedAgentRuntimeManager(options);
+      let pendingInstall: Promise<unknown> | undefined;
+      try {
+        expect(await read()).toEqual({ value: 'resident-resource' });
+        await writeFile(join(dir, 'metadata.json'), '{broken');
+        const install = manager.ensureCurrentRuntime('codex').then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error })
+        );
+        pendingInstall = install;
+        await started.promise;
+        expect(await read()).toEqual({ value: 'resident-resource' });
+        response.resolve(
+          succeeds ? new Response(archiveBytes) : new Response(null, { status: 503 })
+        );
+        const result = await install;
+        if (succeeds) {
+          if (!('value' in result)) throw result.error;
+          expect(result.value.command).not.toBe(command);
+          expect(await readFile(result.value.command, 'utf8')).toBe('tiny-codex');
+          await expect(
+            new ManagedAgentRuntimeManager(options).resolveRuntimeForLaunch('codex')
+          ).resolves.toMatchObject({ command: result.value.command });
+          // A later update must not prune a repair tree whose readers are unknown.
+          definition.version = '99.0.0';
+          await installCachedCodex({ version: '98.0.0', installedAt: '2099-01-01T00:00:00.000Z' });
+        } else {
+          expect(result).toMatchObject({ error: expect.any(ManagedRuntimeError) });
+        }
+        await manager.prepareCache();
+        expect(await read()).toEqual({ value: 'resident-resource' });
+        expect(await readFile(join(dir, 'metadata.json'), 'utf8')).toBe('{broken');
+      } finally {
+        response.resolve(new Response(null, { status: 503 }));
+        await pendingInstall;
+        child.stdin.end();
+        await exited;
+        lines.close();
+        definition.version = originalVersion;
+        definition.platforms['linux-x64'] = originalArchive;
+      }
+    }
+  );
+
+  it.each(['headers', 'body'] as const)(
+    'retains partial bytes after idle timeout at %s and resumes with Range',
+    async (stage) => {
+      const { archiveBytes, definition, originalArchive } =
+        await installTinyCodexArchiveDefinition('idle.tar.zst');
+      const started = Promise.withResolvers<AbortSignal>();
+      const splitAt = Math.floor(archiveBytes.byteLength / 2);
+      let firstAttempt = true;
+      let healthy = false;
+      let bodyClosed = false;
+      const manager = new ManagedAgentRuntimeManager({
+        rootDir,
+        platform: 'linux',
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+        fetchImpl: async (_url, init) => {
+          if (firstAttempt) {
+            firstAttempt = false;
+            return new Response(archiveBytes.slice(0, splitAt));
+          }
+          expect(new Headers(init?.headers).get('Range')).toBe(`bytes=${splitAt}-`);
+          if (healthy) return new Response(archiveBytes.slice(splitAt), { status: 206 });
+          const signal = init?.signal;
+          if (!signal) throw new Error('missing download cancellation');
+          started.resolve(signal);
+          if (stage === 'headers')
+            return await new Promise<never>((_resolve, reject) =>
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+            );
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                bodyClosed = true;
+              },
+            }),
+            { status: 206 }
+          );
+        },
+      });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const failed = expect(manager.ensureCurrentRuntime('codex')).rejects.toThrow('timed out');
+        const signal = await started.promise;
+        await vi.advanceTimersByTimeAsync(60_000);
+        await failed;
+        expect(signal.aborted).toBe(true);
+        if (stage === 'body') expect(bodyClosed).toBe(true);
+        vi.useRealTimers();
+        const partialPath = join(
+          rootDir,
+          '.downloads',
+          `codex-${CODEX_RUNTIME_VERSION}-linux-x64-idle.tar.zst.part`
+        );
+        expect(await readFile(partialPath)).toEqual(Buffer.from(archiveBytes.slice(0, splitAt)));
+        healthy = true;
+        const installed = await manager.ensureCurrentRuntime('codex');
+        expect(await readFile(installed.command, 'utf8')).toBe('tiny-codex');
+      } finally {
+        vi.useRealTimers();
+        definition.platforms['linux-x64'] = originalArchive;
+      }
+    }
+  );
+
+  it('completes a progressing download that takes longer than ten minutes', async () => {
+    const { archiveBytes, definition, originalArchive } =
+      await installTinyCodexArchiveDefinition('slow.tar.zst');
+    const chunkSize = Math.ceil(archiveBytes.byteLength / 24);
+    let offset = 0;
     const manager = new ManagedAgentRuntimeManager({
       rootDir,
       platform: 'linux',
       arch: 'x64',
+      runtimeBaseUrl: 'https://runtime.example.test',
+      fetchImpl: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              await vi.advanceTimersByTimeAsync(30_000);
+              controller.enqueue(archiveBytes.slice(offset, offset + chunkSize));
+              offset += chunkSize;
+              if (offset >= archiveBytes.byteLength) controller.close();
+            },
+          })
+        ),
     });
-
-    await expect(manager.prepareCache()).resolves.toBeUndefined();
-    await expect(manager.listAvailableUpdates()).resolves.toEqual([]);
-    for (const operation of [
-      () => manager.getRuntimeStatus('codex'),
-      () => manager.resolveRuntimeForLaunch('codex'),
-      () => manager.ensureCurrentRuntime('codex'),
-    ]) {
-      await expect(operation()).rejects.toThrow(
-        `Managed runtime cache metadata is invalid for codex/${CODEX_RUNTIME_VERSION}/linux-x64`
-      );
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const began = Date.now();
+    try {
+      const installed = await manager.ensureCurrentRuntime('codex');
+      expect(Date.now() - began).toBeGreaterThan(10 * 60_000);
+      expect(await readFile(installed.command, 'utf8')).toBe('tiny-codex');
+    } finally {
+      vi.useRealTimers();
+      definition.platforms['linux-x64'] = originalArchive;
     }
-    expect(existsSync(command)).toBe(true);
   });
 
   it('still finds updates for other runtimes when one cache cannot be read', async () => {
@@ -404,6 +742,103 @@ describe('ManagedAgentRuntimeManager', () => {
   it('matches the pinned Kimi runtime manifest and Node engine', () => {
     expect(KIMI_CODE_VERSION).toBe(kimiRuntimeManifestJson.version);
     expect(kimiRuntimeManifestJson.minNodeVersion).toBe(KIMI_CODE_MIN_NODE_VERSION);
+  });
+
+  it('classifies linux libc once and keeps claude-code musl archive selection', () => {
+    const getReport = vi.spyOn(process.report, 'getReport');
+    const linuxHost = process.platform === 'linux';
+    const report = (glibcVersionRuntime?: string) =>
+      ({
+        header: glibcVersionRuntime === undefined ? {} : { glibcVersionRuntime },
+      }) as ReturnType<typeof process.report.getReport>;
+    const readOnce = (value: ReturnType<typeof process.report.getReport>) => {
+      let read = false;
+      getReport.mockImplementation(() => {
+        if (read) throw new Error('process.report.getReport ran again');
+        read = true;
+        return value;
+      });
+    };
+    try {
+      getReport.mockImplementation(() => {
+        throw new Error('process.report.getReport ran for a preset classification');
+      });
+      resetMuslLibcCacheForTests(true);
+      expect(mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toBe('linux-x64-musl');
+      expect(mapManagedRuntimePlatform('claude-code', 'linux', 'arm64')).toBe('linux-arm64-musl');
+      expect(mapManagedRuntimePlatform('codex', 'linux', 'x64')).toBe('linux-x64');
+      expect(mapManagedRuntimePlatform('grok-build', 'linux', 'arm64')).toBe('linux-arm64');
+      expect(mapManagedRuntimePlatform('kimi-code', 'linux', 'x64')).toBe('node');
+      expect(mapManagedRuntimePlatform('claude-code', 'darwin', 'arm64')).toBe('darwin-arm64');
+      expect(mapManagedRuntimePlatform('claude-code', 'win32', 'x64')).toBe('win32-x64');
+
+      resetMuslLibcCacheForTests(false);
+      expect(mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toBe('linux-x64');
+      expect(mapManagedRuntimePlatform('claude-code', 'linux', 'arm64')).toBe('linux-arm64');
+      expect(mapManagedRuntimePlatform('claude-code', 'darwin', 'x64')).toBe('darwin-x64');
+      expect(mapManagedRuntimePlatform('claude-code', 'win32', 'arm64')).toBe('win32-arm64');
+
+      if (linuxHost) {
+        resetMuslLibcCacheForTests();
+        readOnce(report('2.39'));
+        expect(mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toBe('linux-x64');
+        expect(mapManagedRuntimePlatform('claude-code', 'linux', 'arm64')).toBe('linux-arm64');
+        expect(mapManagedRuntimePlatform('codex', 'linux', 'x64')).toBe('linux-x64');
+
+        resetMuslLibcCacheForTests();
+        readOnce(report());
+        expect(mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toBe('linux-x64-musl');
+        expect(mapManagedRuntimePlatform('claude-code', 'linux', 'arm64')).toBe('linux-arm64-musl');
+
+        resetMuslLibcCacheForTests();
+        let attempts = 0;
+        getReport.mockImplementation(() => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('report unavailable');
+          if (attempts === 2) return report('2.39');
+          throw new Error('process.report.getReport ran again');
+        });
+        expect(() => mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toThrow(
+          'report unavailable'
+        );
+        expect(mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toBe('linux-x64');
+        expect(mapManagedRuntimePlatform('claude-code', 'linux', 'arm64')).toBe('linux-arm64');
+
+        resetMuslLibcCacheForTests();
+        attempts = 0;
+        getReport.mockImplementation(() => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('report unavailable');
+          if (attempts === 2) return report();
+          throw new Error('process.report.getReport ran again');
+        });
+        expect(() => mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toThrow(
+          'report unavailable'
+        );
+        expect(mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toBe('linux-x64-musl');
+        expect(mapManagedRuntimePlatform('claude-code', 'linux', 'arm64')).toBe('linux-arm64-musl');
+
+        getReport.mockRestore();
+        resetMuslLibcCacheForTests();
+        const reportApi = process.report as { getReport?: typeof process.report.getReport };
+        const savedGetReport = reportApi.getReport;
+        reportApi.getReport = undefined;
+        try {
+          expect(mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toBe('linux-x64-musl');
+          reportApi.getReport = () => {
+            throw new Error('process.report.getReport ran again');
+          };
+          expect(mapManagedRuntimePlatform('claude-code', 'linux', 'arm64')).toBe(
+            'linux-arm64-musl'
+          );
+        } finally {
+          reportApi.getReport = savedGetReport;
+        }
+      }
+    } finally {
+      getReport.mockRestore();
+      resetMuslLibcCacheForTests();
+    }
   });
 
   it('maps the Kimi node package to one platform-independent artifact', () => {
@@ -503,170 +938,6 @@ describe('ManagedAgentRuntimeManager', () => {
       expect(existsSync(join(rootDir, 'bin', 'kimi'))).toBe(false);
     } finally {
       definition.platforms.node = originalArchive;
-    }
-  });
-
-  it('uses the runtime artifact channel assembled by the process boundary', () => {
-    const manager = new ManagedAgentRuntimeManager({
-      rootDir,
-      platform: 'darwin',
-      arch: 'arm64',
-      runtimeBaseUrl: 'https://runtime.example.test',
-      fetchImpl: vi.fn(),
-    });
-
-    expect(manager.getDiagnostics('codex').runtimeBaseHost).toBe('runtime.example.test');
-  });
-
-  it('resumes a partial zstd runtime download and extracts it', async () => {
-    const manager = new ManagedAgentRuntimeManager({
-      rootDir,
-      platform: 'linux',
-      arch: 'x64',
-      runtimeBaseUrl: 'https://runtime.example.test',
-      fetchImpl: vi.fn(),
-    });
-    const definition = manager.getDefinition('codex');
-    const originalArchive = definition.platforms['linux-x64'];
-    const archiveBytes = await createTinyRuntimeArchive(rootDir);
-    const fileName = 'tiny-codex.tar.zst';
-    definition.platforms['linux-x64'] = {
-      fileName,
-      sha256: await sha256(archiveBytes),
-      size: archiveBytes.byteLength,
-      compression: 'zstd',
-      cmd: 'bin/codex',
-    };
-
-    try {
-      const splitAt = Math.floor(archiveBytes.byteLength / 2);
-      const partialPath = join(
-        rootDir,
-        '.downloads',
-        `codex-${CODEX_RUNTIME_VERSION}-linux-x64-${fileName}.part`
-      );
-      await mkdir(join(rootDir, '.downloads'), { recursive: true });
-      await writeFile(partialPath, archiveBytes.slice(0, splitAt));
-
-      const fetchImpl = vi.fn<FetchImpl>(async (_url, init) => {
-        expect(init).toBeDefined();
-        const headers = init?.headers;
-        expect(headers).toBeInstanceOf(Headers);
-        expect((headers as Headers).get('Range')).toBe(`bytes=${splitAt}-`);
-        return {
-          ok: true,
-          status: 206,
-          headers: new Headers(),
-          body: new Response(archiveBytes.slice(splitAt)).body,
-        };
-      });
-      const resumedManager = new ManagedAgentRuntimeManager({
-        rootDir,
-        platform: 'linux',
-        arch: 'x64',
-        runtimeBaseUrl: 'https://runtime.example.test',
-        fetchImpl,
-      });
-
-      const progressEvents: ManagedRuntimeProgressEvent[] = [];
-      const installation = await resumedManager.ensureCurrentRuntime('codex', {
-        onProgress: (event) => {
-          progressEvents.push(event);
-        },
-      });
-
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
-      expect(installation.command).toBe(
-        join(rootDir, 'codex', CODEX_RUNTIME_VERSION, 'linux-x64', 'bin', 'codex')
-      );
-      expect(existsSync(installation.command)).toBe(true);
-      expect(await readFile(installation.command, 'utf8')).toBe('tiny-codex');
-      expect(existsSync(partialPath)).toBe(false);
-      expect(progressEvents).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ phase: 'verifying', percent: 100 }),
-          expect.objectContaining({ phase: 'extracting', percent: 100 }),
-          expect.objectContaining({ phase: 'publishing', percent: 100 }),
-          expect.objectContaining({ phase: 'complete', percent: 100 }),
-        ])
-      );
-      expect(
-        progressEvents.some(
-          (event) =>
-            event.phase === 'downloading' &&
-            event.totalBytes === archiveBytes.byteLength &&
-            event.downloadedBytes !== undefined &&
-            event.downloadedBytes >= splitAt
-        )
-      ).toBe(true);
-    } finally {
-      definition.platforms['linux-x64'] = originalArchive;
-    }
-  });
-
-  it('bounds download progress by elapsed time rather than by changed percent', async () => {
-    // Every progress event is republished as session presence, and presence is a shared
-    // serial queue the machine heartbeat also uses. The emit ceiling must therefore be a
-    // property of this publisher: a clock that never advances must suppress every
-    // chunk-driven emit no matter how many chunks arrive, or how much the percent moves.
-    const { archiveBytes, definition, originalArchive } =
-      await installTinyCodexArchiveDefinition('throttled-codex.tar.zst');
-
-    try {
-      const chunkCount = 64;
-      const chunkSize = Math.ceil(archiveBytes.byteLength / chunkCount);
-      let deliveredChunks = 0;
-      const fetchImpl = vi.fn<FetchImpl>(async () => ({
-        ok: true,
-        status: 200,
-        headers: new Headers(),
-        body: new ReadableStream<Uint8Array>({
-          start(controller) {
-            for (let offset = 0; offset < archiveBytes.byteLength; offset += chunkSize) {
-              controller.enqueue(new Uint8Array(archiveBytes.subarray(offset, offset + chunkSize)));
-              deliveredChunks += 1;
-            }
-            controller.close();
-          },
-        }) as unknown as NonNullable<Awaited<ReturnType<FetchImpl>>['body']>,
-      }));
-
-      const throttledManager = new ManagedAgentRuntimeManager({
-        rootDir,
-        platform: 'linux',
-        arch: 'x64',
-        runtimeBaseUrl: 'https://runtime.example.test',
-        fetchImpl,
-      });
-
-      // Fake ONLY Date: the download pipeline still needs real I/O scheduling.
-      vi.useFakeTimers({ toFake: ['Date'] });
-      vi.setSystemTime(new Date('2026-09-20T00:00:00.000Z'));
-      const progressEvents: ManagedRuntimeProgressEvent[] = [];
-      try {
-        await throttledManager.ensureCurrentRuntime('codex', {
-          onProgress: (event) => {
-            progressEvents.push(event);
-          },
-        });
-      } finally {
-        vi.useRealTimers();
-      }
-
-      const downloadEvents = progressEvents.filter((event) => event.phase === 'downloading');
-      expect(deliveredChunks).toBeGreaterThan(8);
-      // A frozen clock leaves only the three lifecycle emits: attempt start, the forced
-      // one before the pipeline, and the forced one after it settles. The count is
-      // independent of deliveredChunks; per-chunk emission would scale with it.
-      expect(downloadEvents).toHaveLength(3);
-      // The terminal byte count is still reported, so a bounded rate never hides completion.
-      expect(downloadEvents.at(-1)).toMatchObject({
-        phase: 'downloading',
-        downloadedBytes: archiveBytes.byteLength,
-        totalBytes: archiveBytes.byteLength,
-      });
-    } finally {
-      definition.platforms['linux-x64'] = originalArchive;
     }
   });
 
@@ -840,83 +1111,5 @@ describe('ManagedAgentRuntimeManager', () => {
     } finally {
       definition.platforms['linux-x64'] = originalArchive;
     }
-  });
-
-  it('wraps runtime body stream failures as managed runtime errors', async () => {
-    const manager = new ManagedAgentRuntimeManager({
-      rootDir,
-      platform: 'linux',
-      arch: 'x64',
-      runtimeBaseUrl: 'https://runtime.example.test',
-      fetchImpl: vi.fn(),
-    });
-    const definition = manager.getDefinition('codex');
-    const originalArchive = definition.platforms['linux-x64'];
-    const fileName = 'stream-fails.tar.zst';
-    definition.platforms['linux-x64'] = {
-      fileName,
-      sha256: 'sha256-does-not-matter',
-      size: 100,
-      compression: 'zstd',
-      cmd: 'bin/codex',
-    };
-
-    try {
-      let sentChunk = false;
-      const failingBody = new ReadableStream<Uint8Array>({
-        pull(controller) {
-          if (!sentChunk) {
-            sentChunk = true;
-            controller.enqueue(new Uint8Array([1, 2, 3]));
-            return;
-          }
-          controller.error(new Error('socket reset during body'));
-        },
-      });
-      const fetchImpl = vi.fn<FetchImpl>(async () => ({
-        ok: true,
-        status: 200,
-        headers: new Headers(),
-        body: failingBody,
-      }));
-      const streamingManager = new ManagedAgentRuntimeManager({
-        rootDir,
-        platform: 'linux',
-        arch: 'x64',
-        runtimeBaseUrl: 'https://runtime.example.test',
-        fetchImpl,
-      });
-
-      let caught: unknown;
-      try {
-        await streamingManager.ensureCurrentRuntime('codex');
-      } catch (error) {
-        caught = error;
-      }
-
-      if (!(caught instanceof ManagedRuntimeError)) {
-        throw new Error('Expected stream failure to be wrapped as ManagedRuntimeError');
-      }
-      expect(caught.message).toContain('Failed to stream managed runtime');
-      expect(caught.message).toContain('socket reset during body');
-      expect(classifyManagedRuntimeFailureReason(caught)).toBe('stream_failed');
-    } finally {
-      definition.platforms['linux-x64'] = originalArchive;
-    }
-  });
-
-  it('includes nested fetch failure causes in managed runtime messages', () => {
-    const lowLevel = new Error('connect ECONNREFUSED 127.0.0.1:7890');
-    (lowLevel as Error & { code: string }).code = 'ECONNREFUSED';
-    const fetchError = new TypeError('fetch failed', { cause: lowLevel });
-    const error = new ManagedRuntimeError(
-      'Failed to fetch managed runtime https://runtime.example.test/runtime.tar.zst: ' +
-        formatManagedRuntimeFailureMessage(fetchError),
-      { cause: fetchError }
-    );
-
-    expect(error.message).toContain('fetch failed');
-    expect(error.message).toContain('connect ECONNREFUSED 127.0.0.1:7890');
-    expect(error.message).toContain('code=ECONNREFUSED');
   });
 });

@@ -99,7 +99,8 @@ export function useAddLocalProjectMachines(): {
  */
 export function useAddLocalProjectController(
   onProjectAdded?: AddLocalProjectDialogProps['onAdded'],
-  onProjectLocated?: (info: { machineId: MachineId; localProjectId: LocalProjectId }) => void
+  onProjectLocated?: (info: { machineId: MachineId; localProjectId: LocalProjectId }) => void,
+  selectProject?: RemoteDirectoryOps['addProject']
 ) {
   const { t } = useTranslation();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -133,26 +134,46 @@ export function useAddLocalProjectController(
           'local-project/browse-dir',
           timeoutMessage
         ),
-      addProject: async (machineId, args) => {
-        if (!runtime) {
-          return { ok: false, errorCode: 'timeout', message: timeoutMessage };
-        }
-        try {
-          return {
-            ok: true,
-            value: await prepareAndWriteLocalProject({
-              runtime,
+      createDirectory: async (machineId, args) => {
+        if (!runtime)
+          return { ok: false, errorCode: 'daemon_unavailable', message: timeoutMessage };
+        return normalizeResponse(
+          await runtime.requestLocalProjectControl(
+            {
+              type: 'local-project/create-directory',
               machineId,
-              rootPath: args.rootPath,
-              timeoutMessage,
-            }),
-          };
-        } catch (error) {
-          return { ok: false, message: error instanceof Error ? error.message : String(error) };
-        }
+              workspaceId: runtime.workspaceId,
+              parentPath: args.parentPath,
+              name: args.name,
+            },
+            { timeoutMs: 30_000 }
+          ),
+          'local-project/create-directory',
+          timeoutMessage
+        );
       },
+      addProject:
+        selectProject ??
+        (async (machineId, args) => {
+          if (!runtime) {
+            return { ok: false, errorCode: 'timeout', message: timeoutMessage };
+          }
+          try {
+            return {
+              ok: true,
+              value: await prepareAndWriteLocalProject({
+                runtime,
+                machineId,
+                rootPath: args.rootPath,
+                timeoutMessage,
+              }),
+            };
+          } catch (error) {
+            return { ok: false, message: error instanceof Error ? error.message : String(error) };
+          }
+        }),
     };
-  }, [runtime, t]);
+  }, [runtime, t, selectProject]);
 
   const onAdded = useCallback<AddLocalProjectDialogProps['onAdded']>(
     (info) => {

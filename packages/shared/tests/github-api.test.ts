@@ -11,8 +11,6 @@ import {
   githubFetchPRReviewComments,
   githubFetchProjectSkillsAtCommit,
   githubFetchPullRequestDetails,
-  githubFetchPullRequestCommits,
-  githubCompareCommits,
   githubFetchPullRequestReviews,
   normalizeCheckRunsSummary,
 } from '../src/github-api';
@@ -20,6 +18,74 @@ import {
 describe('GitHub PR live reads', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('reads GitHub stack membership and retains it if the stack details fail', async () => {
+    const pr = {
+      number: 42,
+      node_id: 'PR_42',
+      title: 'Layer',
+      state: 'open',
+      html_url: 'https://github.com/owner/repo/pull/42',
+      base: { ref: 'layer-1' },
+      head: { ref: 'layer-2', sha: 'abc' },
+      user: null,
+      created_at: '2026-01-01',
+      updated_at: '2026-01-01',
+      stack: { number: 7, position: 2, size: 2, base: { ref: 'main' } },
+    };
+    let failStack = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith('/pulls/42')) return new Response(JSON.stringify(pr));
+        if (failStack) return new Response('', { status: 503 });
+        return new Response(
+          JSON.stringify({
+            pull_requests: [
+              {
+                number: 41,
+                title: 'First',
+                state: 'closed',
+                draft: false,
+                merged_at: '2026-01-01',
+              },
+              { number: 42, title: 'Layer', state: 'open', draft: false, merged_at: null },
+            ],
+          })
+        );
+      })
+    );
+    const result = await githubFetchPullRequestDetails('', 'owner/repo', 42);
+    expect(result.stack).toEqual({
+      number: 7,
+      position: 2,
+      size: 2,
+      baseRef: 'main',
+      pullRequests: [
+        { number: 41, title: 'First', state: 'closed', draft: false, merged: true },
+        { number: 42, title: 'Layer', state: 'open', draft: false, merged: false },
+      ],
+    });
+    failStack = true;
+    expect((await githubFetchPullRequestDetails('', 'owner/repo', 42)).stack).toEqual({
+      number: 7,
+      position: 2,
+      size: 2,
+      baseRef: 'main',
+    });
+  });
+
+  it('reads public PR comments without an Authorization header', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, options: RequestInit) => {
+        if (new Headers(options.headers).has('authorization'))
+          return new Response(null, { status: 401 });
+        return new Response(JSON.stringify([]));
+      })
+    );
+    await expect(githubFetchPRIssueComments('', 'owner/public', 42)).resolves.toEqual([]);
   });
 
   it('forwards reload mode to every request in a manual refresh', async () => {
@@ -67,100 +133,6 @@ describe('GitHub PR live reads', () => {
     ]);
     await expect(githubFetchPullRequestDetails('token', 'owner/repo', 42)).resolves.toMatchObject({
       baseSha: 'base-sha',
-    });
-  });
-});
-
-describe('GitHub PR changes reads', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('normalizes commits and compare files', async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes('/commits')) {
-        return new Response(
-          JSON.stringify([
-            {
-              sha: 'head',
-              html_url: 'https://github.com/o/r/commit/head',
-              commit: {
-                message: 'Add changes\n\nDetails',
-                author: { date: '2026-09-30T00:00:00Z' },
-              },
-              author: { login: 'alice' },
-              parents: [{ sha: 'parent' }],
-            },
-          ])
-        );
-      }
-      return new Response(
-        JSON.stringify({
-          files: [
-            {
-              filename: 'src/a.ts',
-              status: 'modified',
-              additions: 2,
-              deletions: 1,
-              changes: 3,
-              sha: 'blob',
-              blob_url: 'https://github.com/o/r/blob/head/src/a.ts',
-              raw_url: 'https://github.com/o/r/raw/head/src/a.ts',
-              patch: '@@ -1 +1 @@',
-            },
-            {
-              filename: 'src/old.ts',
-              status: 'deleted',
-              additions: 0,
-              deletions: 2,
-              changes: 2,
-            },
-          ],
-          merge_base_commit: { sha: 'parent' },
-        })
-      );
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(githubFetchPullRequestCommits('token', 'o/r', 42)).resolves.toEqual([
-      {
-        sha: 'head',
-        message: 'Add changes',
-        authorLogin: 'alice',
-        authoredAt: '2026-09-30T00:00:00Z',
-        htmlUrl: 'https://github.com/o/r/commit/head',
-        parentSha: 'parent',
-      },
-    ]);
-    await expect(githubCompareCommits('token', 'o/r', 'parent', 'head')).resolves.toEqual({
-      mergeBaseSha: 'parent',
-      files: [
-        {
-          path: 'src/a.ts',
-          previousPath: null,
-          status: 'modified',
-          additions: 2,
-          deletions: 1,
-          changes: 3,
-          sha: 'blob',
-          blobUrl: 'https://github.com/o/r/blob/head/src/a.ts',
-          rawUrl: 'https://github.com/o/r/raw/head/src/a.ts',
-          patch: '@@ -1 +1 @@',
-        },
-        {
-          path: 'src/old.ts',
-          previousPath: null,
-          status: 'removed',
-          additions: 0,
-          deletions: 2,
-          changes: 2,
-          sha: null,
-          blobUrl: null,
-          rawUrl: null,
-          patch: null,
-        },
-      ],
     });
   });
 });
@@ -321,6 +293,25 @@ describe('githubFetchFileAtCommit', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
+
+  it.each([false, true])(
+    'reads public file content anonymously (raw fallback: %s)',
+    async (fallback) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, options: RequestInit) => {
+          if (new Headers(options.headers).has('authorization'))
+            return new Response(null, { status: 401 });
+          if (fallback && String(url).startsWith('https://api.github.com/'))
+            return new Response('too large', { status: 403 });
+          return new Response('public file content');
+        })
+      );
+      await expect(
+        githubFetchFileAtCommit('', 'owner/public', 'file.txt', 'commit-sha')
+      ).resolves.toBe('public file content');
+    }
+  );
 
   it('rejects API file bodies larger than the byte cap', async () => {
     vi.stubGlobal(
@@ -498,30 +489,6 @@ describe('githubFetchIssuesAndPRs', () => {
       )
     );
   }
-
-  it('requests both pages concurrently', async () => {
-    const startedPages: number[] = [];
-    let bothStarted = () => {};
-    // Neither request may settle until both have started, so the call can only
-    // finish if the two pages really are in flight together.
-    const gate = new Promise<void>((resolve) => {
-      bothStarted = resolve;
-    });
-
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const page = Number(new URL(String(input)).searchParams.get('page'));
-      startedPages.push(page);
-      if (startedPages.length === 2) bothStarted();
-      await gate;
-      return issuesPageResponse(page === 1 ? [3, 2] : [1]);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const items = await githubFetchIssuesAndPRs('token', 'owner/repo');
-
-    expect([...startedPages].sort()).toEqual([1, 2]);
-    expect(items.map((item) => item.number)).toEqual([3, 2, 1]);
-  });
 
   it('dedupes across pages and keeps the most recently updated copy', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

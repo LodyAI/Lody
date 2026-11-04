@@ -1,5 +1,12 @@
+import zlib from 'node:zlib';
 import { z } from 'zod';
-import type { MachineBugReportResponse, MachineId, WorkspaceId } from '@lody/shared';
+import {
+  BUG_REPORT_CLIENT_LOG_LIMITS,
+  type BugReportClientLog,
+  type MachineBugReportResponse,
+  type MachineId,
+  type WorkspaceId,
+} from '@lody/shared';
 import { LODY_LOG_DIR } from '../utils/log-retention';
 import { listDailyLogFiles, readDailyLogFile } from '../utils/log-files';
 import type { MachineAccessCheckResult } from './workspace';
@@ -86,6 +93,49 @@ export const collectBugReportLogs = async (
   return parts;
 };
 
+/** The section the reporter's client log occupies in the uploaded logs. */
+export const BUG_REPORT_CLIENT_LOG_FILE_NAME = 'client.log';
+
+/**
+ * Turn the reporter's client log into one more log section. A log that does
+ * not decode still becomes a section that says so, so a report never silently
+ * drops it — and never fails the daemon logs because of it.
+ */
+export const decodeBugReportClientLog = (clientLog: BugReportClientLog): BugReportLogPart => {
+  const failed = (reason: string): BugReportLogPart => ({
+    fileName: BUG_REPORT_CLIENT_LOG_FILE_NAME,
+    content: `[client log could not be decoded: ${reason}]\n`,
+    truncated: false,
+  });
+  const compressed = Buffer.from(clientLog.data, 'base64');
+  if (
+    compressed.byteLength !== clientLog.compressedBytes ||
+    compressed.byteLength > BUG_REPORT_CLIENT_LOG_LIMITS.maxCompressedBytes
+  ) {
+    return failed('compressed size mismatch');
+  }
+  let raw: Buffer;
+  try {
+    raw = zlib.gunzipSync(compressed, {
+      maxOutputLength: BUG_REPORT_CLIENT_LOG_LIMITS.maxRawBytes,
+    });
+  } catch {
+    return failed('not a gzip stream within the size limit');
+  }
+  if (raw.byteLength !== clientLog.rawBytes) {
+    return failed('raw size mismatch');
+  }
+  try {
+    return {
+      fileName: BUG_REPORT_CLIENT_LOG_FILE_NAME,
+      content: new TextDecoder('utf-8', { fatal: true }).decode(raw),
+      truncated: false,
+    };
+  } catch {
+    return failed('not UTF-8 text');
+  }
+};
+
 export const submitBugReportFromMachine = async (args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
@@ -94,6 +144,8 @@ export const submitBugReportFromMachine = async (args: {
   requestToken: string;
   /** The user this CLI is logged in as (machine operator). */
   machineUserId: string;
+  /** The reporter's client log; appended after this machine's own logs. */
+  clientLog?: BugReportClientLog;
   token: string;
   siteUrl: string;
   logger: { info: (message: string) => void; warn: (message: string) => void };
@@ -139,6 +191,7 @@ export const submitBugReportFromMachine = async (args: {
 
   try {
     const parts = await collectBugReportLogs();
+    if (args.clientLog) parts.push(decodeBugReportClientLog(args.clientLog));
     const logContent = mergeBugReportLogs(parts);
     args.logger.info(
       `[bug-report] uploading ${parts.length} log file(s) (${logContent.length} chars) for workspace ${args.workspaceId}`

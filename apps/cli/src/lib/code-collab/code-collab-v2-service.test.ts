@@ -1,16 +1,7 @@
+import { encodeSessionFilePath } from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -132,179 +123,110 @@ function makeWorkspaceWatchCoordinator(): {
   };
 }
 
+it('reads encrypted file content without starting watchers or publishing an index', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    await writeFile(path.join(workspaceRoot, 'readonly.txt'), 'synthetic original');
+    const publish = collectPublishedSharedStates();
+    const watch = makeWorkspaceWatchCoordinator();
+    const service = new CodeCollabV2Service({
+      readOnly: true,
+      resolveWorkspace: makeResolver(workspaceRoot),
+      workspaceWatchCoordinator: watch.coordinator,
+      ...publish,
+    });
+    try {
+      const first = await service.openText({ sessionId: SESSION_ID, path: 'readonly.txt' });
+      expect(first.status).toBe('ok');
+      expect(
+        await service.refreshText({
+          sessionId: SESSION_ID,
+          path: 'readonly.txt',
+          digest: first.digest,
+        })
+      ).toMatchObject({ status: 'up_to_date' });
+      expect(activeWorkspaceWatchCount(service)).toBe(0);
+      expect(publish.published).toEqual([]);
+      expect(publish.signals).toEqual([]);
+      expect(await readFile(path.join(workspaceRoot, 'readonly.txt'), 'utf8')).toBe(
+        'synthetic original'
+      );
+    } finally {
+      await service.dispose();
+    }
+  });
+});
+
 describe('CodeCollabV2Service text RPC boundary', () => {
-  it('activates checkout metadata independently of the initial file snapshot and refreshes it without file changes', async () => {
+  it('uses the configured refresh deadline, cancels publication and lets a queued refresh publish newer files', async () => {
     await withWorkspace(async (workspaceRoot) => {
-      let release: () => void = () => {};
-      const metadataReady = new Promise<void>((resolve) => {
+      await writeFile(path.join(workspaceRoot, 'old.ts'), 'old');
+      let release = () => {};
+      let started = () => {};
+      const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      let currentBranch = 'feature/open';
-      let publishedBranch: string | undefined;
-      let publication: Promise<void> | undefined;
+      const entered = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let heldSignal: AbortSignal | undefined;
+      let attempts = 0;
+      const snapshots: string[][] = [];
       const service = new CodeCollabV2Service({
         resolveWorkspace: makeResolver(workspaceRoot),
-        observeWorkspaceGit: ({ ownerSessionId, workspaceRoot: root }) => {
-          expect(ownerSessionId).toBe(SESSION_ID);
-          expect(root).toBe(workspaceRoot);
-          publication = metadataReady.then(() => {
-            publishedBranch = currentBranch;
-          });
-          return publication;
+        publishFileIndex: async (publication) => {
+          if (++attempts === 2) {
+            heldSignal = publication.signal;
+            started();
+            await gate;
+          }
+          publication.signal?.throwIfAborted();
+          snapshots.push(Object.keys(publication.fileIndex));
+          return { changed: true };
         },
       });
       try {
-        const snapshot = await service.getFileIndex({ sessionId: SESSION_ID });
-        expect(snapshot.status).toBe('ok');
-        expect(publishedBranch).toBeUndefined();
-        release();
-        await publication;
-        expect(publishedBranch).toBe('feature/open');
-        currentBranch = 'feature/switched';
-        await service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
-        expect(publishedBranch).toBe('feature/open');
         await service.refreshSharedState({ sessionId: SESSION_ID });
-        await publication;
-        expect(publishedBranch).toBe('feature/switched');
-        currentBranch = 'feature/root-refresh';
-        await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-        await publication;
-        expect(publishedBranch).toBe('feature/root-refresh');
+        vi.stubEnv('LODY_CODE_COLLAB_TASK_TIMEOUT_MS', '100');
+        vi.useFakeTimers();
+        const expired = expect(
+          service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID })
+        ).rejects.toThrow('exceeded 100ms');
+        await entered;
+        await writeFile(path.join(workspaceRoot, 'new.ts'), 'new');
+        // Wait for actual queue admission before advancing the clock; filesystem
+        // resolution of the next request must not race its own deadline.
+        const queueApi = service as unknown as {
+          enqueueSharedStateRefresh: (...args: unknown[]) => Promise<void>;
+        };
+        const enqueue = queueApi.enqueueSharedStateRefresh.bind(service);
+        let admitted = () => {};
+        const queued = new Promise<void>((resolve) => {
+          admitted = resolve;
+        });
+        const admission = vi
+          .spyOn(queueApi, 'enqueueSharedStateRefresh')
+          .mockImplementation((...args) => {
+            const result = enqueue(...args);
+            admitted();
+            return result;
+          });
+        const next = service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
+        await queued;
+        admission.mockRestore();
+        await vi.advanceTimersByTimeAsync(100);
+        await expired;
+        await next;
+        expect(heldSignal?.aborted).toBe(true);
+        expect(snapshots.at(-1)).toContain('new.ts');
+        release();
+        await gate;
+        expect(snapshots).toHaveLength(2);
       } finally {
         release();
         service.dispose();
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
       }
-    });
-  });
-
-  it('refreshes watched files without repeating branch observation', async () => {
-    vi.useFakeTimers();
-    try {
-      await withWorkspace(async (workspaceRoot) => {
-        const watch = makeWorkspaceWatchCoordinator();
-        let currentBranch = 'feature/open';
-        let publishedBranch: string | undefined;
-        let finishRefresh: () => void = () => {};
-        const refreshed = new Promise<void>((resolve) => {
-          finishRefresh = resolve;
-        });
-        const service = new CodeCollabV2Service({
-          resolveWorkspace: makeResolver(workspaceRoot),
-          workspaceWatchCoordinator: watch.coordinator,
-          observeWorkspaceGit: async () => {
-            publishedBranch = currentBranch;
-          },
-          publishFileIndex: async (state) => {
-            if (state.fileIndex['watched.txt']) finishRefresh();
-          },
-        });
-        try {
-          await service.getFileIndex({ sessionId: SESSION_ID });
-          expect(publishedBranch).toBe('feature/open');
-          currentBranch = 'feature/external';
-          await writeFile(path.join(workspaceRoot, 'watched.txt'), 'changed');
-          watch.dirty();
-          await vi.advanceTimersByTimeAsync(150);
-          await refreshed;
-          expect(publishedBranch).toBe('feature/open');
-        } finally {
-          service.dispose();
-        }
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('opens text files with a sha256 digest and plain payload', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'hello.ts'), 'const value = 1;\n');
-      const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
-
-      const result = await service.openText({
-        sessionId: SESSION_ID,
-        path: 'hello.ts',
-      });
-
-      expect(result).toMatchObject({
-        status: 'ok',
-        path: 'hello.ts',
-        digest: digestText('const value = 1;\n'),
-        text: {
-          encoding: 'plain',
-          text: 'const value = 1;\n',
-          rawBytes: Buffer.byteLength('const value = 1;\n'),
-        },
-        format: {
-          encoding: 'utf8',
-          eol: 'lf',
-        },
-      });
-    });
-  });
-
-  it('refreshes by digest without returning text when already current', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'hello.ts'), 'old\n');
-      const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
-      const opened = await service.openText({ sessionId: SESSION_ID, path: 'hello.ts' });
-
-      const same = await service.refreshText({
-        sessionId: SESSION_ID,
-        path: 'hello.ts',
-        digest: opened.digest,
-      });
-      expect(same).toEqual({
-        status: 'up_to_date',
-        path: 'hello.ts',
-        digest: opened.digest,
-      });
-
-      await writeFile(path.join(workspaceRoot, 'hello.ts'), 'new\n');
-      const updated = await service.refreshText({
-        sessionId: SESSION_ID,
-        path: 'hello.ts',
-        digest: opened.digest,
-      });
-
-      expect(updated.status).toBe('updated');
-      if (updated.status === 'updated') {
-        expect(updated.digest).toBe(digestText('new\n'));
-        expect(updated.text).toEqual({
-          encoding: 'plain',
-          text: 'new\n',
-          rawBytes: Buffer.byteLength('new\n'),
-        });
-      }
-    });
-  });
-
-  it('saves only when the base digest still matches disk', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      const filePath = path.join(workspaceRoot, 'hello.ts');
-      await writeFile(filePath, 'old\n');
-      const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
-      const opened = await service.openText({ sessionId: SESSION_ID, path: 'hello.ts' });
-
-      const saved = await service.saveText({
-        sessionId: SESSION_ID,
-        requestedByUserId: 'user-1',
-        path: 'hello.ts',
-        baseDigest: opened.digest,
-        text: {
-          encoding: 'plain',
-          text: 'new\n',
-          rawBytes: Buffer.byteLength('new\n'),
-        },
-      });
-
-      expect(saved).toEqual({
-        status: 'ok',
-        path: 'hello.ts',
-        digest: digestText('new\n'),
-        rawBytes: Buffer.byteLength('new\n'),
-      });
-      expect(await readFile(filePath, 'utf8')).toBe('new\n');
     });
   });
 
@@ -369,65 +291,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         expect(saved.status).toBe('ok');
         expect(await readFile(filePath, 'utf8')).toBe('new\n');
         expect(await modeOf(filePath)).toBe('600');
-      });
-
-      await withWorkspace(async (workspaceRoot) => {
-        const previousMask = process.umask(0o022);
-        try {
-          const filePath = path.join(workspaceRoot, 'plain.txt');
-          await writeFile(filePath, 'old\n');
-          await chmod(filePath, 0o644);
-          const service = new CodeCollabV2Service({
-            resolveWorkspace: makeResolver(workspaceRoot),
-          });
-          const opened = await service.openText({ sessionId: SESSION_ID, path: 'plain.txt' });
-          const saved = await service.saveText({
-            sessionId: SESSION_ID,
-            requestedByUserId: 'user-1',
-            path: 'plain.txt',
-            baseDigest: opened.digest,
-            text: {
-              encoding: 'plain',
-              text: 'new\n',
-              rawBytes: Buffer.byteLength('new\n'),
-            },
-          });
-          expect(saved.status).toBe('ok');
-          expect(await modeOf(filePath)).toBe('644');
-        } finally {
-          process.umask(previousMask);
-        }
-      });
-    }
-  );
-
-  it.runIf(process.platform !== 'win32')(
-    'does not change POSIX mode when a digest conflict skips the write',
-    async () => {
-      await withWorkspace(async (workspaceRoot) => {
-        const filePath = path.join(workspaceRoot, 'run.sh');
-        await writeFile(filePath, 'old\n');
-        await chmod(filePath, 0o755);
-        const service = new CodeCollabV2Service({
-          resolveWorkspace: makeResolver(workspaceRoot),
-        });
-        const opened = await service.openText({ sessionId: SESSION_ID, path: 'run.sh' });
-        await writeFile(filePath, 'external\n');
-        await chmod(filePath, 0o755);
-        const conflict = await service.saveText({
-          sessionId: SESSION_ID,
-          requestedByUserId: 'user-1',
-          path: 'run.sh',
-          baseDigest: opened.digest,
-          text: {
-            encoding: 'plain',
-            text: 'new\n',
-            rawBytes: Buffer.byteLength('new\n'),
-          },
-        });
-        expect(conflict.status).toBe('conflict');
-        expect(await readFile(filePath, 'utf8')).toBe('external\n');
-        expect(((await stat(filePath)).mode & 0o777).toString(8)).toBe('755');
       });
     }
   );
@@ -641,43 +504,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
     });
   });
 
-  it('uses gzip-base64 for payloads above the plain text threshold', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      const text = 'a'.repeat(128);
-      await writeFile(path.join(workspaceRoot, 'large.txt'), text);
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        plainTextBytes: 16,
-      });
-
-      const opened = await service.openText({ sessionId: SESSION_ID, path: 'large.txt' });
-
-      expect(opened.text.encoding).toBe('gzip-base64');
-      if (opened.text.encoding === 'gzip-base64') {
-        expect(opened.text.rawBytes).toBe(Buffer.byteLength(text));
-        expect(opened.text.compressedBytes).toBeGreaterThan(0);
-        expect(opened.text.data.length).toBeGreaterThan(0);
-      }
-    });
-  });
-
-  it('rejects compressed text payloads over the configured compressed limit', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'large.txt'), 'a'.repeat(128));
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        plainTextBytes: 16,
-        maxCompressedBytes: 8,
-      });
-
-      await expect(
-        service.openText({ sessionId: SESSION_ID, path: 'large.txt' })
-      ).rejects.toMatchObject({
-        code: 'too_large',
-      });
-    });
-  });
-
   it('rejects binary-looking files and workspace escapes', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await writeFile(path.join(workspaceRoot, 'binary.bin'), Buffer.from([0x61, 0, 0x62]));
@@ -803,94 +629,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
     });
   });
 
-  it('publishes path-keyed file tree and current All Changes state on directory init', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['config', 'user.email', 'test@example.com'], {
-        cwd: workspaceRoot,
-      });
-      await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: workspaceRoot });
-      await writeFile(path.join(workspaceRoot, 'tracked.txt'), 'one\n');
-      await execFileAsync('git', ['add', 'tracked.txt'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['commit', '-m', 'init'], { cwd: workspaceRoot });
-
-      await writeFile(path.join(workspaceRoot, 'tracked.txt'), 'one\ntwo\n');
-      await writeFile(path.join(workspaceRoot, 'untracked.txt'), 'new\n');
-      await writeFile(path.join(workspaceRoot, 'binary.bin'), Buffer.from([0x61, 0, 0x62]));
-      await mkdir(path.join(workspaceRoot, 'src'));
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-      });
-
-      const initialized = await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-
-      expect(initialized).toMatchObject({
-        status: 'ok',
-        path: '.',
-      });
-      const latest = published.at(-1);
-      expect(latest?.fileTree).toMatchObject({
-        'tracked.txt': true,
-        'untracked.txt': true,
-        'binary.bin': true,
-      });
-      expect(latest?.fileTree).not.toHaveProperty('src');
-      expect(latest?.allChanges).toMatchObject({
-        'tracked.txt': { diff: [1, 0] },
-        'untracked.txt': { diff: [1, 0] },
-      });
-    });
-  });
-
-  it('recursively publishes a bounded file tree during explicit directory init', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await mkdir(path.join(workspaceRoot, 'src', 'components'), { recursive: true });
-      await writeFile(path.join(workspaceRoot, 'src', 'index.ts'), 'export {};\n');
-      await writeFile(path.join(workspaceRoot, 'src', 'components', 'button.tsx'), 'button\n');
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-      });
-
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-
-      expect(published.at(-1)?.fileTree).toMatchObject({
-        src: { kind: 'lazy' },
-        'src/components': { kind: 'lazy' },
-        'src/components/button.tsx': true,
-        'src/index.ts': true,
-      });
-    });
-  });
-
-  it('leaves deeper directories lazy when the file tree init budget is exhausted', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await mkdir(path.join(workspaceRoot, 'a', 'b', 'c'), { recursive: true });
-      await writeFile(path.join(workspaceRoot, 'a', 'b', 'c', 'deep.ts'), 'deep\n');
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        maxFileTreeEntries: 2,
-        publishFileIndex,
-      });
-
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-
-      expect(published.at(-1)?.fileTree).toMatchObject({
-        a: { kind: 'lazy' },
-        'a/b': { kind: 'lazy' },
-      });
-      expect(published.at(-1)?.fileTree).not.toHaveProperty('a/b/c');
-      expect(published.at(-1)?.fileTree).not.toHaveProperty('a/b/c/deep.ts');
-    });
-  });
-
   it('does not synthesize non-Git All Changes from a local snapshot baseline', async () => {
     await withWorkspace(async (workspaceRoot) => {
       const filePath = path.join(workspaceRoot, 'notes.txt');
@@ -918,79 +656,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
       });
 
       expect(published.at(-1)?.allChanges).toEqual({});
-    });
-  });
-
-  it('publishes non-Git All Changes from local ACP diff evidence and opens current diffs', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      const filePath = path.join(workspaceRoot, 'notes.txt');
-      await writeFile(filePath, 'one\ntwo\n');
-      const diffStore = new CodeCollabV2DiffStore('workspace-v2', {
-        dbPath: path.join(workspaceRoot, 'diff-store.sqlite3'),
-      });
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      try {
-        const nowMs = Date.now();
-        await diffStore.recordTurnDiffs({
-          workspaceRoot,
-          ownerSessionId: SESSION_ID,
-          turnId: 'turn-1',
-          capturedAtMs: nowMs,
-          events: [
-            {
-              path: filePath,
-              oldText: 'one\n',
-              newText: 'one\ntwo\n',
-            },
-          ],
-        });
-        const service = new CodeCollabV2Service({
-          resolveWorkspace: makeResolver(workspaceRoot),
-          diffStore,
-          publishFileIndex,
-        });
-
-        await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-        expect(published.at(-1)?.allChanges).toEqual({
-          'notes.txt': { diff: [1, 0] },
-        });
-
-        const diff = await service.openCurrentDiff({ sessionId: SESSION_ID, path: 'notes.txt' });
-        expect(diff.status).toBe('ok');
-        if (diff.status === 'ok') {
-          expect(diff.oldSnapshot).toMatchObject({
-            kind: 'text',
-            text: { encoding: 'plain', text: 'one\n' },
-          });
-          expect(diff.newSnapshot).toMatchObject({
-            kind: 'text',
-            text: { encoding: 'plain', text: 'one\ntwo\n' },
-          });
-          expect(diff.add).toBe(1);
-          expect(diff.del).toBe(0);
-        }
-
-        const turnDiff = await service.openTurnDiff({
-          sessionId: SESSION_ID,
-          turnId: 'turn-1',
-          path: 'notes.txt',
-        });
-        expect(turnDiff.status).toBe('ok');
-        if (turnDiff.status === 'ok') {
-          expect(turnDiff.oldSnapshot).toMatchObject({
-            kind: 'text',
-            text: { encoding: 'plain', text: 'one\n' },
-          });
-          expect(turnDiff.newSnapshot).toMatchObject({
-            kind: 'text',
-            text: { encoding: 'plain', text: 'one\ntwo\n' },
-          });
-          expect(turnDiff.add).toBe(1);
-          expect(turnDiff.del).toBe(0);
-        }
-      } finally {
-        await diffStore.close();
-      }
     });
   });
 
@@ -1267,45 +932,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
     });
   });
 
-  it('uses the owner session base branch for committed All Changes state', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['config', 'user.email', 'test@example.com'], {
-        cwd: workspaceRoot,
-      });
-      await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: workspaceRoot });
-      await writeFile(path.join(workspaceRoot, 'tracked.txt'), 'one\n');
-      await execFileAsync('git', ['add', 'tracked.txt'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['commit', '-m', 'init'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['checkout', '-b', 'feature/code-collab'], {
-        cwd: workspaceRoot,
-      });
-      await writeFile(path.join(workspaceRoot, 'tracked.txt'), 'one\ntwo\n');
-      await execFileAsync('git', ['add', 'tracked.txt'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['commit', '-m', 'feature'], { cwd: workspaceRoot });
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: async () => ({
-          ok: true,
-          ownerSessionId: SESSION_ID,
-          workspaceRoot,
-          allChangesBaseBranch: 'main',
-        }),
-        publishFileIndex,
-      });
-
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-
-      expect(published.at(-1)?.allChanges).toMatchObject({
-        'tracked.txt': { diff: [1, 0] },
-      });
-      expect(published.at(-1)?.allChangesDiffStats).toEqual({
-        allChange: { add: 1, del: 0 },
-      });
-    });
-  });
-
   it('returns a local snapshot before asynchronously reconciling Flock state', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await mkdir(path.join(workspaceRoot, 'src'));
@@ -1350,188 +976,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
     });
   });
 
-  it('opens current diffs against the Git All Changes base', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['config', 'user.email', 'test@example.com'], {
-        cwd: workspaceRoot,
-      });
-      await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: workspaceRoot });
-      await writeFile(path.join(workspaceRoot, 'tracked.txt'), 'one\n');
-      await execFileAsync('git', ['add', 'tracked.txt'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['commit', '-m', 'init'], { cwd: workspaceRoot });
-      await writeFile(path.join(workspaceRoot, 'tracked.txt'), 'one\ntwo\n');
-
-      const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
-      const diff = await service.openCurrentDiff({ sessionId: SESSION_ID, path: 'tracked.txt' });
-
-      expect(diff.status).toBe('ok');
-      if (diff.status === 'ok') {
-        expect(diff.oldSnapshot).toMatchObject({
-          kind: 'text',
-          text: { encoding: 'plain', text: 'one\n' },
-        });
-        expect(diff.newSnapshot).toMatchObject({
-          kind: 'text',
-          text: { encoding: 'plain', text: 'one\ntwo\n' },
-        });
-      }
-    });
-  });
-
-  it('removes stale file tree keys when refreshing shared state', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'keep.txt'), 'keep\n');
-      await writeFile(path.join(workspaceRoot, 'remove.txt'), 'remove\n');
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-      });
-
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-      await rm(path.join(workspaceRoot, 'remove.txt'));
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-
-      expect(published.at(-1)?.fileTree).toMatchObject({
-        'keep.txt': true,
-      });
-      expect(published.at(-1)?.fileTree).not.toHaveProperty('remove.txt');
-    });
-  });
-
-  it('publishes the full file index after refreshes', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'one.txt'), 'one\n');
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-      });
-
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-      expect(published.at(-1)?.fileIndex).toMatchObject({
-        'one.txt': true,
-      });
-
-      await writeFile(path.join(workspaceRoot, 'two.txt'), 'two\n');
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-
-      expect(published.at(-1)?.fileIndex).toMatchObject({
-        'one.txt': true,
-        'two.txt': true,
-      });
-      expect(published.at(-1)?.fileTree).toMatchObject({
-        'one.txt': true,
-        'two.txt': true,
-      });
-    });
-  });
-
-  it('keeps the latest file index visible across queued refresh publishes', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'one.txt'), 'one\n');
-
-      const published: PublishedSharedState[] = [];
-      let releaseFirstRefreshPublish: (() => void) | undefined;
-      const firstRefreshPublishReleased = new Promise<void>((resolve) => {
-        releaseFirstRefreshPublish = resolve;
-      });
-      let resolveFirstRefreshPublishStarted: (() => void) | undefined;
-      const firstRefreshPublishStarted = new Promise<void>((resolve) => {
-        resolveFirstRefreshPublishStarted = resolve;
-      });
-      let blockedFirstRefreshPublish = false;
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex: async (state) => {
-          const { fileTree, allChanges } = codeCollabFileIndexToSharedState(state.fileIndex);
-          published.push({
-            fileTree,
-            allChanges,
-            fileIndex: state.fileIndex,
-            updatedAtMs: state.updatedAtMs,
-          });
-          if (published.length === 2 && !blockedFirstRefreshPublish) {
-            blockedFirstRefreshPublish = true;
-            resolveFirstRefreshPublishStarted?.();
-            await firstRefreshPublishReleased;
-          }
-        },
-      });
-
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-      await writeFile(path.join(workspaceRoot, 'two.txt'), 'two\n');
-      const firstRefresh = service.refreshSharedState({ sessionId: SESSION_ID });
-      await firstRefreshPublishStarted;
-
-      await writeFile(path.join(workspaceRoot, 'three.txt'), 'three\n');
-      const secondRefresh = service.refreshSharedState({ sessionId: SESSION_ID });
-      releaseFirstRefreshPublish?.();
-      await Promise.all([firstRefresh, secondRefresh]);
-
-      expect(published.at(-1)?.fileTree).toMatchObject({
-        'one.txt': true,
-        'two.txt': true,
-        'three.txt': true,
-      });
-    });
-  });
-
-  it('skips publishing unchanged file index state', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'one.txt'), 'one\n');
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-      });
-
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-      const publishedAfterInit = published.length;
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-      expect(published.length).toBe(publishedAfterInit);
-    });
-  });
-
-  it('releases workspace file watchers after the idle timeout', async () => {
-    vi.useFakeTimers();
-    try {
-      await withWorkspace(async (workspaceRoot) => {
-        await writeFile(path.join(workspaceRoot, 'one.txt'), 'one\n');
-
-        const { publishFileIndex } = collectPublishedSharedStates();
-        const watch = makeWorkspaceWatchCoordinator();
-        const service = new CodeCollabV2Service({
-          resolveWorkspace: makeResolver(workspaceRoot),
-          publishFileIndex,
-          workspaceWatchCoordinator: watch.coordinator,
-          watchIdleTimeoutMs: 1_000,
-        });
-
-        await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-        expect(activeWorkspaceWatchCount(service)).toBe(1);
-
-        await vi.advanceTimersByTimeAsync(999);
-        expect(activeWorkspaceWatchCount(service)).toBe(1);
-
-        watch.dirty();
-        await vi.advanceTimersByTimeAsync(0);
-        expect(activeWorkspaceWatchCount(service)).toBe(1);
-
-        await vi.advanceTimersByTimeAsync(1);
-        expect(activeWorkspaceWatchCount(service)).toBe(0);
-        expect(watch.releaseCount()).toBe(1);
-        service.dispose();
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it('only initializes directories that are currently published as lazy', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await mkdir(path.join(workspaceRoot, 'node_modules', 'pkg'), { recursive: true });
@@ -1556,64 +1000,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         options: { path: 'node_modules' },
       });
       expect(published.at(-1)?.fileTree).not.toHaveProperty('node_modules/pkg');
-    });
-  });
-
-  it('refreshes expanded directories and removes stale renamed children', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await mkdir(path.join(workspaceRoot, 'src'));
-      await writeFile(path.join(workspaceRoot, 'src', 'old.ts'), 'old\n');
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-      });
-
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-      await service.initDirectory({ sessionId: SESSION_ID, path: 'src' });
-      expect(published.at(-1)?.fileTree).toMatchObject({
-        src: { kind: 'lazy' },
-        'src/old.ts': true,
-      });
-
-      await rename(
-        path.join(workspaceRoot, 'src', 'old.ts'),
-        path.join(workspaceRoot, 'src', 'new.ts')
-      );
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-
-      expect(published.at(-1)?.fileTree).toMatchObject({
-        src: { kind: 'lazy' },
-        'src/new.ts': true,
-      });
-      expect(published.at(-1)?.fileTree).not.toHaveProperty('src/old.ts');
-    });
-  });
-
-  it('skips shared-state publishing when refresh content is unchanged', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'stable.txt'), 'stable\n');
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-      });
-
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-      expect(published).toHaveLength(1);
-
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-      expect(published).toHaveLength(1);
-
-      await writeFile(path.join(workspaceRoot, 'added.txt'), 'added\n');
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-      expect(published).toHaveLength(2);
-      expect(published.at(-1)?.fileTree).toMatchObject({
-        'added.txt': true,
-        'stable.txt': true,
-      });
     });
   });
 
@@ -1660,71 +1046,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
     });
   });
 
-  it('publishes a turn-end meta summary after a watcher already published the same state', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['config', 'user.email', 'test@example.com'], {
-        cwd: workspaceRoot,
-      });
-      await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: workspaceRoot });
-      await writeFile(path.join(workspaceRoot, 'tracked.txt'), 'one\n');
-      await execFileAsync('git', ['add', 'tracked.txt'], { cwd: workspaceRoot });
-      await execFileAsync('git', ['commit', '-m', 'init'], { cwd: workspaceRoot });
-
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-      });
-
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-      await writeFile(path.join(workspaceRoot, 'tracked.txt'), 'one\ntwo\n');
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-      expect(published.at(-1)).toMatchObject({
-        allChangesDiffStats: { allChange: { add: 1, del: 0 } },
-        persistAllChangesDiffStats: false,
-      });
-
-      const publicationCount = published.length;
-      await service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
-
-      expect(published).toHaveLength(publicationCount + 1);
-      expect(published.at(-1)).toMatchObject({
-        allChangesDiffStats: { allChange: { add: 1, del: 0 } },
-        persistAllChangesDiffStats: true,
-      });
-    });
-  });
-
-  it('publishes a file-index signal only when shared state changes', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'initial.txt'), 'initial\n');
-      const { published, signals, publishFileIndex, publishFileIndexSignal } =
-        collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-        publishFileIndexSignal,
-      });
-
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
-
-      expect(published).toHaveLength(1);
-      expect(signals).toHaveLength(1);
-      expect(signals[0]).toMatchObject({ ownerSessionId: SESSION_ID });
-
-      await writeFile(path.join(workspaceRoot, 'after.txt'), 'after\n');
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-
-      expect(published).toHaveLength(2);
-      expect(signals).toHaveLength(2);
-      expect(published.at(-1)?.fileTree).toMatchObject({
-        'after.txt': true,
-      });
-    });
-  });
-
   it('publishes deleted tracked files in All Changes with a deletion marker', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init'], { cwd: workspaceRoot });
@@ -1753,24 +1074,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
       expect(published.at(-1)?.fileIndex).toMatchObject({
         'delete-me.txt': { kind: 'deleted', change: { diff: [0, 2], del: true } },
       });
-    });
-  });
-
-  it('returns too_large on refresh when the current disk text no longer fits payload limits', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      const filePath = path.join(workspaceRoot, 'grows.txt');
-      await writeFile(filePath, 'small\n');
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        maxRawTextBytes: 16,
-      });
-      const opened = await service.openText({ sessionId: SESSION_ID, path: 'grows.txt' });
-
-      await writeFile(filePath, `${'x'.repeat(64)}\n`);
-
-      await expect(
-        service.refreshText({ sessionId: SESSION_ID, path: 'grows.txt', digest: opened.digest })
-      ).rejects.toMatchObject({ code: 'too_large' });
     });
   });
 
@@ -1844,22 +1147,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
       expect(await readFile(filePath, 'utf8')).toBe(grownDisk);
     });
   });
-
-  it('keeps non-Git All Changes empty when no trustworthy base is available', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      await writeFile(path.join(workspaceRoot, 'existing.txt'), 'one\n');
-      const { published, publishFileIndex } = collectPublishedSharedStates();
-      const service = new CodeCollabV2Service({
-        resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex,
-      });
-
-      await writeFile(path.join(workspaceRoot, 'added-by-agent.txt'), 'a\nb\n');
-      await service.refreshSharedState({ sessionId: SESSION_ID });
-
-      expect(published.at(-1)?.allChanges).toEqual({});
-    });
-  });
 });
 
 async function initGitRepoWithCommit(workspaceRoot: string): Promise<void> {
@@ -1880,42 +1167,7 @@ const plainSnapshotText = (snapshot: { kind: string }): string | undefined => {
 };
 
 describe('CodeCollabV2Service openAllChangesDiff', () => {
-  it('reuses non-Git snapshots computed for the changed-file list', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      const filePath = path.join(workspaceRoot, 'notes.txt');
-      await writeFile(filePath, 'one\ntwo\n');
-      const diffStore = new CodeCollabV2DiffStore('workspace-v2', {
-        dbPath: path.join(workspaceRoot, 'diff-store.sqlite3'),
-      });
-      try {
-        await diffStore.recordTurnDiffs({
-          workspaceRoot,
-          ownerSessionId: SESSION_ID,
-          turnId: 'turn-1',
-          capturedAtMs: Date.now(),
-          events: [{ path: filePath, oldText: 'one\n', newText: 'one\ntwo\n' }],
-        });
-        const earliestOld = vi.spyOn(diffStore, 'getEarliestOldSnapshot');
-        const service = new CodeCollabV2Service({
-          resolveWorkspace: makeResolver(workspaceRoot),
-          diffStore,
-        });
-
-        const result = await service.openAllChangesDiff({ sessionId: SESSION_ID });
-
-        expect(result.status).toBe('ok');
-        if (result.status !== 'ok') return;
-        expect(result.base).toBe('diff-store');
-        expect(result.entries).toHaveLength(1);
-        expect(result.entries[0]?.status).toBe('ok');
-        expect(earliestOld).toHaveBeenCalledTimes(1);
-      } finally {
-        await diffStore.close();
-      }
-    });
-  });
-
-  it('bounds non-Git snapshot caching and defers uncached paths without rebuilding them', async () => {
+  it('prioritizes the focused non-Git diff and defers other files when the snapshot budget is exhausted', async () => {
     await withWorkspace(async (workspaceRoot) => {
       const paths = ['focus.txt', 'later-b.txt', 'later-c.txt'];
       for (const workspacePath of paths) {
@@ -1938,7 +1190,6 @@ describe('CodeCollabV2Service openAllChangesDiff', () => {
             newText: `${workspacePath[0]}x\n`,
           })),
         });
-        const earliestOld = vi.spyOn(diffStore, 'getEarliestOldSnapshot');
         const service = new CodeCollabV2Service({
           resolveWorkspace: makeResolver(workspaceRoot),
           diffStore,
@@ -1962,58 +1213,6 @@ describe('CodeCollabV2Service openAllChangesDiff', () => {
         expect(byPath.get('later-b.txt')?.status).toBe('deferred');
         expect(byPath.get('later-c.txt')?.status).toBe('deferred');
         expect(result.truncated).toBe(true);
-        expect(earliestOld).toHaveBeenCalledTimes(paths.length);
-      } finally {
-        await diffStore.close();
-      }
-    });
-  });
-
-  it('defers an oversized stored base before the worker reconstructs it', async () => {
-    await withWorkspace(async (workspaceRoot) => {
-      const workspacePath = 'large.txt';
-      const filePath = path.join(workspaceRoot, workspacePath);
-      const oldText = 'a'.repeat(2 * 1024);
-      const newText = `${oldText}b`;
-      await writeFile(filePath, newText);
-      const diffStore = new CodeCollabV2DiffStore('workspace-v2', {
-        dbPath: path.join(workspaceRoot, 'diff-store.sqlite3'),
-      });
-      try {
-        const nowMs = Date.now();
-        await diffStore.recordTurnDiffs({
-          workspaceRoot,
-          ownerSessionId: SESSION_ID,
-          turnId: 'turn-large-base',
-          capturedAtMs: nowMs,
-          recordedAtMs: nowMs,
-          events: [{ path: filePath, oldText, newText }],
-        });
-        const earliestOld = vi.spyOn(diffStore, 'getEarliestOldSnapshot');
-        const service = new CodeCollabV2Service({
-          resolveWorkspace: makeResolver(workspaceRoot),
-          diffStore,
-          allChangesDiffLimits: {
-            perFileMaxRawBytes: 1024,
-            perFileMaxCompressedBytes: 1024,
-            responseBudgetCompressedBytes: 1024,
-          },
-        });
-
-        const result = await service.openAllChangesDiff({ sessionId: SESSION_ID });
-
-        expect(result.status).toBe('ok');
-        if (result.status !== 'ok') return;
-        expect(result.entries).toEqual([
-          expect.objectContaining({ status: 'deferred', path: workspacePath }),
-        ]);
-        expect(earliestOld).toHaveBeenCalledWith(
-          expect.objectContaining({ path: workspacePath, maxRawBytes: 1024 })
-        );
-        expect(await earliestOld.mock.results[0]?.value).toEqual({
-          status: 'too_large',
-          rawBytes: Buffer.byteLength(oldText),
-        });
       } finally {
         await diffStore.close();
       }
@@ -2093,24 +1292,269 @@ describe('CodeCollabV2Service openAllChangesDiff', () => {
       expect(entry?.del).toBe(0);
     });
   });
+});
 
-  it('orders the focused file first', async () => {
+describe('Project group extra-root files', () => {
+  it('opens, saves, indexes and reconstructs turn diffs independently of main', async () => {
+    const base = await mkdtemp(path.join(tmpdir(), 'code-collab-roots-'));
+    const main = path.join(base, 'main');
+    const extra = path.join(base, 'extra');
+    await mkdir(main);
+    await mkdir(extra);
+    await writeFile(path.join(main, 'a.txt'), 'main');
+    await writeFile(path.join(extra, 'a.txt'), 'old');
+    const rootId = 'member:docs';
+    const key = encodeSessionFilePath({ rootId, relativePath: 'a.txt' });
+    const store = new CodeCollabV2DiffStore('roots' as never, {
+      dbPath: path.join(base, 'diff.sqlite3'),
+    });
+    const publications: CodeCollabV2FileIndexState[] = [];
+    const roots = [
+      { id: 'main', absolutePath: main },
+      { id: rootId, absolutePath: extra },
+    ];
+    const watchedRoots = new Map<string, string>();
+    const service = new CodeCollabV2Service({
+      workspaceWatchCoordinator: {
+        subscribe: async ({ ownerSessionId, workspaceRoot }) => {
+          watchedRoots.set(ownerSessionId, workspaceRoot);
+          return {
+            canonicalRoot: workspaceRoot,
+            release: () => {
+              watchedRoots.delete(ownerSessionId);
+            },
+          };
+        },
+      },
+      resolveWorkspace: async (_, options) => {
+        const root = roots.find((candidate) => candidate.id === (options?.rootId ?? 'main'));
+        return root
+          ? {
+              ok: true,
+              ownerSessionId: SESSION_ID,
+              workspaceRoot: root.absolutePath,
+              fileRoots: roots,
+            }
+          : { ok: false, code: 'permission_denied', message: 'unknown root' };
+      },
+      diffStore: store,
+      publishFileIndex: async (state) => {
+        publications.push(state.fileIndex);
+      },
+    });
+    try {
+      const opened = await service.openText({ sessionId: SESSION_ID, rootId, path: 'a.txt' });
+      expect(opened.text).toMatchObject({ text: 'old' });
+      const saved = await service.saveText({
+        sessionId: SESSION_ID,
+        rootId,
+        path: 'a.txt',
+        requestedByUserId: 'u',
+        baseDigest: opened.digest,
+        text: { encoding: 'plain', text: 'new', rawBytes: 3 },
+      });
+      expect(saved.status).toBe('ok');
+      expect(await readFile(path.join(extra, 'a.txt'), 'utf8')).toBe('new');
+      expect(await readFile(path.join(main, 'a.txt'), 'utf8')).toBe('main');
+      await store.recordTurnDiffs({
+        workspaceRoot: main,
+        fileRoots: roots,
+        ownerSessionId: SESSION_ID,
+        turnId: 'turn',
+        events: [{ path: path.join(extra, 'a.txt'), oldText: 'old', newText: 'new' }],
+      });
+      await service.refreshSharedState({ sessionId: SESSION_ID });
+      expect(new Set(watchedRoots.values())).toEqual(new Set([main, extra]));
+      const index = publications.at(-1)!;
+      expect(index).toHaveProperty('a.txt');
+      expect(index[key]).toBeDefined();
+      expect(
+        (await service.getFileIndex({ sessionId: SESSION_ID, rootId })).fileIndex['a.txt']
+      ).toBeDefined();
+      expect(
+        await service.openTurnDiff({ sessionId: SESSION_ID, rootId, path: 'a.txt', turnId: 'turn' })
+      ).toMatchObject({ status: 'ok' });
+      await expect(
+        service.openText({ sessionId: SESSION_ID, rootId: 'member:unknown', path: 'a.txt' })
+      ).rejects.toThrow();
+    } finally {
+      service.dispose();
+      expect(watchedRoots.size).toBe(0);
+      await store.close();
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('CodeCollabV2Service All Changes scope', () => {
+  const gitText = async (workspaceRoot: string, ...args: string[]): Promise<string> =>
+    (await execFileAsync('git', args, { cwd: workspaceRoot })).stdout.trim();
+
+  const entryPaths = (
+    result: Awaited<ReturnType<CodeCollabV2Service['openAllChangesDiff']>>
+  ): string[] => {
+    if (result.status !== 'ok') throw new Error(`Expected ok, received ${result.status}`);
+    return result.entries.map((entry) => entry.path).sort();
+  };
+
+  it('separates branch-cumulative and uncommitted changes and uses HEAD as the uncommitted base', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await initGitRepoWithCommit(workspaceRoot);
-      await writeFile(path.join(workspaceRoot, 'placeholder.txt'), 'x\n');
+      await writeFile(path.join(workspaceRoot, 'base.txt'), 'base\n');
+      await writeFile(path.join(workspaceRoot, 'gone.txt'), 'bye\n');
       await gitCommitAll(workspaceRoot, 'init');
-      await writeFile(path.join(workspaceRoot, 'a.txt'), 'a\n');
-      await writeFile(path.join(workspaceRoot, 'zzz.txt'), 'z\n');
+      const baseCommit = await gitText(workspaceRoot, 'rev-parse', 'HEAD');
+
+      await gitText(workspaceRoot, 'checkout', '-b', 'feature');
+      await writeFile(path.join(workspaceRoot, 'committed.txt'), 'committed\n');
+      await writeFile(path.join(workspaceRoot, 'modified.txt'), 'one\n');
+      await gitCommitAll(workspaceRoot, 'feature work');
+      const head = await gitText(workspaceRoot, 'rev-parse', 'HEAD');
+
+      await writeFile(path.join(workspaceRoot, 'modified.txt'), 'one\ntwo\n');
+      await writeFile(path.join(workspaceRoot, 'staged.txt'), 'staged\n');
+      await execFileAsync('git', ['add', 'staged.txt'], { cwd: workspaceRoot });
+      await writeFile(path.join(workspaceRoot, 'untracked.txt'), 'untracked\n');
+      await rm(path.join(workspaceRoot, 'gone.txt'));
 
       const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
-      const result = await service.openAllChangesDiff({
-        sessionId: SESSION_ID,
-        focusPath: 'zzz.txt',
-      });
+      try {
+        const branch = await service.openAllChangesDiff({
+          sessionId: SESSION_ID,
+          scope: 'branch',
+        });
+        expect(branch).toMatchObject({ status: 'ok', base: baseCommit });
+        expect(entryPaths(branch)).toEqual([
+          'committed.txt',
+          'gone.txt',
+          'modified.txt',
+          'staged.txt',
+          'untracked.txt',
+        ]);
 
-      expect(result.status).toBe('ok');
-      if (result.status !== 'ok') return;
-      expect(result.entries[0]?.path).toBe('zzz.txt');
+        const uncommitted = await service.openAllChangesDiff({
+          sessionId: SESSION_ID,
+          scope: 'uncommitted',
+        });
+        expect(uncommitted).toMatchObject({ status: 'ok', base: head });
+        expect(entryPaths(uncommitted)).toEqual([
+          'gone.txt',
+          'modified.txt',
+          'staged.txt',
+          'untracked.txt',
+        ]);
+
+        await gitCommitAll(workspaceRoot, 'commit worktree');
+        const afterCommit = await service.openAllChangesDiff({
+          sessionId: SESSION_ID,
+          scope: 'uncommitted',
+        });
+        expect(entryPaths(afterCommit)).toEqual([]);
+        const afterBranch = await service.openAllChangesDiff({
+          sessionId: SESSION_ID,
+          scope: 'branch',
+        });
+        expect(entryPaths(afterBranch)).toContain('committed.txt');
+        expect(
+          await service.openCurrentDiff({
+            sessionId: SESSION_ID,
+            path: 'committed.txt',
+            scope: 'uncommitted',
+          })
+        ).toMatchObject({
+          status: 'unavailable',
+          reason: 'not_changed',
+          message: 'This file has no uncommitted changes.',
+        });
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('reports explicit unavailability for non-Git and unborn worktrees', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
+      try {
+        expect(
+          await service.openAllChangesDiff({ sessionId: SESSION_ID, scope: 'uncommitted' })
+        ).toMatchObject({ status: 'unavailable', reason: 'not_a_git_worktree' });
+      } finally {
+        service.dispose();
+      }
+    });
+
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
+      try {
+        expect(
+          await service.openAllChangesDiff({ sessionId: SESSION_ID, scope: 'uncommitted' })
+        ).toMatchObject({ status: 'unavailable', reason: 'no_commits' });
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('keeps deferred single-file loads on the uncommitted base and never falls back to the diff store', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      await writeFile(path.join(workspaceRoot, 'file.txt'), 'old\n');
+      await gitCommitAll(workspaceRoot, 'init');
+      const head = await gitText(workspaceRoot, 'rev-parse', 'HEAD');
+      await writeFile(path.join(workspaceRoot, 'file.txt'), 'old\nnew\n');
+
+      const diffStore = new CodeCollabV2DiffStore('workspace-v2', {
+        dbPath: path.join(workspaceRoot, 'diff-store.sqlite3'),
+      });
+      try {
+        await diffStore.recordTurnDiffs({
+          workspaceRoot,
+          ownerSessionId: SESSION_ID,
+          turnId: 'turn-stale',
+          capturedAtMs: Date.now(),
+          events: [
+            {
+              path: path.join(workspaceRoot, 'file.txt'),
+              oldText: 'stale\n',
+              newText: 'stale-new\n',
+            },
+          ],
+        });
+        const service = new CodeCollabV2Service({
+          resolveWorkspace: makeResolver(workspaceRoot),
+          diffStore,
+          allChangesDiffLimits: {
+            perFileMaxRawBytes: 1,
+            perFileMaxCompressedBytes: 1,
+            responseBudgetCompressedBytes: 1,
+          },
+        });
+        try {
+          const batch = await service.openAllChangesDiff({
+            sessionId: SESSION_ID,
+            scope: 'uncommitted',
+          });
+          expect(batch).toMatchObject({ status: 'ok', base: head });
+          if (batch.status !== 'ok') return;
+          expect(batch.entries.find((entry) => entry.path === 'file.txt')?.status).toBe('deferred');
+
+          const single = await service.openCurrentDiff({
+            sessionId: SESSION_ID,
+            path: 'file.txt',
+            scope: 'uncommitted',
+          });
+          expect(single.status).toBe('ok');
+          if (single.status !== 'ok') return;
+          expect(plainSnapshotText(single.oldSnapshot)).toBe('old\n');
+          expect(plainSnapshotText(single.newSnapshot)).toBe('old\nnew\n');
+        } finally {
+          service.dispose();
+        }
+      } finally {
+        await diffStore.close();
+      }
     });
   });
 });

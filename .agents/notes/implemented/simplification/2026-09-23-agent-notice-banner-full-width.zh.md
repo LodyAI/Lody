@@ -5,6 +5,9 @@ Translation: current
 
 [English](2026-09-23-agent-notice-banner-full-width.md)
 
+后续变更：关于语义色描边与混合填充的句子已由
+[软色块](2026-10-27-agent-notice-soft-well.md) 取代；宽度与折叠的决策仍然有效。
+
 ## 摘要
 
 `AgentNoticeBanner`——`chat_failed` 与 `agent_warning` 共用的唯一界面——原本是

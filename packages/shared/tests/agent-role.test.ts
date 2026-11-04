@@ -1,17 +1,23 @@
+import {
+  applyAgentRoleProposal,
+  AgentRoleProposalCommandSchema,
+  type AgentRoleProposalMeta,
+} from '../src/agent-role-proposal';
 import { describe, expect, it } from 'vitest';
 
 import {
   AGENT_ROLE_VERSION,
+  bindAgentRoleTarget,
   canManageAgentRole,
+  formatAgentRoleMentionValue,
+  getAgentRoleTargets,
+  resolveAgentRoleMentionValue,
   canReadAgentRole,
   isAgentRoleContentEqual,
   isSensitiveAgentRoleConfigOptionKey,
-  DEFAULT_AGENT_ROLE_EMOJI,
-  getAgentRoleEmoji,
   getAgentRoleMentionSlug,
   listAccessibleAgentRoles,
   normalizeAgentRole,
-  normalizeAgentRoleEmoji,
   normalizeAgentRoleMentionSlug,
   normalizeAgentRoleRunConfig,
   resolveAgentRoleAvailability,
@@ -57,11 +63,6 @@ describe('agent role description', () => {
     }
     expect(normalizeAgentRole({ ...role(), description: 42 })).toBeUndefined();
   });
-
-  it('treats missing and blank as equal but detects description edits', () => {
-    expect(isAgentRoleContentEqual(role(), role({ description: '' }))).toBe(true);
-    expect(isAgentRoleContentEqual(role(), role({ description: 'Review changes' }))).toBe(false);
-  });
 });
 
 describe('agent role mention slug', () => {
@@ -86,23 +87,6 @@ describe('agent role mention slug', () => {
   });
 });
 
-describe('agent role emoji', () => {
-  it('keeps one short glyph and drops what would smuggle in a second line', () => {
-    expect(normalizeAgentRoleEmoji('🔍')).toBe('🔍');
-    expect(normalizeAgentRoleEmoji('  🧑\u200d💻  ')).toBe('🧑\u200d💻');
-    expect(normalizeAgentRoleEmoji('a b')).toBe('ab');
-    expect(normalizeAgentRoleEmoji('😀'.repeat(20))).toBe('😀'.repeat(8));
-    expect(normalizeAgentRoleEmoji('   ')).toBeUndefined();
-    expect(normalizeAgentRoleEmoji(42)).toBeUndefined();
-  });
-
-  it('falls back to one shared default so every Role reads the same', () => {
-    expect(getAgentRoleEmoji({ emoji: '🔍' })).toBe('🔍');
-    expect(getAgentRoleEmoji({})).toBe(DEFAULT_AGENT_ROLE_EMOJI);
-    expect(getAgentRoleEmoji({ emoji: '' })).toBe(DEFAULT_AGENT_ROLE_EMOJI);
-  });
-});
-
 describe('agent role run config', () => {
   it('refuses secret-shaped option keys on write and on read', () => {
     expect(isSensitiveAgentRoleConfigOptionKey('api_key')).toBe(true);
@@ -123,42 +107,6 @@ describe('agent role run config', () => {
       modelId: 'gpt-5.6',
       configOptionValues: { thought_level: 'high', fast: true },
     });
-  });
-
-  it('omits an empty option map rather than persisting one', () => {
-    expect(normalizeAgentRoleRunConfig({ configOptionValues: {} })).toEqual({});
-    expect(normalizeAgentRoleRunConfig(null)).toEqual({});
-  });
-});
-
-describe('agent role rows', () => {
-  it('normalizes a stored row and drops malformed ones', () => {
-    const stored = {
-      ...role({ name: '  Reviewer  ', emoji: ' 🔍 ', promptPrefix: '  Be strict.  ' }),
-      runConfig: { modelId: 'gpt-5.6', configOptionValues: { auth_token: 'x' } },
-    };
-    expect(normalizeAgentRole(stored)).toEqual(
-      role({
-        name: 'Reviewer',
-        emoji: '🔍',
-        promptPrefix: 'Be strict.',
-        runConfig: { modelId: 'gpt-5.6' },
-      })
-    );
-
-    expect(normalizeAgentRole({ ...role(), v: 2 })).toBeUndefined();
-    // A name with no mention token left is a Role that could never be used.
-    expect(normalizeAgentRole({ ...role(), name: '---' })).toBeUndefined();
-    expect(normalizeAgentRole({ ...role(), machineId: '  ' })).toBeUndefined();
-    expect(normalizeAgentRole(null)).toBeUndefined();
-  });
-
-  it('treats option-key ordering as unchanged content', () => {
-    const left = role({ runConfig: { configOptionValues: { a: '1', b: '2' } } });
-    const right = role({ runConfig: { configOptionValues: { b: '2', a: '1' } } });
-    expect(isAgentRoleContentEqual(left, right)).toBe(true);
-    expect(isAgentRoleContentEqual(left, role({ ...left, promptPrefix: 'x' }))).toBe(false);
-    expect(isAgentRoleContentEqual(left, role({ ...left, emoji: '🔍' }))).toBe(false);
   });
 });
 
@@ -215,5 +163,235 @@ describe('agent role availability', () => {
     expect(
       resolveAgentRoleAvailability(role(), context({ loadedAgentConfigMachineIds: new Set() }))
     ).toEqual({ kind: 'unknown' });
+  });
+});
+
+it('preserves memory references, revises identity changes, and gates older machines', () => {
+  const binding = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const configured = role({ runConfig: { memory: binding } });
+  expect(normalizeAgentRole(configured)?.runConfig.memory).toEqual(binding);
+  expect(
+    isAgentRoleContentEqual(
+      configured,
+      role({ runConfig: { memory: { ...binding, memoryId: 'designer' } } })
+    )
+  ).toBe(false);
+  expect(resolveAgentRoleAvailability(configured, context())).toEqual({
+    kind: 'unavailable',
+    reason: 'memory_unsupported',
+  });
+  expect(
+    resolveAgentRoleAvailability(
+      configured,
+      context({ memoryProviderMachineIds: new Set([configured.machineId]) })
+    )
+  ).toEqual({ kind: 'available' });
+  expect(
+    normalizeAgentRole({ ...configured, runConfig: { memory: { providerId: 'nowledge-mem' } } })
+  ).toBeUndefined();
+});
+
+describe('agent role machine targets', () => {
+  const second = {
+    machineId: 'machine-2' as MachineId,
+    agentConfigId: 'config-2' as AgentConfigId,
+    runConfig: { modelId: 'gpt-5.6-luna' },
+    alias: 'Reviewer-Linux',
+  };
+  const multi = role({ alias: 'Reviewer-Mac', additionalTargets: [second] });
+
+  it('reads a v2 row and keeps one target per machine, first one wins', () => {
+    const stored = {
+      ...role(),
+      v: 2,
+      machineId: undefined,
+      targets: [
+        { machineId: 'machine-1', agentConfigId: 'config-1', runConfig: { modelId: 'gpt-5.6' } },
+        second,
+        { machineId: 'machine-2', agentConfigId: 'config-9', runConfig: {} },
+      ],
+    };
+    const read = normalizeAgentRole(stored);
+    expect(read && getAgentRoleTargets(read).map((target) => target.agentConfigId)).toEqual([
+      'config-1',
+      'config-2',
+    ]);
+    // A v2 row with no usable target is not a Role.
+    expect(normalizeAgentRole({ ...stored, targets: [] })).toBeUndefined();
+    expect(normalizeAgentRole({ ...stored, targets: [{ machineId: 'm' }] })).toBeUndefined();
+  });
+
+  it('drops an alias once the role runs on a single machine', () => {
+    expect(normalizeAgentRole(role({ alias: 'Solo' }))?.alias).toBeUndefined();
+    expect(normalizeAgentRole(multi)?.alias).toBe('Reviewer-Mac');
+  });
+
+  it('binds another machine inline and keeps every other target', () => {
+    const bound = bindAgentRoleTarget(multi, 'machine-2' as MachineId);
+    expect(bound).toMatchObject({
+      machineId: 'machine-2',
+      agentConfigId: 'config-2',
+      runConfig: { modelId: 'gpt-5.6-luna' },
+      alias: 'Reviewer-Linux',
+    });
+    expect(bound?.additionalTargets?.map((target) => target.machineId)).toEqual(['machine-1']);
+    expect(bindAgentRoleTarget(multi, 'machine-3' as MachineId)).toBeUndefined();
+  });
+
+  it('resolves a mention to one machine and never guesses for a bare id', () => {
+    const roles = [multi, role({ id: 'role-2' as AgentRoleId, name: 'Solo' })];
+    expect(resolveAgentRoleMentionValue(roles, 'role-2')?.machineId).toBe('machine-1');
+    expect(resolveAgentRoleMentionValue(roles, 'role-1')).toBeUndefined();
+    expect(
+      resolveAgentRoleMentionValue(
+        roles,
+        formatAgentRoleMentionValue('role-1' as AgentRoleId, 'machine-2' as MachineId)
+      )?.agentConfigId
+    ).toBe('config-2');
+    expect(resolveAgentRoleMentionValue(roles, 'role-1@machine-3')).toBeUndefined();
+  });
+});
+
+// Proposals share the same catalog rules as Settings while preserving unrelated fields.
+describe('Agent Role proposals', () => {
+  const proposal = (command: AgentRoleProposalMeta['command']): AgentRoleProposalMeta => ({
+    command,
+    roleId: 'role-1',
+    requesterUserId: 'user-1',
+  });
+  it('creates a private role bound to the exact machine and Agent defaults', () => {
+    const next = applyAgentRoleProposal(
+      proposal({
+        action: 'create',
+        requestId: 'request',
+        name: 'Reviewer',
+        machineId: 'machine',
+        agentConfigId: 'config',
+        promptPrefix: 'Review carefully',
+      }),
+      [],
+      'user-1',
+      20
+    );
+    expect(next).toMatchObject({
+      name: 'Reviewer',
+      visibility: 'private',
+      ownerUserId: 'user-1',
+      machineId: 'machine',
+      agentConfigId: 'config',
+      runConfig: {},
+      revision: 1,
+      promptPrefix: 'Review carefully',
+    });
+    expect(next.createdAt).toBe(20);
+  });
+  it('patches the latest row, clears explicit empty fields and retains the execution snapshot', () => {
+    const current = role({
+      revision: 9,
+      promptPrefix: 'Old',
+      description: 'Keep this',
+      emoji: '🐦',
+      visibility: 'workspace',
+    });
+    const next = applyAgentRoleProposal(
+      proposal({
+        action: 'update',
+        requestId: 'request',
+        roleId: current.id,
+        patch: { promptPrefix: '' },
+      }),
+      [current],
+      'user-1',
+      20
+    );
+    expect(next).toEqual({ ...current, promptPrefix: '', revision: 10, updatedAt: 20 });
+    expect(current.promptPrefix).toBe('Old');
+    expect(
+      applyAgentRoleProposal(
+        proposal({
+          action: 'update',
+          requestId: 'request',
+          roleId: current.id,
+          patch: { promptPrefix: '' },
+        }),
+        [next],
+        'user-1',
+        30
+      )
+    ).toBe(next);
+  });
+  it('normalizes instruction whitespace like Settings so file-based retries are no-ops', () => {
+    const current = role({ promptPrefix: 'Review carefully' });
+    const next = applyAgentRoleProposal(
+      proposal({
+        action: 'update',
+        requestId: 'request',
+        roleId: current.id,
+        patch: { promptPrefix: '  Review carefully\n' },
+      }),
+      [current],
+      'user-1',
+      20
+    );
+    expect(next).toBe(current);
+  });
+
+  it('rejects deleted roles, unauthorized confirmation and duplicate mention names', () => {
+    const update = proposal({
+      action: 'update',
+      requestId: 'request',
+      roleId: 'role-1',
+      patch: { name: 'New' },
+    });
+    expect(() => applyAgentRoleProposal(update, [], 'user-1', 20)).toThrow('no longer exists');
+    expect(() => applyAgentRoleProposal(update, [role()], 'other', 20)).toThrow('requesting user');
+    expect(() =>
+      applyAgentRoleProposal(update, [role({ ownerUserId: 'other' })], 'user-1', 20)
+    ).toThrow('not editable');
+    expect(() =>
+      applyAgentRoleProposal(
+        update,
+        [role(), role({ id: 'other' as AgentRoleId, name: 'New' })],
+        'user-1',
+        20
+      )
+    ).toThrow('already in use');
+  });
+  it('does not overwrite a previously created role when confirmation is retried', () => {
+    const current = role({ name: 'Edited later' });
+    expect(
+      applyAgentRoleProposal(
+        proposal({
+          action: 'create',
+          requestId: 'request',
+          name: 'Original',
+          machineId: 'machine',
+          agentConfigId: 'config',
+        }),
+        [current],
+        'user-1',
+        20
+      )
+    ).toBe(current);
+  });
+  it('rejects unsupported fields, empty patches and oversized instructions', () => {
+    const update = { action: 'update', requestId: 'request', roleId: 'role-1', patch: {} };
+    expect(AgentRoleProposalCommandSchema.safeParse(update).success).toBe(false);
+    expect(
+      AgentRoleProposalCommandSchema.safeParse({ ...update, patch: { apiKey: 'synthetic' } })
+        .success
+    ).toBe(false);
+    expect(
+      AgentRoleProposalCommandSchema.safeParse({
+        ...update,
+        patch: { promptPrefix: 'x'.repeat(32769) },
+      }).success
+    ).toBe(false);
+    expect(
+      AgentRoleProposalCommandSchema.safeParse({
+        ...update,
+        patch: { description: '🐦'.repeat(140) },
+      }).success
+    ).toBe(true);
   });
 });

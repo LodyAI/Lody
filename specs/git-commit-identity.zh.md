@@ -23,7 +23,7 @@ Git 身份；下一次查询可以重试。晚到的结果不得覆盖更新的�
 与 committer 环境变量。GitHub 鉴权仍是独立的、绑定请求者的决策，不会改变 commit 对象
 中的 author 或 committer。
 
-切换请求者或 Git identity 不得触发 ACP 进程或 sandbox 重启，包括已 adopt 的预启动 session。
+切换请求者或 Git identity 不得触发 ACP 进程或 sandbox 重启。
 新身份会更新 host Session 配置，供此后经该配置启动的命令使用。已运行 ACP 仍持有启动时的
 环境，其自行启动的 Git 命令可能继续使用旧身份。无重启的身份传播尚未实现。
 

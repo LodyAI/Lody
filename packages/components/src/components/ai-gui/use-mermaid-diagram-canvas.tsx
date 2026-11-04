@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { Maximize2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { applyMermaidColors, resolveMermaidColors } from './markdown-mermaid';
 import type { MermaidDiagramSelection } from './mermaid-diagram-viewer';
 import {
   applyCanvasTransform,
@@ -181,6 +182,8 @@ export function useMermaidDiagramCanvas({
       const clone = svg.cloneNode(true) as SVGSVGElement;
       // The viewer starts at natural size without changing the inline view.
       applyCanvasTransform(clone, MERMAID_CANVAS_IDENTITY);
+      // The viewer is portalled out of the themed block; keep its colors.
+      applyMermaidColors(clone, resolveMermaidColors(svg));
       setSelection({
         svg: clone,
         naturalWidth: rect.width / scale,

@@ -1,3 +1,4 @@
+import { closeLoginShellApplicationLegacy } from '@/agent/login-shell-env';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import os from 'os';
@@ -72,8 +73,10 @@ import { createLocalCloudPort, type CloudPort, type PlatformKind } from '@lody/p
 import { createCloudCliPort } from '@/lib/cloud-cli-port';
 import { configureManagedAgentRuntimeManager } from '@/agent/managed-agent-runtime';
 import { configureManagedRuntimeUpdateCoordinator } from '@/agent/managed-runtime-update-coordinator';
+import { hasBuiltinAgentCredentials } from './builtin-agent-credentials';
 
 type StartAuthMethod =
+  | 'e2ee_machine_service'
   | 'api_key'
   | 'machine_pairing'
   | 'device_auth'
@@ -87,6 +90,7 @@ interface StartOptions {
   machineName?: string;
   heartbeatLog?: boolean;
   auth?: string;
+  pairedWorkspace?: string;
 }
 
 const EXIT_CODE_ALREADY_RUNNING = 3;
@@ -117,6 +121,10 @@ export const startCommand = new Command('start')
   )
   .option('--debug', 'enable debug output')
   .option('--heartbeat-log', 'output current timestamp every 5 seconds')
+  .option(
+    '--paired-workspace <account/workspace>',
+    'Run only an already paired encrypted workspace, without account login'
+  )
   .option('--auth <credential>', 'Connect with a CLI API key or machine connection token')
   .action(async (options: StartOptions) => {
     createHybridLogger({ level: options.debug ? 'debug' : 'info' });
@@ -205,14 +213,10 @@ export const startCommand = new Command('start')
       logger.info('Starting in local platform mode (no account, no cloud services).');
     }
 
-    const startupTimeSync =
-      platformKind !== 'local' && LODY_SERVER_URL
-        ? syncCliServerTime(logger, LODY_SERVER_URL)
-        : undefined;
-
     const machineNameOverride = options.machineName?.trim();
     const defaultMachineName = machineNameOverride || os.hostname();
-    const authClient = platformKind === 'cloud' ? new AuthClient(logger) : null;
+    const authClient =
+      platformKind === 'cloud' && !options.pairedWorkspace ? new AuthClient(logger) : null;
     const requireCloudAuthClient = (): AuthClient => {
       if (!authClient) {
         throw new Error('Cloud authentication is not available on the local platform');
@@ -232,9 +236,9 @@ export const startCommand = new Command('start')
 
     const cliDetectionStartedAt = Date.now();
     const cliAvailability = {
-      kimi: 'managed-runtime',
+      kimi: hasBuiltinAgentCredentials('kimi') && 'configured',
       pi: 'managed-runtime',
-      grok: 'managed-runtime',
+      grok: hasBuiltinAgentCredentials('grok') && 'configured',
       devin: 'managed-runtime',
       claude: checkClaude(),
       codex: checkCodex(),
@@ -244,8 +248,8 @@ export const startCommand = new Command('start')
     );
     logCliDetectionResults(logger, cliAvailability);
     captureAgentServiceEvent('agent_service_cli_detection', {
-      kimi_available: true,
-      grok_available: true,
+      kimi_available: Boolean(cliAvailability.kimi),
+      grok_available: Boolean(cliAvailability.grok),
       claude_available: Boolean(cliAvailability.claude),
       codex_available: Boolean(cliAvailability.codex),
     });
@@ -336,7 +340,11 @@ export const startCommand = new Command('start')
     let machineId: string;
     let machineName: string;
     let authMethod: StartAuthMethod = 'existing_credentials';
-    const existingAuth = authClient?.getAuthInfo() ?? null;
+    const existingAuth = options.pairedWorkspace ? null : (authClient?.getAuthInfo() ?? null);
+    if (options.pairedWorkspace && (platformKind !== 'cloud' || options.auth !== undefined))
+      throw new Error(
+        'Paired workspace mode requires cloud composition and cannot use account authentication.'
+      );
 
     if (options.auth !== undefined && !providedAuth) {
       logger.error('Missing credential for --auth.');
@@ -347,7 +355,15 @@ export const startCommand = new Command('start')
       process.exit(1);
     }
 
-    if (platformKind === 'local') {
+    if (options.pairedWorkspace) {
+      const { loadCliE2eeMachineBootstrapLegacy } = await import('@/lib/e2ee/workspace-legacy');
+      machineId = await getOrCreateStableMachineIdAsync();
+      const paired = await loadCliE2eeMachineBootstrapLegacy(options.pairedWorkspace, machineId);
+      token = '';
+      userId = paired.bootstrap.accountId;
+      machineName = defaultMachineName;
+      authMethod = 'e2ee_machine_service';
+    } else if (platformKind === 'local') {
       // No account exists on the local platform: author everything under the
       // persisted synthetic identity. The empty token is safe because every
       // cloud endpoint env was blanked above, so token consumers are inert.
@@ -445,6 +461,12 @@ export const startCommand = new Command('start')
     );
 
     const recoverRejectedCredential = async (): Promise<RejectedCredentialRecovery> => {
+      if (options.pairedWorkspace) {
+        logger.error(
+          'Machine access was revoked or its protected credential is unavailable. Pair the machine again.'
+        );
+        return { exitCode: authFailureExitCode, reason: 'Machine access revoked; pair again' };
+      }
       const cleanup = requireCloudAuthClient().clearRejectedToken(token);
       const recovery = resolveRejectedCredentialRecovery({
         cleanup,
@@ -465,6 +487,10 @@ export const startCommand = new Command('start')
       return recovery;
     };
 
+    const startupTimeSync =
+      !options.pairedWorkspace && platformKind !== 'local' && LODY_SERVER_URL
+        ? syncCliServerTime(logger, LODY_SERVER_URL)
+        : undefined;
     try {
       await startAgentService(
         options,
@@ -485,6 +511,7 @@ export const startCommand = new Command('start')
         platformKind
       );
     } catch (error) {
+      await startupTimeSync?.stop();
       captureAgentServiceEvent('agent_service_startup_failed', {
         failure_stage: runtimeStateReporter.snapshot().startupStage ?? 'unknown',
       });
@@ -516,7 +543,7 @@ async function startAgentService(
   logger: Logger,
   runtimeStateReporter: CliRuntimeStateReporter,
   authMethod: StartAuthMethod,
-  startupTimeSync: Promise<void> | undefined,
+  startupTimeSync: ReturnType<typeof syncCliServerTime> | undefined,
   recoverRejectedCredential: () => Promise<RejectedCredentialRecovery>,
   foregroundHostLease: LocalCliHostLease | null,
   supervisorIdentity: LocalSupervisorIdentity | null,
@@ -554,7 +581,24 @@ async function startAgentService(
     null;
 
   let cloudPort: CloudPort;
-  if (platformKind === 'local') {
+  if (options.pairedWorkspace) {
+    if (!LODY_SERVER_URL) {
+      throw new Error('Cloud platform startup requires LODY_SERVER_URL');
+    }
+    const { loadCliE2eeMachineBootstrapLegacy } = await import('@/lib/e2ee/workspace-legacy');
+    const paired = await loadCliE2eeMachineBootstrapLegacy(options.pairedWorkspace, machineId);
+    const { createCloudE2eeMachinePort } = await import('@/lib/cloud-cli-port');
+    cloudPort = createCloudE2eeMachinePort({
+      accountId: userId,
+      workspaceId: paired.bootstrap.workspaceId,
+      genesisHash: paired.bootstrap.genesisHash,
+      machineId,
+      credential: paired.credential,
+      authBaseUrl: paired.bootstrap.deploymentUrl,
+      serverBaseUrl: LODY_SERVER_URL,
+      logger,
+    });
+  } else if (platformKind === 'local') {
     cloudPort = createLocalCloudPort({
       identity: { userId },
       workspaces: [],
@@ -599,7 +643,8 @@ async function startAgentService(
       machineName,
       runtimeStateReporter,
       cloudPort,
-      startupTimeSync,
+      ...(options.pairedWorkspace ? { localFirstBootstrap: false } : {}),
+      startupTimeSync: startupTimeSync?.ready,
       machineLifecycleCapability,
       onFatalAuthFailure: (error) => triggerFatalAuthShutdown?.(error),
       onProcessLifecycleAction: (action) => triggerProcessLifecycleAction?.(action),
@@ -615,10 +660,28 @@ async function startAgentService(
     foregroundHostLease = null;
     await lease?.close();
   };
+  const stopDaemonAndApplication = async () => {
+    await fleet.prepareForShutdown();
+    const failures: unknown[] = [];
+    for (const stop of [
+      () => startupTimeSync?.stop(),
+      () => managedRuntimeUpdates.shutdown(),
+      () => fleet.shutdown(),
+      closeLoginShellApplicationLegacy,
+    ]) {
+      try {
+        await stop();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, 'Daemon and application cleanup failed');
+  };
   registerProcessCleanup(async () => {
     eventLoopLagMonitor.stop();
-    await managedRuntimeUpdates.shutdown();
-    await fleet.shutdown();
+    await stopDaemonAndApplication();
     await closeForegroundHostLease();
   });
   const shutdownSignals: NodeJS.Signals[] =
@@ -635,8 +698,7 @@ async function startAgentService(
       unregisterProcessCleanup();
       stopActivePing();
       eventLoopLagMonitor.stop();
-      await managedRuntimeUpdates.shutdown();
-      await fleet.shutdown();
+      await stopDaemonAndApplication();
       await closeForegroundHostLease();
     },
     flushTelemetry: async () => {
@@ -738,6 +800,7 @@ async function startAgentService(
     // 保持进程活跃
     await new Promise<void>(() => {});
   } catch (error) {
+    let failure = error;
     unregisterSupervisorControl();
     runtimeStateReporter.upsertIssue({
       code: 'agent_service_failed',
@@ -749,15 +812,16 @@ async function startAgentService(
     unregisterProcessCleanup();
     stopActivePing();
     eventLoopLagMonitor.stop();
-    await managedRuntimeUpdates.shutdown();
-    await fleet.shutdown().catch((err: unknown) => {
-      logger.error('Cleanup failed:', err);
-    });
+    try {
+      await stopDaemonAndApplication();
+    } catch (cleanupError) {
+      failure = new AggregateError([error, cleanupError], 'Startup and resource cleanup failed');
+    }
     await closeForegroundHostLease();
-    await reportError('start:agent', error, {
+    await reportError('start:agent', failure, {
       message: 'Agent service failed to start',
       logger,
     });
-    throw error;
+    throw failure;
   }
 }

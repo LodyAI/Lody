@@ -1,3 +1,4 @@
+import { nativeScrollbar } from '../scroll-area/surface';
 import { Select as BaseSelect } from '@base-ui/react/select';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
@@ -305,7 +306,7 @@ export const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(func
           >
             <ChevronUpGlyph />
           </BaseSelect.ScrollUpArrow>
-          <BaseSelect.List className={stylex.props(surface.list).className}>
+          <BaseSelect.List className={stylex.props(surface.list, nativeScrollbar).className}>
             {children}
           </BaseSelect.List>
           <BaseSelect.ScrollDownArrow

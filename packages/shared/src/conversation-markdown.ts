@@ -21,7 +21,8 @@
  * so prose-shaped content outranks everything the agent produced around it.
  *
  * **Message text is never trimmed and thinking is never dropped.** User text,
- * assistant text and proposed plans are reproduced verbatim at every level; if
+ * assistant text and proposed plans are reproduced in full at every level
+ * (apart from heading demotion and portable session-link normalization); if
  * they alone exceed the budget the result goes over and reports `overBudget`.
  * Thinking is what lets the receiving conversation inherit the reasoning, so it
  * degrades by CAPPING (head + tail, middle elided), never by disappearing.
@@ -57,6 +58,7 @@ import {
 } from './comment-reference-format';
 import type { SessionHistoryInput } from './schema';
 import { redactSensitiveTokens } from './replay-prompt-builder';
+import { normalizeSessionLinksForExport } from './session-link-export';
 
 /** Character ceiling for the copied Markdown. */
 export const CONVERSATION_MARKDOWN_MAX_CHARS = 150_000;
@@ -204,6 +206,8 @@ export interface ConversationMarkdownResult {
 }
 
 export interface BuildConversationMarkdownOptions {
+  /** Source identity for portable session links; never infer it in anonymous readers. */
+  workspaceId?: string;
   history: SessionHistoryInput[];
   /** Rendered as the document's `#` heading when present. */
   title?: string;
@@ -589,7 +593,7 @@ function summarizeToolCalls(items: readonly ToolCallItem[], tally: RenderTally):
 function renderItem(item: MessageContent, level: LevelConfig, tally: RenderTally): string | null {
   switch (item.type) {
     case 'text':
-      // Message text is never trimmed; only heading levels move.
+      // Message text is never trimmed; resource links were normalized at entry.
       return item.text?.trim() ? demoteMarkdownHeadings(item.text) : null;
 
     case 'file':
@@ -973,7 +977,7 @@ export function buildConversationMarkdown(
   options: BuildConversationMarkdownOptions
 ): ConversationMarkdownResult {
   const {
-    history,
+    history: sourceHistory,
     title,
     source,
     participants,
@@ -983,6 +987,22 @@ export function buildConversationMarkdown(
     recentEntryCount = CONVERSATION_MARKDOWN_RECENT_ENTRIES,
     includeTrimNotice = true,
   } = options;
+
+  const history = sourceHistory.map((entry) => ({
+    ...entry,
+    items: (entry.items ?? []).map((item) => {
+      if ((item.type === 'text' || item.type === 'thought') && typeof item.text === 'string') {
+        return { ...item, text: normalizeSessionLinksForExport(item.text, options.workspaceId) };
+      }
+      if (item.type === 'proposed_plan' && typeof item.markdown === 'string') {
+        return {
+          ...item,
+          markdown: normalizeSessionLinksForExport(item.markdown, options.workspaceId),
+        };
+      }
+      return item;
+    }),
+  }));
 
   let last: RenderResult | null = null;
   let estimatedTokens = 0;

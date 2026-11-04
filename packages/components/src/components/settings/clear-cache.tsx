@@ -6,7 +6,7 @@ import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
-import { markCacheClearPending, reloadApp } from '@/lib/clear-local-cache';
+import { restartIntoCacheClear } from '@/lib/clear-local-cache';
 
 const styles = stylex.create({
   icon: { width: '14px', height: '14px', flexShrink: 0 },
@@ -15,8 +15,9 @@ const styles = stylex.create({
 /**
  * Shared logic for the "Clear cache" settings action. The actual delete runs at
  * the next boot (see `maybeClearLodyCacheOnBoot`); here we navigate to the
- * conversation page, set the boot flag, and reload — so the user lands back on
- * chat with a freshly rebuilt local cache.
+ * conversation page and restart into the clear (a relaunch on the desktop, a
+ * reload elsewhere) — so the user lands back on chat with a freshly rebuilt
+ * local cache.
  */
 export function useClearCache() {
   const navigate = useNavigate();
@@ -38,8 +39,7 @@ export function useClearCache() {
     } catch {
       // Navigation is best-effort; we reload regardless.
     }
-    markCacheClearPending();
-    reloadApp();
+    if (!(await restartIntoCacheClear())) setIsClearing(false);
   }, [navigate, params.workspaceName]);
 
   return { dialogOpen, setDialogOpen, isClearing, confirmClear };

@@ -1,3 +1,4 @@
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import i18next from 'i18next';
 import {
   getSessionFileDownloadApiPath,
@@ -25,6 +26,12 @@ export async function captureSessionShare(options: {
   previousSourceIds?: readonly { sourceId: string; conversationId: string }[];
   signal: AbortSignal;
 }) {
+  await options.runtime.waitForContentAdmission?.(options.signal);
+  options.signal.throwIfAborted();
+  requireWorkspaceFeature(
+    { mode: options.runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+    'sharing'
+  );
   const stores: Array<{ store: SessionDocStore; releaseSync: () => void }> = [];
   try {
     const orderedStores = await mapShareConcurrent(
@@ -95,20 +102,32 @@ export async function captureSessionShare(options: {
           kind === 'image'
             ? getSessionImageDownloadApiPath(options.runtime.workspaceId, storageId, objectId)
             : getSessionFileDownloadApiPath(options.runtime.workspaceId, storageId, objectId);
-        const response = await fetch(new URL(path, API_BASE_URL), {
-          headers: { Authorization: `Bearer ${options.token}` },
-          signal,
-          credentials: 'omit',
-          redirect: 'error',
-          cache: 'no-store',
-          referrerPolicy: 'no-referrer',
-        });
-        return {
-          bytes: await readShareResponseBytes(response, SHARE_LIMITS.objectBytes),
-          mediaType:
-            response.headers.get('Content-Type')?.split(';')[0]?.trim() ||
-            'application/octet-stream',
-        };
+        try {
+          const response = await fetch(new URL(path, API_BASE_URL), {
+            headers: { Authorization: `Bearer ${options.token}` },
+            signal,
+            credentials: 'omit',
+            redirect: 'error',
+            cache: 'no-store',
+            referrerPolicy: 'no-referrer',
+          });
+          return {
+            bytes: await readShareResponseBytes(
+              response,
+              kind === 'image' ? SHARE_LIMITS.imageBytes : SHARE_LIMITS.objectBytes
+            ),
+            mediaType:
+              response.headers.get('Content-Type')?.split(';')[0]?.trim() ||
+              'application/octet-stream',
+          };
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (error instanceof Error && error.message === 'Share object exceeds size limit')
+            throw kind === 'image'
+              ? new Error('Share image exceeds size limit', { cause: error })
+              : error;
+          throw new Error('Share attachment unavailable', { cause: error });
+        }
       },
     });
     return await prepared;

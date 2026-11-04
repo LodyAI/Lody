@@ -15,6 +15,26 @@ this page is the full text of the rules summarised there.
   Code Collab shared-state metadata does not wake idle markdown rows.
 - Treat Code Collab file-index Flock state as large/path-keyed state. Keep it out
   of repo meta and subscribe from file provider hooks only.
+- The desktop toolbar is a portal from the root conversation controller, not a
+  second `SessionChatInterface`. Root identity supplies header metadata; selected
+  tab actions supply search, copy, rename, fork, archive and share targets.
+- Desktop child chat bodies mount on first selection and remain mounted until
+  their shared close or leaving the root session. The root controller also owns
+  the toolbar; a pending fork target can mount before selection to report readiness.
+  URL selection remains synchronous and is never mirrored in an Effect.
+- Each mounted chat surface keeps a stable imperative ref. Event wrappers for
+  browser, simulator, fork, annotation submission, comments, PR/changes and session
+  navigation read the latest committed handlers. Toolbar objects and slots retain
+  identity until their actual inputs change.
+- Desktop conversation surfaces have absolute inset bounds and strict CSS
+  containment. Their contents do not participate in the shell's intrinsic sizing;
+  inactive surfaces still use `display: none` and pause their scroll engine.
+- Edit-and-resend owns mention sources and expansion while its editor is mounted.
+  Closed editors do not borrow file resources or subscribe the stream to catalogs.
+  Saving expands before trimming and reanchors transcript spans once.
+- Semantic close cues refresh on action-scope/layer mutations, including ancestor
+  visibility. Ordinary message content updates do not trigger geometry reads;
+  command dispatch still checks current visibility and modal ownership.
 - `session-detail.tsx` owns session-switch local UI reset. Keep the reset in the
   render-phase `localStateSessionId !== sessionId` branch; do not add a second
   `useEffect([sessionId])` reset that replays the same state updates.
@@ -34,6 +54,17 @@ this page is the full text of the rules summarised there.
   `SessionMeta.baseBranch` / `project.branch` are start/base refs; they may be
   shown as base fallback, but must not be copied or labeled as current. The
   mobile bottom `SessionInfoBar` omits branch information; desktop keeps it.
+
+Roost initialization pairs a directory page with its observation epoch. A
+validated owner page already includes the version advancement announced by its
+own reply, so that announcement must not require another foreground RPC before
+the page becomes readable. An ordinary page overtaken by a newer owner/control
+revision cannot borrow that observation's epoch; later structural notifications
+still force a retry. Negotiated coherent checkpoints retain their ability to
+progress behind newer hints. Cached reads retain their pre-read epoch fence. The bridge persists accepted
+pages before returning them and retains the previous coherent disk snapshot
+during replacement. This does not make complete cache rebuilding a first-window
+readiness requirement.
 
 ## Desktop windows
 

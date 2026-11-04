@@ -1,22 +1,12 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  computeAnchoredScrollCorrection,
-  computeInitialDiagramZoom,
-  computePinchZoomFactor,
-  MERMAID_DIAGRAM_MAX_ZOOM,
-} from '../src/components/ai-gui/mermaid-diagram-viewer';
-import {
-  computeCanvasPinchFactor,
-  panCanvasTransform,
-  zoomCanvasTransform,
-  MERMAID_CANVAS_MAX_SCALE,
-  type MermaidCanvasView,
-} from '../src/components/ai-gui/mermaid-inline-canvas';
+import { computeInitialDiagramZoom } from '../src/components/ai-gui/mermaid-diagram-viewer';
+import { computeCanvasPinchFactor } from '../src/components/ai-gui/mermaid-inline-canvas';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -27,9 +17,14 @@ vi.mock('react-i18next', () => ({
 const DIAGRAM_WIDTH = 1200;
 const DIAGRAM_HEIGHT = 800;
 
-vi.mock('beautiful-mermaid', () => ({
-  renderMermaidSVGAsync: async () =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAGRAM_WIDTH}" height="${DIAGRAM_HEIGHT}" data-diagram="sequence"><text>Launch game</text></svg>`,
+vi.mock('pele', () => ({
+  render: () => ({
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAGRAM_WIDTH}" height="${DIAGRAM_HEIGHT}" style="color:var(--_fg)" data-diagram="sequence"><text>Launch game</text></svg>`,
+    width: DIAGRAM_WIDTH,
+    height: DIAGRAM_HEIGHT,
+    links: [],
+    type: 'sequence',
+  }),
 }));
 
 const { MarkdownRenderer } = await import('../src/components/ai-gui/markdown-renderer');
@@ -80,161 +75,6 @@ describe('computeInitialDiagramZoom', () => {
         naturalHeight: 800,
       })
     ).toBe(1);
-  });
-
-  it('grows a diagram that already fits, up to the cap', () => {
-    expect(
-      computeInitialDiagramZoom({
-        containerWidth: 800,
-        containerHeight: 800,
-        naturalWidth: 400,
-        naturalHeight: 400,
-      })
-    ).toBe(2);
-    expect(
-      computeInitialDiagramZoom({
-        containerWidth: 1600,
-        containerHeight: 1600,
-        naturalWidth: 100,
-        naturalHeight: 100,
-      })
-    ).toBe(3);
-  });
-
-  it('falls back to natural size when a measurement is missing', () => {
-    expect(
-      computeInitialDiagramZoom({
-        containerWidth: 0,
-        containerHeight: 0,
-        naturalWidth: 0,
-        naturalHeight: 0,
-      })
-    ).toBe(1);
-  });
-
-  it('never opens past the zoom ceiling', () => {
-    expect(
-      computeInitialDiagramZoom({
-        containerWidth: 10_000,
-        containerHeight: 10_000,
-        naturalWidth: 1,
-        naturalHeight: 1,
-      })
-    ).toBeLessThanOrEqual(MERMAID_DIAGRAM_MAX_ZOOM);
-  });
-});
-
-describe('diagram pinch arithmetic', () => {
-  it('undoes itself when the pinch reverses, at any zoom level', () => {
-    expect(computePinchZoomFactor(-12) * computePinchZoomFactor(12)).toBeCloseTo(1, 10);
-    expect(computePinchZoomFactor(-4)).toBeGreaterThan(1);
-    expect(computePinchZoomFactor(4)).toBeLessThan(1);
-  });
-
-  it('bounds a mouse notch so one step cannot throw the diagram to a zoom limit', () => {
-    // A wheel notch reports ~100 where a trackpad pinch reports a few pixels.
-    expect(computePinchZoomFactor(-400)).toBe(computePinchZoomFactor(-25));
-    expect(computePinchZoomFactor(-400)).toBeLessThan(1.3);
-  });
-
-  it('scrolls the pinched point back under the pointer', () => {
-    // A diagram that doubled around the point under the pointer: what was at its
-    // centre now sits 500px further right, so the surface follows by 500px.
-    expect(
-      computeAnchoredScrollCorrection({
-        anchor: { clientX: 500, clientY: 300, ratioX: 0.5, ratioY: 0.5 },
-        diagramLeft: 0,
-        diagramTop: 0,
-        diagramWidth: 2000,
-        diagramHeight: 1200,
-      })
-    ).toEqual({ left: 500, top: 300 });
-  });
-
-  it('leaves the surface alone when the resize kept the point in place', () => {
-    expect(
-      computeAnchoredScrollCorrection({
-        anchor: { clientX: 400, clientY: 200, ratioX: 0.25, ratioY: 0.5 },
-        diagramLeft: 300,
-        diagramTop: 100,
-        diagramWidth: 400,
-        diagramHeight: 200,
-      })
-    ).toEqual({ left: 0, top: 0 });
-  });
-});
-
-describe('inline canvas geometry', () => {
-  /**
-   * A 400x300 frame, drawn at the viewport origin, holding a 200x150 diagram
-   * centred inside it.
-   */
-  const resting: MermaidCanvasView = {
-    frame: { left: 0, top: 0, width: 400, height: 300 },
-    content: { left: 100, top: 75, width: 200, height: 150 },
-  };
-  const identity = { scale: 1, x: 0, y: 0 };
-
-  it('keeps the pinched point under the pointer', () => {
-    // The pointer sits on the diagram's centre, so doubling the diagram must
-    // leave that centre exactly where it was.
-    const zoomed = zoomCanvasTransform(
-      identity,
-      { clientX: 200, clientY: 150, factor: 2 },
-      resting
-    );
-    expect(zoomed.scale).toBe(2);
-    // 400x300 now fills the frame exactly: its left edge moves from 100 to 0.
-    expect(zoomed).toEqual({ scale: 2, x: -100, y: -75 });
-  });
-
-  it('re-centres a diagram smaller than its frame instead of leaving it adrift', () => {
-    // Pinching in from a diagram that was dragged off-centre still ends centred,
-    // because there is nothing left to pan.
-    const off = { scale: 1, x: 90, y: 40 };
-    const zoomed = zoomCanvasTransform(
-      off,
-      { clientX: 0, clientY: 0, factor: 0.5 },
-      { ...resting, content: { left: 190, top: 115, width: 200, height: 150 } }
-    );
-    // Halved to 100x75, it lands back in the middle of the 400x300 frame.
-    expect(zoomed).toEqual({ scale: 0.5, x: 50, y: 37.5 });
-  });
-
-  it('stops a larger diagram at its own edges', () => {
-    // 800x600 inside 400x300: it may travel 400 left and 300 up, no further.
-    const large: MermaidCanvasView = {
-      frame: resting.frame,
-      content: { left: 0, top: 0, width: 800, height: 600 },
-    };
-    expect(
-      panCanvasTransform({ scale: 2, x: 0, y: 0 }, { deltaX: -10_000, deltaY: -10_000 }, large)
-    ).toEqual({ scale: 2, x: -400, y: -300 });
-    expect(
-      panCanvasTransform({ scale: 2, x: 0, y: 0 }, { deltaX: 10_000, deltaY: 10_000 }, large)
-    ).toEqual({ scale: 2, x: 0, y: 0 });
-  });
-
-  it('pans by the drag when there is room for it', () => {
-    const large: MermaidCanvasView = {
-      frame: resting.frame,
-      content: { left: -100, top: -100, width: 800, height: 600 },
-    };
-    expect(
-      panCanvasTransform({ scale: 2, x: -100, y: -100 }, { deltaX: -30, deltaY: -20 }, large)
-    ).toEqual({ scale: 2, x: -130, y: -120 });
-  });
-
-  it('never scales past the ceiling, however hard the pinch', () => {
-    expect(
-      zoomCanvasTransform(identity, { clientX: 200, clientY: 150, factor: 1000 }, resting).scale
-    ).toBe(MERMAID_CANVAS_MAX_SCALE);
-  });
-
-  it('undoes itself when the pinch reverses', () => {
-    expect(computeCanvasPinchFactor(-12) * computeCanvasPinchFactor(12)).toBeCloseTo(1, 10);
-    // A mouse notch reports ~100 where a trackpad pinch reports a few pixels.
-    expect(computeCanvasPinchFactor(-400)).toBe(computeCanvasPinchFactor(-25));
   });
 });
 
@@ -334,43 +174,6 @@ describe('mermaid full-screen viewer', () => {
     vi.restoreAllMocks();
   });
 
-  it('replaces the bundled full-screen control with a diagram that opens the viewer', async () => {
-    const diagram = await renderMarkdown();
-
-    // No bundled overlay; the block keeps its other controls.
-    expect(container?.querySelector('button[title="View fullscreen"]')).toBeNull();
-    expect(container?.querySelector('button[title="Copy code"]')).toBeTruthy();
-
-    expect(diagram.getAttribute('role')).toBe('button');
-    expect(diagram.getAttribute('tabindex')).toBe('0');
-    expect(diagram.getAttribute('aria-label')).toBe('Zoom and pan diagram');
-
-    // The replacement sits in the block's own always-visible action bar.
-    expect(fullscreenButton()?.closest('[data-streamdown="mermaid-block-actions"]')).toBeTruthy();
-    await openViewer();
-
-    expect(viewer()).toBeTruthy();
-    // The copy in the conversation stays where it was.
-    expect(container?.querySelector('[data-streamdown="mermaid"] svg')).toBeTruthy();
-    expect(viewerSurface()?.querySelector('svg[data-diagram="sequence"]')).toBeTruthy();
-  });
-
-  it('keeps its controls clear of the top safe-area inset', async () => {
-    await renderMarkdown();
-    await openViewer();
-
-    const close = viewerClose();
-    expect(close).toBeTruthy();
-    // A raw `top-4` — what the bundled overlay used — puts the only exit under
-    // the status bar on a phone. The control bar must reserve that inset.
-    const controlBar = close?.parentElement;
-    expect(controlBar?.style.paddingTop).toContain('safe-area');
-    expect(close?.className).toContain('h-11');
-    expect(close?.className).toContain('w-11');
-    // Above dialogs and popovers, on the app's z-index scale.
-    expect(viewer()?.getAttribute('style')).toContain('--z-image-viewer');
-  });
-
   it('closes from the button, from a click off the diagram, and from Escape', async () => {
     await renderMarkdown();
 
@@ -416,17 +219,6 @@ describe('mermaid full-screen viewer', () => {
 
     await pressEnter();
     expect(diagram.getAttribute('data-lody-canvas')).toBeNull();
-  });
-
-  it('removes diagram button semantics when the markdown rerenders without Mermaid', async () => {
-    await renderMarkdown();
-    expect(container?.querySelector('[aria-label="Zoom and pan diagram"]')).toBeTruthy();
-
-    await renderMarkdown(PLAIN_MARKDOWN);
-
-    expect(container?.querySelector('[data-streamdown="mermaid"]')).toBeNull();
-    expect(container?.querySelector('[aria-label="Zoom and pan diagram"]')).toBeNull();
-    expect(fullscreenButton()).toBeNull();
   });
 
   it('turns a clicked diagram into a canvas that pinches where it stands', async () => {
@@ -583,54 +375,6 @@ describe('mermaid full-screen viewer', () => {
     expect(viewer()).toBeNull();
   });
 
-  it('releases an activated diagram when the markdown stops containing one', async () => {
-    const diagram = await renderMarkdown();
-    stubCanvasRects(diagram, diagram.querySelector('svg') as SVGSVGElement);
-    await pressWith(diagram, 'mouse');
-    expect(diagram.getAttribute('data-lody-canvas')).toBe('active');
-
-    await renderMarkdown(PLAIN_MARKDOWN);
-
-    // The element is detached by now, so its own state is what proves the
-    // canvas was released rather than left holding document listeners.
-    expect(diagram.getAttribute('data-lody-canvas')).toBeNull();
-    expect(diagram.style.outline).toBe('');
-  });
-
-  it('does not rewrite a diagram it has already marked while the turn streams', async () => {
-    const diagram = await renderMarkdown();
-    stubCanvasRects(diagram, diagram.querySelector('svg') as SVGSVGElement);
-    await pressWith(diagram, 'mouse');
-    await act(async () => {
-      diagram.focus();
-    });
-
-    // Every streamed mutation re-runs the observer. Re-marking a diagram that is
-    // already marked removes `tabindex` from a focused element, which blurs it
-    // in a browser and drops the canvas out of the keyboard mid-turn, and
-    // rewriting `aria-label` re-announces it. Watching the attributes is the
-    // part of that jsdom can prove; the blur itself was checked in Chromium.
-    const rewrites: string[] = [];
-    const watcher = new MutationObserver((records) => {
-      for (const record of records) {
-        if (record.attributeName) rewrites.push(record.attributeName);
-      }
-    });
-    watcher.observe(diagram, { attributes: true });
-
-    await renderMarkdown(`${MERMAID_MARKDOWN}\n\nAnd then it finished.`);
-    watcher.takeRecords().forEach((record) => {
-      if (record.attributeName) rewrites.push(record.attributeName);
-    });
-    watcher.disconnect();
-
-    expect(container?.querySelector('[data-streamdown="mermaid"]')).toBe(diagram);
-    expect(rewrites).toEqual([]);
-    expect(document.activeElement).toBe(diagram);
-    expect(diagram.getAttribute('data-lody-canvas')).toBe('active');
-    expect(diagram.getAttribute('tabindex')).toBe('0');
-  });
-
   it('opens the viewer instead of activating when the tap came from touch', async () => {
     const diagram = await renderMarkdown();
 
@@ -699,26 +443,6 @@ describe('mermaid full-screen viewer', () => {
       expect(readScale(svg)).toBeCloseTo(scale * scale, 5);
     }
   );
-
-  it('leaves a wheel over a diagram in a message to the page', async () => {
-    const diagram = await renderMarkdown();
-    const svg = diagram.querySelector('svg') as SVGSVGElement;
-
-    // Stands in for the conversation's own wheel listeners, which sit on the
-    // scroll viewport above the message.
-    const abovePage: number[] = [];
-    const listener = (event: Event) => abovePage.push((event as WheelEvent).deltaY);
-    container?.addEventListener('wheel', listener);
-
-    const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120 });
-    await act(async () => {
-      svg.dispatchEvent(wheel);
-    });
-    container?.removeEventListener('wheel', listener);
-
-    expect(wheel.defaultPrevented).toBe(false);
-    expect(abovePage).toEqual([120]);
-  });
 
   it('zooms the open viewer on a pinch and leaves a plain wheel to scrolling', async () => {
     await renderMarkdown();

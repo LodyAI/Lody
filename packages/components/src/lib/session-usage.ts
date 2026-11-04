@@ -1,8 +1,9 @@
+import type { AcpCapabilityCacheEntry } from '@lody/shared';
 import {
   CODEX_SPARK_LIMIT_ID,
+  isSubscriptionQuotaEligible,
   normalizePersistedRateLimit,
   parseRateLimitEntryKey,
-  resolveAgentBrandId,
   type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -84,6 +85,23 @@ export function formatRateLimitWindowShortLabel(windowDurationSeconds: number | 
   return `${windowDurationSeconds / 60}m`;
 }
 
+/** "5 hours", "Weekly", or the short `3d` form for any other window the provider reports. */
+export function formatRateLimitWindowDurationLabel(
+  windowDurationSeconds: number | null,
+  t: TFunction
+): string {
+  if (windowDurationSeconds === SEVEN_DAY_WINDOW_SECONDS) {
+    return t('sessions.usage.weekly', 'Weekly');
+  }
+  if (windowDurationSeconds === FIVE_HOUR_WINDOW_SECONDS) {
+    return t('sessions.usage.fiveHour', '5 hours');
+  }
+  if (windowDurationSeconds === null) {
+    return t('sessions.usage.limit', 'Usage');
+  }
+  return formatRateLimitWindowShortLabel(windowDurationSeconds);
+}
+
 export function formatAgentRateLimitWindowLabel(
   window: AgentRateLimitWindow,
   durationLabel: string,
@@ -117,28 +135,18 @@ export function getContextWindowUsageData(
 }
 
 export function canShowSubscriptionRateLimits({
+  capability,
   cliType,
   agentType,
   config,
 }: {
   cliType: AgentConfigCliType;
   agentType: string;
-  config?: Pick<AgentConfigMeta, 'brandId' | 'env'> | null;
+  config?: Pick<AgentConfigMeta, 'brandId' | 'env' | 'codexAuth' | 'magpieGatewayUrl'> | null;
+  capability?: AcpCapabilityCacheEntry['rateLimits'];
 }): boolean {
-  if (
-    cliType !== 'builtin' ||
-    (agentType !== 'claude' &&
-      agentType !== 'codex' &&
-      agentType !== 'grok' &&
-      agentType !== 'kimi')
-  ) {
-    return false;
-  }
-  if (!config) return true;
-
   return (
-    Object.keys(config.env).length === 0 &&
-    !resolveAgentBrandId({ brandId: config.brandId, env: config.env })
+    capability?.version === 1 && isSubscriptionQuotaEligible({ ...config, cliType, agentType })
   );
 }
 
@@ -176,8 +184,7 @@ export function getAgentRateLimitEntries(
         : [];
     })
     .filter(
-      (entry) =>
-        entry.cliType === agentType && entry.agentConfigId === (agentConfigId ?? null)
+      (entry) => entry.cliType === agentType && entry.agentConfigId === (agentConfigId ?? null)
     );
 }
 

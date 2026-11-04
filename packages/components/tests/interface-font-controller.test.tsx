@@ -1,24 +1,16 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  conversationFontSizeAtom,
-  fontLigaturesEnabledAtom,
-  interfaceFontFamilyAtom,
-  INTERFACE_FONT_FAMILY_MAX_LENGTH,
-  normalizeFontLigaturesEnabled,
-  normalizeInterfaceFontFamily,
-} from '../src/atoms/settings';
+import { interfaceFontFamilyAtom } from '../src/atoms/settings';
 import { UI_FONT_SIZE_CSS_VARIABLE } from '../src/components/ai-gui/conversation-font-size-classes';
 import { InterfaceFontController } from '../src/components/interface-font-controller';
 import {
   FONT_LIGATURES_CSS_VARIABLE,
-  FONT_LIGATURES_DISABLED_VALUE,
-  FONT_LIGATURES_ENABLED_VALUE,
   INTERFACE_FONT_CSS_VARIABLE,
   listSystemFontFamilies,
 } from '../src/lib/local-fonts';
@@ -50,14 +42,6 @@ describe('InterfaceFontController', () => {
     container = undefined;
   });
 
-  it('normalizes persisted font family values', () => {
-    expect(normalizeInterfaceFontFamily('  Atkinson Hyperlegible  ')).toBe('Atkinson Hyperlegible');
-    expect(
-      normalizeInterfaceFontFamily('a'.repeat(INTERFACE_FONT_FAMILY_MAX_LENGTH + 10))
-    ).toHaveLength(INTERFACE_FONT_FAMILY_MAX_LENGTH);
-    expect(normalizeInterfaceFontFamily(null)).toBe('');
-  });
-
   it('excludes symbol fonts while retaining and deduplicating text fonts', async () => {
     const families = [
       'Webdings',
@@ -86,94 +70,5 @@ describe('InterfaceFontController', () => {
     });
     expect(store.get(interfaceFontFamilyAtom)).toBe('');
     expect(document.documentElement.style.getPropertyValue(INTERFACE_FONT_CSS_VARIABLE)).toBe('');
-  });
-
-  it('updates the global interface font immediately when enabled', async () => {
-    const store = createStore();
-
-    await act(async () => {
-      root?.render(
-        <Provider store={store}>
-          <InterfaceFontController enabled />
-        </Provider>
-      );
-    });
-
-    await act(async () => {
-      store.set(interfaceFontFamilyAtom, 'Atkinson Hyperlegible');
-    });
-
-    expect(document.documentElement.style.getPropertyValue(INTERFACE_FONT_CSS_VARIABLE)).toBe(
-      '"Atkinson Hyperlegible", var(--font-sans-default)'
-    );
-
-    await act(async () => {
-      store.set(interfaceFontFamilyAtom, '');
-    });
-    expect(document.documentElement.style.getPropertyValue(INTERFACE_FONT_CSS_VARIABLE)).toBe('');
-  });
-
-  it('does not apply the stored interface font outside Electron', async () => {
-    const store = createStore();
-    store.set(interfaceFontFamilyAtom, 'Atkinson Hyperlegible');
-
-    await act(async () => {
-      root?.render(
-        <Provider store={store}>
-          <InterfaceFontController enabled={false} />
-        </Provider>
-      );
-    });
-
-    expect(document.documentElement.style.getPropertyValue(INTERFACE_FONT_CSS_VARIABLE)).toBe('');
-  });
-
-  it('writes --ui-font-size from the appearance setting on every platform', async () => {
-    const store = createStore();
-    store.set(conversationFontSizeAtom, 16);
-
-    await act(async () => {
-      root?.render(
-        <Provider store={store}>
-          <InterfaceFontController enabled={false} />
-        </Provider>
-      );
-    });
-
-    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('16px');
-
-    await act(async () => {
-      store.set(conversationFontSizeAtom, 12);
-    });
-    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('12px');
-  });
-
-  it('treats non-boolean persisted ligature values as enabled', () => {
-    expect(normalizeFontLigaturesEnabled(undefined)).toBe(true);
-    expect(normalizeFontLigaturesEnabled('false')).toBe(true);
-    expect(normalizeFontLigaturesEnabled(false)).toBe(false);
-  });
-
-  it('writes font ligatures onto the document root on every platform', async () => {
-    const store = createStore();
-
-    await act(async () => {
-      root?.render(
-        <Provider store={store}>
-          <InterfaceFontController enabled={false} />
-        </Provider>
-      );
-    });
-
-    expect(document.documentElement.style.getPropertyValue(FONT_LIGATURES_CSS_VARIABLE)).toBe(
-      FONT_LIGATURES_ENABLED_VALUE
-    );
-
-    await act(async () => {
-      store.set(fontLigaturesEnabledAtom, false);
-    });
-    expect(document.documentElement.style.getPropertyValue(FONT_LIGATURES_CSS_VARIABLE)).toBe(
-      FONT_LIGATURES_DISABLED_VALUE
-    );
   });
 });

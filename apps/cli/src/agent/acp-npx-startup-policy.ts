@@ -179,9 +179,8 @@ export async function runNpxStartupWithRecovery<T>(
         continue;
       }
 
-      const shouldPurgeLodyNpmCache =
-        isLikelyNpmCacheCorruption(hintText) || isColdNpxInitializeTimeout(error, installWasCold);
-      if (shouldPurgeLodyNpmCache) {
+      const hasNpmCacheCorruption = isLikelyNpmCacheCorruption(hintText);
+      if (hasNpmCacheCorruption || isColdNpxInitializeTimeout(error, installWasCold)) {
         const brokenPurged = purgeBrokenNpxCache({
           packageName: npxSpec.name,
           version: npxSpec.version,
@@ -192,7 +191,7 @@ export async function runNpxStartupWithRecovery<T>(
           io: options.npxCacheIo,
         });
         const lodyPurged =
-          brokenPurged.length === 0
+          hasNpmCacheCorruption && brokenPurged.length === 0
             ? purgeLodyNpmCache({ env: options.env, io: options.npxCacheIo })
             : [];
         await options.cleanupFailedAttempt?.();

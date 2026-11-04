@@ -1,0 +1,471 @@
+import { describe, expect, vi } from 'vitest';
+import { it } from '@effect/vitest';
+import { Effect, Exit, Fiber, Scope } from 'effect';
+import { TestClock } from 'effect/testing';
+import { Flock } from '@loro-dev/flock-wasm';
+import {
+  LoroRepo,
+  ResourceBusyError,
+  type StorageAdapter,
+  type TransportAdapter,
+  type TransportSubscription,
+} from 'loro-repo';
+import {
+  getMachineFlockDocId,
+  getWorkspaceFlockDocId,
+  type MachineId,
+  type WorkspaceId,
+} from '@lody/shared';
+import type { Logger } from '@/utils/logger';
+import { makeWorkspaceCatalogSync, TRANSIENT_CATALOG_IDLE_MS } from './workspace-catalog-sync';
+
+import { makePromiseRepoNetwork } from './promise-repo-network.test-support';
+
+const workspaceId = 'catalog-sync-test' as WorkspaceId;
+const workspace = getWorkspaceFlockDocId(workspaceId);
+const machine = getMachineFlockDocId(workspaceId, 'target' as MachineId);
+const logger = { debug: () => {} } as Logger;
+const signal = <A = void>() => {
+  let resolve!: (value: A) => void;
+  const promise = new Promise<A>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+const createRepo = (storageAdapter?: StorageAdapter) =>
+  Effect.acquireRelease(
+    Effect.promise(() => LoroRepo.create({ storageAdapter, metaDebounceCommitMs: 0 })),
+    (repo) => Effect.promise(() => repo.destroy())
+  );
+
+/** Real Promise Repo replicas and Flock imports; only the transport is in memory. */
+function network() {
+  const sources = new Map<string, Flock>();
+  const live = new Map<string, { flock: Flock; complete: () => void }>();
+  const joins = new Map<string, ReturnType<typeof signal>>();
+  const closed = new Set<string>();
+  const subscription = (first: Promise<void>, unsubscribe = () => {}): TransportSubscription => ({
+    status: 'joined',
+    firstSyncedWithRemote: first,
+    waitUntilSynced: () => first,
+    onStatusChange: () => () => {},
+    unsubscribe,
+  });
+  const inert = (): TransportAdapter => ({
+    connect: async () => {},
+    close: async () => {},
+    isConnected: () => true,
+    getStatus: () => 'connected',
+    onStatusChange: () => () => {},
+    syncMeta: async () => ({ ok: true }),
+    syncDoc: async () => ({ ok: true }),
+    joinMetaRoom: () => subscription(Promise.resolve()),
+    joinDocRoom: () => subscription(Promise.resolve()),
+  });
+  const publisher: TransportAdapter = {
+    ...inert(),
+    joinMetaRoom: (flock) => {
+      sources.set('meta', flock);
+      return subscription(Promise.resolve());
+    },
+    joinFlockDocRoom: (id, flock) => {
+      sources.set(id, flock);
+      return subscription(Promise.resolve());
+    },
+  };
+  const join = (key: string, flock: Flock) => {
+    const source = sources.get(key);
+    if (!source) throw new Error(`Missing publisher ${key}`);
+    const synced = signal();
+    let detach: (() => void) | undefined;
+    live.set(key, {
+      flock,
+      complete: () => {
+        flock.importFile(source.exportFile());
+        detach ??= source.subscribe(() => flock.importFile(source.exportFile()));
+        synced.resolve();
+      },
+    });
+    joins.get(key)?.resolve(undefined);
+    return subscription(synced.promise, () => {
+      detach?.();
+      live.delete(key);
+      closed.add(key);
+    });
+  };
+  const reader: TransportAdapter = {
+    ...inert(),
+    joinMetaRoom: (flock) => join('meta', flock),
+    joinFlockDocRoom: join,
+    // Reader code must not use request-level catch-up as a hidden prerequisite.
+    syncMeta: async () => {
+      throw new Error('Unexpected forced metadata sync');
+    },
+    syncFlockDoc: async () => {
+      throw new Error('Unexpected forced Flock sync');
+    },
+  };
+  return {
+    publisher,
+    reader,
+    live,
+    closed,
+    joined: (key: string) => {
+      if (live.has(key)) return Promise.resolve();
+      let next = joins.get(key);
+      if (!next) {
+        next = signal();
+        joins.set(key, next);
+      }
+      return next.promise;
+    },
+    complete: (key: string) => {
+      const joined = live.get(key);
+      if (!joined) throw new Error(`Not joined: ${key}`);
+      joined.complete();
+    },
+  };
+}
+
+const fixture = Effect.fnUntraced(function* () {
+  const net = network();
+  const publisher = yield* createRepo();
+  yield* Effect.promise(async () => {
+    await publisher.addTransport('streams', net.publisher);
+    await publisher.joinMetaRoom();
+    await publisher.joinFlockDocRoom(workspace);
+    await publisher.joinFlockDocRoom(machine);
+    await publisher.upsertDocMeta('machine:target', { name: 'initial' });
+    for (const id of [workspace, machine]) {
+      const { flock } = await publisher.openFlockDoc(id);
+      flock.set(['test'], 'initial');
+      flock.commit();
+    }
+  });
+  const repo = yield* createRepo();
+  const owner = yield* Scope.make();
+  yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void));
+  const sync = yield* Scope.provide(makeWorkspaceCatalogSync(repo, workspaceId, logger), owner);
+  yield* sync.hold(machine);
+  yield* Effect.promise(() => repo.addTransport('streams', net.reader));
+  for (const id of ['meta', workspace, machine]) yield* Effect.promise(() => net.joined(id));
+  return { net, publisher, repo, owner, sync };
+});
+
+describe('daemon Promise Repo catalog ownership', () => {
+  for (const recover of [true, false]) {
+    it.effect(
+      recover
+        ? 'recovers a failed metadata durability barrier without replacing the joined reader'
+        : 'bounds repeated baseline failures and releases readers while storage is still unavailable',
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            let unavailable = true;
+            let persisted = false;
+            const originalError = new Error('SQLITE_BUSY');
+            const failures = Array.from({ length: 7 }, () => signal<unknown>());
+            let failureIndex = 0;
+            const repo = yield* Effect.acquireRelease(
+              Effect.promise(() =>
+                LoroRepo.create({
+                  metaDebounceCommitMs: 0,
+                  // The explicit baseline barrier owns this flush, not a real timer.
+                  metaPersistDebounceMs: 60_000,
+                  storageAdapter: {
+                    loadMeta: async () => undefined,
+                    loadDoc: async () => undefined,
+                    loadFlockDoc: async () => undefined,
+                    save: async (payload) => {
+                      if (payload.type !== 'meta-update' && payload.type !== 'meta-snapshot')
+                        return;
+                      if (unavailable) throw originalError;
+                      persisted = true;
+                    },
+                  },
+                })
+              ),
+              (acquiredRepo) => Effect.promise(() => acquiredRepo.destroy())
+            );
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                // Terminal Repo flush is independent of the stopped baseline reader.
+                unavailable = false;
+              })
+            );
+            const meta = yield* Effect.promise(() => repo.joinMetaRoom());
+            yield* Effect.addFinalizer(() => Effect.sync(() => meta.unsubscribe()));
+            const binding = meta.subscription('streams');
+            const waitFor = binding.waitFor.bind(binding);
+            // Observe actual SDK results without changing its barrier or storage behavior.
+            vi.spyOn(binding, 'waitFor').mockImplementation(async (options) => {
+              const result = await waitFor(options);
+              if (result.status === 'error') failures[failureIndex++]?.resolve(result.error);
+              return result;
+            });
+            yield* Effect.promise(() => repo.upsertDocMeta('machine:target', { name: 'retained' }));
+            const owner = yield* Scope.make();
+            yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void));
+            const sync = yield* Scope.provide(
+              makeWorkspaceCatalogSync(repo, workspaceId, logger),
+              owner
+            );
+            yield* Effect.promise(() =>
+              repo.addTransport('streams', makePromiseRepoNetwork().transport())
+            );
+            expect(yield* Effect.promise(() => failures[0]!.promise)).toBe(originalError);
+            expect(binding.status).toBe('joined');
+            const attached = repo.transportRooms('streams');
+            const waiters = yield* Effect.forkChild(
+              Effect.all([sync.ready(undefined, 250), sync.ready(undefined, 250)], {
+                concurrency: 'unbounded',
+              })
+            );
+            yield* TestClock.adjust(250);
+            expect(yield* Fiber.join(waiters)).toEqual([false, false]);
+            expect(persisted).toBe(false);
+            // A metadata persistence failure must not stop independent Flock readers.
+            expect(yield* sync.ready(workspace, 1_000)).toBe(true);
+            expect(yield* sync.ready(machine, 1_000)).toBe(true);
+            yield* TestClock.adjust(750);
+            expect(yield* Effect.promise(() => failures[1]!.promise)).toMatchObject({
+              errors: [originalError, originalError],
+            });
+            if (recover) {
+              unavailable = false;
+              yield* TestClock.adjust(2_000);
+              expect(yield* sync.ready(undefined, 1_000)).toBe(true);
+              expect(persisted).toBe(true);
+              expect(binding.status).toBe('joined');
+              expect(repo.transportRooms('streams')).toEqual(expect.arrayContaining(attached));
+              expect(
+                (yield* Effect.promise(() => repo.getDocMeta('machine:target')))?.meta.name
+              ).toBe('retained');
+              expect(yield* sync.ready(undefined, 0)).toBe(true);
+            } else {
+              // Retry backoff grows to 30s, independent of how often requests arrive.
+              for (const [index, delay] of [2_000, 4_000, 8_000, 16_000, 30_000].entries()) {
+                yield* TestClock.adjust(delay);
+                expect(yield* Effect.promise(() => failures[index + 2]!.promise)).toMatchObject({
+                  errors: [originalError, originalError],
+                });
+                expect(yield* sync.ready(undefined, 0)).toBe(false);
+                expect(persisted).toBe(false);
+              }
+            }
+            yield* Scope.close(owner, Exit.void);
+            for (const id of [workspace, machine])
+              yield* Effect.promise(() => repo.unloadFlockDoc(id));
+            meta.unsubscribe();
+            expect(repo.transportRooms('streams')).toEqual([]);
+            const failuresAtClose = failureIndex;
+            yield* TestClock.adjust(120_000);
+            expect(failureIndex).toBe(failuresAtClose);
+          })
+        )
+    );
+  }
+
+  it.effect(
+    'bounds cold waits, shares same-key ownership, and observes live edits after detach/reattach',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { net, publisher, repo, owner, sync } = yield* fixture();
+          yield* Effect.all([sync.hold(machine), sync.hold(machine)], { concurrency: 'unbounded' });
+          const waits = yield* Effect.forkChild(
+            Effect.all(
+              [undefined, workspace, machine].map((id) => sync.ready(id, 1_000)),
+              { concurrency: 'unbounded' }
+            )
+          );
+          yield* TestClock.adjust(1_000);
+          expect(yield* Fiber.join(waits)).toEqual([false, false, false]);
+          expect(net.live.size).toBe(3);
+          expect(yield* Effect.promise(() => repo.getDocMeta('machine:target'))).toBeUndefined();
+          for (const id of ['meta', workspace, machine]) net.complete(id);
+          for (const id of [undefined, workspace, machine])
+            expect(yield* sync.ready(id, 1_000)).toBe(true);
+          expect((yield* Effect.promise(() => repo.getDocMeta('machine:target')))?.meta.name).toBe(
+            'initial'
+          );
+          for (const id of [workspace, machine]) {
+            const local = yield* Effect.promise(() => repo.openFlockDoc(id));
+            expect(local.flock.get(['test'])).toBe('initial');
+            const remote = yield* Effect.promise(() => publisher.openFlockDoc(id));
+            remote.flock.set(['test'], 'later');
+            remote.flock.commit();
+            expect(local.flock.get(['test'])).toBe('later');
+            yield* Effect.promise(async () => {
+              await expect(repo.unloadFlockDoc(id)).rejects.toBeInstanceOf(ResourceBusyError);
+            });
+          }
+          yield* Effect.promise(() => repo.removeTransport('streams'));
+          expect(net.live.size).toBe(0);
+          for (const id of [undefined, workspace, machine])
+            expect(yield* sync.ready(id, 0)).toBe(true);
+          yield* Effect.promise(() =>
+            publisher.upsertDocMeta('machine:target', { name: 'reattached' })
+          );
+          yield* Effect.promise(() => repo.addTransport('streams', net.reader));
+          for (const id of ['meta', workspace, machine]) net.complete(id);
+          // Metadata hydration is asynchronous; the real public barrier drains it.
+          const meta = yield* Effect.promise(() => repo.joinMetaRoom());
+          yield* Effect.promise(() => meta.subscription('streams').waitFor());
+          meta.unsubscribe();
+          expect((yield* Effect.promise(() => repo.getDocMeta('machine:target')))?.meta.name).toBe(
+            'reattached'
+          );
+          yield* Scope.close(owner, Exit.void);
+          expect(net.live.size).toBe(0);
+          for (const id of [workspace, machine])
+            yield* Effect.promise(() => repo.unloadFlockDoc(id));
+        })
+      )
+  );
+
+  it.effect(
+    "releases another Machine's catalog once reads stop, even when its first sync never finishes",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #2194: a one-off Role listing held this room for the life of the
+          // daemon, so a room that never synced kept retrying forever.
+          const { net, owner, sync } = yield* fixture();
+          net.complete('meta');
+          net.complete(workspace);
+          expect(yield* sync.ready(machine, 0)).toBe(false);
+
+          // A read inside the window extends the lease.
+          yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS - 1_000);
+          yield* sync.hold(machine);
+          yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS - 1_000);
+          expect(net.live.has(machine)).toBe(true);
+
+          yield* TestClock.adjust(1_000);
+          expect(net.live.has(machine)).toBe(false);
+          expect(net.closed.has(machine)).toBe(true);
+          // Nothing rejoins it without a new read; permanent catalogs stay joined.
+          yield* TestClock.adjust(10 * TRANSIENT_CATALOG_IDLE_MS);
+          expect(net.live.has(machine)).toBe(false);
+          expect(net.live.has('meta')).toBe(true);
+          expect(net.live.has(workspace)).toBe(true);
+
+          // A later read joins again and can reach its baseline.
+          yield* sync.hold(machine);
+          yield* Effect.promise(() => net.joined(machine));
+          net.complete(machine);
+          expect(yield* sync.ready(machine, 1_000)).toBe(true);
+          yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS);
+          expect(net.live.has(machine)).toBe(false);
+          yield* Scope.close(owner, Exit.void);
+        })
+      )
+  );
+
+  it.effect(
+    'keeps a cold detached baseline uncertain and catches up when the same Repo attaches later',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { net, repo, sync } = yield* fixture();
+          yield* Effect.promise(() => repo.removeTransport('streams'));
+          expect(yield* sync.ready(workspace, 0)).toBe(false);
+          yield* Effect.promise(() => repo.addTransport('streams', net.reader));
+          net.complete(workspace);
+          expect(yield* sync.ready(workspace, 1_000)).toBe(true);
+          expect(
+            (yield* Effect.promise(() => repo.openFlockDoc(workspace))).flock.get(['test'])
+          ).toBe('initial');
+        })
+      )
+  );
+
+  it.effect('starts a fresh reader for reads that arrive while an idle reader is releasing', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const repo = yield* createRepo();
+        const acquire = repo.acquireFlockDoc.bind(repo);
+        const releasing = signal();
+        const releaseGate = signal();
+        let machineLeases = 0;
+        vi.spyOn(repo, 'acquireFlockDoc').mockImplementation(async (id) => {
+          const lease = await acquire(id);
+          if (id !== machine) return lease;
+          machineLeases += 1;
+          const first = machineLeases === 1;
+          return {
+            ...lease,
+            release: async () => {
+              if (first) {
+                releasing.resolve();
+                await releaseGate.promise;
+              }
+              await lease.release();
+            },
+          };
+        });
+        const owner = yield* Scope.make();
+        const sync = yield* Scope.provide(
+          makeWorkspaceCatalogSync(repo, workspaceId, logger, false),
+          owner
+        );
+        expect(yield* sync.ready(machine, 1_000)).toBe(true);
+        yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS);
+        yield* Effect.promise(() => releasing.promise);
+
+        // The retiring reader neither answers nor absorbs this read's lease.
+        expect(yield* sync.ready(machine, 1_000)).toBe(true);
+        expect(machineLeases).toBe(2);
+        releaseGate.resolve();
+        yield* Scope.close(owner, Exit.void);
+        for (const id of [workspace, machine]) yield* Effect.promise(() => repo.unloadFlockDoc(id));
+      })
+    )
+  );
+
+  it.effect('reports an idle release defect at shutdown without blocking the next read', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const repo = yield* createRepo();
+        const original = new Error('Synthetic idle release failure');
+        const acquire = repo.acquireFlockDoc.bind(repo);
+        let failRelease = true;
+        let machineLeases = 0;
+        vi.spyOn(repo, 'acquireFlockDoc').mockImplementation(async (id) => {
+          const lease = await acquire(id);
+          if (id === machine) machineLeases += 1;
+          return {
+            ...lease,
+            release: async () => {
+              await lease.release();
+              if (id === machine && failRelease) {
+                failRelease = false;
+                throw original;
+              }
+            },
+          };
+        });
+        const owner = yield* Scope.make();
+        const sync = yield* Scope.provide(
+          makeWorkspaceCatalogSync(repo, workspaceId, logger, false),
+          owner
+        );
+        expect(yield* sync.ready(machine, 1_000)).toBe(true);
+        yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS);
+        // The failed idle release is not a cached answer: a fresh reader joins.
+        expect(yield* sync.ready(machine, 1_000)).toBe(true);
+        expect(machineLeases).toBe(2);
+        const exit = yield* Effect.exit(Scope.close(owner, Exit.void));
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isFailure(exit)) {
+          const defect = exit.cause.reasons.find((reason) => reason._tag === 'Die');
+          expect(defect).toMatchObject({
+            defect: { cause: { reasons: [{ defect: { errors: [original] } }] } },
+          });
+        }
+        for (const id of [workspace, machine]) yield* Effect.promise(() => repo.unloadFlockDoc(id));
+      })
+    )
+  );
+});

@@ -1,4 +1,5 @@
 import { installRendererUnloadConfirmation } from './renderer-unload'
+import { parseSessionLink } from '@lody/shared/session-link'
 import { getWindowTargetPath, presentWindowTarget } from './window-target'
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
@@ -20,6 +21,7 @@ import {
   trackMainWindowState
 } from './window-persistence'
 import {
+  applyResolvedWindowTheme,
   getInitialMainWindowThemeSource,
   getMainWindowBackgroundColor,
   getMainWindowTitleBarOverlay
@@ -32,7 +34,8 @@ import { createRendererProcessGoneHandling } from './renderer-process-gone'
 import { createRendererHangWatchdog } from './renderer-hang-watchdog'
 import { recordRendererHang, registerRendererHangDocument } from './renderer-hang-diagnostics'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
-import { type ElectronWindowTarget } from '@lody/shared/electron-ipc'
+import { E2EE_CLIENT_LOSS_PROBE, type ElectronWindowTarget } from '@lody/shared/electron-ipc'
+import { clientLossProbeEnabled } from './services/e2ee-client-loss-gate'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import { isDevbarRendererEnabled } from './services/devbar/service'
 import { devbarRendererEntry } from './services/devbar/control'
@@ -234,6 +237,10 @@ function installNavigationGuard(window: BrowserWindow, targets: readonly ReloadT
     if (isTrustedNavigation(event.url, targets)) return
 
     event.preventDefault()
+    if (parseSessionLink(event.url)) {
+      window.webContents.send('app.deepLink', event.url)
+      return
+    }
     const externalUrl = normalizeExternalHttpUrl(event.url)
     if (externalUrl) {
       void shell.openExternal(externalUrl)
@@ -388,9 +395,8 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } }
       : {}),
-    // Windows: hide the native title bar (its neutral gray clashes with the
-    // app canvas) and keep only the OS-drawn caption buttons as an overlay
-    // tinted to match the theme.
+    // Windows: hide the native title bar and retain OS-drawn caption buttons
+    // over a transparent background, with glyphs tinted to match the theme.
     ...(process.platform === 'win32'
       ? {
           titleBarStyle: 'hidden',
@@ -404,7 +410,9 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       // Carry Electron's OS-level preference into preload so first-run product
       // language detection does not mistake the available .pak for user intent.
       additionalArguments: [
-        serializePreferredSystemLanguagesArgument(app.getPreferredSystemLanguages())
+        serializePreferredSystemLanguagesArgument(app.getPreferredSystemLanguages()),
+        // Preload admits the probe channels only when main registered them.
+        ...(clientLossProbeEnabled() ? [E2EE_CLIENT_LOSS_PROBE.argument] : [])
       ],
       sandbox: false,
       nodeIntegration: false,
@@ -463,6 +471,10 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   })
 
   window.webContents.setWindowOpenHandler((details) => {
+    if (parseSessionLink(details.url)) {
+      window.webContents.send('app.deepLink', details.url)
+      return { action: 'deny' }
+    }
     const externalUrl = normalizeExternalHttpUrl(details.url)
     if (externalUrl) {
       void shell.openExternal(externalUrl)
@@ -588,6 +600,12 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
 
 export function setMainWindowProductReloadTarget(window: BrowserWindow): void {
   setReloadTarget(window, resolveMainRendererTarget('/'))
+}
+
+export function setMainWindowOnboardingReloadTarget(window: BrowserWindow): void {
+  nativeTheme.themeSource = 'light'
+  applyResolvedWindowTheme(window, 'light', process.platform)
+  setReloadTarget(window, resolveMainRendererTarget('/onboarding', false))
 }
 
 export function openOrFocusMainWindow(options: OpenMainWindowOptions): BrowserWindow {

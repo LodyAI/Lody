@@ -1,3 +1,4 @@
+import { scheduleRunNotificationSourceSchema } from './notifications/presentation';
 import { z } from 'zod';
 import { MessageAuthorSchema } from './message-author';
 import {
@@ -33,6 +34,15 @@ export const HistoryEntryWriteSchema = z.object({
       'canceled',
     ])
     .optional(),
+  scheduleRun: scheduleRunNotificationSourceSchema.optional(),
+  derivedFrom: z
+    .object({
+      sessionId: z.string().trim().min(1).max(256),
+      userTurnId: z.string().trim().min(1).max(256),
+    })
+    .strict()
+    .optional(),
+  cancellationReason: z.literal('user_stop').optional(),
   inputConfig: z
     .preprocess(normalizeLegacyAcpSessionConfig, SessionHistoryInputConfigSchema)
     .optional(),

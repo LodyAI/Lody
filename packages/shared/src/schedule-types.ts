@@ -1,14 +1,27 @@
+import { MemoryBindingSchema } from './memory-provider';
 import { z } from 'zod';
 
-import { ProjectRefSchema } from './message-schemas';
+import {
+  AcpConfigOptionValueSchema,
+  ProjectRefSchema,
+  SessionInputBlocksSchema,
+  ACPTurnConfigSchema,
+} from './message-schemas';
 import type { ProjectRef } from './project';
-import { classifyPermissionModeFace } from './ai';
-import { isSensitiveAcpConfigOptionId } from './session-preparation';
+import { classifyPermissionModeFace, type AcpConfigOptionSummary } from './ai';
+import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
+import { isAcpFastModeConfigId } from './acp-run-config';
 
 export const SCHEDULE_PROMPT_MAX_BYTES = 32 * 1024;
-export const SCHEDULE_PROTOCOL_VERSION = 1;
+export { SCHEDULES_PROTOCOL_VERSION as SCHEDULE_PROTOCOL_VERSION } from './machine-protocol-capabilities';
 export const SCHEDULE_DISPATCH_MAX_ATTEMPTS = 5;
 export const SCHEDULE_DISPATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/**
+ * Completed one-time messages keep their definition and Registry row for a
+ * quiet period, then the owner purges the document. The tombstone remains to
+ * reject stale offline writes.
+ */
+export const SCHEDULED_MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const SCHEDULE_MISFIRE_GRACE_MS = 2 * 60 * 1000;
 export const SCHEDULE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000] as const;
 
@@ -66,6 +79,7 @@ export const DEFAULT_SCHEDULE_DESTINATION: ScheduleDestination = { kind: 'new_se
 
 export const ScheduleAgentSchema = z
   .object({
+    memory: MemoryBindingSchema.optional(),
     agentConfigId: z.string().min(1),
     modeId: z.string().min(1).optional(),
     modelId: z.string().min(1).optional(),
@@ -79,16 +93,49 @@ export const ScheduleAgentSchema = z
             (key) => !isSensitiveAcpConfigOptionId(key),
             'Credentials belong in the Agent configuration'
           ),
-        z.string().max(1024)
+        AcpConfigOptionValueSchema.refine(
+          (value) => typeof value !== 'string' || value.length <= 1024,
+          'Config option value must be at most 1024 characters'
+        )
       )
       .refine((value) => Object.keys(value).length <= 50, 'Too many config options')
       .optional(),
   })
   .strict();
 
+/**
+ * Older Schedule writers stringified ACP booleans. Interpret exact boolean
+ * literals for declared booleans and for absent semantic Fast ids; explicit
+ * selects and all other strings retain their type.
+ * This is an execution/display projection, never a persisted-definition migration:
+ * the Registry fingerprint and frozen run definition must remain unchanged.
+ */
+export function normalizeLegacyScheduleAgent(
+  agent: z.infer<typeof ScheduleAgentSchema>,
+  options: readonly Pick<AcpConfigOptionSummary, 'id' | 'type'>[] = []
+): z.infer<typeof ScheduleAgentSchema> {
+  if (!agent.configOptionValues) return agent;
+  const optionsById = new Map(options.map((option) => [option.id, option]));
+  return {
+    ...agent,
+    configOptionValues: Object.fromEntries(
+      Object.entries(agent.configOptionValues).map(([id, value]) => {
+        const option = optionsById.get(id);
+        const isBoolean =
+          option?.type === 'boolean' || (option === undefined && isAcpFastModeConfigId(id));
+        return [
+          id,
+          isBoolean && (value === 'true' || value === 'false') ? value === 'true' : value,
+        ];
+      })
+    ),
+  };
+}
+
 export const ScheduleDefinitionSchema = z
   .object({
     scheduleId: identifier,
+    messageVersion: z.literal(1).optional(),
     title: z.string().trim().min(1).max(200),
     ownerId: z.string().min(1),
     // Pin execution to the machine that the human authorized. Moving an Agent
@@ -129,9 +176,35 @@ export const ScheduleActivitySchema = z
   .strict();
 export type ScheduleActivity = z.infer<typeof ScheduleActivitySchema>;
 
+/** Frozen human-authored message; absent on legacy prompt-only tasks. */
+export const ScheduledMessageSchema = ACPTurnConfigSchema.pick({
+  mcpServerIds: true,
+  agentRoleId: true,
+  agentRoleRevision: true,
+  agentRoleSnapshot: true,
+})
+  .extend({
+    inputBlocks: SessionInputBlocksSchema.min(1).refine(
+      (blocks) => blocks.some((block) => block.type !== 'text' || block.text.trim().length > 0),
+      'Message must contain content'
+    ),
+    rolePromptPrefix: z.string().max(32768).optional(),
+  })
+  .strict();
+export type ScheduledMessage = z.infer<typeof ScheduledMessageSchema>;
+
+/** The prompt projection of a complete message; writers and readers must agree byte for byte. */
+export function scheduledMessagePrompt(message: Pick<ScheduledMessage, 'inputBlocks'>): string {
+  return message.inputBlocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n');
+}
+
 export type ScheduleDocument = {
   definition: ScheduleDefinition;
   prompt: string;
+  message?: ScheduledMessage;
   timeline: ScheduleActivity[];
 };
 
@@ -149,6 +222,7 @@ export const ScheduleRegistryRowSchema = ScheduleDefinitionSchema.pick({
   updatedAt: true,
 }).extend({
   elevatedPermissions: z.boolean().default(false),
+  scheduledMessage: z.literal(true).optional(),
   definitionFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   agentConfigId: z.string().min(1),
   projectKind: z.enum(['local', 'github']).optional(),
@@ -164,6 +238,7 @@ export const ScheduleRuntimeRowSchema = z.object({
   nextScheduledAt: timestamp.optional(),
   queueState: z.enum(['due', 'waiting_for_agent', 'retrying', 'blocked']).optional(),
   blockedCode: z.string().max(100).optional(),
+  messageState: z.enum(['pending', 'sent', 'cancelled', 'failed']).optional(),
   lastDispatch: z
     .object({ scheduledFor: timestamp, dispatchedAt: timestamp, sessionId: z.string() })
     .optional(),
@@ -198,6 +273,7 @@ export function scheduleUsesElevatedPermissions(
   agent: z.infer<typeof ScheduleAgentSchema>
 ): boolean {
   return [agent.modeId, ...Object.values(agent.configOptionValues ?? {})].some((value) => {
+    if (typeof value !== 'string') return false;
     const face = classifyPermissionModeFace(value);
     return face.kind !== 'hidden' && face.tone === 'warning';
   });

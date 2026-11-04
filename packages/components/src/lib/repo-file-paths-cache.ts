@@ -108,7 +108,10 @@ export async function readCachedRepoFilePaths(
   return memoryCache.get(key) ?? persisted;
 }
 
-/** Fetches the tree now; concurrent callers for the same key share one request. */
+/**
+ * Fetch now, sharing concurrent callers without reporting failures to analytics.
+ * Failures are not cached: a later call starts a new attempt, never a timed retry.
+ */
 export function fetchRepoFilePaths(
   workspaceId: string,
   repoFullName: string,
@@ -117,8 +120,10 @@ export function fetchRepoFilePaths(
   const key = getRepoFilePathsCacheKey(workspaceId, repoFullName, branch);
   const pending = inFlight.get(key);
   if (pending) return pending;
-  const request = withGitHubTokenRetry(workspaceId, repoFullName, (token) =>
-    githubFetchFilePaths(token, repoFullName, branch)
+  const request: Promise<RepoFilePathsCacheEntry> = withGitHubTokenRetry(
+    workspaceId,
+    repoFullName,
+    (token) => githubFetchFilePaths(token, repoFullName, branch)
   )
     .then((result) => {
       const parsed = RepoFilePathsResultSchema.parse({ repoFullName, ...result });

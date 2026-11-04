@@ -1,14 +1,9 @@
-import { createSessionAgentWrites } from '../lib/loro/session-agent-writes';
-import { LoroDoc, LoroMap } from 'loro-crdt';
-import { createHistoryWriter } from '@lody/shared';
-import { createLoroSessionData } from '@lody/shared/session-data';
 import { withHistoryPort } from '../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionHistoryInput, SessionId } from '@lody/shared';
 import {
   SessionTurnWaitError,
-  calculateTurnDurationMs,
-  findAssistantEntryForUserTurn,
+  sessionHistoryActivityAt,
   waitForTurnCompletion,
 } from './session-output';
 
@@ -63,102 +58,6 @@ const createSessionDoc = (mirror: ReturnType<typeof createMirror>) => {
 };
 
 describe('session output helpers', () => {
-  it('finds the assistant entry linked to the target user turn', () => {
-    const history = [
-      createHistoryEntry({
-        id: 'assistant-before',
-        role: 'assistant',
-      }),
-      createHistoryEntry({
-        id: 'user-1',
-        role: 'user',
-      }),
-      createHistoryEntry({
-        id: 'assistant-unrelated',
-        role: 'assistant',
-        userTurnId: 'user-2',
-      }),
-      createHistoryEntry({
-        id: 'assistant-target',
-        role: 'assistant',
-        userTurnId: 'user-1',
-      }),
-    ];
-
-    expect(findAssistantEntryForUserTurn(history, 'user-1')?.id).toBe('assistant-target');
-  });
-
-  it('streams one linked turn without materializing unrelated bodies', async () => {
-    const doc = new LoroDoc();
-    const writer = createHistoryWriter(doc);
-    for (let i = 0; i < 100; i++)
-      writer.append(
-        createHistoryEntry({
-          id: `old-${i}`,
-          items: [{ type: 'text', text: 'large old body'.repeat(100) }],
-        })
-      );
-    writer.append(createHistoryEntry({ id: 'u', role: 'user', status: 'processing' }));
-    writer.append(
-      createHistoryEntry({
-        id: 'a',
-        userTurnId: 'u',
-        finished: false,
-        items: [{ type: 'text', text: 'first' }],
-      })
-    );
-    const data = createLoroSessionData({
-      sessionId: 'session-1' as SessionId,
-      doc,
-      writer,
-    });
-    const bodyReads: string[] = [];
-    const toJSON = LoroMap.prototype.toJSON;
-    const spy = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function (this: LoroMap) {
-      const id = this.get('id');
-      if (typeof id === 'string') bodyReads.push(id);
-      return toJSON.call(this);
-    });
-    const first = Promise.withResolvers<void>();
-    const events: Array<Record<string, unknown>> = [];
-    const completion = waitForTurnCompletion({
-      sessionDoc: {
-        sessionId: 'session-1' as SessionId,
-        sessionData: data,
-        subscribeAll: (notify) => doc.subscribe(() => notify()),
-      },
-      backend: {
-        readTurnOutput: (userTurnId: string) => data.history.readTurnOutput(userTurnId),
-        subscribeHistory: (listener: () => void) => doc.subscribe(() => listener()),
-      },
-      userTurnId: 'u',
-      outputMode: 'jsonl',
-      timeoutMs: 0,
-      onEvent(event) {
-        events.push(event);
-        if (event.type === 'update') first.resolve();
-      },
-    });
-    try {
-      await first.promise;
-      await createSessionAgentWrites(data.writer).setTurnField('a', 'finished', {
-        kind: 'set',
-        value: true,
-      });
-      await createSessionAgentWrites(data.writer).setTurnField('u', 'status', {
-        kind: 'set',
-        value: 'handled',
-      });
-      expect((await completion).turnId).toBe('a');
-      expect(events.map((e) => e.type)).toEqual(['update', 'done']);
-      expect(bodyReads.length).toBeGreaterThan(0);
-      expect([...new Set(bodyReads)]).toEqual(['a']);
-    } finally {
-      spy.mockRestore();
-      data.dispose();
-    }
-  });
-
   it('streams updated assistant items and resolves when the turn finishes', async () => {
     const userTurn = createHistoryEntry({
       id: 'user-1',
@@ -443,13 +342,19 @@ describe('session output helpers', () => {
       vi.useRealTimers();
     }
   });
+});
 
-  it('calculates turn durations from timestamp and endedAt', () => {
-    expect(
-      calculateTurnDurationMs({
-        timestamp: '2026-03-27T00:00:00.000Z',
-        endedAt: Date.parse('2026-03-27T00:00:03.000Z'),
-      })
-    ).toBe(3_000);
+describe('history summary activity time', () => {
+  it('uses completion for finished assistant entries and retains creation for active/legacy/user entries', () => {
+    const timestamp = '2026-01-01T00:00:00.000Z';
+    const endedAt = Date.parse('2026-01-01T00:07:00.000Z');
+    const entry = { role: 'assistant' as const, timestamp, endedAt, finished: true };
+    expect(sessionHistoryActivityAt(entry)).toBe('2026-01-01T00:07:00.000Z');
+    expect(sessionHistoryActivityAt({ ...entry, finished: false })).toBe(timestamp);
+    expect(sessionHistoryActivityAt({ ...entry, role: 'user' })).toBe(timestamp);
+    expect(sessionHistoryActivityAt({ ...entry, endedAt: undefined })).toBe(timestamp);
+    expect(sessionHistoryActivityAt({ ...entry, endedAt: NaN })).toBe(timestamp);
+    expect(sessionHistoryActivityAt(undefined)).toBeUndefined();
+    expect(entry.timestamp).toBe(timestamp);
   });
 });

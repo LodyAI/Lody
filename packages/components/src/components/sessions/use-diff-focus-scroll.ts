@@ -78,6 +78,7 @@ export const useDiffFocusScroll = ({
   focusRequestSeq,
   isFocusTargetResolved,
   contextKey,
+  onScrollTarget,
 }: {
   focusFilePath?: string | null;
   focusComment?: DiffCommentFocusTarget | null;
@@ -85,6 +86,7 @@ export const useDiffFocusScroll = ({
   /** Whether the focused file or nested target has been resolved (allows early scroll). */
   isFocusTargetResolved: boolean;
   contextKey?: string | null;
+  onScrollTarget?: (target: HTMLElement) => void;
 }): {
   scrollContainerRef: MutableRefObject<HTMLDivElement | null>;
   registerPathBlock: (filePath: string, node: HTMLDivElement | null) => void;
@@ -127,8 +129,9 @@ export const useDiffFocusScroll = ({
     }
 
     scrollTargetIntoContainer(target, container, focusComment ? 'center' : 'start');
+    onScrollTarget?.(target);
     return true;
-  }, [focusComment, focusFilePath]);
+  }, [focusComment, focusFilePath, onScrollTarget]);
 
   // Scroll as soon as the focused file is resolved — don't wait for all files.
   useEffect(() => {

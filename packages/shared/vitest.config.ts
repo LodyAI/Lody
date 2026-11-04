@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    server: { deps: { inline: ['@effect/vitest'] } },
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     // `local-project.test.ts` spawns real `git` subprocesses and each

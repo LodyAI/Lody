@@ -7,27 +7,32 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 ## Build and packaging
 
-- CLI SSR uses native Node 22 TLA, never browser TLA transforms.
-  Validate at `NODE_OPTIONS=--max-old-space-size=2048`, not a raised heap.
-  Use per-package chunks, transitive assignment and CJS helper chunks.
-  Keep maps and no app code in vendor chunks.
+- Node 22 native TLA only; fixed 2048 MiB. Build CLI/workers then ACP in separate
+  Vite processes; ACP preserves dist. Keep maps, flat entries, transitive package
+  and CJS chunks; no app in vendor chunks.
+- The production bundle inlines `@loro-dev/streams-crdt` into `chunks/`. Its zstd
+  runtime resolves `./zstd.wasm` from that module, so `copy:wasm` places the file
+  beside each emitted module that references it and refuses a CLI-root-only copy.
+  Initialization failure rejects and is not cached. A waiter timeout does not
+  restart an in-flight or already-started wasm runtime. A pending init retains
+  the Loro document held by the snapshot upload.
+  [Decision](../../.agents/notes/implemented/bug-fix/2026-11-03-cli-zstd-wasm-init-hang.md).
 
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
-  never initialize telemetry in local mode even if PostHog variables exist in the shell.
+  never initialize telemetry in local mode even if PostHog env vars are set.
 - INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling
   `claude-acp.js` / `codex-acp.js` / `*-worker.js` — because worker owners resolve their child by
   FILENAME next to `import.meta.url`. Keep npm packages external by ABSOLUTE path, keep
   `splitting: true`, and keep the no-hoisting assertion.
 - Import the CLI's own `version` from `@/pkg`, never a relative `../package.json`; the package
-  `name` stays `lody` in every composition.
+  `name` is `lody` in every composition.
 - Optional desktop provenance comes from the compiled constant in `utils/desktop-build.ts`,
-  never runtime environment variables. File/hybrid log initialization records it at debug level.
-- Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can silently launch old
-  adapter capabilities from a stale `dist/`.
-- `engines.node` is pinned to `>=22.14.0 <23 || >=23.6.0` by better-sqlite3's
-  `NAPI_VERSION=10`, and
-  `src/utils/sqlite-runtime-support.ts` must stay the FIRST import in `src/index.ts` — older Node
-  segfaults on the SQLite binding instead of throwing.
+  never runtime env vars. File/hybrid log init records it at debug level.
+- Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can launch stale
+  adapter capabilities from an old `dist/`.
+- Keep the [Node security floors](../../.agents/notes/implemented/bug-fix/2026-10-22-node-security-runtime-floor.md)
+  aligned across engines/preinstall/CLI. `sqlite-runtime-support.ts` stays first.
+  Electron skips only the version floor.
 - Read [apps/electron/AGENTS.md](../electron/AGENTS.md) — embedded packaging, native deps/ABI,
   child runtime env, and the three places the Node pin moves together — before changing runtime
   deps, bundle externals, or spawning `process.execPath` with a filtered environment.
@@ -44,19 +49,25 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 ## Coding rules
 
-- Prefer Effect TS idioms for new/refactored CLI code — services via `Context.Tag` + `Layer`,
-  typed errors, structured concurrency, `Schedule` retries: context/cli-effect-ts.md.
-- Keep the strict tsconfig, no `any` or non-null assertions, and Zod at every foreign boundary:
+- Prefer Effect v4 for new/refactored CLI code; follow the [Effect guide](../../.agents/docs/cli-effect-ts.md).
+- Processes use `@lody/shared/node/process` (wiring: `src/platform/process-options`);
+  [rules](../../packages/shared/src/node/AGENTS.md), enforced by `check:cli-process-boundary`.
+- Strict tsconfig, no `any` or non-null assertions, Zod at every foreign boundary:
   context/cli-type-safety.md.
+- Shared start/probe/load promises share only in-flight attempts or successes; a failure must not be
+  cached until restart. An unprovable local fact degrades its own action instead of blocking unrelated
+  work, and every user-path wait is bounded ([rules](../../.agents/docs/failure-containment.md#rules)).
 - After a remote prompt arrives, only correctness-critical setup may block before ACP
   `agent.prompt`; never await notifications, analytics, or UI summaries
   (context/cli-prompt-hot-path.md).
-- Startup order and timing traces: context/cli-startup.md.
+- Startup order/timing traces: context/cli-startup.md.
 - The daemon file log always keeps `debug`, so a per-token or per-tick `logger.debug` evicts the 20 MB
   rotation window. Move it to `logger.trace` (`LODY_LOG_TRACE=1`) only if its subsystem's failures
   stay diagnosable without it; keep failing/slow branches at `debug`
   ([note](../../.agents/notes/implemented/architecture/2026-09-16-daemon-log-volume.md)).
 - File logs use `createFileTransport`; a raw `DailyRotateFile` makes a full disk crash the daemon.
+- A sync confirmation that fails on timeout waits ≥ `SYNC_CONFIRMATION_TIMEOUT_MS` (30s); waits
+  that continue on timeout may be shorter.
 - Read context/local-agent-ownership.md before changing local ports/sockets, daemon PID state,
   Electron/daemon startup, Supervisor retries, or Worker shutdown; health probes are observation
   only and never authorize PID killing.
@@ -72,20 +83,21 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - Child Sessions are one level deep. An independent Session created inside another persists exact
   provenance in `openedBySessionId`, plus `openedByRootSessionId` when the opener is a child Tab;
   never rewrite the exact opener to the root or treat either as `parentSessionId`.
-- INVARIANT: reasoning effort and fast mode are per MODEL, because an ACP probe's `configOptions`
-  describe only the model current at probe time. Validate effort against the TARGET model using
+- INVARIANT: reasoning effort and fast mode are per MODEL. Apply mode, then model, then dependent
+  options, for both top-level and config-option selections. A probe's `configOptions` describe only
+  its current model. Validate effort against the TARGET model using
   `getModelEffortChoices` (the stored per-model declaration first, then
   `modelReasoningEfforts`) and skip the resulting `validatedConfigIds` in
   `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
-  runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
-  never become visible `agent_warning` notices, while other rejections still do. Claude Fable
+  runtime rejections in debug diagnostics. Codex/Claude effort, Fast and Plan rejections stay hidden;
+  model rejections always emit `agent_warning` in the GUI. Claude Fable
   models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
 - INVARIANT: `SessionManager` publishes `exit`/`terminated` only for `Session` instances a caller
   received. `MessageHandler` treats them as "the live turn's agent died" and finalizes the turn, so
   a `createAgent` failure detaches the instance BEFORE its cleanup `terminate`; otherwise a
   recovery such as the resume-to-replay fallback loses every update of the replacement agent
   ([note](../../.agents/notes/implemented/bug-fix/2026-09-11-failed-session-create-lifecycle-events.md)).
-- `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text plus CLI
+- `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text and CLI
   version, platform, and architecture — never cwd, paths, hostname, environment, logs, prompts,
   history, or file contents. Keep obvious-secret rejection in the CLI and the hosted API boundary.
 
@@ -109,8 +121,5 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - Pi extension scanning runs only the pinned runtime's read-only listing entry under a frozen
   default or saved-profile environment — never caller-supplied launch fields. Selections
   require the pinned extension-aware runtime (`piExtensionsProtocolVersion`), not a fallback.
-- `src/lib/pr-poller/` compensates for a broken hosted GitHub webhook → Streams fan-out. Keep
-  policy in its pure modules with a thin scheduler, keep priority driven by presence and
-  `lastMessageAt` rather than a turn-end hook, and keep only scheduling state (never PR status) in
-  `~/.lody/pr-poller-state.json`. Spec: `specs/pr-status-reconciler.md`; invariants:
-  `src/lib/pr-poller/AGENTS.md`.
+- `src/lib/pr-poller/` owns PR associations and lifecycle reconciliation. Spec:
+  `specs/pr-status-reconciler.md`; invariants: [pr-poller](src/lib/pr-poller/AGENTS.md).

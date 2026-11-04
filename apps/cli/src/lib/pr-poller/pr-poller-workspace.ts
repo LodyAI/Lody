@@ -12,6 +12,7 @@ import {
   type SessionPullRequestStateMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import type { PrMetaWritePlan } from './pr-poll-writeback';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { listAliveSessionMetas } from '@/lib/command-runtime';
 import type { Logger } from '@/utils/logger';
@@ -22,6 +23,7 @@ import {
 } from './github-credential-resolver';
 import type { AliveSessionMeta } from './pr-poll-targets';
 import type { CloudGithubTokenPort, CloudPrAssociationPort } from '@lody/platform';
+import type { PrObservation } from './github-graphql-client';
 
 /**
  * Per-workspace adapter between the poller scheduler and a live workspace
@@ -40,11 +42,27 @@ export type AssociatePullRequestArgs = {
 };
 
 export type PrPollMetaPatch = {
+  lifecycle?: PrMetaWritePlan['lifecycle'];
   pullRequests?: SessionPullRequestMeta[];
   pullRequestState?: Record<string, SessionPullRequestStateMeta>;
 };
 
 export interface PrPollerWorkspaceHandle {
+  wantsWorkflowObservations?(sessionId: string): boolean;
+  recordWorkflowObservations?(
+    meta: SessionMeta,
+    repository: string,
+    headSha: string,
+    runs: readonly import('./workflow-runs').WorkflowRunObservation[],
+    gap: boolean,
+    observedAt: number
+  ): Promise<void>;
+  recordObservations?(
+    meta: SessionMeta,
+    repoFullName: string,
+    observations: readonly PrObservation[],
+    observedAt: number
+  ): Promise<void>;
   readonly workspaceId: string;
   /** Local machine identity — the pre-write ownership revalidation predicate. */
   readonly machineId: MachineId;
@@ -57,7 +75,10 @@ export interface PrPollerWorkspaceHandle {
   subscribePresence(listener: (states: LodyPresenceStateMap) => void): (() => void) | null;
   getPresenceStates(): LodyPresenceStateMap | null;
   waitForInitialSync(timeoutMs?: number): Promise<boolean>;
-  resolveCredential(repoFullName: string): Promise<ResolvedGitHubCredential | null>;
+  resolveCredential(
+    repoFullName: string,
+    nativeCredentials?: boolean
+  ): Promise<ResolvedGitHubCredential | null>;
   invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void;
   /** Optional hosted webhook linkage; failure does not block summary publication. */
   associatePullRequest: ((args: AssociatePullRequestArgs) => Promise<boolean>) | null;
@@ -68,6 +89,9 @@ export interface PrPollerWorkspaceHandle {
 const ASSOCIATE_TIMEOUT_MS = 15_000;
 
 export function createLodyPrPollerWorkspace(options: {
+  recordObservations?: PrPollerWorkspaceHandle['recordObservations'];
+  wantsWorkflowObservations?: PrPollerWorkspaceHandle['wantsWorkflowObservations'];
+  recordWorkflowObservations?: PrPollerWorkspaceHandle['recordWorkflowObservations'];
   documentManager: LoroDocumentManager;
   workspaceId: string;
   userId: string;
@@ -92,6 +116,9 @@ export function createLodyPrPollerWorkspace(options: {
   return {
     workspaceId,
     machineId,
+    recordObservations: options.recordObservations,
+    wantsWorkflowObservations: options.wantsWorkflowObservations,
+    recordWorkflowObservations: options.recordWorkflowObservations,
 
     async listAliveSessionMetas(): Promise<AliveSessionMeta[]> {
       const rows = await listAliveSessionMetas(documentManager);
@@ -112,7 +139,11 @@ export function createLodyPrPollerWorkspace(options: {
     },
 
     async writeOwnerMeta(ownerSessionId: SessionId, patch: PrPollMetaPatch): Promise<void> {
-      await documentManager.repo.upsertDocMeta(getSessionRoomId(ownerSessionId), patch);
+      const { lifecycle = [], ...legacyPatch } = patch;
+      await documentManager.repo.upsertDocMeta(getSessionRoomId(ownerSessionId), {
+        ...legacyPatch,
+        ...Object.fromEntries(lifecycle.map((write) => [write.field, write.value])),
+      });
     },
 
     watchSessionMetadata(listener: (sessionId: SessionId) => void): (() => void) | null {
@@ -147,8 +178,8 @@ export function createLodyPrPollerWorkspace(options: {
       );
     },
 
-    resolveCredential(repoFullName: string) {
-      return credentialResolver.resolve(repoFullName);
+    resolveCredential(repoFullName: string, nativeCredentials?: boolean) {
+      return credentialResolver.resolve(repoFullName, nativeCredentials);
     },
 
     invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void {
@@ -174,7 +205,7 @@ export function createLodyPrPollerWorkspace(options: {
               }),
             ]);
             if (!associated) {
-              logger.debug(`[pr-poller] PR association was rejected for ${args.prUrl}`);
+              logger.trace(`[pr-poller] PR association was rejected or paused for ${args.prUrl}`);
               return false;
             }
             return true;

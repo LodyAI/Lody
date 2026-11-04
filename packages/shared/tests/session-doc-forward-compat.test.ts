@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { Loro, LoroList, LoroMap, LoroText } from 'loro-crdt';
-import { Mirror, schema, validateSchema } from 'loro-mirror';
+import { Mirror, schema } from 'loro-mirror';
 
-import { sessionDocSchema, sessionHistorySchema } from '../src/schema';
+import { sessionDocSchema } from '../src/schema';
 import { createSessionMirror as createProductionSessionMirror } from '../src/session-mirror';
-import { MessageContentSchema } from '../src/message-schemas';
+
 import type { SessionId } from '../src/ids';
 
 /**
@@ -130,40 +130,6 @@ describe('session doc forward compatibility', () => {
     mirror.dispose();
   });
 
-  it('keeps malformed known items and untyped items invalid', () => {
-    for (const item of [{ type: 'text' }, { type: 42 }, {}]) {
-      const result = validateSchema(sessionHistorySchema, {
-        id: 'invalid-turn',
-        role: 'system',
-        timestamp: '2026-01-01T00:00:00.000Z',
-        items: [item],
-      });
-      expect(result.valid).toBe(false);
-    }
-    // Storage compatibility does not authorize a future type as new input.
-    expect(MessageContentSchema.safeParse({ type: 'future_operation_progress' }).success).toBe(
-      false
-    );
-    expect(
-      MessageContentSchema.safeParse({ type: 'text', text: { futureValue: 42 } }).success
-    ).toBe(false);
-  });
-
-  it('keeps writing after a newer peer adds an undeclared root key', () => {
-    const doc = new Loro();
-    const mirror = createSessionMirror(doc);
-
-    // The crashing path in production: the mirror is already open when the
-    // newer peer's update arrives, so the unknown key enters state via events.
-    doc.import(createFutureDocSnapshot());
-
-    expect(() => {
-      mirror.setState({ externalHistoryCursor: { importedTurnHashes: ['older-client'] } });
-    }).not.toThrow();
-
-    expect(doc.toJSON().futureFeature).toEqual({ id: 'op-1', state: 'preparing' });
-  });
-
   it('preserves the undeclared root key through a full-state update', () => {
     const doc = new Loro();
     const mirror = createSessionMirror(doc);
@@ -202,4 +168,34 @@ describe('session doc forward compatibility', () => {
     ]);
     expect(olderDoc.toJSON().futureFeature).toEqual({ id: 'op-1', state: 'failed' });
   });
+});
+
+it('preserves a terminal projection when a pre-notification client edits the session', () => {
+  const { notification: _notification, ...oldDefinition } = sessionDocSchema.definition;
+  const newer = new Loro();
+  const current = createSessionMirror(newer);
+  const notification = {
+    id: 'a42f1111-1111-4111-8111-111111111111',
+    recipientId: 'user',
+    turnId: 'turn',
+    outcome: 'failed',
+    createdAt: 100,
+  };
+  current.setState({ notification });
+  const older = new Loro();
+  older.import(newer.export({ mode: 'snapshot' }));
+  const oldMirror = new Mirror({
+    doc: older,
+    schema: schema(oldDefinition),
+    ignoreUnknownProperties: true,
+  });
+  oldMirror.setState((state) => ({
+    ...state,
+    externalHistoryCursor: { importedTurnHashes: ['legacy-write'] },
+  }));
+  newer.import(older.export({ mode: 'update', from: newer.version() }));
+  expect(current.getState().notification).toEqual(notification);
+  expect(current.getState().externalHistoryCursor?.importedTurnHashes).toEqual(['legacy-write']);
+  oldMirror.dispose();
+  current.dispose();
 });

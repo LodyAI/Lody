@@ -30,6 +30,7 @@ export const ALWAYS_FULL_GLOBS = Object.freeze([
   'scripts/**',
   'packages/configs/**',
   '.oxlintrc.json',
+  '.oxlintrc.effect.json',
   '.eslintignore',
   '.prettierrc',
   '.prettierignore',

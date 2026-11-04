@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ConvexProviderWithAuth, type ConvexReactClient } from 'convex/react';
 import { getAuthSessionIntentGeneration, type LodyAuthClient } from '../lib/auth';
+import { activateConvexJwtAuthKey, requestConvexJwt } from '../lib/convex-jwt';
 
 type RecoverableConvexBetterAuthProviderProps = {
   authClient: LodyAuthClient;
@@ -18,39 +19,6 @@ type PendingToken = {
   authKey: string;
   promise: Promise<string | null>;
 };
-
-const PENDING_CONVEX_TOKEN_REQUESTS = new WeakMap<object, Map<string, Promise<string | null>>>();
-
-function requestConvexTokenForAuthKey(
-  authClient: LodyAuthClient,
-  authKey: string
-): Promise<string | null> {
-  let requestsByAuthKey = PENDING_CONVEX_TOKEN_REQUESTS.get(authClient);
-  if (!requestsByAuthKey) {
-    requestsByAuthKey = new Map();
-    PENDING_CONVEX_TOKEN_REQUESTS.set(authClient, requestsByAuthKey);
-  }
-
-  const existing = requestsByAuthKey.get(authKey);
-  if (existing) {
-    return existing;
-  }
-
-  let request: Promise<string | null>;
-  request = authClient.convex
-    .token({ fetchOptions: { throw: false } })
-    .then(({ data }) => data?.token ?? null)
-    .finally(() => {
-      if (requestsByAuthKey.get(authKey) === request) {
-        requestsByAuthKey.delete(authKey);
-      }
-      if (requestsByAuthKey.size === 0) {
-        PENDING_CONVEX_TOKEN_REQUESTS.delete(authClient);
-      }
-    });
-  requestsByAuthKey.set(authKey, request);
-  return request;
-}
 
 export function RecoverableConvexBetterAuthProvider({
   authClient,
@@ -113,7 +81,15 @@ function useRecoverableBetterAuth(authClient: LodyAuthClient, generation: number
         const requestSequenceRef = useRef(0);
         const mountedRef = useRef(true);
         activeAuthKeyRef.current = authKey;
+        // Out-of-band JWT recovery joins this session's request; publish before any effect runs.
+        const jwtIdentity = `${authIntentGeneration}:${sessionId ?? ''}`;
+        activateConvexJwtAuthKey(authClient, authKey, jwtIdentity);
         const cachedToken = cachedTokenState.authKey === authKey ? cachedTokenState.token : null;
+
+        useEffect(
+          () => activateConvexJwtAuthKey(authClient, authKey, jwtIdentity),
+          [authKey, jwtIdentity]
+        );
 
         useEffect(() => {
           mountedRef.current = true;
@@ -163,7 +139,7 @@ function useRecoverableBetterAuth(authClient: LodyAuthClient, generation: number
 
             const requestSequence = requestSequenceRef.current + 1;
             requestSequenceRef.current = requestSequence;
-            const promise = requestConvexTokenForAuthKey(authClient, authKey)
+            const promise = requestConvexJwt(authClient, authKey)
               .then((token) => {
                 const isCurrentRequest =
                   mountedRef.current &&

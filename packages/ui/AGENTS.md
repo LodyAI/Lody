@@ -57,7 +57,7 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
   `dialog/surface.ts`; only their way in and dismissal differ. An outside press
   does not answer an alert dialog; Escape does. `Content` names its panel to
   `PopupContainerProvider` in **state, not a ref**: React attaches a child's
-  refs first, so a popup mounting in the same commit lands on the body.
+  refs first. Modals inherit `ModalContainerProvider`, not floating popup hosts.
 - There is no `Sheet`: a panel arriving from an edge is Base UI's `Drawer`, whose
   viewport lays it out so the panel's `transform` carries the drag. `side` is
   the writing direction's edge, `inset` the second axis.
@@ -110,11 +110,11 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
   their messages; `popup` the lists they open), not one per component.
 - `src/gallery` is the token board: a new token, variant, size, tone or shape
   lands with its entry, read off the rendered node.
-  `test/gallery.test.tsx` fails when a token has no entry. **A sample that is a
+  **A sample that is a
   rung needs a different rung under it**: the panel is the card rung, and in
   dark region and card are one value. No test sees this — open the board.
 - `corner.shape` goes with every radius except `radius.full` and ringed
   corners — both `corner.round`: spread shadows can't parallel-offset a
   superellipse; round is the non-Chromium fallback.
-- A Radix file in `packages/components/src/ui` is deleted when its in-repo
-  callers reach zero; private consumers sync on typecheck.
+- `ScrollArea` exposes its native viewport ref. Delete obsolete Radix files once
+  all in-repo callers migrate; private consumers sync on typecheck.

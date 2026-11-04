@@ -2,6 +2,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import {
   NO_MATCH_SEARCH_QUERY,
   RELEASE_SEARCH_QUERY,
+  SESSION_AUTO_TITLE,
   SESSION_RESPONSE_TEXT,
   SIMILAR_SESSION_PROMPT,
   SIMILAR_SESSION_TITLE,
@@ -227,6 +228,9 @@ export class SidebarSearchPage {
     await expect(this.page.getByText(SESSION_RESPONSE_TEXT, { exact: true })).toBeVisible({
       timeout: 60_000,
     });
+    // Rename the completed generated title so the scenario covers a user override,
+    // not a race with the still-pending automatic title write.
+    await expect(this.activeRow(sessionId)).toContainText(SESSION_AUTO_TITLE, { timeout: 60_000 });
     return sessionId;
   }
 
@@ -238,7 +242,7 @@ export class SidebarSearchPage {
     await dialog.getByRole('button', { name: /^(Save|保存)$/u }).click();
     await expect(dialog).toBeHidden();
     await expect(this.page.locator('body')).not.toHaveCSS('pointer-events', 'none');
-    await expect(this.activeRow(sessionId)).toContainText(title);
+    await expect(this.activeRow(sessionId)).toContainText(title, { timeout: 30_000 });
   }
 
   private async expectActiveSessionTitles(targetTitle: string): Promise<void> {

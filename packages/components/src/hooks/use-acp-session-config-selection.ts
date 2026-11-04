@@ -14,9 +14,11 @@ import {
   type ResolvedAcpSessionConfigSelection,
 } from '@/lib/acp-session-config-selection';
 import type { AcpSelectorTarget } from '@/components/shared/acp-selector-options';
+import type { SessionRunConfigDraftScope } from '@/atoms/session-run-config-drafts';
+import { useSessionRunConfigDraft } from './use-session-run-config-draft';
 
 /**
- * ACP run-config selection with NO effects. The only stored state is the
+ * ACP run-config selection remains a pure derivation. The only stored state is the
  * user's unsent edits; everything else derives per render
  * (`lib/acp-session-config-selection.ts` has the full story of the reconcile
  * loop this replaces — do not reintroduce a reducer that stores the resolved
@@ -50,6 +52,8 @@ export type UseAcpSessionConfigSelectionStateArgs = {
   preferences: AcpSessionConfigPreferences;
   runtimePreferences?: AcpSessionConfigPreferences | null;
   preserveUnsentUserEdits?: boolean;
+  /** Existing-session intent: only local accepted sends consume captured edits. */
+  draftScope?: SessionRunConfigDraftScope;
 };
 
 const EMPTY_PREFERENCES: AcpSessionConfigPreferences = {};
@@ -72,6 +76,7 @@ export type AcpSessionConfigSelectionHandle = {
   selectModel: (value: string | null) => void;
   selectConfigOption: (configId: string, value: AcpConfigOptionValue) => void;
   replaceConfigOptions: (values: Record<string, AcpConfigOptionValue>) => void;
+  captureForSend: (inputConfig: AcpSessionConfigPreferences) => (() => void) | undefined;
 };
 
 export function useAcpSessionConfigSelectionState({
@@ -81,7 +86,9 @@ export function useAcpSessionConfigSelectionState({
   preferences,
   runtimePreferences,
   preserveUnsentUserEdits = false,
+  draftScope,
 }: UseAcpSessionConfigSelectionStateArgs): AcpSessionConfigSelectionHandle {
+  const draft = useSessionRunConfigDraft(draftScope, enabled);
   const [fence, setFence] = useState<EditsFence>({
     targetKey: null,
     preferenceRevision: null,
@@ -89,6 +96,7 @@ export function useAcpSessionConfigSelectionState({
   });
 
   if (
+    !draftScope &&
     enabled &&
     (fence.targetKey !== targetKey || fence.preferenceRevision !== preferenceRevision)
   ) {
@@ -128,7 +136,11 @@ export function useAcpSessionConfigSelectionState({
 
   const effectivePreferences = enabled ? stablePreferencesRef.current : EMPTY_PREFERENCES;
   const effectiveRuntimePreferences = enabled ? stableRuntimePreferencesRef.current : null;
-  const edits = enabled ? fence.edits : EMPTY_ACP_SESSION_USER_CONFIG_EDITS;
+  const edits = enabled
+    ? draftScope
+      ? draft.edits
+      : fence.edits
+    : EMPTY_ACP_SESSION_USER_CONFIG_EDITS;
 
   const selection = useMemo<AcpSessionConfigSelectionInputs>(
     () => ({
@@ -165,16 +177,17 @@ export function useAcpSessionConfigSelectionState({
   return {
     selection,
     candidates,
-    appliedTargetKey: fence.targetKey,
-    appliedPreferenceRevision: fence.preferenceRevision,
+    appliedTargetKey: draftScope ? targetKey : fence.targetKey,
+    appliedPreferenceRevision: draftScope ? preferenceRevision : fence.preferenceRevision,
     hasUserEdits:
       edits.mode !== undefined ||
       edits.model !== undefined ||
       Object.keys(edits.configOptions).length > 0,
-    selectMode,
-    selectModel,
-    selectConfigOption,
-    replaceConfigOptions,
+    selectMode: draftScope ? draft.selectMode : selectMode,
+    selectModel: draftScope ? draft.selectModel : selectModel,
+    selectConfigOption: draftScope ? draft.selectConfigOption : selectConfigOption,
+    replaceConfigOptions: draftScope ? draft.replaceConfigOptions : replaceConfigOptions,
+    captureForSend: draft.captureForSend,
   };
 }
 

@@ -17,7 +17,7 @@ export function BootNavigate<
 >(props: NavigateOptions<TRouter, TFrom, TTo, TMaskFrom, TMaskTo> & Attributes) {
   return (
     <>
-      <BootShell />
+      <BootShell path={typeof props.to === 'string' ? props.to : undefined} />
       <Navigate {...props} />
     </>
   );

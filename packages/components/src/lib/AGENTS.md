@@ -1,63 +1,79 @@
 # Shared UI helpers and file surfaces
 
-Rules bind callers too.
-Background: [components](../../../../.agents/docs/components-package.md),
-[files](../../../../.agents/docs/components-file-paths.md).
+Rules bind callers too. [Background](../../../../.agents/docs/components-package.md).
 
-- Send acceptance and RPC await local commits, never Repo-wide flush.
+- Direct ordinary attachment uploads require trusted mode admission for the current account and workspace before sending source bytes; a provisional runtime is not that proof. Protected attachment failures never enable ordinary HTTP or plaintext local fallback.
+- Send/RPC await local commits, never Repo flush. Save `humanInputReceipts` before activation; RPC is redundant.
+- Encrypted sends refuse a host-verified machine withdrawal before any write. [Gate](../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#sender-withdrawal-gate).
+- Retry immutable Roost input; absent receipts stay unknown. Cache/refresh keeps
+  all input. Resolve owner routing per call.
+
+- Markdown caches hold bounded raw ASTs per grammar; clone per use; skip streams.
+
+Organization queries require matching authenticated sessions.
 
 ## Electron IPC types
 
 - `electron-ipc-client.ts` may import `ElectronIpcServices` from main-process
   registration with `import type` only. Browser/mobile bundles must erase the edge;
   never add an Electron runtime/package dependency or allow Node APIs in shared UI.
-- Keep `experimentalDecorators` and the direct catalog-pinned `@types/node` dependency
-  for the source declarations. Service classes and their single constructor list own
-  invoke signatures; never duplicate them in a handwritten contract, spec, or one-for-one
-  platform port. Fix resolution/erasure at this boundary or reconsider caller ownership.
-  Push events and one-way sends stay in `@lody/shared/electron-ipc`.
+- Keep `experimentalDecorators` and direct catalog-pinned `@types/node` for declarations.
+  Service constructors own invoke signatures; never duplicate them in contracts,
+  Specs or platform ports. Resolve erasure here or reconsider ownership.
+  Push events/one-way sends stay in `@lody/shared/electron-ipc`.
 
 ## Crash recovery and diagnostics
 
-- `ErrorBoundary`'s `error-boundary-fallback.tsx` displays the real error and one-click
-  full-report copy on every build. Details default visible (`showErrorDetails` opts out);
-  `lib/error-boundary-report.ts` is the pure copy builder.
+- E2EE repair archives originals and uses account-bound native reads; keep conflicts.
+  Readable evidence skips native work. Isolate bad intents.
+
+- `ErrorBoundary`'s fallback shows the real error and one-click full-report copy on every
+  build, details visible (`showErrorDetails` opts out); `error-boundary-report.ts` builds it.
 - Error/not-found screens use `components/status-page.tsx`; pre-React `boot-failure.ts`
-  draws that column in plain DOM with copied V2 token values, never React/StyleX/Tailwind.
+  copies its V2 tokens into plain DOM, never React/StyleX/Tailwind.
 - Crash screens never reload/restart/reset themselves. `resetKeys` must not clear a captured
-  error; the copyable fallback stays visible until the user presses a recovery button.
-- A cloud query throws into render and keeps throwing. An optional surface inside a larger
-  boundary owns an inline `ErrorBoundary`, so a backend failure degrades locally instead of
-  replacing the host subtree.
-- `lib/clear-local-cache.ts` owns `markCacheClearPending` (recoverable `lody*` caches,
-  still signed in) and `startHardReset` (full wipe/sign-out with its own confirmation
-  dialog). Defer asynchronous deletes to next boot; clear synchronous storage BEFORE
-  writing the boot flag.
-- Cache-level clearing uses an explicit localStorage DELETE list, never a keep-allowlist.
-  Include connection caches (Streams JWT/gateway, cursor-bypass markers, workspace-info
-  map); register new `lody:*` cache keys there. Auth tokens and preferences survive.
-- Include the tail of `lib/session-render-trace.ts` in copied reports. Its module-level
-  ring records render/mount/navigation, collapsing consecutive duplicates into ×N.
-  Writers append one compact diagnostic line, never drive behavior from the trace;
-  surface mount/unmount uses a layout effect.
-- `maybeClearLodyCacheOnBoot` runs once at most per page load, shared by `AppInitializer`
-  and `RuntimeProvider`; the latter awaits it before opening repo IndexedDB.
-- Mount `stuck-connection-banner.tsx` once in `MainLayout`. After 45s of continuous
-  control-connection `loading`, offer the same cache-clear flow; never interrupt,
-  retry, or time out the connection attempt.
+  error; the copyable fallback stays until the user presses a recovery button.
+- A cloud query throws into render and keeps throwing: an optional surface owns an inline
+  `ErrorBoundary`, so a backend failure degrades locally.
+- `lib/clear-local-cache.ts` owns `restartIntoCacheClear` (recoverable `lody*` caches,
+  still signed in; reloads one window) and `startHardReset` (full wipe/sign-out,
+  host-native first, own confirmation). Defer deletes to next boot; clear synchronous
+  storage BEFORE the flag. Record a clear's result; never re-run it unasked.
+- Ordinary IndexedDB cache clearing deletes only the known rebuildable cache names
+  and replica/cursor families in `clear-local-cache.ts`. Apply that policy to
+  enumerated and caller-supplied names alike. Preserve unknown databases, custody,
+  installation receipts and unresolved originals; new caches need an explicit entry.
+  Reserve disposable replica/cursor name families for caches, never durable host stores.
+- Cache clearing uses a localStorage DELETE list, never a keep-allowlist. Include
+  connection caches (Streams JWT/gateway, cursor-bypass, workspace-info) and new
+  `lody:*` cache keys; retain auth tokens and preferences.
+- Reports copy the `lib/session-render-trace.ts` tail; writers append one compact line,
+  never drive behavior from it; surface mount/unmount uses a layout effect.
+- Record crashes and unretried failures in `client-log.ts` (sent with bug reports):
+  events and ids, never prompts, history or file content.
+- `maybeClearLodyCacheOnBoot` runs once per page load; `RuntimeProvider` awaits it
+  before opening repo IndexedDB.
+- Route waits are `BlockingWaitPlaceholder` (recovery at 30s), never bare
+  `LoadingPlaceholder`/`BootShell`; failures are `RouteMessage` with a `gate` (`null`:
+  not a failure). `stuck-connection-banner.tsx` (`MainLayout`, 45s `loading`) opens
+  the same recovery page. Nothing clears automatically: replicas may hold unsynced edits.
 
 ## File Preview and Code Collab
 
-- Remote file surfaces read the owner-session file-index Flock. Local Electron targets
-  load initial file trees and All Changes from the local `code-collab/get-file-index`
-  Machine RPC snapshot without awaiting Flock, then subscribe to local Flock events.
-  Subscription delay/failure cannot block IPC or trigger cloud fallback. Allow stale
-  join events to converge with the CLI's asynchronous snapshot reconciliation.
-  Machine RPC also serves exact content, save, LSP, and diff requests.
+- Remote file surfaces read the owning session's file-index Flock. Local Electron
+  initial trees and All Changes first use local `code-collab/get-file-index`
+  Machine RPC without awaiting Flock, then subscribe to local Flock events.
+  Delayed/failed subscriptions never block IPC or fall back to cloud. Stale join
+  events converge with CLI asynchronous snapshot reconciliation. Machine RPC
+  also provides exact content, save, LSP and diffs.
 - `openFile` uses File Preview v3 plain reads: no workspace watch, All Changes recompute,
-  or Flock publish. Local Electron uses IPC-only `file/resolve-local`, negotiated via
-  `localFileResources`; unresolved routes never fall back to Streams RPC. Electron
-  serves local file resources; remote targets retain restricted, bounded `file/preview`.
+  or Flock publish. Electron verifies disk machine identity and reads via local IPC,
+  independent of daemon/index readiness. Unknown targets never fall back to Streams;
+  confirmed remote targets retain restricted, bounded `file/preview`.
+- Encrypted remote file roles come from the verified ledger status, never the organization
+  listing. Refuse methods outside the closed read list for non-writers, and every remote file
+  method without host feature RPC, before signing, with non-retryable copy; the receiving
+  machine still authorizes. [Decision](../../../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md#browser-and-mobile-consumers).
 - Small local text may enter the full-document editor/cache. `paged-text` is a separate
   readonly snapshot with bounded random reads; never seed the save cache, executable
   HTML, rendered Markdown/SVG, or full-document copy/download from it. Hidden paged
@@ -76,18 +92,19 @@ Background: [components](../../../../.agents/docs/components-package.md),
 - Preview and More-menu shell actions share `useSessionFileActions`. Only Electron
   on the session's own machine may invoke them; explicit local absolute artifact
   paths stay absolute, and remote paths never launch on the viewer's machine.
-- Native file sharing uses complete authorized preview bytes, never a remote host
-  path. Keep the existing transfer limits; stage each export in an isolated cache
-  file and clean up after cancellation, failure, or handoff.
+- Native file/PNG sharing uses complete authorized bytes, never host paths. Preserve
+  transfer limits; stage isolated cache files and clean up after handoff, failure, or
+  cancellation. Report cancellation separately; retain the preview and selection.
+- Before changing conversation Markdown/PNG exports, read the
+  [conversation export rules](../AGENTS.md#conversation-exports).
 
 ## File identity, caching, and errors
 
-- `session-file-open-target.ts` alone owns path normalization. Canonical workspace-relative
-  paths (tree, quick open, mobile browser, LSP) travel verbatim. Only Markdown hrefs
-  are URL-decoded and stripped of `:<line>` / `#L<line>` suffixes, absolute host
-  roots; same-machine Electron preserves other worktree paths instead of stripping
-  `.../worktrees/<uuid>/` prefixes. Display shortening never rewrites click targets.
-  Line anchors travel as fields, not inside paths.
+- `session-file-open-target.ts` owns normalization: canonical paths travel verbatim;
+  Markdown hrefs decode URL/line suffixes and host roots; local Electron preserves
+  other worktrees. Conversation links use `resolveDirectMarkdownFileOpenTarget`
+  to retain explicit absolute or index-confirmed paths without discovery. Copy
+  preserves the authored path independently of resolution. Anchors remain fields.
 - Cache resolved opens under BOTH `response.path` (the save identity) and the requested
   path (viewer/change-check identity). After save, refresh EVERY `cacheKeys` alias.
   Preview reads are case-tolerant; `save-text` writes are case-exact.
@@ -110,13 +127,15 @@ Background: [components](../../../../.agents/docs/components-package.md),
 
 ## ACP dispatch
 
-- Automatic Role cleanup requires a fresh matching runtime schema and owner access.
-  Persist through a conditional writer transaction; never overwrite intervening edits
-  or clear model/permission pins. See [intent](../../../../specs/agent-role-schema-reconciliation.md).
+- Independent Plan toggles retain Roles; match other pins.
+
+- Automatic Role cleanup needs a fresh matching runtime schema and owner access.
+  Conditional writer transactions preserve concurrent edits and model/permission pins.
+  [Contract](../../../../specs/agent-role-schema-reconciliation.md).
 
 - Display every provider-supplied rate-limit window name with localized duration via
   `formatAgentRateLimitWindowLabel`, even when duration/utilization/reset match.
 - Before creating top-level or child sessions, call `filterAcpSessionConfigOptionValues()`
   so cached values outside the current selector schema are neither dispatched nor persisted.
 
-Attachment transfer lifecycle changes follow [workspace ownership](../providers/AGENTS.md#attachment-transfer-ownership).
+Attachment lifetime: [workspace ownership](../providers/AGENTS.md#attachment-transfer-ownership).

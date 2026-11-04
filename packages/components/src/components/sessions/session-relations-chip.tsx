@@ -1,4 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { Button } from '@lody/ui/button';
+import { Popover } from '@lody/ui/popover';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { useSessionActions } from '@/hooks/use-session-actions';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import { MessagesSquare } from 'lucide-react';
@@ -21,6 +27,24 @@ import {
 import { cn } from '@/lib/utils';
 import { useWorkingHandOver } from '@/ui/working-status-mark';
 import { PopoverActionChip } from './info-chip';
+
+const styles = stylex.create({
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    padding: space[2],
+    flexWrap: 'wrap',
+    borderBottom: `1px solid ${colors.separator}`,
+  },
+  label: { fontSize: text.footnoteSize, color: colors.secondaryLabel },
+  confirmation: { display: 'flex', flexDirection: 'column', gap: space[3], maxWidth: 320 },
+  actions: { display: 'flex', justifyContent: 'flex-end', gap: space[2] },
+  status: { padding: space[2], fontSize: text.footnoteSize, color: colors.secondaryLabel },
+  error: { padding: space[2], fontSize: text.footnoteSize, color: colors.destructive },
+  tree: { maxHeight: 320, overflowY: 'auto', padding: space[1.5] },
+});
 
 /**
  * Whether the current Session sits in an opened-by tree worth showing. A
@@ -53,9 +77,16 @@ export function CurrentSessionRelationsChip({
   onOpenSession: (target: SessionNavigationTarget) => void;
 }) {
   const sessions = useAtomValue(allActiveSessionsAtom);
+  const { setTreeCollaborationStopped } = useSessionActions();
   const tree = useMemo(() => buildSessionRelationTree(sessions, sessionId), [sessions, sessionId]);
   return tree ? (
-    <SessionRelationsChip tree={tree} currentSessionId={sessionId} onOpenSession={onOpenSession} />
+    <SessionRelationsChip
+      key={tree.session.id}
+      tree={tree}
+      currentSessionId={sessionId}
+      onOpenSession={onOpenSession}
+      onSetCollaborationStopped={(stopped) => setTreeCollaborationStopped(tree.session.id, stopped)}
+    />
   ) : null;
 }
 
@@ -64,14 +95,37 @@ export function SessionRelationsChip({
   currentSessionId,
   onOpenSession,
   defaultOpen,
+  onSetCollaborationStopped,
 }: {
   tree: SessionRelationTreeNode;
   currentSessionId: SessionId;
   onOpenSession: (target: SessionNavigationTarget) => void;
   /** Storybook/testing aid. */
   defaultOpen?: boolean;
+  onSetCollaborationStopped?: (stopped: boolean) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
+  const inFlight = useRef(false);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const stopped = tree.session.collaborationStopped === true;
+  const apply = async (next: boolean) => {
+    if (inFlight.current || !onSetCollaborationStopped) return;
+    inFlight.current = true;
+    setPending(true);
+    setError(false);
+    try {
+      await onSetCollaborationStopped(next);
+      setConfirmOpen(false);
+    } catch {
+      setError(true);
+    } finally {
+      inFlight.current = false;
+      setPending(false);
+    }
+  };
   return (
     <PopoverActionChip
       icon={MessagesSquare}
@@ -80,12 +134,106 @@ export function SessionRelationsChip({
       value={String(countSessionRelationTree(tree) - 1)}
       defaultOpen={defaultOpen}
       content={
-        <div className="max-h-80 overflow-y-auto p-1.5">
-          <RelationTreeRow
-            node={tree}
-            currentSessionId={currentSessionId}
-            onOpenSession={onOpenSession}
-          />
+        <div>
+          <div {...stylex.props(styles.header)}>
+            <span {...stylex.props(styles.label)}>
+              {t('sessions.relations.label', 'Related sessions')}
+            </span>
+            {onSetCollaborationStopped ? (
+              stopped ? (
+                <Button
+                  size="mini"
+                  variant="secondary"
+                  disabled={pending}
+                  onClick={() => void apply(false)}
+                >
+                  {t('sessions.relations.resumeCollaboration', 'Restore collaboration')}
+                </Button>
+              ) : (
+                <Popover.Root
+                  open={confirmOpen}
+                  onOpenChange={(open) => {
+                    if (!pending) setConfirmOpen(open);
+                  }}
+                >
+                  <Popover.Trigger
+                    render={<Button size="mini" variant="ghost" tone="destructive" />}
+                  >
+                    {t(
+                      'sessions.relations.stopCollaboration',
+                      'Stop all conversation collaboration'
+                    )}
+                  </Popover.Trigger>
+                  <Popover.Content side="top" align="end" initialFocus={cancelRef}>
+                    <div {...stylex.props(styles.confirmation)}>
+                      <Popover.Title>
+                        {t(
+                          'sessions.relations.stopConfirmation',
+                          'This will stop all conversations in the conversation tree.'
+                        )}
+                      </Popover.Title>
+                      <Popover.Description>
+                        {t(
+                          'sessions.relations.stopDetails',
+                          'Execution stays blocked until you restore collaboration. Offline machines stop after reconnecting.'
+                        )}
+                      </Popover.Description>
+                      {error ? (
+                        <p role="alert" {...stylex.props(styles.error)}>
+                          {t(
+                            'sessions.relations.controlFailed',
+                            'Could not update the whole tree. Check the connection and update all machines, then retry.'
+                          )}
+                        </p>
+                      ) : null}
+                      <div {...stylex.props(styles.actions)}>
+                        <Button
+                          ref={cancelRef}
+                          size="small"
+                          variant="secondary"
+                          disabled={pending}
+                          onClick={() => setConfirmOpen(false)}
+                        >
+                          {t('sessions.relations.cancel', 'Cancel')}
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="destructive"
+                          disabled={pending}
+                          onClick={() => void apply(true)}
+                        >
+                          {t('sessions.relations.confirm', 'Confirm')}
+                        </Button>
+                      </div>
+                    </div>
+                  </Popover.Content>
+                </Popover.Root>
+              )
+            ) : null}
+          </div>
+          {stopped ? (
+            <p role="status" {...stylex.props(styles.status)}>
+              {t(
+                'sessions.relations.stopped',
+                'Collaboration stopped. Restore it here before continuing. Offline machines apply the stop after reconnecting.'
+              )}
+            </p>
+          ) : null}
+          {error && !confirmOpen ? (
+            <p role="alert" {...stylex.props(styles.error)}>
+              {t(
+                'sessions.relations.controlFailed',
+                'Could not update the whole tree. Check the connection and update all machines, then retry.'
+              )}
+            </p>
+          ) : null}
+          <div {...stylex.props(styles.tree)}>
+            <RelationTreeRow
+              node={tree}
+              currentSessionId={currentSessionId}
+              onOpenSession={onOpenSession}
+            />
+          </div>
         </div>
       }
     />

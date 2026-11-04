@@ -1,10 +1,18 @@
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACP_CAPABILITY_CACHE_VERSION } from '@lody/shared';
 import { getAcpCapabilitySourceVersion } from '../src/agent/setting';
-import type { LoroDocumentManager } from '../src/lib/loro/doc';
+import { LoroDocumentManager } from '../src/lib/loro/doc';
+import * as encryptedWorkspace from '../src/lib/e2ee/workspace-legacy';
+import type { MachineRuntimeOptions } from '../src/lib/machine-runtime';
+import { createTestCloudPort } from './test-cloud-port';
 import type { Logger } from '../src/utils/logger';
 
 const mocks = vi.hoisted(() => ({
+  runtimeOptions: [] as unknown[],
   initializeRuntime: vi.fn(async () => {}),
   cleanupRuntime: vi.fn(async () => {}),
   attachRemoteBridge: vi.fn(async () => {}),
@@ -29,6 +37,9 @@ vi.mock('@/pkg', () => ({
 
 vi.mock('@/lib/machine-runtime', () => ({
   MachineRuntime: class MockMachineRuntime {
+    constructor(options: unknown) {
+      mocks.runtimeOptions.push(options);
+    }
     initialize = mocks.initializeRuntime;
     cleanup = mocks.cleanupRuntime;
     attachRemoteBridge = mocks.attachRemoteBridge;
@@ -68,6 +79,7 @@ const builtinCodexSourceVersion = getAcpCapabilitySourceVersion({
 describe('Lody.registerAgent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.runtimeOptions.length = 0;
     mocks.fetchAcpCapabilities.mockResolvedValue({
       modes: [],
       models: [],
@@ -310,6 +322,47 @@ describe('Lody.registerAgent', () => {
     expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
 
+  it('recovers registration failures with backoff while later providers remain usable', async () => {
+    vi.useFakeTimers();
+    const rows = new Set<string>();
+    let fail = true;
+    const documentManager = {
+      hasCompletedInitialMetaSync: () => true,
+      syncMachineFlockDoc: async () => true,
+      getBuiltinAgentOptOuts: async () => new Set(),
+      hasAgentConfig: async (_type: string, agent: string) => rows.has(agent),
+      createAgentConfig: async (_type: string, agent: string) => {
+        if (agent === 'codex' && fail) throw new Error('temporary write failure');
+        rows.add(agent);
+        return agent;
+      },
+    } as unknown as LoroDocumentManager;
+    const { Lody } = await import('../src/lib/lody');
+    const lody = new Lody(
+      {
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1',
+        token: 'token',
+        userId: 'user-1',
+        machineId: 'machine-1',
+        machineName: 'machine',
+        builtinAgentConfigCliTypes: ['codex', 'claude'],
+      },
+      documentManager
+    );
+    mocks.initializeRuntime.mockRejectedValueOnce(new Error('temporary initialization failure'));
+    await lody.attachRemoteBridge();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rows.size).toBe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect([...rows]).toEqual(['claude']);
+    fail = false;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect([...rows]).toEqual(['claude', 'codex']);
+    await lody.cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('does not write static capabilities during builtin agent registration', async () => {
     const updateAcpCapabilities = vi.fn(async () => {});
     const getAcpCapabilities = vi.fn(async () => ({
@@ -489,4 +542,90 @@ describe('Lody.registerAgent', () => {
     // bail out of the whole loop.
     expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
+});
+
+describe('Lody workspace cloud-port composition', () => {
+  it.each([undefined, 'plaintext', 'e2ee'] as const)(
+    'uses host Git credentials only in encrypted workspaces (mode=%s)',
+    async (contentMode) => {
+      const directory = mkdtempSync(join(tmpdir(), 'lody-execution-composition-'));
+      const hostedTokenManager = {
+        getCredentialPolicy: async () => ({ personalEnabled: true }),
+      };
+      const cloudPort = createTestCloudPort({
+        kind: 'cloud',
+        e2ee: {} as never,
+        githubTokens: {
+          createTokenManager: () => hostedTokenManager as never,
+        },
+      });
+      const native = vi
+        .spyOn(encryptedWorkspace, 'openCliE2eeWorkspaceLegacy')
+        .mockImplementation(async () => {
+          if (contentMode !== 'e2ee') throw new Error('ordinary workspace opened E2EE custody');
+          return { close: async () => {}, repositoryDirectory: directory } as never;
+        });
+      const documents = vi
+        .spyOn(LoroDocumentManager, 'create')
+        .mockResolvedValue({ sessions: new Map() } as LoroDocumentManager);
+      try {
+        const { Lody } = await import('../src/lib/lody');
+        const lody = await Lody.create({
+          logger: createSilentLogger(),
+          workspaceId: 'synthetic-workspace',
+          contentMode,
+          genesisHash: 'ab'.repeat(32),
+          token: 'synthetic-token',
+          userId: 'user-1',
+          machineId: 'synthetic-machine',
+          machineName: 'Synthetic',
+          cloudPort,
+          memoryPressure: {} as never,
+          machineLifecycleCapability: {
+            launchMode: 'foreground',
+            canRemoteRestart: false,
+            canRemoteUpgrade: false,
+            reason: 'not_daemon',
+          },
+        });
+        const runtime = mocks.runtimeOptions.at(-1) as MachineRuntimeOptions;
+        expect(readdirSync(directory)).toEqual([]);
+        const gate = runtime.handlerConfig.encryptedExecution;
+        if (contentMode === 'e2ee') {
+          if (!gate) throw new Error('Missing encrypted execution gate');
+          expect(
+            await Effect.runPromise(
+              gate.claim({
+                workspaceId: 'synthetic-workspace',
+                sessionId: 'session',
+                userTurnId: 'turn',
+                requesterUserId: 'user-1',
+              })
+            )
+          ).toEqual({ state: 'denied' });
+        } else {
+          expect(gate).toBeUndefined();
+          expect(readdirSync(directory)).toEqual([]);
+        }
+
+        // Invoke Lody's production factory and the real SessionManager policy
+        // method: a null broker means agent git/gh uses the host credentials.
+        const sessions = runtime.sessionManagerFactory();
+        expect(await sessions.resolveGitIdentityOptions('user-1')).toEqual({
+          preferMachineIdentity: true,
+          personalIdentityEnabled: contentMode !== 'e2ee',
+        });
+        expect(runtime.handlerConfig.cloudPort?.githubTokens).toBe(
+          contentMode === 'e2ee' ? null : cloudPort.githubTokens
+        );
+        expect(lody.options.cloudPort.githubTokens).toBe(
+          contentMode === 'e2ee' ? null : cloudPort.githubTokens
+        );
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+        native.mockRestore();
+        documents.mockRestore();
+      }
+    }
+  );
 });

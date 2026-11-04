@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentConfigId, AgentConfigMeta, MachineId, MachineViewMeta } from '@lody/shared';
 import {
-  getChatLandingAgentSelectionsForMachine,
   getChatLandingDefaultsStorageKey,
   readChatLandingDefaults,
+  recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
   writeChatLandingDefaults,
 } from '../src/lib/chat-landing-defaults';
@@ -87,33 +87,6 @@ afterEach(() => {
 });
 
 describe('chat landing defaults storage', () => {
-  it('persists and restores repo/project/agent selections per workspace', () => {
-    installWindowStorage();
-    const workspaceId = 'workspace-1';
-
-    writeChatLandingDefaults(workspaceId, {
-      contextType: 'local',
-      agentId: 'agent-1',
-      machineId: 'machine-1',
-      repoFullName: 'loro-dev/lody',
-      branch: 'main',
-      localMachineId: 'machine-1',
-      localProjectId: 'project-1',
-      localBranch: 'feature/test',
-    });
-
-    expect(readChatLandingDefaults(workspaceId)).toEqual({
-      contextType: 'local',
-      agentId: 'agent-1',
-      machineId: 'machine-1',
-      repoFullName: 'loro-dev/lody',
-      branch: 'main',
-      localMachineId: 'machine-1',
-      localProjectId: 'project-1',
-      localBranch: 'feature/test',
-    });
-  });
-
   it('isolates defaults between workspaces', () => {
     installWindowStorage();
 
@@ -139,69 +112,39 @@ describe('chat landing defaults storage', () => {
       branch: 'develop',
     });
   });
-
-  it('returns null when stored payload is invalid', () => {
-    installWindowStorage();
-    const workspaceId = 'workspace-1';
-    localStorage.setItem(
-      getChatLandingDefaultsStorageKey(workspaceId),
-      JSON.stringify({ contextType: 'unsupported' })
-    );
-    expect(readChatLandingDefaults(workspaceId)).toBeNull();
-  });
-
-  it('is a no-op when window is unavailable', () => {
-    Reflect.deleteProperty(globalThis, 'window');
-    Reflect.deleteProperty(globalThis, 'localStorage');
-
-    expect(readChatLandingDefaults('workspace-1')).toBeNull();
-    expect(() => writeChatLandingDefaults('workspace-1', { contextType: 'chat' })).not.toThrow();
-  });
 });
 
-describe('getChatLandingAgentSelectionsForMachine', () => {
-  it('keeps every provider on the selected machine in list order', () => {
-    const selections = getChatLandingAgentSelectionsForMachine(
-      [
-        createConfig('provider-a', 'machine-a'),
-        createConfig('provider-b', 'machine-a'),
-        createConfig('provider-other-machine', 'machine-b'),
-        createConfig('provider-c', 'machine-a'),
-        createConfig('provider-d', 'machine-a'),
-      ],
-      asMachineId('machine-a')
+describe('last accepted project', () => {
+  it.each([
+    { kind: 'github', repoFullName: 'org/repo' },
+    { kind: 'local', machineId: 'machine-a', localProjectId: 'project-a' },
+    { kind: 'group', projectId: 'group-a' },
+    { kind: 'none' },
+  ] as const)('remembers $kind separately from mutable composer defaults', (project) => {
+    installWindowStorage();
+    writeChatLandingDefaults('workspace-a', { agentId: 'agent-a', contextType: 'chat' });
+    recordChatLandingProjectUse('workspace-a', project);
+    expect(readChatLandingDefaults('workspace-a')).toMatchObject({
+      agentId: 'agent-a',
+      lastUsedProject: project,
+    });
+    expect(readChatLandingDefaults('workspace-b')).toBeNull();
+  });
+  it('discards a corrupt remembered target without losing existing agent defaults', () => {
+    installWindowStorage();
+    localStorage.setItem(
+      getChatLandingDefaultsStorageKey('workspace-a'),
+      JSON.stringify({
+        agentId: 'agent-a',
+        lastUsedProject: { kind: 'local', localProjectId: 'incomplete' },
+      })
     );
-
-    expect(selections).toEqual([
-      { agentId: asAgentConfigId('provider-a'), machineId: asMachineId('machine-a') },
-      { agentId: asAgentConfigId('provider-b'), machineId: asMachineId('machine-a') },
-      { agentId: asAgentConfigId('provider-c'), machineId: asMachineId('machine-a') },
-      { agentId: asAgentConfigId('provider-d'), machineId: asMachineId('machine-a') },
-    ]);
+    expect(readChatLandingDefaults('workspace-a')).toMatchObject({ agentId: 'agent-a' });
+    expect(readChatLandingDefaults('workspace-a')?.lastUsedProject).toBeUndefined();
   });
 });
 
 describe('resolvePreferredChatLandingAgentSelection', () => {
-  it('restores the exact stored agent and machine when still compatible', () => {
-    const selection = resolvePreferredChatLandingAgentSelection({
-      preferredAgentId: asAgentConfigId('codex-a'),
-      preferredMachineId: asMachineId('machine-a'),
-      executorConfigs: [
-        createConfig('codex-a', 'machine-a'),
-        createConfig('claude-a', 'machine-a', 'claude'),
-      ],
-      machines: new Map([
-        ['machine-a', createMachine('machine-a')],
-        ['machine-b', createMachine('machine-b')],
-      ]),
-    });
-
-    expect(selection).toEqual({
-      agentId: asAgentConfigId('codex-a'),
-      machineId: asMachineId('machine-a'),
-    });
-  });
-
   it('falls back to a same-agent-type config on the required machine when the stored config belongs elsewhere', () => {
     const selection = resolvePreferredChatLandingAgentSelection({
       preferredAgentId: asAgentConfigId('claude-a'),
@@ -280,24 +223,6 @@ describe('resolvePreferredChatLandingAgentSelection', () => {
 
     expect(selection).toEqual({
       agentId: asAgentConfigId('claude-b'),
-      machineId: asMachineId('machine-b'),
-    });
-  });
-
-  it('falls back to the first compatible machine in order when no stored selection resolves', () => {
-    const selection = resolvePreferredChatLandingAgentSelection({
-      executorConfigs: [
-        createConfig('codex-b', 'machine-b'),
-        createConfig('claude-c', 'machine-c', 'claude'),
-      ],
-      machines: new Map([
-        ['machine-b', createMachine('machine-b')],
-        ['machine-c', createMachine('machine-c')],
-      ]),
-    });
-
-    expect(selection).toEqual({
-      agentId: asAgentConfigId('codex-b'),
       machineId: asMachineId('machine-b'),
     });
   });

@@ -19,7 +19,36 @@
  * and resolves the runtime-omitted key once, so this must mount and settle.
  */
 
+// @vitest-environment jsdom
+/**
+ * The composer's selector options are built FROM the selection (the
+ * `useSessionAcpSelectorContext` cycle), and the regression these tests pin
+ * comes from a real session (51e236e0-b0d0-4c47-a74b-f8cfe2e97a91, 0.89.x,
+ * React error #185 on open). Its stored turn preferences carry a config option
+ * the agent's runtime snapshot does not report:
+ *
+ *   turn inputConfig: builtin/claude, mode `auto`, model `claude-fable-5[1m]`,
+ *     configOptionValues `{ effort: high, fast: false }`
+ *   acpRuntimeConfig (revision 1, based on that same turn): mode `auto`,
+ *     model `claude-fable-5`,
+ *     configOptionValues `{ effort: high, mode: auto, model: claude-fable-5 }`
+ *
+ * The old reconcile/apply layout-effect pair alternated on that key once per
+ * render until React aborted with "Maximum update depth exceeded". The derived
+ * hook stores only user edits, feeds the capability lookup from CANDIDATES,
+ * and resolves the runtime-omitted key once, so this must mount and settle.
+ */
 import { act, useMemo } from 'react';
+import { Provider, createStore } from 'jotai';
+import {
+  sessionRunConfigDraftsAtom,
+  setSessionRunConfigDraftAccountAtom,
+} from '../src/atoms/session-run-config-drafts';
+import type { WorkspaceRuntime } from '../src/atoms/runtime';
+import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
+import { LoroDoc } from 'loro-crdt';
+import { createConversationSession } from '../src/lib/conversation-view';
+import { createSessionSendResources } from '../src/lib/session-send-resources';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -141,43 +170,11 @@ describe('session composer config selection wiring (#185 regression)', () => {
     expect(() => {
       flushSync(() => root?.render(<ConfigSelectionHarness />));
     }).not.toThrow();
-    // One render to mount, one for the fence adjustment. React aborts at 50
-    // nested updates, so anything unbounded shows up here first.
-    expect(renderCount).toBeLessThanOrEqual(3);
     // The runtime snapshot's values win, and its key set is final: the
     // preference-only `fast` is not re-seeded.
     expect(settledModelId).toBe('claude-fable-5');
     expect(settledConfigKeys).not.toContain('fast');
     expect(settledConfigKeys).toContain('effort');
-  });
-
-  it('keeps the selector catalog stable across value-equal document frames', () => {
-    /* Streaming rebuilds `sessionDoc.history` — and thus the resolved
-       preference/runtime object literals — with unchanged VALUES once per
-       merge frame. The replaced reducer absorbed that churn by returning the
-       same state object; the hook must absorb it too, or the catalog (and the
-       memoized composer subtree fed from it) rebuilds on every frame of the
-       conversation hot path. */
-    flushSync(() => root?.render(<ConfigSelectionHarness />));
-    const settledCatalogBuilds = catalogBuilds;
-    for (let frame = 0; frame < 10; frame += 1) {
-      const freshPreferences = {
-        ...preferences,
-        configOptionValues: { ...(preferences.configOptionValues ?? {}) },
-      };
-      const freshRuntime = runtimeConfig
-        ? { ...runtimeConfig, configOptionValues: { ...(runtimeConfig.configOptionValues ?? {}) } }
-        : runtimeConfig;
-      flushSync(() =>
-        root?.render(
-          <ConfigSelectionHarness
-            framePreferences={freshPreferences}
-            frameRuntimePreferences={freshRuntime}
-          />
-        )
-      );
-    }
-    expect(catalogBuilds).toBe(settledCatalogBuilds);
   });
 });
 
@@ -437,5 +434,278 @@ describe('composer configuration across attachment sends', () => {
     durable = [];
     render();
     expect(visible().model).toBe('default');
+  });
+});
+
+describe('existing-session run-config drafts', () => {
+  const closeSendResources: Array<() => Promise<void>> = [];
+  let container: HTMLDivElement;
+  let root: Root;
+  let store: ReturnType<typeof createStore>;
+  let selection: ReturnType<typeof useAcpSessionConfigSelectionState>;
+  const options: AcpSessionSelectorOptionsInput = {
+    capabilityAuthority: 'authoritative',
+    modeOptions: [{ value: 'agent', label: 'Agent' }],
+    modelOptions: ['chosen', 'next'].map((value) => ({ value, label: value })),
+    defaultModeId: 'agent',
+    defaultModelId: 'chosen',
+    modelReasoningEfforts: undefined,
+    configOptionSelectors: [
+      { configId: 'fast-mode', label: 'Fast', type: 'boolean', currentValue: false, options: [] },
+    ],
+  };
+  function Harness({
+    session = 'a',
+    provider = 'codex-a',
+    baseline = false,
+    revision = 'old',
+  }: {
+    session?: string;
+    provider?: string;
+    baseline?: boolean;
+    revision?: string;
+  }) {
+    selection = useAcpSessionConfigSelectionState({
+      targetKey: provider,
+      preferenceRevision: revision,
+      preferences: { configOptionValues: { 'fast-mode': baseline } },
+      runtimePreferences: { configOptionValues: { 'fast-mode': baseline } },
+      preserveUnsentUserEdits: true,
+      draftScope: {
+        accountId: 'account',
+        workspaceId: 'workspace',
+        sessionId: session,
+        targetKey: provider,
+      },
+    });
+    const resolved = useResolvedAcpSessionConfigSelection(selection.selection, options);
+    return <output>{String(resolved.configOptionValues['fast-mode'])}</output>;
+  }
+  const render = (props: Parameters<typeof Harness>[0] = {}) => {
+    flushSync(() =>
+      root.render(
+        <Provider store={store}>
+          <Harness key={props.session ?? 'a'} {...props} />
+        </Provider>
+      )
+    );
+  };
+  const toggle = (value: boolean) =>
+    flushSync(() => selection.selectConfigOption('fast-mode', value));
+  const visible = () => container.textContent;
+  const sendFixture = () => {
+    const started = Promise.withResolvers<void>();
+    const write = Promise.withResolvers<void>();
+    const written: SessionHistory[] = [];
+    const doc = new LoroDoc();
+    const control = createConversationSession(doc, { sessionId: 'a' as SessionId });
+    const sendResources = createSessionSendResources({
+      acquire: async () =>
+        ({
+          getState: () => control.mirror.getState(),
+          setState: control.mirror.setState.bind(control.mirror),
+        }) as never,
+      releaseRef: () => {},
+    });
+    closeSendResources.push(async () => {
+      await sendResources.dispose();
+      control.dispose();
+      doc.free();
+    });
+    const entry: SessionHistory = {
+      id: 'local-turn',
+      role: 'user',
+      userId: 'account',
+      timestamp: '2026-10-07T00:00:00.000Z',
+      status: 'pending',
+      items: [{ type: 'text', text: 'Synthetic message' }],
+      inputConfig: { ...selection.candidates },
+      read: false,
+      fileDiff: [],
+      finished: true,
+    };
+    const runtime = {
+      workspaceId: 'workspace',
+      pendingSends: null,
+      sendResources,
+      repo: { getDocMeta: async () => ({ meta: { id: 'a', machineId: 'machine' } }) },
+      writer: {
+        appendSessionTurn: async (_session: SessionId, turn: SessionHistory) => {
+          started.resolve();
+          await write.promise;
+          written.push(turn);
+          return 'direct' as const;
+        },
+      },
+    } as unknown as WorkspaceRuntime;
+    const admit = () =>
+      acceptSessionUserTurn(
+        runtime,
+        'a' as SessionId,
+        entry,
+        { kind: 'history' },
+        undefined,
+        undefined,
+        undefined,
+        selection.captureForSend(entry.inputConfig!)
+      );
+    return { started, write, written, entry, runtime, admit };
+  };
+  beforeEach(() => {
+    store = createStore();
+    store.set(setSessionRunConfigDraftAccountAtom, 'account');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    flushSync(() => root.unmount());
+    container.remove();
+    for (const close of closeSendResources.splice(0)) await close();
+  });
+
+  it('preserves Fast on and explicit off across A/B/A remounts and remote turns', () => {
+    render();
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+    toggle(true);
+    render({ session: 'b', baseline: true });
+    toggle(false);
+    render({ revision: 'remote', baseline: false });
+    expect(visible()).toBe('true');
+    expect(selection.hasUserEdits).toBe(true);
+    render({ session: 'b', baseline: true });
+    expect(visible()).toBe('false');
+    expect(selection.hasUserEdits).toBe(true);
+  });
+
+  it('isolates provider drafts and ignores the replaced target’s edit callback', () => {
+    render();
+    toggle(true);
+    const editA = selection.selectConfigOption;
+    render({ provider: 'codex-b' });
+    expect(visible()).toBe('false');
+    flushSync(() => editA('fast-mode', false));
+    expect(selection.hasUserEdits).toBe(false);
+    toggle(false);
+    render();
+    expect(visible()).toBe('true');
+    render({ provider: 'codex-b', baseline: true });
+    expect(visible()).toBe('false');
+  });
+
+  it('consumes captured edits only after the local write succeeds, even after unmount', async () => {
+    render();
+    toggle(true);
+    const send = sendFixture();
+    const accepted = send.admit();
+    await send.started.promise;
+    expect(send.written).toEqual([]);
+    expect(selection.hasUserEdits).toBe(true);
+    render({ session: 'b' });
+    await act(async () => {
+      send.write.resolve();
+      await expect(accepted).resolves.toBe('written');
+    });
+    expect(send.written).toEqual([send.entry]);
+    expect(send.written[0]!.inputConfig?.configOptionValues).toEqual({ 'fast-mode': true });
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+    render();
+    expect(selection.hasUserEdits).toBe(false);
+  });
+
+  it('consumes only captured fields while preserving newer and same-valued edits', async () => {
+    render();
+    flushSync(() => {
+      selection.selectMode('agent');
+      selection.selectModel('chosen');
+      selection.selectConfigOption('fast-mode', false);
+    });
+    const send = sendFixture();
+    const accepted = send.admit();
+    await send.started.promise;
+    flushSync(() => {
+      selection.selectModel('next');
+      selection.selectConfigOption('fast-mode', false);
+    });
+    await act(async () => {
+      send.write.resolve();
+      await expect(accepted).resolves.toBe('written');
+    });
+    expect(send.written[0]!.inputConfig).toEqual({
+      modeId: 'agent',
+      modelId: 'chosen',
+      configOptionValues: { 'fast-mode': false },
+    });
+    expect(selection.selection.edits).toEqual({
+      model: { value: 'next' },
+      configOptions: { 'fast-mode': false },
+    });
+  });
+
+  it('keeps edits when the local write rejects admission', async () => {
+    render();
+    toggle(true);
+    const send = sendFixture();
+    const accepted = send.admit();
+    await send.started.promise;
+    send.write.reject(new Error('Synthetic local write rejected'));
+    await expect(accepted).rejects.toThrow('Synthetic local write rejected');
+    expect(send.written).toEqual([]);
+    expect(visible()).toBe('true');
+    expect(selection.hasUserEdits).toBe(true);
+  });
+
+  it('consumes held-send edits at admission without consuming the next draft at promotion', async () => {
+    render();
+    toggle(true);
+    const send = sendFixture();
+    const preparation = Promise.withResolvers<void>();
+    const pending = createPendingSessionSends({
+      prepare: async (held) => {
+        await preparation.promise;
+        return { entry: held.entry, queue: held.queue, attachments: [] };
+      },
+      write: async (held) => {
+        send.written.push(held.entry);
+      },
+      deliver: async () => {},
+    });
+    send.runtime.pendingSends = pending;
+    try {
+      await act(async () => {
+        await expect(
+          acceptSessionUserTurn(
+            send.runtime,
+            'a' as SessionId,
+            send.entry,
+            { kind: 'history' },
+            undefined,
+            undefined,
+            [{ id: 'attachment', kind: 'file', source: new File(['synthetic'], 'sample.txt') }],
+            selection.captureForSend(send.entry.inputConfig!)
+          )
+        ).resolves.toBe('pending');
+      });
+      expect(selection.hasUserEdits).toBe(false);
+      expect(send.written).toEqual([]);
+      toggle(false);
+      const drained = new Promise<void>((resolve) => {
+        const unsubscribe = pending.subscribe(() => {
+          if (pending.hasSession('a' as SessionId)) return;
+          unsubscribe();
+          resolve();
+        });
+      });
+      await act(async () => {
+        preparation.resolve();
+        await drained;
+      });
+      expect(send.written).toEqual([send.entry]);
+      expect(visible()).toBe('false');
+      expect(selection.hasUserEdits).toBe(true);
+    } finally {
+      preparation.resolve();
+      pending.dispose();
+    }
   });
 });

@@ -1,4 +1,11 @@
+import type { SessionHistoryMetadata, SessionSubagentRun } from '@lody/shared/session-data';
 import type { SessionHistory, SessionId, SessionTurnInputConfig } from '@lody/shared';
+
+/** Display-only capability, attached non-enumerably to a projected task.
+ * A closed dialog retains no complete child transcript. */
+export type SubagentRunHistorySource = {
+  read(): Promise<SessionSubagentRun | undefined>;
+};
 
 /**
  * Cheap per-turn facts the outline rail, placeholder rows, and height estimates
@@ -38,6 +45,7 @@ export type TurnIndexInputConfig = Pick<
   | 'modelId'
   | 'cliType'
   | 'agentType'
+  | 'memory'
   | 'mcpServerIds'
   | 'configOptionValues'
 >;
@@ -80,9 +88,14 @@ export type ConversationViewChange =
   | { kind: 'structure'; from: number; to: number }
   // Body identities to invalidate. Empty for summary-only/cache bookkeeping;
   // subscribers still receive a version change, but no body fact became stale.
-  | { kind: 'changed'; ids: readonly string[] };
+  // indexIds names refreshed metadata without prematurely invalidating a body.
+  | { kind: 'changed'; ids: readonly string[]; indexIds?: readonly string[] };
 
 export type ConversationViewListener = (change: ConversationViewChange) => void;
+
+/** Position-only row used while a reverse page has not been loaded yet. */
+export const UNLOADED_TURN_PREFIX = 'unloaded-turn:';
+export const isUnloadedTurnId = (id: string): boolean => id.startsWith(UNLOADED_TURN_PREFIX);
 
 /** Owns the concrete turn containers captured at acquisition, even if they move. */
 export type ConversationRange = {
@@ -116,18 +129,35 @@ export interface ConversationView {
    * token rate, and rebuilding a per-turn layout that often is pure waste.
    */
   readonly structureVersion: number;
+  /**
+   * Wall-clock ms (this process's clock) at which the backend last reported a
+   * history change to this view; `null` until one arrives after opening. In
+   * memory only: liveness UI reads it on its own tick, so it never bumps
+   * `version`, and hydration or paging never moves it.
+   */
+  readonly lastUpdateAt: number | null;
   /** Resolves once the initial directory and retained tail are ready; offscreen summaries stay lazy. */
   readonly ready: Promise<void>;
+  /** True when this backend can page toward older history. */
+  readonly hasMoreOlder?: boolean;
   index(i: number): TurnIndexRow | undefined;
   /** -1 when the id is unknown. */
   indexOf(turnId: string): number;
   /** One authoritative, consistent full read for explicit export/replay/hash. */
   readAll(): Promise<SessionHistory[]>;
-  /** The hydrated turn, or `undefined` until an acquired range covers it. */
+  readMetadata(): Promise<SessionHistoryMetadata[]>;
+  /** Hydrated display turn; child runs may be previews with an on-demand
+   * detail capability. Never use this as export/copy/write input: use readAll
+   * or the authoritative SessionData reader. Undefined until acquired. */
   turn(i: number): SessionHistory | undefined;
   isHydrated(i: number): boolean;
   /** Captures `[from, to)` now. Release the returned handle when done. */
   acquireRange(from: number, to: number): ConversationRange;
+  /** Prepends one older directory page when the backend supports paging. */
+  loadOlder?(): Promise<boolean>;
+  /** Load the complete directory, or stop once a requested turn is found.
+   * Bodies remain windowed. Releasing the lease cancels further page requests. */
+  acquireDirectory?(throughTurnId?: string): ConversationRange;
   subscribe(listener: ConversationViewListener): () => void;
   dispose(): void;
 }

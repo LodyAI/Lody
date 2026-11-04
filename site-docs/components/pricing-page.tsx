@@ -281,9 +281,29 @@ const copy = {
           'No. Lody only charges for the collaboration workspace. You keep using your own Claude Code, Codex, or model-provider account at zero markup.',
       },
       {
-        question: 'What counts as a paid seat?',
+        question: 'How are new members billed?',
         answer:
-          'Plus is billed per accepted member inside the upgraded workspace. Pending invitations are not billed until they are accepted.',
+          'Invitations are free. When someone joins a Plus workspace, they use an empty paid seat at no extra cost. Otherwise, a new seat is added and prorated daily from their join date. They can start using Plus immediately.',
+      },
+      {
+        question: 'When do you collect the extra charge?',
+        answer:
+          'Not immediately. On monthly plans, the next renewal includes next month’s seats plus this month’s prorated additions. On yearly plans, additions are charged on the next monthly anniversary of your subscription, covering the time from joining to annual renewal.',
+      },
+      {
+        question: 'What happens when a member leaves?',
+        answer:
+          'Removal or departure does not refund the current term or cancel charges already incurred. The empty seat can be reused at no extra cost until renewal. Your seat count decreases at the next monthly or annual renewal.',
+      },
+      {
+        question: 'What if I added someone by mistake?',
+        answer:
+          'Remove them, then contact contact@lody.ai within 3 days of the invoice date for a refund of their prorated seat charge.',
+      },
+      {
+        question: 'Does canceling or deleting a workspace cancel outstanding charges?',
+        answer:
+          'No. Charges already incurred are still due on the original billing date. Deleting a workspace does not bring that date forward.',
       },
       {
         question: 'Can we start free and upgrade later?',
@@ -456,9 +476,27 @@ const copy = {
           '不会。Lody 只对协作 workspace 收费。你继续使用自己的 Claude Code、Codex 或模型供应商账号，零加价。',
       },
       {
-        question: '什么会被计为一个付费 seat？',
+        question: '新增成员怎么收费？',
         answer:
-          'Plus 按升级 workspace 内已接受的成员计费。Pending invitation 不计费，接受邀请后才计入 seat。',
+          '邀请不收费，成员实际加入 Plus 工作区后才计费。有空闲的付费席位就免费复用；没有则新增一个席位，从加入当天按天折算。加入后即可使用 Plus。',
+      },
+      {
+        question: '新增席位什么时候扣款？',
+        answer:
+          '不会立即扣款。月付：下次续费合并收取下个月的席位费和本月新增的折算费。年付：在下一个月度账单日（订阅日期对应的每月日期），收取加入日至年度到期的折算费。',
+      },
+      {
+        question: '成员被移除或退出后呢？',
+        answer:
+          '本期不退款，已产生的费用仍需支付。空出的席位本期内可免费换人，到下次月度或年度续费时才减少席位数。',
+      },
+      {
+        question: '误加了成员怎么办？',
+        answer: '先移除成员，再于账单日起 3 天内联系 contact@lody.ai，可退还该成员的席位折算费。',
+      },
+      {
+        question: '取消续费或删除工作区后，还要付费吗？',
+        answer: '已产生的费用仍按原账单日收取，删除工作区不会提前扣款。',
       },
       {
         question: '可以先免费试用，之后再升级吗？',

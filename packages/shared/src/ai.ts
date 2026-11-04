@@ -1,3 +1,7 @@
+import { decodeSessionFilePath } from './project-path';
+import type { AgentRoleProposalMeta } from './agent-role-proposal';
+import type { LodyRateLimitsCapability } from 'acp-extension-core';
+import type { MemoryBinding } from './memory-provider';
 import type { AcpModelControls } from './acp-model-capabilities';
 import {
   AvailableCommand,
@@ -51,26 +55,18 @@ export type AgentType = string;
 /**
  * How each builtin agent's ACP adapter handles the session title.
  *
- * - `none` — no usable title over ACP, so Lody runs its isolated title agent and
- *   keeps the title-generation config for it. Kimi's pushed title is only the
- *   first prompt truncated to 200 chars; the Harness never mounts its upstream
- *   title plugin.
- * - `untagged` — pushes one authoritative `session_info_update` carrying no
- *   `_meta`, so it can only be trusted on identity. Claude asks the Agent SDK via
- *   its `generate_session_title` control request; Grok's official runtime
- *   generates one in its own ACP session impl and the proxy forwards it untouched.
- * - `tagged` — labels every title with `_meta.lody.titleSource`, so only an
- *   `explicit` one may be stored. Codex (>= 1.8.0) emits a first-prompt `fallback`
- *   preview before its generated title, and storing that would make the raw prompt
- *   the session title.
+ * - `none` — Lody generates titles unless the runtime advertises ownership.
+ *   Builtin Codex always uses Lody's configurable isolated title session.
+ * - `untagged` — legacy Claude/Grok runtimes publish authoritative untagged titles.
+ *   Claude uses its SDK; Grok generates titles in the official runtime.
  *
  * Exhaustive on purpose: adding a builtin agent must not silently default it.
  */
-const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' | 'tagged'> = {
+const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged'> = {
   pi: 'none',
   devin: 'none',
   claude: 'untagged',
-  codex: 'tagged',
+  codex: 'none',
   grok: 'untagged',
   kimi: 'none',
   deepseek: 'none',
@@ -83,13 +79,13 @@ const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' 
 const builtinAcpTitleOwnership = (
   cliType: AgentConfigCliType | null | undefined,
   agentType: AgentType | null | undefined
-): 'none' | 'untagged' | 'tagged' =>
+): 'none' | 'untagged' =>
   cliType === 'builtin' && agentType && isBuiltinAgentType(agentType)
     ? BUILTIN_ACP_TITLE_OWNERSHIP[agentType]
     : 'none';
 
 /**
- * Advertised title ownership or legacy builtin adapters that generate titles, so Lody never
+ * Except for builtin Codex, advertised ownership or legacy builtin identity means Lody never
  * starts its isolated title agent for them and hides the title-generation config
  * from their agent settings.
  *
@@ -109,9 +105,10 @@ export const acpOwnsSessionTitleGeneration = (
   runtimeOverrides?: BuiltinRuntimeOverrides,
   sessionTitle?: boolean
 ): boolean =>
-  sessionTitle === true ||
-  (!hasBuiltinRuntimeOverrideValues(runtimeOverrides) &&
-    builtinAcpTitleOwnership(cliType, agentType) !== 'none');
+  !(cliType === 'builtin' && agentType === 'codex') &&
+  (sessionTitle === true ||
+    (!hasBuiltinRuntimeOverrideValues(runtimeOverrides) &&
+      builtinAcpTitleOwnership(cliType, agentType) !== 'none'));
 
 /**
  * Adapters whose pushed titles are authoritative without a `titleSource` tag.
@@ -145,6 +142,7 @@ export type BuiltinRuntimeOverrides = {
   kimiPath?: string;
   grokPath?: string;
   devinPath?: string;
+  piPath?: string;
   piExtensions?: string[];
 };
 
@@ -161,6 +159,7 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     kimiPath?: unknown;
     grokPath?: unknown;
     devinPath?: unknown;
+    piPath?: unknown;
     piExtensions?: unknown;
   };
   return (
@@ -170,6 +169,7 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     (record.kimiPath === undefined || typeof record.kimiPath === 'string') &&
     (record.devinPath === undefined || typeof record.devinPath === 'string') &&
     (record.grokPath === undefined || typeof record.grokPath === 'string') &&
+    (record.piPath === undefined || typeof record.piPath === 'string') &&
     (record.piExtensions === undefined ||
       (Array.isArray(record.piExtensions) &&
         record.piExtensions.length <= PI_EXTENSIONS_MAX_SELECTIONS &&
@@ -376,7 +376,24 @@ export type AcpCommandSummary = {
 // Codex-only carry a bogus ladder for every agent that spells other variants
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
-export const ACP_CAPABILITY_CACHE_VERSION = 9;
+// 11: provider command previews come only from probes, never project sessions.
+export const ACP_CAPABILITY_CACHE_VERSION = 11;
+
+/**
+ * One sign-in method an ACP agent advertised in its `initialize` response.
+ *
+ * Persisted with the capability cache so the account panel can offer the
+ * agent's own sign-in methods without starting an authentication attempt
+ * first. `args` is display-only; the Machine resolves the trusted executable
+ * and arguments itself.
+ */
+export type AcpAuthMethodSummary = {
+  type: 'agent' | 'env_var' | 'terminal';
+  id?: string;
+  name?: string;
+  description?: string;
+  args?: string[];
+};
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -410,12 +427,22 @@ export type AcpCapabilityCacheEntry = {
    * stored in the capability row itself; see `acp-model-capabilities.ts`.
    */
   declaredModelControls?: Record<string, AcpModelControls>;
-  /** Available slash commands advertised by the agent. */
+  /** Probe commands shown before a session reports its own list; [] confirms an empty probe. */
   availableCommands?: AcpCommandSummary[];
+  /**
+   * Sign-in methods the agent advertised in its `initialize` response.
+   *
+   * `undefined` means no probe has asked yet; an empty array means the agent was
+   * asked and advertised none. Only agent-driven (registry/custom/Devin)
+   * providers record this: built-in providers sign in with their own native
+   * login command, which the adapter's method list does not describe.
+   */
+  authMethods?: AcpAuthMethodSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
   sessionFork?: boolean;
   /** Runtime advertised Core sessionTitle v1 (automatic, tagged title updates). */
   sessionTitle?: boolean;
+  rateLimits?: LodyRateLimitsCapability;
   /** True only when the runtime advertised Lody's acknowledged steering extension. */
   acknowledgedSteer?: boolean;
   /**
@@ -445,6 +472,10 @@ export const getReadableAcpCapabilityCacheEntry = (
 ): AcpCapabilityCacheEntry | undefined => {
   if (!entry) {
     return undefined;
+  }
+  if ((entry.cacheVersion ?? 0) < 11 && entry.availableCommands !== undefined) {
+    const { availableCommands: _projectCommands, ...compatible } = entry;
+    entry = compatible;
   }
   // Cache v7 stopped deriving bracketed model suffixes as reasoning efforts for
   // non-Codex agents. Preserve every other understood field from older entries,
@@ -1258,25 +1289,25 @@ const selectByLowestRank = (
 /**
  * Computes runtime title-generation configOptionValues from current ACP capabilities.
  *
- * These are not agent-specific hardcoded defaults. When the user has not configured title
- * generation, choose the least-privileged mode, the last listed model, and the smallest
- * reasoning effort from the agent's current configOptions.
+ * Builtin Codex defaults to Luna, low reasoning, and full access. Other providers
+ * retain their current model; only explicitly configured title models are applied.
+ * Safe mode and reasoning defaults are inferred from advertised capabilities.
  */
 export function computeTitleGenerationDefaults(
-  _cliType: AgentConfigCliType,
-  _agentType: AgentType,
+  cliType: AgentConfigCliType,
+  agentType: AgentType,
   configOptions: AcpConfigOptionSummary[]
 ): Record<string, AcpConfigOptionValue> {
+  if (cliType === 'builtin' && agentType === 'codex') {
+    return { model: 'gpt-5.6-luna', reasoning_effort: 'low', mode: 'agent-full-access' };
+  }
   const defaults: Record<string, AcpConfigOptionValue> = {};
   for (const opt of configOptions) {
     if (opt.type !== 'select') {
       continue;
     }
 
-    if (opt.category === 'model') {
-      const lastOption = opt.options.length > 0 ? opt.options[opt.options.length - 1] : undefined;
-      defaults[opt.id] = lastOption?.value ?? opt.currentValue;
-    } else if (opt.category === 'mode') {
+    if (opt.category === 'mode') {
       defaults[opt.id] =
         selectByLowestRank(opt.options, leastPermissionModeRank) ?? opt.currentValue;
     } else if (opt.id === 'reasoning_effort' || opt.category === 'thought_level') {
@@ -1320,6 +1351,7 @@ export type SystemNoticeName =
   | 'agent_warning'
   | 'task_proposal'
   | 'schedule_proposal'
+  | 'agent_role_proposal'
   | 'session_fork_origin';
 
 /**
@@ -1492,6 +1524,7 @@ export type SystemNoticeMeta = {
   agent_warning: AgentWarningMeta;
   task_proposal: TaskProposalMeta;
   schedule_proposal: ScheduleProposalMeta;
+  agent_role_proposal: AgentRoleProposalMeta;
   session_fork_origin: SessionForkOriginMeta;
 };
 
@@ -1506,6 +1539,7 @@ export const SESSION_IMAGE_ALLOWED_MIME_TYPES = [
 ] as const;
 
 export type SessionImagePayload = {
+  encryption?: import('./encrypted-attachment').EncryptedAttachment;
   imageId: string;
   mimeType: string;
   fileName?: string;
@@ -1543,6 +1577,14 @@ export type SessionFileTransport = 'r2' | 'local';
  * absolute or parent-traversing path when it reaches a different machine.
  */
 export function isSessionFileSourcePath(value: string): boolean {
+  if (value.startsWith('\0')) {
+    const decoded = decodeSessionFilePath(value);
+    return (
+      decoded !== undefined &&
+      decoded.rootId !== 'main' &&
+      isSessionFileSourcePath(decoded.relativePath)
+    );
+  }
   if (value.length === 0 || value.includes('\0')) return false;
   const normalized = value.replace(/\\/g, '/');
   if (normalized === '.' || normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
@@ -1552,6 +1594,7 @@ export function isSessionFileSourcePath(value: string): boolean {
 }
 
 export type SessionFilePayload = {
+  encryption?: import('./encrypted-attachment').EncryptedAttachment;
   type: 'file';
   /** Unique identifier; also the relay-store key. Generated by the uploader. */
   fileId: string;
@@ -1816,6 +1859,13 @@ export type MessageContent =
         meta?: SystemNoticeMeta[Name];
       };
     }[SystemNoticeName]
+  | {
+      type: 'operation_completion_batch';
+      batchId: string;
+      memberCount: number;
+      members?: OperationCompletionContent[];
+      deliveryStatus?: 'prepared' | 'submitted' | 'unknown' | 'settled' | 'not_submitted';
+    }
   | OperationCompletionContent
   | OperationProgressContent
   | {
@@ -1853,6 +1903,8 @@ export type TerminalCommandBlock = {
   command: string;
   args?: string[];
   cwd?: string;
+  /** History kept only the head of command + args (1 KiB budget). */
+  truncated?: boolean;
 };
 
 export type TerminalOutputBlock = {
@@ -1887,7 +1939,10 @@ export type IssuePRMention = {
 };
 
 export type ACPTurnConfig = {
+  memory?: MemoryBinding;
+  /** Frozen effective execution text, including accepted Config/Role instructions. */
   prompt: string;
+  /** Authored input for display/editing and structured attachments for execution. */
   inputBlocks?: SessionInputBlock[];
   cliType: AgentConfigCliType;
   agentType: AgentType;
@@ -1920,6 +1975,7 @@ export type ACPSessionConfig = ACPTurnConfig & {
   customAcp?: CustomAcpLaunchSpec;
   /** Advanced runtime binary override for builtin Claude/Codex agents. */
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
 };
 
 /**
@@ -1927,6 +1983,8 @@ export type ACPSessionConfig = ACPTurnConfig & {
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
 export type SessionTurnInputConfig = Partial<ACPTurnConfig> & {
+  /** Attribution only; the Host checks its durable Invocation receipt at admission. */
+  _lodyAutomation?: import('./automations/contracts').AutomationOrigin;
   /** An accepted steer has no independently editable provider turn boundary. */
   _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
 };

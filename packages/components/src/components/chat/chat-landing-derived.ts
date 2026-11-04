@@ -20,12 +20,16 @@ export type ChatLandingProjectSession = {
   machineId: string;
   project?: ChatLandingProjectRefLike | null;
   repoFullName?: string | null;
+  /** Set when the session was started from a multi-member project. */
+  projectRun?: { id: string } | null;
   lastMessageAt?: number | null;
 };
 
 export type ChatLandingProjectRecency = {
   byRepo: ReadonlyMap<string, number>;
   byProject: ReadonlyMap<string, number>;
+  /** Multi-member projects by id, so they rank among recently used projects. */
+  byGroup: ReadonlyMap<string, number>;
 };
 
 export type SharingReviewActionTarget = 'machines' | 'projects' | null;
@@ -196,6 +200,8 @@ export interface ChatLandingSubmitDisabledArgs {
   isRuntimeInitializing: boolean;
   isLoadingLocalGitState: boolean;
   hasLocalGitStateError: boolean;
+  /** The MCP selection still waits on project defaults that have not been read. */
+  mcpDefaultsPending?: boolean;
 }
 
 export type ChatLandingComposerStatus<TMessage = unknown> = {
@@ -307,11 +313,13 @@ export function getChatLandingProjectRecency(
 ): ChatLandingProjectRecency {
   const byRepo = new Map<string, number>();
   const byProject = new Map<string, number>();
+  const byGroup = new Map<string, number>();
   for (const session of sessions) {
     recordLatestTimestamp(byRepo, getSessionGitHubRepoFullName(session), session.lastMessageAt);
     recordLatestTimestamp(byProject, getSessionLocalProjectKey(session), session.lastMessageAt);
+    recordLatestTimestamp(byGroup, session.projectRun?.id ?? null, session.lastMessageAt);
   }
-  return { byRepo, byProject };
+  return { byRepo, byProject, byGroup };
 }
 
 export function compareChatLandingRepositoryByRecency(
@@ -555,8 +563,15 @@ export function getChatLandingSubmitDisabled({
   isRuntimeInitializing,
   isLoadingLocalGitState,
   hasLocalGitStateError,
+  mcpDefaultsPending = false,
 }: ChatLandingSubmitDisabledArgs): boolean {
-  if (submitting || hasBlockingImages || hasBlockingFiles || !hasSendableContent) {
+  if (
+    submitting ||
+    hasBlockingImages ||
+    hasBlockingFiles ||
+    !hasSendableContent ||
+    mcpDefaultsPending
+  ) {
     return true;
   }
 
@@ -587,10 +602,12 @@ export function getChatLandingVisibleComposerStatus<TMessage>({
 }
 
 export type ChatLandingPreSelectionIntent = {
-  context: 'local' | 'github' | 'chat' | undefined;
+  context: 'local' | 'github' | 'chat' | 'group' | undefined;
   machine: string | undefined;
   project: string | undefined;
   repo: string | undefined;
+  /** Project group id; only meaningful with `context: 'group'`. */
+  group?: string | undefined;
 };
 
 /** Identity of one URL-named selection (pre-selection intent or mirrored state). */
@@ -599,27 +616,36 @@ export function buildChatLandingPreSelectionKey({
   machine,
   project,
   repo,
+  group,
 }: ChatLandingPreSelectionIntent): string {
-  return `${context}|${machine}|${project}|${repo}`;
+  // A group id is appended only when present, so existing keys keep their shape.
+  const base = `${context}|${machine}|${project}|${repo}`;
+  return group ? `${base}|${group}` : base;
 }
 
 /** Search-parameter contract of the `/$workspaceName/chat` route. */
 export type ChatLandingSearch = {
-  context?: 'local' | 'github' | 'chat';
+  context?: 'local' | 'github' | 'chat' | 'group';
   machine?: string;
   project?: string;
   repo?: string;
+  /** Project group id, with `context: 'group'`. */
+  group?: string;
 };
 
 export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
   return {
     context:
-      search.context === 'local' || search.context === 'github' || search.context === 'chat'
+      search.context === 'local' ||
+      search.context === 'github' ||
+      search.context === 'chat' ||
+      search.context === 'group'
         ? search.context
         : undefined,
     machine: typeof search.machine === 'string' ? search.machine : undefined,
     project: typeof search.project === 'string' ? search.project : undefined,
     repo: typeof search.repo === 'string' ? search.repo : undefined,
+    group: typeof search.group === 'string' ? search.group : undefined,
   };
 }
 
@@ -660,10 +686,12 @@ export function getSelectedLocalProjectKey(
 }
 
 export type ChatLandingEffectiveSelection = {
-  contextType: 'local' | 'github' | 'chat';
+  contextType: 'local' | 'github' | 'chat' | 'group';
   machineId: string | null;
   localProjectId: string | null;
   repoFullName: string | null;
+  /** Selected Project group, with `contextType: 'group'`. */
+  projectGroupId?: string | null;
 };
 
 /**
@@ -676,9 +704,13 @@ export function getChatLandingSelectionSearch({
   machineId,
   localProjectId,
   repoFullName,
+  projectGroupId,
 }: ChatLandingEffectiveSelection): ChatLandingSearch {
   if (contextType === 'chat') {
     return { context: 'chat' };
+  }
+  if (contextType === 'group' && projectGroupId) {
+    return { context: 'group', group: projectGroupId };
   }
   if (contextType === 'local' && machineId && localProjectId) {
     return { context: 'local', machine: machineId, project: localProjectId };
@@ -721,4 +753,19 @@ export function getChatLandingSelectionSyncDecision({
   if (!urlNamesSelection || !intentApplied) return 'skip';
   if (!armed) return 'arm';
   return selectionKey === urlKey ? 'skip' : 'sync';
+}
+
+export function compareUnifiedProjectOptions(
+  left: { label: string; value: string; lastUsedAt?: number },
+  right: { label: string; value: string; lastUsedAt?: number }
+): number {
+  if (left.lastUsedAt !== undefined && right.lastUsedAt !== undefined) {
+    if (left.lastUsedAt !== right.lastUsedAt) return right.lastUsedAt - left.lastUsedAt;
+  } else if (left.lastUsedAt !== undefined) {
+    return -1;
+  } else if (right.lastUsedAt !== undefined) {
+    return 1;
+  }
+  const labelComparison = left.label.localeCompare(right.label);
+  return labelComparison !== 0 ? labelComparison : left.value.localeCompare(right.value);
 }

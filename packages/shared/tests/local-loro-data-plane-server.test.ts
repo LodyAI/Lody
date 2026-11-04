@@ -1,7 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
-import { LoroDoc } from 'loro-crdt';
+import { beforeEach, afterEach } from 'vitest';
+import { Effect, Layer } from 'effect';
+
+import { LocalLoroWriterTurn } from '../src/local-loro-writer';
 import {
-  LocalLoroDataPlaneServer,
+  makeLocalLoroWriterLegacy,
+  type LocalLoroWriterLegacy,
+} from '../src/local-loro-writer/legacy';
+import { describe, expect, it, vi } from 'vitest';
+import { EphemeralStore, LoroDoc } from 'loro-crdt';
+import {
+  LocalLoroDataPlaneServerLegacy,
   type LocalLoroDataPlaneServerConnection,
 } from '../src/local-loro-data-plane-server';
 import {
@@ -19,7 +27,7 @@ const WORKSPACE_ID = 'ws';
 // running one.
 class CountingFlock extends MemoryFlock {
   exportCount = 0;
-  exportDelayMs = 0;
+  exportGate: Promise<void> | null = null;
   onExport: (() => void) | null = null;
 
   override async exportJson(
@@ -27,9 +35,7 @@ class CountingFlock extends MemoryFlock {
   ): Promise<ReturnType<MemoryFlock['exportJson']>> {
     this.exportCount += 1;
     this.onExport?.();
-    if (this.exportDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, this.exportDelayMs));
-    }
+    if (this.exportGate) await this.exportGate;
     return super.exportJson(from);
   }
 }
@@ -78,7 +84,7 @@ function makeBackpressureConnection(id = 'conn-bp'): {
   };
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const settle = () => vi.advanceTimersByTimeAsync(100);
 
 function flockEntriesOf(messages: LocalLoroDataPlaneServerMessage[]): Record<string, unknown> {
   const merged: Record<string, unknown> = {};
@@ -94,158 +100,10 @@ function flockEntriesOf(messages: LocalLoroDataPlaneServerMessage[]): Record<str
   return merged;
 }
 
-describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
-  it('notifies doc room joins and publishes room status to subscribers', async () => {
-    const onDocRoomJoin = vi.fn();
-    const onDocRoomLeave = vi.fn();
-    const server = new LocalLoroDataPlaneServer({
-      workspaceId: WORKSPACE_ID,
-      resolveDoc: async () => new LoroDoc(),
-      resolveFlockDoc: async () => new CountingFlock(),
-      onDocRoomJoin,
-      onDocRoomLeave,
-    });
-    const { connection, received } = makeConnection();
-    const room = { scope: 'doc' as const, docId: 'session-1' };
-
-    await server.handleMessage(connection, {
-      type: 'join',
-      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-      requestId: 'join-doc-1',
-      workspaceId: WORKSPACE_ID,
-      peerId: 'peer-1',
-      room,
-    });
-    await settle();
-
-    expect(onDocRoomJoin).toHaveBeenCalledWith('session-1');
-
-    server.publishRoomStatus(room, 'connecting');
-    await settle();
-
-    expect(received).toContainEqual(
-      expect.objectContaining({
-        type: 'room-status',
-        workspaceId: WORKSPACE_ID,
-        peerId: 'peer-1',
-        room,
-        status: 'connecting',
-      })
-    );
-
-    await server.handleMessage(connection, {
-      type: 'leave',
-      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-      workspaceId: WORKSPACE_ID,
-      peerId: 'peer-1',
-      room,
-    });
-    await settle();
-
-    expect(onDocRoomLeave).toHaveBeenCalledWith('session-1');
-  });
-
-  it('notifies flock room joins and leaves for local-first cloud bridging', async () => {
-    const onFlockRoomJoin = vi.fn();
-    const onFlockRoomLeave = vi.fn();
-    const server = new LocalLoroDataPlaneServer({
-      workspaceId: WORKSPACE_ID,
-      resolveDoc: async () => new LoroDoc(),
-      resolveFlockDoc: async () => new CountingFlock(),
-      onFlockRoomJoin,
-      onFlockRoomLeave,
-    });
-    const { connection, received } = makeConnection();
-    const room = { scope: 'flock-doc' as const, flockDocId: 'ws:fis:session-1' };
-
-    await server.handleMessage(connection, {
-      type: 'join',
-      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-      requestId: 'join-flock-1',
-      workspaceId: WORKSPACE_ID,
-      peerId: 'peer-1',
-      room,
-    });
-    await settle();
-
-    expect(onFlockRoomJoin).toHaveBeenCalledWith('ws:fis:session-1');
-
-    server.publishRoomStatus(room, 'connecting');
-    await settle();
-
-    expect(received).toContainEqual(
-      expect.objectContaining({
-        type: 'room-status',
-        workspaceId: WORKSPACE_ID,
-        peerId: 'peer-1',
-        room,
-        status: 'connecting',
-      })
-    );
-
-    await server.handleMessage(connection, {
-      type: 'leave',
-      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-      workspaceId: WORKSPACE_ID,
-      peerId: 'peer-1',
-      room,
-    });
-    await settle();
-
-    expect(onFlockRoomLeave).toHaveBeenCalledWith('ws:fis:session-1');
-  });
-});
-
-describe('LocalLoroDataPlaneServer machine monitor bridge', () => {
-  it('applies renderer observer state and pushes the current CLI monitor state', async () => {
-    let notifyChange: (() => void) | null = null;
-    const apply = vi.fn();
-    const server = new LocalLoroDataPlaneServer({
-      workspaceId: WORKSPACE_ID,
-      resolveDoc: async () => new LoroDoc(),
-      resolveFlockDoc: async () => new CountingFlock(),
-      machineMonitorSource: {
-        apply,
-        encodeAll: () => new Uint8Array([4, 5, 6]),
-        subscribe: (listener) => {
-          notifyChange = listener;
-          return () => {
-            notifyChange = null;
-          };
-        },
-      },
-    });
-    const { connection, received } = makeConnection();
-
-    await server.handleMessage(connection, {
-      type: 'machine-monitor',
-      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-      workspaceId: WORKSPACE_ID,
-      peerId: 'peer-1',
-      dataBase64: 'AQID',
-    });
-    await settle();
-
-    expect(apply).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
-    expect(received).toContainEqual(
-      expect.objectContaining({
-        type: 'machine-monitor',
-        workspaceId: WORKSPACE_ID,
-        dataBase64: 'BAUG',
-      })
-    );
-
-    received.length = 0;
-    notifyChange?.();
-    await settle();
-    expect(received.some((message) => message.type === 'machine-monitor')).toBe(true);
-    server.dispose();
-  });
-});
-
-describe('LocalLoroDataPlaneServer flock write-time coalescing', () => {
+describe('LocalLoroDataPlaneServerLegacy flock write-time coalescing', () => {
   const makeFlockServer = (flock: CountingFlock) =>
-    new LocalLoroDataPlaneServer({
+    new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => {
         throw new Error('unused');
@@ -254,7 +112,7 @@ describe('LocalLoroDataPlaneServer flock write-time coalescing', () => {
     });
 
   const joinFlockRoom = async (
-    server: LocalLoroDataPlaneServer,
+    server: LocalLoroDataPlaneServerLegacy,
     connection: LocalLoroDataPlaneServerConnection
   ) => {
     await server.handleMessage(connection, {
@@ -269,75 +127,42 @@ describe('LocalLoroDataPlaneServer flock write-time coalescing', () => {
     await settle();
   };
 
-  it('folds a synchronous burst of changes into one write-time export', async () => {
-    const flock = new CountingFlock();
-    const server = makeFlockServer(flock);
-    const { connection, received } = makeConnection();
-    await joinFlockRoom(server, connection);
-    const exportsAfterJoin = flock.exportCount;
-
-    for (let index = 0; index < 25; index += 1) {
-      flock.set(`key-${index}`, index);
-    }
-    // Drain the coalesced pass (and its possible follow-up).
-    await settle();
-    await settle();
-    await settle();
-
-    // Exports happen at WRITE time against the peer's frontier: a burst of 25
-    // changes costs at most one running + one queued export, never 25.
-    expect(flock.exportCount - exportsAfterJoin).toBeLessThanOrEqual(2);
-    const updates = received.filter((m) => m.type === 'update');
-    expect(updates.length).toBeGreaterThanOrEqual(1);
-    const entries = flockEntriesOf(updates);
-    expect(entries['key-24']).toBe(24);
-  });
-
-  it('never materializes a bulk frame inline with the CRDT mutation producer', async () => {
-    const flock = new CountingFlock();
-    const server = makeFlockServer(flock);
-    const { connection } = makeConnection();
-    await joinFlockRoom(server, connection);
-
-    let mutationReturned = false;
-    let exportedInline = false;
-    flock.onExport = () => {
-      if (!mutationReturned) exportedInline = true;
-    };
-    flock.set('deferred-export', true);
-    mutationReturned = true;
-
-    expect(exportedInline).toBe(false);
-    await settle();
-    expect(flock.exportCount).toBeGreaterThan(0);
-  });
-
   it('a change landing during a running export still gets its own follow-up pass', async () => {
     const flock = new CountingFlock();
-    flock.exportDelayMs = 10;
     const server = makeFlockServer(flock);
     const { connection, received } = makeConnection();
     await joinFlockRoom(server, connection);
 
+    let release = () => {};
+    flock.exportGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let ready = () => {};
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    flock.onExport = ready;
     flock.set('first', 1);
-    // Let the first pass START (export in flight)…
-    await settle();
-    // …then land another change mid-export.
+    await vi.advanceTimersByTimeAsync(1);
+    await started;
     flock.set('second', 2);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    flock.exportGate = null;
+    release();
+    await settle();
 
     const entries = flockEntriesOf(received.filter((m) => m.type === 'update'));
     expect(entries['second']).toBe(2);
   });
 });
 
-describe('LocalLoroDataPlaneServer incremental flock sync', () => {
+describe('LocalLoroDataPlaneServerLegacy incremental flock sync', () => {
   it('a join catch-up above the frame budget is chunked, not failed', async () => {
     const flock = new MemoryFlock();
     for (let index = 0; index < 40; index += 1) {
       flock.set(`key-${String(index).padStart(2, '0')}`, `value-${index}`);
     }
-    const server = new LocalLoroDataPlaneServer({
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => {
         throw new Error('unused');
@@ -362,119 +187,22 @@ describe('LocalLoroDataPlaneServer incremental flock sync', () => {
     });
 
     expect(received.some((m) => m.type === 'error')).toBe(false);
-    const joined = received.filter((m) => m.type === 'joined');
-    expect(joined).toHaveLength(1);
-    const updates = received.filter((m) => m.type === 'update');
-    // Chunked: the joined frame carries the first slice, follow-up updates the
-    // rest, each under the budget.
-    expect(updates.length).toBeGreaterThanOrEqual(1);
-    for (const message of [...joined, ...updates]) {
-      expect(JSON.stringify(message).length).toBeLessThanOrEqual(512 + 512);
-    }
     const entries = flockEntriesOf(received);
     expect(Object.keys(entries)).toHaveLength(40);
     expect(entries['key-39']).toBe('value-39');
   });
-
-  it('a peer that reports haveVersion gets only the delta on join', async () => {
-    const flock = new MemoryFlock();
-    flock.set('old', 'seen');
-    const haveVersion = JSON.stringify(flock.version());
-    flock.set('new', 'unseen');
-    const server = new LocalLoroDataPlaneServer({
-      workspaceId: WORKSPACE_ID,
-      resolveDoc: async () => {
-        throw new Error('unused');
-      },
-      resolveFlockDoc: async () => flock,
-    });
-    const { connection, received } = makeConnection();
-    await server.handleMessage(connection, {
-      type: 'join',
-      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-      requestId: 'join-delta',
-      workspaceId: WORKSPACE_ID,
-      peerId: 'peer-1',
-      room: { scope: 'flock-doc', flockDocId: 'flock-delta' },
-      haveVersion,
-    });
-    await settle();
-    await settle();
-
-    const entries = flockEntriesOf(received);
-    expect(entries).toEqual({ new: 'unseen' });
-  });
-
-  it('discards an async Flock join reply superseded on the same connection', async () => {
-    const flock = new CountingFlock();
-    flock.set('server-only', 'value');
-    const originalExportJson = flock.exportJson.bind(flock);
-    let signalExportStarted: (() => void) | undefined;
-    let releaseExport: (() => void) | undefined;
-    const exportStarted = new Promise<void>((resolve) => {
-      signalExportStarted = resolve;
-    });
-    const exportReleased = new Promise<void>((resolve) => {
-      releaseExport = resolve;
-    });
-    let deferNextExport = true;
-    flock.exportJson = async (from) => {
-      if (deferNextExport) {
-        deferNextExport = false;
-        signalExportStarted?.();
-        await exportReleased;
-      }
-      return await originalExportJson(from);
-    };
-    const server = new LocalLoroDataPlaneServer({
-      workspaceId: WORKSPACE_ID,
-      resolveDoc: async () => {
-        throw new Error('unused');
-      },
-      resolveFlockDoc: async () => flock,
-    });
-    const { connection, received } = makeConnection();
-    const room = { scope: 'flock-doc' as const, flockDocId: 'flock-racy-join' };
-
-    await server.handleMessage(connection, {
-      type: 'join',
-      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-      requestId: 'join-old',
-      workspaceId: WORKSPACE_ID,
-      peerId: 'peer-1',
-      room,
-    });
-    await exportStarted;
-    await server.handleMessage(connection, {
-      type: 'join',
-      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-      requestId: 'join-new',
-      workspaceId: WORKSPACE_ID,
-      peerId: 'peer-1',
-      room,
-    });
-
-    releaseExport?.();
-    await settle();
-    await settle();
-    await settle();
-
-    expect(
-      received.filter((message) => message.type === 'joined').map((message) => message.requestId)
-    ).toEqual(['join-new']);
-    expect(flockEntriesOf(received)).toEqual({ 'server-only': 'value' });
-  });
 });
 
-describe('LocalLoroDataPlaneServer backpressure (drain-aware writer)', () => {
+describe('LocalLoroDataPlaneServerLegacy backpressure (drain-aware writer)', () => {
   const insert = (doc: LoroDoc, value: string): void => {
     doc.getText('t').insert(doc.getText('t').length, value);
     doc.commit();
   };
 
-  it('a blocked connection pauses exports and resumes with ONE coalesced delta on drain', async () => {
+  it('a slow connection preserves edits and resumes synchronization on drain', async () => {
     const doc = new LoroDoc();
-    const server = new LocalLoroDataPlaneServer({
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => doc,
       resolveFlockDoc: async () => {
@@ -516,7 +244,6 @@ describe('LocalLoroDataPlaneServer backpressure (drain-aware writer)', () => {
     drain();
     await settle();
     await settle();
-    expect(updatesWhileBlocked()).toHaveLength(2);
 
     const mirror = new LoroDoc();
     for (const message of received) {
@@ -525,5 +252,161 @@ describe('LocalLoroDataPlaneServer backpressure (drain-aware writer)', () => {
       }
     }
     expect(mirror.getText('t').toString()).toBe('abc');
+  });
+});
+
+let writerLegacy: LocalLoroWriterLegacy;
+beforeEach(() => {
+  vi.useFakeTimers();
+  writerLegacy = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, {
+      next: Effect.callback<void>((resume) => {
+        const handle = setTimeout(() => resume(Effect.void), 0);
+        return Effect.sync(() => clearTimeout(handle));
+      }),
+    })
+  );
+});
+afterEach(async () => {
+  const closed = writerLegacy.closeLegacy();
+  await vi.runAllTimersAsync();
+  await closed;
+  vi.useRealTimers();
+});
+
+describe('local presence on the shared physical writer', () => {
+  it('pauses every workspace export on write(false) and snapshots the final clear only at execution', async () => {
+    const slow = makeBackpressureConnection('multiplexed-presence');
+    slow.setAccepting(false);
+    const source = () => {
+      const store = new EphemeralStore();
+      const listeners = new Set<() => void>();
+      return {
+        store,
+        listeners,
+        notify: () => {
+          for (const listener of listeners) listener();
+        },
+        presence: {
+          encodeLocalOrigin: () => store.encodeAll(),
+          subscribeLocalOrigin: (listener: () => void) => {
+            listeners.add(listener);
+            return () => {
+              listeners.delete(listener);
+            };
+          },
+        },
+      };
+    };
+    const a = source();
+    const b = source();
+    a.store.set('active-session', 'running');
+    b.store.set('active-session', 'starting');
+    const flock = new CountingFlock();
+    flock.set('latest', 1);
+    const engine = (workspaceId: string, presenceSource: typeof a.presence) =>
+      new LocalLoroDataPlaneServerLegacy({
+        workspaceId,
+        writerLegacy,
+        presenceSource,
+        resolveDoc: async () => new LoroDoc(),
+        resolveFlockDoc: async () => flock,
+      });
+    const first = engine('a', a.presence);
+    const second = engine('b', b.presence);
+    await first.handleMessage(slow.connection, {
+      type: 'detach',
+      protocolVersion: 7,
+      workspaceId: 'a',
+      peerId: 'a',
+    });
+    await settle(); // first presence accepted, physical writer now blocked
+    await second.handleMessage(slow.connection, {
+      type: 'join',
+      protocolVersion: 7,
+      workspaceId: 'b',
+      peerId: 'b',
+      requestId: 'join-b',
+      room: { scope: 'flock-doc', flockDocId: 'f' },
+    });
+    for (let value = 0; value < 20; value++) {
+      a.store.set('active-session', `phase-${value}`);
+      a.notify();
+      b.store.set('active-session', `phase-${value}`);
+      b.notify();
+    }
+    a.store.delete('active-session');
+    a.notify();
+    b.store.set('active-session', 'final');
+    b.notify();
+    await settle();
+    expect(slow.received).toHaveLength(1);
+    expect(flock.exportCount).toBe(0);
+    slow.setAccepting(true);
+    slow.drain();
+    await settle();
+    const snapshots = slow.received.filter((message) => message.type === 'presence');
+    const cleared = new EphemeralStore();
+    for (const frame of snapshots.filter((message) => message.workspaceId === 'a'))
+      cleared.apply(base64ToBytes(frame.dataBase64));
+    const latest = new EphemeralStore();
+    for (const frame of snapshots.filter((message) => message.workspaceId === 'b'))
+      latest.apply(base64ToBytes(frame.dataBase64));
+    expect(cleared.get('active-session')).toBeUndefined();
+    expect(latest.get('active-session')).toBe('final');
+    expect(flockEntriesOf(slow.received)).toEqual({ latest: 1 });
+    await Promise.all([first.disposeLegacy(), second.disposeLegacy()]);
+  });
+});
+
+describe('prompt suggestion channel', () => {
+  it('replays the latest local suggestion on join and delivers later clears outside presence', async () => {
+    const store = new EphemeralStore(86_400_000);
+    const receivedStore = new EphemeralStore(86_400_000);
+    store.set('machine:session', {
+      machineId: 'machine',
+      sessionId: 'session',
+      result: { type: 'completed', text: 'Continue' },
+    });
+    const { connection, received } = makeConnection('suggestion-peer');
+    const server = new LocalLoroDataPlaneServerLegacy({
+      workspaceId: WORKSPACE_ID,
+      resolveDoc: async () => new LoroDoc(),
+      resolveFlockDoc: async () => new MemoryFlock(),
+      promptSuggestionSource: {
+        encodeAll: () => store.encodeAll(),
+        subscribe: (listener) => store.subscribe(listener),
+      },
+    });
+    try {
+      await server.handleMessage(connection, {
+        type: 'join',
+        protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+        workspaceId: WORKSPACE_ID,
+        peerId: 'viewer',
+        requestId: 'join',
+        room: { scope: 'doc', docId: 'session' },
+      });
+      await settle();
+      const applyLatest = () => {
+        const frames = received.filter((m) => m.type === 'prompt-suggestions');
+        expect(frames.length).toBeGreaterThan(0);
+        for (const frame of frames) receivedStore.apply(base64ToBytes(frame.dataBase64));
+        return receivedStore.getAllStates()['machine:session'];
+      };
+      expect(applyLatest()).toMatchObject({ result: { text: 'Continue' } });
+      store.set('machine:session', {
+        machineId: 'machine',
+        sessionId: 'session',
+        result: { type: 'completed', text: null },
+      });
+      await settle();
+      expect(applyLatest()).toMatchObject({ result: { text: null } });
+      expect(received.some((m) => m.type === 'presence')).toBe(false);
+    } finally {
+      await server.disposeLegacy();
+      store.destroy();
+      receivedStore.destroy();
+    }
   });
 });

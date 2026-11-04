@@ -1,5 +1,13 @@
 import type { ChildProcess } from 'node:child_process';
+import { Effect } from 'effect';
 import type { CliRuntimeState } from '@lody/shared/electron-ipc';
+import {
+  childProcessTree,
+  hasExited,
+  makeProcessRunnerLegacy,
+  terminateChildTreeLegacy,
+  type ProcessFacadeOptions,
+} from '@lody/shared/node/process';
 import { buildRetryDelay, FailureWindow, isAlreadyRunningOutcome } from './retry.js';
 import type {
   CliRunResult,
@@ -38,7 +46,7 @@ type ActiveRun = {
 };
 
 function isChildProcessRunning(child: ChildProcess | null): boolean {
-  return child !== null && child.exitCode === null && child.signalCode === null;
+  return child !== null && !hasExited(child);
 }
 
 function runtimeMatchesHost(runtime: CliRuntimeState, host: SupervisorHostIdentity): boolean {
@@ -76,6 +84,8 @@ export class CliSupervisor {
   private readonly healthyRunMs: number;
   private readonly failureWindow: FailureWindow;
   private readonly oomFailureWindow: FailureWindow;
+  private readonly fatalOomCooldownMs: number;
+  private readonly processOptions: ProcessFacadeOptions;
 
   private desiredState: 'running' | 'stopped' = 'stopped';
   private probeOnly = false;
@@ -84,6 +94,8 @@ export class CliSupervisor {
   private prepareAbortController: AbortController | null = null;
   private exitActionAbortController: AbortController | null = null;
   private activeRun: ActiveRun | null = null;
+  /** A run whose SIGKILL left its leader or part of its tree unconfirmed. */
+  private unreleasedRun: ActiveRun | null = null;
   private externalRuntimeState: CliRuntimeState | null = null;
   private externalHostIdentity: SupervisorHostIdentity | null = null;
   private latestRuntimeState: CliRuntimeState | null = null;
@@ -133,6 +145,8 @@ export class CliSupervisor {
       options.fatalOomWindowMs ?? DEFAULT_FATAL_OOM_WINDOW_MS,
       options.fatalOomThreshold ?? DEFAULT_FATAL_OOM_THRESHOLD
     );
+    this.fatalOomCooldownMs = options.fatalOomCooldownMs ?? 10 * 60_000;
+    this.processOptions = options.processOptions ?? {};
   }
 
   getState(): SupervisorState {
@@ -288,6 +302,12 @@ export class CliSupervisor {
       }
       if (ownershipAbortController.signal.aborted || !this.isCurrent(generation)) {
         if (ownership.status === 'acquired') await this.ownership.release();
+        return;
+      }
+      if (ownership.status === 'inaccessible') {
+        // Retrying only repeats the same access check; an explicit restart
+        // tries again once the user has stopped or re-privileged that host.
+        this.markFatal(ownership.description);
         return;
       }
       if (ownership.status === 'occupied') {
@@ -557,7 +577,9 @@ export class CliSupervisor {
     if (!window.record()) return false;
     if (failureClass === 'v8_oom') {
       this.markFatal(
-        `CLI exhausted its V8 heap ${window.recentCount} times within ${window.windowMinutes} minutes: ${reason}`
+        `CLI exhausted its V8 heap ${window.recentCount} times within ${window.windowMinutes} minutes: ${reason}`,
+        undefined,
+        true
       );
       return true;
     }
@@ -588,59 +610,113 @@ export class CliSupervisor {
   }
 
   private async terminateActiveRun(reason: string, graceMs: number): Promise<void> {
-    const run = this.activeRun;
+    const run = this.activeRun ?? this.unreleasedRun;
     if (!run) return;
 
     this.clearHealthyRunTimer();
     this.lastStateMessage = reason;
     this.publishState();
-    this.requestGracefulShutdown(run);
-
-    let result = await this.waitForRun(run, graceMs);
+    // An already escalated run gets SIGKILL again, not a second grace period.
+    const escalated = run === this.unreleasedRun;
+    let result = escalated
+      ? null
+      : await this.waitForRun(run, graceMs, this.requestGracefulShutdown(run));
+    let killFailure: string | null = null;
     if (!result) {
       this.lastStateMessage = `${reason}; forcing CLI process to exit`;
       this.publishState();
-      this.signalChild(run.handle.child, 'SIGKILL');
-      result = await this.waitForRun(run, this.forceKillWaitMs);
-      if (!result) {
-        const message = `CLI process ${run.handle.child.pid ?? 'unknown'} did not exit after SIGKILL`;
-        this.fatalReason = message;
-        this.lastStateMessage = message;
-        this.publishState();
-        throw new Error(message);
-      }
+      [result, killFailure] = await Promise.all([
+        this.waitForRun(run, this.forceKillWaitMs),
+        this.forceKill(run),
+      ]);
     }
 
-    if (this.activeRun === run) this.activeRun = null;
-    this.latestRuntimeState = null;
-    this.lastExitCode = result.code;
-    this.lastExitAtMs = Date.now();
+    if (result) {
+      if (this.activeRun === run) this.activeRun = null;
+      this.latestRuntimeState = null;
+      this.lastExitCode = result.code;
+      this.lastExitAtMs = Date.now();
+    }
+    // Keep the run until its whole tree is confirmed gone, so a retried stop
+    // terminates it again instead of releasing ownership over survivors.
+    this.unreleasedRun = !result || killFailure ? run : null;
+    if (!result || killFailure) {
+      const message = `CLI process ${run.handle.child.pid ?? 'unknown'} did not exit after SIGKILL${
+        killFailure ? `: ${killFailure}` : ''
+      }`;
+      this.fatalReason = message;
+      this.lastStateMessage = message;
+      this.publishState();
+      throw new Error(message);
+    }
   }
 
-  private requestGracefulShutdown(run: ActiveRun): void {
-    if (run.handle.requestShutdown) {
+  /**
+   * Ask the child to drain: the cross-platform shutdown channel first, SIGTERM
+   * to its tree when there is none or it fails. Resolves false when no graceful
+   * request could be delivered at all, so the caller escalates at once instead
+   * of waiting out a grace period nothing is using.
+   */
+  private async requestGracefulShutdown(run: ActiveRun): Promise<boolean> {
+    const { requestShutdown } = run.handle;
+    if (requestShutdown) {
       try {
-        void Promise.resolve(run.handle.requestShutdown()).catch(() => {
-          this.signalChild(run.handle.child, 'SIGTERM');
-        });
-        return;
+        await requestShutdown();
+        return true;
       } catch {
         // Fall through to the OS signal fallback.
       }
     }
-    this.signalChild(run.handle.child, 'SIGTERM');
+    return await this.signalTerminate(run);
   }
 
-  private signalChild(child: ChildProcess, signal: NodeJS.Signals): void {
-    if (!isChildProcessRunning(child)) return;
+  private async signalTerminate(run: ActiveRun): Promise<boolean> {
     try {
-      child.kill(signal);
+      await makeProcessRunnerLegacy(this.processOptions)(
+        Effect.flatMap(
+          childProcessTree(run.handle.child, { processGroup: run.handle.processGroup ?? false }),
+          (tree) => tree.signal('SIGTERM')
+        )
+      );
+      return true;
     } catch {
-      // The exit promise is authoritative; timeout escalation reports failure.
+      // Undeliverable SIGTERM: end the grace period; force-kill reports failure.
+      return false;
     }
   }
 
-  private async waitForRun(run: ActiveRun, timeoutMs: number): Promise<CliRunResult | null> {
+  /**
+   * SIGKILL the child's whole tree and wait, bounded, until it is gone.
+   * Resolves with why the tree could not be proven gone, or null.
+   */
+  private async forceKill(run: ActiveRun): Promise<string | null> {
+    try {
+      await terminateChildTreeLegacy(
+        run.handle.child,
+        {
+          graceMs: 0,
+          killWaitMs: this.forceKillWaitMs,
+          processGroup: run.handle.processGroup ?? false,
+        },
+        this.processOptions
+      );
+      return null;
+    } catch (error) {
+      return this.formatError(error);
+    }
+  }
+
+  /**
+   * The run's result within `timeoutMs`, or null. A `graceDelivered` that
+   * resolves false ends the wait early. Every promise raced here settles, so
+   * no reaction outlives the call (a shared never-settling promise would keep
+   * each run's result alive for the life of the process).
+   */
+  private async waitForRun(
+    run: ActiveRun,
+    timeoutMs: number,
+    graceDelivered?: Promise<boolean>
+  ): Promise<CliRunResult | null> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
@@ -648,6 +724,9 @@ export class CliSupervisor {
         new Promise<null>((resolve) => {
           timeout = setTimeout(() => resolve(null), timeoutMs);
           timeout.unref?.();
+          void graceDelivered?.then((delivered) => {
+            if (!delivered) resolve(null);
+          });
         }),
       ]);
     } finally {
@@ -857,15 +936,34 @@ export class CliSupervisor {
     await this.ownership.release();
   }
 
-  private markFatal(reason: string, result?: CliRunResult): void {
+  private markFatal(reason: string, result?: CliRunResult, recoverOom = false): void {
     if (this.fatalReason === reason) return;
     this.fatalReason = reason;
     this.clearRetryTimer();
     this.clearHealthyRunTimer();
     this.stopPolling();
     this.lastStateMessage = reason;
+    if (recoverOom) {
+      const generation = this.generation;
+      const timer = setTimeout(() => {
+        if (this.retryTimer !== timer || !this.isCurrent(generation)) return;
+        this.retryTimer = null;
+        this.pendingRetryInMs = null;
+        this.fatalReason = null;
+        this.oomFailureWindow.reset();
+        this.attempt = 0;
+        this.lastStateMessage = 'Recovering CLI after V8 OOM cooldown';
+        this.startPolling();
+        this.publishState();
+        void this.enqueueLifecycle(async () => await this.reconcile(generation));
+      }, this.fatalOomCooldownMs);
+      timer.unref?.();
+      this.retryTimer = timer;
+      this.pendingRetryInMs = this.fatalOomCooldownMs;
+    }
     this.publishState();
-    this.notifyTerminal({ reason: 'fatal', result, message: reason });
+    // OOM cooldown retains the host and its lease; daemon onTerminal exits it.
+    if (!recoverOom) this.notifyTerminal({ reason: 'fatal', result, message: reason });
   }
 
   private notifyTerminal(termination: SupervisorTermination): void {

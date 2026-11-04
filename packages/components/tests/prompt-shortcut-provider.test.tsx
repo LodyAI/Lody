@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act, createElement, StrictMode } from 'react';
+// @vitest-environment jsdom
+import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PromptShortcutRuntime } from '@lody/shared/prompt-shortcuts';
@@ -16,6 +17,7 @@ const fixture = vi.hoisted(() => {
     makePlatform,
     platform: makePlatform(),
     workspaceId: 'workspace-a',
+    status: 'allowed' as 'allowed' | 'pending' | 'blocked',
     directory: [],
     createRepo: vi.fn(),
     openStore: vi.fn(),
@@ -24,8 +26,16 @@ const fixture = vi.hoisted(() => {
   };
 });
 
-vi.mock('jotai', () => ({
+vi.mock('jotai', async (original) => ({
+  ...(await original<typeof import('jotai')>()),
   useAtomValue: () => ({ workspaceId: fixture.workspaceId }),
+}));
+vi.mock('@/hooks/use-workspace-feature', () => ({
+  useLegacyWorkspaceQueryStatus: () => fixture.status,
+  useLegacyWorkspaceQueriesEnabled: () => fixture.status === 'allowed',
+  useAssertLegacyWorkspaceAccess: () => () => {
+    if (fixture.status !== 'allowed') throw new Error('legacy admission pending');
+  },
 }));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'workspace' }));
 vi.mock('@/hooks/use-resolved-workspace-scope', () => ({
@@ -42,7 +52,10 @@ vi.mock('@lody/platform/react', () => ({
   useCloudQuery: () => fixture.directory,
 }));
 vi.mock('@/lib/cloud-api-operations', () => ({ cloudOperations: { promptShortcuts: {} } }));
-vi.mock('loro-repo', () => ({ LoroRepo: { create: fixture.createRepo } }));
+vi.mock('loro-repo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('loro-repo')>();
+  return { ...actual, LoroRepo: { create: fixture.createRepo } };
+});
 vi.mock('loro-repo/storage/indexeddb', () => ({ IndexedDBStorageAdaptor: class {} }));
 vi.mock('@lody/shared/prompt-shortcuts', async () => {
   const { PromptShortcutRuntime: ActualRuntime } =
@@ -101,6 +114,7 @@ describe('PromptShortcutProvider lifecycle', () => {
 
   beforeEach(() => {
     fixture.workspaceId = 'workspace-a';
+    fixture.status = 'allowed';
     fixture.platform = fixture.makePlatform();
     fixture.records = [];
     fixture.closeStore.mockReset().mockResolvedValue(undefined);
@@ -176,71 +190,27 @@ describe('PromptShortcutProvider lifecycle', () => {
     expect(current).not.toBe(first);
     expect(container.textContent).toBe('workspace-a');
   });
-
-  it('fences a replacement platform before publishing its new runtime', async () => {
+  it('retires cloud shortcuts while admission is pending or encrypted and reopens after ordinary admission', async () => {
+    fixture.status = 'allowed';
     await render();
-    const first = current!;
-    const opening = deferred();
-    fixture.createRepo.mockImplementationOnce(async () => {
-      await opening.promise;
-      return { destroy: async () => {} };
-    });
-    fixture.platform = fixture.makePlatform();
-    rendered = [];
+    expect(container.textContent).toBe('workspace-a');
+    fixture.status = 'pending';
     await render();
     expect(current).toBeNull();
-    expect(rendered).not.toContain(first);
-
-    await act(async () => opening.resolve());
+    expect(container.textContent).toBe('loading');
+    fixture.status = 'blocked';
+    await render();
+    expect(current).toBeNull();
+    fixture.status = 'allowed';
+    await render();
     expect(current).not.toBeNull();
-    expect(current).not.toBe(first);
-    expect(container.textContent).toBe('workspace-a');
   });
 
-  it('warms visible shortcut bodies only after an idle window', async () => {
-    const entry = {
-      v: 1 as const,
-      id: 'shortcut-a',
-      workspaceId: 'workspace-a',
-      ownerUserId: 'user-a',
-      visibility: 'private' as const,
-      name: 'Review',
-      slug: 'review',
-      description: 'Review this change',
-      scope: {},
-      revision: 'revision-a',
-      createdAt: 1,
-      updatedAt: 1,
-      bodyDocId: 'body-a',
-      dependencySummary: [],
-    };
-    fixture.records = [{ entry, published: entry, operation: null, deleted: false }];
-    const idleCallbacks = new Map<number, IdleRequestCallback>();
-    let nextIdleHandle = 1;
-    vi.stubGlobal(
-      'requestIdleCallback',
-      vi.fn((callback: IdleRequestCallback) => {
-        const handle = nextIdleHandle++;
-        idleCallbacks.set(handle, callback);
-        return handle;
-      })
-    );
-    vi.stubGlobal(
-      'cancelIdleCallback',
-      vi.fn((handle: number) => idleCallbacks.delete(handle))
-    );
-    const prefetch = vi
-      .spyOn(PromptShortcutRuntime.prototype, 'prefetch')
-      .mockResolvedValue(undefined);
-
+  it('keeps the local shortcut store available without cloud admission', async () => {
+    fixture.platform.capabilities.clear();
+    fixture.status = 'pending';
     await render();
-    expect(prefetch).not.toHaveBeenCalled();
-    expect(idleCallbacks.size).toBe(1);
-    const callback = [...idleCallbacks.values()][0]!;
-    await act(async () => callback({ didTimeout: false, timeRemaining: () => 10 }));
-
-    expect(prefetch).toHaveBeenCalledTimes(1);
-    expect(prefetch.mock.calls[0]?.[0]).toEqual([entry]);
-    expect(prefetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
+    expect(current?.workspaceId).toBe('workspace-a');
+    expect(container.textContent).toBe('workspace-a');
   });
 });

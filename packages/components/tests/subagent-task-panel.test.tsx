@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import { SubagentTaskPanel, type SubagentTask } from '../src/components/ai-gui/subagent-task-panel';
+import {
+  SubagentTaskPanel,
+  collectSubagentTasks,
+  type SubagentTask,
+} from '../src/components/ai-gui/subagent-task-panel';
 import { SubagentRunMessageList } from '../src/components/ai-gui/subagent-run-history';
 import { SubagentRunHistory } from '../src/components/ai-gui/view';
 import { initI18n } from '../src/i18n';
@@ -97,105 +102,257 @@ describe('SubagentTaskPanel', () => {
   const rowNamed = (name: string) =>
     container.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
 
-  it('states background once in the summary and gives each row the word its state needs', () => {
-    render([
-      task({
-        taskId: 'a',
-        isBackgrounded: true,
-        status: 'completed',
-        startedAtEpochSeconds: 100,
-        endedAtEpochSeconds: 145,
-      }),
-      task({ taskId: 'b', isBackgrounded: true, status: 'in_progress', lastToolName: 'Bash' }),
-      task({ taskId: 'c', isBackgrounded: true, status: 'failed', error: 'exit code 1' }),
-    ]);
-
-    const text = container.textContent ?? '';
-    expect(text).toContain('Waiting on 1 background task');
-    expect(text).not.toMatch(/\bBackground\b/);
-    // Done says how long it took; running says what it is doing; failed says so.
-    expect(text).toContain('45s');
-    expect(text).toContain('Running Bash');
-    expect(text).toContain('Failed');
-    // The error itself is detail: it is in the peek, not on the row.
-    expect(text).not.toContain('exit code 1');
+  it('loads only the opened child and ignores a late result after switching tasks', async () => {
+    const first = Promise.withResolvers<Run>();
+    const second = Promise.withResolvers<Run>();
+    const reads: string[] = [];
+    const a = task({
+      taskId: 'a',
+      description: 'First child',
+      status: 'in_progress',
+      run: run('running', [{ type: 'text', text: 'Latest a' }]),
+      history: {
+        read: () => {
+          reads.push('a');
+          return first.promise;
+        },
+      },
+    });
+    const b = task({
+      taskId: 'b',
+      description: 'Second child',
+      status: 'in_progress',
+      run: run('running', [{ type: 'text', text: 'Latest b' }]),
+      history: {
+        read: () => {
+          reads.push('b');
+          return second.promise;
+        },
+      },
+    });
+    render([a, b]);
+    expect(reads).toEqual([]);
+    expect(latestActions()).toEqual(['Latest a', 'Latest b']);
+    await act(async () => rowNamed('Claude task · First child')?.click());
+    expect(reads).toEqual(['a']);
+    // Switching the selected task replaces the detail owner while the earlier
+    // asynchronous read is still pending.
+    render([b]);
+    await act(async () => rowNamed('Claude task · Second child')?.click());
+    expect(reads).toEqual(['a', 'b']);
+    await act(async () => {
+      second.resolve(run('running', [{ type: 'text', text: 'Full second transcript' }]));
+    });
+    expect(steps()).toEqual(['Full second transcript']);
+    await act(async () => {
+      first.resolve(run('running', [{ type: 'text', text: 'Stale first transcript' }]));
+    });
+    expect(steps()).toEqual(['Full second transcript']);
   });
 
-  it('notes the background share when only some tasks are backgrounded', () => {
-    render([
-      task({ taskId: 'a', status: 'completed', isBackgrounded: true }),
-      task({ taskId: 'b', status: 'completed' }),
-    ]);
-
-    expect(container.textContent).toContain('2 tasks · 1 in background');
+  it('follows a deferred running transcript and retains content while refreshing without overriding reading position', async () => {
+    const first = Promise.withResolvers<Run>();
+    const next = Promise.withResolvers<Run>();
+    const subject = task({
+      status: 'in_progress',
+      run: run('running'),
+      history: { read: () => first.promise },
+    });
+    render([subject]);
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+    const scroller = peek()?.querySelector<HTMLDivElement>('.scrollbar-pro');
+    expect(scroller).toBeTruthy();
+    if (!scroller) throw new Error('Missing task scroller');
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, get: () => 1000 },
+      clientHeight: { configurable: true, get: () => 200 },
+    });
+    await act(async () =>
+      first.resolve(run('running', [{ type: 'text', text: 'Initial full transcript' }]))
+    );
+    expect(scroller.scrollTop).toBe(1000);
+    act(() => {
+      scroller.scrollTop = 0;
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    const step = peek()?.querySelector('[data-step]');
+    render([{ ...subject, history: { read: () => next.promise } }]);
+    expect(steps()).toEqual(['Initial full transcript']);
+    expect(step?.isConnected).toBe(true);
+    await act(async () =>
+      next.resolve(run('running', [{ type: 'text', text: 'Updated full transcript' }]))
+    );
+    expect(steps()).toEqual(['Updated full transcript']);
+    expect(scroller.scrollTop).toBe(0);
   });
 
-  it('peeks at the full multi-line command of a background task from its row', async () => {
+  it('retries a failed on-demand transcript read without presenting it as empty', async () => {
+    let fail = true;
+    const subject = task({
+      status: 'in_progress',
+      run: run('running'),
+      history: {
+        read: async () => {
+          if (fail) throw new Error('synthetic read failure');
+          return run('running', [{ type: 'text', text: 'Recovered transcript' }]);
+        },
+      },
+    });
+    render([subject]);
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+    expect(peek()?.textContent).not.toContain('No steps were received');
+    const retry = Array.from(peek()?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Retry'
+    );
+    expect(retry).toBeDefined();
+    fail = false;
+    await act(async () => retry?.click());
+    expect(steps()).toEqual(['Recovered transcript']);
+  });
+
+  it('splits subagents from other tasks into tabs only when a turn has both', async () => {
+    const shownIds = () =>
+      Array.from(container.querySelectorAll('[data-subagent-task-id]')).map((node) =>
+        node.getAttribute('data-subagent-task-id')
+      );
+    const tab = (group: string) =>
+      container.querySelector<HTMLElement>(`[data-subagent-task-tab="${group}"]`);
+    const agent = task({
+      taskId: 'agent',
+      actor: 'Explore',
+      taskKind: 'background',
+      isBackgrounded: true,
+      status: 'in_progress',
+      run: run('running'),
+    });
+    const doneAgent = task({ taskId: 'done-agent', subagentType: 'Plan', status: 'completed' });
+    const shell = task({ taskId: 'shell', actor: 'local_bash', status: 'completed' });
+    const monitor = task({ taskId: 'monitor', taskType: 'monitor_mcp', status: 'completed' });
+    const wakeup = task({ taskId: 'wakeup', taskKind: 'scheduled', status: 'pending' });
+
+    // One kind is one list, with no strip to choose from.
+    render([agent, doneAgent]);
+    expect(tab('subagents')).toBeNull();
+    expect(shownIds()).toEqual(['agent', 'done-agent']);
+    render([shell, { ...monitor, status: 'in_progress' }]);
+    expect(tab('tasks')).toBeNull();
+    expect(shownIds()).toEqual(['shell', 'monitor']);
+
+    // A backgrounded agent is still a subagent; Subagents is chosen first, and
+    // each tab marks whether anything on it is still running.
+    render([shell, agent, doneAgent, monitor]);
+    expect(shownIds()).toEqual(['agent', 'done-agent']);
+    expect(container.textContent).toContain('Waiting on 1 task');
+    expect(tab('subagents')?.textContent).toBe('Subagents');
+    expect(tab('subagents')?.querySelector('[data-slot="spinner"]')).not.toBeNull();
+    expect(tab('tasks')?.textContent).toBe('Tasks');
+    expect(tab('tasks')?.querySelector('[data-slot="spinner"]')).toBeNull();
+
+    await act(async () => tab('tasks')?.click());
+    expect(shownIds()).toEqual(['shell', 'monitor']);
+
+    // The chosen tab survives the tasks changing under it.
+    render([shell, agent, doneAgent, monitor, wakeup]);
+    expect(shownIds()).toEqual(['shell', 'monitor', 'wakeup']);
+    expect(tab('tasks')?.textContent).toBe('Tasks');
+    expect(tab('tasks')?.querySelector('[data-slot="spinner"]')).not.toBeNull();
+  });
+
+  it('links a Core background task to its full command while retaining its brief', async () => {
     const command = 'pnpm install\npnpm run build --filter @lody/components 2>&1';
-    render([
-      task({
-        taskId: 'bash',
-        actor: undefined,
-        taskType: 'local_bash',
-        isBackgrounded: true,
+    const background = task({
+      taskId: 'bash',
+      actor: 'local_bash',
+      taskKind: 'background',
+      toolUseId: 'bash-tool',
+      isBackgrounded: true,
+      description: 'Build the components',
+    });
+    // The task may precede the tool in retained history. Match ids, not labels.
+    const tasks = collectSubagentTasks([
+      background,
+      {
+        type: 'tool_call',
+        toolCallId: 'unrelated',
+        kind: 'execute',
         status: 'completed',
-        description: command,
-        summary: command,
-      }),
+        content: [{ type: 'terminal_command', command: 'echo wrong-command' }],
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'bash-tool',
+        kind: 'execute',
+        status: 'completed',
+        content: [{ type: 'terminal_command', command }],
+      },
     ]);
-    // The settled group folds; open it to reach the row.
+    render(tasks);
     act(() => container.querySelector<HTMLButtonElement>('[aria-expanded]')?.click());
-    expect(peek()).toBeNull();
+    expect(container.textContent).not.toContain('local_bash');
+    await act(async () => rowNamed('Bash · Build the components')?.click());
 
-    // The group's summary is the first button, the task's row the second.
-    await act(async () => container.querySelectorAll<HTMLButtonElement>('button')[1]?.click());
-
-    expect(peek()?.querySelector('pre')?.textContent).toBe(command);
+    expect(peek()?.querySelector('[aria-label="Brief"]')?.textContent).toContain(
+      'Build the components'
+    );
     expect(peek()?.querySelector('[aria-label="Command"] pre')?.textContent).toBe(command);
-    expect(peek()?.querySelector('[data-tool-detail-sheet] code')?.textContent).toBe(command);
-    expect(peek()?.textContent).toContain('Completed');
+    expect(peek()?.textContent).not.toContain('wrong-command');
+    expect(background).not.toHaveProperty('command');
   });
 
-  it("shows a failed task's error in its peek", async () => {
-    render([task({ taskId: 'x', status: 'failed', error: 'exit code 1' })]);
+  it('keeps an unmatched Bash description as a brief and resolves a later tool update', async () => {
+    const background = task({
+      actor: 'local_bash',
+      toolUseId: 'bash-tool',
+      description: 'Build project',
+    });
+    render(
+      collectSubagentTasks([
+        background,
+        {
+          type: 'tool_call',
+          toolCallId: 'another-tool',
+          kind: 'execute',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'echo unrelated' }],
+        },
+      ])
+    );
     act(() => container.querySelector<HTMLButtonElement>('[aria-expanded]')?.click());
+    await act(async () => rowNamed('Bash · Build project')?.click());
+    expect(peek()?.querySelector('[aria-label="Brief"]')?.textContent).toContain('Build project');
+    expect(peek()?.querySelector('[aria-label="Command"]')).toBeNull();
 
-    await act(async () => rowNamed('Claude task · find skills')?.click());
-
-    expect(peek()?.textContent).toContain('exit code 1');
+    render(
+      collectSubagentTasks([
+        background,
+        {
+          type: 'tool_call',
+          toolCallId: 'bash-tool',
+          kind: 'execute',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'pnpm build' }],
+        },
+      ])
+    );
+    expect(peek()?.querySelector('[aria-label="Command"] pre')?.textContent).toBe('pnpm build');
   });
 
-  it('cancels a running subagent from its peek', async () => {
-    const onCancel = async (taskId: string) => {
-      throw new Error(`Cannot stop ${taskId}: disconnected`);
-    };
-    render([task({ taskId: 'sub', taskKind: 'subagent', status: 'in_progress' })], onCancel);
-
-    await act(async () => rowNamed('Claude task · find skills')?.click());
-    const cancel = Array.from(peek()?.querySelectorAll('button') ?? []).find(
-      (button) => button.textContent === 'Stop task'
-    );
-    await act(async () => cancel?.click());
-
-    expect(peek()?.querySelector('[role="alert"]')?.textContent).toBe(
-      'Cannot stop sub: disconnected'
-    );
-    expect(cancel?.disabled).toBe(false);
-  });
-
-  it("follows a streamed run's latest step on its row as steps arrive", () => {
-    const first = toolStep('t1', 'Read `src/config.ts`');
-    render([task({ taskId: 'r', status: 'in_progress', run: run('running', [first]) })]);
-    expect(latestActions()).toEqual(['Read src/config.ts']);
-
-    render([
-      task({
-        taskId: 'r',
-        status: 'in_progress',
-        run: run('running', [first, { type: 'text', text: 'Found it.\n\n## The config loader' }]),
-      }),
+  it('links legacy Bash tasks without treating other task briefs as commands', () => {
+    const bash = task({ actor: undefined, taskType: 'local_bash', toolUseId: 'tool' });
+    const agent = task({ taskId: 'agent', actor: 'Explore', toolUseId: 'tool' });
+    const tasks = collectSubagentTasks([
+      bash,
+      agent,
+      {
+        type: 'tool_call',
+        toolCallId: 'tool',
+        kind: 'execute',
+        status: 'completed',
+        content: [{ type: 'terminal_command', command: '/bin/bash', args: ['-lc', 'pnpm test'] }],
+      },
     ]);
-    expect(latestActions()).toEqual(['The config loader']);
+    expect(tasks[0]?.command).toBe('pnpm test');
+    expect(tasks[1]).not.toHaveProperty('command');
   });
 
   it("falls back to a run's progress when it streams no steps, and keeps a legacy summary", () => {
@@ -215,25 +372,6 @@ describe('SubagentTaskPanel', () => {
       task({ taskId: 'legacy', status: 'in_progress', summary: 'Reading the lockfile' }),
     ]);
     expect(latestActions()).toEqual(['Running Grep', 'Reading the lockfile']);
-  });
-
-  it('opens every received step of a run in its dialog and keeps it current', async () => {
-    const steps1 = [toolStep('t1', 'Read a.ts'), { type: 'thought', text: 'weighing' } as RunItem];
-    render([task({ taskId: 'r', status: 'in_progress', run: run('running', steps1) })]);
-
-    await act(async () => rowNamed('Claude task · find skills')?.click());
-    expect(steps()).toEqual(['Read a.ts', 'weighing']);
-
-    render([
-      task({
-        taskId: 'r',
-        status: 'completed',
-        summary: 'All done',
-        run: run('completed', [...steps1, { type: 'text', text: 'All done' }]),
-      }),
-    ]);
-    expect(steps()).toEqual(['Read a.ts', 'weighing', 'All done']);
-    expect(peek()?.textContent).toContain('Completed');
   });
 
   it('says why a run has no steps and when some were lost', async () => {
@@ -338,33 +476,6 @@ describe('SubagentTaskPanel', () => {
       node.getAttribute('data-subagent-task-id')
     );
     expect(order).toEqual(['parent', 'child', 'sibling', 'orphan']);
-  });
-
-  it('mounts its dialog inside the mobile Vaul drawer it sits in, where touch can scroll it', async () => {
-    const tasks = [task({ taskId: 'r', status: 'in_progress', run: run('running') })];
-    act(() =>
-      root.render(
-        <div data-vaul-drawer="" data-testid="drawer">
-          <SubagentTaskPanel tasks={tasks} renderHistory={renderHistory} />
-        </div>
-      )
-    );
-    await act(async () => rowNamed('Claude task · find skills')?.click());
-
-    const drawer = container.querySelector('[data-testid="drawer"]');
-    const dialog = peek();
-    expect(dialog).not.toBeNull();
-    // Inside the drawer's modal boundary, and opted out of its drag gesture.
-    expect(drawer?.contains(dialog ?? null)).toBe(true);
-    expect(dialog?.closest('[data-vaul-no-drag]')).not.toBeNull();
-  });
-
-  it('keeps its dialog on the body outside a drawer', async () => {
-    render([task({ taskId: 'r', status: 'in_progress', run: run('running') })]);
-    await act(async () => rowNamed('Claude task · find skills')?.click());
-
-    expect(peek()).not.toBeNull();
-    expect(container.contains(peek())).toBe(false);
   });
 
   it('groups child activity like a conversation and keeps prose visible when folded', () => {

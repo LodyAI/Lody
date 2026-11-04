@@ -1,3 +1,4 @@
+import { readSessionHistoryMetadata } from '@lody/shared/session-data';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
@@ -235,7 +236,7 @@ export function ScheduleProposalNotice({
     if (!runtime) return undefined;
     let cancelled = false;
     void runtime
-      .withSessionStore(sessionId, (store) => store.sessionData.history.readAll())
+      .withSessionStore(sessionId, (store) => readSessionHistoryMetadata(store.sessionData.history))
       .then((history) => {
         if (cancelled) return;
         const config = resolveSessionConversationConfig(history);
@@ -377,7 +378,7 @@ export function ScheduleProposalNotice({
         // Re-resolve from history at click time, so a mode changed since the
         // card rendered is the one that gets persisted.
         const history = await runtime.withSessionStore(sessionId, (store) =>
-          store.sessionData.history.readAll()
+          readSessionHistoryMetadata(store.sessionData.history)
         );
         const latest = resolveSessionConversationConfig(history);
         const final = resolveScheduleProposalTarget({
@@ -408,7 +409,9 @@ export function ScheduleProposalNotice({
         await runtime.withScheduleStore(
           scheduleId,
           () =>
-            new ScheduleRepository(runtime.repo, runtime.workspaceId).save({
+            new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+              protectedContent: runtime.contentMode === 'e2ee',
+            }).save({
               scheduleId,
               activationId: uuid(),
               activityId: `proposal-${meta.proposalId}`,
@@ -492,6 +495,10 @@ export function ScheduleProposalNotice({
 
   const problemText: Record<ProposalTargetProblem, string> = {
     role_not_found: t('schedules.proposal.roleNotFound', 'The named Agent Role no longer exists.'),
+    role_machine_required: t(
+      'schedules.proposal.roleMachineRequired',
+      'That Agent Role runs on several machines; name the machine to use.'
+    ),
     agent_not_found: t('schedules.proposal.agentNotFound', 'The named Agent is not available.'),
     machine_mismatch: t(
       'schedules.proposal.machineMismatch',

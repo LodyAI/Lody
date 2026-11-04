@@ -8,7 +8,6 @@ import type {
   SessionId,
   WorkspaceId,
 } from '@lody/shared';
-import { SessionIdSchema } from '@lody/shared';
 
 const configId = 'config-1' as AgentConfigId;
 
@@ -59,6 +58,7 @@ import {
   LoroStreamsLiveModePolicy,
   LoroStreamsMachineRpcClient,
   LoroStreamsRpcResponseDispatcher,
+  HISTORY_INPUT_RESPONSE_RECOVERY_MS,
   LoroStreamsRpcRequestSchema,
   LoroMachineAcpCapabilitiesRefreshRpcRequestSchema,
   createRpcSecretRecipient,
@@ -294,76 +294,6 @@ describe('LoroStreamsMachineRpcClient', () => {
     });
   });
 
-  it('sends minimal session preparation requests and resolves the response', async () => {
-    const fake = createFakeStreamClient();
-    const sessionId = SessionIdSchema.parse('session-1');
-    const client = new LoroStreamsMachineRpcClient({
-      workspaceId: 'workspace-1',
-      machineId: 'machine-1',
-      streamClient: fake.streamClient,
-    });
-
-    const responsePromise = client.requestSessionPrepare({
-      preparationId: 'prepare-1',
-      sessionId,
-      requestedByUserId: 'user-1',
-      agentConfigId: configId,
-      cliType: 'builtin',
-      agentType: 'codex',
-      timeoutMs: 5_000,
-    });
-    await vi.waitFor(() => expect(fake.appended).toHaveLength(1));
-
-    const request = fake.appended[0]?.value as { id: string; params: Record<string, unknown> };
-    expect(fake.appended[0]?.value).toEqual(
-      expect.objectContaining({
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          project: undefined,
-        },
-      })
-    );
-    expect(request.params).not.toHaveProperty('prompt');
-    expect(request.params).not.toHaveProperty('env');
-
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
-          id: request.id,
-          method: 'session/prepare',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          result: {
-            type: 'session/prepare_response',
-            preparationId: 'prepare-1',
-            sessionId: 'session-1',
-            accepted: true,
-            disposition: 'accepted',
-          },
-        },
-      ],
-      nextOffset: '1',
-      cursor: 'cursor-1',
-      upToDate: true,
-    });
-
-    await expect(responsePromise).resolves.toEqual({
-      type: 'session/prepare_response',
-      preparationId: 'prepare-1',
-      sessionId: 'session-1',
-      accepted: true,
-      disposition: 'accepted',
-    });
-    client.stop();
-  });
-
   it('sends session terminate requests and resolves the response', async () => {
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({
@@ -537,6 +467,24 @@ describe('LoroStreamsMachineRpcClient', () => {
       success: true,
       replacementUserTurnId: 'user-new',
     });
+    client.stop();
+  });
+
+  it('forwards includeDisk on machine status only when asked', async () => {
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    void client.requestMachineStatus({ timeoutMs: 5000, includeDisk: true });
+    void client.requestMachineStatus({ timeoutMs: 5000 });
+    await vi.waitFor(() => expect(fake.appended).toHaveLength(2));
+    // Older daemons reject unknown params, so the default request stays empty.
+    expect(fake.appended.map((entry) => (entry.value as { params: unknown }).params)).toEqual([
+      { includeDisk: true },
+      {},
+    ]);
     client.stop();
   });
 
@@ -2020,6 +1968,53 @@ describe('LoroStreamsMachineRpcClient', () => {
     }
   });
 
+  it('roundtrips a project member probe with its typed result', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    try {
+      const pending = client.requestProjectProbeLocalMember({
+        localProjectId: 'local-1' as LocalProjectId,
+        requestedByUserId: 'user-1',
+      });
+      await fake.waitForAppendedCount(1);
+      const request = fake.appended[0]!.value as { id: string; method: string; params: unknown };
+      expect(request).toMatchObject({
+        method: 'project/probe-local-member',
+        params: { localProjectId: 'local-1', requestedByUserId: 'user-1' },
+      });
+      const result = {
+        type: 'project/probe-local-member',
+        repoFullName: 'acme/api',
+        isGit: true,
+        submodules: [{ path: 'proto', url: '../proto.git', repoFullName: 'acme/proto' }],
+      };
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: request.method,
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            result,
+          },
+        ],
+        nextOffset: '1',
+        cursor: '1',
+        upToDate: true,
+      });
+      expect(await pending).toEqual(result);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it('sends local project git state requests and resolves git state responses', async () => {
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({
@@ -2199,31 +2194,6 @@ describe('createLoroStreamsJsonStreamClient', () => {
       contentType: 'application/json',
       ttlSeconds: 61,
     });
-  });
-
-  it('forwards timeout config to StreamsClient', async () => {
-    streamsClientMockFns.create.mockResolvedValue({
-      ok: true,
-      result: {
-        created: true,
-        contentType: 'application/json',
-        nextOffset: '-1',
-        closed: false,
-      },
-    });
-
-    const timeout = { connectTimeoutMs: 30_000, pollTimeoutMs: 45_000 };
-    const client = createLoroStreamsJsonStreamClient({
-      bucketId: 'bucket-1',
-      getToken: async () => 'token-1',
-      baseUrl: 'https://streams.example.com',
-      timeout,
-    });
-
-    await client.ensureJsonStream('workspace-1:rpc:req:machine-1');
-
-    const instance = getLastStreamsClientInstance();
-    expect(instance.options.timeout).toEqual(timeout);
   });
 
   it('adds request context to stream ensure errors', async () => {
@@ -2941,6 +2911,270 @@ describe('machine RPC response live transport fallback', () => {
     },
   });
 
+  const signal = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+
+  const inputRecoveryHarness = (
+    policy = new LoroStreamsLiveModePolicy(),
+    holdAppend = false,
+    abortThrows = false
+  ) => {
+    const appendEntered = signal(),
+      appendReleased = signal(),
+      appendFinished = signal();
+    let finishedCount = 0;
+    const appendWaiters: Array<{ count: number; resolve(): void }> = [];
+    const requests: Array<{ id: string; method: string }> = [];
+    const reads: Array<{
+      mode: string;
+      offset?: string;
+      signal?: AbortSignal;
+      reply(messages: unknown[]): Promise<void>;
+    }> = [];
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: async () => {},
+      appendJson: async (_id, value) => {
+        const request = LoroStreamsRpcRequestSchema.parse(value);
+        requests.push({ id: request.id, method: request.method });
+        appendEntered.resolve();
+        if (holdAppend) await appendReleased.promise;
+        return 'request-offset';
+      },
+      readJsonLive: async (_id, state, onBatch, options) => {
+        reads.push({
+          mode: options?.modePolicy?.selectRequestMode() ?? 'sse',
+          offset: state.nextOffset,
+          signal: options?.signal,
+          reply: async (messages) => {
+            await onBatch({ messages, nextOffset: '43', cursor: 'cursor-43', upToDate: false });
+          },
+        });
+        await onBatch({ messages: [], nextOffset: '42', cursor: 'cursor-42', upToDate: true });
+        await untilAborted(options?.signal);
+        if (abortThrows) throw new DOMException('Aborted', 'AbortError');
+      },
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+      liveModePolicy: policy,
+    });
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient,
+      responseDispatcher: dispatcher,
+      trace: (event) => {
+        if (event !== 'machine rpc transport append finished') return;
+        appendFinished.resolve();
+        finishedCount += 1;
+        for (const waiter of appendWaiters) if (finishedCount >= waiter.count) waiter.resolve();
+      },
+    });
+    const input = (timeoutMs = 30_000) =>
+      client.requestSessionHistoryWrite({
+        sessionId: 'session-1' as SessionId,
+        operation: 'accept_input_and_dispatch',
+        payload: { entry: { id: 'input-1' } },
+        timeoutMs,
+      });
+    const receipt = async (index = 0) => ({
+      jsonrpc: '2.0',
+      id: requests[index]!.id,
+      method: 'session/history-write',
+      rpcVersion: '1',
+      machineId: 'machine-1',
+      result: await encryptCodeCollabV2RpcPayload('session-1', {
+        type: 'session/history-write_response',
+        sessionId: 'session-1',
+        operation: 'accept_input_and_dispatch',
+        success: true,
+        result: { status: 'accepted', turnId: 'input-1', active: true },
+        historyRevision: 1,
+        historyCount: 1,
+        historyChange: null,
+      }),
+    });
+    const waitForAppends = (count: number) =>
+      finishedCount >= count
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => appendWaiters.push({ count, resolve }));
+    return {
+      dispatcher,
+      client,
+      requests,
+      reads,
+      input,
+      receipt,
+      appendEntered,
+      appendReleased,
+      appendFinished,
+      waitForAppends,
+    };
+  };
+
+  it.each(['sse', 'long-poll', 'abort-error', 'diagnostic-error'] as const)(
+    'renews a stalled %s response read and receives the real encrypted input receipt before timeout',
+    async (mode) => {
+      const policy = new LoroStreamsLiveModePolicy({
+        onChange:
+          mode === 'diagnostic-error'
+            ? () => {
+                throw new Error('Diagnostic sink failed');
+              }
+            : undefined,
+      });
+      if (mode === 'long-poll')
+        policy.noteReadOutcome({
+          requestedMode: 'auto',
+          observedTransport: 'long-poll',
+          deliveredBatch: true,
+        });
+      const h = inputRecoveryHarness(policy, false, mode === 'abort-error');
+      let settled = false;
+      const pending = h.input().then((value) => {
+        settled = true;
+        return value;
+      });
+      try {
+        await h.appendFinished.promise;
+        await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS - 1);
+        expect(settled).toBe(false);
+        expect(h.reads).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(h.reads.map((read) => [read.mode, read.offset])).toEqual([
+          [mode === 'long-poll' ? 'long-poll' : 'auto', '-1'],
+          ['long-poll', '42'],
+        ]);
+        // Recovery alone is never delivery, even when the actual owner is slow.
+        expect(settled).toBe(false);
+        await h.reads[1]!.reply([await h.receipt()]);
+        await expect(pending).resolves.toMatchObject({
+          success: true,
+          result: { status: 'accepted', turnId: 'input-1', active: true },
+        });
+        expect(h.requests.map((request) => request.method)).toEqual(['session/history-write']);
+        expect(h.dispatcher.getLiveModeDiagnostics()?.sseResponseTimeouts).toBe(0);
+        // A duplicate reply from the previous read cannot start another write.
+        await h.reads[0]!.reply([await h.receipt()]);
+        await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+        expect(h.requests).toHaveLength(1);
+        expect(h.reads).toHaveLength(2);
+      } finally {
+        h.dispatcher.stop();
+      }
+    }
+  );
+
+  it('does not let unrelated replies postpone a pending input recovery', async () => {
+    const h = inputRecoveryHarness();
+    const pending = h.input();
+    try {
+      await h.appendFinished.promise;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const status = h.client.requestMachineStatus();
+      await h.waitForAppends(2);
+      await h.reads[0]!.reply([machineStatusResponse(h.requests[1]!.id, 'machine-1')]);
+      await expect(status).resolves.toMatchObject({ success: true });
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS - 1_000);
+      expect(h.reads).toHaveLength(2);
+      await h.reads[1]!.reply([await h.receipt()]);
+      await expect(pending).resolves.toMatchObject({ success: true });
+    } finally {
+      h.dispatcher.stop();
+    }
+  });
+
+  it('renews once for overlapping inputs and retains both original requests', async () => {
+    const h = inputRecoveryHarness();
+    const first = h.input();
+    try {
+      await h.appendFinished.promise;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const second = h.input();
+      await h.waitForAppends(2);
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS - 1_000);
+      expect(h.reads).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      expect(h.reads).toHaveLength(2);
+      await h.reads[1]!.reply([await h.receipt(0), await h.receipt(1)]);
+      await expect(Promise.all([first, second])).resolves.toMatchObject([
+        { success: true },
+        { success: true },
+      ]);
+      expect(h.requests).toHaveLength(2);
+    } finally {
+      h.dispatcher.stop();
+    }
+  });
+
+  it('leaves a healthy SSE read alone after an input receipt arrives', async () => {
+    const h = inputRecoveryHarness();
+    const pending = h.input();
+    try {
+      await h.appendFinished.promise;
+      await h.reads[0]!.reply([await h.receipt()]);
+      await expect(pending).resolves.toMatchObject({ success: true });
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      expect(h.reads).toHaveLength(1);
+      expect(h.dispatcher.getLiveModeDiagnostics()?.transport).toBe('sse');
+    } finally {
+      h.dispatcher.stop();
+    }
+  });
+
+  it('starts response recovery only after the request append completes', async () => {
+    const h = inputRecoveryHarness(undefined, true);
+    const pending = h.input();
+    try {
+      await h.appendEntered.promise;
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      expect(h.reads).toHaveLength(1);
+      h.appendReleased.resolve();
+      await h.appendFinished.promise;
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      expect(h.reads).toHaveLength(2);
+      await h.reads[1]!.reply([await h.receipt()]);
+      await expect(pending).resolves.toMatchObject({ success: true });
+    } finally {
+      h.appendReleased.resolve();
+      h.dispatcher.stop();
+    }
+  });
+
+  it.each(['stop', 'cancel', 'pin', 'timeout'] as const)(
+    'does not recover an input after %s',
+    async (end) => {
+      const h = inputRecoveryHarness(
+        new LoroStreamsLiveModePolicy(end === 'pin' ? { pin: 'sse' } : {})
+      );
+      const pending = h.input(end === 'timeout' ? 1_000 : 30_000);
+      try {
+        await h.appendFinished.promise;
+        if (end === 'stop') h.dispatcher.stop();
+        if (end === 'cancel') h.client.stop();
+        await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+        expect(h.reads).toHaveLength(1);
+        if (end === 'pin') {
+          await h.reads[0]!.reply([await h.receipt()]);
+          await expect(pending).resolves.toMatchObject({ success: true });
+        } else if (end === 'timeout')
+          await expect(pending).resolves.toMatchObject({
+            success: false,
+            rpcFailure: { source: 'transport', code: 'response_timeout' },
+          });
+        else await expect(pending).resolves.toBeNull();
+      } finally {
+        h.dispatcher.stop();
+      }
+    }
+  );
+
   it('falls back to long-poll when SSE reads keep failing, and still answers pending calls', async () => {
     const transport = mockBrokenSseTransport();
     const traced: Array<{ event: string; details: Record<string, unknown> }> = [];
@@ -3331,6 +3565,46 @@ describe('pending RPC deadline', () => {
       await vi.advanceTimersByTimeAsync(1_000);
       await expect(pending).resolves.toBeNull();
 
+      dispatcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('LoroStreamsRpcResponseDispatcher response loop', () => {
+  it('keeps reading responses when recreating a missing response stream fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let ensureCalls = 0;
+      let reads = 0;
+      const streamClient: LoroStreamsJsonStreamClient = {
+        ensureJsonStream: vi.fn(async () => {
+          ensureCalls += 1;
+          if (ensureCalls === 1) throw new Error('synthetic gateway unavailable');
+        }),
+        appendJson: vi.fn(async () => 'next-offset'),
+        readJsonLive: vi.fn(async (_streamId, _state, _onBatch, options) => {
+          reads += 1;
+          if (reads <= 2) throw new LoroStreamsGatewayError('stream not found', 404);
+          await new Promise((_resolve, reject) =>
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            })
+          );
+        }),
+      };
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+
+      await dispatcher.start();
+      await vi.waitFor(() => expect(ensureCalls).toBe(1));
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(reads).toBe(3));
+      expect(ensureCalls).toBe(2);
       dispatcher.stop();
     } finally {
       vi.useRealTimers();

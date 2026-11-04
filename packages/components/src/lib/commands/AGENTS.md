@@ -78,7 +78,10 @@ only tells global dispatch to yield for events originating in its subtree.
   quitting. The chord is not listed or rebindable in keyboard settings.
 - Developer Mode's pointer-aware close beta defaults off. When enabled,
   `semantic-action-router.ts` selects the innermost visible registered action scope
-  from pointer/keyboard intent; SessionDetail supplies the close handlers. Empty
+  from explicit open/select, clicks, keyboard input, and wheel intent. Plain hover
+  requires 250 ms and cannot replace explicit ownership; async destination claims
+  yield to newer deliberate input or resets. Hover/focus fallback cannot yield to
+  window close while another close scope is visible. SessionDetail supplies the close handlers. Empty
   panels collapse and transfer focus; cancelled/blocked closes never try siblings.
   Open modal/menu layers block background close. Native browser ownership signals
   contain only browser id and input source, never page contents or typed keys.

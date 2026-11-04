@@ -1,3 +1,4 @@
+import { nativeScrollbar } from '../scroll-area/surface';
 import { ContextMenu as BaseContextMenu } from '@base-ui/react/context-menu';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
@@ -95,6 +96,7 @@ export const ContextMenuContent = forwardRef<HTMLDivElement, ContextMenuContentP
               return appendClassName(
                 stylex.props(
                   surface.popup,
+                  nativeScrollbar,
                   surface.popupMenu,
                   hidden && hiddenSurfaceForSide(state.side)
                 ).className,

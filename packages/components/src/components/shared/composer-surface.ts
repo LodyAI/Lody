@@ -26,6 +26,11 @@ import {
  *   the semantic tokens they resolve to): 28px, 8px in, 10px corners, the
  *   highlight mixed 6% from the surface toward the ink, the tick at the end.
  * - A search field on that surface is typed into, so it is still the well.
+ * - Weight is 400 for every label, and 500 only for a value being typed or
+ *   chosen (a field, a search box). 550 would be a nicer optical step where
+ *   the face is variable, but the fallback resolves through static Inter,
+ *   where CSS font matching rounds 550 up to 600 and makes the input the
+ *   heaviest text in the composer.
  *
  * StyleX has no attribute or descendant selector: open, highlighted and
  * compact are read from state or a container query and applied as classes.
@@ -63,8 +68,8 @@ export const composerSurface = stylex.create({
     outlineStyle: 'none',
     fontFamily: 'inherit',
     fontSize: text.subheadlineSize,
-    fontWeight: 500,
-    letterSpacing: text.controlTracking,
+    fontWeight: 400,
+    fontVariationSettings: "'opsz' 18",
     lineHeight: text.subheadlineLeading,
     whiteSpace: 'nowrap',
     textAlign: 'start',
@@ -84,7 +89,6 @@ export const composerSurface = stylex.create({
    * it stays focusable for its tooltip, and drops the pointer's fill.
    */
   triggerInert: {
-    opacity: 0.45,
     backgroundColor: 'transparent',
     color: colors.secondaryLabel,
   },
@@ -99,6 +103,13 @@ export const composerSurface = stylex.create({
     gap: { default: space[1.5], [COMPACT_FACE]: 0 },
     paddingInline: { default: space[2], [COMPACT_FACE]: 0 },
     justifyContent: { default: 'flex-start', [COMPACT_FACE]: 'center' },
+  },
+
+  /** Text shared by peer controls in the context row above the composer. */
+  contextLabel: {
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 400,
   },
 
   /* ── Context pill (above the composer) ───────────────────────────────── */
@@ -238,7 +249,7 @@ export const composerSurface = stylex.create({
     fontFamily: 'inherit',
     fontSize: text.subheadlineSize,
     fontWeight: 500,
-    letterSpacing: text.controlTracking,
+    fontVariationSettings: "'opsz' 18",
     lineHeight: text.subheadlineLeading,
     whiteSpace: 'nowrap',
     textAlign: 'start',
@@ -289,7 +300,6 @@ export const composerSurface = stylex.create({
     fontSize: text.subheadlineSize,
     lineHeight: text.subheadlineLeading,
     fontWeight: 400,
-    letterSpacing: text.controlTracking,
   },
   /** Groups selector rows without overriding `Menu.Content`'s inset. */
   menuList: {
@@ -330,7 +340,7 @@ export const composerSurface = stylex.create({
   /** Where the keyboard or the pointer is. */
   rowHighlighted: { backgroundColor: POPUP_HIGHLIGHT },
   /** The same 45% the whole library uses, and no pointer. */
-  rowDisabled: { opacity: 0.45, pointerEvents: 'none' },
+  rowDisabled: { color: colors.secondaryLabel, pointerEvents: 'none' },
   /** A row's words: the name, and what it is about under it. */
   rowText: {
     display: 'flex',
@@ -410,7 +420,7 @@ export const composerSurface = stylex.create({
     fontFamily: 'inherit',
     fontSize: text.subheadlineSize,
     fontWeight: 500,
-    letterSpacing: text.controlTracking,
+    fontVariationSettings: "'opsz' 18",
     '::placeholder': { color: colors.tertiaryLabel, opacity: 1 },
   },
 });

@@ -1,7 +1,15 @@
+import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
+import {
+  LoginShellCache,
+  LoginShellCacheLive,
+  LoginShellEnvironment,
+} from '@lody/shared/node/login-shell-env';
+import { bindLoginShellCacheLegacy } from '../src/agent/login-shell-env';
+import { Cause, Effect, Layer } from 'effect';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChildProcess } from 'child_process';
 import type { SessionId, WorkspaceId } from '@lody/shared';
 
@@ -18,6 +26,25 @@ import {
   getCurrentCommitHash,
   type GitRunner,
 } from '../src/lib/git/git-diff-stats';
+
+// Sessions borrow the same explicit application owner as production launchers.
+let shellOwner: ReturnType<typeof makeApplicationRuntime<LoginShellCache, never>>;
+beforeEach(() => {
+  shellOwner = makeApplicationRuntime(
+    LoginShellCacheLive.pipe(
+      Layer.provide(
+        Layer.succeed(LoginShellEnvironment, {
+          probe: () => Effect.succeed({}),
+        })
+      )
+    ),
+    { recover: Effect.failCause, project: Cause.squash }
+  );
+  bindLoginShellCacheLegacy(shellOwner);
+});
+afterEach(async () => {
+  await shellOwner.closeLegacy();
+});
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -154,7 +181,7 @@ const createProcessHandle = (
 const createSandbox = (
   handles: SessionProcessHandle[]
 ): SessionSandbox & {
-  spawn: ReturnType<typeof vi.fn>;
+  spawn: ReturnType<typeof vi.fn<SessionSandbox['spawn']>>;
   terminate: ReturnType<typeof vi.fn>;
   cleanup: ReturnType<typeof vi.fn>;
 } => ({
@@ -259,6 +286,58 @@ describe('Session resource limits', () => {
 });
 
 describe('Session command execution', () => {
+  it('releases a stalled Git observation, preserves the branch, and admits the next observation', async () => {
+    const { WorkspaceGitService } = await import('../src/session/workspace-git-service');
+    const child = new FakeCommandChild(1201);
+    const next = new FakeCommandChild(1202);
+    const started = Promise.withResolvers<void>();
+    const handle = createProcessHandle(child, async () => null);
+    let released = false;
+    handle.terminate = async () => {
+      released = true;
+      child.emit('close', null, 'SIGKILL');
+    };
+    const sandbox = createSandbox([handle, createProcessHandle(next, async () => null)]);
+    const spawn = sandbox.spawn.getMockImplementation();
+    if (!spawn) throw new Error('Missing sandbox spawn');
+    sandbox.spawn.mockImplementation(async (...args) => {
+      const result = await spawn(...args);
+      started.resolve();
+      return result;
+    });
+    const session = createSession('observation' as SessionId, sandbox);
+    let branchName = 'last-known';
+    const doc = {
+      getMetaState: async () => ({ branchName }),
+      setBranchName: async (branch: string) => {
+        branchName = branch;
+      },
+    };
+    const service = new WorkspaceGitService({
+      logger: createSilentLogger(),
+      workspaceDocument: { getOrCreateSessionDoc: async () => doc } as never,
+    });
+    vi.useFakeTimers();
+    try {
+      const observed = service.syncSession('observation' as SessionId, session);
+      await started.promise;
+      await vi.advanceTimersByTimeAsync(15_000);
+      // Branch resolution tries its second observational command after failure.
+      next.stdout.end('');
+      next.emit('close', 0, null);
+      await observed;
+      expect(released).toBe(true);
+      expect(branchName).toBe('last-known');
+      await service.syncSession('observation' as SessionId, {
+        getWorkdir: () => process.cwd(),
+        exec: async () => 'recovered',
+      });
+      expect(branchName).toBe('recovered');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('spawns structured commands directly without a shell', async () => {
     const child = new FakeCommandChild(1003);
     const sandbox = createSandbox([createProcessHandle(child, async () => null)]);

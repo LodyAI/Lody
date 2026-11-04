@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Fiber, Runtime } from 'effect';
+import { Context, Duration, Effect, Fiber } from 'effect';
 
 const LOCAL_RECONNECT_BASE_DELAY_MS = 1_000;
 const LOCAL_RECONNECT_MAX_DELAY_MS = 30_000;
@@ -37,7 +37,7 @@ export const waitForLocalReconnectDelayEffect = (options: {
   const computeDelayMs = options.computeDelayMs ?? computeLocalReconnectDelayMs;
   const delayMs = computeDelayMs(options.attempt, options.random);
 
-  return Effect.as(Clock.sleep(Duration.millis(delayMs)), delayMs);
+  return Effect.as(Effect.sleep(Duration.millis(delayMs)), delayMs);
 };
 
 type LocalReconnectLoopOptions = {
@@ -57,12 +57,12 @@ type LocalReconnectLoopOptions = {
   onError?: (error: unknown) => void;
   computeDelayMs?: (attempt: number) => number;
   /**
-   * Effect runtime used for the retry waits (Clock.sleep + fiber interrupt).
-   * Production omits it (default runtime, live clock — compatible with vi
-   * fake timers); tests inject a TestClock-backed runtime via
-   * `Effect.runtime()` under `TestContext` for deterministic virtual time.
+   * Effect services used for the retry waits (Effect.sleep + fiber interrupt).
+   * Production omits them (live clock, compatible with vi fake timers);
+   * tests capture services backed by TestClock via
+   * `Effect.context()` under `TestClock.layer()` for deterministic virtual time.
    */
-  runtime?: Runtime.Runtime<never>;
+  services?: Context.Context<never>;
 };
 
 export type LocalReconnectLoop = {
@@ -70,6 +70,8 @@ export type LocalReconnectLoop = {
   update: () => void;
   trigger: (reason?: LocalReconnectTriggerReason) => void;
   stop: () => void;
+  /** Permanently stop retries and join the current reconciliation before its repo closes. */
+  close: () => Promise<void>;
 };
 
 /**
@@ -79,16 +81,18 @@ export type LocalReconnectLoop = {
  * so the continuation and cancelers consult the token instead of the fiber.
  */
 type PendingWait = {
-  fiber: Fiber.RuntimeFiber<void> | null;
+  fiber: Fiber.Fiber<void> | null;
   settled: boolean;
 };
 
 export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): LocalReconnectLoop {
-  const runFork = Runtime.runFork(options.runtime ?? Runtime.defaultRuntime);
+  const runFork = Effect.runForkWith(options.services ?? Context.empty());
   let pendingWait: PendingWait | null = null;
   let backoffResetWait: PendingWait | null = null;
   let retryAttempt = 0;
   let inFlight = false;
+  let inFlightDone: PromiseWithResolvers<void> | null = null;
+  let closing: Promise<void> | null = null;
   let pendingForcedRun = false;
   let pendingTriggerReason: LocalReconnectTriggerReason | undefined;
 
@@ -142,14 +146,14 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
   // update() calls must not push the reset out indefinitely); cancelled the
   // moment a problem is observed again.
   const scheduleBackoffResetWait = () => {
-    if (backoffResetWait || retryAttempt === 0) {
+    if (closing || backoffResetWait || retryAttempt === 0) {
       return;
     }
     const current: PendingWait = { fiber: null, settled: false };
     backoffResetWait = current;
     const fiber = runFork(
       Effect.andThen(
-        Clock.sleep(Duration.millis(LOCAL_RECONNECT_HEALTHY_RESET_MS)),
+        Effect.sleep(Duration.millis(LOCAL_RECONNECT_HEALTHY_RESET_MS)),
         Effect.sync(() => {
           if (current.settled) {
             return;
@@ -172,6 +176,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
   const isActive = (): boolean => inFlight || pendingWait !== null;
 
   const update = () => {
+    if (closing) return;
     if (!options.canRun() || !options.hasProblem()) {
       cancelPendingWait();
       // No immediate forgiveness: a cleared problem may just be the transient
@@ -193,7 +198,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
     pendingWait = current;
     const fiber = runFork(
       Effect.andThen(
-        Clock.sleep(Duration.millis(delayMs)),
+        Effect.sleep(Duration.millis(delayMs)),
         Effect.sync(() => {
           if (current.settled) {
             return;
@@ -212,6 +217,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
   };
 
   const run = async (force: boolean) => {
+    if (closing) return;
     if (!options.canRun()) {
       if (force) {
         clearPendingTrigger();
@@ -236,6 +242,8 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
 
     const hadProblemAtStart = options.hasProblem();
     inFlight = true;
+    const done = Promise.withResolvers<void>();
+    inFlightDone = done;
     options.onStateChange();
     try {
       await options.reconnect(triggerReason === undefined ? { force } : { force, triggerReason });
@@ -243,6 +251,8 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
       options.onError?.(error);
     } finally {
       inFlight = false;
+      inFlightDone = null;
+      done.resolve();
       // An attempt against a problem always costs a backoff step, even when
       // hasProblem() reads false right now — the reconnect we just ran leaves
       // rooms in a transient 'connecting' window, and treating that as
@@ -269,6 +279,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
     isActive,
     update,
     trigger: (reason) => {
+      if (closing) return;
       recordPendingTrigger(reason);
       cancelPendingWait();
       cancelBackoffResetWait();
@@ -277,6 +288,22 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
       // history; otherwise repeated token/online/visibility signals can pin a
       // broken connection to the first backoff step forever.
       void run(true);
+    },
+    close: () => {
+      if (closing) return closing;
+      const done = Promise.withResolvers<void>();
+      closing = done.promise;
+      const waits = [pendingWait?.fiber, backoffResetWait?.fiber].filter(
+        (fiber): fiber is Fiber.Fiber<void> => fiber != null
+      );
+      clearPendingTrigger();
+      cancelPendingWait();
+      cancelBackoffResetWait();
+      void Promise.all([
+        inFlightDone?.promise,
+        ...waits.map((fiber) => Effect.runPromise(Fiber.await(fiber))),
+      ]).then(() => done.resolve(), done.reject);
+      return closing;
     },
     stop: () => {
       clearPendingTrigger();

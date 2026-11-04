@@ -16,6 +16,7 @@
 //   the raw error with us).
 
 import { STATUS_ILLUSTRATION_CSS, STATUS_ILLUSTRATIONS } from './status-illustrations';
+import { flushClientLog, installClientLog, recordClientError, recordClientLog } from './client-log';
 
 export type BootDiagnostics = {
   message: string;
@@ -154,7 +155,8 @@ function resolveBootBeaconInstallId(): string {
 function getBootBeaconConfig(): { key: string; host: string } | null {
   // import.meta.env is statically replaced by Vite at build time in every shell
   // that bundles this module, so reading it here works pre-React.
-  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+  const env = import.meta.env;
+  if (env.VITE_LODY_PLATFORM !== 'cloud') return null;
   const key = env.VITE_PUBLIC_POSTHOG_KEY;
   const host = env.VITE_PUBLIC_POSTHOG_HOST;
   if (!key || !host) return null;
@@ -220,7 +222,7 @@ export function captureBootFailedBeacon(error: unknown, options: BootFailureOpti
   postBootBeaconEvent('app/boot_failed', {
     failure_kind: failureKind,
     platform: options.platform ?? 'web',
-    error_type: error instanceof Error ? error.name : typeof error,
+    error_type: error instanceof Error ? 'Error' : typeof error,
     is_online: typeof navigator !== 'undefined' ? navigator.onLine : null,
     // install_id doubles as the distinct id; surface it as a prop too so it
     // joins with `app/launch.install_id` for the same install.
@@ -575,6 +577,10 @@ export function renderBootFailure(
   // Pre-React `app/boot_failed` beacon (spec §7.4): emit once, here at the single
   // entry point every shell funnels boot failures through, before the SDK exists.
   captureBootFailedBeacon(error, { ...options, failureKind });
+  // The standalone recovery page has no AppInitializer; a no-op when the app already installed it.
+  installClientLog();
+  recordClientError('boot.failed', error, { failureKind, surface: options.surface ?? 'boot' });
+  void flushClientLog();
 
   // Make sure the error reaches the devtools console even when no UI is visible.
   // Use %s formatting so devtools renders multi-line strings nicely.
@@ -674,6 +680,8 @@ export function renderBootFailure(
   if (reloadButton) {
     reloadButton.addEventListener('click', () => {
       postBootBeaconEvent('app/boot_failure_reload_clicked', { platform: beaconPlatform });
+      recordClientLog('warn', 'boot.failure_reload_clicked');
+      void flushClientLog();
       reloadButton.disabled = true;
       setStatus(copy.reloading);
       const reenable = (): void => {

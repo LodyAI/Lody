@@ -309,6 +309,7 @@ export function AcpBottomBarModeSelector({
   const permissionSelector = explicitPermissionSelector ?? modeSelectors[0];
   const fastModeTooltip = t('chat.fastModeTooltip');
   const claudeFastModeTooltip = t('chat.fastModeTooltipClaude');
+  const modeControlLabel = t('chat.runConfig.modeLabel', 'Mode');
 
   return (
     <>
@@ -343,9 +344,9 @@ export function AcpBottomBarModeSelector({
           variant="compact"
           icon={getModeIcon(selectedModeId ?? null)}
           iconOnly
-          ariaLabel="Permission mode"
+          ariaLabel={modeControlLabel}
           contentClassName={contentClassName}
-          triggerTitle="Permission mode"
+          triggerTitle={modeControlLabel}
         />
       ) : permissionSelector?.type === 'select' ? (
         renderConfigSelector(permissionSelector, {

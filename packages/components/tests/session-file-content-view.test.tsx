@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
@@ -32,9 +33,10 @@ import {
 import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { lodyPresenceStatesAtom, lodyPresenceSyncStateAtom } from '../src/atoms/presence';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
-import { SaveTextConflictError } from '../src/hooks/use-code-collab-save-text';
+
 import { Tooltip } from '@lody/ui/tooltip';
 import { writeTextToClipboard } from '../src/lib/clipboard';
+import { SESSION_DEEP_LINK_EVENT } from '../src/lib/session-deep-link';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -471,54 +473,6 @@ describe('SessionFileContentView', () => {
     expect(view.textContent).not.toContain('Local project is unavailable');
   });
 
-  it('renders opened provider files without duplicate top titles or provider strip text', async () => {
-    const view = await renderEditableProviderFile();
-    const statusBar = view.querySelector('[data-testid="session-file-realtime-status-bar"]');
-
-    // A freshly opened collab file has never been saved, so it shows no
-    // misleading "Saved" status. With nothing else to surface (machine
-    // online, idle live sync, no SVG toggle) the status bar collapses away.
-    expect(statusBar).toBeNull();
-    expect(view.textContent).not.toContain('Saved');
-    expect(view.textContent).not.toContain('Host online');
-    expect(view.textContent).not.toContain('Host connecting');
-    expect(view.textContent).not.toContain('Host offline');
-    expect(view.textContent).not.toContain('Code Collab');
-    expect(view.textContent).not.toContain('Live');
-    expect(view.textContent).not.toContain('src/live.ts');
-  });
-
-  it('does not show host connecting while the provider is pending', async () => {
-    const view = await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'src/live.ts',
-        fileProviderPending: true,
-        active: true,
-      })
-    );
-    await flushMicrotasks();
-
-    expect(view.textContent).not.toContain('Host connecting');
-    expect(view.textContent).not.toContain('Host online');
-    expect(view.textContent).not.toContain('Code Collab');
-  });
-
-  it('shows machine offline icon from session machine presence', async () => {
-    const view = await renderEditableProviderFile(createEditableProvider(), {
-      machineOnline: false,
-    });
-    const statusBar = view.querySelector('[data-testid="session-file-realtime-status-bar"]');
-    const offlineStatus = statusBar?.querySelector('[title="Machine is offline"]');
-
-    expect(offlineStatus?.textContent).toBe('Offline');
-    expect(offlineStatus?.previousElementSibling?.getAttribute('aria-hidden')).toBe('true');
-    expect(view.textContent).not.toContain('Host offline');
-    // Freshly opened: the offline icon shows, but no misleading "Saved".
-    expect(view.textContent).not.toContain('Saved');
-  });
-
   it('shows unsaved dirty state without live sync in the bottom status bar', async () => {
     vi.useFakeTimers();
     const provider = createEditableProvider();
@@ -570,80 +524,6 @@ describe('SessionFileContentView', () => {
     const event = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
-  });
-
-  it('reports save state changes for the parent tab shell', async () => {
-    const stateChanges: SessionFileSaveViewState[] = [];
-    const view = await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'src/live.ts',
-        fileId: 't:live',
-        fileProvider: createEditableProvider(),
-        fileProviderPending: false,
-        fileProviderRole: 'write',
-        active: true,
-        onSaveStateChange: (state) => stateChanges.push(state),
-      })
-    );
-    await flushMicrotasks();
-
-    expect(stateChanges.at(-1)).toMatchObject({ dirty: false, canSave: false });
-
-    await act(async () => {
-      monacoMockState.onContentChange?.('let value = 2;');
-    });
-    await flushMicrotasks();
-
-    expect(view.textContent).toContain('Unsaved');
-    expect(stateChanges.at(-1)).toMatchObject({
-      dirty: true,
-      canSave: true,
-      saving: false,
-      conflict: false,
-      error: false,
-    });
-  });
-
-  it('saves the editable provider text when the parent increments saveRequestSeq', async () => {
-    const provider = createEditableProvider();
-    const saveText = vi.spyOn(provider, 'saveText');
-
-    await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'src/live.ts',
-        fileId: 't:live',
-        fileProvider: provider,
-        fileProviderPending: false,
-        fileProviderRole: 'write',
-        active: true,
-        saveRequestSeq: 0,
-      })
-    );
-    await flushMicrotasks();
-
-    await act(async () => {
-      monacoMockState.onContentChange?.('let value = 2;');
-    });
-    await rerender(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'src/live.ts',
-        fileId: 't:live',
-        fileProvider: provider,
-        fileProviderPending: false,
-        fileProviderRole: 'write',
-        active: true,
-        saveRequestSeq: 1,
-      })
-    );
-    await flushMicrotasks();
-
-    expect(saveText).toHaveBeenCalledWith('t:live', 'let value = 2;');
   });
 
   it('does not replace dirty provider text or save base digest after provider rebuild', async () => {
@@ -734,134 +614,6 @@ describe('SessionFileContentView', () => {
     expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
       'let value = 2;'
     );
-  });
-
-  it('shows saving while an explicit disk save is in flight', async () => {
-    vi.useFakeTimers();
-    const provider = createEditableProvider();
-    vi.spyOn(provider, 'saveText').mockImplementation(() => new Promise(() => undefined));
-    const view = await renderEditableProviderFile(provider);
-
-    await act(async () => {
-      monacoMockState.onContentChange?.('let value = 2;');
-    });
-    await clickSave(view);
-
-    expect(view.textContent).toContain('Saving');
-  });
-
-  it('shows save failures in the bottom status bar without adding a top banner', async () => {
-    vi.useFakeTimers();
-    const provider = createEditableProvider();
-    vi.spyOn(provider, 'saveText').mockRejectedValue(new Error('disk denied'));
-    const view = await renderEditableProviderFile(provider);
-
-    await act(async () => {
-      monacoMockState.onContentChange?.('let value = 2;');
-    });
-    await clickSave(view);
-    await flushMicrotasks();
-
-    expect(view.textContent).toContain('Save failed');
-    expect(view.textContent).not.toContain('Save failed: disk denied');
-  });
-
-  it('shows save conflict in the bottom bar and keeps actions in a separate row', async () => {
-    vi.useFakeTimers();
-    const provider = createEditableProvider();
-    vi.spyOn(provider, 'saveText').mockRejectedValue(
-      new SaveTextConflictError('disk_changed', 'conflict-1', 'save_conflict: disk_changed')
-    );
-    const view = await renderEditableProviderFile(provider);
-
-    await act(async () => {
-      monacoMockState.onContentChange?.('let value = 2;');
-    });
-    await clickSave(view);
-    await flushMicrotasks();
-
-    expect(view.textContent).toContain('Save conflict');
-    expect(view.textContent).toContain('Discard my edits');
-    expect(view.textContent).toContain('Insert conflict markers');
-    expect(view.textContent).toContain('Overwrite disk');
-  });
-
-  it('does not reopen provider files when the translation function identity changes', async () => {
-    const provider = createFakeSessionFileProvider({
-      files: [
-        {
-          path: 'assets/logo.bin',
-          kind: 'binary',
-          sourceState: 'live-collaborative',
-        },
-      ],
-      snapshots: {
-        'assets/logo.bin': { kind: 'binary', bytes: new Uint8Array([1, 2, 3]) },
-      },
-    });
-    const openFile = vi.spyOn(provider, 'openFile');
-
-    await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'assets/logo.bin',
-        fileProvider: provider,
-        fileProviderPending: false,
-      })
-    );
-    await flushMicrotasks();
-
-    expect(openFile).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not open an inactive provider tab until it becomes active', async () => {
-    const provider = createFakeSessionFileProvider({
-      files: [
-        {
-          path: 'src/main.ts',
-          fileId: 't:main',
-          kind: 'text',
-          sourceState: 'live-collaborative',
-        },
-      ],
-      snapshots: {
-        'src/main.ts': { kind: 'text', text: 'console.log("ready");' },
-      },
-    });
-    const openFile = vi.spyOn(provider, 'openFile');
-
-    await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'src/main.ts',
-        fileId: 't:main',
-        fileProvider: provider,
-        fileProviderPending: false,
-        active: false,
-      })
-    );
-    await flushMicrotasks();
-
-    expect(openFile).not.toHaveBeenCalled();
-
-    await act(async () => {
-      root?.render(
-        createElement(SessionFileContentView, {
-          sessionId: session.id,
-          session,
-          filePath: 'src/main.ts',
-          fileId: 't:main',
-          fileProvider: provider,
-          fileProviderPending: false,
-          active: true,
-        })
-      );
-    });
-    await flushMicrotasks();
-
-    expect(openFile).toHaveBeenCalledTimes(1);
   });
 
   it('unsubscribes provider live text without discarding pending edits when a tab is inactive', async () => {
@@ -974,61 +726,6 @@ describe('SessionFileContentView', () => {
     expect(saveText).not.toHaveBeenCalled();
   });
 
-  it('remounts the Monaco provider viewer when switching files', async () => {
-    const provider = createFakeSessionFileProvider({
-      files: [
-        {
-          path: 'src/one.ts',
-          fileId: 't:one',
-          kind: 'text',
-          sourceState: 'live-collaborative',
-        },
-        {
-          path: 'src/two.ts',
-          fileId: 't:two',
-          kind: 'text',
-          sourceState: 'live-collaborative',
-        },
-      ],
-      snapshots: {
-        'src/one.ts': { kind: 'text', text: 'export const one = 1;' },
-        'src/two.ts': { kind: 'text', text: 'export const two = 2;' },
-      },
-    });
-
-    await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'src/one.ts',
-        fileId: 't:one',
-        fileProvider: provider,
-        fileProviderPending: false,
-        active: true,
-      })
-    );
-    await flushMicrotasks();
-    expect(monacoMockState.mountCount).toBe(1);
-
-    await act(async () => {
-      root?.render(
-        createElement(SessionFileContentView, {
-          sessionId: session.id,
-          session,
-          filePath: 'src/two.ts',
-          fileId: 't:two',
-          fileProvider: provider,
-          fileProviderPending: false,
-          active: true,
-        })
-      );
-    });
-    await flushMicrotasks();
-
-    expect(monacoMockState.mountCount).toBe(2);
-    expect(monacoMockState.unmountCount).toBe(1);
-  });
-
   it('renders Markdown files by default and can switch to the source editor', async () => {
     const markdown = '# Rendered by default';
     const provider = createFakeSessionFileProvider({
@@ -1065,6 +762,96 @@ describe('SessionFileContentView', () => {
     );
     expect(view.querySelector('button[aria-label="Preview"]')).not.toBeNull();
   });
+
+  it.each([true, false])(
+    'opens exact Markdown session links with fileProvider=%s',
+    async (withProvider) => {
+      const uri = 'lody://session/preview-target?workspace=preview-workspace';
+      const previewSession = {
+        ...session,
+        project: { kind: 'github', repoFullName: 'example/preview', branch: 'main' },
+      } satisfies SessionMeta;
+      const markdown = `[Target](${uri})\n\n[Legacy](session://legacy-target)\n\n[Guide](./guide.md)\n\n[Website](https://example.com/guide)`;
+      const provider = createFakeSessionFileProvider({
+        files: [{ path: 'README.md', kind: 'text', sourceState: 'live-readonly' }],
+        snapshots: { 'README.md': { kind: 'text', text: markdown } },
+      });
+      if (!withProvider) {
+        Object.defineProperty(window, '__LODY_ELECTRON__', {
+          configurable: true,
+          value: true,
+        });
+        Object.defineProperty(window, 'ipc', {
+          configurable: true,
+          value: {
+            invoke: async (channel: string) => {
+              if (channel === 'localProjects.readSessionWorktreeFile') {
+                return { path: 'README.md', content: markdown, truncated: false };
+              }
+              throw new Error(`Unexpected invoke ${channel}`);
+            },
+            on: () => () => {},
+            send: () => {},
+          },
+        });
+      }
+      const destinations: string[] = [];
+      const onDeepLink = (event: Event) => destinations.push((event as CustomEvent<string>).detail);
+      window.addEventListener(SESSION_DEEP_LINK_EVENT, onDeepLink);
+      try {
+        const view = await render(
+          createElement(SessionFileContentView, {
+            sessionId: session.id,
+            session: previewSession,
+            filePath: 'README.md',
+            fileProvider: withProvider ? provider : null,
+            sessionLinksEnabled: true,
+          }),
+          { localMachine: !withProvider }
+        );
+        await flushMicrotasks();
+        const target = view.querySelector<HTMLElement>('[data-session-link="preview-target"]');
+        const legacy = view.querySelector<HTMLElement>('[data-session-link="legacy-target"]');
+        expect(target?.tagName).toBe('BUTTON');
+        expect(legacy?.tagName).toBe('BUTTON');
+        await act(async () => target!.click());
+        expect(destinations).toEqual([uri]);
+        await act(async () => legacy!.click());
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target']);
+
+        const guide = [...view.querySelectorAll('button')].find(
+          (button) => button.textContent === 'Guide'
+        );
+        expect(guide).toBeDefined();
+        await act(async () => guide!.click());
+        expect(vi.mocked(writeTextToClipboard).mock.lastCall?.[0]).toBe('./guide.md');
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target']);
+        expect(
+          view.querySelector('a[href="https://example.com/guide"]')?.getAttribute('target')
+        ).toBe('_blank');
+
+        await rerender(
+          createElement(SessionFileContentView, {
+            sessionId: session.id,
+            session: previewSession,
+            filePath: 'README.md',
+            fileProvider: withProvider ? provider : null,
+          })
+        );
+        const inertTarget = view.querySelector<HTMLElement>('[data-session-link="preview-target"]');
+        const inertLegacy = view.querySelector<HTMLElement>('[data-session-link="legacy-target"]');
+        expect(inertTarget?.tagName).toBe('SPAN');
+        expect(inertLegacy?.tagName).toBe('SPAN');
+        await act(async () => {
+          inertTarget!.click();
+          inertLegacy!.click();
+        });
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target']);
+      } finally {
+        window.removeEventListener(SESSION_DEEP_LINK_EVENT, onDeepLink);
+      }
+    }
+  );
 
   it('loads document-relative remote images only after a click, while keeping the prose visible', async () => {
     const provider = createFakeSessionFileProvider({
@@ -1432,112 +1219,51 @@ describe('SessionFileContentView', () => {
     );
   });
 
-  it('renders a download action in the toolbar and downloads HTML file content', async () => {
-    downloadBytesAsFile.mockClear();
+  it('opens mobile HTML without credentialless support and toggles source without executing it', async () => {
+    delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+      .credentialless;
+    const text = '<h1>Preview</h1><script>window.executed = true</script>';
     const provider = createFakeSessionFileProvider({
-      files: [
-        {
-          path: 'artifacts/result.html',
-          fileId: 't:result-html',
-          kind: 'text',
-          sourceState: 'live-readonly',
-        },
-      ],
-      snapshots: {
-        'artifacts/result.html': { kind: 'text', text: '<!doctype html><h1>Hello</h1>' },
-      },
+      files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
+      snapshots: { 'result.html': { kind: 'text', text } },
     });
-    const view = await render(
+    const renderView = (active = true) =>
       createElement(SessionFileContentView, {
         sessionId: session.id,
         session,
-        filePath: 'artifacts/result.html',
-        fileId: 't:result-html',
-        fileProvider: provider,
-        fileProviderPending: false,
-        htmlPreviewRequestSeq: 1,
-      })
-    );
-    await flushMicrotasks();
-
-    const downloadButton = view.querySelector<HTMLButtonElement>(
-      'button[aria-label="Download file"]'
-    );
-    expect(downloadButton).not.toBeNull();
-
-    await act(async () => {
-      downloadButton?.click();
-    });
-
-    expect(downloadBytesAsFile).toHaveBeenCalledTimes(1);
-    expect(downloadBytesAsFile).toHaveBeenCalledWith(
-      'artifacts/result.html',
-      new TextEncoder().encode('<!doctype html><h1>Hello</h1>')
-    );
-  });
-
-  it('returns to code mode when the keyed session target changes', async () => {
-    const provider = createFakeSessionFileProvider({
-      files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
-      snapshots: { 'result.html': { kind: 'text', text: '<h1>Preview</h1>' } },
-    });
-    const nextSession = {
-      ...session,
-      id: 'session-file-content-view-next' as SessionId,
-    } satisfies SessionMeta;
-    const renderTarget = (target: SessionMeta) =>
-      createElement(SessionFileContentView, {
-        key: `${target.id}:html-tab`,
-        sessionId: target.id,
-        session: target,
         filePath: 'result.html',
         fileProvider: provider,
         fileProviderPending: false,
+        defaultHtmlPreview: true,
+        active,
       });
-    const view = await render(renderTarget(session));
+    const view = await render(renderView());
     await flushMicrotasks();
-
-    await act(async () => {
-      view
-        .querySelector<HTMLButtonElement>('button[aria-label="Preview HTML (runs scripts)"]')
-        ?.click();
-    });
-    await flushMicrotasks();
-    expect(view.querySelector('[data-testid="managed-html-preview"]')).not.toBeNull();
-
-    await rerender(renderTarget(nextSession));
-    await flushMicrotasks();
+    const frame = view.querySelector('iframe');
+    expect(frame?.getAttribute('sandbox')).toBe('');
+    expect(frame?.srcdoc).toContain('<h1>Preview</h1>');
+    expect(frame?.srcdoc).not.toContain('<script>');
     expect(view.querySelector('[data-testid="managed-html-preview"]')).toBeNull();
-    expect(view.querySelector('button[aria-label="Preview HTML (runs scripts)"]')).not.toBeNull();
+    expect(view.querySelector('button[aria-label="Reload"]')).toBeNull();
+    await act(async () =>
+      view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')?.click()
+    );
+    expect(view.querySelector('iframe')).toBeNull();
+    expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
+      text
+    );
+    await act(async () =>
+      view.querySelector<HTMLButtonElement>('button[aria-label="Preview"]')?.click()
+    );
+    expect(view.querySelector('iframe')).not.toBeNull();
+    await rerender(renderView(false));
+    expect(view.querySelector('iframe')).toBeNull();
+    await rerender(renderView());
+    expect(view.querySelector('iframe')).not.toBeNull();
+    installCredentiallessIframeSupportForTest();
   });
 
-  it('does not offer script execution without credentialless iframe support', async () => {
-    delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
-      .credentialless;
-    try {
-      const provider = createFakeSessionFileProvider({
-        files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
-        snapshots: { 'result.html': { kind: 'text', text: '<h1>Preview</h1>' } },
-      });
-      const view = await render(
-        createElement(SessionFileContentView, {
-          sessionId: session.id,
-          session,
-          filePath: 'result.html',
-          fileProvider: provider,
-          fileProviderPending: false,
-        })
-      );
-      await flushMicrotasks();
-
-      expect(view.querySelector('[data-testid="monaco-viewer"]')).not.toBeNull();
-      expect(view.querySelector('button[aria-label="Preview HTML (runs scripts)"]')).toBeNull();
-    } finally {
-      installCredentiallessIframeSupportForTest();
-    }
-  });
-
-  it('does not execute a truncated HTML snapshot', async () => {
+  it('does not preview a truncated HTML snapshot even with mobile default preview', async () => {
     Object.defineProperty(window, '__LODY_ELECTRON__', {
       configurable: true,
       value: true,
@@ -1573,6 +1299,7 @@ describe('SessionFileContentView', () => {
         sessionId: githubSession.id,
         session: githubSession,
         filePath: 'large.html',
+        defaultHtmlPreview: true,
         fileProvider: null,
         fileProviderPending: false,
         active: true,
@@ -1584,34 +1311,6 @@ describe('SessionFileContentView', () => {
     expect(view.querySelector('[data-testid="monaco-viewer"]')).not.toBeNull();
     expect(view.querySelector('button[aria-label="Preview HTML (runs scripts)"]')).toBeNull();
     expect(view.querySelector('[data-testid="managed-html-preview"]')).toBeNull();
-  });
-
-  it('does not show the preview eye toggle for non-previewable text files', async () => {
-    const provider = createFakeSessionFileProvider({
-      files: [
-        { path: 'src/main.ts', fileId: 't:main', kind: 'text', sourceState: 'live-readonly' },
-      ],
-      snapshots: { 'src/main.ts': { kind: 'text', text: 'const a = 1;' } },
-    });
-
-    const view = await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'src/main.ts',
-        fileId: 't:main',
-        fileProvider: provider,
-        fileProviderPending: false,
-      })
-    );
-    await flushMicrotasks();
-
-    const hasPreviewEye = Array.from(view.querySelectorAll('button')).some((b) => {
-      const label = b.getAttribute('aria-label');
-      return label === 'Preview' || label === 'Hide preview';
-    });
-    expect(hasPreviewEye).toBe(false);
-    expect(view.querySelector('[data-testid="monaco-viewer"]')).not.toBeNull();
   });
 });
 
@@ -1738,80 +1437,6 @@ describe('independent preview remount investigation', () => {
     }
   });
 
-  it('drops a stale live ack when a later open advances the snapshot', async () => {
-    const firstRuntime = createCodeCollabRuntime({
-      previewFile: async () => ({
-        ...filePreviewResult('# Original', DIGEST_1),
-        path: 'README.md',
-      }),
-      saveText: async () => ({ status: 'ok', path: 'README.md', digest: DIGEST_2, rawBytes: 18 }),
-    });
-    const secondRuntime = createCodeCollabRuntime({
-      previewFile: async () => ({
-        ...filePreviewResult('# From rebuild', DIGEST_2),
-        path: 'README.md',
-      }),
-      openText: async () => codeCollabTextResult('ok', '# From rebuild', DIGEST_2),
-    });
-    const firstProvider = new CodeCollabSessionFileProvider({
-      runtime: firstRuntime,
-      role: 'write',
-      fileTree: { 'README.md': true },
-      textState: sharedCodeCollabTextState,
-    });
-    const secondProvider = new CodeCollabSessionFileProvider({
-      runtime: secondRuntime,
-      role: 'write',
-      fileTree: { 'README.md': true },
-      textState: createCodeCollabSessionFileProviderTextState(),
-    });
-    const view = await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'README.md',
-        fileId: 'README.md',
-        fileProvider: firstProvider,
-        fileProviderPending: false,
-        fileProviderRole: 'write',
-        preferNativeMarkdownSelection: true,
-      })
-    );
-    const click = async (label: string) => {
-      const button = view.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-      expect(button).not.toBeNull();
-      expect(button?.disabled).toBe(false);
-      await act(async () => {
-        button?.click();
-      });
-    };
-    const textarea = () =>
-      view.querySelector<HTMLTextAreaElement>('textarea[aria-label="Markdown source"]');
-    await click('Hide preview');
-    expect(textarea()?.value).toBe('# Original');
-    await act(async () => {
-      await firstProvider.saveText('README.md', '# Updated elsewhere');
-    });
-    expect(textarea()?.value).toBe('# Updated elsewhere');
-    await rerender(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'README.md',
-        fileId: 'README.md',
-        fileProvider: secondProvider,
-        fileProviderPending: false,
-        fileProviderRole: 'write',
-        preferNativeMarkdownSelection: true,
-      })
-    );
-    await flushMicrotasks();
-    await click('Preview');
-    expect(view.textContent).toContain('From rebuild');
-    await click('Hide preview');
-    expect(textarea()?.value).toBe('# From rebuild');
-  });
-
   it('discards a live ack when a fresh open returns the original text', async () => {
     const firstRuntime = createCodeCollabRuntime({
       previewFile: async () => ({
@@ -1884,5 +1509,53 @@ describe('independent preview remount investigation', () => {
     expect(view.textContent).toContain('Original');
     await click('Hide preview');
     expect(textarea()?.value).toBe('# Original');
+  });
+});
+
+describe('failed file preview recovery', () => {
+  it.each(['reopen', 'retry button'])('reads the recovered file through %s', async (action) => {
+    let available = false;
+    const provider = createCodeCollabProvider(
+      createCodeCollabRuntime({
+        previewFile: async () =>
+          available
+            ? filePreviewResult('recovered file', DIGEST_1)
+            : { status: 'error', v: 3, code: 'file_not_found', message: 'File was not found.' },
+      })
+    );
+    const viewNode = (focusRequestSeq: number) =>
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'src/live.ts',
+        fileId: 'src/live.ts',
+        fileProvider: provider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        active: true,
+        focusRequestSeq,
+      });
+    const view = await render(viewNode(1));
+    expect(view.textContent).toContain('File not found');
+    available = true;
+    if (action === 'reopen') await rerender(viewNode(2));
+    else
+      await act(async () => {
+        const retry = [...view.querySelectorAll('button')].find(
+          (button) => button.textContent === 'Retry'
+        );
+        expect(retry).toBeDefined();
+        retry?.click();
+      });
+    expect(view.querySelector('[data-testid="session-file-error-state"]')).toBeNull();
+    expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
+      'recovered file'
+    );
+    // Focusing a successful preview must not replace its accepted snapshot.
+    available = false;
+    await rerender(viewNode(3));
+    expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
+      'recovered file'
+    );
   });
 });

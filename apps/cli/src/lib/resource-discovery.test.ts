@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { McpServer } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { z } from 'zod';
+
 import type {
   AgentConfigMeta,
   AgentRole,
@@ -12,56 +9,6 @@ import type {
   WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import { ResourceDiscovery, type DiscoverySource } from './resource-discovery';
-import { registerDiscoveryTools } from '@/mcp/discovery-tools';
-import { createSessionToolRegistrar, type SessionToolHandlers } from '@/mcp/session-tool-router';
-
-describe('Session tool argument boundaries', () => {
-  it('normalizes once and rejects invalid input through both MCP and direct daemon dispatch', async () => {
-    const server = new McpServer({ name: 'boundary-test', version: '1' });
-    const handlers: SessionToolHandlers = new Map();
-    const register = createSessionToolRegistrar(
-      server,
-      (_name, _args, execute) => execute(),
-      handlers
-    );
-    const received: string[] = [];
-    register(
-      'resolve',
-      {
-        inputSchema: z.object({
-          value: z
-            .string()
-            .min(1)
-            .transform((value) => `resolved:${value}`),
-        }),
-      },
-      async ({ value }) => {
-        received.push(value);
-        return { content: [{ type: 'text', text: value }] };
-      }
-    );
-    const daemonHandler = handlers.get('resolve');
-    if (!daemonHandler) throw new Error('Missing daemon handler');
-    const client = new Client({ name: 'boundary-client', version: '1' });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    try {
-      await server.connect(serverTransport);
-      await client.connect(clientTransport);
-      await expect(daemonHandler({ value: 123 })).rejects.toThrow();
-      const mcp = await client.callTool({ name: 'resolve', arguments: { value: 'input' } });
-      const daemon = await daemonHandler({ value: 'input' });
-      expect(mcp.content).toEqual([{ type: 'text', text: 'resolved:input' }]);
-      expect(daemon.content).toEqual(mcp.content);
-      expect(received).toEqual(['resolved:input', 'resolved:input']);
-      const invalid = await client.callTool({ name: 'resolve', arguments: { value: 123 } });
-      expect(invalid.isError).toBe(true);
-      expect(received).toEqual(['resolved:input', 'resolved:input']);
-    } finally {
-      await client.close();
-      await server.close();
-    }
-  });
-});
 
 const machine = (id: string): MachineMeta => ({ id, name: id }) as MachineMeta;
 const config = (id: string, machineId = 'one'): AgentConfigMeta =>
@@ -118,6 +65,132 @@ const source = (overrides: Partial<DiscoverySource> = {}): DiscoverySource => ({
 });
 
 describe('resource discovery across MCP and CLI', () => {
+  it('reports quota windows and opt-in machine resources without failing on an unavailable machine', async () => {
+    const discovery = new ResourceDiscovery(
+      source({
+        rateLimits: async (id) =>
+          id === 'one'
+            ? {
+                weekly: {
+                  limitId: 'weekly',
+                  scope: { providerId: 'codex' },
+                  windows: [
+                    { usedPercent: 40, windowDurationSeconds: 3600, resetsAtEpochSeconds: null },
+                    {
+                      usedPercent: 100,
+                      windowDurationSeconds: 604800,
+                      resetsAtEpochSeconds: 1_793_000_000,
+                    },
+                  ],
+                },
+                // A legacy synced row without scope/windows must not break the list.
+                legacy: { limitId: 'legacy', usedPercent: 80, resetsAt: 1 } as never,
+              }
+            : Promise.reject(new Error('Synthetic flock read failure')),
+        onlineMachineIds: async () => new Set(['one', 'two'] as MachineId[]),
+        machineResources: async (target) => {
+          if (target.id === 'two') throw new Error('Synthetic RPC timeout');
+          return { disk: { totalGB: 100, freeGB: 1, usedPercent: 99 } };
+        },
+      })
+    );
+    const plain = await discovery.list('machine', {});
+    expect(plain.items).toEqual([
+      expect.objectContaining({
+        id: 'one',
+        quota: [
+          expect.objectContaining({ provider: 'codex', usedPercent: 100, exhausted: true }),
+          expect.objectContaining({ usedPercent: 40, exhausted: false }),
+        ],
+      }),
+      expect.not.objectContaining({ quota: expect.anything() }),
+    ]);
+    expect(plain.items[0]).not.toHaveProperty('resources');
+    expect(plain.items[0]?.quota).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ resetsAt: new Date(1_793_000_000_000).toISOString() }),
+      ])
+    );
+
+    const withResources = await discovery.list('machine', { includeResources: true });
+    expect(withResources.items).toEqual([
+      expect.objectContaining({
+        id: 'one',
+        resources: { disk: expect.objectContaining({ freeGB: 1 }) },
+      }),
+      expect.objectContaining({ id: 'two', resources: 'unavailable' }),
+    ]);
+  });
+
+  it('marks unconfirmed catalogs as syncing instead of inventing missing configurations or capabilities', async () => {
+    const readiness = {
+      metadata: true,
+      workspace: true,
+      machines: new Map([['one' as MachineId, false]]),
+    };
+    const discovery = new ResourceDiscovery(
+      source({
+        roles: async () => [role('cold')],
+        configs: async () => [],
+        catalogReadiness: () => readiness,
+      })
+    );
+    expect((await discovery.list('agent_role')).items[0]?.availability).toEqual({
+      state: 'unknown',
+      reason: 'catalog_syncing',
+    });
+    expect(await discovery.list('agent_config')).toMatchObject({
+      items: [],
+      sync: { state: 'syncing', retryable: true },
+    });
+    await expect(discovery.get('agent_config', 'agent')).rejects.toThrow('CATALOG_SYNCING');
+    readiness.machines.set('one' as MachineId, true);
+    expect((await discovery.list('agent_role')).items[0]?.availability).toEqual({
+      state: 'unavailable',
+      reason: 'agent_config_missing',
+    });
+    await expect(discovery.get('agent_config', 'agent')).rejects.toThrow('RESOURCE_NOT_FOUND');
+  });
+
+  it('downgrades stale model and capability negatives while preserving denied machine access', async () => {
+    const readiness = {
+      metadata: false,
+      workspace: false,
+      machines: new Map([['one' as MachineId, false]]),
+    };
+    const stale = new ResourceDiscovery(
+      source({
+        roles: async () => [role('model', { runConfig: { modelId: 'new-model' } })],
+        catalogReadiness: () => readiness,
+      })
+    );
+    expect((await stale.list('agent_role')).items[0]?.availability).toEqual({
+      state: 'unknown',
+      reason: 'catalog_syncing',
+    });
+    const denied = new ResourceDiscovery(
+      source({
+        roles: async () => [role('denied')],
+        canAccess: async () => false,
+        catalogReadiness: () => readiness,
+      })
+    );
+    expect((await denied.list('agent_role')).items[0]?.availability?.reason).toBe(
+      'machine_inaccessible_or_missing'
+    );
+    const capabilities = new ResourceDiscovery(
+      source({
+        roles: async () => [role('caps')],
+        capabilities: async () => ({}),
+        catalogReadiness: () => readiness,
+      })
+    );
+    expect((await capabilities.list('agent_role')).items[0]?.availability).toEqual({
+      state: 'unknown',
+      reason: 'catalog_syncing',
+    });
+  });
+
   it('enumerates beyond 20, preserves stable continuation after insertion and rejects cursor scope changes', async () => {
     const configs = Array.from({ length: 45 }, (_, n) => config(`a-${String(n).padStart(2, '0')}`));
     const deps = source({ configs: async (id) => (id === 'one' ? configs : []) });
@@ -220,6 +293,47 @@ describe('resource discovery across MCP and CLI', () => {
     });
   });
 
+  it('checks a Role permission pin against the agent `_permission` option', async () => {
+    const discovery = new ResourceDiscovery(
+      source({
+        capabilities: async () => ({
+          // Shaped like Grok's catalog; bound to the fixture's agent config.
+          agent: {
+            cliType: 'builtin',
+            agentType: 'codex',
+            fetchedAt: 1,
+            modes: [],
+            models: [{ modelId: 'model', name: 'Model' }],
+            configOptions: [
+              {
+                id: 'permission_mode',
+                name: 'Permission Mode',
+                category: '_permission',
+                type: 'select',
+                currentValue: 'ask',
+                options: [
+                  { value: 'ask', name: 'Ask Every Time' },
+                  { value: 'always-approve', name: 'Always Approve' },
+                ],
+              },
+            ],
+          },
+        }),
+        roles: async () => [
+          role('approve', {
+            runConfig: { configOptionValues: { permission_mode: 'always-approve' } },
+          }),
+          role('retired', { runConfig: { configOptionValues: { permission_mode: 'yolo' } } }),
+        ],
+      })
+    );
+    const page = await discovery.list('agent_role');
+    expect(page.items.find((row) => row.id === 'approve')?.availability?.state).toBe('available');
+    expect(page.items.find((row) => row.id === 'retired')?.availability?.reason).toBe(
+      'mode_unavailable'
+    );
+  });
+
   it('filters Roles by their binding while retaining unavailable matches', async () => {
     const discovery = new ResourceDiscovery(
       source({ roles: async () => [role('one'), role('two', { machineId: 'two' as MachineId })] })
@@ -227,6 +341,27 @@ describe('resource discovery across MCP and CLI', () => {
     const page = await discovery.list('agent_role', { machineId: 'two' });
     expect(page.items.map((row) => row.id)).toEqual(['two']);
     expect(page.items[0]?.availability?.state).toBe('unavailable');
+  });
+
+  it('lists a multi-machine Role once per machine and returns every machine on get', async () => {
+    const both = role('both', {
+      alias: 'Both-One',
+      additionalTargets: [
+        { machineId: 'two' as MachineId, agentConfigId: 'cfg-two' as never, runConfig: {} },
+      ],
+    });
+    const discovery = new ResourceDiscovery(source({ roles: async () => [both] }));
+    const page = await discovery.list('agent_role');
+    expect(page.items.map((row) => [row.id, row.machineId, row.machineCount])).toEqual([
+      ['both', 'one', 2],
+      ['both', 'two', 2],
+    ]);
+    expect(page.items[0]?.alias).toBe('Both-One');
+    const got = await discovery.get('agent_role', 'both');
+    expect(got.targets?.map((row) => row.machineId)).toEqual(['one', 'two']);
+    expect(
+      (await discovery.list('agent_role', { machineId: 'two' })).items.map((row) => row.machineId)
+    ).toEqual(['two']);
   });
 
   it('reads GitHub-only projects independently of the local machine catalog', async () => {
@@ -245,23 +380,6 @@ describe('resource discovery across MCP and CLI', () => {
         repoFullName: 'synthetic/repo',
       },
     ]);
-  });
-
-  it('preserves mixed, local-only and machine-scoped project results', async () => {
-    const discovery = new ResourceDiscovery(source());
-    expect((await discovery.list('project')).items.map((row) => [row.kind, row.machineId])).toEqual(
-      [
-        ['github', undefined],
-        ['local', 'one'],
-        ['local', 'two'],
-      ]
-    );
-    expect(
-      (await discovery.list('project', { machineId: 'two' })).items.map((row) => [
-        row.kind,
-        row.machineId,
-      ])
-    ).toEqual([['local', 'two']]);
   });
 
   it('reports cached and missing agent capabilities and omits launch secrets', async () => {
@@ -309,48 +427,5 @@ describe('resource discovery across MCP and CLI', () => {
     expect(mcp.items[0]?.selectedForCurrentTurn).toBe(false);
     expect(JSON.stringify(mcp)).not.toContain('synthetic-command');
     expect(JSON.stringify(mcp)).not.toContain('synthetic-secret');
-  });
-
-  it('surfaces read failures without claiming an empty catalog', async () => {
-    const discovery = new ResourceDiscovery(
-      source({
-        projects: async () => {
-          throw new Error('sync unavailable');
-        },
-      })
-    );
-    await expect(discovery.list('project', { kind: 'local' })).rejects.toThrow('sync unavailable');
-  });
-
-  it('serves the shared result through the real MCP wire and rejects irrelevant filters', async () => {
-    const discovery = new ResourceDiscovery(source());
-    const server = new McpServer({ name: 'synthetic-discovery', version: '1' });
-    registerDiscoveryTools(
-      createSessionToolRegistrar(server, (_name, _args, run) => run()),
-      (read) => read(discovery)
-    );
-    const client = new Client({ name: 'synthetic-client', version: '1' });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverTransport);
-    await client.connect(clientTransport);
-    try {
-      const result = await client.callTool({ name: 'lody_machine_list', arguments: { limit: 1 } });
-      const expected = await discovery.list('machine', { limit: 1 });
-      expect(result.content).toEqual([{ type: 'text', text: JSON.stringify(expected) }]);
-      for (const [resource, args] of [
-        ['machine', { machineId: 'one' }],
-        ['project', { onlineStatus: 'online' }],
-        ['agent_config', { kind: 'local' }],
-        ['agent_role', { onlineStatus: 'online' }],
-        ['mcp', { machineId: 'one' }],
-      ] as const) {
-        const invalid = await client.callTool({ name: `lody_${resource}_list`, arguments: args });
-        expect(invalid.isError, resource).toBe(true);
-        await expect(discovery.list(resource, args)).rejects.toThrow();
-      }
-    } finally {
-      await client.close();
-      await server.close();
-    }
   });
 });

@@ -1,11 +1,11 @@
 import { createFileRoute, notFound, Outlet, redirect } from '@tanstack/react-router';
 import { BootNavigate } from '@/components/boot-navigate';
-import { BootShell } from '@/components/boot-shell';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useCloudQuery } from '@lody/platform/react';
+import { WorkspaceAdmissionGate } from '@/components/workspace-admission-gate';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   clearPreferredWorkspaceSlugIfMatch,
@@ -21,7 +21,7 @@ import {
   resolveWorkspaceAccessDeniedFallback,
 } from '@/lib/workspace-route-guard';
 import { RouteMessage } from '@/components/route-message';
-import { LoadingPlaceholder } from '@/components/loading-placeholder';
+import { BlockingWaitPlaceholder } from '@/components/blocking-wait-placeholder';
 import {
   WORKSPACE_SLUG_RESERVED_LANDING_EXACT_PATHS,
   WORKSPACE_SLUG_RESERVED_LANDING_PREFIXES,
@@ -31,6 +31,7 @@ import { WorkspaceRouteTargetProvider } from '../providers/workspace-route-targe
 import {
   getLocalWorkspaceSlug,
   useLocalPlatformWorkspacesState,
+  retryLocalPlatformSnapshot,
 } from '../providers/local-platform-provider';
 
 // Paths that are served by the CF Pages middleware as landing pages.
@@ -121,15 +122,18 @@ function LocalWorkspaceGuardRoute() {
   if (workspacesState.status === 'error') {
     return (
       <RouteMessage
+        gate="workspace_list_error"
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
+        onRetry={retryLocalPlatformSnapshot}
       />
     );
   }
 
   if (!workspace) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="local_workspace_starting"
         variant="boot"
         title={t('workspace.route.localStartingTitle')}
         description={t('workspace.route.localStartingDescription')}
@@ -212,7 +216,8 @@ function CloudWorkspaceGuardRoute() {
     }
 
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_access_denied_fallback"
         variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
@@ -247,7 +252,15 @@ function CloudWorkspaceGuardRoute() {
   // unauthorized access to workspace UI.
   // ==========================================================================
   if (confirmedUnauthenticated) {
-    return <BootShell />;
+    // The root sign-out path redirects from here; if it never does, this wait
+    // still has to offer a way out.
+    return (
+      <BlockingWaitPlaceholder
+        gate="sign_out_pending"
+        variant="boot"
+        title={t('workspace.route.signingInTitle')}
+      />
+    );
   }
 
   if (hasLocalToken) {
@@ -287,7 +300,8 @@ function CloudWorkspaceGuardRoute() {
   // No local token - use the original loading flow
   if (!sessionSettled) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="session_loading"
         variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
@@ -302,7 +316,8 @@ function CloudWorkspaceGuardRoute() {
 
   if (isPending || isRetrying || access === undefined) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_access_loading"
         variant="boot"
         title={t('workspace.route.accessLoadingTitle')}
         description={t('workspace.route.accessLoadingDescription')}
@@ -316,7 +331,8 @@ function CloudWorkspaceGuardRoute() {
 
   if (access.status === 'unauthenticated') {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="session_loading"
         variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
@@ -338,7 +354,15 @@ function CloudWorkspaceGuardRoute() {
   );
 }
 
-function WorkspaceAuthedRoute({
+function WorkspaceAuthedRoute(props: Parameters<typeof PlaintextWorkspaceAuthedRoute>[0]) {
+  return (
+    <WorkspaceAdmissionGate workspaceName={props.workspaceName}>
+      <PlaintextWorkspaceAuthedRoute {...props} />
+    </WorkspaceAdmissionGate>
+  );
+}
+
+function PlaintextWorkspaceAuthedRoute({
   workspaceName,
   organizations,
   organizationsLoading,
@@ -401,6 +425,7 @@ function WorkspaceAuthedRoute({
     if (optimisticGuard === 'switch-error') {
       return (
         <RouteMessage
+          gate="workspace_switch_error"
           title={t('workspace.route.openErrorTitle')}
           description={t('workspace.route.openErrorDescription')}
         />
@@ -409,7 +434,8 @@ function WorkspaceAuthedRoute({
 
     if (optimisticGuard === 'wait-for-switch') {
       return (
-        <LoadingPlaceholder
+        <BlockingWaitPlaceholder
+          gate="workspace_switch_pending"
           variant="boot"
           title={t('workspace.route.switchingTitle')}
           description={t('workspace.route.switchingDescription')}
@@ -424,7 +450,8 @@ function WorkspaceAuthedRoute({
   // No local token - use the original loading flow
   if (!orgSettled) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_list_loading"
         variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
@@ -435,7 +462,8 @@ function WorkspaceAuthedRoute({
   const hasOrganizations = Array.isArray(organizations);
   if (organizationsLoading || !hasOrganizations) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_list_loading"
         variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
@@ -473,6 +501,7 @@ function WorkspaceAuthedRoute({
   if (workspaceGuard === 'switch-error') {
     return (
       <RouteMessage
+        gate="workspace_switch_error"
         title={t('workspace.route.openErrorTitle')}
         description={t('workspace.route.openErrorDescription')}
       />
@@ -481,7 +510,8 @@ function WorkspaceAuthedRoute({
 
   if (workspaceGuard === 'wait-for-switch') {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_switch_pending"
         variant="boot"
         title={t('workspace.route.switchingTitle')}
         description={t('workspace.route.switchingDescription')}

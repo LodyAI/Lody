@@ -55,6 +55,28 @@ async function fixture() {
 }
 
 describe('Codex profile ownership and generation publication', () => {
+  it('skips a corrupt sibling, keeps target validation strict, and rediscovers repaired metadata', async () => {
+    const { root, store, config, resolved } = await fixture();
+    const file = path.join(root, resolved.profile.profileId, 'profile.json');
+    const saved = await readFile(file, 'utf8');
+    const other = {
+      ...config,
+      id: randomUUID(),
+      codexAuth: { ...config.codexAuth, profileId: randomUUID() },
+    } as AgentConfigMeta;
+    const sibling = await store.resolve('workspace-fixture', other, true);
+    await writeFile(file, '{broken');
+    expect((await store.list('workspace-fixture')).map((item) => item.profile.profileId)).toEqual([
+      sibling?.profile.profileId,
+    ]);
+    await expect(store.resolve('workspace-fixture', config)).rejects.toThrow(
+      'metadata could not be read'
+    );
+    await writeFile(file, saved);
+    expect(await store.list('workspace-fixture')).toHaveLength(2);
+    expect(await store.resolve('workspace-fixture', config, true)).toEqual(resolved);
+  });
+
   it('uses isolated Codex default storage for new and unfinished ChatGPT profiles', async () => {
     const { root, store, config } = await fixture();
     const chatgpt = {
@@ -142,47 +164,6 @@ describe('Codex profile ownership and generation publication', () => {
       )
     );
     expect(attempts.map((attempt) => attempt.status).sort()).toEqual(['fulfilled', 'rejected']);
-  });
-
-  it('never marks an unavailable vault ready or leaves a candidate active', async () => {
-    const { root, vault, config, resolved } = await fixture();
-    const locked = new CodexProfileStore(root, {
-      ...vault,
-      set: async () => {
-        throw new Error('Vault locked');
-      },
-    });
-    await expect(
-      locked.withApiKeyCandidate(resolved, 'synthetic-key', async () => {})
-    ).rejects.toThrow('Vault locked');
-    expect(await locked.isReady(resolved)).toBe(false);
-    await expect(locked.resolve('workspace-fixture', config)).rejects.toThrow('Authenticate');
-  });
-
-  it('permits simultaneous uses and isolates each native exit proof', async () => {
-    const { resolved, store } = await fixture();
-    await store.withApiKeyCandidate(resolved, 'synthetic-key', async () => {});
-    const [first, second] = await Promise.all([
-      registerCodexProfileProcess(resolved),
-      registerCodexProfileProcess(resolved),
-    ]);
-    first.recordNativePid(process.pid);
-    second.recordNativePid(process.pid);
-    expect(first.token).not.toBe(second.token);
-    await first();
-    const proof = (token: string) =>
-      path.join(resolved.home, '..', 'processes', `${token}.native.json`);
-    await writeFile(proof(first.token), JSON.stringify({ nativeExited: true }));
-    await first();
-    await writeFile(proof(first.token), JSON.stringify({ nativeExited: true }));
-    expect(await reconcileCodexProfileProcesses(resolved)).toBe(false);
-    expect(JSON.parse(await readFile(proof(second.token), 'utf8'))).toEqual({
-      nativePid: process.pid,
-      nativeExited: false,
-    });
-    await writeFile(proof(second.token), JSON.stringify({ nativeExited: true }));
-    await second();
-    expect(await reconcileCodexProfileProcesses(resolved)).toBe(true);
   });
 
   it('reclaims exited children and pre-spawn failures; unknown uses do not block another start', async () => {
@@ -281,6 +262,79 @@ describe('Codex profile ownership and generation publication', () => {
     expect(await store.apiKey(resolved)).toBe('synthetic-first');
     expect([...secrets.values()]).toEqual(['synthetic-first']);
   });
+
+  it.each([
+    { stage: 'save', ready: false },
+    { stage: 'save', ready: true },
+    { stage: 'verification', ready: false },
+    { stage: 'verification', ready: true },
+    { stage: 'cancellation', ready: false },
+    { stage: 'cancellation', ready: true },
+  ])(
+    'preserves $stage failure and retries cleanup after restart (ready=$ready)',
+    async ({ stage, ready }) => {
+      const { root, vault, resolved, config, secrets } = await fixture();
+      const originalError = new Error(`Synthetic ${stage} failure`);
+      const cleanupError = new Error('Synthetic credential deletion failure');
+      let failSave = false;
+      let failCleanup = false;
+      const failingVault: CodexCredentialVault = {
+        ...vault,
+        set: async (id, value) => {
+          await vault.set(id, value);
+          // A failed write may have stored the credential before returning an error.
+          if (failSave) throw originalError;
+        },
+        delete: async (id) => {
+          if (failCleanup) throw cleanupError;
+          await vault.delete(id);
+        },
+      };
+      const store = new CodexProfileStore(root, failingVault);
+      if (ready) await store.withApiKeyCandidate(resolved, 'synthetic-old', async () => {});
+      const recordPath = path.join(root, resolved.profile.profileId, 'profile.json');
+      const before = JSON.parse(await readFile(recordPath, 'utf8'));
+      const controller = new AbortController();
+      failSave = stage === 'save';
+      failCleanup = true;
+
+      await expect(
+        store.withApiKeyCandidate(
+          resolved,
+          'synthetic-candidate',
+          async () => {
+            if (stage === 'cancellation') controller.abort(originalError);
+            else throw originalError;
+          },
+          controller.signal
+        )
+      ).rejects.toBe(originalError);
+
+      const retained = JSON.parse(await readFile(recordPath, 'utf8'));
+      expect(retained.state).toBe(before.state);
+      expect(retained.activeGeneration).toBe(before.activeGeneration);
+      expect(retained.generations).toHaveLength(before.generations.length + 1);
+      expect([...secrets.values()]).toEqual(
+        ready ? ['synthetic-old', 'synthetic-candidate'] : ['synthetic-candidate']
+      );
+
+      const restarted = new CodexProfileStore(root, failingVault);
+      expect(await restarted.resolve('workspace-fixture', config, true)).toEqual(resolved);
+      expect(await restarted.isReady(resolved)).toBe(ready);
+      if (ready) expect(await restarted.apiKey(resolved)).toBe('synthetic-old');
+      else await expect(restarted.apiKey(resolved)).rejects.toThrow('Authenticate');
+      await expect(restarted.reconcileGenerations(resolved)).rejects.toBe(cleanupError);
+      expect(JSON.parse(await readFile(recordPath, 'utf8'))).toEqual(retained);
+
+      failCleanup = false;
+      failSave = false;
+      await restarted.reconcileGenerations(resolved);
+      expect(JSON.parse(await readFile(recordPath, 'utf8'))).toEqual(before);
+      expect([...secrets.values()]).toEqual(ready ? ['synthetic-old'] : []);
+      await restarted.withApiKeyCandidate(resolved, 'synthetic-retry', async () => {});
+      expect(await restarted.apiKey(resolved)).toBe('synthetic-retry');
+    }
+  );
 
   it('rejects endpoint, owner, and runtime rewrites without retrieving the saved key', async () => {
     const { store, config, resolved } = await fixture();

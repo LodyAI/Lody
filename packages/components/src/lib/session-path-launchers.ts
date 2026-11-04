@@ -51,6 +51,7 @@ export const BUILTIN_PATH_LAUNCHERS: readonly BuiltinPathLauncher[] = [
   { kind: 'builtin', id: 'zed', label: 'Zed', requiresElectron: true },
   { kind: 'builtin', id: 'sublime', label: 'Sublime Text', requiresElectron: true },
   { kind: 'builtin', id: 'warp', label: 'Warp', requiresElectron: true },
+  { kind: 'builtin', id: 'delta', label: 'Delta', requiresElectron: true },
   {
     kind: 'builtin',
     id: 'xcode',
@@ -434,6 +435,15 @@ export function buildPathLauncherLaunchInput(
 
   if (launcher.id === 'sublime') {
     return buildSublimePathLauncherInput(targetPath, normalizePlatform(platform), launcher.label);
+  }
+
+  if (launcher.id === 'delta') {
+    return {
+      kind: 'command',
+      command: { command: 'delta', args: ['open', targetPath] },
+      targetPath,
+      label: launcher.label,
+    };
   }
 
   if (launcher.id === 'xcode') {

@@ -28,9 +28,11 @@ B, while the original human remains the authorization principal throughout.
   machine access, chain-depth limits and recipient configuration stay unchanged.
 - Operation acceptance freezes source authors and target Role presentation
   atomically. Create/chat and their batch/recovery paths propagate those values.
-  Role deletion or renaming cannot change an accepted snapshot. Optional extension
-  storage preserves strict legacy Operation readers; old executors may still
-  produce legacy messages without author metadata.
+  Missing delegated display snapshots retain the Operation’s frozen requester Session
+  and source Turn as Agent provenance, with a generic `Agent` label and unknown
+  Role/model details. Delegated inputs without source identity are rejected, never
+  authored as human. Role deletion or renaming cannot change an accepted snapshot.
+  Source snapshots use a separate extension table.
 - Composer submissions freeze the selected Role's display snapshot per turn.
   Explicit None clears Role presentation. Session creation provenance must not
   label every future turn. Unconfigured CLI/MCP follow-ups retain the target's

@@ -6,7 +6,7 @@ import { getMarkdownHighlightWorker } from '@/lib/markdown-highlight-worker';
 import {
   createMarkdownHighlighter,
   ensureMarkdownCodeLanguage,
-  MARKDOWN_CODE_LANGUAGES,
+  MARKDOWN_CORE_CODE_LANGUAGES,
   MARKDOWN_EXTENDED_CODE_LANGUAGES,
   tokenizeMarkdownCode,
   type MarkdownHighlighter,
@@ -31,7 +31,7 @@ const MARKDOWN_CODE_LANGUAGE_ALIASES: Partial<Record<string, BundledLanguage>> =
   lean4: 'lean',
 };
 
-const MARKDOWN_CODE_LANGUAGE_SET = new Set<string>(MARKDOWN_CODE_LANGUAGES);
+const MARKDOWN_CODE_LANGUAGE_SET = new Set<string>(MARKDOWN_CORE_CODE_LANGUAGES);
 const MARKDOWN_EXTENDED_CODE_LANGUAGE_SET = new Set<string>(MARKDOWN_EXTENDED_CODE_LANGUAGES);
 const MARKDOWN_EXTENDED_LANGUAGE_ALIASES = new Set(['mysql', 'pgsql', 'postgres', 'postgresql']);
 

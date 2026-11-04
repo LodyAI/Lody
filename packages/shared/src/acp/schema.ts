@@ -95,13 +95,15 @@ const zToolCallContent = z.union([
   withMeta({ type: z.literal('terminal'), terminalId: z.string() }),
 ]);
 
+// Omitted lists are not clears, including replayed initial calls. Preserve their
+// presence just as zToolCallUpdate and normalized child events do.
 export const zToolCall = withMeta({
   toolCallId: z.string(),
   title: z.string(),
   kind: zToolKind.optional(),
   status: zToolCallStatus.optional(),
-  content: z.array(zToolCallContent).optional().default([]),
-  locations: z.array(zToolCallLocation).optional().default([]),
+  content: z.array(zToolCallContent).optional(),
+  locations: z.array(zToolCallLocation).optional(),
   rawInput: z.unknown().optional(),
   rawOutput: z.unknown().optional(),
 });

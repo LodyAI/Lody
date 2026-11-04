@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-一个工作区通过一条 ephemeral Loro 传输发布在线状态，该传输的队列串行、不合并、无上限，
+一个工作区通过一条 ephemeral Loro 传输发布在线状态，最初检查的 0.15.1 版本中，该传输的队列串行、不合并、无上限，
 而机器心跳与该工作区内其他所有 presence 写入方共用它。因此产出快过网络排空的写入方会延迟
 心跳；又因为心跳的 `updatedAt` 在创建时而非发送时写入，被延迟的心跳送达时已超出 90 秒
 时效窗口：读取端收到了它，却仍报告机器离线，而此时房间状态是 `joined`，任何地方都不会
@@ -112,3 +112,55 @@ null 分支此前完全没有测试，而 `commands/agent-config.ts` 早已正�
 
 触发该不变量的线上故障，以及造成故障的、已被 revert 的生产者，记录在
 [已驳回的 transient-reasoning note](../../rejected/bug-fix/2026-09-18-codex-transient-reasoning.zh.md)。
+
+## 事实纠正与诊断边界 — 2026-10-12
+
+诊断 PR：[#1503](https://github.com/LodyAI/Lody/pull/1503)。
+
+重新核对消费中的 streams-crdt 0.16.2 后纠正当前队列说明：内置
+`EphemeralStoreAdaptor` 会合并未发送的同 key set/delete 更新链；in-flight bytes 与
+不同 key、未知或多 key 写入仍彼此独立。上文 0.15.1 的检查是历史事实；速率、体积、来源
+划分义务和读取端三态意图保持不变。本次没有改变 Spec 保证。
+
+旧诊断夸大了证据：`lastLocalAppendAtMs`/`lastWriteError` 可选 getter 存在于继承的类型，
+但已发布 ephemeral 实现没有它们。`pendingLocalCount` 统计逻辑未确认写入，包括被覆盖的
+写入。`waitUntilSynced()` 捕获更新链快照，跟随同 key 后继值，排除后来独立的更新链。
+因此删除旧的“heartbeat delivered”、`ageAtSendMs`、`queuedAhead` 标签；屏障延迟无法
+证明某个心跳的精确发送、服务端处理时刻或 peer 收到。
+
+既有 daemon 日志现在通过数字/封闭枚举白名单转发 Effect 4.0.2 fiber annotations。
+任意 annotation 值、message 对象与 Cause 内容均省略；原因类别保留诊断级别，不复制
+凭据、payload 或 URL。程序内的完整 Cause 和恢复所有权不受影响。Trace 进入既有文件出口
+的 opt-in 策略。逐条成功改为 trace，慢完成保留 debug，30 秒限频健康汇总保留待完成
+鉴权/POST 数量、真实等待年龄及累计失败数。
+
+临时适配在既有 auth/fetch 边界观察，每个远端代际拥有独立诊断状态。它原样传递 callback
+context 和 fetch signal/headers/body，不读取响应 body，也不重试、排空或重建上游队列。
+Auth/fetch attempt 是观测编号，不是重试次数。队列条目年龄、重试标识与 peer 回执明确
+保持 unavailable。锁定的上游原生发布 API 提供等价安全阶段事件与真实完成回执后替换此
+适配；扩展已有应用拥有者，不增加诊断 runtime 或第二套发送内核。
+
+所有权仍属于既有 Promise runtime 和上游传输。本次不新增原生生命周期内核或 Legacy
+门面，也不删除公开 presence API。0.16.2 中，bootstrap 可先完成，但 outbound flush 阻塞
+仍会让 `join()` 无法返回。Close 拒绝等待者并移除本地订阅，却不取消或等待 in-flight
+POST。`close_returned` 只记录该返回；迟到观测仍携带旧代际编号。原生取消、共享 close
+完成结果、清理失败所有权与安全替换在本单元仍未实现。[当前 presence 指南](../../../docs/cli-lib-loro-presence.md)
+维护阶段含义与替换条件。
+
+验证使用真实已安装的 EphemeralStreamCrdt/EphemeralStore 和公开 adaptor，合成 fetch/SSE、
+显式请求/peer/完成 gates，以及伪 Date 或 timers。覆盖 POST 阻塞期间读取正常、鉴权
+等待/拒绝、HTTP 拒绝、bootstrap 先于 join 完成、同 key 链覆盖、捕获屏障之外的独立写入、
+重连重发、来源划分及 close 后 POST 才完成。Effect logger 测试使用 TestClock，并检查
+真实文件出口的 trace opt-in 与安全投影。删除私有 subscription stand-in 和只检查 mock
+调用次数的通知测试。临时消融 annotation 转发、POST pending 观测和 barrier-age 投影，
+各自均触发行为断言失败；脚本不进入产品源码。合成结果不说明生产事故根因，也不证明
+原生清理、远端服务行为、桌面打包或非 Linux 平台。
+
+最终验证基于 `3ac76bad10f46720517a2ca6929f03de4ef5bb9b`：37 项聚焦/相邻测试通过；
+根类型检查/lint、format/format:check、i18n 和 code-collab/platform/CLI-process/public
+守卫通过。`pnpm check` 在 CLI 测试阶段停止（4031 通过、15 失败、1 跳过）；恢复两份
+本次改动的运行时源码为基线后，同样复现 5 个失败套件/15 项失败及 4 个未处理错误
+（iOS simulator、原生 Git 夹具、cloudflared IPC）。这证明当前环境下基线失败，不说明
+其精确根因；其余全量 CI 阶段被中断。开始执行 docs status；最终 docs check --base
+在 base/head 均有同样 6 个未检出的 Kimi/Pi 子模块链接，零新增错误，无 SHA 保护主题。
+仅验证子进程清除继承的 `GIT_CONFIG_*`；用户全局配置未改动。

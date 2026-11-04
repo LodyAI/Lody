@@ -5,6 +5,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { SessionBrowserToolbar } from './session-browser-toolbar';
 import {
   PreviewConnectionPlaceholder,
@@ -35,6 +36,13 @@ const styles = stylex.create({
   },
   errorIcon: { flexShrink: 0, width: '14px', height: '14px', marginTop: '2px' },
   errorText: { minWidth: 0, overflowWrap: 'break-word' },
+  disclosure: {
+    margin: 0,
+    paddingInline: '12px',
+    paddingBlock: '8px',
+    fontSize: '0.75rem',
+    color: colors.secondaryLabel,
+  },
   progress: {
     display: 'flex',
     flex: '1 1 0%',
@@ -83,6 +91,7 @@ type SessionBrowserPanelViewProps = {
   onDismissError: () => void;
   navigationPhase?: ManagedNavigationPhase | null;
   suggestedAddress?: string;
+  tunnelDisclosure?: boolean;
   children?: ReactNode;
 };
 
@@ -95,9 +104,11 @@ export function SessionBrowserPanelView({
   onDismissError,
   navigationPhase,
   suggestedAddress,
+  tunnelDisclosure,
   children,
 }: SessionBrowserPanelViewProps) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const hasContent = Boolean(children);
   // When remote content is absent the placeholder owns the single recovery
   // action; keeping it out of the popover avoids two simultaneous Restore
@@ -117,6 +128,14 @@ export function SessionBrowserPanelView({
   return (
     <div {...rootStyle} className={[rootStyle.className, className].filter(Boolean).join(' ')}>
       <SessionBrowserToolbar {...toolbar} previewStatus={toolbarPreviewStatus} />
+      {tunnelDisclosure ? (
+        <p {...stylex.props(styles.disclosure)}>
+          {t(
+            'sessions.browser.tunnelDisclosure',
+            'Page content passes through the tunnel service as plaintext; this preview is not end-to-end encrypted.'
+          )}
+        </p>
+      ) : null}
       {showErrorBanner ? (
         <div role="alert" {...stylex.props(styles.error)}>
           <ShieldAlert {...stylex.props(styles.errorIcon)} />
@@ -152,9 +171,15 @@ export function SessionBrowserPanelView({
             <Globe2 {...stylex.props(styles.emptyIcon)} aria-hidden />
             <p {...stylex.props(styles.emptyText)}>
               {suggestedAddress
-                ? t('sessions.browser.emptyWithCandidate', 'Press Enter to open {{url}}', {
-                    url: suggestedAddress,
-                  })
+                ? isMobile
+                  ? t(
+                      'sessions.browser.emptyWithCandidateMobile',
+                      'Open {{url}} from the address bar',
+                      { url: suggestedAddress }
+                    )
+                  : t('sessions.browser.emptyWithCandidate', 'Press Enter to open {{url}}', {
+                      url: suggestedAddress,
+                    })
                 : t(
                     'sessions.browser.emptyNoCandidate',
                     'No preview address reported yet. Enter a URL above, or ask the agent to report its dev server.'

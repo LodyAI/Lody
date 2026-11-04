@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
-import { PopupContainerProvider } from '@lody/ui/popup-container';
+import { ModalContainerProvider, PopupContainerProvider } from '@lody/ui/popup-container';
 
 import { cn } from '@/lib/utils';
 import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
@@ -8,23 +8,23 @@ import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 const DrawerViewportContext = React.createContext(false);
 
 function Drawer({ repositionInputs, ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
-  // Android-compatible shells can resize the layout viewport along with the
-  // keyboard. Vaul captures that already-shrunk drawer as its initial height
-  // and can restore it on hide (e.g. HarmonyOS / Zhuoyi). Side drawers instead
-  // keep their CSS height and track only the currently occluded bottom edge.
-  const followViewport =
+  // Vaul caches a focused drawer's initial height, which becomes stale after
+  // a fold/rotation or a keyboard-resized WebView. Keep side drawers CSS-sized.
+  // iOS surfaces already consume the native keyboard offset; other hosts need
+  // the currently occluded visual-viewport edge instead.
+  const manageSideDrawer =
     (props.direction === 'right' || props.direction === 'left') &&
     !props.snapPoints &&
     repositionInputs !== false &&
-    isNativeAppShell() &&
-    !isNativeIOSAppShell();
+    (isNativeAppShell() || repositionInputs === true);
+  const followViewport = manageSideDrawer && !isNativeIOSAppShell();
 
   return (
     <DrawerViewportContext.Provider value={followViewport}>
       <DrawerPrimitive.Root
         data-slot="drawer"
         {...props}
-        repositionInputs={followViewport ? false : repositionInputs}
+        repositionInputs={manageSideDrawer ? false : repositionInputs}
       />
     </DrawerViewportContext.Provider>
   );
@@ -91,22 +91,33 @@ const DrawerOverlay = React.forwardRef<
 DrawerOverlay.displayName = 'DrawerOverlay';
 
 function DrawerContent({
+  skipOpenAnimation = false,
+  nativeKeyboardInset = false,
   className,
   children,
   style,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & {
+  /** Suppress entrance for an in-place handoff; preserve drag/exit transitions. */
+  skipOpenAnimation?: boolean;
+  /** Native side-panel portals whose children do not already own keyboard lift. */
+  nativeKeyboardInset?: boolean;
+}) {
   const viewportBottom = useDrawerViewportBottom();
   const [popupContainer, setPopupContainer] = React.useState<HTMLDivElement | null>(null);
   const mergedStyle = {
     '--lody-drawer-width': '256px',
     ...style,
+    ...(skipOpenAnimation ? { animationName: 'none' } : {}),
+    ...(nativeKeyboardInset && isNativeIOSAppShell()
+      ? { bottom: 'var(--native-keyboard-height, 0px)' }
+      : {}),
     ...(viewportBottom === undefined ? {} : { bottom: viewportBottom }),
   } as React.CSSProperties;
 
   return (
     <DrawerPortal data-slot="drawer-portal">
-      <DrawerOverlay />
+      <DrawerOverlay style={skipOpenAnimation ? { animationName: 'none' } : undefined} />
       <DrawerPrimitive.Content
         data-slot="drawer-content"
         className={cn(
@@ -124,7 +135,9 @@ function DrawerContent({
            `bg-muted`, which equals `--background` in the dark theme and renders
            invisible) so the handle actually reads as draggable. */}
         <div className="bg-muted-foreground/40 mx-auto mt-3 hidden h-1.5 w-10 shrink-0 rounded-full group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
-        <PopupContainerProvider container={popupContainer}>{children}</PopupContainerProvider>
+        <ModalContainerProvider container={popupContainer}>
+          <PopupContainerProvider container={popupContainer}>{children}</PopupContainerProvider>
+        </ModalContainerProvider>
         {/* Body portals inherit Vaul's pointer lock and leave its focus scope.
             Keep floating controls inside the modal, outside scrolling content;
             a boxless host adds no flex item, and menu gestures never drag Vaul. */}

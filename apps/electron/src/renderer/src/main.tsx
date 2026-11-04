@@ -1,3 +1,4 @@
+import { installClientLog } from '@lody/components/lib/client-log'
 import { installWindowPreparationIntent } from '@lody/components/lib/window-preparation-intent'
 import { windowPreparationAtom } from '@lody/components/lib/window-preparation'
 import type { PreparedWindowTarget } from '@lody/shared/electron-ipc'
@@ -33,6 +34,9 @@ import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
 import { DesktopDevbar } from './devbar/index'
 import { installAppIconBridge } from './app-icon'
+
+const stopClientDiagnostics = installClientLog()
+import.meta.hot?.dispose(stopClientDiagnostics)
 
 // Desktop windows should not Tab-cycle a focus ring through the whole UI like a web page.
 installNativeTabBehavior()

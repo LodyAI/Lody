@@ -1,4 +1,6 @@
 import type { MessageContent } from '@lody/shared';
+import { buildSessionLink } from '@lody/shared/session-link';
+import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
 import type { ExportAttachmentRecord, ExportSessionSummary, ExportTranscriptTurn } from './types';
 
 function escapeInlineCode(value: string): string {
@@ -16,12 +18,20 @@ function formatAttachmentLine(
   return `[image: ${label}]`;
 }
 
-function renderItem(item: MessageContent, attachmentLinks: Map<string, string>): string[] {
+function renderItem(
+  item: MessageContent,
+  attachmentLinks: Map<string, string>,
+  workspaceId: string
+): string[] {
   switch (item.type) {
     case 'text':
-      return item.text.trim() ? [item.text.trim()] : [];
+      return item.text.trim()
+        ? [normalizeSessionLinksForExport(item.text.trim(), workspaceId)]
+        : [];
     case 'thought':
-      return item.text.trim() ? ['#### Thought', item.text.trim()] : [];
+      return item.text.trim()
+        ? ['#### Thought', normalizeSessionLinksForExport(item.text.trim(), workspaceId)]
+        : [];
     case 'image': {
       const link = attachmentLinks.get(item.imageId);
       return [formatAttachmentLine(item, link)];
@@ -93,6 +103,7 @@ export function buildTranscriptMarkdown(args: {
     `# ${args.session.title ?? args.session.sessionId}`,
     '',
     `- Session ID: \`${args.session.sessionId}\``,
+    `- Session: [Open in Lody](${buildSessionLink({ sessionId: args.session.sessionId, workspaceId: args.session.workspaceId })})`,
     `- Agent: ${args.session.agent.type}`,
     `- Created At: ${args.session.createdAt}`,
     `- Archived: ${args.session.archived ? 'yes' : 'no'}`,
@@ -113,7 +124,9 @@ export function buildTranscriptMarkdown(args: {
 
   for (const turn of args.turns) {
     lines.push('', `## ${turn.role} · ${turn.timestamp}`, '');
-    const rendered = turn.items.flatMap((item) => renderItem(item, attachmentLinks));
+    const rendered = turn.items.flatMap((item) =>
+      renderItem(item, attachmentLinks, args.session.workspaceId)
+    );
     if (rendered.length === 0) {
       lines.push('_No renderable content_');
       continue;

@@ -1,8 +1,11 @@
+import { toShared } from '@/platform/process-options';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { isPidAliveSyncLegacy } from '@lody/shared/node/process';
+
 import type { ResolvedCodexProfile } from './codex-profile-store';
 
 const UsageRecordSchema = z.object({ version: z.literal(1), token: z.uuid() }).strict();
@@ -15,14 +18,10 @@ export type CodexProfileProcessUsage = (() => Promise<void>) & {
   abandonBeforeSpawn(): Promise<void>;
 };
 
+/** A pid owned by another user (EPERM) still counts as running. */
 function nativeProcessIsGone(pid: number | undefined): boolean {
   if (pid === undefined) return false;
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ESRCH';
-  }
+  return !isPidAliveSyncLegacy(pid, toShared());
 }
 
 async function readProof(file: string) {

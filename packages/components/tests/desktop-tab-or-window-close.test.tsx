@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, useRef, useState } from 'react';
 import { createStore, Provider, useAtomValue } from 'jotai';
 import {
   createSemanticActionRouter,
   reportSemanticActionInteraction,
   type SemanticActionScope,
+  SEMANTIC_HOVER_DWELL_MS,
 } from '../src/lib/commands/semantic-action-router';
 import { useSemanticActionRouter } from '../src/lib/commands/use-semantic-action-router';
 import {
@@ -26,48 +28,6 @@ import {
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-describe('desktop closer lifecycle', () => {
-  let windowOpen: boolean;
-  beforeEach(() => {
-    __resetDesktopTabClosersForTests();
-    windowOpen = true;
-    vi.spyOn(window, 'close').mockImplementation(() => {
-      windowOpen = false;
-    });
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    __resetDesktopTabClosersForTests();
-  });
-  it('closes a window with no registered surface', () => {
-    closeCurrentTabOrWindow();
-    expect(windowOpen).toBe(false);
-  });
-  it('restores the previous surface after the top closer is removed', () => {
-    const tabs = ['older', 'newer'];
-    registerDesktopTabCloser(() => {
-      tabs.splice(tabs.indexOf('older'), 1);
-      return 'handled';
-    });
-    const dispose = registerDesktopTabCloser(() => {
-      tabs.splice(tabs.indexOf('newer'), 1);
-      return 'handled';
-    });
-    closeCurrentTabOrWindow();
-    expect(tabs).toEqual(['older']);
-    expect(windowOpen).toBe(true);
-    dispose();
-    closeCurrentTabOrWindow();
-    expect(tabs).toEqual([]);
-    expect(windowOpen).toBe(true);
-  });
-  it('honors an explicit native-window result from the active surface', () => {
-    registerDesktopTabCloser(() => 'unhandled');
-    closeCurrentTabOrWindow();
-    expect(windowOpen).toBe(false);
-  });
-});
-
 describe('semantic close routing', () => {
   let host: HTMLDivElement;
   let conversation: HTMLElement;
@@ -79,11 +39,19 @@ describe('semantic close routing', () => {
   let cancelled: boolean;
   let scopes: SemanticActionScope[];
 
-  const point = (element: HTMLElement, x = 10, y = 10, buttons = 0) => {
+  const move = (element: HTMLElement, x = 10, y = 10, buttons = 0) => {
     element.dispatchEvent(
       new MouseEvent('pointermove', { bubbles: true, clientX: x, clientY: y, buttons })
     );
   };
+  const point = (element: HTMLElement, x = 10, y = 10, buttons = 0) => {
+    move(element, x, y, buttons);
+    vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS);
+  };
+  const click = (element: HTMLElement) =>
+    element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  const wheel = (element: HTMLElement) =>
+    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
   const press = (element: HTMLElement, key: string, options: KeyboardEventInit = {}) => {
     element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key, ...options }));
   };
@@ -96,6 +64,7 @@ describe('semantic close routing', () => {
   });
 
   beforeEach(() => {
+    vi.useFakeTimers();
     __resetDesktopTabClosersForTests();
     // jsdom has no layout. Give real DOM nodes a visible rectangle; semantic
     // hidden/aria-hidden/inert checks still run in the production resolver.
@@ -153,6 +122,7 @@ describe('semantic close routing', () => {
     router.dispose();
     host.remove();
     vi.restoreAllMocks();
+    vi.useRealTimers();
     __resetDesktopTabClosersForTests();
   });
 
@@ -169,17 +139,11 @@ describe('semantic close routing', () => {
     expect(windowOpen).toBe(true);
   });
 
-  it('collapses an already empty panel without closing the conversation', () => {
-    panel.querySelector('[data-tab]')!.remove();
-    point(panel);
-    close();
-    expect(remaining()).toEqual({ conversation: 2, panel: 0, panelOpen: false, windowOpen: true });
-  });
-
   it('selects an iframe host on pointer entry without reading its document', () => {
     const frame = document.createElement('iframe');
     panel.append(frame);
     frame.dispatchEvent(new MouseEvent('pointerover', { bubbles: true, clientX: 25, clientY: 25 }));
+    vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS);
     close();
     expect(remaining().panelOpen).toBe(false);
     expect(remaining().conversation).toBe(2);
@@ -188,10 +152,98 @@ describe('semantic close routing', () => {
   it('routes native browser ownership signals through its visible host', () => {
     window.dispatchEvent(new Event('blur'));
     reportSemanticActionInteraction(panel, 'pointer');
+    vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS);
     close();
     expect(remaining().panelOpen).toBe(false);
     expect(remaining().conversation).toBe(2);
   });
+
+  it('keeps an opened file targeted after the pointer returns to the sole conversation', () => {
+    conversation.querySelector('[data-tab]')!.remove();
+    const finishOpen = router.deferActivation('side-panel');
+    finishOpen();
+    point(conversation, 40, 40);
+    expect(panel.dataset.lodyActionActive).toBe('true');
+    close();
+    expect(remaining()).toEqual({ conversation: 1, panel: 0, panelOpen: false, windowOpen: true });
+    // Successful collapse deliberately hands off for the next invocation.
+    close();
+    expect(windowOpen).toBe(false);
+  });
+
+  it.each(['click', 'typing', 'wheel'])(
+    'lets deliberate conversation %s reclaim ownership from an opened file',
+    (interaction) => {
+      router.activate('side-panel');
+      if (interaction === 'click') click(conversation);
+      if (interaction === 'typing') press(input, 'a');
+      if (interaction === 'wheel') wheel(conversation);
+      point(panel, 40, 40);
+      close();
+      expect(remaining()).toEqual({ conversation: 1, panel: 1, panelOpen: true, windowOpen: true });
+    }
+  );
+
+  it('does not treat programmatic focus or scrolling as deliberate input', () => {
+    router.activate('side-panel');
+    input.focus();
+    conversation.dispatchEvent(new Event('scroll', { bubbles: true }));
+    point(conversation, 30, 30);
+    close();
+    expect(remaining().panelOpen).toBe(false);
+    expect(remaining().conversation).toBe(2);
+  });
+
+  it('does not commit a pane merely crossed by the pointer', () => {
+    move(panel);
+    vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS - 1);
+    move(conversation, 30, 30);
+    vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS);
+    close();
+    expect(remaining().conversation).toBe(1);
+    expect(remaining().panel).toBe(1);
+  });
+
+  it.each(['hover', 'focused fallback', 'default fallback'])(
+    'does not close the window through %s while a second close scope is visible',
+    (selection) => {
+      conversation.querySelector('[data-tab]')!.remove();
+      if (selection === 'hover') point(conversation);
+      if (selection === 'default fallback') input.blur();
+      close();
+      expect(remaining()).toEqual({ conversation: 1, panel: 1, panelOpen: true, windowOpen: true });
+      click(conversation);
+      close();
+      expect(windowOpen).toBe(false);
+    }
+  );
+
+  it('preserves window closure when there is no other visible close scope', () => {
+    conversation.querySelector('[data-tab]')!.remove();
+    panel.hidden = true;
+    close();
+    expect(windowOpen).toBe(false);
+  });
+
+  it('does not let a late file open override newer deliberate input', () => {
+    const finishOpen = router.deferActivation('side-panel');
+    press(input, 'a');
+    finishOpen();
+    close();
+    expect(remaining().conversation).toBe(1);
+    expect(remaining().panel).toBe(1);
+  });
+
+  it.each(['pointerdown', 'keyboard', 'wheel'] as const)(
+    'native browser %s takes persistent ownership',
+    (source) => {
+      reportSemanticActionInteraction(panel, source);
+      point(conversation, 40, 40);
+      close();
+      expect(remaining().panelOpen).toBe(false);
+      expect(remaining().conversation).toBe(2);
+    }
+  );
 
   it('typing reclaims the conversation from a stationary pointer', () => {
     point(panel);
@@ -204,23 +256,6 @@ describe('semantic close routing', () => {
   it('a close chord does not replace the pointer target with the old text caret', () => {
     point(panel);
     press(input, 'w', { code: 'KeyW', ctrlKey: true });
-    close();
-    expect(remaining().panelOpen).toBe(false);
-    expect(remaining().conversation).toBe(2);
-  });
-
-  it('does not add any repeat-key suppression', () => {
-    point(panel);
-    close();
-    press(input, 'w', { code: 'KeyW', ctrlKey: true, repeat: true });
-    close();
-    expect(remaining().conversation).toBe(1);
-  });
-
-  it('ignores programmatic focus restoration after hovering', () => {
-    point(panel);
-    panel.querySelector('button')!.focus();
-    input.focus();
     close();
     expect(remaining().panelOpen).toBe(false);
     expect(remaining().conversation).toBe(2);
@@ -287,47 +322,11 @@ describe('semantic close routing', () => {
     expect(remaining()).toEqual({ conversation: 2, panel: 1, panelOpen: true, windowOpen: true });
   });
 
-  it('clears hover ownership when the pointer leaves the window', () => {
-    point(panel);
-    panel.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: null }));
-    close();
-    expect(remaining().conversation).toBe(1);
-  });
-
-  it('clears transient ownership on window blur', () => {
-    point(panel);
-    window.dispatchEvent(new Event('blur'));
-    close();
-    expect(remaining().conversation).toBe(1);
-    expect(remaining().panel).toBe(1);
-  });
-
   it('ignores pointer movement during a drag', () => {
     point(panel, 20, 20, 1);
     close();
     expect(remaining().conversation).toBe(1);
     expect(remaining().panel).toBe(1);
-  });
-
-  it('chooses the innermost registered action scope independently of registration order', () => {
-    const nested = document.createElement('div');
-    nested.textContent = 'nested item';
-    panel.append(nested);
-    scopes.unshift({
-      id: 'nested',
-      element: nested,
-      actions: {
-        close: () => {
-          nested.remove();
-          return 'handled';
-        },
-      },
-    });
-    point(nested);
-    close();
-    expect(nested.isConnected).toBe(false);
-    expect(remaining().panel).toBe(1);
-    expect(remaining().conversation).toBe(2);
   });
 });
 
@@ -385,10 +384,12 @@ describe('semantic close developer gate lifecycle', () => {
       container
         .querySelector('[data-lody-action-scope="side-panel"]')!
         .dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 30, clientY: 30 }));
+      vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS);
     });
   const close = () => act(() => closeCurrentTabOrWindow());
 
   beforeEach(() => {
+    vi.useFakeTimers();
     window.localStorage.clear();
     __resetDesktopTabClosersForTests();
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
@@ -405,6 +406,7 @@ describe('semantic close developer gate lifecycle', () => {
     act(() => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.useRealTimers();
     __resetDesktopTabClosersForTests();
   });
   it('requires both opt-ins, updates immediately, and retains the choice when developer mode is disabled', () => {

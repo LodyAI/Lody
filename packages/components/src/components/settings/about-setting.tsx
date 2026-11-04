@@ -2,7 +2,7 @@ import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
-import { CheckCircle2, AlertCircle, ArrowUpRight, Download } from 'lucide-react';
+import { CheckCircle2, AlertCircle, ArrowUpRight, Download, RotateCcw } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
@@ -20,6 +20,11 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { getDownloadPageUrl, getNightlyDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
 import { developerModeEnabledAtom } from '@/atoms/settings';
+import {
+  desktopOnboardingDraftAtom,
+  desktopOnboardingPhaseAtom
+} from '@/atoms/onboarding';
+import { clearDesktopOnboardingFlowId } from '@/components/onboarding/onboarding-analytics';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MobileAboutSettings } from '@/components/mobile/mobile-about-settings';
 import { collectClientBuildInfo } from '@/lib/client-build-info';
@@ -128,6 +133,81 @@ function UpdateStatusText({
   return null;
 }
 
+function DefaultLinkHandlerSetting() {
+  const { t } = useTranslation();
+  const [isDefault, setIsDefault] = useState<boolean | null>(null);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [app] = useState(() => getIpcServices()?.app);
+  useEffect(() => {
+    if (!app) return undefined;
+    let disposed = false;
+    const refresh = () =>
+      void app
+        .getDefaultLinkHandler()
+        .then((state) => {
+          if (!disposed) setIsDefault(state.isDefault);
+        })
+        .catch(() => {
+          if (!disposed) setIsDefault(false);
+        });
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      disposed = true;
+      window.removeEventListener('focus', refresh);
+    };
+  }, [app]);
+  if (!app) return null;
+  return (
+    <CompactRow
+      label={t('deepLink.defaultHandler', 'Open Lody links with this app')}
+      helper={
+        message ??
+        t(
+          'deepLink.defaultHandlerHelp',
+          'Choose which installed version opens links from other apps.'
+        )
+      }
+    >
+      <Button
+        size="small"
+        variant="secondary"
+        disabled={pending || isDefault === true}
+        onClick={() => {
+          setPending(true);
+          void app
+            .setDefaultLinkHandler()
+            .then((state) => {
+              setIsDefault(state.isDefault);
+              setMessage(
+                state.isDefault
+                  ? null
+                  : t(
+                      'deepLink.defaultHandlerPending',
+                      'If prompted, confirm your choice in system settings.'
+                    )
+              );
+            })
+            .catch(() =>
+              setMessage(
+                t(
+                  'deepLink.defaultHandlerFailed',
+                  'Unable to change the default app. Choose it in system settings.'
+                )
+              )
+            )
+            .finally(() => setPending(false));
+        }}
+      >
+        {isDefault
+          ? t('deepLink.defaultHandlerActive', 'Default app')
+          : t('deepLink.makeDefault', 'Set as default')}
+      </Button>
+    </CompactRow>
+  );
+}
+
 function DevbarSettingsControls() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<DevbarConfig | null>(null);
@@ -135,7 +215,11 @@ function DevbarSettingsControls() {
   const [supported, setSupported] = useState(true);
   const [pending, setPending] = useState(false);
   const [warmupPending, setWarmupPending] = useState(false);
+  const [restartPending, setRestartPending] = useState(false);
+  const [restartFailed, setRestartFailed] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [, setOnboardingPhase] = useAtom(desktopOnboardingPhaseAtom);
+  const [, setOnboardingDraft] = useAtom(desktopOnboardingDraftAtom);
 
   useEffect(() => {
     const app = getIpcServices()?.app;
@@ -193,6 +277,26 @@ function DevbarSettingsControls() {
     }
   }, []);
 
+  const restartOnboarding = useCallback(async () => {
+    const app = getIpcServices()?.app;
+    if (!app) return;
+    setRestartPending(true);
+    setRestartFailed(false);
+    setOnboardingPhase(null);
+    setOnboardingDraft({ provider: null, project: null });
+    clearDesktopOnboardingFlowId();
+    try {
+      const result = await app.restartOnboarding();
+      if (!result.ok) {
+        setRestartFailed(true);
+        setRestartPending(false);
+      }
+    } catch {
+      setRestartFailed(true);
+      setRestartPending(false);
+    }
+  }, [setOnboardingDraft, setOnboardingPhase]);
+
   if (!supported) return null;
 
   return (
@@ -230,6 +334,31 @@ function DevbarSettingsControls() {
           aria-label={t('settings.about.devbarWarmup', 'Auxiliary window warmup')}
         />
       </CompactRow>
+      <CompactRow
+        label={t('settings.about.restartOnboarding', 'Restart onboarding')}
+        helper={t(
+          'settings.about.restartOnboardingHelper',
+          'Clear onboarding progress and reopen the setup flow.'
+        )}
+      >
+        <Button
+          variant="secondary"
+          size="small"
+          disabled={restartPending}
+          onClick={() => void restartOnboarding()}
+        >
+          {restartPending ? <Spinner size="small" /> : <RotateCcw {...stylex.props(styles.icon)} />}
+          {t('settings.about.restartOnboardingAction', 'Restart')}
+        </Button>
+      </CompactRow>
+      {restartFailed && (
+        <CompactRow label={t('settings.about.restartOnboarding', 'Restart onboarding')}>
+          <span {...stylex.props(styles.status, styles.statusError)}>
+            <AlertCircle {...stylex.props(styles.statusIcon)} />
+            {t('settings.about.restartOnboardingError', 'Onboarding could not be restarted.')}
+          </span>
+        </CompactRow>
+      )}
       {config?.enabled && config.devframe && (
         <CompactRow
           label={t('settings.about.devbarAgentConnect', 'Agent connection')}
@@ -324,6 +453,7 @@ export function AboutSettingsComponent() {
       {/* What is running is one fact: the version, and the build it came
         from as its detail; the update check acts on exactly that. */}
       <CompactSection>
+        <DefaultLinkHandlerSetting />
         <CompactRow
           label={
             displayVersion

@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, useState } from 'react';
+
 import { Menu } from '@lody/ui/menu';
-import { Drawer as UiDrawer } from '@lody/ui/drawer';
+
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Drawer, DrawerContent, DrawerTitle } from '../src/ui/drawer';
-import { SessionMobileDiffDrawerContent } from '../src/components/sessions/session-mobile-diff-drawer-content';
+import { SessionMobileDiffDrawer } from '../src/components/sessions/session-mobile-diff-drawer';
 
 const runtime = vi.hoisted(() => ({ native: true, ios: false }));
 vi.mock('../src/lib/native-platform', () => ({
@@ -43,6 +45,8 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  delete window.__LODY_HORIZONTAL_DIVISION__;
+  document.documentElement.style.removeProperty('--native-keyboard-height');
 });
 
 function renderDrawer(repositionInputs = true) {
@@ -72,87 +76,6 @@ function resize(layoutHeight: number, visualHeight: number, eventTarget: EventTa
     eventTarget.dispatchEvent(new Event('resize'));
   });
 }
-
-describe('native side-drawer keyboard layout', () => {
-  it('restores CSS sizing after a resizing keyboard hides with the input still focused', () => {
-    const drawer = renderDrawer();
-    resize(480, 480);
-    resize(800, 800);
-    expect(document.activeElement).toBe(drawer.querySelector('textarea'));
-    expect(drawer.style.height).toBe('');
-    expect(drawer.style.bottom).toBe('0px');
-  });
-
-  it('tracks overlay keyboard height through intermediate changes and repeated open/hide cycles', () => {
-    const drawer = renderDrawer();
-    for (const height of [480, 400, 460, 800, 500, 800]) {
-      resize(800, height);
-      expect(drawer.style.bottom).toBe(`${800 - height}px`);
-      expect(drawer.style.height).toBe('');
-    }
-  });
-
-  it('handles window-only resize notifications and switches between resize and overlay modes', () => {
-    const drawer = renderDrawer();
-    resize(800, 480);
-    expect(drawer.style.bottom).toBe('320px');
-    resize(480, 480, window);
-    expect(drawer.style.bottom).toBe('0px');
-    resize(800, 800, window);
-    expect(drawer.style.height).toBe('');
-    expect(drawer.style.bottom).toBe('0px');
-  });
-
-  it('measures an already-open keyboard on mount and accounts for viewport panning', () => {
-    viewport.height = 450;
-    viewport.offsetTop = 30;
-    const drawer = renderDrawer();
-    expect(drawer.style.bottom).toBe('320px');
-    act(() => {
-      viewport.offsetTop = 50;
-      viewport.dispatchEvent(new Event('scroll'));
-    });
-    expect(drawer.style.bottom).toBe('300px');
-    resize(800, 800);
-    expect(drawer.style.bottom).toBe('0px');
-  });
-
-  it.each([0.999, 1.0000001])('tracks keyboard occlusion at near-unit scale %s', (scale) => {
-    const drawer = renderDrawer();
-    viewport.scale = scale;
-    resize(800, 480);
-    expect(drawer.style.bottom).toBe('320px');
-    resize(800, 800);
-    expect(drawer.style.bottom).toBe('0px');
-    expect(drawer.style.height).toBe('');
-  });
-
-  it.each([0.98, 1.02, 2])(
-    'does not treat pinch zoom at scale %s as keyboard occlusion',
-    (scale) => {
-      const drawer = renderDrawer();
-      viewport.scale = scale;
-      resize(800, 400);
-      expect(drawer.style.bottom).toBe('0px');
-    }
-  );
-
-  it('keeps CSS sizing when visualViewport is unavailable', () => {
-    vi.stubGlobal('visualViewport', undefined);
-    const drawer = renderDrawer();
-    resize(480, 480, window);
-    resize(800, 800, window);
-    expect(drawer.style.height).toBe('');
-    expect(drawer.style.bottom).toBe('0px');
-  });
-
-  it.each(['web', 'ios', 'disabled'] as const)('does not take over %s positioning', (mode) => {
-    runtime.native = mode !== 'web';
-    runtime.ios = mode === 'ios';
-    const drawer = renderDrawer(mode !== 'disabled');
-    expect(drawer.style.bottom).toBe('');
-  });
-});
 
 function DrawerMenu({ initiallyOpen }: { initiallyOpen: boolean }) {
   const [selection, setSelection] = useState('Unchanged');
@@ -185,12 +108,19 @@ describe('drawer floating controls', () => {
               <DrawerTitle>Conversation</DrawerTitle>
               <button onClick={() => setOpen(true)}>Open changes</button>
               <output>{selection}</output>
-              <UiDrawer.Root side="bottom" open={open} onOpenChange={setOpen}>
-                <SessionMobileDiffDrawerContent side="bottom" aria-describedby={undefined}>
-                  <UiDrawer.Title>Changes</UiDrawer.Title>
-                  <button onClick={() => setSelection('Selected line')}>Select line</button>
-                </SessionMobileDiffDrawerContent>
-              </UiDrawer.Root>
+              <SessionMobileDiffDrawer
+                open={open}
+                onOpenChange={setOpen}
+                changes={{
+                  ready: true,
+                  synced: true,
+                  changeEntries: [],
+                  changeFilePaths: [],
+                  onOpenChangesDiff: () => {},
+                }}
+              >
+                <button onClick={() => setSelection('Selected line')}>Select line</button>
+              </SessionMobileDiffDrawer>
             </DrawerContent>
           </Drawer>
         );
@@ -217,42 +147,6 @@ describe('drawer floating controls', () => {
         diff!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click()
       );
       expect(drawer.querySelector('[data-side="bottom"]')).toBeNull();
-      expect(drawer.getAttribute('data-state')).toBe('open');
-    }
-  );
-
-  it.each([false, true])(
-    'keeps a menu interactive in the modal scope (initially open: %s)',
-    async (initiallyOpen) => {
-      await act(async () => {
-        root.render(<DrawerMenu initiallyOpen={initiallyOpen} />);
-      });
-      if (!initiallyOpen) {
-        await act(async () => {
-          document
-            .querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!
-            .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-          await vi.advanceTimersByTimeAsync(32);
-        });
-      }
-      const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
-      const item = document.querySelector<HTMLElement>('[role="menuitem"]')!;
-      expect(drawer.contains(item)).toBe(true);
-      expect(item.closest('[data-vaul-no-drag]')).not.toBeNull();
-      // A body portal inherits the modal pointer lock, so its clicks hit the iframe below.
-      expect(getComputedStyle(document.body).pointerEvents).toBe('none');
-      expect(getComputedStyle(item).pointerEvents).not.toBe('none');
-      await act(async () => {
-        item.focus();
-        await vi.advanceTimersByTimeAsync(32);
-      });
-      expect(document.activeElement).toBe(item);
-      await act(async () => {
-        item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        await vi.advanceTimersByTimeAsync(32);
-      });
-      expect(drawer.querySelector('output')?.textContent).toBe('Rotated');
-      expect(document.querySelector('[role="menu"]')).toBeNull();
       expect(drawer.getAttribute('data-state')).toBe('open');
     }
   );

@@ -52,7 +52,7 @@ await test('extractFaqFromMdx ignores pages without an FAQ section', () => {
 });
 
 await test('session-handoff English FAQ matches the page and emits FAQPage JSON-LD', () => {
-  const fromMdx = extractFaqFromMdx(readDoc('content/docs/en/(features)/session-handoff.mdx'));
+  const fromMdx = extractFaqFromMdx(readDoc('content/docs/en/(guides)/session-handoff.mdx'));
   const items = docsFaqByPath['/docs/session-handoff'] ?? [];
   assert.equal(items.length, 5);
   assert.deepEqual(items, fromMdx);
@@ -81,8 +81,18 @@ await test('session-handoff English FAQ matches the page and emits FAQPage JSON-
   );
 });
 
+await test('share-link-vs-live-handoff English FAQ stays a definition contrast', () => {
+  const fromMdx = extractFaqFromMdx(readDoc('content/docs/en/compare/share-link-vs-live-handoff.mdx'));
+  const items = docsFaqByPath['/docs/compare/share-link-vs-live-handoff'] ?? [];
+  assert.equal(items.length, 5);
+  assert.deepEqual(items, fromMdx);
+  assert.equal(items[0]?.question, 'Is a share link the same as handing off a coding agent session?');
+  assert.match(items[0]?.answer ?? '', /viewable record/u);
+  assert.doesNotMatch(fromMdx.map((item) => item.question).join('\n'), /Lody vs Lore|replace Lore/iu);
+});
+
 await test('session-handoff Chinese FAQ matches the page', () => {
-  const fromMdx = extractFaqFromMdx(readDoc('content/docs/zh/(features)/session-handoff.mdx'));
+  const fromMdx = extractFaqFromMdx(readDoc('content/docs/zh/(guides)/session-handoff.mdx'));
   const items = docsFaqByPath['/zh/docs/session-handoff'] ?? [];
   assert.equal(items.length, 5);
   assert.deepEqual(items, fromMdx);

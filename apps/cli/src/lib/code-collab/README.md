@@ -4,11 +4,24 @@ Binding rules live in [AGENTS.md](AGENTS.md); this file is the navigation index.
 Ground truth for the rewrite: specs/code-collab-v2.md. The old v1
 host/runtime/CRDT capture implementation has been removed from this directory.
 
+Turn completion, error and Stop schedule shared-state refresh without waiting.
+The service owns cancellation and per-attempt deadlines: `taskTimeoutMs` for embedded
+callers, or `LODY_CODE_COLLAB_TASK_TIMEOUT_MS` (default 30,000 ms; invalid/nonpositive
+values use the default). Refreshes coalesce by owner and settle waiters per batch.
+Disposal and explicit owner release abort attempts. `code-collab-task.ts` observes
+late Promise failures and blocks cancelled continuations from subsequent writes.
+A private MessagePort lets the scan worker reap cancelled Git children before returning.
+Bun's child-process runtime uses an equivalent task-scoped IPC handshake.
+The shared Repo/Streams owner retains raw I/O that outlives a cancelled waiter.
+See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-code-collab-turn-finalization-wait.md).
+
 - `code-collab-v2-service.ts` — the unified CLI Code Collab v2 service. It resolves
   owner/child workspace roots through `message-handler.ts`, treats relative paths as
   file ids, enforces path/text/payload limits, handles open/refresh/save conflicts,
   publishes file tree/current All Changes, and opens current or turn-scoped diffs.
-  Git All Changes uses the owner base; non-Git uses local diff evidence only when a
+  Project groups scan each Member with Git, prefix paths by Member placement, and pin
+  each Member merge base for All Changes snapshots. The main directory is not a Git repository.
+  Ordinary Git All Changes uses the owner base; non-Git uses local diff evidence only when a
   trustworthy base exists. It owns in-memory file-index state replacement and Flock
   publish even when the scan itself ran in a worker.
 - `file-index-scan-core.ts` — shared scan and Git merge-base resolution. Tracking

@@ -1,11 +1,34 @@
+import { Console } from 'node:console';
+import { Writable } from 'node:stream';
+import * as commandRuntime from '@/lib/command-runtime';
+import * as telemetry from '@/instrument';
+import { getLogger } from '@/utils/logger';
+import { makeWorkspaceCommandManagers } from '@/lib/workspace-command-manager';
+import { runSessionCommand } from './session';
+import { z } from 'zod';
+import { getSessionCancelProtocolFields } from './session';
+import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
+import { LoroDoc } from 'loro-crdt';
+import { createHistoryWriter } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import { appendUserPromptHistory } from './session';
+import { prepareSessionInput } from './session';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
+import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
+
 import {
   getMachineFlockDocId,
+  getWorkspaceFlockDocId,
+  getProjectMcpKey,
+  writeWorkspaceMcpServerToFlock,
+  workspaceFlockKeys,
+  ACP_CAPABILITY_CACHE_VERSION,
+  getBuiltinRuntimeOverrideSourceVersionSuffix,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   type AcpCapabilityCacheEntry,
@@ -18,59 +41,47 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
-import {
-  createLocalProjectBranchSelector,
-  normalizeLocalProjectRootPath,
-} from '@lody/shared/node/local-project';
+import { createLocalProjectBranchSelector } from '@lody/shared/node/local-project';
 
 import type { MachineAccessCheckResult } from '@/lib/workspace';
 import {
   type MachineAccessReaders,
-  applyAgentRunConfigSelection,
+  MachineFlockReadUnavailableError,
+  readAgentAcpCapability,
   runSessionOperationWithSyncedMetadata,
   assertSupportedParentDepth,
   confirmDispatchSyncedBestEffort,
   filterAuthorizedMachineMetas,
   filterAuthorizedLocalProjectCandidates,
-  filterCompatibleInheritedTurnConfig,
   filterCompatibleTurnConfigOptionValues,
   filterSessionMetas,
-  hasNonPositionalPromptSource,
-  normalizeCliValue,
-  rollbackPendingSessionCreate,
-  renderSessionTranscript,
   renderAssistantTurnCompletion,
   deriveSessionLiveStatus,
-  ensureSessionCreateWorkspaceMetaFresh,
-  resolveCreateAgentSelector,
+  resolveEffectiveSessionCreateDispatchConfig,
   resolveCreateCurrentSessionId,
   resolveOpenedBySessionRelation,
   resolveSessionCreateOwnerUserId,
   selectDefaultAgentConfigForCreate,
   readDelegatedMachineAccess,
   resolveSessionRequester,
+  sendSessionChatResult,
+  ensureTargetMachineNotOffline,
+  MachineOfflineError,
+  readSessionLiveStatusesMany,
   resolveSessionCommandRequesterUserId,
-  resolveChatArgs,
-  resolveRenameArgs,
-  resolvePromptCandidate,
   resolveTurnDispatchConfigFromInputConfig,
   resolveTurnDispatchDefaultsFromHistory,
   resolveEffectiveSessionChatDispatchConfig,
   resolveLocalProjectBranchForCreate,
   resolveLocalProjectCreateGitContext,
   resolveLocalProjectRefOrThrow,
-  selectLocalProjectsBySelector,
   selectTargetMachineForCreate,
-  shouldReadStdinForChatArgResolution,
   shouldWaitForSessionCompletion,
-  selectSessionTranscriptEntries,
   selectWorkspaceSummary,
   sortSessionMetas,
   toSessionTranscriptEntries,
   updateSessionActivityTimestamps,
   updateSessionActivityTimestampsBestEffort,
-  validateTurnConfigOptionValues,
-  validateTurnModeAndModel,
   withBuiltinDefaultTurnMode,
 } from './session';
 
@@ -147,33 +158,6 @@ const createAcpCapability = (): AcpCapabilityCacheEntry => ({
 });
 
 describe('session command helpers', () => {
-  it('uses one hard Meta read across request validation and accepted create materialization', async () => {
-    const syncMetaOrThrow = vi.fn(async () => undefined);
-    const manager = { syncMetaOrThrow };
-    const workspaceId = 'workspace-id' as WorkspaceId;
-
-    await ensureSessionCreateWorkspaceMetaFresh({
-      manager,
-      workspaceId,
-      prewriteSatisfied: false,
-    });
-    await ensureSessionCreateWorkspaceMetaFresh({
-      manager,
-      workspaceId,
-      prewriteSatisfied: true,
-    });
-
-    expect(syncMetaOrThrow).toHaveBeenCalledTimes(1);
-    expect(syncMetaOrThrow).toHaveBeenCalledWith({
-      reason: 'session.create:workspace-id:prewrite',
-    });
-  });
-
-  it('normalizes blank CLI values to undefined', () => {
-    expect(normalizeCliValue('   ')).toBeUndefined();
-    expect(normalizeCliValue(' value ')).toBe('value');
-  });
-
   it('records both the root Session and exact child Tab that opened a Session', () => {
     expect(
       resolveOpenedBySessionRelation(
@@ -249,42 +233,6 @@ describe('session command helpers', () => {
         ],
       })
     ).toEqual({ modeId: 'default' });
-  });
-
-  it('picks prompt candidates by explicit precedence', () => {
-    expect(
-      resolvePromptCandidate({
-        prompt: 'from-prompt',
-        promptFileContent: 'from-file',
-        positionalPrompt: 'from-position',
-        stdinText: 'from-stdin',
-      })
-    ).toBe('from-prompt');
-
-    expect(
-      resolvePromptCandidate({
-        promptFileContent: 'from-file',
-        positionalPrompt: 'from-position',
-        stdinText: 'from-stdin',
-      })
-    ).toBe('from-file');
-  });
-
-  it('selects workspaces by explicit selector or the only candidate', () => {
-    const workspaces = [
-      { id: 'ws-1', slug: 'alpha', name: 'Alpha', role: 'member' },
-      { id: 'ws-2', slug: 'beta', name: 'Beta', role: 'member' },
-    ];
-
-    expect(selectWorkspaceSummary(workspaces, 'beta')).toEqual(workspaces[1]);
-    expect(
-      selectWorkspaceSummary([{ id: 'ws-3', slug: null, name: 'Solo', role: 'owner' }])
-    ).toEqual({
-      id: 'ws-3',
-      slug: null,
-      name: 'Solo',
-      role: 'owner',
-    });
   });
 
   it('throws when workspace selection is ambiguous', () => {
@@ -435,290 +383,6 @@ describe('session command helpers', () => {
       state: 'waiting',
       source: 'machine',
     });
-  });
-
-  it('validates ACP config option ids, types, and select values before dispatch', () => {
-    const capability = createAcpCapability();
-    expect(() =>
-      validateTurnConfigOptionValues({ approval_policy: 'never', web_search: true }, capability)
-    ).not.toThrow();
-    expect(() => validateTurnConfigOptionValues({ unknown: true }, capability)).toThrow(
-      /Unknown ACP config option/
-    );
-    expect(() => validateTurnConfigOptionValues({ approval_policy: false }, capability)).toThrow(
-      /expects a select value/
-    );
-    expect(() =>
-      validateTurnConfigOptionValues({ approval_policy: 'invalid' }, capability)
-    ).toThrow(/Allowed values/);
-    expect(() => validateTurnConfigOptionValues({ web_search: 'true' }, capability)).toThrow(
-      /expects a boolean value/
-    );
-  });
-
-  it('resolves a semantic run config selection against the target agent capabilities', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...createAcpCapability(),
-      configOptions: [
-        ...(createAcpCapability().configOptions ?? []),
-        {
-          id: 'reasoning_effort',
-          name: 'Reasoning effort',
-          category: 'thought_level',
-          type: 'select',
-          currentValue: 'medium',
-          options: [{ value: 'high', name: 'High' }],
-        },
-      ],
-    };
-
-    expect(
-      applyAgentRunConfigSelection(
-        {
-          configOptionValues: { approval_policy: 'never' },
-          runConfig: { modelId: 'model-a', reasoningEffort: 'high' },
-        },
-        capability
-      ).config
-    ).toEqual({
-      modelId: 'model-a',
-      configOptionValues: { approval_policy: 'never', reasoning_effort: 'high' },
-    });
-
-    // No selection: the config passes through untouched, capability or not.
-    expect(applyAgentRunConfigSelection({ modeId: 'default' }, undefined).config).toEqual({
-      modeId: 'default',
-    });
-
-    expect(() =>
-      applyAgentRunConfigSelection({ runConfig: { fastMode: true } }, capability)
-    ).toThrow(/does not offer a fast mode option/);
-  });
-
-  it('validates effort against the selected model and skips the probed-model snapshot check', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...createAcpCapability(),
-      configOptions: [
-        {
-          id: 'model',
-          name: 'Model',
-          category: 'model',
-          type: 'select',
-          currentValue: 'model-a',
-          options: [
-            { value: 'model-a', name: 'Model A' },
-            { value: 'model-b', name: 'Model B' },
-          ],
-        },
-        {
-          id: 'reasoning_effort',
-          name: 'Reasoning effort',
-          category: 'thought_level',
-          type: 'select',
-          // Snapshot taken while model-a was current.
-          currentValue: 'medium',
-          options: [{ value: 'medium', name: 'Medium' }],
-        },
-      ],
-      models: [],
-      modelReasoningEfforts: { 'model-a': ['medium'], 'model-b': ['medium', 'xhigh'] },
-    };
-
-    const requested = applyAgentRunConfigSelection(
-      { runConfig: { modelId: 'model-b', reasoningEffort: 'xhigh' } },
-      capability
-    );
-
-    expect(requested.config.configOptionValues).toEqual({ reasoning_effort: 'xhigh' });
-    expect(requested.validatedConfigIds.has('reasoning_effort')).toBe(true);
-    // `xhigh` is absent from the probed model's option list, so the snapshot
-    // check must skip it rather than reject a value valid for model-b.
-    expect(() =>
-      validateTurnConfigOptionValues(
-        requested.config.configOptionValues,
-        capability,
-        requested.validatedConfigIds
-      )
-    ).not.toThrow();
-    expect(() =>
-      validateTurnConfigOptionValues(requested.config.configOptionValues, capability)
-    ).toThrow(/Allowed values/);
-  });
-
-  it('drops inherited ACP config options that are no longer compatible', () => {
-    expect(
-      filterCompatibleTurnConfigOptionValues(
-        { approval_policy: 'never', web_search: 'true', removed: false },
-        createAcpCapability()
-      )
-    ).toEqual({ approval_policy: 'never' });
-  });
-
-  it('validates explicit mode and model selectors against agent capabilities', () => {
-    const capability = createAcpCapability();
-    expect(() =>
-      validateTurnModeAndModel({ modeId: 'default', modelId: 'model-a' }, capability)
-    ).not.toThrow();
-    expect(() => validateTurnModeAndModel({ modeId: 'plan' }, capability)).toThrow(
-      'Unsupported ACP mode'
-    );
-    expect(() => validateTurnModeAndModel({ modelId: 'model-b' }, capability)).toThrow(
-      'Unsupported ACP model'
-    );
-    expect(() => validateTurnModeAndModel({ modeId: 'default' }, undefined)).toThrow(
-      'Unsupported ACP mode'
-    );
-  });
-
-  it('drops incompatible inherited mode and model selectors', () => {
-    expect(
-      filterCompatibleInheritedTurnConfig(
-        {
-          modeId: 'plan',
-          modelId: 'model-a',
-          configOptionValues: { approval_policy: 'never' },
-        },
-        createAcpCapability()
-      )
-    ).toEqual({
-      modelId: 'model-a',
-      configOptionValues: { approval_policy: 'never' },
-    });
-  });
-
-  it('accepts mode and model selectors advertised as ACP config options', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...createAcpCapability(),
-      modes: [],
-      models: [],
-      configOptions: [
-        {
-          id: 'mode',
-          name: 'Mode',
-          category: 'mode',
-          type: 'select',
-          currentValue: 'plan',
-          options: [{ value: 'plan', name: 'Plan' }],
-        },
-        {
-          id: 'model',
-          name: 'Model',
-          category: 'model',
-          type: 'select',
-          currentValue: 'model-b',
-          options: [{ value: 'model-b', name: 'Model B' }],
-        },
-      ],
-    };
-    expect(() =>
-      validateTurnModeAndModel({ modeId: 'plan', modelId: 'model-b' }, capability)
-    ).not.toThrow();
-  });
-
-  it('sorts sessions with invalid createdAt timestamps deterministically', () => {
-    const sessions = [
-      createSessionMeta({
-        id: 'z-session',
-        createdAt: 'not-a-date',
-      }),
-      createSessionMeta({
-        id: 'a-session',
-        createdAt: 'still-not-a-date',
-      }),
-    ];
-
-    expect(sortSessionMetas(sessions).map((session) => session.id)).toEqual([
-      'z-session',
-      'a-session',
-    ]);
-  });
-
-  it('resolves rename args from explicit title, positional title, and env fallback', () => {
-    expect(
-      resolveRenameArgs({
-        sessionIdArg: 'session-1',
-        titleArg: 'Renamed from positional',
-      })
-    ).toEqual({
-      sessionId: 'session-1',
-      title: 'Renamed from positional',
-    });
-
-    expect(
-      resolveRenameArgs({
-        sessionIdArg: 'session-1',
-        optionTitle: 'Renamed from option',
-      })
-    ).toEqual({
-      sessionId: 'session-1',
-      title: 'Renamed from option',
-    });
-
-    expect(
-      resolveRenameArgs({
-        optionTitle: 'Renamed using env fallback',
-        envSessionId: 'session-from-env',
-      })
-    ).toEqual({
-      sessionId: 'session-from-env',
-      title: 'Renamed using env fallback',
-    });
-  });
-
-  it('rejects rename args when the title is missing', () => {
-    expect(() =>
-      resolveRenameArgs({
-        sessionIdArg: 'session-1',
-      })
-    ).toThrow(/Missing title/);
-
-    expect(() =>
-      resolveRenameArgs({
-        sessionIdArg: 'session-2',
-        envSessionId: 'session-from-env',
-      })
-    ).toThrow(/Missing title/);
-  });
-
-  it('resolves chat args from explicit session id or env fallback', () => {
-    expect(
-      resolveChatArgs({
-        sessionIdArg: 'session-1',
-        promptArg: 'prompt from second positional',
-      })
-    ).toEqual({
-      sessionId: 'session-1',
-      positionalPrompt: 'prompt from second positional',
-    });
-
-    expect(
-      resolveChatArgs({
-        sessionIdArg: 'prompt from first positional',
-        envSessionId: 'session-from-env',
-      })
-    ).toEqual({
-      sessionId: 'session-from-env',
-      positionalPrompt: 'prompt from first positional',
-    });
-
-    expect(
-      resolveChatArgs({
-        sessionIdArg: 'session-explicit',
-        envSessionId: 'session-from-env',
-        hasNonPositionalPromptSource: true,
-      })
-    ).toEqual({
-      sessionId: 'session-explicit',
-    });
-  });
-
-  it('resolves --agent as a create alias for --agent-config', () => {
-    expect(resolveCreateAgentSelector({ agent: 'Codex' })).toBe('Codex');
-    expect(resolveCreateAgentSelector({ agentConfig: 'cfg-1' })).toBe('cfg-1');
-    expect(resolveCreateAgentSelector({ agent: 'cfg-1', agentConfig: 'cfg-1' })).toBe('cfg-1');
-    expect(() => resolveCreateAgentSelector({ agent: 'cfg-1', agentConfig: 'cfg-2' })).toThrow(
-      /either --agent or --agent-config/
-    );
   });
 
   it('uses the same default agent config rules for create and create_options', () => {
@@ -1002,6 +666,69 @@ describe('session command helpers', () => {
     ).toMatchObject({ modeId: 'agent-auto-review' });
   });
 
+  it('keeps the inherited permission option across model switches and partial overrides', () => {
+    // Grok carries permission in a `_permission` config option, not in modeId.
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'grok',
+      modes: [],
+      models: [
+        { modelId: 'grok-a', name: 'A' },
+        { modelId: 'grok-b', name: 'B' },
+      ],
+      configOptions: [
+        {
+          id: 'permission_mode',
+          name: 'Permission Mode',
+          category: '_permission',
+          type: 'select',
+          currentValue: 'ask',
+          options: [
+            { value: 'ask', name: 'Ask Every Time' },
+            { value: 'always-approve', name: 'Always Approve' },
+          ],
+        },
+        {
+          id: 'web_search',
+          name: 'Web search',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'grok' });
+    const inheritedDispatchConfig = {
+      modelId: 'grok-a',
+      configOptionValues: { permission_mode: 'always-approve', web_search: true },
+    };
+    const resolve = (
+      dispatchConfig: Parameters<
+        typeof resolveEffectiveSessionChatDispatchConfig
+      >[0]['dispatchConfig']
+    ) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig,
+        inheritedDispatchConfig,
+        target,
+        capability,
+      });
+
+    expect(resolve({ modelId: 'grok-b' })).toMatchObject({
+      modelId: 'grok-b',
+      configOptionValues: { permission_mode: 'always-approve' },
+    });
+    expect(resolve({ modelId: 'grok-b' }).configOptionValues).not.toHaveProperty('web_search');
+    expect(resolve({ configOptionValues: { web_search: false } }).configOptionValues).toEqual({
+      permission_mode: 'always-approve',
+      web_search: false,
+    });
+    expect(resolve({ configOptionValues: { permission_mode: 'ask' } }).configOptionValues).toEqual({
+      permission_mode: 'ask',
+    });
+  });
+
   it.each(['xhigh', 'medium'])(
     'checks inherited effort %s against the inherited model',
     (effort) => {
@@ -1245,64 +972,6 @@ describe('session command helpers', () => {
     ).toThrow(/Nested child sessions are not supported.*root-session/);
   });
 
-  it('treats stdin as a prompt source only when it actually has content', () => {
-    expect(hasNonPositionalPromptSource({ stdinText: undefined })).toBe(false);
-    expect(hasNonPositionalPromptSource({ stdinText: 'prompt from stdin' })).toBe(true);
-    expect(hasNonPositionalPromptSource({ promptFile: '-' })).toBe(true);
-  });
-
-  it('only pre-reads stdin for chat arg resolution when env fallback is ambiguous', () => {
-    expect(
-      shouldReadStdinForChatArgResolution({
-        sessionIdArg: 'session-1',
-        envSessionId: 'session-from-env',
-        prompt: 'prompt from option',
-        stdinIsTty: false,
-      })
-    ).toBe(false);
-
-    expect(
-      shouldReadStdinForChatArgResolution({
-        sessionIdArg: 'session-1',
-        envSessionId: 'session-from-env',
-        stdinIsTty: false,
-      })
-    ).toBe(true);
-
-    expect(
-      shouldReadStdinForChatArgResolution({
-        sessionIdArg: 'session-1',
-        envSessionId: 'session-from-env',
-        stdinIsTty: true,
-      })
-    ).toBe(false);
-  });
-
-  it('swallows rollback cleanup failures so the original create error can propagate', async () => {
-    const deleteDoc = vi.fn(async () => {
-      throw new Error('delete failed');
-    });
-    const cleanSessionDoc = vi.fn(async () => {
-      throw new Error('clean failed');
-    });
-    const warn = vi.fn();
-
-    await expect(
-      rollbackPendingSessionCreate(
-        {
-          repo: { deleteDoc },
-          cleanSessionDoc,
-        },
-        'session-1',
-        { warn }
-      )
-    ).resolves.toBeUndefined();
-
-    expect(deleteDoc).toHaveBeenCalledWith('session-session-1');
-    expect(cleanSessionDoc).toHaveBeenCalledWith('session-1', { preserveStatus: true });
-    expect(warn).toHaveBeenCalledTimes(2);
-  });
-
   it('does not throw when the dispatch doc sync is not confirmed, and skips meta sync', async () => {
     const waitUntilSynced = vi.fn(async () => false);
     const waitUntilMetaSynced = vi.fn(async () => true);
@@ -1343,47 +1012,6 @@ describe('session command helpers', () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it('confirms workspace meta after the dispatch doc sync succeeds, without warning', async () => {
-    const waitUntilSynced = vi.fn(async () => true);
-    const waitUntilMetaSynced = vi.fn(async () => true);
-    const warn = vi.fn();
-
-    await expect(
-      confirmDispatchSyncedBestEffort({
-        manager: { waitUntilMetaSynced },
-        sessionDoc: { waitUntilSynced },
-        reason: 'session.create:session-1',
-        logger: { warn },
-      })
-    ).resolves.toBeUndefined();
-
-    expect(waitUntilMetaSynced).toHaveBeenCalledTimes(1);
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it('does not start workspace meta confirmation before dispatch doc confirmation settles', async () => {
-    let resolveDocSync!: (synced: boolean) => void;
-    const waitUntilSynced = vi.fn(
-      async () =>
-        await new Promise<boolean>((resolve) => {
-          resolveDocSync = resolve;
-        })
-    );
-    const waitUntilMetaSynced = vi.fn(async () => true);
-
-    const confirmation = confirmDispatchSyncedBestEffort({
-      manager: { waitUntilMetaSynced },
-      sessionDoc: { waitUntilSynced },
-      reason: 'session.create:session-1',
-    });
-    await Promise.resolve();
-    expect(waitUntilMetaSynced).not.toHaveBeenCalled();
-
-    resolveDocSync(true);
-    await confirmation;
-    expect(waitUntilMetaSynced).toHaveBeenCalledTimes(1);
-  });
-
   it('does not throw when workspace meta sync is not confirmed', async () => {
     const waitUntilSynced = vi.fn(async () => true);
     const waitUntilMetaSynced = vi.fn(async () => false);
@@ -1402,7 +1030,7 @@ describe('session command helpers', () => {
   });
 
   it.each(['archive', 'restore', 'delete'] as const)(
-    'synchronizes the %s snapshot before any mutation and preserves its cascade',
+    'synchronizes the %s snapshot and changes only the selected containment tree',
     async (operation) => {
       const root = createSessionMeta({
         id: 'sync-root' as SessionId,
@@ -1416,8 +1044,20 @@ describe('session command helpers', () => {
       const opened = createSessionMeta({
         id: 'sync-opened' as SessionId,
         openedBySessionId: child.id,
+        openedByRootSessionId: root.id,
         isArchived: root.isArchived,
       });
+      const openedChild = createSessionMeta({
+        id: 'sync-opened-child' as SessionId,
+        parentSessionId: opened.id,
+        isArchived: root.isArchived,
+      });
+      const directlyOpened = createSessionMeta({
+        id: 'sync-directly-opened' as SessionId,
+        openedBySessionId: root.id,
+        isArchived: root.isArchived,
+      });
+      const independentSessions = [opened, openedChild, directlyOpened];
       const repo = await LoroRepo.create({});
       try {
         await repo.upsertDocMeta(getSessionRoomId(root.id), root);
@@ -1431,7 +1071,7 @@ describe('session command helpers', () => {
             started.resolve();
             await sync.promise;
             if (failSync) throw new Error('metadata unavailable');
-            for (const session of [child, opened])
+            for (const session of [child, ...independentSessions])
               await repo.upsertDocMeta(getSessionRoomId(session.id), session);
           },
           waitUntilMetaSynced: async () => true,
@@ -1450,16 +1090,21 @@ describe('session command helpers', () => {
         failSync = false;
         await expect(
           runSessionOperationWithSyncedMetadata(manager, root.id, operation)
-        ).resolves.toEqual(operation === 'archive' ? [child.id, opened.id] : [child.id]);
-        for (const session of [root, child, opened]) {
+        ).resolves.toEqual([child.id]);
+        for (const session of [root, child]) {
           const entry = await repo.getDocMeta(getSessionRoomId(session.id));
-          if (operation === 'delete' && session !== opened) {
+          if (operation === 'delete') {
             expect(isLoroRepoDocDeleted(entry)).toBe(true);
           } else {
             expect(isLoroRepoDocDeleted(entry)).toBe(false);
-            expect(entry?.meta.isArchived).toBe(operation === 'archive' || session === opened);
+            expect(entry?.meta.isArchived).toBe(operation === 'archive');
             if (operation === 'archive') expect(entry?.meta.status).toEqual({ type: 'idle' });
           }
+        }
+        for (const session of independentSessions) {
+          const entry = await repo.getDocMeta(getSessionRoomId(session.id));
+          expect(isLoroRepoDocDeleted(entry)).toBe(false);
+          expect(entry?.meta).toEqual(session);
         }
         expect(cleaned).toEqual(operation === 'delete' ? [child.id, root.id] : []);
       } finally {
@@ -1530,19 +1175,6 @@ describe('session command helpers', () => {
     } finally {
       await repo.destroy();
     }
-  });
-
-  it('matches local project selectors against normalized paths', () => {
-    const project = {
-      id: 'local-project-1',
-      name: 'lody',
-      rootPath: normalizeLocalProjectRootPath(process.cwd()),
-    };
-
-    expect(selectLocalProjectsBySelector([project], '.')).toEqual([project]);
-    expect(selectLocalProjectsBySelector([project], `${process.cwd()}${path.sep}`)).toEqual([
-      project,
-    ]);
   });
 
   it('filters local project candidates to authorized project ids before selection', () => {
@@ -1640,6 +1272,47 @@ describe('session command helpers', () => {
     } finally {
       rmSync(rootPath, { recursive: true, force: true });
     }
+  });
+
+  it('resolves a local project from the replica when Flock freshness sync fails', async () => {
+    const syncFlockDocOrThrow = vi.fn(async () => {
+      throw new Error('Streams sync failed: network_error');
+    });
+    const manager = {
+      syncFlockDocOrThrow,
+      repo: {
+        getDocMeta: vi.fn(async () => ({
+          meta: {
+            localProjects: {
+              'local-project-1': {
+                id: 'local-project-1',
+                name: 'lody',
+                rootPath: '/workspace/lody',
+                createdAtMs: 1,
+              },
+            },
+          },
+        })),
+        openFlockDoc: vi.fn(async () => ({
+          flock: {
+            scan: () => [],
+          },
+        })),
+      },
+    } as unknown as Parameters<typeof resolveLocalProjectRefOrThrow>[0];
+
+    await expect(
+      resolveLocalProjectRefOrThrow(
+        manager,
+        'workspace-1' as WorkspaceId,
+        'machine-id' as MachineId,
+        'lody'
+      )
+    ).resolves.toEqual({
+      kind: 'local',
+      localProjectId: 'local-project-1',
+    });
+    expect(syncFlockDocOrThrow).toHaveBeenCalled();
   });
 
   it('does not synthesize a branch for non-git local projects', async () => {
@@ -1759,15 +1432,6 @@ describe('session command helpers', () => {
     ).toEqual({ githubRepoFullName: 'loro-dev/lody' });
   });
 
-  it('preserves the remote repository identity spelling', () => {
-    expect(
-      resolveLocalProjectCreateGitContext({
-        gitState: createLocalProjectGitState({ githubRepoFullName: 'Loro-Dev/Lody' }),
-        useWorktree: true,
-      })
-    ).toEqual({ branch: 'main', githubRepoFullName: 'Loro-Dev/Lody' });
-  });
-
   it('keeps a non-GitHub local origin without a GitHub identity', () => {
     expect(
       resolveLocalProjectCreateGitContext({
@@ -1798,32 +1462,6 @@ describe('session command helpers', () => {
         requestedBranch: 'feature/missing',
       })
     ).toThrow('Local project branch not found: feature/missing');
-  });
-
-  it('keeps the non-git local project rules while resolving identity', () => {
-    expect(
-      resolveLocalProjectCreateGitContext({
-        gitState: { git: false },
-      })
-    ).toEqual({});
-    expect(() =>
-      resolveLocalProjectCreateGitContext({
-        gitState: { git: false },
-        useWorktree: true,
-      })
-    ).toThrow(/--worktree/);
-    expect(() =>
-      resolveLocalProjectCreateGitContext({
-        gitState: { git: false },
-        requestedBranch: 'main',
-      })
-    ).toThrow(/not a git repository/);
-    expect(() =>
-      resolveLocalProjectCreateGitContext({
-        gitState: createLocalProjectGitState({ branches: [], currentBranch: null }),
-        useWorktree: true,
-      })
-    ).toThrow(/does not have a branch to use as a worktree base/);
   });
 
   it('downgrades session activity timestamp write failures to warnings', async () => {
@@ -1979,55 +1617,6 @@ describe('session command helpers', () => {
     ]);
   });
 
-  it('selects the most recent transcript entries and supports reverse order', () => {
-    const entries = [
-      { index: 0, id: 'a', role: 'user', timestamp: 't0', text: 'a' },
-      { index: 1, id: 'b', role: 'assistant', timestamp: 't1', text: 'b' },
-      { index: 2, id: 'c', role: 'user', timestamp: 't2', text: 'c' },
-      { index: 3, id: 'd', role: 'assistant', timestamp: 't3', text: 'd' },
-    ] as const;
-
-    expect(selectSessionTranscriptEntries([...entries], { limit: 2 })).toEqual([
-      entries[2],
-      entries[3],
-    ]);
-    expect(selectSessionTranscriptEntries([...entries], { limit: 2, reverse: true })).toEqual([
-      entries[3],
-      entries[2],
-    ]);
-    expect(selectSessionTranscriptEntries([...entries], { all: true, reverse: true })).toEqual([
-      entries[3],
-      entries[2],
-      entries[1],
-      entries[0],
-    ]);
-  });
-
-  it('renders transcript entries as readable blocks', () => {
-    expect(
-      renderSessionTranscript([
-        {
-          index: 0,
-          id: 'entry-1',
-          role: 'user',
-          timestamp: '2026-03-12T00:00:00.000Z',
-          text: 'hello',
-        },
-        {
-          index: 1,
-          id: 'entry-2',
-          role: 'assistant',
-          timestamp: '2026-03-12T00:00:01.000Z',
-          text: 'world',
-        },
-      ])
-    ).toBe(
-      '[user] 2026-03-12T00:00:00.000Z entry-1\nhello\n\n[assistant] 2026-03-12T00:00:01.000Z entry-2\nworld'
-    );
-
-    expect(renderSessionTranscript([])).toBe('No visible history found.');
-  });
-
   it('renders the visible assistant completion for human --wait output', () => {
     expect(
       renderAssistantTurnCompletion([
@@ -2154,5 +1743,773 @@ describe('delegated machine access', () => {
       allowed: false,
       reason: 'not_visible',
     });
+  });
+});
+
+describe('MCP selection at turn authoring', () => {
+  it('freezes project defaults and honors explicit opt-out through subsequent resolution', async () => {
+    const repo = await LoroRepo.create({});
+    try {
+      const workspaceId = 'workspace-mcp' as WorkspaceId;
+      const project = { kind: 'github' as const, repoFullName: 'Example/Repo', branch: 'main' };
+      const key = getProjectMcpKey(project);
+      if (!key) throw new Error('Expected a project identity');
+      const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+      for (const id of ['global', 'project']) {
+        writeWorkspaceMcpServerToFlock(handle.flock, {
+          id: id as import('@lody/shared').McpServerId,
+          name: id,
+          transport: 'stdio',
+          connection: { transport: 'stdio', command: 'synthetic' },
+          enabledByDefault: id === 'global',
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }
+      handle.flock.set(workspaceFlockKeys.projectMcpDefault(key), {
+        ids: ['project' as import('@lody/shared').McpServerId],
+      });
+      handle.flock.commit();
+      const manager = {
+        repo,
+        syncFlockDocOrThrow: async () => {
+          await repo.flush();
+        },
+      } as unknown as import('../lib/loro/doc').LoroDocumentManager;
+      const args = {
+        manager,
+        workspaceId,
+        project,
+        agentConfig: {
+          id: 'agent',
+          name: 'Synthetic',
+          machineId: 'machine',
+          cliType: 'custom',
+          agentType: 'claude',
+        } as AgentConfigMeta,
+        dispatchConfig: {},
+      };
+      const frozen = await resolveEffectiveSessionCreateDispatchConfig(args);
+      expect(frozen.mcpServerIds).toEqual(['project']);
+      handle.flock.set(workspaceFlockKeys.projectMcpDefault(key), { ids: [] });
+      handle.flock.commit();
+      expect(
+        (await resolveEffectiveSessionCreateDispatchConfig({ ...args, dispatchConfig: frozen }))
+          .mcpServerIds
+      ).toEqual(['project']);
+      expect((await resolveEffectiveSessionCreateDispatchConfig(args)).mcpServerIds).toEqual([]);
+      expect(
+        (await resolveEffectiveSessionCreateDispatchConfig({ ...args, project: undefined }))
+          .mcpServerIds
+      ).toEqual(['global']);
+      expect(
+        (
+          await resolveEffectiveSessionCreateDispatchConfig({
+            ...args,
+            project: undefined,
+            dispatchConfig: { mcpServerIds: [] },
+          })
+        ).mcpServerIds
+      ).toEqual([]);
+      const unavailable = {
+        repo,
+        syncFlockDocOrThrow: async () => {
+          throw new Error('catalog unavailable');
+        },
+      } as unknown as import('../lib/loro/doc').LoroDocumentManager;
+      await expect(
+        resolveEffectiveSessionCreateDispatchConfig({ ...args, manager: unavailable })
+      ).rejects.toThrow('catalog unavailable');
+      expect(
+        (
+          await resolveEffectiveSessionCreateDispatchConfig({
+            ...args,
+            manager: unavailable,
+            dispatchConfig: { mcpServerIds: [] },
+          })
+        ).mcpServerIds
+      ).toEqual([]);
+    } finally {
+      await repo.destroy();
+    }
+  });
+});
+
+describe('target Machine availability from presence', () => {
+  const target = {
+    auth: {
+      machineId: 'caller-machine' as MachineId,
+      userId: 'user-1',
+      token: '',
+      userName: 'User',
+      userEmail: 'user@example.test',
+      machineName: 'Caller',
+    },
+    workspaceId: 'workspace-1' as WorkspaceId,
+    machineId: 'target-machine' as MachineId,
+  };
+  const presence = (online: MachineId[] | null) => ({
+    getOnlineMachineIds: async () => (online === null ? null : new Set(online)),
+  });
+  // A Streams path slow enough that every one-shot Machine RPC times out.
+  const rpcTimesOut = () =>
+    vi
+      .spyOn(commandRuntime, 'withMachineRpcClient')
+      .mockRejectedValue(new Error('timeout: Machine status request timed out'));
+  const sessionId = 'session-1' as SessionId;
+  const sessions = [{ id: sessionId, machineId: target.machineId }];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('admits online or unknown presence even while Machine RPC times out', async () => {
+    rpcTimesOut();
+    await expect(
+      ensureTargetMachineNotOffline({ ...target, manager: presence([target.machineId]) })
+    ).resolves.toBe('online');
+    await expect(
+      ensureTargetMachineNotOffline({ ...target, manager: presence(null) })
+    ).resolves.toBe('unknown');
+  });
+
+  it('rejects only definite presence offline, as retryable MACHINE_OFFLINE', async () => {
+    const error = await ensureTargetMachineNotOffline({ ...target, manager: presence([]) }).catch(
+      (caught: unknown) => caught
+    );
+    expect(error).toBeInstanceOf(MachineOfflineError);
+    expect((error as MachineOfflineError).toLodyError()).toEqual({
+      code: 'MACHINE_OFFLINE',
+      message: 'Target Machine is offline: target-machine',
+      retryable: true,
+    });
+  });
+
+  it('reports a presence-online Machine as online but stale when live status RPC times out', async () => {
+    rpcTimesOut();
+    const online = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence([target.machineId]),
+    });
+    expect(online.get(sessionId)).toEqual({
+      sessionId,
+      machineOnline: true,
+      fresh: false,
+      reason: 'timeout: Machine status request timed out',
+    });
+
+    const unknown = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence(null),
+    });
+    expect(unknown.get(sessionId)?.machineOnline).toBe(false);
+
+    const offline = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence([]),
+    });
+    expect(offline.get(sessionId)).toEqual({
+      sessionId,
+      machineOnline: false,
+      fresh: false,
+      reason: 'Target Machine is offline: target-machine',
+    });
+  });
+
+  it('asks only daemons advertising sessionLiveActivity for activity', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockImplementation(async (_args, run) =>
+      run({
+        requestSessionLiveStatus: async (options: Record<string, unknown>) => {
+          requests.push(options);
+          return {
+            type: 'session/live-status_response',
+            machineId: target.machineId,
+            sessionId,
+            success: true,
+            state: 'running',
+            observedAtMs: 1,
+            ...(options.includeActivity
+              ? { activity: { currentAction: 'shell: flock heavy.lock', queuedInputs: 2 } }
+              : {}),
+          };
+        },
+      } as never)
+    );
+    const read = (capabilities: Record<string, number> | undefined) =>
+      readSessionLiveStatusesMany({
+        ...target,
+        sessions,
+        manager: {
+          ...presence([target.machineId]),
+          repo: {
+            getDocMeta: async () =>
+              capabilities ? { meta: { protocolCapabilities: capabilities } } : undefined,
+          } as never,
+        },
+      });
+
+    // An older daemon rejects the unknown request field, so it is never sent.
+    expect((await read(undefined)).get(sessionId)).not.toHaveProperty('activity');
+    expect(requests[0]).not.toHaveProperty('includeActivity');
+
+    expect((await read({ sessionLiveActivity: 1 })).get(sessionId)).toMatchObject({
+      activity: { currentAction: 'shell: flock heavy.lock', queuedInputs: 2 },
+    });
+    expect(requests[1]).toMatchObject({ includeActivity: true });
+  });
+});
+
+describe('prepared command attachment inputs', () => {
+  const auth = {
+    machineId: 'machine-1' as MachineId,
+    userId: 'user-1',
+    token: '',
+    userName: 'User',
+    userEmail: 'user@example.test',
+    machineName: 'Local',
+  };
+  const workspace = { id: 'workspace-1', name: 'Workspace', slug: 'workspace', role: 'owner' };
+  const ownerTarget = {
+    targetMachine: { id: auth.machineId, ownerUserId: auth.userId } as MachineMeta,
+    agentConfig: {
+      id: 'agent-1',
+      machineId: auth.machineId,
+      cliType: 'registry',
+      agentType: 'fixture',
+      prompt: 'System instructions',
+    } as AgentConfigMeta,
+  };
+  const file = {
+    type: 'file' as const,
+    fileId: 'file-1',
+    fileName: 'data.csv',
+    mimeType: 'text/csv',
+    sizeBytes: 3,
+    sha256: 'a'.repeat(64),
+    textPreview: true,
+    transport: 'r2' as const,
+    uploadedAt: 1,
+  };
+  const options = {
+    workspaceMetaPrewriteSatisfied: true,
+    bypassSessionQuota: true,
+    historyBackend: 'loro' as const,
+  };
+
+  it('rejects delegated create and chat without source identity before any publication', async () => {
+    const manager = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('Unexpected side effect');
+        },
+      }
+    );
+    const delegatedRequester = { userId: auth.userId };
+    await expect(
+      prepareSessionInput(
+        auth,
+        workspace,
+        manager as never,
+        'Delegated work',
+        { ...options, delegatedRequester },
+        { inheritSessionDefaults: false, mcpServerIds: [] },
+        ownerTarget
+      )
+    ).rejects.toThrow('missing Agent source identity');
+    await expect(
+      sendSessionChatResult(
+        auth,
+        workspace,
+        manager as never,
+        'target' as SessionId,
+        'Delegated work',
+        {},
+        undefined,
+        undefined,
+        undefined,
+        delegatedRequester
+      )
+    ).rejects.toThrow('missing Agent source identity');
+  });
+
+  it('keeps raw input in history and preserves attachments beside composed execution text', async () => {
+    // Preparation must not write metadata/history or start execution.
+    const manager = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('Unexpected side effect during preparation');
+        },
+      }
+    );
+    const prepared = await prepareSessionInput(
+      auth,
+      workspace,
+      manager as never,
+      'Analyze',
+      {
+        ...options,
+        inputAttachments: [file],
+      },
+      { inheritSessionDefaults: false, mcpServerIds: [] },
+      ownerTarget
+    );
+    expect(prepared.userTurn.items).toEqual([{ type: 'text', text: 'Analyze' }, file]);
+    expect(prepared.userTurn.inputConfig?.prompt).toBe('System instructions\n\nAnalyze');
+    expect(prepared.userTurn.inputConfig?.inputBlocks).toEqual([
+      { type: 'text', text: 'Analyze' },
+      file,
+    ]);
+    expect(prepared.userTurn.status).toBe('prepared');
+    expect(prepared.meta.latestUserMsgId).toBeUndefined();
+  });
+
+  it('appends attachment-only continuations once and rejects a changed attachment on retry', async () => {
+    const doc = new LoroDoc();
+    const sessionId = 'session-attachments' as SessionId;
+    const data = createLoroSessionData({ doc, sessionId });
+    const writer = createHistoryWriter(doc);
+    const sessionDoc = {
+      sessionId,
+      sessionData: data,
+      getMetaState: async () => ({ historyBackend: 'loro' }),
+      appendUserTurn: async (entry: SessionHistoryInput) => {
+        writer.append(entry as never);
+      },
+    };
+    const args = {
+      sessionDoc: sessionDoc as never,
+      prompt: '',
+      inputBlocks: [file],
+      userId: 'user-1',
+      preallocatedId: 'fixed-turn',
+      inputConfig: {
+        prompt: '',
+        inputBlocks: [file],
+        cliType: 'registry' as const,
+        agentType: 'fixture',
+      },
+    };
+    const first = await appendUserPromptHistory(args);
+    expect(await appendUserPromptHistory(args)).toMatchObject({ id: first.id });
+    expect(writer.readStored()).toHaveLength(1);
+    expect(writer.readStored()[0]?.items).toEqual([file]);
+    await expect(
+      appendUserPromptHistory({ ...args, inputBlocks: [{ ...file, fileId: 'other-file' }] })
+    ).rejects.toThrow('already used');
+    expect(writer.readStored()).toHaveLength(1);
+    doc
+      .getList('history')
+      .push({ ...first, items: [{ type: 'text', text: 'later duplicate' }] } as never);
+    doc.commit();
+    expect(await appendUserPromptHistory(args)).toEqual({ ...first, existingStatus: 'pending' });
+    expect(writer.readStored()[0]?.items).toEqual([file]);
+    expect(writer.readStored()[1]?.items).toEqual([{ type: 'text', text: 'later duplicate' }]);
+    expect(writer.readStored()).toHaveLength(2);
+  });
+
+  it('prepares an attachment-only first turn and rejects an empty message before publication', async () => {
+    const manager = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('Unexpected side effect during preparation');
+        },
+      }
+    );
+    const prepared = await prepareSessionInput(
+      auth,
+      workspace,
+      manager as never,
+      '',
+      {
+        ...options,
+        inputAttachments: [file],
+      },
+      { inheritSessionDefaults: false, mcpServerIds: [] },
+      ownerTarget
+    );
+    expect(prepared.userTurn.items).toEqual([file]);
+    await expect(
+      prepareSessionInput(
+        auth,
+        workspace,
+        manager as never,
+        '',
+        {
+          ...options,
+          inputAttachments: [],
+        },
+        { inheritSessionDefaults: false, mcpServerIds: [] },
+        ownerTarget
+      )
+    ).rejects.toThrow('text');
+  });
+});
+
+describe('Machine Flock freshness fallback validation', () => {
+  const workspaceId = 'workspace-id' as WorkspaceId;
+  const agentConfig: AgentConfigMeta = {
+    id: 'config-id' as AgentConfigMeta['id'],
+    machineId: 'machine-id' as MachineId,
+    name: 'Synthetic provider',
+    cliType: 'builtin',
+    agentType: 'codex',
+  };
+  const deadline = () => new FlockSyncTimeoutError('Synthetic Flock freshness deadline');
+  const readFixture = (capability: AcpCapabilityCacheEntry | undefined, syncError?: Error) => {
+    const rows = capability ? [{ key: ['acpCapability', agentConfig.id], value: capability }] : [];
+    const syncFlockDocOrThrow = vi.fn(async () => {
+      if (syncError) throw syncError;
+    });
+    const manager = {
+      syncFlockDocOrThrow,
+      repo: {
+        getDocMeta: async () => ({ meta: {} }),
+        openFlockDoc: async () => ({
+          flock: {
+            scan: (options?: { prefix?: readonly unknown[] }) =>
+              rows.filter(
+                (row) =>
+                  !options?.prefix || options.prefix.every((part, index) => row.key[index] === part)
+              ),
+          },
+        }),
+      },
+    } as unknown as Parameters<typeof readAgentAcpCapability>[0]['manager'];
+    return { manager, syncFlockDocOrThrow };
+  };
+  const resolve = (
+    manager: Parameters<typeof readAgentAcpCapability>[0]['manager'],
+    dispatchConfig: Parameters<
+      typeof resolveEffectiveSessionCreateDispatchConfig
+    >[0]['dispatchConfig'],
+    overrides: Partial<Parameters<typeof resolveEffectiveSessionCreateDispatchConfig>[0]> = {}
+  ) =>
+    resolveEffectiveSessionCreateDispatchConfig({
+      manager,
+      workspaceId,
+      agentConfig,
+      dispatchConfig: { mcpServerIds: [], ...dispatchConfig },
+      ...overrides,
+    });
+
+  it.each([undefined, 1, ACP_CAPABILITY_CACHE_VERSION, ACP_CAPABILITY_CACHE_VERSION + 1])(
+    'validates usable cached ACP values after failed freshness regardless of cacheVersion %s',
+    async (cacheVersion) => {
+      const capability = { ...createAcpCapability(), cacheVersion };
+      const { manager } = readFixture(capability, deadline());
+      await expect(
+        readAgentAcpCapability({
+          manager,
+          workspaceId,
+          machineId: agentConfig.machineId,
+          agentConfigId: agentConfig.id,
+        })
+      ).resolves.toEqual(capability);
+      await expect(
+        resolve(manager, { modeId: 'default', runConfig: { modelId: 'model-a' } })
+      ).resolves.toMatchObject({
+        modeId: 'default',
+        modelId: 'model-a',
+        inheritSessionDefaults: false,
+      });
+    }
+  );
+
+  it.each([
+    { capability: undefined, dispatchConfig: { modelId: 'model-a' } },
+    { capability: createAcpCapability(), dispatchConfig: { modelId: 'new-model' } },
+    { capability: createAcpCapability(), dispatchConfig: { runConfig: { fastMode: true } } },
+    {
+      capability: createAcpCapability(),
+      dispatchConfig: { configOptionValues: { approval_policy: 'new-value' } },
+    },
+  ])(
+    'reports insufficient or stale cached selection as unavailable: %j',
+    async ({ capability, dispatchConfig }) => {
+      const { manager } = readFixture(capability, deadline());
+      await expect(resolve(manager, dispatchConfig)).rejects.toBeInstanceOf(
+        MachineFlockReadUnavailableError
+      );
+    }
+  );
+
+  it('keeps confirmed unsupported selection and malformed option types as input errors', async () => {
+    const confirmed = readFixture(createAcpCapability()).manager;
+    await expect(resolve(confirmed, { modelId: 'unknown' })).rejects.toThrow(
+      'Unsupported ACP model'
+    );
+    try {
+      await resolve(confirmed, { modelId: 'unknown' });
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(MachineFlockReadUnavailableError);
+    }
+    const fallback = readFixture(createAcpCapability(), deadline()).manager;
+    await expect(resolve(fallback, { configOptionValues: { web_search: 'true' } })).rejects.toThrow(
+      'expects a boolean'
+    );
+    try {
+      await resolve(fallback, { configOptionValues: { web_search: 'true' } });
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(MachineFlockReadUnavailableError);
+    }
+  });
+
+  it('does not classify explicit Plan/permission conflicts as stale capability data', async () => {
+    const capability = {
+      ...createAcpCapability(),
+      modes: [
+        { id: 'plan', name: 'Plan' },
+        { id: 'default', name: 'Default' },
+      ],
+    };
+    const { manager } = readFixture(capability, deadline());
+    await expect(
+      resolve(manager, { modeId: 'default', runConfig: { planMode: true } })
+    ).rejects.toThrow('conflicts with explicit mode');
+  });
+
+  it('does not apply a readable capability entry from a different runtime override', async () => {
+    const runtimeOverrides = { codexPath: '/synthetic/selected-codex' };
+    const capability = {
+      ...createAcpCapability(),
+      sourceVersion:
+        'synthetic' +
+        getBuiltinRuntimeOverrideSourceVersionSuffix({ codexPath: '/synthetic/other-codex' }),
+    };
+    const { manager } = readFixture(capability, deadline());
+    await expect(
+      resolve(
+        manager,
+        { modelId: 'model-a' },
+        { agentConfig: { ...agentConfig, runtimeOverrides } }
+      )
+    ).rejects.toBeInstanceOf(MachineFlockReadUnavailableError);
+  });
+
+  it('retains the explicit localOnly path without requesting freshness', async () => {
+    const { manager, syncFlockDocOrThrow } = readFixture(createAcpCapability(), deadline());
+    await expect(
+      resolve(manager, { modeId: 'default', modelId: 'model-a' }, { localOnly: true })
+    ).resolves.toMatchObject({ modelId: 'model-a' });
+    expect(syncFlockDocOrThrow).not.toHaveBeenCalled();
+  });
+
+  it('reports absent cached projects as unavailable without misclassifying malformed selectors', async () => {
+    const { manager } = readFixture(undefined, deadline());
+    await expect(
+      resolveLocalProjectRefOrThrow(manager, workspaceId, agentConfig.machineId, 'missing-project')
+    ).rejects.toBeInstanceOf(MachineFlockReadUnavailableError);
+    await expect(
+      resolveLocalProjectRefOrThrow(manager, workspaceId, agentConfig.machineId, '   ')
+    ).rejects.toThrow('Missing local project selector');
+  });
+
+  it('retains readable Pi override caches when a reader has no launch-source context', async () => {
+    const capability = {
+      ...createAcpCapability(),
+      agentType: 'pi',
+      sourceVersion: 'synthetic+override:fixture',
+    };
+    const { manager } = readFixture(capability, deadline());
+    await expect(
+      readAgentAcpCapability({
+        manager,
+        workspaceId,
+        machineId: agentConfig.machineId,
+        agentConfigId: agentConfig.id,
+      })
+    ).resolves.toMatchObject(capability);
+  });
+
+  it('bounds public selection context and never exposes private diagnostics or option values', () => {
+    const failure = new MachineFlockReadUnavailableError({
+      message: 'private diagnostic containing credentials',
+      cause: new Error('private transport token'),
+      selection: { kind: 'ACP option', id: 'option-' + 'x'.repeat(300) },
+    }).toLodyError();
+    expect(failure.message).toContain('ACP option');
+    expect(failure.message).toContain(('option-' + 'x'.repeat(300)).slice(0, 120));
+    expect(failure.message).not.toContain('x'.repeat(121));
+    expect(failure.message).not.toContain('private');
+    expect(failure.message).not.toContain('credentials');
+  });
+});
+
+describe('Stop protocol negotiation', () => {
+  it('keeps released strict cancel payloads valid and opts modern peers into durable pause', () => {
+    const legacy = z
+      .object({ sessionId: z.string(), turnId: z.string(), timeoutMs: z.number() })
+      .strict();
+    const common = { sessionId: 'session', turnId: 'turn', timeoutMs: 10000 };
+    for (const machine of [undefined, {}, { protocolCapabilities: { operationInbox: 1 } }]) {
+      expect(
+        legacy.parse({ ...common, ...getSessionCancelProtocolFields(machine, 'cancel-id', true) })
+      ).toEqual(common);
+    }
+    expect(
+      getSessionCancelProtocolFields(
+        { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+        'cancel-id',
+        true
+      )
+    ).toEqual({ cancelId: 'cancel-id', pauseInbox: true });
+    expect(
+      getSessionCancelProtocolFields(
+        { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+        'cancel-id',
+        false
+      )
+    ).toEqual({ cancelId: 'cancel-id', pauseInbox: false });
+  });
+});
+
+describe('session command output boundary', () => {
+  it.each([
+    { mode: 'json', fail: false },
+    { mode: 'jsonl', fail: false },
+    { mode: 'human', fail: false },
+    { mode: 'json', fail: true },
+    { mode: 'jsonl', fail: true },
+  ])('preserves $mode output and restores logging (failure=$fail)', async ({ mode, fail }) => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const capture = (chunks: string[]) =>
+      new Writable({
+        write(chunk, _encoding, done) {
+          chunks.push(String(chunk));
+          done();
+        },
+      });
+    vi.stubGlobal('console', new Console({ stdout: capture(out), stderr: capture(err) }));
+    const logger = getLogger('output-regression');
+    const exitCode = process.exitCode;
+    const setup = vi.spyOn(commandRuntime, 'syncCommandTime').mockImplementation(async () => {
+      logger.info('setup diagnostic');
+    });
+    const flush = vi.spyOn(telemetry, 'flushTelemetry').mockImplementation(async () => {
+      logger.info('exit diagnostic');
+    });
+    const withManager = makeWorkspaceCommandManagers();
+    try {
+      await runSessionCommand(mode === 'human' ? {} : { [mode]: true }, async () => {
+        await withManager(
+          'synthetic-workspace',
+          {
+            userId: 'synthetic-user',
+            token: 'synthetic-token',
+            machineId: 'synthetic-machine',
+            authBaseUrl: 'https://example.invalid',
+          },
+          async () => ({
+            cleanUp: async () => {
+              logger.info('transport detached');
+            },
+          }),
+          async () => {
+            if (fail) throw new Error('synthetic failure');
+            commandRuntime.printJson({ ok: true, alreadyStopped: true });
+          },
+          (error) => {
+            throw error;
+          }
+        );
+      });
+      expect(process.exitCode).toBe(fail ? 1 : 0);
+      if (mode === 'human') {
+        expect(out.join('')).toContain('transport detached');
+        expect(err.join('')).toBe('');
+      } else {
+        expect(JSON.parse(out.join(''))).toEqual(
+          fail
+            ? mode === 'json'
+              ? { ok: false, error: 'synthetic failure' }
+              : { type: 'error', error: 'synthetic failure' }
+            : { ok: true, alreadyStopped: true }
+        );
+        for (const diagnostic of ['setup diagnostic', 'transport detached', 'exit diagnostic']) {
+          expect(err.join('')).toContain(diagnostic);
+        }
+      }
+      logger.info('after command');
+      expect(out.join('')).toContain('after command');
+    } finally {
+      process.exitCode = exitCode;
+      setup.mockRestore();
+      flush.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('paired machine billing entitlement while offline', () => {
+  it('waits once, fails open without asking again for 30 seconds, then retries and caches', async () => {
+    const { createCloudE2eeMachinePort } = await import('@/lib/cloud-cli-port');
+    const { getWorkspaceBillingEntitlementBestEffort } = await import('./session');
+    const { evaluateSessionCreateQuota } = await import('@lody/shared');
+    type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+    vi.stubEnv('LODY_PLATFORM', 'cloud');
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    let online = false;
+    let subscriptions = 0;
+    const client: Client = {
+      onUpdate: ((_ref: unknown, _args: unknown, listener: (value: unknown) => void) => {
+        subscriptions += 1;
+        // Offline: the subscription never answers. Online: it answers at once.
+        if (online) listener({ valid: true, effectivePlanTier: 'free', checkoutPending: false });
+        return () => {};
+      }) as unknown as Client['onUpdate'],
+      query: (() => new Promise(() => {})) as Client['query'],
+      close: async () => {},
+    };
+    const workspaceId = 'offline-billing-workspace';
+    const port = createCloudE2eeMachinePort({
+      accountId: 'synthetic-machine-owner',
+      workspaceId,
+      genesisHash: 'ab'.repeat(32),
+      machineId: 'machine',
+      credential: 'a4'.repeat(32),
+      authBaseUrl: 'https://synthetic.convex.cloud',
+      serverBaseUrl: 'https://relay.synthetic.test',
+      logger: getLogger('session'),
+      client,
+    });
+    const manager = { cloudBilling: port.billing } as unknown as Parameters<
+      typeof getWorkspaceBillingEntitlementBestEffort
+    >[0];
+    const workspace = { id: workspaceId, name: 'Offline', slug: null, role: 'member' };
+    const read = () => getWorkspaceBillingEntitlementBestEffort(manager, workspace);
+    try {
+      // The first command waits for the read deadline, then fails open.
+      const first = read();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(first).resolves.toBeNull();
+      expect(subscriptions).toBe(1);
+      // Within 30 seconds the next command fails open at once, with no new read.
+      await vi.advanceTimersByTimeAsync(29_000);
+      await expect(read()).resolves.toBeNull();
+      expect(subscriptions).toBe(1);
+      // After 30 seconds the plan is read again; the connection is back.
+      online = true;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const free = await read();
+      expect(subscriptions).toBe(2);
+      expect(free).toEqual({ effectivePlanTier: 'free', checkoutPending: false });
+      if (!free) throw new Error('expected a Free plan');
+      expect(evaluateSessionCreateQuota({ ...free, sessionCount: 199 }).allowed).toBe(true);
+      expect(evaluateSessionCreateQuota({ ...free, sessionCount: 200 }).allowed).toBe(false);
+      // A successful read is cached normally again.
+      await expect(read()).resolves.toEqual(free);
+      expect(subscriptions).toBe(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
   });
 });

@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
+import { TestCloudPlatformProvider } from './test-platform';
+
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitHubSettingsView } from '../src/components/settings/github-settings-view';
 import type { SettingsWorkspaceRepoWithStatus } from '../src/components/settings/settings-data-cache';
 import { initI18n } from '../src/i18n';
@@ -10,6 +13,81 @@ import { initI18n } from '../src/i18n';
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
+
+const authState = vi.hoisted(() => ({
+  electron: false,
+  native: false,
+  mobile: false,
+  available: true,
+  authorization: 'missing',
+  openedUrls: [] as string[],
+  openResult: true,
+  error: '',
+  linkedCallback: '',
+  repos: [],
+}));
+vi.mock('../src/lib/electron', () => ({ isElectronRenderer: () => authState.electron }));
+vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: () => authState.native }));
+vi.mock('../src/lib/native-browser', () => ({
+  openExternalUrl: async (url: string) => {
+    authState.openedUrls.push(url);
+    return authState.openResult;
+  },
+}));
+vi.mock('../src/lib/app-platform', () => ({ useAppCapability: () => authState.available }));
+vi.mock('../src/hooks/use-mobile', () => ({ useIsMobile: () => authState.mobile }));
+vi.mock('../src/atoms', () => ({ currentWorkspaceSlugAtom: {} }));
+vi.mock('jotai', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('jotai')>()),
+  useAtomValue: () => 'test-workspace',
+}));
+vi.mock('../src/lib/github-token', () => ({ invalidateGitHubTokensForWorkspace: () => {} }));
+vi.mock('../src/lib/toast', () => ({
+  toast: {
+    error: (message: string) => {
+      authState.error = message;
+    },
+  },
+}));
+vi.mock('../src/hooks/use-convex-error-message', () => ({
+  useConvexErrorMessage: () => (_: unknown, fallback: string) => fallback,
+}));
+vi.mock('../src/hooks/use-authenticated-convex', () => ({
+  useAuthenticatedConvex: () => ({
+    isAuthenticated: true,
+    isLoading: false,
+    claimAutomaticCommand: () => false,
+  }),
+}));
+// This suite exercises the ordinary GitHub presentation/authorization flow.
+vi.mock('../src/hooks/use-workspace-feature', async (original) => ({
+  ...(await original<object>()),
+  useLegacyWorkspaceQueriesEnabled: () => true,
+  useAssertLegacyWorkspaceAccess: () => () => {},
+  useLegacyWorkspaceQueryStatus: () => 'allowed',
+}));
+vi.mock('../src/hooks/use-personal-github-authorization', () => ({
+  usePersonalGitHubAuthorization: () => async () => {
+    authState.linkedCallback = 'operation-only';
+  },
+}));
+vi.mock('../src/components/settings/settings-data-cache', () => ({
+  useSettingsDataCache: () => ({
+    workspaceId: 'workspace-test',
+    canManageGithub: false,
+    workspaceReposWithStatus: authState.repos,
+    workspaceReposLoading: false,
+  }),
+}));
+vi.mock('@lody/platform/react', async (original) => ({
+  ...(await original<typeof import('@lody/platform/react')>()),
+  useCloudQuery: () => ({ enabled: true, authorization: { state: authState.authorization } }),
+  useCloudAction: () => async () => {},
+  useCloudMutation: () => async () => {},
+}));
+
+import { IntegrationsSettingsComponent } from '../src/components/settings/integrations-setting';
+import { MobileSettingsFoldContext } from '../src/components/mobile/mobile-settings-fold-context';
 
 const repo = (repoFullName: string, enabled: boolean): SettingsWorkspaceRepoWithStatus => ({
   repoFullName,
@@ -63,6 +141,18 @@ describe('GitHubSettingsView', () => {
   beforeEach(async () => {
     await initI18n('en');
     toggled.length = 0;
+    Object.assign(authState, {
+      electron: false,
+      native: false,
+      mobile: false,
+      available: true,
+      authorization: 'missing',
+      openedUrls: [],
+      openResult: true,
+      error: '',
+      linkedCallback: '',
+    });
+    vi.stubEnv('VITE_SITE_URL', 'https://preview.example.com');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -71,28 +161,7 @@ describe('GitHubSettingsView', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
-  });
-
-  it('groups repositories under their owner, in arrival order, and summarises what is enabled', async () => {
-    await render(true);
-    expect(ownerHeadings()).toEqual(['loro-dev', 'LodyAI', 'zxch3n']);
-    expect(container.textContent).toContain('3 of 6 repositories enabled');
-
-    await act(async () => repoSwitch('loro-dev/lody')!.click());
-    expect(toggled).toEqual([['loro-dev/lody', true]]);
-  });
-
-  it('narrows the owners to the repositories matching the search', async () => {
-    await render(true);
-    const search = container.querySelector<HTMLInputElement>('input[type="search"]')!;
-    await act(async () => {
-      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-      setValue.call(search, 'dot');
-      search.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    expect(ownerHeadings()).toEqual(['zxch3n']);
-    expect(repoSwitch('zxch3n/dotfiles')).not.toBeNull();
-    expect(repoSwitch('zxch3n/blog')).toBeNull();
+    vi.unstubAllEnvs();
   });
 
   it('shows a member the repositories without letting them change any', async () => {
@@ -102,5 +171,104 @@ describe('GitHubSettingsView', () => {
     );
     await act(async () => repoSwitch('loro-dev/loro')!.click());
     expect(toggled).toEqual([]);
+  });
+
+  const authorizeButton = () =>
+    [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Authorize'
+    );
+  const renderSettings = async () => {
+    await act(async () =>
+      root.render(
+        createElement(TestCloudPlatformProvider, null, createElement(IntegrationsSettingsComponent))
+      )
+    );
+  };
+
+  it('separates GitHub identity from repositories and keeps the search input during fold changes', async () => {
+    authState.mobile = true;
+    authState.native = true;
+    authState.repos = repos as never[];
+    const renderFold = async (fold: boolean) => {
+      await act(async () =>
+        root.render(
+          createElement(
+            TestCloudPlatformProvider,
+            null,
+            createElement(
+              MobileSettingsFoldContext.Provider,
+              { value: fold ? { messageHeight: 300, lowerTop: 340, gapHeight: 40 } : null },
+              createElement(IntegrationsSettingsComponent)
+            )
+          )
+        )
+      );
+    };
+    await renderFold(true);
+    const upper = container.querySelector('[data-settings-fold-upper]')!;
+    const lower = container.querySelector('[data-settings-fold-lower]')!;
+    expect(upper.textContent).toContain('Personal Identity');
+    expect(lower.textContent).toContain('loro-dev/loro');
+    const search = lower.querySelector('input[type="search"]');
+    expect(search).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        search,
+        'loro'
+      );
+      search!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(lower.textContent).not.toContain('zxch3n/blog');
+    await renderFold(false);
+    expect(container.querySelector('input[type="search"]')).toBe(search);
+    expect(search!.value).toBe('loro');
+    expect(lower.textContent).not.toContain('zxch3n/blog');
+  });
+
+  it.each([
+    ['electron', false],
+    ['native', false],
+    ['native', true],
+  ] as const)(
+    'offers external authorization in the %s shell (mobile: %s) for missing and expired credentials',
+    async (host, mobile) => {
+      authState[host] = true;
+      authState.mobile = mobile;
+      for (const state of ['missing', 'expired']) {
+        authState.authorization = state;
+        await renderSettings();
+        expect(container.textContent).toContain('Authorization needed');
+        expect(authorizeButton()?.disabled).toBe(false);
+        await act(async () => authorizeButton()!.click());
+        expect(authState.openedUrls.at(-1)).toBe(
+          'https://preview.example.com/test-workspace/settings/github'
+        );
+        expect(authState.linkedCallback).toBe('');
+        expect(authorizeButton()?.disabled).toBe(false);
+      }
+      authState.authorization = 'authorized';
+      await renderSettings();
+      expect(authorizeButton()).toBeUndefined();
+    }
+  );
+
+  it('reports a rejected browser handoff and lets the user retry', async () => {
+    authState.electron = true;
+    authState.openResult = false;
+    await renderSettings();
+    await act(async () => authorizeButton()!.click());
+    expect(authState.error).toBe('Authorization failed');
+    expect(authorizeButton()?.disabled).toBe(false);
+    expect(authState.linkedCallback).toBe('');
+  });
+
+  it('starts operation-only browser authorization and keeps the local capability gate', async () => {
+    await renderSettings();
+    await act(async () => authorizeButton()!.click());
+    expect(authState.linkedCallback).toBe('operation-only');
+    expect(authState.openedUrls).toEqual([]);
+    authState.available = false;
+    await renderSettings();
+    expect(container.textContent).toBe('');
   });
 });

@@ -34,5 +34,18 @@ the most recently rejected token is tracked.
 Transient errors remain retryable by the transport. Credential 401/403 failures
 remain suppressed until the credential changes or manual invalidation occurs.
 
-Implementation: `packages/shared/src/loro-streams-auth.ts`; regression coverage:
+A native provider owns shared refresh work under Scope. Cancelling or timing out
+one waiter does not cancel other leases. The last lease, credential replacement
+and close cancel and await actual I/O before handoff. If raw work ignores abort,
+bounded cleanup failure retains the old owner and complete Cause; explicit
+successful recovery is required before replacing it. Concurrent close shares its
+completion/failure. Timeout and cancellation must not become undefined auth success.
+Native getToken/auth preserve terminal auth typed failures. Only the explicit Legacy
+old-protocol callback projects a nonempty all-auth Cause to undefined; mixed Causes
+retain every other failure reason. Diagnostic snapshots omit credentials, JWTs, URLs,
+raw error payloads and owners, without removing the original recovery Cause.
+Promise callers retain one explicitly named Legacy facade until their owners migrate.
+
+Implementation: `packages/shared/src/loro-streams-auth.ts` and
+[the native provider](../packages/shared/src/loro-streams-token/README.md); regression coverage:
 `packages/shared/tests/loro-streams-auth.test.ts`. No cross-tab coordination is promised.

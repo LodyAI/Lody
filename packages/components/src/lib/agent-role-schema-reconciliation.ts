@@ -1,8 +1,12 @@
 import {
+  bindAgentRoleTarget,
   canManageAgentRole,
+  getAgentRoleTargets,
   getWorkspaceFlockDocId,
-  isAgentRole,
   isAgentRoleContentEqual,
+  normalizeAgentRole,
+  serializeAgentRoleRow,
+  withAgentRoleTargets,
   workspaceFlockKeys,
   type AcpCapabilityCacheEntry,
   type AgentRole,
@@ -49,7 +53,11 @@ export function reconcileAgentRoleSchema(
   return { ...role, runConfig: { ...role.runConfig, configOptionValues: values } };
 }
 
-/** Fence a delayed probe against editing, deletion, ownership and workspace changes. */
+/**
+ * Fence a delayed probe against editing, deletion, ownership and workspace changes.
+ * `expected` is the Role bound to the probed machine; only that target changes,
+ * and the row keeps its stored shape (v1 for a single-target Role).
+ */
 export async function persistReconciledAgentRole(
   runtime: WorkspaceRuntime,
   expected: AgentRole,
@@ -63,21 +71,27 @@ export async function persistReconciledAgentRole(
   const changed = await runtime.writer.flockRowUpdate(
     getWorkspaceFlockDocId(runtime.workspaceId),
     workspaceFlockKeys.agentRole(expected.id),
-    (current) => {
+    (stored) => {
+      const current = normalizeAgentRole(stored);
+      const bound = current && bindAgentRoleTarget(current, expected.machineId);
       if (
         !isCurrent() ||
-        !isAgentRole(current) ||
+        !current ||
+        !bound ||
         !canManageAgentRole(current, userId) ||
         current.revision !== expected.revision ||
-        !isAgentRoleContentEqual(current, expected)
+        !isAgentRoleContentEqual(bound, expected)
       )
         return undefined;
-      return {
-        ...current,
-        runConfig: next.runConfig,
+      const [first, ...rest] = getAgentRoleTargets(current).map((target) =>
+        target.machineId === expected.machineId ? { ...target, runConfig: next.runConfig } : target
+      );
+      if (!first) return undefined;
+      return serializeAgentRoleRow({
+        ...withAgentRoleTargets(current, [first, ...rest]),
         revision: current.revision + 1,
         updatedAt: now,
-      };
+      });
     }
   );
   if (changed) void uploadWorkspaceCatalog(runtime);

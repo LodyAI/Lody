@@ -32,16 +32,14 @@ const WINDOW_BACKGROUND_COLORS: Record<ResolvedWindowTheme, string> = {
 
 export const MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT = 36
 
-// Matches the bundled VS Code themes' `titleBar.*` colors
-// (`lody-light.json` / Vesper after Lody's deep-sea palette,
-// `vesper-deep-sea-palette.ts`) so the OS-drawn
-// caption buttons sit on the same canvas as the rest of the window.
+// Keep the native caption background transparent so renderer backdrops also
+// dim the area beneath the Windows controls. Glyphs still follow the theme.
 const TITLE_BAR_OVERLAY_COLORS: Record<
   ResolvedWindowTheme,
   { color: string; symbolColor: string }
 > = {
-  light: { color: '#FFFFFF', symbolColor: '#3C4048' },
-  dark: { color: '#131416', symbolColor: '#7A7D82' }
+  light: { color: '#00000000', symbolColor: '#3C4048' },
+  dark: { color: '#00000000', symbolColor: '#7A7D82' }
 }
 
 export function getMainWindowBackgroundColor(theme: ResolvedWindowTheme): string {

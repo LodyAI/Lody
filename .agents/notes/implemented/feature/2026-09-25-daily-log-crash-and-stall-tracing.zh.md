@@ -49,7 +49,10 @@ Electron 主进程（`desktop-log.ts`，在 `desktop-bootstrap` 确定 `userData
   `cleanExit`，就记为异常结束。
 - 追踪每个内置 CLI：启动（只记子命令和参数个数，因为渲染进程传入的参数可能含凭据）、每一行
   stderr、退出码/信号/终止类型/存活时长、Supervisor 的每次退出决策，以及每次 Supervisor
-  状态变化。子进程仍在却处于 `reconnecting`，说明 CLI 没有应答探测，界面上表现为断连。
+  状态变化。事实纠正：`reconnecting` 也可能表示后端连接变化，而运行快照和身份仍然可用，
+  因而不能证明 CLI 事件循环阻塞。
+  [侧栏身份调查](../bug-fix/2026-10-11-sidebar-machine-order-stability.zh.md)
+  增加了独立的探测失败和恢复追踪，以区分这些路径。
 
 CLI：
 

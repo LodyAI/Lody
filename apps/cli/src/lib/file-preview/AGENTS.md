@@ -20,12 +20,35 @@ save path's text reads.
 
 ## Invariants
 
+- Encrypted queries resolve existing paths from metadata and already-open project
+  catalogs. Never create a chat directory, join/sync a project Flock or repair
+  member links to satisfy a read. Refuse Markdown worktree discovery explicitly;
+  never start Git or silently return an incomplete candidate set. Ordinary resolution retains its existing policy.
+
+- `file/download-chunk` is a separate `fileDownload` v1 capability. Preserve
+  owner-envelope authorization, remote path containment, positive paid-workspace
+  entitlement on every request, the 100 MiB ceiling and 512 KiB response chunks.
+  Billing failures do not grant this larger transfer. Pin file identity/metadata
+  across ranges; reject mutation instead of returning a mixed file. No watchers,
+  history writes, preview-budget increases or plaintext cloud fallback.
+
+- `markdownFileLinks` resolution returns identities only and every realpath-distinct
+  match; never pick one or widen authorization. Canonical previews never discover.
+
+- Cold ordinary-chat previews resolve the existing default workspace from durable
+  Session metadata, using the parent owner for child tabs and `getDefaultSessionWorkdir`.
+  Do not create a directory, start an agent, or replace an unavailable project with
+  a chat workspace just to preview a file.
+- Local preview validates durable Session/machine/child ownership independently of
+  workspace availability. An unavailable workspace permits absolute and home-rooted
+  local reads only, marked external/readonly; never guess a relative base. Remote
+  preview and Code Collab still require their existing workspace resolution.
 - `file-preview-service.ts` never throws for a domain failure: every rejection is a
   typed `status: 'error'` response.
-- `file-preview-path-policy.ts` is the security boundary. Remote `file/preview`
-  requests may read only the session workspace root, `os.tmpdir()`,
+- Shared `node/file-preview-path-policy.ts` is the security boundary. Remote `file/preview`
+  requests may read only the registered session file roots, `os.tmpdir()`,
   `<LodyDataDir>/chats`, and `LODY_FILE_PREVIEW_EXTRA_ROOTS`. The separate
-  local-only `file/resolve-local` IPC method is the Electron user's explicit
+  legacy local-only `file/resolve-local` IPC method is the desktop user's explicit
   same-machine capability and resolves any regular file for Electron; it returns
   identity only, never bytes, and is never added
   to the Loro Streams RPC protocol.
@@ -54,6 +77,10 @@ save path's text reads.
 - A missing target has no realpath, so classify it against BOTH the resolved and the
   unresolved roots. That step only picks the error code; it never grants a read, and
   it still reports `file_not_found` only inside an allowed root.
+- Failed path probes must retain non-missing filesystem errors: EACCES/EPERM are
+  permission failures; other non-ENOENT/ENOTDIR errors are I/O failures. Apply the
+  remote path boundary before returning that classification. Diagnostics stay local
+  and contain identity/error codes, never file contents.
 - Unit-test the fold rule through an injected `FilePreviewDirectoryReader`
   (`file-preview-path-policy.test.ts`), not only against the real filesystem.
 - Remote oversize is refused, never truncated. The read takes one byte past the limit so a
@@ -66,7 +93,8 @@ save path's text reads.
 - **Remote previews remain one bounded complete response. Local content never rides
   that response.** `file/resolve-local` returns the canonical absolute path after
   owner/path resolution; Electron owns bounded content reads and resource lifetime.
-  Negotiate `localFileResources` through the central machine protocol binding.
+  Legacy clients negotiate `localFileResources`. Current Electron resolves and reads
+  directly, using its own disk machine identity rather than daemon ownership checks.
 - `maxBinaryBytes` stays pinned to `SESSION_IMAGE_MAX_SIZE_BYTES`. Do not raise these
   budgets without measuring against the real gateway, since a non-404 4xx append
   failure is not retried.
@@ -77,7 +105,7 @@ save path's text reads.
   capability — do not add one here.** Remote preview serves only the allowlisted
   temp/scratch roots, while Electron's same-machine local preview can inspect
   arbitrary paths. `code-collab/save-text` refuses everything outside the session
-  workspace (lexical check plus `assertRealPathInsideWorkspace` on the
+  roots (lexical check plus `assertRealPathInsideWorkspace` on the
   symlink-resolved path) and cannot create files at all. The client counterpart: an
   `external: true` result must be marked readonly regardless of the file index, or
   the editor offers a Save the machine is guaranteed to reject and the user loses

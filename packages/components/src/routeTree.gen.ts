@@ -27,6 +27,7 @@ import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitat
 import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install';
 import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/checkout-return';
 import { Route as WorkspaceNameAuthRouteImport } from './routes/$workspaceName/_auth';
+import { Route as WorkspaceE2eeWorkspaceIdRouteImport } from './routes/workspace/e2ee/$workspaceId';
 import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings';
 import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions';
 import { Route as WorkspaceNameAuthSchedulesRouteImport } from './routes/$workspaceName/_auth/schedules';
@@ -42,6 +43,7 @@ import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/
 import { Route as WorkspaceNameAuthSettingsPreferencesRouteImport } from './routes/$workspaceName/_auth/settings/preferences';
 import { Route as WorkspaceNameAuthSettingsPeopleRouteImport } from './routes/$workspaceName/_auth/settings/people';
 import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines';
+import { Route as WorkspaceNameAuthSettingsMemoryRouteImport } from './routes/$workspaceName/_auth/settings/memory';
 import { Route as WorkspaceNameAuthSettingsMcpRouteImport } from './routes/$workspaceName/_auth/settings/mcp';
 import { Route as WorkspaceNameAuthSettingsMachinesRouteImport } from './routes/$workspaceName/_auth/settings/machines';
 import { Route as WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/keyboard-shortcuts';
@@ -149,6 +151,11 @@ const WorkspaceNameAuthRoute = WorkspaceNameAuthRouteImport.update({
   id: '/_auth',
   getParentRoute: () => WorkspaceNameRoute,
 } as any);
+const WorkspaceE2eeWorkspaceIdRoute = WorkspaceE2eeWorkspaceIdRouteImport.update({
+  id: '/workspace/e2ee/$workspaceId',
+  path: '/workspace/e2ee/$workspaceId',
+  getParentRoute: () => rootRouteImport,
+} as any);
 const WorkspaceNameAuthSettingsRoute = WorkspaceNameAuthSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -228,6 +235,11 @@ const WorkspaceNameAuthSettingsMyMachinesRoute =
     path: '/my-machines',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
   } as any);
+const WorkspaceNameAuthSettingsMemoryRoute = WorkspaceNameAuthSettingsMemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
 const WorkspaceNameAuthSettingsMcpRoute = WorkspaceNameAuthSettingsMcpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
@@ -344,6 +356,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/schedules': typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
   '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
@@ -360,6 +373,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
   '/$workspaceName/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute;
   '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute;
+  '/$workspaceName/settings/memory': typeof WorkspaceNameAuthSettingsMemoryRoute;
   '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
   '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
   '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
@@ -392,6 +406,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
   '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
   '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
+  '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
   '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
@@ -408,6 +423,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
   '/$workspaceName/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute;
   '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute;
+  '/$workspaceName/settings/memory': typeof WorkspaceNameAuthSettingsMemoryRoute;
   '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
   '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
   '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
@@ -445,6 +461,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/schedules': typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   '/$workspaceName/_auth/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/_auth/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/_auth/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/_auth/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
   '/$workspaceName/_auth/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
@@ -461,6 +478,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
   '/$workspaceName/_auth/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute;
   '/$workspaceName/_auth/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute;
+  '/$workspaceName/_auth/settings/memory': typeof WorkspaceNameAuthSettingsMemoryRoute;
   '/$workspaceName/_auth/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
   '/$workspaceName/_auth/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
   '/$workspaceName/_auth/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
@@ -498,6 +516,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/schedules'
     | '/$workspaceName/sessions'
     | '/$workspaceName/settings'
+    | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/schedules/$scheduleId'
     | '/$workspaceName/sessions/$sessionId'
     | '/$workspaceName/settings/about'
@@ -514,6 +533,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/keyboard-shortcuts'
     | '/$workspaceName/settings/machines'
     | '/$workspaceName/settings/mcp'
+    | '/$workspaceName/settings/memory'
     | '/$workspaceName/settings/my-machines'
     | '/$workspaceName/settings/people'
     | '/$workspaceName/settings/preferences'
@@ -546,6 +566,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/archive'
     | '/$workspaceName/chat'
     | '/$workspaceName/sessions'
+    | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/schedules/$scheduleId'
     | '/$workspaceName/sessions/$sessionId'
     | '/$workspaceName/settings/about'
@@ -562,6 +583,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/keyboard-shortcuts'
     | '/$workspaceName/settings/machines'
     | '/$workspaceName/settings/mcp'
+    | '/$workspaceName/settings/memory'
     | '/$workspaceName/settings/my-machines'
     | '/$workspaceName/settings/people'
     | '/$workspaceName/settings/preferences'
@@ -598,6 +620,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/schedules'
     | '/$workspaceName/_auth/sessions'
     | '/$workspaceName/_auth/settings'
+    | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/_auth/schedules/$scheduleId'
     | '/$workspaceName/_auth/sessions/$sessionId'
     | '/$workspaceName/_auth/settings/about'
@@ -614,6 +637,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/keyboard-shortcuts'
     | '/$workspaceName/_auth/settings/machines'
     | '/$workspaceName/_auth/settings/mcp'
+    | '/$workspaceName/_auth/settings/memory'
     | '/$workspaceName/_auth/settings/my-machines'
     | '/$workspaceName/_auth/settings/people'
     | '/$workspaceName/_auth/settings/preferences'
@@ -644,6 +668,7 @@ export interface RootRouteChildren {
   InviteInvitationIdRoute: typeof InviteInvitationIdRoute;
   JoinTokenRoute: typeof JoinTokenRoute;
   WorkspaceCreateRoute: typeof WorkspaceCreateRoute;
+  WorkspaceE2eeWorkspaceIdRoute: typeof WorkspaceE2eeWorkspaceIdRoute;
 }
 
 declare module '@tanstack/react-router' {
@@ -774,6 +799,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthRouteImport;
       parentRoute: typeof WorkspaceNameRoute;
     };
+    '/workspace/e2ee/$workspaceId': {
+      id: '/workspace/e2ee/$workspaceId';
+      path: '/workspace/e2ee/$workspaceId';
+      fullPath: '/workspace/e2ee/$workspaceId';
+      preLoaderRoute: typeof WorkspaceE2eeWorkspaceIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/$workspaceName/_auth/settings': {
       id: '/$workspaceName/_auth/settings';
       path: '/settings';
@@ -877,6 +909,13 @@ declare module '@tanstack/react-router' {
       path: '/my-machines';
       fullPath: '/$workspaceName/settings/my-machines';
       preLoaderRoute: typeof WorkspaceNameAuthSettingsMyMachinesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/memory': {
+      id: '/$workspaceName/_auth/settings/memory';
+      path: '/memory';
+      fullPath: '/$workspaceName/settings/memory';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMemoryRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/settings/mcp': {
@@ -1041,6 +1080,7 @@ interface WorkspaceNameAuthSettingsRouteChildren {
   WorkspaceNameAuthSettingsKeyboardShortcutsRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
   WorkspaceNameAuthSettingsMachinesRoute: typeof WorkspaceNameAuthSettingsMachinesRoute;
   WorkspaceNameAuthSettingsMcpRoute: typeof WorkspaceNameAuthSettingsMcpRoute;
+  WorkspaceNameAuthSettingsMemoryRoute: typeof WorkspaceNameAuthSettingsMemoryRoute;
   WorkspaceNameAuthSettingsMyMachinesRoute: typeof WorkspaceNameAuthSettingsMyMachinesRoute;
   WorkspaceNameAuthSettingsPeopleRoute: typeof WorkspaceNameAuthSettingsPeopleRoute;
   WorkspaceNameAuthSettingsPreferencesRoute: typeof WorkspaceNameAuthSettingsPreferencesRoute;
@@ -1067,6 +1107,7 @@ const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChil
   WorkspaceNameAuthSettingsKeyboardShortcutsRoute: WorkspaceNameAuthSettingsKeyboardShortcutsRoute,
   WorkspaceNameAuthSettingsMachinesRoute: WorkspaceNameAuthSettingsMachinesRoute,
   WorkspaceNameAuthSettingsMcpRoute: WorkspaceNameAuthSettingsMcpRoute,
+  WorkspaceNameAuthSettingsMemoryRoute: WorkspaceNameAuthSettingsMemoryRoute,
   WorkspaceNameAuthSettingsMyMachinesRoute: WorkspaceNameAuthSettingsMyMachinesRoute,
   WorkspaceNameAuthSettingsPeopleRoute: WorkspaceNameAuthSettingsPeopleRoute,
   WorkspaceNameAuthSettingsPreferencesRoute: WorkspaceNameAuthSettingsPreferencesRoute,
@@ -1136,6 +1177,7 @@ const rootRouteChildren: RootRouteChildren = {
   InviteInvitationIdRoute: InviteInvitationIdRoute,
   JoinTokenRoute: JoinTokenRoute,
   WorkspaceCreateRoute: WorkspaceCreateRoute,
+  WorkspaceE2eeWorkspaceIdRoute: WorkspaceE2eeWorkspaceIdRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

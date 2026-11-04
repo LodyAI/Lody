@@ -5,9 +5,10 @@ Parent rules apply. `CLAUDE.md` is a symlink; edit this file only.
 - Breaking static-publication cutover in progress: do not deploy until the
   anonymous reader, MCP confirmation, GC and integration fixtures switch
   together. [Intent](../../../../../specs/session-sharing.md).
-- `session-share-dialog.tsx` and controlled `session-share-manager.tsx` own
-  authenticated publication. The manager is one screen at a time — setup,
-  publishing, published — with exactly one primary action each.
+- `session-share-dialog.tsx`, `session-share-panel.tsx` and controlled
+  `session-share-manager.tsx` own authenticated publication. The manager is one
+  screen at a time — setup, publishing, published — with exactly one primary
+  action each.
   A human action starts publication; the package is frozen in full before any
   byte is uploaded. Include all selected stored history, including
   thought/tool content with the [sharing projection](../../../../../specs/session-sharing.md).
@@ -16,10 +17,9 @@ Parent rules apply. `CLAUDE.md` is a symlink; edit this file only.
   reuses the frozen retry keys), uploads and commits. There is no publication
   preview or prepare-only action. A stale draft is revoked by the next publish,
   never on dialog open.
-- Progress must stay honest: only the object upload has a byte total, so only it
-  may show a percentage; capture and the publish commit use the indeterminate
-  sweep. Auto-copy may claim "copied" only after the clipboard write resolves; a
-  rejected write shows the manual-copy field.
+- Progress is determinate only for object upload. Claim auto-copy only after clipboard success; otherwise show manual copy.
+- The header panel keeps the editor inline in `session-share-panel.tsx` with the `embedded` manager;
+  `⋯` still opens the dialog.
 - MCP consent names purpose, exact targets and full URL delivery to the agent.
   One approval starts an independent share and encrypted result delivery.
   Hide cards on local or canonical publication success.
@@ -44,7 +44,11 @@ Parent rules apply. `CLAUDE.md` is a symlink; edit this file only.
 - `lib/session-share-publisher.ts` is app-only: hydrate all sources before
   synchronous capture, copy attachments under app authority, and release every
   source lease. Never import it from the anonymous entry. Workspace E2EE will
-  decrypt here before plaintext publication, not on a server or reader.
+  decrypt here before plaintext publication, not on a server or reader. Encrypted
+  publication requires explicit confirmation of the runtime, workspace/root, selected
+  session set and share revision before capture or upload, including updates and MCP
+  approvals. Invalidate changed scopes and reject unavailable selections; ordinary
+  workspaces retain their existing flow. [Decision](../../../../../.agents/notes/implemented/feature/2026-10-28-e2ee-share-plaintext-consent.md).
 - `lib/session-share-secrets.ts` owns device-local credentials scoped by
   user/workspace/share and credential version. Ordinary cache clear preserves them.
   Missing credentials require reset, never recovery from cloud data or Flock.

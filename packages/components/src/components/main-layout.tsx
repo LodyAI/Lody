@@ -1,3 +1,4 @@
+import { MagpieImportDialogContainer } from './settings/magpie-import-dialog-container';
 import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
 import { useAgentRoleSchemaReconciliation } from '@/hooks/use-agent-role-schema-reconciliation';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
@@ -13,6 +14,7 @@ import { BugReportDialogContainer } from './bug-report/bug-report-dialog-contain
 import { JoinCommunityDialogContainer } from './settings/join-community-dialog-container';
 import { StuckConnectionBannerContainer } from './stuck-connection-banner';
 import { DesktopSettingsModal } from './settings/desktop-settings-modal';
+import { ProjectEditorHost } from './settings/project-editor-host';
 import { PromptShortcutProvider } from '../providers/prompt-shortcut-provider';
 export {
   getMobileMainLayoutContentClassName,
@@ -93,6 +95,8 @@ export function MainLayout({
           <JoinCommunityDialogContainer />
           <StuckConnectionBannerContainer />
           {workspaceReady ? <DesktopSettingsModal /> : null}
+          {workspaceReady ? <MagpieImportDialogContainer /> : null}
+          {workspaceReady ? <ProjectEditorHost /> : null}
         </WorkspaceRuntimeShell>
       </PromptShortcutProvider>
     </WorkspaceWindowOwnerContext>

@@ -4,11 +4,12 @@ Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
 `AGENTS.md` only. Prefer extending a primitive here over a private replacement in a
 feature directory.
 
-## Drawer popups
+## Drawers
 
-- `DrawerContent` provides an internal boxless no-drag popup host via state.
-  Keep portals inside that modal and outside scrolling children: body portals
-  inherit Vaul's pointer lock and clicks pass through to the underlying content.
+- Native iOS side drawers stay CSS-sized. Non-chat panels opt into
+  `nativeKeyboardInset`; chat composers own their lift.
+- `DrawerContent` keeps popup/modal hosts state-backed, no-drag, inside the
+  modal and outside scrollers. Body portals inherit pointer lock and pass clicks through.
 
 ## Emoji picker
 
@@ -54,8 +55,8 @@ strings on i18n rather than the registry's inline English.
 - Dialog-contained `OptionSelector` menus must portal into the nearest
   `[data-lody-dialog-content]`; a body portal is outside the modal's scroll and
   focus guards. `src/ui/dialog.tsx` emits that attribute on every panel.
-- `DiffViewer` uses the shared `@pierre/diffs` worker pools for syntax work regardless
-  of file size. Do not create or terminate a worker pool per viewer.
+- `DiffViewer` bounds standalone inline parsing by characters AND lines; syntax
+  and other parsing share Workers. Preserve context/fallbacks; no per-viewer pools.
 - Every floating surface passes `useSafeAreaCollisionPadding` as
   `collisionPadding`; the default parks a colliding surface flush against the
   screen edge and caps `--available-height` there too.
@@ -70,7 +71,7 @@ strings on i18n rather than the registry's inline English.
   while work is in flight is a plain `Button`, never `Action`/`Cancel` —
   those are `Close`, and `Close` always closes.
 - Tooltips come from `@lody/ui/tooltip` (Base UI): `Tooltip.Provider/Root/
-  Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
+Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   provider. The chip is visual-only — no `role="tooltip"`, no
   `aria-describedby` — so an icon-only trigger names itself with `aria-label`.
 - Overlay list hover (menus, command palette, select) is
@@ -105,12 +106,11 @@ strings on i18n rather than the registry's inline English.
 
 ## Scroll area
 
-- Keep the `@radix-ui/react-scroll-area` patch until an upstream version cancels
-  thumb polling on effect cleanup. Verify both ESM and CommonJS with
-  `tests/scroll-area-lifecycle.test.tsx` when upgrading; removing a thumb during
-  the scroll-end debounce must not retain a frame loop or detached viewport.
-- `loro-sidebar.tsx` uses `type="scroll"` so the overlay thumb appears only while
-  scrolling; do not revert to the Radix default `hover`.
+- Use `@lody/ui/scroll-area` (Base UI). Its `viewportRef` is the scrolling node;
+  never query vendor attributes from the root. Native controls share its tokens
+  through `nativeScrollbar`; `../tailwind/scrollbars.css` covers product containers.
+  Hidden bars, compact tracks and conversation gutters stay local.
+- Sidebar keeps `visibility="scroll"` (visible while scrolling), never `hover`.
 
 ## Slider
 

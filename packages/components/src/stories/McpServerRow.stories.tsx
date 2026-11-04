@@ -56,6 +56,18 @@ export const Http: Story = {
     },
   },
 };
+export const AuthorizationRequired: Story = {
+  args: {
+    ...Http.args,
+    toolList: { status: 'error' },
+    authentication: {
+      type: 'mcp/authentication',
+      status: 'required',
+      hasCredentials: false,
+      reason: 'oauth_required',
+    },
+  },
+};
 export const WithoutConnection: Story = {
   args: {
     server: {

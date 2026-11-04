@@ -6,6 +6,7 @@ import { atomEffect } from 'jotai-effect';
 import type { LoroRepo } from 'loro-repo';
 import {
   isLoroRepoDocDeleted,
+  resolveSessionPullRequests,
   getSessionRoomId,
   isAgentConfigDocRoomId,
   isMachineDocRoomId,
@@ -17,10 +18,16 @@ import {
   type SessionId,
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from './runtime';
+import {
+  clearSessionRunConfigDraftsAtom,
+  sessionRunConfigDraftAccountAtom,
+  sessionRunConfigDraftsAtom,
+} from './session-run-config-drafts';
 import { mergeBootstrapMetaCache } from '@/lib/doc-meta-bootstrap';
 import { listDocMetaEntries, type DocMetaCacheSnapshot } from '@/lib/doc-meta-batch';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
+import { describeErrorType } from '@/lib/workspace-data-scope';
 
 // ---------------------------------------------------------------------------
 // Runtime guard for metadata entering the cache.
@@ -127,8 +134,8 @@ const DOC_META_EVENT_FLUSH_BATCH_SIZE = 50;
 
 function sessionListEntryEqual(a: SessionMeta, b: SessionMeta): boolean {
   for (const key of SESSION_LIST_VISIBLE_KEYS) {
-    const av = a[key];
-    const bv = b[key];
+    const av = key === 'pullRequests' ? resolveSessionPullRequests(a) : a[key];
+    const bv = key === 'pullRequests' ? resolveSessionPullRequests(b) : b[key];
     if (av === bv) continue;
     if (!jsonValueEqual(av, bv)) return false;
   }
@@ -245,6 +252,49 @@ export type DocMetaCacheScope = {
 
 /** Identifies which runtime owns the current singleton metadata projection. */
 export const docMetaCacheScopeAtom = atom<DocMetaCacheScope | null>(null);
+
+/** Public-ID-only automation projection. This names an expected execution
+ * target; it is not a write, persistence or execution receipt. */
+export const sessionMetaIdentityAtomFamily = atomFamily((sessionId: SessionId) => {
+  let previous: {
+    workspaceId: WorkspaceRuntime['workspaceId'];
+    sessionId: SessionId;
+    machineId: NonNullable<SessionMeta['machineId']>;
+  } | null = null;
+  return atom((get) => {
+    const runtime = get(activeWorkspaceRuntimeAtom);
+    const scope = get(docMetaCacheScopeAtom);
+    const roomId = getSessionRoomId(sessionId);
+    const meta = get(sessionMetaCacheAtom)[roomId];
+    if (
+      !runtime ||
+      !scope?.ready ||
+      scope.runtime !== runtime ||
+      scope.workspaceId !== runtime.workspaceId ||
+      scope.workspaceSlug !== runtime.workspaceSlug ||
+      get(docMetaProjectionPendingAtomFamily(roomId)) ||
+      !meta ||
+      meta.id !== sessionId ||
+      typeof meta.machineId !== 'string' ||
+      !meta.machineId.trim()
+    ) {
+      previous = null;
+      return null;
+    }
+    if (
+      previous?.workspaceId === scope.workspaceId &&
+      previous.sessionId === meta.id &&
+      previous.machineId === meta.machineId
+    )
+      return previous;
+    previous = {
+      workspaceId: scope.workspaceId,
+      sessionId: meta.id,
+      machineId: meta.machineId,
+    };
+    return previous;
+  });
+});
 
 /**
  * The ready projection for `repo`, or null while it bootstraps or belongs to
@@ -562,6 +612,19 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   }
 
   let cancelled = false;
+  const draftOwner = get.peek(sessionRunConfigDraftAccountAtom);
+  const clearDeletedSessionDraft = (
+    sessionId: string,
+    lifetime = get.peek(sessionRunConfigDraftAccountAtom).lifetime
+  ) => {
+    if (!runtime.accountId) return;
+    set(clearSessionRunConfigDraftsAtom, {
+      accountId: runtime.accountId,
+      lifetime,
+      workspaceId: runtime.workspaceId,
+      sessionIds: [sessionId],
+    });
+  };
   const pendingReadEpochByDocId = new Map<string, number>();
   const pendingExistenceCounts = new Map<string, number>();
   const markedPendingDocIds = new Set<string>();
@@ -892,6 +955,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
 
   const handle = runtime.repo.watch(
     (event) => {
+      if (cancelled) return;
       if (event.kind === 'doc-metadata') {
         const patch = event.patch as Record<string, unknown>;
         // Local writes have already been accepted by Meta Flock. Apply them to
@@ -919,6 +983,10 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
       } else if ((event as { kind: string }).kind === 'doc-existence-changed') {
         const e = event as unknown as { kind: string; docId: string; from: string; to: string };
         if (e.to !== 'deleted' && e.to !== 'active' && e.to !== 'missing') return;
+        if (e.to === 'deleted' && isSessionDocRoomId(e.docId)) {
+          // Invalidate edit leases immediately, not after the metadata batch.
+          clearDeletedSessionDraft(e.docId.slice(SESSION_DOC_PREFIX.length));
+        }
         pendingExistenceCounts.set(e.docId, (pendingExistenceCounts.get(e.docId) ?? 0) + 1);
         setProjectionPending(e.docId, true);
         if (e.to === 'deleted') {
@@ -933,6 +1001,29 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     },
     { kinds: ['doc-metadata', 'doc-existence-changed'] as string[] as never }
   );
+
+  // A session may have been deleted while this workspace was not open. Probe
+  // only actual drafts, and require a deletion marker: missing metadata during
+  // bootstrap is not proof of deletion. Reads do not acquire Session stores.
+  const workspaceDrafts = [...get.peek(sessionRunConfigDraftsAtom).values()].filter(
+    ({ scope }) =>
+      scope.accountId === runtime.accountId && scope.workspaceId === runtime.workspaceId
+  );
+  const draftSessionIds = new Set(workspaceDrafts.map(({ scope }) => scope.sessionId));
+  for (const sessionId of draftSessionIds) {
+    const docId = getSessionRoomId(sessionId as SessionId);
+    void runtime.repo.getDocMeta(docId).then(
+      (entry) => {
+        if (cancelled) return;
+        if (isLoroRepoDocDeleted(entry)) {
+          clearDeletedSessionDraft(sessionId, draftOwner.lifetime);
+        }
+      },
+      (error: unknown) => {
+        if (!cancelled) console.warn('[doc-meta] Failed to check draft session existence', error);
+      }
+    );
+  }
 
   // Started after the watch above so the live subscription covers the whole scan
   // window. The scan and live events overlap regardless, so merge per field: a
@@ -972,7 +1063,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
         workspaceId: runtime.workspaceId,
         workspaceSlug: runtime.workspaceSlug,
         ready: false,
-        scanFailure: { errorType: error instanceof Error ? error.name || 'Error' : typeof error },
+        scanFailure: { errorType: describeErrorType(error) },
       });
     }
   );

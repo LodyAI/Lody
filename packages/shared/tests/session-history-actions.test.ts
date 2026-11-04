@@ -7,8 +7,12 @@ import {
   type SessionTurn,
   type SessionEntry,
   type SessionTurnStatus,
+  applyHistoryAction,
 } from '../src/session-data';
 import type { SessionId } from '../src/ids';
+import type { StoredLodyOperation } from '../src/session-orchestration';
+import { createHistoryWriter } from '../src/history-writer';
+import { planOperationProgress } from '../src/session-data/operation-progress';
 const sid = 'actions' as SessionId;
 const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry => ({
   id,
@@ -16,6 +20,137 @@ const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry 
   timestamp: '2026-01-01T00:00:00Z',
   items: [{ type: 'text', text: id }],
   fileDiff: [],
+});
+
+describe('operation progress local history writes', () => {
+  const operation = (): StoredLodyOperation => ({
+    workspaceId: 'workspace' as StoredLodyOperation['workspaceId'],
+    ownerMachineId: 'machine' as StoredLodyOperation['ownerMachineId'],
+    requesterSessionId: sid,
+    requesterUserId: 'user',
+    operationId: 'op',
+    kind: 'session_create_many',
+    fingerprint: 'synthetic',
+    canonicalCommand: {},
+    frozenContinuationConfig: { inputConfig: {} },
+    initiatorChainDepth: 0,
+    createdAt: '2026-01-01T00:00:00Z',
+    deadlineAt: '2026-01-02T00:00:00Z',
+    state: 'active',
+    items: [
+      {
+        status: 'active',
+        inputDurable: true,
+        target: { sessionId: 'child' as SessionId, userTurnId: 'input' },
+      },
+    ],
+  });
+  const action = (op = operation()) => ({
+    kind: 'operation-progress' as const,
+    operation: op,
+    timestamp: '2026-01-01T00:00:00Z',
+    statuses: [['child\0input', 'running']] as const,
+  });
+
+  it('follows imported duplicate cards and uncommitted row shifts without stale positions', async () => {
+    const doc = new LoroDoc();
+    const data = createLoroSessionData({ sessionId: sid, doc });
+    await data.commands.applyHistoryAction(action());
+    const peer = new LoroDoc();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    const peerWriter = createHistoryWriter(peer);
+    const card = planOperationProgress([], operation(), action().timestamp)[0]!;
+    peerWriter.append({ ...card, id: `${card.id}:duplicate:peer` });
+    doc.import(peer.export({ mode: 'update' }));
+    doc.getList('history').insert(0, row('pending') as never);
+    expect(
+      await data.commands.applyHistoryAction({
+        ...action(),
+        statuses: [['child\0input', 'succeeded']],
+      })
+    ).toEqual({ matched: true });
+    peer.import(doc.export({ mode: 'update' }));
+    expect(peer.toJSON()).toEqual(doc.toJSON());
+    expect(await data.history.readAll()).toHaveLength(2);
+    expect((await data.history.readAll())[0]?.id).toBe('pending');
+    data.dispose();
+  });
+
+  it('merges concurrent canonical copies without regressing a terminal target and converges by local updates', () => {
+    const left = new LoroDoc();
+    const right = new LoroDoc();
+    const leftWriter = createHistoryWriter(left);
+    const rightWriter = createHistoryWriter(right);
+    leftWriter.updateOperationProgress(action());
+    rightWriter.updateOperationProgress({ ...action(), statuses: [['child\0input', 'succeeded']] });
+    left.import(right.export({ mode: 'update' }));
+    expect(leftWriter.readStored()).toHaveLength(2);
+    const observer = new LoroDoc();
+    observer.import(left.export({ mode: 'snapshot' }));
+    const unsubscribe = left.subscribeLocalUpdates((update) => observer.import(update));
+    expect(leftWriter.updateOperationProgress(action())).toBe(true);
+    expect(leftWriter.readStored()).toHaveLength(1);
+    expect(leftWriter.readStored()[0]).toMatchObject({
+      items: [{ items: [{ status: 'succeeded' }] }],
+    });
+    right.import(left.export({ mode: 'update' }));
+    expect(right.toJSON()).toEqual(left.toJSON());
+    // A transport subscribed only to local updates must receive the reconciliation.
+    expect(observer.toJSON()).toEqual(left.toJSON());
+    const count = right.opCount();
+    expect(rightWriter.updateOperationProgress(action())).toBe(false);
+    expect(right.opCount()).toBe(count);
+    unsubscribe();
+    observer.free();
+  });
+
+  it('retains the canonical card metadata when an older alias precedes it', () => {
+    const doc = new LoroDoc();
+    const writer = createHistoryWriter(doc);
+    const card = planOperationProgress([], operation(), action().timestamp)[0]!;
+    writer.append({ ...card, id: `${card.id}:duplicate:first`, timestamp: '2025-01-01T00:00:00Z' });
+    writer.append(row('between'));
+    writer.append(card);
+    const list = doc.getList('history');
+    const canonical = list.get(2) as LoroMap;
+    canonical.set('future', { retained: true });
+    expect(writer.updateOperationProgress(action())).toBe(true);
+    expect(writer.readStored().map((entry) => entry.id)).toEqual(['between', card.id]);
+    expect(writer.readStored()[1]).toMatchObject({
+      timestamp: card.timestamp,
+      future: { retained: true },
+    });
+    expect((list.get(1) as LoroMap).id).toBe(canonical.id);
+  });
+
+  it('treats unchanged progress with stored extension fields as a no-op', () => {
+    const doc = new LoroDoc();
+    const writer = createHistoryWriter(doc);
+    writer.updateOperationProgress(action());
+    const card = doc.getList('history').get(0) as LoroMap;
+    const content = (card.get('items') as LoroList).get(0) as LoroMap;
+    content.set('future', { retained: true });
+    const item = (content.get('items') as LoroList).get(0) as LoroMap;
+    (item.get('target') as LoroMap).set('futureTarget', { retained: true });
+    doc.commit();
+    const before = doc.toJSON();
+    const count = doc.opCount();
+    expect(writer.updateOperationProgress(action())).toBe(false);
+    expect(doc.opCount()).toBe(count);
+    expect(doc.toJSON()).toEqual(before);
+    expect(
+      writer.updateOperationProgress({ ...action(), statuses: [['child\0input', 'succeeded']] })
+    ).toBe(true);
+    expect(writer.readStored()[0]).toMatchObject({
+      items: [
+        {
+          future: { retained: true },
+          items: [{ status: 'succeeded', target: { futureTarget: { retained: true } } }],
+        },
+      ],
+    });
+    expect(writer.updateOperationProgress(action())).toBe(false);
+  });
 });
 for (const backend of ['loro'] as const)
   describe(`history actions ${backend}`, () => {
@@ -57,38 +192,67 @@ for (const backend of ['loro'] as const)
       ).toBe(false);
       expect(await data.history.readAll()).toEqual(after);
     });
-    it('preserves permission outcomes when a request is repeated', async () => {
-      const data = create();
-      await data.commands.appendTurn({
-        ...row('a'),
-        items: [
+    it.each(['switch_mode', 'execute'] as const)(
+      'merges pending %s review content before the user answers',
+      async (kind) => {
+        const data = create();
+        const preview = [
+          { type: 'content' as const, content: { type: 'text' as const, text: '{}' } },
+        ];
+        const review = [
           {
-            type: 'tool_call',
-            toolCallId: 'c',
-            status: 'pending',
-            title: 'existing',
-            permissionRequest: {
-              requestId: 'old',
-              options: [],
-              outcome: { outcome: 'cancelled' },
-            },
+            type: 'content' as const,
+            content: { type: 'text' as const, text: '# Plan\n\nAdd a regression test.' },
           },
-        ],
-      });
-      await data.commands.applyHistoryAction({
-        kind: 'permission-request',
-        requestId: 'new',
-        request: {
+          {
+            type: 'content' as const,
+            content: { type: 'text' as const, text: 'Requesting approval to implement' },
+          },
+        ];
+        await data.commands.appendTurn({
+          ...row('a'),
+          items: [
+            { type: 'tool_call', toolCallId: 'c', kind, status: 'in_progress', content: preview },
+          ],
+        });
+        const request = {
           sessionId: 'acp',
-          toolCall: { toolCallId: 'c', title: 'incoming' },
-          options: [],
-        },
-      });
-      expect((await data.history.readAll())[0]?.items?.[0]).toMatchObject({
-        title: 'existing',
-        permissionRequest: { requestId: 'new', outcome: { outcome: 'cancelled' } },
-      });
-    });
+          toolCall: { toolCallId: 'c', content: review },
+          options: [{ optionId: 'approve', name: 'Approve', kind: 'allow_once' as const }],
+        };
+        await data.commands.applyHistoryAction({
+          kind: 'permission-request',
+          requestId: 'review',
+          request,
+        });
+        const expected = kind === 'switch_mode' ? review : preview;
+        expect((await data.history.readAll())[0]?.items?.[0]).toMatchObject({
+          content: expected,
+          permissionRequest: { requestId: 'review', options: request.options },
+        });
+        const item = (await data.history.readAll())[0]?.items?.[0];
+        expect(item?.type === 'tool_call' && item.permissionRequest?.outcome).toBeUndefined();
+
+        // A request without content must not erase the displayed review.
+        await data.commands.applyHistoryAction({
+          kind: 'permission-request',
+          requestId: 'review',
+          request: { ...request, toolCall: { toolCallId: 'c' } },
+        });
+        expect((await data.history.readAll())[0]?.items?.[0]).toMatchObject({ content: expected });
+        await data.commands.respondPermission('review', { outcome: 'cancelled' });
+        await data.commands.applyHistoryAction({
+          kind: 'permission-request',
+          requestId: 'review',
+          request: { ...request, toolCall: { toolCallId: 'c', content: preview } },
+        });
+        expect((await data.history.readAll())[0]?.items?.[0]).toMatchObject({
+          content: expected,
+          permissionRequest: { outcome: { outcome: 'cancelled' } },
+        });
+        data.dispose();
+      }
+    );
     it('finishes only the requested assistant and preserves its original end time', async () => {
       const data = create();
       await seed(data);
@@ -151,94 +315,44 @@ for (const backend of ['loro'] as const)
         ).matched
       ).toBe(false);
     });
-    it('rejects malformed token usage without changing history', async () => {
+    it('sums a known per-turn cost and keeps mixed unknown costs unknown', async () => {
       const data = create();
       await seed(data);
-      const before = await data.history.readAll();
-      await expect(
-        data.commands.applyHistoryAction({
-          kind: 'assistant-token-usage',
-          turnId: 'a',
-          add: {
-            inputTokens: -1,
-            outputTokens: 0,
-            cacheReadInputTokens: 0,
-            cacheCreationInputTokens: 0,
-            reasoningOutputTokens: 0,
-          },
-        })
-      ).rejects.toThrow();
-      expect(await data.history.readAll()).toEqual(before);
-    });
-    it('rejects malformed content without changing history', async () => {
-      const data = create();
-      await seed(data);
-      const before = await data.history.readAll();
-      await expect(
-        data.commands.applyHistoryAction({
-          kind: 'assistant-items',
-          turnId: 'a',
-          mode: 'replace',
-          items: [{ type: 'text', text: 42 } as never],
-        })
-      ).rejects.toThrow();
-      expect(await data.history.readAll()).toEqual(before);
-    });
-  });
-it('retains an opaque stored item during a named field action', async () => {
-  const doc = new LoroDoc();
-  const data = createLoroSessionData({ sessionId: sid, doc });
-  await data.commands.appendTurn(row('a'));
-  const map = doc.getList('history').get(0) as LoroMap;
-  const items = map.get('items') as LoroList;
-  items.push({ type: 'future', payload: { keep: true } });
-  doc.commit();
-  await data.commands.applyHistoryAction({ kind: 'finish-assistant', turnId: 'a', endedAt: 42 });
-  expect((await data.history.readAll())[0]?.items?.[1]).toEqual({
-    type: 'future',
-    payload: { keep: true },
-  });
-});
+      const usage = (inputTokens: number, costUSD: number | null | undefined) => ({
+        inputTokens,
+        outputTokens: 5,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 1,
+        reasoningOutputTokens: 2,
+        ...(costUSD !== undefined ? { costUSD } : {}),
+      });
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(10, 0.5),
+      });
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(3, 0.25),
+      });
+      expect((await data.history.readAll())[1]?.tokenUsage).toMatchObject({ costUSD: 0.75 });
 
-for (const backend of ['loro'] as const)
-  it(`${backend}: an ended-steer fallback only changes pending_apply`, async () => {
-    const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
-    await data.commands.appendTurn({ ...row('u', 'user'), status: 'pending_apply' });
-    const action = {
-      kind: 'user-status' as const,
-      turnId: 'u',
-      status: 'pending' as const,
-      onlyPendingApply: true,
-    };
-    expect((await data.commands.applyHistoryAction(action)).matched).toBe(true);
-    await data.commands.applyHistoryAction({
-      kind: 'user-status',
-      turnId: 'u',
-      status: 'processing',
+      // Once a contribution has no tariff, the turn total is unknown rather than partial.
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(1, undefined),
+      });
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(1, 0.1),
+      });
+      expect((await data.history.readAll())[1]?.tokenUsage).toMatchObject({ costUSD: null });
     });
-    expect((await data.commands.applyHistoryAction(action)).matched).toBe(false);
-    expect((await data.history.readAll())[0]).toMatchObject({ status: 'processing', read: true });
-    expect((await data.commands.applyHistoryAction({ ...action, turnId: 'missing' })).matched).toBe(
-      false
-    );
-    expect(
-      (
-        await data.commands.applyHistoryAction({
-          kind: 'user-status',
-          turnId: 'missing',
-          status: 'pending',
-          requeueUndelivered: true,
-        })
-      ).matched
-    ).toBe(true);
-    await data.commands.appendTurn({ ...row('a'), fileDiff: [{ filePath: 'x', add: 1, del: 0 }] });
-    await data.commands.applyHistoryAction(
-      JSON.parse(
-        JSON.stringify({ kind: 'assistant-file-diff', turnId: 'a', change: { kind: 'clear' } })
-      )
-    );
-    expect((await data.history.readAll())[1]).not.toHaveProperty('fileDiff');
   });
+
 describe('user status on duplicate turn copies', () => {
   const withCopies = async (...statuses: SessionTurnStatus[]) => {
     const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
@@ -318,6 +432,29 @@ describe('user status on duplicate turn copies', () => {
       ['pending', null],
     ]);
   });
+
+  it('settles unclaimed input only while every copy still awaits a start', async () => {
+    const settle = {
+      kind: 'user-status',
+      turnId: 'u',
+      status: 'canceled',
+      onlyAwaitingStart: true,
+    } as const;
+    const unclaimed = await withCopies('pending', 'seen');
+    expect((await unclaimed.data.commands.applyHistoryAction(settle)).matched).toBe(true);
+    expect(await unclaimed.copies()).toEqual([
+      ['canceled', null],
+      ['canceled', null],
+    ]);
+    for (const claimed of ['processing', 'handled', 'pending_apply'] as const) {
+      const { data, copies } = await withCopies(claimed, 'pending');
+      expect((await data.commands.applyHistoryAction(settle)).matched).toBe(false);
+      expect(await copies()).toEqual([
+        [claimed, null],
+        ['pending', null],
+      ]);
+    }
+  });
 });
 
 it('business full reads preserve normalization without rewriting opaque stored history', async () => {
@@ -371,14 +508,88 @@ it.each(['handled', 'failed', 'canceled', 'delivery_unknown'] as const)(
   }
 );
 
-it('Loro structural actions report membership changes even without a target hint', async () => {
+it('updates one matching batch receipt while preserving the original user input and other batches', async () => {
   const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
-  const changes: unknown[] = [];
-  const subscription = data.history.observe((change) => changes.push(change));
-  await subscription.initial;
-  await data.commands.applyHistoryAction({ kind: 'upsert-turn', turn: row('a') });
-  expect(changes.at(-1)).toMatchObject({ kind: 'structure', from: 0, to: 1 });
-  await data.commands.applyHistoryAction({ kind: 'remove-turn', turnId: 'a' });
-  expect(changes.at(-1)).toMatchObject({ kind: 'structure', from: 0, to: 0 });
-  subscription.unsubscribe();
+  const input = {
+    ...row('user', 'user'),
+    inputConfig: { prompt: 'current request', chainDepth: 0 },
+  };
+  await data.commands.appendTurn(input);
+  for (const id of ['one', 'two'])
+    await data.commands.appendTurn({
+      ...row(id, 'system'),
+      items: [
+        {
+          type: 'operation_completion_batch',
+          batchId:
+            id === 'one'
+              ? '00000000-0000-4000-8000-000000000001'
+              : '00000000-0000-4000-8000-000000000002',
+          memberCount: 8,
+          deliveryStatus: 'prepared',
+        },
+      ],
+    });
+  expect(
+    (
+      await data.commands.applyHistoryAction({
+        kind: 'operation-batch-status',
+        turnId: 'one',
+        batchId: 'wrong',
+        status: 'unknown',
+      })
+    ).matched
+  ).toBe(false);
+  await data.commands.applyHistoryAction({
+    kind: 'operation-batch-status',
+    turnId: 'one',
+    batchId: '00000000-0000-4000-8000-000000000001',
+    status: 'unknown',
+  });
+  const history = await data.history.readAll();
+  expect(history[0]).toEqual(input);
+  expect(history[1]?.items?.[0]).toMatchObject({
+    batchId: '00000000-0000-4000-8000-000000000001',
+    deliveryStatus: 'unknown',
+  });
+  expect(history[2]?.items?.[0]).toMatchObject({
+    batchId: '00000000-0000-4000-8000-000000000002',
+    deliveryStatus: 'prepared',
+  });
+  expect(
+    (
+      await data.commands.applyHistoryAction({
+        kind: 'operation-batch-status',
+        turnId: 'one',
+        batchId: '00000000-0000-4000-8000-000000000001',
+        status: 'unknown',
+      })
+    ).matched
+  ).toBe(false);
+});
+
+it('keeps manual Stop provenance on the exact user turn across peer import and shallow output reads', async () => {
+  const doc = new LoroDoc();
+  const data = createLoroSessionData({ sessionId: sid, doc });
+  await data.commands.appendTurn({ ...row('stopped', 'user'), status: 'processing' });
+  await data.commands.appendTurn({ ...row('other', 'user'), status: 'pending' });
+  await data.commands.applyHistoryAction({
+    kind: 'user-status',
+    turnId: 'stopped',
+    status: 'canceled',
+    cancellationReason: 'user_stop',
+  });
+  const peer = new LoroDoc();
+  peer.import(doc.export({ mode: 'snapshot' }));
+  const copy = createLoroSessionData({ sessionId: sid, doc: peer });
+  expect((await copy.history.readTurnOutput('stopped'))[0]).toMatchObject({
+    id: 'stopped',
+    status: 'canceled',
+    cancellationReason: 'user_stop',
+  });
+  expect(await copy.history.readTurn('other')).toMatchObject({
+    state: 'ready',
+    turn: { status: 'pending' },
+  });
+  expect(await copy.history.readTurn('other')).not.toHaveProperty('turn.cancellationReason');
 });

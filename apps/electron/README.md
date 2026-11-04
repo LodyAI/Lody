@@ -2,6 +2,18 @@
 
 Lody desktop application built with Electron, React, and TypeScript.
 
+The desktop pins Electron 44.7.0 and requires macOS 13 or newer on Mac.
+This runtime is compatible with the pinned DeepSeek Harness native loader;
+see the [runtime compatibility decision](../../.agents/notes/implemented/bug-fix/2026-10-10-dsh-electron-runtime.md).
+
+## Conversation links
+
+All versions generate `lody://session/<id>?workspace=<id>`. In-app links stay in
+the current installation; external links use the OS default selected in Settings →
+About. Startup does not replace an existing default; packaged Windows fills an absent handler after first launch. Version-specific schemes remain for
+explicit handoff and login callbacks. The shared packaging hook advertises both
+resource and callback protocols; see the [deep-link contract](../../specs/deep-links.md).
+
 ## Recommended IDE Setup
 
 - [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Oxc](https://marketplace.visualstudio.com/items?itemName=oxc.oxc-vscode)
@@ -13,6 +25,12 @@ Lody desktop application built with Electron, React, and TypeScript.
 ```bash
 $ pnpm install
 ```
+
+Postinstall prepares the Electron binary and, on macOS, builds Sparkle through its
+own installer. SQLite and the embedded CLI native packages use their shipped
+Node-API prebuilds; installation does not rebuild them for an Electron ABI.
+Packaging stages the target platform/architecture binaries and probes them before
+signing.
 
 ### Open-source desktop development
 
@@ -31,6 +49,25 @@ instance.
 an OSS build that has already been prepared. It deliberately skips rebuilding
 and should not be used as the normal development command.
 
+CLI diagnostics share `<data dir>/logs/<local date>.log`. The `cli-probe` scope
+records failed runtime-state requests and recovery, including error type, duration,
+PID and consecutive request failures; healthy polling stays silent. The count
+includes startup/reconcile reads, so it differs from the supervisor's poll counter.
+Use these traces with `cli-supervisor` state transitions to distinguish local probe
+failure from backend reconnecting with an available runtime. See the
+[identity investigation](../../.agents/notes/implemented/bug-fix/2026-10-11-sidebar-machine-order-stability.md).
+
+### Test builds
+
+For a local test artifact, run `pnpm --dir apps/electron build:app:test` after
+building and syncing the embedded CLI. Run `pnpm check` separately. This explicit
+entry uses `scripts/electron.vite.test.config.ts`, skips duplicate typechecking and
+minification, disables source maps and compressed-size reporting, and targets
+native modern renderer syntax. Outputs are isolated under `.test-build/electron/out` at the repository root and include `test-build.json`.
+Main externals, renderer entries, CSP and native probes are preserved. These
+artifacts are for tests; normal build and packaging commands retain the original
+release configuration.
+
 ### Cloud browser login
 
 Cloud composition uses a main-process login coordinator; the OSS composition never
@@ -39,6 +76,10 @@ subscribe to revisioned login snapshots. Organization hydration is separately
 retryable and cannot sign the user out. See the
 [login contract](../../specs/desktop-browser-login.md) and
 [decision](../../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.md).
+
+Main authentication requests use Chromium networking after app readiness, retaining
+Better Auth's credential storage hooks and cancellation. Certificate failures explain
+which clock, network, or trust settings to check before starting a fresh attempt.
 
 ### Desktop performance bar
 

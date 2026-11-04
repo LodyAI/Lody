@@ -143,6 +143,14 @@ export type LocalProjectMeta = {
   createdAtMs: number;
   lastOpenedAtMs?: number;
   history?: LocalProjectHistoryCatalogs;
+  /**
+   * `owner/repo` of the folder's GitHub remote, observed by the owning daemon.
+   * The renderer may persist its validated prepare-add inspection on registration.
+   * Absent for folders without one and from older daemons.
+   */
+  githubRepoFullName?: string;
+  /** Explicit standalone membership; false for folder-only imports. Legacy rows default true. */
+  standaloneVisible?: boolean;
 };
 
 const DEFAULT_BASE_BRANCH = 'main';
@@ -203,44 +211,6 @@ export function isDirectLocalProject(project: unknown, sessionIsWorktree?: unkno
   return (
     typedProject.kind === 'local' && typedProject.useWorktree !== true && sessionIsWorktree !== true
   );
-}
-
-/**
- * Structural, brand-agnostic view of a `ProjectRef` so this helper accepts both
- * the branded `ProjectRef` (web) and the Zod-inferred preparation spec (CLI),
- * whose `localProjectId` is a plain string.
- */
-type ProjectRefDedupInput =
-  | { kind: 'github'; repoFullName: string; branch: string }
-  | {
-      kind: 'local';
-      localProjectId: string;
-      branch?: string;
-      githubRepoFullName?: string;
-      useWorktree?: boolean;
-    };
-
-/**
- * Produces a stable, JSON-comparable value from a `ProjectRef` so that the CLI's
- * session-preparation claim key and the client's preparation request key derive
- * the SAME identity. Both sides MUST consume this single definition: if the shapes
- * drift, preparations silently stop being claimed and every draft falls back to a
- * cold start with no error. Returns `null` when there is no project.
- */
-export function normalizeProjectRefForDedup(
-  project: ProjectRefDedupInput | null | undefined
-): unknown {
-  if (!project) return null;
-  if (project.kind === 'github') {
-    return ['github', project.repoFullName, project.branch];
-  }
-  return [
-    'local',
-    project.localProjectId,
-    project.branch ?? null,
-    project.githubRepoFullName ?? null,
-    project.useWorktree === true,
-  ];
 }
 
 export function resolveBaseBranchPreference(options: {

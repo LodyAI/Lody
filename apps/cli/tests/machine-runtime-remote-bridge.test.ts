@@ -24,7 +24,7 @@ const deferred = <T>(): Deferred<T> => {
   return { promise, resolve };
 };
 
-const createHarness = () => {
+const createHarness = (encrypted = false) => {
   // Stateful shared-resource model: attach/detach flip the same booleans the
   // real LoroDocumentManager transport + MessageHandler backfill gate flip.
   const state = { transportAttached: false, backfillEnabled: false };
@@ -52,7 +52,13 @@ const createHarness = () => {
       throw new Error('not used');
     },
     workspaceDocument: workspaceDocument as never,
-    handlerConfig: { token: 'token' } as never,
+    handlerConfig: {
+      token: 'token',
+      encryptedWorkspace: encrypted,
+      workspaceId: 'workspace',
+      machineId: 'machine',
+      userId: 'owner',
+    } as never,
     logger: createSilentLogger(),
   } satisfies MachineRuntimeOptions);
   (runtime as unknown as { handler: unknown }).handler = handler;
@@ -129,4 +135,42 @@ describe('MachineRuntime remote bridge transitions', () => {
     expect(state.transportAttached).toBe(true);
     expect(state.backfillEnabled).toBe(true);
   });
+});
+
+it('admits encrypted file and preview features through machine dispatch while rejecting foreign routing and requester identity', async () => {
+  const { runtime, handler } = createHarness(true);
+  const files = new Map<string, string>();
+  Object.assign(handler, {
+    handleLocalMachineRpc: async (
+      request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+    ) => {
+      if (request.method === 'code-collab/save-text' && request.params.text.encoding === 'plain')
+        files.set(request.params.path, request.params.text.text);
+      return { ok: true, result: { status: 'ok' } };
+    },
+  });
+  const request = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    method: 'code-collab/save-text' as const,
+    params: {
+      sessionId: 'session',
+      requestedByUserId: 'owner',
+      path: 'private.ts',
+      baseDigest: 'sha256:' + '11'.repeat(32),
+      text: { encoding: 'plain' as const, text: 'private contents', rawBytes: 16 },
+    },
+  };
+  await runtime.handleEncryptedFeatureRpc(request);
+  expect(files.get('private.ts')).toBe('private contents');
+  await expect(
+    runtime.handleEncryptedFeatureRpc({ ...request, workspaceId: 'other' })
+  ).rejects.toThrow('e2ee_feature_scope');
+  await expect(
+    runtime.handleEncryptedFeatureRpc({
+      ...request,
+      params: { ...request.params, requestedByUserId: 'other', path: 'foreign.ts' },
+    })
+  ).rejects.toThrow('e2ee_feature_requester');
+  expect([...files.keys()]).toEqual(['private.ts']);
 });

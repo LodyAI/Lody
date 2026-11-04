@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+/** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,8 +15,18 @@ const mocks = vi.hoisted(() => ({
     isPending: false,
     isRetrying: false,
     confirmedUnauthenticated: false,
-    rawData: { session: { id: 'session-1' } },
+    rawData: { session: { id: 'session-1' } } as { session: { id: string } } | null,
   },
+}));
+
+vi.mock('../src/components/auth-recovery-error', () => ({
+  AuthRecoveryError: ({ onRetry, isRecovering }: { onRetry: () => void; isRecovering: boolean }) =>
+    isRecovering ? null : (
+      <div role="alert">
+        <span>Authentication recovery failed</span>
+        <button onClick={onRetry}>Retry</button>
+      </div>
+    ),
 }));
 
 vi.mock('convex/react', () => ({
@@ -34,6 +45,10 @@ import {
   useAuthenticatedConvex,
   type AuthenticatedConvexContextValue,
 } from '../src/hooks/use-authenticated-convex';
+import {
+  CONVEX_AUTH_RECOVERY_DELAYS_MS,
+  CONVEX_AUTH_RECOVERY_TIMEOUT_MS,
+} from '../src/lib/authed-convex-query';
 import { AuthenticatedConvexProvider } from '../src/providers/authenticated-convex-provider';
 
 (
@@ -47,6 +62,7 @@ describe('AuthenticatedConvexProvider', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
     mocks.convexAuth.isAuthenticated = false;
     mocks.convexAuth.isLoading = false;
     mocks.session.hasRawUser = true;
@@ -129,76 +145,170 @@ describe('AuthenticatedConvexProvider', () => {
     expect(current?.isAuthenticated).toBe(true);
     expect(current?.isRecovering).toBe(false);
   });
-
-  it('deduplicates automatic commands for one Better Auth session', async () => {
-    mocks.convexAuth.isAuthenticated = true;
-
-    await act(async () => {
+  async function renderProvider() {
+    await act(async () =>
       root.render(
         <AuthenticatedConvexProvider>
           <Consumer />
         </AuthenticatedConvexProvider>
-      );
-    });
+      )
+    );
+  }
 
-    expect(current!.claimAutomaticCommand('github-profile-refresh:workspace-1')).toBe(true);
-    expect(current!.claimAutomaticCommand('github-profile-refresh:workspace-1')).toBe(false);
+  async function rejectAttempt(delay: number) {
+    await act(async () => vi.advanceTimersByTimeAsync(delay));
+    mocks.convexAuth.isLoading = true;
+    await renderProvider();
+    mocks.convexAuth.isLoading = false;
+    mocks.convexAuth.isAuthenticated = false;
+    await renderProvider();
+  }
 
-    mocks.session.rawData = { session: { id: 'session-2' } };
-    await act(async () => {
-      root.render(
-        <AuthenticatedConvexProvider>
-          <Consumer />
-        </AuthenticatedConvexProvider>
-      );
-    });
-
-    expect(current!.claimAutomaticCommand('github-profile-refresh:workspace-1')).toBe(true);
-  });
-
-  it('keeps retrying a reported auth failure after Convex rejects refreshed auth', async () => {
-    mocks.convexAuth.isAuthenticated = true;
+  it('stops after six rejected refreshes, keeps children mounted, and retries only on user action', async () => {
     mocks.refetch.mockResolvedValue(undefined);
-
-    await act(async () => {
-      root.render(
-        <AuthenticatedConvexProvider>
-          <Consumer />
-        </AuthenticatedConvexProvider>
-      );
-    });
-
-    expect(container.textContent).toBe('ready');
+    await renderProvider();
+    const child = container.firstChild;
+    for (const delay of CONVEX_AUTH_RECOVERY_DELAYS_MS) await rejectAttempt(delay);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Authentication recovery failed'
+    );
+    expect(container.firstChild).toBe(child);
+    expect(current?.isLoading).toBe(false);
+    expect(current?.isAuthenticated).toBe(false);
+    expect(current?.isRecovering).toBe(false);
+    const requests = mocks.refetch.mock.calls.length;
+    expect(requests).toBe(6);
     await act(async () => {
       current!.requestAuthRecovery();
+      window.dispatchEvent(new Event('online'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(60_000);
     });
-    expect(container.textContent).toBe('recovering');
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(250);
-    });
-    expect(mocks.restartConvexAuth).toHaveBeenCalledTimes(1);
+    expect(mocks.refetch).toHaveBeenCalledTimes(requests);
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    await act(async () => container.querySelector('button')!.click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(current?.isRecovering).toBe(true);
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(mocks.refetch).toHaveBeenCalledTimes(requests + 1);
+  });
 
+  it('bounds hung session requests and ignores their late completion', async () => {
+    let resolve!: () => void;
+    mocks.refetch.mockReturnValue(
+      new Promise<void>((done) => {
+        resolve = done;
+      })
+    );
+    await renderProvider();
+    for (const delay of CONVEX_AUTH_RECOVERY_DELAYS_MS) {
+      await act(async () => vi.advanceTimersByTimeAsync(delay));
+      await act(async () => vi.advanceTimersByTimeAsync(CONVEX_AUTH_RECOVERY_TIMEOUT_MS));
+    }
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(mocks.refetch).toHaveBeenCalledTimes(6);
+    await act(async () => resolve());
+    expect(mocks.restartConvexAuth).not.toHaveBeenCalled();
+  });
+
+  it('bounds a Convex refresh that never emits a loading transition', async () => {
+    mocks.refetch.mockResolvedValue(undefined);
+    await renderProvider();
+    for (const delay of CONVEX_AUTH_RECOVERY_DELAYS_MS) {
+      await act(async () => vi.advanceTimersByTimeAsync(delay));
+      await act(async () => vi.advanceTimersByTimeAsync(CONVEX_AUTH_RECOVERY_TIMEOUT_MS));
+    }
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(mocks.restartConvexAuth).toHaveBeenCalledTimes(6);
+  });
+
+  it('retires old in-flight work and gives a new session its own budget', async () => {
+    let resolve!: () => void;
+    mocks.refetch.mockReturnValueOnce(
+      new Promise<void>((done) => {
+        resolve = done;
+      })
+    );
+    await renderProvider();
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    mocks.session.rawData = { session: { id: 'session-2' } };
+    await renderProvider();
+    await act(async () => resolve());
+    expect(mocks.restartConvexAuth).not.toHaveBeenCalled();
+    for (const delay of CONVEX_AUTH_RECOVERY_DELAYS_MS) await rejectAttempt(delay);
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(mocks.refetch).toHaveBeenCalledTimes(7);
+  });
+
+  it('stops without a recovery error when the session is confirmed invalid', async () => {
+    mocks.refetch.mockReturnValue(new Promise(() => {}));
+    await renderProvider();
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    mocks.session.confirmedUnauthenticated = true;
+    await renderProvider();
+    await act(async () => vi.advanceTimersByTimeAsync(120_000));
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(current?.isRecovering).toBe(false);
+    expect(mocks.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not forgive a refresh followed immediately by another protected-query rejection', async () => {
+    mocks.convexAuth.isAuthenticated = true;
+    mocks.refetch.mockResolvedValue(undefined);
+    await renderProvider();
+    for (const delay of CONVEX_AUTH_RECOVERY_DELAYS_MS) {
+      await act(async () => current!.requestAuthRecovery());
+      await act(async () => vi.advanceTimersByTimeAsync(delay));
+      mocks.convexAuth.isLoading = true;
+      await renderProvider();
+      mocks.convexAuth.isLoading = false;
+      await renderProvider();
+      expect(current?.isAuthenticated).toBe(true);
+    }
+    await act(async () => current!.requestAuthRecovery());
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(mocks.refetch).toHaveBeenCalledTimes(6);
+  });
+
+  it('pauses offline without resetting attempts or double-counting an in-flight request', async () => {
+    mocks.refetch.mockResolvedValue(undefined);
+    await renderProvider();
+    await rejectAttempt(250);
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    await act(async () => {
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+      window.dispatchEvent(new Event('offline'));
+    });
     mocks.convexAuth.isLoading = true;
-    await act(async () => {
-      root.render(
-        <AuthenticatedConvexProvider>
-          <Consumer />
-        </AuthenticatedConvexProvider>
-      );
-    });
-    mocks.convexAuth.isAuthenticated = false;
+    await renderProvider();
     mocks.convexAuth.isLoading = false;
-    await act(async () => {
-      root.render(
-        <AuthenticatedConvexProvider>
-          <Consumer />
-        </AuthenticatedConvexProvider>
-      );
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(500);
-    });
+    await renderProvider();
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
     expect(mocks.refetch).toHaveBeenCalledTimes(2);
-    expect(mocks.restartConvexAuth).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+      window.dispatchEvent(new Event('online'));
+    });
+    for (const delay of CONVEX_AUTH_RECOVERY_DELAYS_MS.slice(2)) await rejectAttempt(delay);
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(mocks.refetch).toHaveBeenCalledTimes(6);
+  });
+  it('does not replenish the budget when raw session data disappears during each refresh', async () => {
+    mocks.refetch.mockResolvedValue(undefined);
+    await renderProvider();
+    for (const delay of CONVEX_AUTH_RECOVERY_DELAYS_MS) {
+      await act(async () => vi.advanceTimersByTimeAsync(delay));
+      mocks.session.rawData = null;
+      mocks.session.hasRawUser = false;
+      mocks.convexAuth.isLoading = true;
+      await renderProvider();
+      mocks.session.rawData = { session: { id: 'session-1' } };
+      mocks.session.hasRawUser = true;
+      mocks.convexAuth.isLoading = false;
+      await renderProvider();
+    }
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(mocks.refetch).toHaveBeenCalledTimes(6);
   });
 });

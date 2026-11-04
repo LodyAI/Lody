@@ -1,3 +1,5 @@
+import { toShared } from '@/platform/process-options';
+import { getLogger } from '@/utils/logger';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -10,7 +12,8 @@ import {
 } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { SystemCodexCredentialVault, type CodexCredentialVault } from './codex-credential-vault';
-import { execFile } from 'node:child_process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { resolveBuiltinAuthenticationProcessLaunch } from './setting';
 import {
   registerCodexProfileProcess,
@@ -56,6 +59,7 @@ const identity = (owner: CodexProfileOwner) =>
 
 export class CodexProfileStore {
   private readonly operations = new Map<string, Promise<unknown>>();
+  private readonly warnedProfiles = new Set<string>();
 
   constructor(
     private readonly root = path.join(getLodyDataDir(), 'codex-profiles'),
@@ -229,8 +233,11 @@ export class CodexProfileStore {
         await this.write(directory, { ...candidate, activeGeneration: generation, state: 'ready' });
         return result;
       } catch (error) {
-        await this.vault.delete(credentialId);
-        await this.write(directory, record);
+        try {
+          await this.vault.delete(credentialId);
+        } catch {
+          // The inactive generation remains durable cleanup work; preserve the authentication failure.
+        }
         throw error;
       }
     });
@@ -315,6 +322,23 @@ export class CodexProfileStore {
     });
   }
 
+  async isAccountBound(owner: CodexProfileOwner): Promise<boolean> {
+    if (await this.hasBinding(owner)) return true;
+    return (await this.list(owner.workspaceId)).some(
+      (profile) => profile.configId === owner.configId && profile.machineId === owner.machineId
+    );
+  }
+
+  private async hasBinding(owner: CodexProfileOwner): Promise<boolean> {
+    try {
+      await lstat(path.join(this.root, `binding-${identity(owner)}.json`));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
   async list(workspaceId: string): Promise<ResolvedCodexProfile[]> {
     const entries = await readdir(this.root, { withFileTypes: true }).catch(
       (error: NodeJS.ErrnoException) => {
@@ -325,14 +349,21 @@ export class CodexProfileStore {
     const profiles: ResolvedCodexProfile[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || !z.uuid().safeParse(entry.name).success) continue;
-      const directory = await this.directory(entry.name);
-      const record = await this.read(directory);
-      if (record?.workspaceId === workspaceId)
-        profiles.push({
-          ...record,
-          home: path.join(directory, 'home'),
-          authStore: resolveAuthStore(record),
-        });
+      try {
+        const directory = await this.directory(entry.name);
+        const record = await this.read(directory);
+        if (record?.workspaceId === workspaceId)
+          profiles.push({
+            ...record,
+            home: path.join(directory, 'home'),
+            authStore: resolveAuthStore(record),
+          });
+      } catch {
+        if (!this.warnedProfiles.has(entry.name)) {
+          this.warnedProfiles.add(entry.name);
+          getLogger().warn(`Skipping unreadable Codex profile ${entry.name}`);
+        }
+      }
     }
     return profiles;
   }
@@ -353,21 +384,26 @@ async function logoutNativeProfile(
     if (/^(CODEX_|OPENAI_|LODY_CODEX_|DYLD_|NODE_OPTIONS$|LD_PRELOAD$|LD_LIBRARY_PATH$)/i.test(key))
       delete env[key];
   env.CODEX_HOME = profile.home;
-  await new Promise<void>((resolve, reject) => {
-    const child = execFile(
-      launch.command,
-      [
-        ...(profile.authStore === 'keyring' ? ['-c', 'cli_auth_credentials_store="keyring"'] : []),
-        'logout',
-      ],
-      { env, timeout: 20_000, windowsHide: true },
-      (error) => {
-        if (error) reject(new Error('Codex account cleanup could not complete'));
-        else resolve();
-      }
+  try {
+    await runCommandTextLegacy(
+      {
+        command: launch.command,
+        args: [
+          ...(profile.authStore === 'keyring'
+            ? ['-c', 'cli_auth_credentials_store="keyring"']
+            : []),
+          'logout',
+        ],
+        env,
+        timeout: 20_000,
+        check: 'exit-0',
+        onSpawned: (child) => lease.recordNativePid(child.pid),
+      },
+      toShared()
     );
-    lease.recordNativePid(child.pid);
-  });
+  } catch {
+    throw new Error('Codex account cleanup could not complete');
+  }
 }
 
 let defaultStore: CodexProfileStore | undefined;

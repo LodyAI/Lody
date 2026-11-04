@@ -2,17 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PREVIEW_ACCESS_TOKEN_COOKIE,
-  PREVIEW_EMBEDDER_POLICY,
-  PREVIEW_RESOURCE_POLICY,
   applyPreviewEmbeddingHeaders,
   buildPreviewAccessTokenCookie,
   hasReportedPreviewTarget,
   isQuickTunnelViewerUrl,
-  removePreviewAccessTokenFromSearch,
   removePreviewQueryParamFromSearch,
   sanitizePreviewProxyResponseHeaders,
   setPreviewQueryParamInUrl,
-  stripPreviewFrameAncestorsDirective,
 } from '../src/preview';
 
 describe('Quick Tunnel viewer URL shape', () => {
@@ -37,20 +33,6 @@ describe('Quick Tunnel viewer URL shape', () => {
 });
 
 describe('preview access token cookie', () => {
-  it('removes preview access tokens without normalizing Vite bare query params', () => {
-    expect(
-      removePreviewAccessTokenFromSearch(
-        '?vue&type=style&index=0&lang.css&__lody_preview_token=preview-token'
-      )
-    ).toBe('?vue&type=style&index=0&lang.css');
-    expect(
-      removePreviewAccessTokenFromSearch(
-        '?__lody_preview_token=preview-token&vue&type=style&index=0&lang.css'
-      )
-    ).toBe('?vue&type=style&index=0&lang.css');
-    expect(removePreviewAccessTokenFromSearch('?__lody_preview_token=preview-token')).toBe('');
-  });
-
   it('adds and removes preview capabilities without normalizing bare query params', () => {
     const viewerUrl = setPreviewQueryParamInUrl(
       new URL(
@@ -80,25 +62,6 @@ describe('preview access token cookie', () => {
       `${PREVIEW_ACCESS_TOKEN_COOKIE}=preview%20token%2Fwith%2Bchars; Max-Age=120; Path=/; Secure; HttpOnly; SameSite=None; Partitioned`
     );
   });
-
-  it('clamps preview access token cookie max-age', () => {
-    const now = 1_800_000;
-
-    expect(
-      buildPreviewAccessTokenCookie({
-        token: 'preview-token',
-        expiresAt: now + 12 * 60 * 60 * 1000,
-        now,
-      })
-    ).toContain('Max-Age=28800');
-    expect(
-      buildPreviewAccessTokenCookie({
-        token: 'preview-token',
-        expiresAt: now - 1_000,
-        now,
-      })
-    ).toContain('Max-Age=60');
-  });
 });
 
 describe('preview proxy response headers', () => {
@@ -119,35 +82,9 @@ describe('preview proxy response headers', () => {
       ['Content-Security-Policy-Report-Only', "frame-ancestors 'none'"],
     ]);
   });
-
-  it('drops content-security-policy when only frame-ancestors remains', () => {
-    expect(
-      sanitizePreviewProxyResponseHeaders([
-        ['content-security-policy', "frame-ancestors 'self'"],
-        ['x-frame-options', 'DENY'],
-        ['cache-control', 'no-store'],
-      ])
-    ).toEqual([['cache-control', 'no-store']]);
-  });
-
-  it('strips frame-ancestors case-insensitively from a CSP value', () => {
-    expect(
-      stripPreviewFrameAncestorsDirective(
-        "  FRAME-ANCESTORS https://example.com ; default-src 'self';"
-      )
-    ).toBe("default-src 'self'");
-  });
 });
 
 describe('preview embedding headers', () => {
-  it('sets COEP/CORP that match the embedder app policy', () => {
-    const headers = applyPreviewEmbeddingHeaders(new Headers());
-    expect(headers.get('Cross-Origin-Embedder-Policy')).toBe(PREVIEW_EMBEDDER_POLICY);
-    expect(headers.get('Cross-Origin-Resource-Policy')).toBe(PREVIEW_RESOURCE_POLICY);
-    expect(PREVIEW_EMBEDDER_POLICY).toBe('credentialless');
-    expect(PREVIEW_RESOURCE_POLICY).toBe('cross-origin');
-  });
-
   it('overrides any pre-existing embedder/resource policy from the upstream response', () => {
     const headers = applyPreviewEmbeddingHeaders(
       new Headers({

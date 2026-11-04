@@ -1,14 +1,16 @@
 # Main services
 
-App icons are macOS packaged-app only. `app-icon-service.ts` owns device-local
-preferences and the serialized native apply path; the renderer supplies only a
-catalog identifier. Never edit signed resources or the shared development
-Electron bundle. Finder custom metadata affects strict validation; see the
+History watch deadlines include owner wait plus ordinary read allowance;
+ordinary control reads keep their shorter deadline.
+
+App icons are packaged macOS only. `app-icon-service.ts` owns local preferences
+and serialized native apply; renderers supply only catalog IDs. Never edit signed
+resources or the shared development Electron bundle. Finder custom metadata affects strict validation; see the
 [icon decision](../../../../../.agents/notes/implemented/feature/2026-09-23-macos-app-icons.md).
 
-Native notifications must stay strongly referenced after delivery succeeds, until
-click, close, or failure. `NotificationService` owns those references and
-`notification-delivery.ts` releases them; returning IPC success is not dismissal.
+After delivery, retain native notifications until click/close/failure.
+`NotificationService` owns references; `notification-delivery.ts` releases them.
+IPC success is not dismissal.
 See the [lifetime fix](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-notification-click-lifetime.md).
 
 Window badge reports replace absolute contributions; always apply repeated values,
@@ -16,15 +18,19 @@ including zero. Discard a contribution when its renderer crashes or navigates to
 new document, as well as when the window closes. Renderer reconciliation must not
 cause another bounce while permission waiting remains nonzero.
 
-The Devbar Hub is off by default and starts only after the primary window's hidden
-Developer Mode control enables it; `LODY_DEVBAR=true` is an automation override.
-It binds to loopback, and the normal renderer CSP stays unchanged. Enabling it
-always exposes the aggregate MCP endpoint and Terminals add-on, which grant local
-shell/subprocess access; disabling Devbar removes both capabilities.
+Devbar defaults off; only the primary window's hidden Developer Mode control or
+automation `LODY_DEVBAR=true` enables it. Keep loopback binding and renderer CSP.
+Enabling exposes aggregate MCP and Terminals with local shell/subprocess access;
+disabling removes both capabilities.
 Do not add filesystem management, code-server, non-loopback binding, or remote
 access without a new capability/security decision in the owning
 [Spec](../../../../../specs/desktop-devbar.md) and
 [Agent Note](../../../../../.agents/notes/implemented/feature/2026-09-16-devbar-hub-ui.md).
+
+The disk-full guard (`storage-guard.ts`) requires a failed Lody write AND low space
+on a Lody data volume. Space alone never blocks. Only relaunch/quit clears it;
+background agents keep running
+([decision](../../../../../.agents/notes/proposed/feature/2026-10-22-desktop-disk-full-guard.md)).
 
 ## Public browser
 
@@ -56,9 +62,25 @@ Renderer `beforeunload` vetoes on product windows (close, reload, quit) surface
 through one native Stay/Leave confirmation (`../renderer-unload.ts`); Leave only
 ignores that document's veto. Quit closes product windows, and so gets unload
 approval, before it destroys relays or stops the CLI; Stay cancels quit with the
-app fully running. A quit close whose renderer hangs or dies is destroyed so quit
+app fully running. Quit veto confirmation uses an asynchronous sheet with a visible
+parent, so its fifteen-second deadline remains runnable. Leave retries only that
+document's close; navigation, timeout or destruction cancels the sheet and invalidates
+late replies. Non-quit close/reload keeps its existing confirmation behavior.
+A quit close whose renderer hangs or dies is destroyed so quit
 cannot wait forever. Never destroy a normally closing window or add a path that
 bypasses unrelated `beforeunload` guards such as unsaved editors.
+A renderer-requested relaunch (`../relaunch-intent.ts`) calls `app.relaunch()` only at
+`will-quit`; a quit the barrier cancels settles `cancelled`, and the IPC caller
+withdraws any reset request it armed, so a later ordinary quit neither relaunches nor
+resets. Relaunching quits the embedded CLI: never make it a default recovery step.
+
+Quit bounds each renderer close and main-owned resource drain to fifteen seconds.
+Unconfirmed work keeps its original owner until main exits. Log it, give a
+presence-only warning marker at most one second to persist, then exit nonzero
+without terminal reporting UI. Next launch delivers a nonmodal native notification; failed
+delivery retains the marker. Never replace custody or clear pending writes
+on a waiter deadline. CLI and shell process owners must still confirm release
+before main can terminate. Quit diagnostics name phases, never credentials or causes.
 
 ## Auto-update
 
@@ -75,3 +97,47 @@ bypasses unrelated `beforeunload` guards such as unsaved editors.
   `downloadedFile` is set, `recordError` keeps `phase: 'downloaded'`; dropping
   to `error` hides the sidebar banner and the About install button, which are
   the only ways to retry.
+
+LoginShellCache Layer owns the shell environment; getUserShellEnvCachedLegacy
+is launcher-only. After renderer unload approval, quit awaits application disposal
+and CLI exit. Retain failed process owners for quit/recovery; never substitute null
+or bind replacements before release. After a failed quit, retry owners once before rebuilding
+the shell and relays and reopening a product window; unresolved owners use the localized
+quit/retry dialog. See the
+[decision](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
+
+## E2EE runtime
+
+Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md),
+[M2](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
+[join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
+and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
+Fence opens/late D03 registration by identity/generation; pin D03 before signing.
+Workspace custody; reset binds account/generation; recheck after lock/drain before archive.
+No network under locks; drain before release.
+Bad keys allow ledger open; core repairs.
+Isolate verification/storage errors; malformed input keeps readers.
+Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
+Conflicts refuse fallback. Failed close retains its fence; report restart-required.
+Fixed cloud refs; auth/bound/abort; fence late disposed calls.
+Keep uncertain bytes; raw/SDK causes never leave main.
+Verified reads beat lost ACKs; cleanup retains admission.
+`e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
+
+Consent pins exact verified proofs/session/record/requestId/keys/credentials/pins.
+Missing credentials block approval; never export them. Failed begin stays discoverable.
+Archive terminal/foreign attempts, including pin-only+relay; fence same-request
+unknown/admitting. Retain installed origins, other sessions and primary/cleanup causes.
+Retirement needs exact superseded socket receipt and atomic all-null local match;
+fresh sessions need consent. Unsigned staged material stays pending across windows/retries
+until verified admission/history settlement (including later revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Keys use verified mailbox/history; committed epochs may use staging. Staging read
+denial/I/O failure cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.
+
+Only rotate resumes candidates. Keep errors transport-free.
+
+Machine sharing uses the lazy native host in `packages/e2ee-machine-sharing`.
+Passive cache inspection uses existing entries only; never call openWorkspace or
+readMachineSharing from that path. Counts are diagnostic, not execution authority.
+Policy errors affect dependent execution only. Invalidate sharing before exposing changed
+verified ledger heads/counts; unchanged ingest preserves cache freshness. Narrow read/update methods keep keys
+and device credentials in main. See the [policy decision](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).

@@ -65,6 +65,19 @@ const isMissingBubRuntimeError = (error: string | undefined): boolean => {
   );
 };
 
+const isMissingDimcodeRuntimeError = (error: string | undefined): boolean => {
+  const normalized = error?.toLowerCase() ?? '';
+  return (
+    normalized.includes('spawn dimcode enoent') ||
+    normalized.includes('command not found') ||
+    normalized.includes('dimcode is not recognized') ||
+    normalized.includes("'dimcode' is not recognized") ||
+    normalized.includes("no such command 'acp'") ||
+    normalized.includes("unknown command 'acp'") ||
+    normalized.includes("unrecognized subcommand 'acp'")
+  );
+};
+
 /**
  * Owns the non-interactive half of built-in provider creation on the target
  * machine. Flock rows are the durable queue: syncing a row or restarting the
@@ -81,6 +94,7 @@ export class ProviderSetupManager {
   private drainPromise: Promise<void> | null = null;
   private drainRequested = false;
   private stopped = false;
+  private readonly runtimeCancellation = new AbortController();
   private cleanupRetry: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: ProviderSetupManagerOptions) {
@@ -112,6 +126,7 @@ export class ProviderSetupManager {
 
   stop(): void {
     this.stopped = true;
+    this.runtimeCancellation.abort();
     this.drainRequested = false;
     clearTimeout(this.cleanupRetry);
     this.cleanupRetry = undefined;
@@ -141,7 +156,11 @@ export class ProviderSetupManager {
     while (!this.stopped) {
       this.drainRequested = false;
       await this.reconcileCancellations();
-      await this.reconcileCodexProfiles();
+      try {
+        await this.reconcileCodexProfiles();
+      } catch {
+        this.logger.warn('[provider-setup] Codex profile scan failed; continuing setup queue');
+      }
       const setups = (await this.readSetups())
         .filter((setup) => RESUMABLE_STATUSES.has(setup.status))
         .sort((left, right) => left.createdAt - right.createdAt);
@@ -178,7 +197,7 @@ export class ProviderSetupManager {
       }
 
       // Non-managed builtins prepare their command during the live probe:
-      // Bub is user-installed and Dimcode uses npx. Keep the config
+      // Bub and Dimcode are user-installed. Keep the config
       // unpublished until that ACP process passes verification.
       if (isManagedBuiltinAgentType(setup.config.agentType)) {
         const preparing = await this.updateStatus(setup.id, attempt, 'preparing-runtime');
@@ -201,12 +220,15 @@ export class ProviderSetupManager {
         }
         if (binaryStatus.status !== 'installed' && binaryStatus.status !== 'not-applicable') {
           unexpectedFailureCode = 'runtime-install-failed';
-          const install = await this.execution.installMachineAcpBinary({
-            type: 'machine/acp-binary-install',
-            machineId: this.machineId,
-            workspaceId: this.workspaceId,
-            agentType: preparing.config.agentType,
-          });
+          const install = await this.execution.installMachineAcpBinary(
+            {
+              type: 'machine/acp-binary-install',
+              machineId: this.machineId,
+              workspaceId: this.workspaceId,
+              agentType: preparing.config.agentType,
+            },
+            { signal: this.runtimeCancellation.signal }
+          );
           if (!install.success) {
             await this.fail(setup.id, attempt, 'runtime-install-failed');
             return;
@@ -238,7 +260,8 @@ export class ProviderSetupManager {
       await this.fail(
         verifying.id,
         attempt,
-        verifying.config.agentType === 'bub' && isMissingBubRuntimeError(response.error)
+        (verifying.config.agentType === 'bub' && isMissingBubRuntimeError(response.error)) ||
+          (verifying.config.agentType === 'dimcode' && isMissingDimcodeRuntimeError(response.error))
           ? 'runtime-unavailable'
           : 'verification-failed'
       );

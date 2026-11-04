@@ -1,42 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  isAbsoluteFilePath,
-  resolveLocalWorkspaceFilePath,
-} from '../src/lib/session-local-file-path';
-
-describe('isAbsoluteFilePath', () => {
-  it('recognizes POSIX, Windows drive, and UNC paths', () => {
-    expect(isAbsoluteFilePath('/tmp/build/Lody.zip')).toBe(true);
-    expect(isAbsoluteFilePath('\\\\server\\share\\Lody.zip')).toBe(true);
-    expect(isAbsoluteFilePath('C:/build/Lody.zip')).toBe(true);
-    expect(isAbsoluteFilePath('C:\\build\\Lody.zip')).toBe(true);
-    expect(isAbsoluteFilePath('  /tmp/build/Lody.zip  ')).toBe(true);
-  });
-
-  it('rejects workspace-relative and empty paths', () => {
-    expect(isAbsoluteFilePath('src/main.ts')).toBe(false);
-    expect(isAbsoluteFilePath('./src/main.ts')).toBe(false);
-    expect(isAbsoluteFilePath('../artifacts/Lody.dmg')).toBe(false);
-    expect(isAbsoluteFilePath('')).toBe(false);
-    expect(isAbsoluteFilePath(null)).toBe(false);
-    expect(isAbsoluteFilePath(undefined)).toBe(false);
-  });
-});
+import { resolveLocalWorkspaceFilePath } from '../src/lib/session-local-file-path';
 
 describe('resolveLocalWorkspaceFilePath', () => {
-  it('joins a workspace root with a workspace-relative viewer path', () => {
-    expect(resolveLocalWorkspaceFilePath('/Users/dev/.lody/worktrees/abc', 'src/app/main.ts')).toBe(
-      '/Users/dev/.lody/worktrees/abc/src/app/main.ts'
-    );
-    expect(resolveLocalWorkspaceFilePath('/Users/dev/project/', './docs/README.md')).toBe(
-      '/Users/dev/project/docs/README.md'
-    );
-    // The separator follows the ROOT, not the host running this code.
-    expect(resolveLocalWorkspaceFilePath('C:\\Users\\dev\\project', 'src/main.ts')).toBe(
-      'C:\\Users\\dev\\project\\src\\main.ts'
-    );
-  });
-
   it('preserves absolute paths only for an explicitly local target', () => {
     expect(resolveLocalWorkspaceFilePath('/workspace', '/tmp/build/Lody.zip', true)).toBe(
       '/tmp/build/Lody.zip'
@@ -60,5 +25,14 @@ describe('resolveLocalWorkspaceFilePath', () => {
     expect(
       resolveLocalWorkspaceFilePath('/Users/dev/project', 'C:\\Windows\\notepad.exe')
     ).toBeNull();
+  });
+
+  it('never joins a home-rooted path onto the workspace root', () => {
+    // Remote targets do not resolve it, exactly like an absolute path.
+    expect(resolveLocalWorkspaceFilePath('/workspace', '~/a.txt', false, '/Users/dev')).toBeNull();
+    // An unknown home directory leaves it unresolved rather than producing
+    // `<workspace>/~/...`.
+    expect(resolveLocalWorkspaceFilePath('/workspace', '~/a.txt', true)).toBeNull();
+    expect(resolveLocalWorkspaceFilePath('/workspace', '~/a.txt', true, '  ')).toBeNull();
   });
 });

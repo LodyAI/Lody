@@ -1,4 +1,4 @@
-import { snapshotAgentRole } from '@lody/shared';
+import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -106,9 +106,11 @@ export function useSessionAgentRole({
   const scopedRoles = useMemo(
     () =>
       machineId && agentConfigId
-        ? roles.filter(
-            (role) => role.machineId === machineId && role.agentConfigId === agentConfigId
-          )
+        ? roles.flatMap((role) => {
+            // Bound to this Session's machine: that target is what would run here.
+            const bound = bindAgentRoleTarget(role, machineId);
+            return bound?.agentConfigId === agentConfigId ? [bound] : [];
+          })
         : [],
     [agentConfigId, machineId, roles]
   );
@@ -236,6 +238,7 @@ export function useSessionAgentRole({
       ? {
           agentRoleId: selectedRoleId,
           agentRoleRevision: pickedItem.role.revision,
+          memory: pickedItem.role.runConfig.memory,
           agentRoleSnapshot: snapshotAgentRole(pickedItem.role),
         }
       : pickedRoleId === null
@@ -245,7 +248,7 @@ export function useSessionAgentRole({
             null
           : !agentRolesSynced
             ? runConfigHasUserEdits
-              ? undefined
+              ? null
               : typeof storedPickedRevision === 'number'
                 ? { agentRoleId: pickedRoleId, agentRoleRevision: storedPickedRevision }
                 : undefined

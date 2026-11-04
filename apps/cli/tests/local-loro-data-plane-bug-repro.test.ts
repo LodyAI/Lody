@@ -28,7 +28,7 @@ import {
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
   type LocalLoroDataPlaneServerMessage,
 } from '@lody/shared/local-loro-data-plane';
-import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
+import { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc';
 import {
   startLocalLoroDataPlaneServer,
@@ -99,31 +99,33 @@ class SocketClient {
     });
   }
 
-  /** Resolves 'joined' | 'error' (matching requestId) | 'socket-closed' | 'timeout'. */
-  async outcomeForRequest(
-    requestId: string,
-    timeoutMs: number
-  ): Promise<'joined' | 'error' | 'socket-closed' | 'timeout'> {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const match = this.messages.find(
-        (message) =>
-          (message.type === 'joined' || message.type === 'error') &&
-          'requestId' in message &&
-          message.requestId === requestId
-      );
-      if (match) return match.type as 'joined' | 'error';
-      if (this.socket.destroyed) return 'socket-closed';
-      if (Date.now() > deadline) return 'timeout';
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, 50);
-        const off = this.onActivity(() => {
-          clearTimeout(timer);
+  waitForMessage(
+    predicate: (message: LocalLoroDataPlaneServerMessage) => boolean
+  ): Promise<LocalLoroDataPlaneServerMessage> {
+    return new Promise((resolve, reject) => {
+      const check = () => {
+        const match = this.messages.find(predicate);
+        if (match) {
           off();
-          resolve();
-        });
-      });
-    }
+          resolve(match);
+        } else if (this.socket.destroyed) {
+          off();
+          reject(new Error('socket closed before expected frame'));
+        }
+      };
+      const off = this.onActivity(check);
+      check();
+    });
+  }
+
+  async outcomeForRequest(requestId: string): Promise<'joined' | 'error'> {
+    const message = await this.waitForMessage(
+      (candidate) =>
+        (candidate.type === 'joined' || candidate.type === 'error') &&
+        candidate.requestId === requestId
+    );
+    if (message.type === 'joined' || message.type === 'error') return message.type;
+    throw new Error('unexpected frame');
   }
 }
 
@@ -154,7 +156,7 @@ describe('local Loro data-plane socket server — F6 regression', () => {
     fs.mkdirSync(path.dirname(getLocalLoroDataPlaneSocketPath()), { recursive: true });
 
     const docs = new Map<string, LoroDoc>();
-    const engine = new LocalLoroDataPlaneServer({
+    const engine = new LocalLoroDataPlaneServerLegacy({
       workspaceId: WORKSPACE_ID,
       resolveDoc: async (docId) => {
         const existing = docs.get(docId);
@@ -199,7 +201,7 @@ describe('local Loro data-plane socket server — F6 regression', () => {
 
       // Healthy baseline: a normal join round-trips on this connection.
       await client.writeLine(joinLine('join-1', 'doc-1'));
-      expect(await client.outcomeForRequest('join-1', 5_000)).toBe('joined');
+      expect(await client.outcomeForRequest('join-1')).toBe('joined');
 
       // A frame over the injected test limit from a NON-COMPLIANT sender. The
       // production limit remains 32MB; lowering it here exercises the same
@@ -215,23 +217,108 @@ describe('local Loro data-plane socket server — F6 regression', () => {
       await client.writeRaw('A'.repeat(TEST_MAX_FRAME_BYTES));
       await client.writeRaw('"}}\n');
 
-      await vi.waitFor(
-        () => {
-          expect(client.messages).toContainEqual(
-            expect.objectContaining({ type: 'error', code: 'payload_too_large' })
-          );
-        },
-        { timeout: 5_000 }
+      await client.waitForMessage(
+        (message) => message.type === 'error' && message.code === 'payload_too_large'
       );
 
       // R4-required behavior: the connection survives the oversized frame (the
       // splitter discards it and the server answers with a protocol error), so
       // an unrelated join on the same shared connection still succeeds.
       await client.writeLine(joinLine('join-2', 'doc-2'));
-      const outcome = await client.outcomeForRequest('join-2', 5_000);
+      const outcome = await client.outcomeForRequest('join-2');
       expect(outcome).toBe('joined');
 
       socket.destroy();
     }
   );
+});
+
+// Exercise actual Node Writable high-water/drain behavior without a network or
+// scheduler race. The socket adapter consumes the same structural API.
+import { Writable } from 'node:stream';
+import { Effect, Layer } from 'effect';
+import { LocalLoroWriterTurn, makeLocalLoroWriterOwner } from '@lody/shared/local-loro-writer';
+import { makeLocalLoroWriterLegacy } from '@lody/shared/local-loro-writer/legacy';
+import { makeNodeLocalLoroWriterConnection } from '@lody/shared/node/local-loro-writer';
+
+it('the Node write(false)/drain boundary pauses export across workspaces and preserves fair resume order', async () => {
+  vi.useFakeTimers();
+  const pendingWrites: Array<() => void> = [];
+  const wire: LocalLoroDataPlaneServerMessage[] = [];
+  const socket = new Writable({
+    highWaterMark: 1,
+    write(chunk, _encoding, done) {
+      wire.push(JSON.parse(chunk.toString()) as LocalLoroDataPlaneServerMessage);
+      pendingWrites.push(() => done());
+    },
+  });
+  const facade = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, {
+      next: Effect.callback<void>((resume) => {
+        const handle = setTimeout(() => resume(Effect.void), 0);
+        return Effect.sync(() => clearTimeout(handle));
+      }),
+    })
+  );
+  let exportedB = false;
+  const connection = makeNodeLocalLoroWriterConnection('writable', socket);
+  const frame = (workspaceId: string): LocalLoroDataPlaneServerMessage => ({
+    type: 'presence',
+    protocolVersion: 7,
+    workspaceId,
+    dataBase64: 'AA==',
+  });
+  try {
+    facade.writer.offer(connection, {
+      owner: makeLocalLoroWriterOwner(),
+      valid: () => true,
+      onCause: () => {},
+      build: Effect.succeed([frame('a'), frame('a')]),
+    });
+    facade.writer.offer(connection, {
+      owner: makeLocalLoroWriterOwner(),
+      valid: () => true,
+      onCause: () => {},
+      build: Effect.sync(() => {
+        exportedB = true;
+        return [frame('b')];
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(wire.map((message) => ('workspaceId' in message ? message.workspaceId : ''))).toEqual([
+      'a',
+    ]);
+    expect(exportedB).toBe(false);
+    expect(socket.destroyed).toBe(false);
+    const drain = () =>
+      new Promise<void>((resolve) => {
+        socket.once('drain', resolve);
+        const complete = pendingWrites.shift();
+        if (!complete) throw new Error('no accepted write');
+        complete();
+      });
+    await drain();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(wire.map((message) => ('workspaceId' in message ? message.workspaceId : ''))).toEqual([
+      'a',
+      'b',
+    ]);
+    await drain();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(wire.map((message) => ('workspaceId' in message ? message.workspaceId : ''))).toEqual([
+      'a',
+      'b',
+      'a',
+    ]);
+    await drain();
+    await facade.closeLegacy();
+    expect(socket.listenerCount('drain')).toBe(0);
+  } finally {
+    for (const complete of pendingWrites.splice(0)) complete();
+    const closed = facade.closeLegacy();
+    await vi.runAllTimersAsync();
+    await closed;
+    socket.destroy();
+    vi.useRealTimers();
+  }
 });

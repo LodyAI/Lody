@@ -10,7 +10,11 @@ import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import { resolveConfig } from 'electron-vite'
 import { build } from 'vite'
-import { acquireDesktopLease } from './services/desktop-exclusion.ts'
+import {
+  acquireDesktopLease,
+  CLOUD_DESKTOP_LOCK,
+  handOffDesktopDeepLink
+} from './services/desktop-exclusion.ts'
 
 const electronRoot = fileURLToPath(new URL('../../', import.meta.url))
 const require = createRequire(new URL('../../package.json', import.meta.url))
@@ -46,12 +50,18 @@ before(async () => {
     build: { ...config.build, write: false, outDir: root }
   })
   const output = (Array.isArray(result) ? result[0] : result).output
-  entryCode = output.find((item) => item.type === 'chunk' && item.isEntry).code
+  const entry = output.find((item) => item.type === 'chunk' && item.isEntry)
+  entryCode = entry.code
   const application = output.find(
     (item) =>
-      item.type === 'chunk' && item.facadeModuleId === join(electronRoot, 'src/main/application.ts')
+      item.type === 'chunk' &&
+      item.isDynamicEntry &&
+      item.moduleIds.includes(join(electronRoot, 'src/main/application.ts'))
   )
   assert.ok(application, 'business application must remain a separate, lazy module')
+  assert.ok(entry.dynamicImports.includes(application.fileName))
+  assert.ok(!entry.imports.includes(application.fileName))
+  assert.ok(!entry.moduleIds.includes(join(electronRoot, 'src/main/application.ts')))
   applicationImport = `./${application.fileName}`
   const supervisorBuild = await build({
     configFile: false,
@@ -63,7 +73,10 @@ before(async () => {
       lib: {
         entry: join(electronRoot, '../../packages/cli-supervisor/src/supervisor.ts'),
         formats: ['cjs']
-      }
+      },
+      // The process layer is Node code: keep Node built-ins and its runtime
+      // packages as real modules instead of browser stubs.
+      rollupOptions: { external: [/^node:/, /^effect(\/|$)/, 'cross-spawn'] }
     }
   })
   const supervisorExports = {}
@@ -73,12 +86,17 @@ before(async () => {
     ).code,
     {
       exports: supervisorExports,
+      // Resolve the externals where the process layer itself resolves them.
+      require: createRequire(join(electronRoot, '../../packages/shared/package.json')),
+      process,
       setTimeout,
       clearTimeout,
       setInterval,
       clearInterval,
+      queueMicrotask,
       AbortController,
       DOMException,
+      URL,
       console
     }
   )
@@ -90,16 +108,31 @@ after(async () => {
 
 function launch(
   t,
-  { port = 0, hostPort, sameAppPrimary = true, packaged = true, e2e = false } = {}
+  {
+    port = 0,
+    hostPort,
+    sameAppPrimary = true,
+    packaged = true,
+    e2e = false,
+    dialogGate,
+    hostProbeGate,
+    initialUrl = 'ai.lody.nightly://auth/callback#synthetic-attempt'
+  } = {}
 ) {
   const ready = Promise.withResolvers()
   const completed = Promise.withResolvers()
+  const applicationStarted = Promise.withResolvers()
+  const dialogOpened = Promise.withResolvers()
+  const hostProbeStarted = Promise.withResolvers()
+  const leaseHandoffReceived = Promise.withResolvers()
   const events = []
   const paths = new Map([['appData', root]])
   const sockets = []
   const timers = new Set()
   let executionHost
   let reservedHostPort = hostPort
+  let leasePort
+  let leaseServerCreated = false
   const app = Object.assign(new EventEmitter(), {
     isPackaged: packaged,
     getVersion: () => '0.0.0-test',
@@ -111,7 +144,7 @@ function launch(
     requestSingleInstanceLock() {
       // macOS may deliver the callback before ready and while acquiring a lease.
       const event = { preventDefault() {} }
-      app.emit('open-url', event, 'ai.lody.nightly://auth/callback#synthetic-attempt')
+      app.emit('open-url', event, initialUrl)
       return sameAppPrimary
     },
     whenReady: () => ready.promise,
@@ -133,6 +166,8 @@ function launch(
     dialog: {
       showMessageBox: async (options) => {
         events.push(['conflict', options.message, options.detail])
+        dialogOpened.resolve()
+        if (dialogGate) await dialogGate.promise
       },
       showErrorBox: () => {
         events.push(['fatal'])
@@ -144,22 +179,46 @@ function launch(
     await Promise.all(sockets.map((server) => new Promise((resolve) => server.close(resolve))))
   })
   const net = {
-    createConnection() {
+    createConnection(options) {
+      // The cross-channel handoff dials the fixed desktop lease. Redirect it to
+      // the fixture owner so no test touches the user's real port.
+      if (options && typeof options === 'object' && options.port === CLOUD_DESKTOP_LOCK.port) {
+        return createConnection({ host: options.host ?? '127.0.0.1', port })
+      }
       // No fixture may touch the user's fixed Host port or named pipe.
       if (reservedHostPort) return createConnection({ host: '127.0.0.1', port: reservedHostPort })
       const socket = new Socket()
+      if (hostProbeGate) {
+        hostProbeStarted.resolve()
+        void hostProbeGate.promise.then(() =>
+          socket.emit('error', Object.assign(new Error('not listening'), { code: 'ECONNREFUSED' }))
+        )
+        return socket
+      }
       queueMicrotask(() =>
         socket.emit('error', Object.assign(new Error('not listening'), { code: 'ECONNREFUSED' }))
       )
       return socket
     },
     createServer(handler) {
-      const server = createServer(handler)
+      const desktopLease = !leaseServerCreated
+      leaseServerCreated = true
+      const server = createServer((socket) => {
+        if (desktopLease) socket.once('data', () => leaseHandoffReceived.resolve())
+        handler(socket)
+      })
       const listen = server.listen.bind(server)
       server.listen = (options, callback) => {
-        if (typeof options === 'object') return listen({ ...options, port }, callback)
+        const done = typeof callback === 'function' ? callback : undefined
+        if (typeof options === 'object') {
+          return listen({ ...options, port }, () => {
+            leasePort = server.address().port
+            done?.()
+          })
+        }
         return listen({ host: '127.0.0.1', port: reservedHostPort ?? 0 }, () => {
           reservedHostPort = server.address().port
+          done?.()
         })
       }
       sockets.push(server)
@@ -169,6 +228,7 @@ function launch(
   const application = {
     startApplication(host) {
       executionHost = host
+      applicationStarted.resolve()
     },
     handleDesktopLaunch(event) {
       events.push(['launch', JSON.parse(JSON.stringify(event))])
@@ -209,7 +269,10 @@ function launch(
         events.push(['application'])
         // Resolve after launch replay, without timing sleeps.
         queueMicrotask(() => queueMicrotask(() => completed.resolve()))
-        return application
+        // Shared modules between dynamic entries can make Rollup expose the
+        // application namespace instead of a facade with direct exports. Both
+        // forms must still reach this require only after ownership is acquired.
+        return { ...application, application }
       }
       if (id.startsWith('node:') || id === 'zod' || id === 'image-dimensions') return require(id)
       throw new Error(`Forbidden pre-ownership dependency: ${id}`)
@@ -219,10 +282,15 @@ function launch(
   ready.resolve()
   return {
     done: completed.promise,
+    applicationStarted: applicationStarted.promise,
+    dialogOpened: dialogOpened.promise,
+    hostProbeStarted: hostProbeStarted.promise,
+    leaseHandoffReceived: leaseHandoffReceived.promise,
     events,
     paths,
     getExecutionHost: () => executionHost,
-    getHostPort: () => reservedHostPort
+    getHostPort: () => reservedHostPort,
+    getLeasePort: () => leasePort
   }
 }
 
@@ -237,6 +305,111 @@ void test('bundled entry refuses another channel before loading credential/appli
   )
   assert.equal(run.paths.get('userData'), join(root, 'Lody Nightly'))
   assert.equal(run.paths.get('sessionData'), join(root, 'Lody Nightly'))
+})
+
+void test('bundled entry hands a portable link to the running desktop instead of showing a conflict', async (t) => {
+  const received = Promise.withResolvers()
+  const owner = await acquireDesktopLease(
+    { host: '127.0.0.1', port: 0 },
+    {
+      onDeepLink: (url) => {
+        received.resolve(url)
+        return true
+      }
+    }
+  )
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const run = launch(t, {
+    port: owner.port,
+    e2e: true,
+    initialUrl: 'lody://session/session-1?workspace=workspace-1'
+  })
+  await run.done
+  assert.equal(await received.promise, 'lody://session/session-1?workspace=workspace-1')
+  assert.deepEqual(
+    run.events.filter(([name]) => !['scheme', 'name'].includes(name)).map(([name]) => name),
+    ['quit']
+  )
+  assert.equal(run.paths.get('userData'), join(root, 'Lody Nightly'))
+  assert.equal(run.paths.get('sessionData'), join(root, 'Lody Nightly'))
+})
+
+void test('a Host-conflicted startup refuses handoffs until a fresh owner starts', async (t) => {
+  const daemon = await listeningHost(t, {
+    version: 1,
+    instanceId: 'external-daemon',
+    pid: process.pid,
+    mode: 'daemon',
+    startedAtMs: 1
+  })
+  const dialog = Promise.withResolvers()
+  const blocked = launch(t, { hostPort: daemon.port, dialogGate: dialog })
+  await blocked.dialogOpened
+  const blockedEndpoint = { host: '127.0.0.1', port: blocked.getLeasePort() }
+
+  assert.equal(
+    await handOffDesktopDeepLink('lody://session/blocked-startup', blockedEndpoint),
+    false
+  )
+  await new Promise((resolve) => daemon.server.close(resolve))
+  assert.equal(await handOffDesktopDeepLink('lody://session/still-blocked', blockedEndpoint), false)
+
+  dialog.resolve()
+  await blocked.done
+  assert.ok(!blocked.events.some(([name]) => name === 'application' || name === 'launch'))
+
+  const recovered = launch(t)
+  await recovered.applicationStarted
+  const target = 'lody://session/recovered-owner'
+  assert.equal(
+    await handOffDesktopDeepLink(target, {
+      host: '127.0.0.1',
+      port: recovered.getLeasePort()
+    }),
+    true,
+    JSON.stringify({
+      events: recovered.events,
+      port: recovered.getLeasePort(),
+      executionHost: recovered.getExecutionHost()
+    })
+  )
+  assert.ok(recovered.events.some(([name, event]) => name === 'launch' && event.url === target))
+})
+
+void test('slow startup keeps a portable handoff pending until launch handling binds', async (t) => {
+  const hostProbe = Promise.withResolvers()
+  const run = launch(t, { hostProbeGate: hostProbe })
+  await run.hostProbeStarted
+  const target = 'lody://session/slow-startup'
+  const accepted = handOffDesktopDeepLink(target, {
+    host: '127.0.0.1',
+    port: run.getLeasePort()
+  })
+
+  await run.leaseHandoffReceived
+  hostProbe.resolve()
+  assert.equal(await accepted, true)
+  assert.ok(run.events.some(([name, event]) => name === 'launch' && event.url === target))
+})
+
+void test('an auth callback never crosses the channel lease', async (t) => {
+  let received = false
+  const owner = await acquireDesktopLease(
+    { host: '127.0.0.1', port: 0 },
+    {
+      onDeepLink: () => {
+        received = true
+        return true
+      }
+    }
+  )
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const run = launch(t, { port: owner.port, e2e: true })
+  await run.done
+  assert.equal(received, false)
+  assert.ok(run.events.some(([name]) => name === 'conflict'))
 })
 
 void test('bundled entry imports application after ownership and replays the early login', async (t) => {

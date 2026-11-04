@@ -1,5 +1,6 @@
 import { PreviewCard as BasePreviewCard } from '@base-ui/react/preview-card';
 import * as stylex from '@stylexjs/stylex';
+import { nativeScrollbar } from '../scroll-area/surface';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
 import { portalClassName, usePopupContainer, type PopupContainer } from '../popup/portal-container';
@@ -81,6 +82,7 @@ export const PreviewCardContent = forwardRef<HTMLDivElement, PreviewCardContentP
               return appendClassName(
                 stylex.props(
                   surface.popup,
+                  nativeScrollbar,
                   surface.popupPanel,
                   hidden && hiddenSurfaceForSide(state.side),
                   noAnimation && surface.popupNoTransition

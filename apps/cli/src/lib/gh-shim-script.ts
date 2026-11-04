@@ -14,7 +14,8 @@ import { createHash } from 'crypto';
 import { GITHUB_CREDENTIAL_ENV_KEYS, LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/gh-token-env';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { githubCredentialRuntime } from './github-credential-runtime';
-import { ensureGitHubGitTransport } from './github-git-transport';
+import { ghPrCreateScript } from './gh-pr-create-script';
+import { ensureGitHubGitTransport, type GitTransportLogger } from './github-git-transport';
 
 const GH_SHIM_POSIX_BASENAME = 'gh';
 const GH_SHIM_WINDOWS_BASENAME = 'gh.cmd';
@@ -387,6 +388,9 @@ const repoCommandFlags = {
 const readRepoCommandArgs = (args) => {
   const isUrl = (value) => /^https?:/i.test(value || '');
   const arity = new Map([['--repo', true], ['-R', true], ['--help', false], ['-h', false]]);
+  const optionNames = new Map([['--repo', 'repo'], ['-R', 'repo'], ['--help', 'help'], ['-h', 'help']]);
+  const values = {};
+  const booleans = {};
   const positionals = [];
   let command;
   let help = false;
@@ -409,7 +413,9 @@ const readRepoCommandArgs = (args) => {
         for (const descriptor of descriptors.split(' ').filter(Boolean)) {
           const [long, short] = descriptor.split(':');
           arity.set('--' + long, takesValue);
+          optionNames.set('--' + long, long);
           if (short) arity.set('-' + short, takesValue);
+          if (short) optionNames.set('-' + short, long);
         }
       }
       continue;
@@ -425,6 +431,7 @@ const readRepoCommandArgs = (args) => {
         if (!long && attached >= 0 && value.startsWith('=')) value = value.slice(1);
         // Consume known values once; never rescan them as flags or subjects.
         if (value === undefined) return null;
+        (values[optionNames.get(name)] ??= []).push(value);
         if (name === '--repo' || name === '-R') repo = value;
         if (args[0] === 'issue' && command === 'develop') {
           if (name === '--issue-repo' || name === '-i') issueRepo = value;
@@ -436,6 +443,7 @@ const readRepoCommandArgs = (args) => {
       const value = long && attached >= 0 ? arg.slice(attached + 1) :
         !long && arg[j + 2] === '=' ? arg.slice(j + 3) : 'true';
       if (!/^(true|false|1|0|t|f)$/i.test(value)) return null;
+      booleans[optionNames.get(name)] = /^(true|1|t)$/i.test(value);
       if (name === '--help' || name === '-h') help = /^(true|1|t)$/i.test(value);
       if (name === '--disable-auto') disableAuto = /^(true|1|t)$/i.test(value);
       if (!long && arg[j + 2] === '=') break;
@@ -478,7 +486,7 @@ const readRepoCommandArgs = (args) => {
     catch { return null; }
   }
   // develop's deprecated selector overrides --repo regardless of flag order.
-  return { subject, command, disableAuto, repo: issueRepo !== undefined ? issueRepo : repo };
+  return { subject, command, disableAuto, repo: issueRepo !== undefined ? issueRepo : repo, values, booleans };
 };
 
 // API accepts exactly one endpoint. Values can themselves look like URLs or
@@ -673,7 +681,7 @@ async function* ghEnvironments(ghCommand, args) {
     const token = env.GH_TOKEN || env.GITHUB_TOKEN;
     if (token) return { token };
     const result = await runGhCommand(ghCommand, ['auth', 'token', '--hostname', target.host], {
-      env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 3000,
+      env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
     });
     if (result.error) throw result.error;
     if (result.status !== 0) throw credentialError('local_auth_missing');
@@ -683,15 +691,25 @@ async function* ghEnvironments(ghCommand, args) {
     const attemptEnv = candidate.source === 'local' ? { ...env } : isolatedGhEnv(env, candidate.token);
     injectGhToken(attemptEnv, candidate.token);
     attemptEnv.GH_HOST = 'github.com';
-    yield { env: attemptEnv, source: candidate.source };
+    yield { env: attemptEnv, source: candidate.source, target };
   }
 }
+${ghPrCreateScript}
 const main = async () => {
   const ghCommand = resolveRealGhCommand();
   if (!ghCommand) throw credentialError('gh_not_found');
   const args = process.argv.slice(2);
   for await (const attempt of ghEnvironments(ghCommand, args)) {
     console.error('[Lody GitHub] ' + JSON.stringify({ source: attempt.source, stage: 'execute' }));
+    const normalizedCreateArgs = normalizeRepoArgs(args);
+    const parsedCreate = normalizedCreateArgs[0] === 'pr' ? readRepoCommandArgs(normalizedCreateArgs) : null;
+    if ((attempt.source === 'personal' || attempt.source === 'app') && parsedCreate?.command === 'create') {
+      // REST records the App actor; native gh's GraphQL creation loses it.
+      // Treat creation plus metadata as one compound write, with no replay.
+      const created = await createPrViaRest(ghCommand, attempt.target, parsedCreate, attempt.env);
+      if (created !== null) { process.exitCode = created; return; }
+      console.error('[Lody GitHub] Using native gh for this PR creation mode; GitHub may omit App attribution. To preserve it, push the branch first and supply --title, --body/--body-file, --base and --head without fill, web, editor, template, recovery or attachment options.');
+    }
     // Preserve native streaming. Once output or a possible write is observed,
     // never replay a command (gh may issue multiple API calls internally).
     const result = await new Promise(resolve => {
@@ -822,7 +840,10 @@ const ensureWritableShimTarget = (filePath: string): void => {
   }
 };
 
-export const ensureGhShimScript = (brokerStateFilePath?: string): void => {
+export const ensureGhShimScript = (
+  brokerStateFilePath?: string,
+  logger?: GitTransportLogger
+): void => {
   const source = buildGhShimSource(resolveRealGhPath(brokerStateFilePath), brokerStateFilePath);
   const shimTargets =
     process.platform === 'win32'
@@ -859,7 +880,8 @@ export const ensureGhShimScript = (brokerStateFilePath?: string): void => {
     ensureGitHubGitTransport(
       getGhShimHostBinDir(brokerStateFilePath),
       resolveBrokerStatePath(brokerStateFilePath),
-      realGit
+      realGit,
+      { logger }
     );
 };
 

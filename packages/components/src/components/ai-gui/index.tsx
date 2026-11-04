@@ -1,4 +1,4 @@
-import { forwardRef, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { forwardRef, memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import type {
   SessionFilePayload,
   SessionHistoryParsed,
@@ -10,6 +10,7 @@ import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/ato
 import { getSavedAnchorTurnId } from '@/lib/conversation-scroll/saved-state';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { AgentActivityTone } from './view';
+import type { HistoryLiveWindow, LiveTurnActivity } from './assistant-turn-timing';
 import {
   MessageRowView,
   SessionChatStreamView,
@@ -17,11 +18,10 @@ import {
   type CapacityRetryControl,
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
+  type SessionChatStreamViewProps,
   type UserMessageEditMentionContext,
   type UserMessageEditSubmission,
 } from './view';
-import { reanchorMessageTextSpansForTrim } from '@lody/shared';
-import { useMentionPromptExpansion } from '@/components/mentions/mention-expansion';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import { useConversationVersion } from '@/hooks/use-conversation-view';
@@ -68,6 +68,7 @@ export interface SessionChatStreamProps {
   leadingContent?: ReactNode;
   /** Scrolls after history as a local, not-yet-committed user message. */
   trailingContent?: ReactNode;
+  localUserMessages?: SessionChatStreamViewProps['localUserMessages'];
   emptyState?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
   showScrollToLatest?: boolean;
@@ -75,10 +76,14 @@ export interface SessionChatStreamProps {
   agentActivityTone?: AgentActivityTone;
   /** The status is live work (not waiting on the user): shimmer it. */
   agentActivityShimmer?: boolean;
+  /** Presence-derived activity; gates the running turn's timing and liveness. */
+  liveTurnActivity?: LiveTurnActivity | null;
+  historyLive?: HistoryLiveWindow;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
   /** Routes HTML attachment clicks to a live file or Browser surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
+  onAnnotateImage?: SessionChatStreamViewProps['onAnnotateImage'];
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
   assistantActionsMessageId?: string | null;
@@ -102,7 +107,6 @@ export interface SessionChatStreamProps {
   forkingAssistantMessageId?: string | null;
   /** Opens another session from an in-conversation link (e.g. a fork's origin). */
   onNavigateSession?: (target: SessionNavigationTarget) => void;
-  onLastCompletedAssistantMessageIdChange?: (messageId: string | null) => void;
   conversationFontSize?: ConversationFontSize;
   /** Full-page overlay that keeps the conversation outline independent of composer height. */
   outlineOverlayRoot?: HTMLElement | null;
@@ -170,15 +174,19 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       className,
       leadingContent,
       trailingContent,
+      localUserMessages,
       emptyState,
       onAtBottomChange,
       showScrollToLatest = true,
       agentActivityLabel = null,
       agentActivityTone = 'primary',
       agentActivityShimmer,
+      liveTurnActivity = null,
+      historyLive,
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onAnnotateImage,
       messageFileDiffEntriesByTurn,
       assistantActions,
       assistantActionsMessageId,
@@ -191,7 +199,6 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       onEditLastUser,
       onResendUndelivered,
       capacityRetry,
-      onLastCompletedAssistantMessageIdChange,
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
@@ -213,42 +220,6 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       onOutlinePreviewRound: handleOutlinePreviewRound,
       onRetainedTurnIdsChange,
     } = useConversationStreamItems(view, sessionId, { initialFocusTurnId });
-    useEffect(() => {
-      onLastCompletedAssistantMessageIdChange?.(lastCompletedAssistantMessageId);
-    }, [lastCompletedAssistantMessageId, onLastCompletedAssistantMessageIdChange]);
-
-    /* The edit-and-resend save path needs the same before-send expansion the
-       composer's send runs; mounting it here (rather than inside each row)
-       keeps the skill/session catalogs single per stream and lets the row's
-       `onEdit` receive already-expanded text. */
-    const { expand: expandEditMentions } = useMentionPromptExpansion({
-      source: editMentionContext?.mentionSource,
-      skillAgent: editMentionContext?.skillAgent,
-      promptValue: '',
-      currentSessionId: sessionId,
-    });
-    const stableExpandEditMentions = useStableCallback(expandEditMentions);
-    const handleEditLastUser = useCallback(
-      async (message: SessionHistoryParsed, submission: UserMessageEditSubmission) => {
-        if (!onEditLastUser) return false;
-        const expanded = stableExpandEditMentions({
-          text: submission.text,
-          mentions: submission.mentions,
-        });
-        const trimmedText = expanded.text.trim();
-        const trimmedSpans = reanchorMessageTextSpansForTrim(
-          expanded.text,
-          trimmedText,
-          expanded.spans
-        );
-        return await onEditLastUser(message, {
-          text: trimmedText,
-          mentions: submission.mentions,
-          spans: trimmedSpans,
-        });
-      },
-      [onEditLastUser, stableExpandEditMentions]
-    );
 
     const stableOnFileDiffClick = useStableCallback((turnId: string, filePath: string) => {
       onFileDiffClick?.(turnId, filePath);
@@ -293,7 +264,9 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             workspaceId={workspaceId}
             showSenderIdentity={showSenderIdentity}
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
-            onEditLastUser={message.id === lastUserMessageId ? handleEditLastUser : undefined}
+            onEditLastUser={
+              onEditLastUser && message.id === lastUserMessageId ? onEditLastUser : undefined
+            }
             editMentionContext={editMentionContext}
             onResendUndelivered={onResendUndelivered}
             capacityRetry={message.id === capacityRetry?.noticeId ? capacityRetry : undefined}
@@ -304,9 +277,9 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       [
         conversationFontSize,
         editMentionContext,
-        handleEditLastUser,
         hasNavigateSession,
         lastUserMessageId,
+        onEditLastUser,
         onResendUndelivered,
         capacityRetry,
         stableOnNavigateSession,
@@ -325,6 +298,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         className={className}
         leadingContent={leadingContent}
         trailingContent={trailingContent}
+        localUserMessages={localUserMessages}
         emptyState={emptyState}
         onAtBottomChange={onAtBottomChange}
         showScrollToLatest={showScrollToLatest}
@@ -332,6 +306,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         onFileDiffClick={hasFileDiffClick ? stableOnFileDiffClick : undefined}
         onFilePathClick={hasFilePathClick ? stableOnFilePathClick : undefined}
         onOpenHtmlFile={onOpenHtmlFile}
+        onAnnotateImage={onAnnotateImage}
         lastAssistantMessageId={lastAssistantMessageId}
         lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
         messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
@@ -345,6 +320,8 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         agentActivityLabel={agentActivityLabel}
         agentActivityTone={agentActivityTone}
         agentActivityShimmer={agentActivityShimmer}
+        liveTurnActivity={liveTurnActivity}
+        {...(historyLive ? { historyLive } : {})}
         conversationFontSize={conversationFontSize}
         suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
         outlineOverlayRoot={outlineOverlayRoot}

@@ -1,98 +1,43 @@
-import { shellEnv } from 'shell-env';
+import { Effect, Exit } from 'effect';
+import { LoginShellCache, LoginShellCacheClosed } from '@lody/shared/node/login-shell-env';
+import type { ApplicationRuntime } from '@lody/shared/node/application-runtime';
+import { squashProcessFailure } from '@lody/shared/node/process';
 
-// Match the Electron probe's budget (cli-service.ts SHELL_ENV_TIMEOUT_MS).
-const SHELL_ENV_TIMEOUT_MS = 3000;
+// This pointer bridges remaining Promise/synchronous launchers to the owner
+// installed by the application entry. All cache state and work live in its Layer.
+let application: ApplicationRuntime<LoginShellCache, never> | undefined;
 
-/**
- * Resolving the login-shell env spawns the user's shell with `-ilc` so it sources
- * their full profile. That is slow (~100-300ms) but the result does not change
- * mid-session, so memoize the first resolution for the process lifetime.
- */
-let cachedShellEnvPromise: Promise<NodeJS.ProcessEnv> | null = null;
-/** Last successfully resolved env, exposed to synchronous callers. */
-let resolvedShellEnv: NodeJS.ProcessEnv = {};
-
-const shouldSkip = (): boolean =>
-  // shell-env just returns process.env on win32, so skip the subprocess there.
-  process.platform === 'win32' || process.env.LODY_DISABLE_SHELL_ENV === '1';
-
-const resolveOnce = (): Promise<NodeJS.ProcessEnv> => {
-  const probe = shellEnv()
-    .then((env) => {
-      resolvedShellEnv = env;
-      // The race below may have already resolved the memoized promise to {} via
-      // the timeout. Replace it so *later* awaiters (acp-runner aux sessions,
-      // history-sync) get the real env instead of being stuck on the timeout's
-      // empty overlay for the rest of the process — otherwise the sync accessor
-      // (which reads resolvedShellEnv) and the async accessor would permanently
-      // disagree after a slow-but-successful probe.
-      cachedShellEnvPromise = Promise.resolve(env);
-      return env;
-    })
-    .catch((): NodeJS.ProcessEnv => ({}));
-
-  // shell-env has no built-in timeout; a hanging dotfile would otherwise block
-  // every awaiting ACP spawn forever. Fail open to the empty overlay so the
-  // withDefaultAcpPathEntries fallback still applies. We cannot reap the spawned
-  // login shell here (shell-env exposes no child handle), but execa's default
-  // cleanup kills it on process exit, so at worst a hung dotfile leaks one idle
-  // shell for the daemon's lifetime — not per spawn.
-  const timeout = new Promise<NodeJS.ProcessEnv>((resolve) => {
-    const timer = setTimeout(() => resolve({}), SHELL_ENV_TIMEOUT_MS);
-    timer.unref();
-  });
-
-  return Promise.race([probe, timeout]);
+/** @deprecated Application-entry binding for launchers awaiting native migration. */
+export const bindLoginShellCacheLegacy = (
+  owner: ApplicationRuntime<LoginShellCache, never>
+): void => {
+  if (application && !application.isReleased())
+    throw new Error('Login-shell application owner already bound');
+  application = owner;
+};
+const owner = () => {
+  if (!application || application.isClosing()) throw new LoginShellCacheClosed();
+  return application;
 };
 
-/**
- * Read the environment (most importantly `PATH`) from the user's login shell
- * profile via the `shell-env` library.
- *
- * GUI/daemon launches (Electron Dock, systemd, npx, IDE terminals) inherit a
- * minimal PATH that omits the dirs users actually install tools into
- * (`~/.local/bin`, homebrew, cargo, volta, asdf, ...). Spawning an agent binary
- * such as `opencode acp` then fails with `spawn opencode ENOENT`. `shell-env`
- * sources the login shell, so we pick up tools wherever they live instead of
- * guessing a fixed set of directories.
- *
- * Never throws: on a clean failure the `.catch` yields `{}` (an empty overlay).
- * Note `shell-env` itself, when every candidate shell fails, falls back to
- * returning the inherited `process.env` rather than throwing — so the overlay may
- * be the full process env, not `{}`. That stays safe because `mergeLoginShellEnv`
- * is base-wins for non-PATH vars (a no-op for vars the base already has) and the
- * caller scrubs inherited auth/routing vars *after* overlaying (see session.ts).
- * Disable entirely via `LODY_DISABLE_SHELL_ENV=1`.
- */
-export const getLoginShellEnv = async (): Promise<NodeJS.ProcessEnv> => {
-  if (shouldSkip()) {
-    return {};
-  }
-  if (!cachedShellEnvPromise) {
-    cachedShellEnvPromise = resolveOnce();
-  }
-  return cachedShellEnvPromise;
+/** @deprecated Promise boundary; LoginShellCache owns the probe, wait and result. */
+export const getLoginShellEnvLegacy = async (): Promise<NodeJS.ProcessEnv> => {
+  if (process.env.LODY_DISABLE_SHELL_ENV === '1') return {};
+  const exit = await owner().runtime.runPromiseExit(
+    Effect.flatMap(LoginShellCache, (cache) => cache.get(3000))
+  );
+  if (Exit.isFailure(exit)) throw squashProcessFailure(exit.cause);
+  return exit.value ?? {};
 };
 
-/**
- * Synchronous view of the login-shell env for callers that cannot await, such as
- * terminal-manager environment callbacks. Returns `{}` until
- * `getLoginShellEnv()` has resolved at least once, so the first read kicks off
- * resolution and relies on the `withDefaultAcpPathEntries` fallback for that one
- * call; later reads see the cached env. ACP startup awaits the async accessor.
- */
-export const getCachedLoginShellEnvSync = (): NodeJS.ProcessEnv => {
-  if (shouldSkip()) {
-    return {};
-  }
-  if (!cachedShellEnvPromise) {
-    void getLoginShellEnv();
-  }
-  return resolvedShellEnv;
+/** @deprecated Synchronous snapshot; a pending probe returns the empty overlay. */
+export const getCachedLoginShellEnvSyncLegacy = (): NodeJS.ProcessEnv => {
+  if (process.env.LODY_DISABLE_SHELL_ENV === '1') return {};
+  const exit = owner().runtime.runSyncExit(Effect.flatMap(LoginShellCache, (cache) => cache.peek));
+  if (Exit.isFailure(exit)) throw squashProcessFailure(exit.cause);
+  return exit.value ?? {};
 };
 
-/** Test-only: clear the memoized login-shell env so cases can re-resolve. */
-export const resetLoginShellEnvCache = (): void => {
-  cachedShellEnvPromise = null;
-  resolvedShellEnv = {};
-};
+/** @deprecated Application exit boundary. Concurrent closes await the same receipt. */
+export const closeLoginShellApplicationLegacy = (): Promise<void> =>
+  application?.closeLegacy() ?? Promise.resolve();

@@ -38,6 +38,7 @@ import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
 import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
+import { INFO_BAR_PROSE_CLASS, INFO_BAR_TEXT_CLASS } from './info-bar-type';
 import { ClusterChip, StageChip } from './info-chip';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -197,19 +198,14 @@ export function GoalChip({
         kind: 'popover',
         ariaLabel: t('sessions.goal.banner.label', 'Goal'),
         content: (
-          <div className="flex flex-col gap-2 p-3 text-xs">
+          <div className={cn('flex flex-col gap-2 p-3', INFO_BAR_TEXT_CLASS)}>
             <div className="flex items-center gap-2">
               <Target className={cn('h-4 w-4 shrink-0', meta.textClassName)} aria-hidden="true" />
-              <span
-                className={cn(
-                  'text-[11px] font-semibold uppercase tracking-wide',
-                  meta.textClassName
-                )}
-              >
+              <span className={cn('font-medium  ', meta.textClassName)}>
                 {t('sessions.goal.banner.label', 'Goal')}
               </span>
               <span className={cn('font-medium', meta.textClassName)}>{statusLabel}</span>
-              <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
                 {timeLabel ? (
                   <span
                     className="inline-flex items-center gap-1 tabular-nums leading-none"
@@ -222,7 +218,12 @@ export function GoalChip({
                 {tokensLabel ? <span className="tabular-nums">{tokensLabel}</span> : null}
               </span>
             </div>
-            <p className="scrollbar-pro max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-snug text-foreground">
+            <p
+              className={cn(
+                'scrollbar-pro max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-foreground',
+                INFO_BAR_PROSE_CLASS
+              )}
+            >
               {objective}
             </p>
             {showPause || showResume || showClear || showDismiss ? (
@@ -339,7 +340,7 @@ export function ScheduleChip({
         ariaLabel: heading,
         content: (
           <div className="flex flex-col gap-1.5 p-3">
-            <div className="flex items-center gap-1.5 text-xs">
+            <div className={cn('flex items-center gap-1.5', INFO_BAR_TEXT_CLASS)}>
               <AlarmClock className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
               <span className="font-medium text-foreground">{heading}</span>
               <span className="text-muted-foreground">· {summary}</span>
@@ -408,26 +409,33 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
   }
 
   return (
-    <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-foreground/[0.08] bg-foreground/[0.03] dark:border-transparent dark:bg-muted-foreground/[0.08]">
+    <div className="flex min-w-12 shrink-[8] items-center overflow-hidden rounded-md bg-foreground/[0.05] dark:bg-muted-foreground/[0.08]">
       <button
         type="button"
         onClick={primaryAction.onClick}
         disabled={primaryAction.disabled}
         title={primaryAction.label}
-        className="flex shrink-0 select-none items-center px-1.5 py-0.5 text-xs font-medium text-muted-foreground outline-none transition-colors enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+        className={cn(
+          'flex min-w-0 shrink select-none items-center px-1.5 py-0.5 font-medium text-muted-foreground outline-none transition-colors enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]',
+          INFO_BAR_TEXT_CLASS
+        )}
       >
         <span className="truncate">{primaryAction.label}</span>
       </button>
       {overflowActions.length > 0 ? (
         <Menu.Root>
-          <Menu.Trigger render={<button
-              type="button"
-              aria-label={t('sessions.moreActions', 'More actions')}
-              title={t('sessions.moreActions', 'More actions')}
-              className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
-            >
-              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>}>
+          <Menu.Trigger
+            render={
+              <button
+                type="button"
+                aria-label={t('sessions.moreActions', 'More actions')}
+                title={t('sessions.moreActions', 'More actions')}
+                className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+              >
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            }
+          >
             <button
               type="button"
               aria-label={t('sessions.moreActions', 'More actions')}
@@ -457,11 +465,7 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
                   )}
                 </Menu.Item>
               ) : (
-                <Menu.Item
-                  key={action.id}
-                  disabled={action.disabled}
-                  onClick={action.onClick}
-                >
+                <Menu.Item key={action.id} disabled={action.disabled} onClick={action.onClick}>
                   {action.label}
                 </Menu.Item>
               )
@@ -521,22 +525,26 @@ function LocationControl({
   return (
     <Tooltip.Provider delay={300}>
       <Tooltip.Root>
-        <Tooltip.Trigger render={canCopy ? (
-            <button
-              type="button"
-              onClick={handleCopy}
-              aria-label={label}
-              // -mr-1 cancels the stage's icon→summary gap so the glyph sits
-              // close to the repo/branch text (a lone icon otherwise floats).
-              className="-mr-1 flex h-6 shrink-0 select-none items-center rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
-            >
-              {glyph}
-            </button>
-          ) : (
-            <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
-              {glyph}
-            </span>
-          )}/>
+        <Tooltip.Trigger
+          render={
+            canCopy ? (
+              <button
+                type="button"
+                onClick={handleCopy}
+                aria-label={label}
+                // -mr-1 cancels the stage's icon→summary gap so the glyph sits
+                // close to the repo/branch text (a lone icon otherwise floats).
+                className="-mr-1 flex h-6 shrink-0 select-none items-center rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
+              >
+                {glyph}
+              </button>
+            ) : (
+              <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
+                {glyph}
+              </span>
+            )
+          }
+        />
         <Tooltip.Content side="top">
           <span className="font-medium text-foreground">{label}</span>
           {canCopy ? (
@@ -580,7 +588,8 @@ export function ContextChip({
   diffStat?: { add: number; del: number } | null;
   prCiRuns?: readonly PrCiRun[];
   onOpenPrCiRun?: (run: PrCiRun) => void;
-  /** Compact CI state from the session row; live runs override it when present. */
+  /** CI verdict from session metadata, the same value the sidebar shows. Live
+   *  runs only list the checks; they never change this summary. */
   prCiState?: SessionPullRequestCiState | null;
 } & InfoBarItemMode) {
   const { t } = useTranslation();
@@ -608,17 +617,8 @@ export function ContextChip({
   // cluster stays uniform-width (the "#1234" label lived only here and caused
   // the layout jump on hand-off).
   const StatusIcon = statusMeta?.icon ?? LocationIcon;
-  const liveCiOverall = prCiRuns?.length ? summarizePrCiRuns(prCiRuns) : null;
-  const compactCiState: SessionPullRequestCiState | null | undefined =
-    liveCiOverall === 'failing'
-      ? 'f'
-      : liveCiOverall === 'running'
-        ? 'p'
-        : liveCiOverall === 'passing'
-          ? 's'
-          : prCiState;
   const prNumber = pr
-    ? (getSessionPullRequestLegacyFields(pr).number ?? parseGitHubPrNumber(pr.url))
+    ? (parseGitHubPrNumber(pr.url) ?? getSessionPullRequestLegacyFields(pr).number)
     : null;
   const value = pr ? (prNumber ? `#${prNumber}` : 'PR') : undefined;
   const label = pr
@@ -646,16 +646,19 @@ export function ContextChip({
         onClick={onOpenPr}
         aria-label={t('sessions.pr.openTab', 'Open pull request')}
         title={t('sessions.pr.openTab', 'Open pull request')}
-        className="flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10"
+        className={cn(
+          'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+          INFO_BAR_TEXT_CLASS
+        )}
       >
-        <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
+        <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
         {value ? (
           <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
         ) : null}
       </button>
     ) : (
       <span className="flex h-6 shrink-0 items-center gap-1 px-1 font-medium text-muted-foreground">
-        <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
+        <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
         {value ? (
           <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
         ) : null}
@@ -684,6 +687,8 @@ export function ContextChip({
 
   // The line totals sit on the right edge in their own tinted chip, colored
   // like GitHub's (the PR's green and red), apart from the repo/branch text.
+  // Under squeeze the action label truncates first; the totals clip last,
+  // inside their own chip rather than past the bar.
   const diffChip = hasDiff ? (
     <button
       type="button"
@@ -691,7 +696,10 @@ export function ContextChip({
       disabled={!onOpenAllChanges}
       aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
       title={t('sessions.detailTabs.allChanges', 'All Changes')}
-      className="flex h-5 shrink-0 items-center gap-1.5 rounded-md bg-foreground/[0.06] px-1.5 text-[11px] font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none"
+      className={cn(
+        'flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none',
+        INFO_BAR_TEXT_CLASS
+      )}
     >
       <span className="text-github-addition">+{diffStat.add}</span>
       <span className="text-github-deletion">−{diffStat.del}</span>
@@ -725,7 +733,7 @@ export function ContextChip({
             {/* CI pill stays adjacent to the PR number; the location control
                 trails it, sitting right before the repo/branch summary. */}
             <span className="hidden @[420px]:contents">
-              <PrCiPill runs={prCiRuns} onOpenRun={onOpenPrCiRun} />
+              <PrCiPill runs={prCiRuns} state={prCiState} onOpenRun={onOpenPrCiRun} />
             </span>
             {locationControl}
           </>
@@ -802,22 +810,41 @@ export const PR_CI_RUN_ICON: Record<
   cancelled: { Icon: CircleSlash, className: 'text-muted-foreground/70' },
 };
 
-export function usePrCiPresentation(runs: readonly PrCiRun[]) {
+/** Session metadata CI code as a pill verdict; null when metadata has none. */
+function getPrCiOverallFromState(
+  state: SessionPullRequestCiState | null | undefined
+): PrCiOverall | null {
+  if (state === 's') return 'passing';
+  if (state === 'f' || state === 'e') return 'failing';
+  if (state === 'p' || state === 'x') return 'running';
+  return null;
+}
+
+/** The verdict is the metadata CI code, the same one the sidebar and the Fix CI
+ *  gate read; without one the pill only lists the runs. */
+export function usePrCiPresentation(
+  runs: readonly PrCiRun[],
+  state?: SessionPullRequestCiState | null
+) {
   const { t } = useTranslation();
-  const overall = summarizePrCiRuns(runs);
+  const overall = getPrCiOverallFromState(state);
   const settled = runs.filter((run) => run.status !== 'running' && run.status !== 'queued').length;
   const overallLabel =
     overall === 'passing'
       ? t('sessions.prCi.passing', 'CI passed')
       : overall === 'failing'
         ? t('sessions.prCi.failing', 'CI failed')
-        : t('sessions.prCi.running', 'CI running');
+        : overall === 'running'
+          ? t('sessions.prCi.running', 'CI running')
+          : null;
   const toneClassName =
     overall === 'passing'
       ? 'text-status-success'
       : overall === 'failing'
         ? 'text-destructive'
-        : 'text-status-warning';
+        : overall === 'running'
+          ? 'text-status-warning'
+          : 'text-muted-foreground';
   const VerdictIcon =
     overall === 'passing' ? CircleCheck : overall === 'failing' ? CircleX : CircleDot;
   return { overall, settled, overallLabel, toneClassName, VerdictIcon };
@@ -825,23 +852,29 @@ export function usePrCiPresentation(runs: readonly PrCiRun[]) {
 
 function PrCiPopoverBody({
   runs,
+  state,
   onOpenRun,
 }: {
   runs: readonly PrCiRun[];
+  state?: SessionPullRequestCiState | null;
   onOpenRun?: (run: PrCiRun) => void;
 }) {
   const { t } = useTranslation();
   const durationUnitLabels = getDurationUnitLabels(t);
-  const { settled, overallLabel, toneClassName } = usePrCiPresentation(runs);
+  const { settled, overallLabel, toneClassName } = usePrCiPresentation(runs, state);
   return (
     <div className="flex flex-col gap-1.5 p-3">
-      <div className="flex items-center gap-1.5 text-xs">
-        <span className={cn('font-medium', toneClassName)}>{overallLabel}</span>
+      <div className={cn('flex items-center gap-1.5', INFO_BAR_TEXT_CLASS)}>
+        <span className={cn('font-medium', toneClassName)}>
+          {overallLabel ?? t('sessions.prCi.label', 'CI checks')}
+        </span>
         <span className="text-muted-foreground">
           · {settled}/{runs.length}
         </span>
       </div>
-      <ul className="scrollbar-pro flex max-h-56 flex-col overflow-y-auto text-xs">
+      <ul
+        className={cn('scrollbar-pro flex max-h-56 flex-col overflow-y-auto', INFO_BAR_TEXT_CLASS)}
+      >
         {runs.map((run) => {
           const { Icon: RunIcon, className: runClassName } = PR_CI_RUN_ICON[run.status];
           const duration =
@@ -887,20 +920,25 @@ function PrCiPopoverBody({
  */
 export function PrCiPill({
   runs,
+  state,
   onOpenRun,
 }: {
   runs: readonly PrCiRun[] | undefined;
+  /** Session metadata CI code; it decides the verdict when present. */
+  state?: SessionPullRequestCiState | null;
   /** Open a check run (e.g. its GitHub Actions page). */
   onOpenRun?: (run: PrCiRun) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const hasRuns = !!runs && runs.length > 0;
-  const presentation = usePrCiPresentation(hasRuns ? runs! : []);
+  const presentation = usePrCiPresentation(hasRuns ? runs! : [], state);
   if (!hasRuns) return null;
 
   const { overall, settled, overallLabel, toneClassName, VerdictIcon } = presentation;
-  const label = `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`;
+  const label = overallLabel
+    ? `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`
+    : t('sessions.prCi.label', 'CI checks');
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -911,7 +949,8 @@ export function PrCiPill({
             aria-label={label}
             title={label}
             className={cn(
-              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+              INFO_BAR_TEXT_CLASS,
               open && 'bg-muted-foreground/10'
             )}
           >
@@ -931,7 +970,7 @@ export function PrCiPill({
         aria-label={t('sessions.prCi.label', 'CI checks')}
         className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
       >
-        <PrCiPopoverBody runs={runs!} onOpenRun={onOpenRun} />
+        <PrCiPopoverBody runs={runs!} state={state} onOpenRun={onOpenRun} />
       </Popover.Content>
     </Popover.Root>
   );

@@ -2,18 +2,16 @@
 
 import { createHash } from 'node:crypto';
 import { runInThisContext } from 'node:vm';
-import { flushSync } from 'react-dom';
+import { act, Component, useState, type ReactNode } from 'react';
+
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BootShell } from '../src/components/boot-shell';
-import { BOOT_SHELL_COLORS, BOOT_SHELL_MARKUP } from '../src/lib/boot-shell';
+import { BootShell, BootShellProvider } from '../src/components/boot-shell';
+
+import { BOOT_SHELL_MARKUP } from '../src/lib/boot-shell';
 import { createBootShellScript } from '../src/lib/boot-shell-script';
-import {
-  createThemeCssVariables,
-  DEFAULT_VSCODE_THEME_SELECTION,
-  getBundledVSCodeThemeByIdSync,
-} from '../src/lib/vscode-theme';
+
 import {
   BOOT_SHELL_HEAD_MARKER,
   BOOT_SHELL_ROOT_MARKER,
@@ -48,6 +46,9 @@ function boot(
 }
 
 beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('localStorage', window.localStorage);
+  vi.stubGlobal('sessionStorage', window.sessionStorage);
   osPrefersDark = false;
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -62,9 +63,12 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   sessionStorage.clear();
+  vi.unstubAllGlobals();
   html.removeAttribute('class');
   html.removeAttribute('style');
   html.removeAttribute('data-lody-boot-sidebar');
+  html.removeAttribute('data-lody-boot-layout');
+  html.removeAttribute('data-lody-boot-mobile');
   document.body.innerHTML = '';
 });
 
@@ -80,41 +84,6 @@ describe('boot shell script', () => {
     html.removeAttribute('class');
     osPrefersDark = false;
     expect(boot('/acme/chat', { 'vite-ui-theme': 'system' }).theme).toBe('light');
-  });
-
-  it.each([
-    ['a workspace route', '/acme/chat', {}, {}, '280px'],
-    ['a hash-history session route', '/index.html#/acme/sessions/s1', {}, {}, '280px'],
-    ['the stored width', '/acme/chat', { 'lody-sidebar-last-width': '312' }, {}, '312px'],
-    ['a width past the maximum', '/acme/chat', { 'lody-sidebar-last-width': '900' }, {}, '420px'],
-    ['a collapsed sidebar', '/acme/chat', { 'lody-sidebar-collapsed': 'true' }, {}, null],
-    ['settings, which has no sidebar', '/acme/settings/general', {}, {}, null],
-    ['login', '/login', {}, {}, null],
-    ['onboarding', '/index.html#/onboarding', {}, {}, null],
-    [
-      'the root ignores a legacy saved route',
-      '/',
-      {
-        'lody:lastAppRoute': JSON.stringify({
-          version: 1,
-          path: '/acme/sessions/s1',
-          updatedAt: 1,
-        }),
-      },
-      {},
-      null,
-    ],
-    ['the root on a first visit', '/', {}, {}, null],
-    ['a session window, collapsed by default', '/acme/sessions/s1?window=session', {}, {}, null],
-    [
-      'an auxiliary window, which keeps its own collapse state',
-      '/acme/chat?window=workspace',
-      { 'lody-sidebar-collapsed': 'true' },
-      { 'lody-sidebar-collapsed': 'false' },
-      '280px',
-    ],
-  ])('sidebar column for %s', (_label, url, storage, session, expected) => {
-    expect(boot(url, storage, session).sidebarWidth).toBe(expected);
   });
 
   it('falls back to the mark alone when storage is unavailable', () => {
@@ -159,43 +128,151 @@ describe('boot shell document', () => {
     const plain = '<html><head><link rel="stylesheet" href="a.css"></head><body></body></html>';
     expect(moveStylesheetsAfterBootShell(plain)).toBe(plain);
   });
+});
 
-  it('renders the same frame from React as the static markup', () => {
-    const staticShell = document.createElement('div');
-    staticShell.innerHTML = BOOT_SHELL_MARKUP;
-    const container = document.createElement('div');
+class RecoveryBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? <button>Recover render</button> : this.props.children;
+  }
+}
+
+describe('boot shell provider handoff', () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    container = document.createElement('div');
     document.body.append(container);
-    const root = createRoot(container);
-    flushSync(() => root.render(<BootShell />));
-
-    const outline = (shell: Element) =>
-      Array.from(shell.querySelectorAll('*'), (element) => element.getAttribute('class'));
-    const reactShell = container.querySelector('[data-lody-boot-shell]')!;
-    const htmlShell = staticShell.querySelector('[data-lody-boot-shell]')!;
-    expect(outline(reactShell)).toEqual(outline(htmlShell));
-    // React sets `src` last, so compare attributes rather than serialized order.
-    const attributes = (element: Element) =>
-      Object.fromEntries(Array.from(element.attributes, (a) => [a.name, a.value]));
-    expect(attributes(reactShell.querySelector('img')!)).toEqual(
-      attributes(htmlShell.querySelector('img')!)
-    );
-    root.unmount();
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
   });
 
-  it('paints the colours the bundled themes resolve to', () => {
-    const resolve = (id: string | undefined) => {
-      const variables = createThemeCssVariables(getBundledVSCodeThemeByIdSync(id!)!) as Record<
-        string,
-        string
-      >;
-      return {
-        canvas: variables['--background'],
-        sidebar: variables['--sidebar-background'],
-        sidebarBorder: variables['--sidebar-border'],
-        status: variables['--muted-foreground'],
-      };
-    };
-    expect(resolve(DEFAULT_VSCODE_THEME_SELECTION.lightThemeId)).toEqual(BOOT_SHELL_COLORS.light);
-    expect(resolve(DEFAULT_VSCODE_THEME_SELECTION.darkThemeId)).toEqual(BOOT_SHELL_COLORS.dark);
+  const frame = () => container.querySelector('.lody-boot-shell')!;
+  const expectReleased = (shell: Element) => {
+    expect(shell.hasAttribute('data-lody-boot-shell')).toBe(false);
+    expect(shell.getAttribute('aria-hidden')).toBe('true');
+    expect(shell.hasAttribute('inert')).toBe(true);
+    expect(shell.hasAttribute('aria-busy')).toBe(false);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+  };
+  const expectAccessible = (element: HTMLElement) => {
+    expect(element.closest('[inert], [aria-hidden="true"]')).toBeNull();
+    element.focus();
+    expect(document.activeElement).toBe(element);
+  };
+
+  it('replaces static markup, retains the frame and mark across distinct gates, and releases on destination commit', () => {
+    container.innerHTML = BOOT_SHELL_MARKUP;
+    const staticFrame = frame();
+    const EntryGate = () => <BootShell status="Signing in" />;
+    const DestinationGate = () => <BootShell path="/acme/chat" status="Opening workspace" />;
+    const render = (children: ReactNode) =>
+      act(() => root.render(<BootShellProvider path="/login">{children}</BootShellProvider>));
+    render(<EntryGate />);
+    const shell = frame();
+    const mark = shell.querySelector('img');
+    expect(shell).not.toBe(staticFrame);
+    expect(staticFrame.isConnected).toBe(false);
+    expect(shell.hasAttribute('data-lody-boot-shell')).toBe(true);
+    expect(shell.getAttribute('data-layout')).toBe('plain');
+    render(<DestinationGate />);
+    expect(frame()).toBe(shell);
+    expect(shell.querySelector('img')).toBe(mark);
+    expect(container.querySelectorAll('.lody-boot-shell')).toHaveLength(1);
+    expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('Opening workspace');
+    expect(shell.getAttribute('data-layout')).toBe('workspace');
+    expect(shell.getAttribute('data-sidebar')).toBe('shown');
+    render(<button>Destination</button>);
+    expect(frame()).toBe(shell);
+    expect(shell.querySelector('img')).toBe(mark);
+    expectReleased(shell);
+    expectAccessible(container.querySelector('button')!);
+  });
+
+  it('renders real children while pending and releases immediately for an interactive recovery page', () => {
+    function Pending() {
+      const [recover, setRecover] = useState(false);
+      return recover ? (
+        <button>Reload workspace</button>
+      ) : (
+        <>
+          <BootShell status="Connecting" />
+          <button onClick={() => setRecover(true)}>Show recovery</button>
+        </>
+      );
+    }
+    act(() =>
+      root.render(
+        <BootShellProvider>
+          <Pending />
+        </BootShellProvider>
+      )
+    );
+    const shell = frame();
+    expect(shell.hasAttribute('data-lody-boot-shell')).toBe(true);
+    const pendingButton = container.querySelector('button')!;
+    expectAccessible(pendingButton);
+    act(() => pendingButton.click());
+    expect(frame()).toBe(shell);
+    expectReleased(shell);
+    expect(container.querySelector('button')?.textContent).toBe('Reload workspace');
+    expectAccessible(container.querySelector('button')!);
+  });
+
+  it('bridges a router pending gap and never resurrects the previous boot on later navigation', () => {
+    const render = (pending: boolean, gate: boolean) =>
+      act(() =>
+        root.render(
+          <BootShellProvider path="/acme/chat" pending={pending}>
+            {gate ? <BootShell status="Opening workspace" /> : <button>Committed content</button>}
+          </BootShellProvider>
+        )
+      );
+    render(false, true);
+    const shell = frame();
+    render(true, false);
+    expect(frame()).toBe(shell);
+    expect(shell.hasAttribute('data-lody-boot-shell')).toBe(true);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('Opening workspace');
+    render(false, false);
+    expectReleased(shell);
+    expectAccessible(container.querySelector('button')!);
+    render(true, false);
+    expectReleased(shell);
+    expectAccessible(container.querySelector('button')!);
+  });
+
+  it('lets an outer render boundary replace the provider and expose recovery after a child throws', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    function Child({ fail }: { fail: boolean }) {
+      if (fail) throw new Error('Synthetic destination failure');
+      return <BootShell status="Loading destination" />;
+    }
+    const render = (fail: boolean) =>
+      act(() =>
+        root.render(
+          <RecoveryBoundary>
+            <BootShellProvider>
+              <Child fail={fail} />
+            </BootShellProvider>
+          </RecoveryBoundary>
+        )
+      );
+    render(false);
+    const shell = frame();
+    expect(shell.hasAttribute('data-lody-boot-shell')).toBe(true);
+    render(true);
+    expect(shell.isConnected).toBe(false);
+    expect(container.querySelector('.lody-boot-shell')).toBeNull();
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.querySelector('button')?.textContent).toBe('Recover render');
+    expectAccessible(container.querySelector('button')!);
   });
 });

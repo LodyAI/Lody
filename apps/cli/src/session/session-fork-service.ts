@@ -1,5 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { readSessionHistoryMetadata } from '@lody/shared/session-data';
+import { toShared } from '@/platform/process-options';
+import { resolveSessionConversationConfig } from '@lody/shared';
 import {
   getServerNow,
   resolveSessionAcpTargetId,
@@ -25,6 +26,8 @@ import {
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { SessionManager } from './session-manager';
@@ -38,7 +41,6 @@ import {
 import { createSessionBackend, type SessionBackendForkSnapshot } from './session-backend';
 
 type ForkWarning = SessionForkResponse['warnings'][number];
-const execFileAsync = promisify(execFile);
 
 /** Recovery opens only store-listed docs; keep even that small fan-out bounded. */
 const FORK_RECOVERY_CONCURRENCY = 4;
@@ -234,10 +236,10 @@ export class SessionForkService {
    * each room and pull each stream (see ../lib/loro/AGENTS.md). Recovery stays
    * O(in-flight forks), never O(session docs).
    *
-   * Race discipline (same rules as the speculative-worktree sweep): every
-   * candidate is re-read under `withForkOperationLock`, and liveness comes from
-   * `activeOperations`, never from timestamps — a same-target retry that
-   * already restarted must never be rolled back as "interrupted".
+   * Race discipline: every candidate is re-read under `withForkOperationLock`,
+   * and liveness comes from `activeOperations`, never from timestamps — a
+   * same-target retry that already restarted must never be rolled back as
+   * "interrupted".
    */
   async recoverPendingForks(): Promise<void> {
     let markers: SessionForkOperationMarker[];
@@ -341,7 +343,7 @@ export class SessionForkService {
       historyBackend:
         targetMeta?.historyBackend ?? marker.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND,
     });
-    const history = await targetBackend.readHistory();
+    const history = await targetBackend.readHistoryQuery();
     const hasOriginNotice = history.some((entry) =>
       (entry.items ?? []).some(
         (item) => item.type === 'system_notice' && item.name === 'session_fork_origin'
@@ -358,6 +360,7 @@ export class SessionForkService {
       // Genuinely interrupted mid-saga: the process that owned it is gone.
       // Compensate the worktree from the marker payload (no source doc needed),
       // then leave the durable failed receipt for same-target retries to read.
+      const configHistory = await readSessionHistoryMetadata(targetBackend.history);
       await this.deps.sessionManager
         .cleanupForkWorktree({
           workspaceId: this.deps.workspaceId as never,
@@ -366,7 +369,8 @@ export class SessionForkService {
           agentConfigId: marker.cleanup.agentConfigId as never,
           agentCliType: marker.cleanup.cliType,
           agentType: marker.cleanup.agentType as never,
-          mcpServerIds: resolveSessionMcpSelection(history),
+          memory: resolveSessionConversationConfig(configHistory).memory,
+          mcpServerIds: resolveSessionMcpSelection(configHistory),
           project: marker.cleanup.project as ProjectRef,
           sessionId: targetSessionId,
           githubRepo: marker.cleanup.repoFullName,
@@ -566,9 +570,6 @@ export class SessionForkService {
     }
 
     const sourceTitle = source.title?.trim() || 'Untitled session';
-    // One expression shared by the target meta and the recovery marker so a
-    // repaired session can never drift from a normally-forked one's title.
-    const forkTitle = `(fork) ${sourceTitle}`;
     const historyResult = cloneHistoryThroughTurn(
       [...sourceSnapshot.history],
       spec.sourceTurnId,
@@ -717,7 +718,7 @@ export class SessionForkService {
         machineId: source.machineId,
         createdAt: new Date(now).toISOString(),
         lastMessageAt: now,
-        title: forkTitle,
+        title: sourceTitle,
         titleSource: 'generated',
         userId: spec.requestedByUserId,
         status: SessionStatusFactory.initializing(undefined, 'Creating fork worktree'),
@@ -742,7 +743,7 @@ export class SessionForkService {
         targetSessionId,
         operationId: operation.id,
         createdAt: operation.createdAt,
-        title: forkTitle,
+        title: sourceTitle,
         historyBackend: targetMeta.historyBackend,
         cleanup: {
           project: targetProject,
@@ -833,7 +834,7 @@ export class SessionForkService {
       machineId: source.machineId,
       createdAt: new Date(now).toISOString(),
       lastMessageAt: now,
-      title: forkTitle,
+      title: sourceTitle,
       titleSource: 'generated',
       userId: spec.requestedByUserId,
       status: SessionStatusFactory.initializing(),
@@ -870,9 +871,11 @@ export class SessionForkService {
             agentConfigId: source.agentConfigId,
             agentCliType: source.cliType,
             agentType: source.agentType,
+            memory: resolveSessionConversationConfig(historyResult.history).memory,
             mcpServerIds: resolveSessionMcpSelection(historyResult.history),
             customAcp: agentConfig.customAcp,
             runtimeOverrides: agentConfig.runtimeOverrides,
+            magpieGatewayUrl: agentConfig.magpieGatewayUrl,
             env: agentConfig.env,
             project: source.project,
             sessionId: targetSessionId,
@@ -961,16 +964,26 @@ export class SessionForkService {
   }
 
   private async inspectGitWorkdir(workdir: string): Promise<{ dirty: boolean; headSha: string }> {
-    const status = await execFileAsync('git', ['status', '--porcelain'], {
-      cwd: workdir,
-      windowsHide: true,
-      timeout: 10_000,
-    });
-    const head = await execFileAsync('git', ['rev-parse', '--verify', 'HEAD^{commit}'], {
-      cwd: workdir,
-      windowsHide: true,
-      timeout: 10_000,
-    });
+    const status = await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['status', '--porcelain'],
+        cwd: workdir,
+        timeout: 10_000,
+        check: 'exit-0',
+      },
+      toShared()
+    );
+    const head = await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['rev-parse', '--verify', 'HEAD^{commit}'],
+        cwd: workdir,
+        timeout: 10_000,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     return { dirty: status.stdout.trim().length > 0, headSha: head.stdout.trim() };
   }
 
@@ -1000,9 +1013,11 @@ export class SessionForkService {
       agentConfigId: source.agentConfigId,
       agentCliType: source.cliType,
       agentType: source.agentType,
+      memory: resolveSessionConversationConfig(historyResult.history).memory,
       mcpServerIds: resolveSessionMcpSelection(historyResult.history),
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
+      magpieGatewayUrl: agentConfig.magpieGatewayUrl,
       env: agentConfig.env,
       project: targetProject,
       sessionId: targetSessionId,
@@ -1034,11 +1049,16 @@ export class SessionForkService {
       const resolvedBranch = this.deps.resolveGitBranch
         ? await this.deps.resolveGitBranch(sessionWorkdir)
         : (
-            await execFileAsync('git', ['branch', '--show-current'], {
-              cwd: sessionWorkdir,
-              windowsHide: true,
-              timeout: 10_000,
-            })
+            await runCommandTextLegacy(
+              {
+                command: 'git',
+                args: ['branch', '--show-current'],
+                cwd: sessionWorkdir,
+                timeout: 10_000,
+                check: 'exit-0',
+              },
+              toShared()
+            )
           ).stdout.trim() || undefined;
       const targetAcpSessionId = targetSession.acpSessionId;
       const branchName = resolvedBranch ?? targetMeta.baseBranch;

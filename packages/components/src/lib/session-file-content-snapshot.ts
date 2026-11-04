@@ -34,7 +34,11 @@ export function sessionFileOpenResultToContentLoadResult(
     case 'text':
       return {
         status: 'ready',
-        snapshot: { kind: 'text', text: result.snapshot.text },
+        snapshot: {
+          kind: 'text',
+          text: result.snapshot.text,
+          truncated: result.snapshot.truncated,
+        },
       };
     case 'binary':
       return {

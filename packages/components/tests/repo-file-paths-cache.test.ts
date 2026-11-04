@@ -11,8 +11,13 @@ vi.mock('../src/lib/github-token', () => ({
     run('token'),
 }));
 
-const { clearRepoFilePathsMemoryCache, loadRepoFilePaths } =
-  await import('../src/lib/repo-file-paths-cache');
+const {
+  clearRepoFilePathsMemoryCache,
+  loadRepoFilePaths,
+  fetchRepoFilePaths,
+  readCachedRepoFilePaths,
+  getRepoFilePathsCacheKey,
+} = await import('../src/lib/repo-file-paths-cache');
 const { GitHubRepoFileProvider } = await import('../src/lib/github-repo-file-provider');
 
 const tree = (paths: string[]) => ({
@@ -34,20 +39,6 @@ describe('repo file paths cache', () => {
     vi.useRealTimers();
   });
 
-  it('downloads a tree once for concurrent and repeated searches', async () => {
-    let resolve!: (value: unknown) => void;
-    fetchFilePaths.mockReturnValueOnce(new Promise((r) => (resolve = r)));
-
-    const first = loadRepoFilePaths('ws', 'org/repo', 'main');
-    const second = loadRepoFilePaths('ws', 'org/repo', 'main');
-    resolve(tree(['a.ts']));
-
-    expect((await first).paths).toEqual(['a.ts']);
-    expect((await second).paths).toEqual(['a.ts']);
-    expect((await loadRepoFilePaths('ws', 'org/repo', 'main')).paths).toEqual(['a.ts']);
-    expect(fetchFilePaths).toHaveBeenCalledTimes(1);
-  });
-
   it('keys by branch and refreshes a stale tree', async () => {
     fetchFilePaths
       .mockResolvedValueOnce(tree(['main.ts']))
@@ -59,13 +50,6 @@ describe('repo file paths cache', () => {
 
     vi.setSystemTime(new Date('2026-09-23T07:00:00Z'));
     expect((await loadRepoFilePaths('ws', 'org/repo', 'main')).paths).toEqual(['main-2.ts']);
-  });
-
-  it('does not cache a failed download', async () => {
-    fetchFilePaths.mockRejectedValueOnce(new Error('403')).mockResolvedValueOnce(tree(['a.ts']));
-
-    await expect(loadRepoFilePaths('ws', 'org/repo')).rejects.toThrow('403');
-    expect((await loadRepoFilePaths('ws', 'org/repo')).paths).toEqual(['a.ts']);
   });
 
   it('searches a GitHub repository fresh once per file browser, not from the TTL cache', async () => {
@@ -86,5 +70,50 @@ describe('repo file paths cache', () => {
     // Later keystrokes reuse the browser's copy.
     expect(await paths('old')).toEqual(['old.ts']);
     expect(fetchFilePaths).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('shared file download failures', () => {
+  afterEach(() => {
+    clearRepoFilePathsMemoryCache();
+    fetchFilePaths.mockReset();
+    vi.useRealTimers();
+  });
+
+  it('rejects every concurrent caller with the original failure, then permits a new attempt', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const error = new Error('GitHub API error: 503 unavailable');
+    let reject!: (error: unknown) => void;
+    fetchFilePaths.mockReturnValueOnce(
+      new Promise((_, r) => {
+        reject = r;
+      })
+    );
+    const browser = fetchRepoFilePaths('ws', 'org/repo');
+    const first = fetchRepoFilePaths('ws', 'org/repo');
+    const second = fetchRepoFilePaths('ws', 'org/repo');
+    const settled = Promise.allSettled([browser, first, second]);
+    vi.setSystemTime(1250);
+    reject(error);
+    expect(await settled).toEqual(
+      Array.from({ length: 3 }, () => ({ status: 'rejected', reason: error }))
+    );
+    expect(await readCachedRepoFilePaths(getRepoFilePathsCacheKey('ws', 'org/repo'))).toBeNull();
+
+    // Even the same error object must not poison later requests.
+    fetchFilePaths.mockRejectedValueOnce(error);
+    await expect(fetchRepoFilePaths('ws', 'org/repo')).rejects.toBe(error);
+    fetchFilePaths.mockResolvedValueOnce(tree(['recovered.ts']));
+    expect((await loadRepoFilePaths('ws', 'org/repo')).paths).toEqual(['recovered.ts']);
+  });
+
+  it('preserves a stale tree after a failed refresh', async () => {
+    fetchFilePaths.mockResolvedValueOnce(tree(['cached.ts']));
+    const cached = await loadRepoFilePaths('ws', 'org/repo');
+    const error = new Error('403');
+    fetchFilePaths.mockRejectedValueOnce(error);
+    await expect(fetchRepoFilePaths('ws', 'org/repo')).rejects.toBe(error);
+    expect(await readCachedRepoFilePaths(getRepoFilePathsCacheKey('ws', 'org/repo'))).toBe(cached);
   });
 });

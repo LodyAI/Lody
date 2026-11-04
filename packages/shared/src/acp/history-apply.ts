@@ -1,7 +1,14 @@
 import type { MessageContent, ModelInfo, SubagentRunItem } from '../ai';
 import { isLodySubagentEvent, type LodySubagentEvent } from 'acp-extension-core';
 import type { SessionHistoryInput, SessionPlanEntry } from '../schema';
+import type { AgentHistoryTargets } from '../history-agent-window';
 import { sanitizeLodyInternalInstructions } from '../goal';
+import { Immer, enablePatches, type Patch } from 'immer';
+import {
+  mergeHistoryStreamText as mergeStreamText,
+  hasAssistantTextTags,
+  shouldDedupeHistoryChunk as shouldDedupeChunk,
+} from '../history-stream-text';
 
 import { parseCodexTerminalCommand, parseCodexTerminalOutput } from './codex-raw';
 import type { AcpSessionNotification } from './schema';
@@ -235,6 +242,103 @@ const normalizeTerminalOutputsForHistory = (
   return next;
 };
 
+/**
+ * Durable budget for one `terminal_command` (command plus args, UTF-8 bytes).
+ * Agents inline whole files or base64 images into shell commands; the stored
+ * command is a display label, and the full text stays with the agent.
+ */
+export const MAX_STORED_TERMINAL_COMMAND_BYTES = 1024;
+const TERMINAL_COMMAND_TRUNCATION_MARKER = '…';
+const TERMINAL_COMMAND_TRUNCATION_MARKER_BYTES = 3;
+
+/**
+ * The longest head of `value` within `maxBytes` UTF-8 bytes that does not split
+ * a code point. Counts in place so a multi-megabyte string is never encoded.
+ */
+const utf8Head = (value: string, maxBytes: number): { end: number; bytes: number } => {
+  let end = 0;
+  let bytes = 0;
+  while (end < value.length) {
+    const unit = value.charCodeAt(end);
+    const isPair =
+      unit >= 0xd800 &&
+      unit <= 0xdbff &&
+      end + 1 < value.length &&
+      (value.charCodeAt(end + 1) & 0xfc00) === 0xdc00;
+    // A lone surrogate encodes as U+FFFD: three bytes.
+    const width = unit < 0x80 ? 1 : unit < 0x800 ? 2 : isPair ? 4 : 3;
+    if (bytes + width > maxBytes) break;
+    bytes += width;
+    end += isPair ? 2 : 1;
+  }
+  return { end, bytes };
+};
+
+/** Keep the head of a command and its args within one shared 1 KiB budget. */
+export const truncateTerminalCommandForHistory = <
+  T extends { command: string; args?: string[]; truncated?: boolean },
+>(
+  block: T
+): T => {
+  const parts = [block.command, ...(block.args ?? [])];
+  let remaining = MAX_STORED_TERMINAL_COMMAND_BYTES;
+  let fits = true;
+  for (const part of parts) {
+    const head = utf8Head(part, remaining);
+    if (head.end < part.length) {
+      fits = false;
+      break;
+    }
+    remaining -= head.bytes;
+  }
+  // Already-truncated commands fit, so re-compacting a stored block is a no-op.
+  if (fits) return block;
+
+  let budget = MAX_STORED_TERMINAL_COMMAND_BYTES - TERMINAL_COMMAND_TRUNCATION_MARKER_BYTES;
+  const kept: string[] = [];
+  for (const part of parts) {
+    const head = utf8Head(part, budget);
+    if (head.end === part.length) {
+      kept.push(part);
+      budget -= head.bytes;
+      continue;
+    }
+    kept.push(part.slice(0, head.end) + TERMINAL_COMMAND_TRUNCATION_MARKER);
+    break;
+  }
+  const [command = '', ...args] = kept;
+  return { ...block, command, ...(block.args === undefined ? {} : { args }), truncated: true };
+};
+
+/**
+ * Agents often use the full shell command as a tool title, so the title gets
+ * the same head-keeping 1 KiB bound as the command it repeats.
+ */
+export const truncateToolTitleForHistory = <T extends string | null | undefined>(title: T): T =>
+  typeof title === 'string'
+    ? (truncateTerminalCommandForHistory({ command: title }).command as T)
+    : title;
+
+/**
+ * Whether a stored tool title is the output of `truncateToolTitleForHistory`.
+ * Titles have no flag field: a cut title ends with the marker and fills the
+ * budget to within one code point, which an ordinary title practically never does.
+ */
+export const isToolTitleTruncatedForHistory = (title: string): boolean => {
+  if (!title.endsWith(TERMINAL_COMMAND_TRUNCATION_MARKER)) return false;
+  const { end, bytes } = utf8Head(title, MAX_STORED_TERMINAL_COMMAND_BYTES);
+  return end === title.length && bytes > MAX_STORED_TERMINAL_COMMAND_BYTES - 4;
+};
+
+const normalizeTerminalCommandsForHistory = (
+  contents: StoredToolCallContent
+): StoredToolCallContent =>
+  contents.some((block) => block.type === 'terminal_command')
+    ? contents.map((block) =>
+        block.type === 'terminal_command' ? truncateTerminalCommandForHistory(block) : block
+      )
+    : contents;
+
 const extractTerminalCommandContent = (
   rawInput: unknown,
   kind?: ToolKind | null
@@ -373,6 +477,21 @@ const extractTerminalOutputContent = (
     !NON_TERMINAL_TOOL_KINDS.has(kind ?? '')
   ) {
     return buildTerminalOutputBlocks({ output: rawOutput });
+  }
+
+  // Pi: a shell result is `{ content: [{ type: 'text', text }], details }`. Other Pi
+  // tools share that shape, so only an execute call's result is terminal output.
+  if (kind === 'execute') {
+    const content = asRecordOrUndefined(rawOutput)?.content;
+    if (Array.isArray(content)) {
+      const output = content
+        .flatMap((block) => {
+          const record = asRecordOrUndefined(block);
+          return record?.type === 'text' && typeof record.text === 'string' ? [record.text] : [];
+        })
+        .join('');
+      if (output.length > 0) return buildTerminalOutputBlocks({ output });
+    }
   }
 
   return [];
@@ -633,6 +752,7 @@ const compactToolCallContentForHistory = (
 
   compacted = stripDuplicateFencedToolContent(compacted);
   compacted = normalizeTerminalOutputsForHistory(compacted);
+  compacted = normalizeTerminalCommandsForHistory(compacted);
 
   // Post-filtering may have created adjacent duplicates again.
   return dedupeAdjacentToolCallContent(compacted);
@@ -671,12 +791,6 @@ const compactAdjacentTextAndThought = (items: MessageContent[]): MessageContent[
   return compacted;
 };
 
-function shouldDedupeChunk(chunk: string): boolean {
-  // Heuristic: only dedupe "substantial" chunks to avoid collapsing legitimate short repeats
-  // (e.g. "yes", "ha", or repeated tokens in intentionally repeated phrases).
-  return chunk.length >= 48 || chunk.includes('\n');
-}
-
 function mergeTerminalOutputSnapshot(current: string, incoming: string): string {
   if (!incoming) return current;
   if (!current) return incoming;
@@ -710,36 +824,12 @@ function mergeTerminalOutputSnapshot(current: string, incoming: string): string 
   return incoming;
 }
 
-const mergeStreamChunk = (current: string, incoming: string): string => {
-  if (!incoming) return current;
-  if (!current) return incoming;
-
-  // Some emitters send snapshots instead of deltas. If `incoming` is a snapshot that already
-  // contains `current`, keep only the snapshot.
-  if (incoming.startsWith(current)) {
-    return incoming;
-  }
-
-  // On reconnect/retry, the same chunk may be re-sent. Avoid duplicating large chunks.
-  if (shouldDedupeChunk(incoming) && current.endsWith(incoming)) {
-    return current;
-  }
-
-  if (!shouldDedupeChunk(incoming)) {
-    return current + incoming;
-  }
-
-  // Best-effort overlap merge to handle partial replays where the boundary is not aligned.
-  const maxWindow = 4096;
-  const minOverlap = 24;
-  const maxOverlap = Math.min(current.length, incoming.length, maxWindow);
-  for (let overlap = maxOverlap; overlap >= minOverlap; overlap--) {
-    if (current.slice(-overlap) === incoming.slice(0, overlap)) {
-      return current + incoming.slice(overlap);
-    }
-  }
-
-  return current + incoming;
+export type AgentHistoryTextAppend = {
+  turnId: string;
+  itemIndex: number;
+  previous: string;
+  value: string;
+  text: string;
 };
 
 const mergeToolCallMessage = (
@@ -925,7 +1015,7 @@ const mergeToolCallMessage = (
     toolCallId: incoming.toolCallId,
     // `null` title/kind means "no information" on the wire (zod allows explicit null);
     // it must keep the previously persisted value, not wipe it.
-    title: incoming.title ?? prev.title,
+    title: truncateToolTitleForHistory(incoming.title ?? prev.title),
     kind: nextKind ?? undefined,
     status: nextStatus,
     content: mergedContent.length
@@ -1076,6 +1166,258 @@ const parseAssistantTextTags = (text: string, turnId: string): MessageContent[] 
   });
 };
 
+type ToolUpdate = Extract<
+  AcpSessionNotification['update'],
+  { sessionUpdate: 'tool_call' | 'tool_call_update' }
+>;
+
+// Subagent/background task lifecycle rides the tool_call transport (see
+// claude-subagent-task.ts). Materialize it as a first-class `subagent_task`
+// item instead of persisting a tool_call; the applier merges by taskId.
+const toolUpdateSubagentTasks = (update: ToolUpdate): MessageContent[] => {
+  const subagentTask =
+    parseLodyTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
+    parseDevinSubagentTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
+    parseSubagentTaskWire(update.rawInput);
+  if (subagentTask) {
+    const devinSubagentId = getDevinSubagentContextId((update as ToolCallUpdateWithMeta)._meta);
+    return [
+      {
+        type: 'subagent_task',
+        ...(devinSubagentId !== null ? { parentTaskId: devinSubagentId } : {}),
+        ...subagentTask,
+      },
+    ];
+  }
+  return parseCodexCollabAgentTasks(update.title, update.rawInput).map((task) => ({
+    type: 'subagent_task',
+    ...task,
+  }));
+};
+
+/** Dependencies for a sparse history write; undefined only for structural/singleton updates. */
+export const targetLocalHistoryTargets = (
+  notifications: readonly AcpSessionNotification[]
+): AgentHistoryTargets | undefined => {
+  const tools = new Set<string>();
+  const tasks = new Set<string>();
+  let rootTail = false;
+  const rootTailIfTaskMissing = new Set<string>();
+  const runs = new Map<
+    string,
+    { sessionId: string; runId: string; tail: boolean; plan: boolean; toolCallIds: string[] }
+  >();
+  const run = (sessionId: string, runId: string) => {
+    const key = JSON.stringify([sessionId, runId]);
+    let target = runs.get(key);
+    if (!target)
+      runs.set(key, (target = { sessionId, runId, tail: false, plan: false, toolCallIds: [] }));
+    return target;
+  };
+  for (const { sessionId, update } of notifications) {
+    const context = getDevinSubagentContextId(update._meta);
+    if (context !== null) tasks.add(context);
+    switch (update.sessionUpdate) {
+      case 'subagent_event': {
+        const event = update.event;
+        if (!isLodySubagentEvent(event) || event.sessionId !== sessionId) continue;
+        const target = run(event.sessionId, event.runId);
+        if (event.type === 'snapshot') {
+          if (event.snapshot.parentRunId) run(event.sessionId, event.snapshot.parentRunId);
+          if (event.snapshot.parentToolCallId) tools.add(event.snapshot.parentToolCallId);
+        } else if (event.type === 'output') {
+          if (
+            (event.update.sessionUpdate === 'agent_message_chunk' ||
+              event.update.sessionUpdate === 'agent_thought_chunk') &&
+            event.update.content.type === 'text'
+          )
+            target.tail = true;
+          if (event.update.sessionUpdate === 'plan') target.plan = true;
+          if (
+            event.update.sessionUpdate === 'tool_call' ||
+            event.update.sessionUpdate === 'tool_call_update'
+          )
+            target.toolCallIds.push(event.update.toolCallId);
+        }
+        continue;
+      }
+      case 'agent_message_chunk':
+      case 'agent_thought_chunk':
+        if (update.content.type === 'text' && update.content.text.length > 0) {
+          if (context !== null && !hasOtherDevinSubagentMeta(update._meta))
+            rootTailIfTaskMissing.add(context);
+          else rootTail = true;
+        }
+        continue;
+      case 'user_message_chunk':
+      case 'config_option_update':
+      case 'usage_update':
+      case 'plan':
+        continue;
+      case 'plan_update':
+        if (update.plan.type !== 'items') return undefined;
+        continue;
+      case 'tool_call':
+      case 'tool_call_update':
+        tools.add(update.toolCallId);
+        for (const task of toolUpdateSubagentTasks(update))
+          if (task.type === 'subagent_task') tasks.add(task.taskId);
+        continue;
+      default:
+        return undefined;
+    }
+  }
+  return {
+    toolCallIds: [...tools],
+    taskIds: [...tasks],
+    rootTail,
+    rootTailIfTaskMissing: [...rootTailIfTaskMissing],
+    runs: [...runs.values()],
+  };
+};
+
+/** Compatibility for callers that only support the original tool-only window. */
+export const targetLocalToolCallIds = (
+  notifications: readonly AcpSessionNotification[]
+): string[] | undefined => {
+  const targets = targetLocalHistoryTargets(notifications);
+  return targets && targets.taskIds.length === 0 && targets.runs.length === 0
+    ? [...targets.toolCallIds]
+    : undefined;
+};
+
+/** One storage projection for root and normalized child tools, before any CRDT write. */
+const buildToolCallMessageForHistory = (
+  update: Extract<
+    AcpSessionNotification['update'],
+    { sessionUpdate: 'tool_call' | 'tool_call_update' }
+  >,
+  previousTool?: ToolCallMessage
+): ToolCallMessage => {
+  const kind = (update.kind ?? previousTool?.kind) as ToolKind | null | undefined;
+
+  // `update.content` is untrusted and provider-dependent; some tools include whole file
+  // contents or full old/new text. Strip those early so we never persist them.
+  let baseContent: StoredToolCallContent = update.content ? [...update.content] : [];
+  baseContent = stripToolCallContentForHistory(kind, baseContent);
+
+  // Extract structured terminal command/output from implementation-specific fields.
+  //
+  // rawInput → terminal_command block
+  // _meta.claudeCode.toolResponse / rawOutput → terminal_output blocks
+  //
+  // For file reads, `rawOutput` is usually the full file text; we intentionally do NOT
+  // persist that into session history.
+  //
+  // Priority for terminal output extraction:
+  // 1. Claude Code _meta.claudeCode.toolResponse (v0.19+: {stdout, stderr, ...})
+  // 2. Codex rawOutput (object: {aggregated_output, exit_code, ...})
+  // 3. Claude Code rawOutput (v0.19+: plain string)
+  let derivedCommand = extractTerminalCommandContent(update.rawInput, kind);
+
+  // Fallback: some agents (e.g., Kimi) put the command as JSON in content blocks
+  // instead of rawInput. Try to extract it from content when rawInput yields nothing.
+  if (derivedCommand.length === 0) {
+    derivedCommand = extractTerminalCommandFromContent(baseContent);
+  }
+
+  let derivedOutput: StoredToolCallContent = [];
+  if (kind !== 'read') {
+    // Prefer _meta.claudeCode.toolResponse for Claude Code tools (has separate stdout/stderr)
+    const meta = (update as ToolCallUpdateWithMeta)._meta;
+    if (isClaudeCodeTool(meta)) {
+      derivedOutput = extractClaudeCodeTerminalOutputContent(meta);
+    }
+
+    // Fallback to rawOutput (Codex object format or Claude Code plain string for execute tools)
+    if (derivedOutput.length === 0) {
+      derivedOutput = extractTerminalOutputContent(update.rawOutput, kind);
+    }
+  }
+
+  if (derivedOutput.length > 0) {
+    // ACP uses a `terminal` placeholder block to indicate that terminal output is streaming
+    // in the CLI. Once we have *any* structured terminal output (`terminal_output`) persisted
+    // in history, the placeholder becomes redundant and can cause confusing UI layouts
+    // (e.g. "streaming in your CLI" inserted between command and output).
+    baseContent = baseContent.filter((c) => c.type !== 'terminal');
+
+    // Some agents duplicate terminal output by emitting both:
+    // - `rawOutput.aggregated_output` (with real ANSI escapes), and
+    // - a fenced `content` snapshot (often with escaped sequences like `\\u001b`).
+    //
+    // Agents using ACP terminal RPCs (e.g., Kimi) put the result as plain text content
+    // blocks which are also extracted as rawOutput → terminal_output.
+    //
+    // When we have a derived terminal output, drop any content blocks whose text matches.
+    const candidateOutputs = new Set(
+      derivedOutput
+        .filter((b) => b.type === 'terminal_output')
+        .map((b) => normalizeTerminalOutputForComparison(b.output))
+    );
+    baseContent = baseContent.filter((c) => {
+      if (c.type !== 'content') return true;
+      if (!('content' in c)) return true;
+      if (c.content.type !== 'text') return true;
+      // Check fenced code blocks (Codex style)
+      const fenced = extractSingleFencedBlock(c.content.text);
+      if (fenced && candidateOutputs.has(normalizeTerminalOutputForComparison(fenced.body))) {
+        return false;
+      }
+      // Check plain text match (Kimi/Pi style: content text is identical to terminal
+      // output). Indented output such as `launchctl print` only matches untrimmed.
+      const plainText = c.content.text.trim();
+      if (
+        plainText.length > 0 &&
+        (candidateOutputs.has(normalizeTerminalOutputForComparison(plainText)) ||
+          candidateOutputs.has(normalizeTerminalOutputForComparison(c.content.text)))
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  const derived: StoredToolCallContent = [...derivedCommand, ...derivedOutput];
+  const content = compactToolCallContentForHistory([...baseContent, ...derived], { kind });
+  const explicitLocations = Array.isArray(update.locations) ? update.locations : undefined;
+  const locations =
+    explicitLocations ??
+    deriveLocationsFromToolCallContent(update.content) ??
+    deriveLocationsFromRawInput(update.rawInput);
+  // Scheduling tools are the one exception to stripping rawInput/rawOutput: the
+  // scheduled-tasks panel derives entirely from history, so it needs the schedule and
+  // the created job id. Persist them (small, stable) plus the canonical tool name the
+  // deriver switches on; `title` stays whatever the agent chose to show.
+  const toolName =
+    resolveAcpToolName((update as ToolCallUpdateWithMeta)._meta) ?? previousTool?.toolName;
+  const activityKind = getToolCallActivityKind((update as ToolCallUpdateWithMeta)._meta);
+  const isSchedulingTool = toolName !== undefined && SCHEDULING_TOOL_NAMES.has(toolName);
+  const input = asRecordOrUndefined(update.rawInput);
+  return {
+    type: 'tool_call',
+    toolCallId: update.toolCallId,
+    title: truncateToolTitleForHistory(update.title),
+    toolName,
+    kind: kind ?? undefined,
+    status: update.status ?? previousTool?.status ?? 'pending',
+    content: content.length ? content : undefined,
+    locations,
+    // Generic ACP rawInput/rawOutput is excluded because it is unstructured by spec;
+    // scheduling tools keep theirs, and mode switches retain only the displayed plan.
+    rawInput: isSchedulingTool
+      ? input
+      : kind === 'switch_mode' && typeof input?.plan === 'string'
+        ? { plan: input.plan }
+        : undefined,
+    rawOutput: isSchedulingTool ? asRecordOrUndefined(update.rawOutput) : undefined,
+    // Cron is local-time to this machine — record its zone so the panel resolves the
+    // fire time in the right timezone regardless of where it is later viewed.
+    schedulingTimeZone: isSchedulingTool ? resolveMachineTimeZone() : undefined,
+    activityKind,
+  };
+};
+
 export const buildMessageContentFromNotification = (
   message: AcpSessionNotification,
   previousTool?: ToolCallMessage
@@ -1113,146 +1455,10 @@ export const buildMessageContentFromNotification = (
       return [];
     case 'tool_call':
     case 'tool_call_update': {
-      // Subagent/background task lifecycle rides the tool_call transport (see
-      // claude-subagent-task.ts). Materialize it as a first-class `subagent_task`
-      // item instead of persisting a tool_call; the applier merges by taskId.
-      const subagentTask =
-        parseLodyTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
-        parseDevinSubagentTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
-        parseSubagentTaskWire(update.rawInput);
-      if (subagentTask) {
-        const devinSubagentId = getDevinSubagentContextId((update as ToolCallUpdateWithMeta)._meta);
-        return [
-          {
-            type: 'subagent_task',
-            ...(devinSubagentId !== null ? { parentTaskId: devinSubagentId } : {}),
-            ...subagentTask,
-          },
-        ];
-      }
+      const subagentTasks = toolUpdateSubagentTasks(update);
+      if (subagentTasks.length > 0) return subagentTasks;
 
-      const codexCollabTasks = parseCodexCollabAgentTasks(update.title, update.rawInput);
-      if (codexCollabTasks.length > 0) {
-        return codexCollabTasks.map((task) => ({ type: 'subagent_task', ...task }));
-      }
-
-      const kind = (update.kind ?? previousTool?.kind) as ToolKind | null | undefined;
-
-      // `update.content` is untrusted and provider-dependent; some tools include whole file
-      // contents or full old/new text. Strip those early so we never persist them.
-      let baseContent: StoredToolCallContent = update.content ? [...update.content] : [];
-      baseContent = stripToolCallContentForHistory(kind, baseContent);
-
-      // Extract structured terminal command/output from implementation-specific fields.
-      //
-      // rawInput → terminal_command block
-      // _meta.claudeCode.toolResponse / rawOutput → terminal_output blocks
-      //
-      // For file reads, `rawOutput` is usually the full file text; we intentionally do NOT
-      // persist that into session history.
-      //
-      // Priority for terminal output extraction:
-      // 1. Claude Code _meta.claudeCode.toolResponse (v0.19+: {stdout, stderr, ...})
-      // 2. Codex rawOutput (object: {aggregated_output, exit_code, ...})
-      // 3. Claude Code rawOutput (v0.19+: plain string)
-      let derivedCommand = extractTerminalCommandContent(update.rawInput, kind);
-
-      // Fallback: some agents (e.g., Kimi) put the command as JSON in content blocks
-      // instead of rawInput. Try to extract it from content when rawInput yields nothing.
-      if (derivedCommand.length === 0) {
-        derivedCommand = extractTerminalCommandFromContent(baseContent);
-      }
-
-      let derivedOutput: StoredToolCallContent = [];
-      if (kind !== 'read') {
-        // Prefer _meta.claudeCode.toolResponse for Claude Code tools (has separate stdout/stderr)
-        const meta = (update as ToolCallUpdateWithMeta)._meta;
-        if (isClaudeCodeTool(meta)) {
-          derivedOutput = extractClaudeCodeTerminalOutputContent(meta);
-        }
-
-        // Fallback to rawOutput (Codex object format or Claude Code plain string for execute tools)
-        if (derivedOutput.length === 0) {
-          derivedOutput = extractTerminalOutputContent(update.rawOutput, kind);
-        }
-      }
-
-      if (derivedOutput.length > 0) {
-        // ACP uses a `terminal` placeholder block to indicate that terminal output is streaming
-        // in the CLI. Once we have *any* structured terminal output (`terminal_output`) persisted
-        // in history, the placeholder becomes redundant and can cause confusing UI layouts
-        // (e.g. "streaming in your CLI" inserted between command and output).
-        baseContent = baseContent.filter((c) => c.type !== 'terminal');
-
-        // Some agents duplicate terminal output by emitting both:
-        // - `rawOutput.aggregated_output` (with real ANSI escapes), and
-        // - a fenced `content` snapshot (often with escaped sequences like `\\u001b`).
-        //
-        // Agents using ACP terminal RPCs (e.g., Kimi) put the result as plain text content
-        // blocks which are also extracted as rawOutput → terminal_output.
-        //
-        // When we have a derived terminal output, drop any content blocks whose text matches.
-        const candidateOutputs = new Set(
-          derivedOutput
-            .filter((b) => b.type === 'terminal_output')
-            .map((b) => normalizeTerminalOutputForComparison(b.output))
-        );
-        baseContent = baseContent.filter((c) => {
-          if (c.type !== 'content') return true;
-          if (!('content' in c)) return true;
-          if (c.content.type !== 'text') return true;
-          // Check fenced code blocks (Codex style)
-          const fenced = extractSingleFencedBlock(c.content.text);
-          if (fenced && candidateOutputs.has(normalizeTerminalOutputForComparison(fenced.body))) {
-            return false;
-          }
-          // Check plain text match (Kimi style: content text is identical to terminal output)
-          const plainText = c.content.text.trim();
-          if (
-            plainText.length > 0 &&
-            candidateOutputs.has(normalizeTerminalOutputForComparison(plainText))
-          ) {
-            return false;
-          }
-          return true;
-        });
-      }
-
-      const derived: StoredToolCallContent = [...derivedCommand, ...derivedOutput];
-      const content = compactToolCallContentForHistory([...baseContent, ...derived], { kind });
-      const explicitLocations = Array.isArray(update.locations) ? update.locations : undefined;
-      const locations =
-        explicitLocations ??
-        deriveLocationsFromToolCallContent(update.content) ??
-        deriveLocationsFromRawInput(update.rawInput);
-      // Scheduling tools are the one exception to stripping rawInput/rawOutput: the
-      // scheduled-tasks panel derives entirely from history, so it needs the schedule and
-      // the created job id. Persist them (small, stable) plus the canonical tool name the
-      // deriver switches on; `title` stays whatever the agent chose to show.
-      const toolName =
-        resolveAcpToolName((update as ToolCallUpdateWithMeta)._meta) ?? previousTool?.toolName;
-      const activityKind = getToolCallActivityKind((update as ToolCallUpdateWithMeta)._meta);
-      const isSchedulingTool = toolName !== undefined && SCHEDULING_TOOL_NAMES.has(toolName);
-      return [
-        {
-          type: 'tool_call',
-          toolCallId: update.toolCallId,
-          title: update.title,
-          toolName,
-          kind: kind ?? undefined,
-          status: update.status ?? previousTool?.status ?? 'pending',
-          content: content.length ? content : undefined,
-          locations,
-          // Generic ACP rawInput/rawOutput is excluded because it is unstructured by spec;
-          // scheduling tools keep theirs (see SCHEDULING_TOOL_NAMES).
-          rawInput: isSchedulingTool ? asRecordOrUndefined(update.rawInput) : undefined,
-          rawOutput: isSchedulingTool ? asRecordOrUndefined(update.rawOutput) : undefined,
-          // Cron is local-time to this machine — record its zone so the panel resolves the
-          // fire time in the right timezone regardless of where it is later viewed.
-          schedulingTimeZone: isSchedulingTool ? resolveMachineTimeZone() : undefined,
-          activityKind,
-        },
-      ];
+      return [buildToolCallMessageForHistory(update, previousTool)];
     }
     case 'plan':
       // Plan is now stored as a field on the history entry, not as a MessageContent item.
@@ -1286,7 +1492,7 @@ export const buildMessageContentFromNotification = (
         },
       ];
     case 'available_commands_update':
-      // Slash commands are already cached in ACP capabilities metadata and consumed from there.
+      // Commands belong to session control state, outside the transcript.
       // Persisting them into chat history only creates empty assistant rows in the UI.
       return [];
     case 'current_mode_update':
@@ -1331,12 +1537,14 @@ class NotificationOnHistoryApplier {
   // where the task first appeared (keyed by `taskId`).
   private readonly subagentTaskEntryIndexById = new Map<string, number | null>();
   private readonly touchedAssistantEntryIndices = new Set<number>();
+  private runIndex: Map<string, { entryIndex: number; itemIndex: number }> | undefined;
   private changed = false;
 
   constructor(
     history: SessionHistoryInput[],
     options: ApplyNotificationOnHistoryOptions,
-    private model?: ModelInfo
+    private model?: ModelInfo,
+    private readonly textAppends?: AgentHistoryTextAppend[]
   ) {
     this.history = history;
     this.createId = options.createId ?? defaultCreateId;
@@ -1439,22 +1647,20 @@ class NotificationOnHistoryApplier {
   }
 
   private findRun(sessionId: string, runId: string) {
-    for (let entryIndex = 0; entryIndex < this.history.length; entryIndex++) {
-      const items = this.readEntryItems(entryIndex);
-      const itemIndex = items.findIndex(
-        (item) =>
-          item.type === 'subagent_task' &&
-          item.taskId === runId &&
-          item.run?.sessionId === sessionId
-      );
-      if (itemIndex >= 0)
-        return {
-          entryIndex,
-          itemIndex,
-          task: items[itemIndex] as Extract<MessageContent, { type: 'subagent_task' }>,
-        };
+    if (!this.runIndex) {
+      this.runIndex = new Map();
+      for (let entryIndex = 0; entryIndex < this.history.length; entryIndex++) {
+        this.readEntryItems(entryIndex).forEach((item, itemIndex) => {
+          if (item.type !== 'subagent_task' || !item.run) return;
+          const key = JSON.stringify([item.run.sessionId, item.taskId]);
+          if (!this.runIndex!.has(key)) this.runIndex!.set(key, { entryIndex, itemIndex });
+        });
+      }
     }
-    return undefined;
+    const found = this.runIndex.get(JSON.stringify([sessionId, runId]));
+    if (!found) return undefined;
+    const task = this.readEntryItems(found.entryIndex)[found.itemIndex];
+    return task?.type === 'subagent_task' ? { ...found, task } : undefined;
   }
 
   /** Run identity includes the ACP root; children never alter parent turn metadata. */
@@ -1526,7 +1732,13 @@ class NotificationOnHistoryApplier {
       };
       const items = this.ensureEntryItems(entryIndex);
       if (existing) items[existing.itemIndex] = task;
-      else items.push(task);
+      else {
+        items.push(task);
+        this.runIndex?.set(JSON.stringify([event.sessionId, event.runId]), {
+          entryIndex,
+          itemIndex: items.length - 1,
+        });
+      }
       this.changed = true;
       return;
     }
@@ -1574,50 +1786,12 @@ class NotificationOnHistoryApplier {
         );
         const previous = run.items[index];
         const tool = previous?.type === 'tool_call' ? previous : undefined;
-        // Keep child tool payloads intact. The parent's compact terminal projection
-        // intentionally discards diffs and read results, unsuitable for the detail view.
+        const incoming = this.stampSchedulingToolCall(buildToolCallMessageForHistory(update, tool));
         const content: Extract<SubagentRunItem, { type: 'tool_call' }> = {
-          ...tool,
+          ...(tool ? mergeToolCallMessage(tool, incoming, update.content != null) : incoming),
           ...(identity.nativeTurnId !== undefined ? { nativeTurnId: identity.nativeTurnId } : {}),
           ...(identity.messageId !== undefined ? { messageId: identity.messageId } : {}),
-          type: 'tool_call',
-          toolCallId: update.toolCallId,
-          status: update.status ?? tool?.status ?? 'pending',
-          title: update.title ?? tool?.title,
-          kind: update.kind ?? tool?.kind,
-          content: update.content ?? tool?.content,
-          locations: update.locations ?? tool?.locations,
-          rawInput: asRecordOrUndefined(update.rawInput) ?? tool?.rawInput,
-          rawOutput: asRecordOrUndefined(update.rawOutput) ?? tool?.rawOutput,
-          toolName: resolveAcpToolName(update._meta) ?? tool?.toolName,
-          _meta: update._meta ?? tool?._meta,
         };
-        for (const [key, value] of [
-          ['rawInput', update.rawInput],
-          ['rawOutput', update.rawOutput],
-        ] as const) {
-          if (value == null || asRecordOrUndefined(value)) continue;
-          // MessageContent's historical raw fields accept records. Retain other
-          // JSON values in metadata, and make scalar output readable in the UI.
-          const meta = content._meta ?? {};
-          const lody = asRecordOrUndefined(meta.lody) ?? {};
-          const raw = asRecordOrUndefined(lody.subagentRaw) ?? {};
-          content._meta = { ...meta, lody: { ...lody, subagentRaw: { ...raw, [key]: value } } };
-          if (key === 'rawOutput') {
-            const text = typeof value === 'string' ? value : JSON.stringify(value);
-            const blocks = content.content ?? [];
-            if (
-              !blocks.some(
-                (block) =>
-                  block.type === 'content' &&
-                  block.content.type === 'text' &&
-                  block.content.text === text
-              )
-            ) {
-              content.content = [...blocks, { type: 'content', content: { type: 'text', text } }];
-            }
-          }
-        }
         if (index >= 0) run.items[index] = content;
         else run.items.push(content);
       }
@@ -1885,17 +2059,24 @@ class NotificationOnHistoryApplier {
     const last = items[items.length - 1];
     if (last && last.type === kind) {
       const existing = last as Extract<MessageContent, { type: typeof kind }>;
-      const text = sanitizeLodyInternalInstructions(mergeStreamChunk(existing.text, delta));
+      const merged = mergeStreamText(existing, delta);
+      const text = merged.item.text;
       if (!text) {
         items.pop();
         this.touchedAssistantEntryIndices.add(entryIndex);
         this.changed = true;
         return;
       }
-      items[items.length - 1] = {
-        ...existing,
-        text,
-      } as MessageContent;
+      items[items.length - 1] = merged.item;
+      const turnId = this.history[entryIndex]?.id;
+      if (turnId && merged.suffix !== undefined)
+        this.textAppends?.push({
+          turnId,
+          itemIndex: items.length - 1,
+          previous: existing.text,
+          value: text,
+          text: merged.suffix,
+        });
       this.touchedAssistantEntryIndices.add(entryIndex);
       this.changed = true;
       return;
@@ -1968,6 +2149,7 @@ class NotificationOnHistoryApplier {
 
     items.push({
       ...incoming,
+      ...(incoming.title ? { title: truncateToolTitleForHistory(incoming.title) } : {}),
       status: incoming.status || 'pending',
       content: incoming.content
         ? compactToolCallContentForHistory(incoming.content, {
@@ -2021,7 +2203,7 @@ class NotificationOnHistoryApplier {
         }
 
         const text = item.text;
-        if (!text.includes('<thinking>') && !text.includes('<proposed_plan>')) {
+        if (!hasAssistantTextTags(item)) {
           newItems.push(item);
           continue;
         }
@@ -2071,6 +2253,75 @@ export const applyNotificationOnHistoryWithChange = (
   return { history: nextHistory, changed: applier.hasChanges() };
 };
 
+enablePatches();
+const mutationImmer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
+/** Authored paths, before validation; values always come from the validated result. */
+export type AgentHistoryMutationPath = { turnId: string; path: readonly (string | number)[] };
+export type AgentHistoryMutationEvent =
+  | { kind: 'notification'; value: AcpSessionNotification }
+  | { kind: 'content'; value: MessageContent };
+
+/** Private-owner planning: shares untouched values; public readers still detach. */
+export function planAgentHistoryMutation(
+  history: SessionHistoryInput[],
+  events: readonly AgentHistoryMutationEvent[],
+  model?: ModelInfo,
+  options: ApplyNotificationOnHistoryOptions = {}
+): {
+  history: SessionHistoryInput[];
+  textAppends: AgentHistoryTextAppend[];
+  changes: AgentHistoryMutationPath[];
+} {
+  const textAppends: AgentHistoryTextAppend[] = [];
+  const changes: AgentHistoryMutationPath[] = [];
+  let next = history;
+  // Preserve the current per-event post-processing and transport order.
+  const ownedEvents = structuredClone(events);
+  const ownedModel = model === undefined ? undefined : structuredClone(model);
+  for (const event of ownedEvents) {
+    let patches: Patch[] = [];
+    next = mutationImmer.produce(
+      next,
+      (draft) => {
+        if (event.kind === 'notification') {
+          new NotificationOnHistoryApplier(draft, options, ownedModel, textAppends).apply([
+            event.value,
+          ]);
+        } else {
+          const applied = applyMessageContentsBatch(draft, [event.value], {
+            ...options,
+            model: ownedModel,
+            textAppends,
+          });
+          for (const [index, entry] of applied.entries()) {
+            const current = draft[index];
+            if (!current || current.id !== entry.id) {
+              draft[index] = entry;
+              continue;
+            }
+            for (const key of new Set([...Object.keys(current), ...Object.keys(entry)])) {
+              if (Reflect.get(current, key) === Reflect.get(entry, key)) continue;
+              if (Object.hasOwn(entry, key)) Reflect.set(current, key, Reflect.get(entry, key));
+              else Reflect.deleteProperty(current, key);
+            }
+          }
+          draft.length = applied.length;
+        }
+      },
+      (recorded) => {
+        patches = recorded;
+      }
+    );
+    for (const patch of patches) {
+      const index = patch.path[0];
+      if (typeof index !== 'number') continue;
+      const entry = next[index];
+      if (entry) changes.push({ turnId: entry.id, path: patch.path.slice(1) });
+    }
+  }
+  return { history: next, textAppends, changes };
+}
+
 /**
  * Batch process multiple message contents in O(n) time complexity.
  * This avoids the O(n²) cost of calling applyMessageContent repeatedly.
@@ -2080,6 +2331,8 @@ export const applyNotificationOnHistoryWithChange = (
  * text/thought/plan deltas are flushed first to maintain correct order.
  */
 export type ApplyMessageContentsBatchOptions = {
+  /** Internal planning records; the mutating reader API remains unchanged. */
+  textAppends?: AgentHistoryTextAppend[];
   createId?: () => string;
   now?: () => string;
   targetAssistantEntryId?: string;
@@ -2197,12 +2450,18 @@ export const applyMessageContentsBatch = (
     const last = state.items[state.items.length - 1];
     if (last && last.type === kind) {
       const existing = last as Extract<MessageContent, { type: typeof kind }>;
-      const text = sanitizeLodyInternalInstructions(mergeStreamChunk(existing.text, delta));
+      const merged = mergeStreamText(existing, delta);
+      const text = merged.item.text;
       if (text) {
-        state.items[state.items.length - 1] = {
-          ...existing,
-          text,
-        } as MessageContent;
+        state.items[state.items.length - 1] = merged.item;
+        if (merged.suffix !== undefined)
+          options.textAppends?.push({
+            turnId: state.entry.id,
+            itemIndex: state.items.length - 1,
+            previous: existing.text,
+            value: text,
+            text: merged.suffix,
+          });
       } else {
         state.items.pop();
       }
@@ -2269,6 +2528,7 @@ export const applyMessageContentsBatch = (
     } else {
       state.items.push({
         ...incoming,
+        ...(incoming.title ? { title: truncateToolTitleForHistory(incoming.title) } : {}),
         status: incoming.status || 'pending',
         content: incoming.content
           ? compactToolCallContentForHistory(incoming.content, {
@@ -2370,7 +2630,7 @@ export const applyMessageContentsBatch = (
         newItems.push(item);
         continue;
       }
-      if (!item.text.includes('<thinking>') && !item.text.includes('<proposed_plan>')) {
+      if (!hasAssistantTextTags(item)) {
         newItems.push(item);
         continue;
       }

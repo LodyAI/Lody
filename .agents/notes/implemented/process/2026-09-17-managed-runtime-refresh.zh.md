@@ -33,3 +33,13 @@ Claude 包含八个平台目标，Codex 和 Grok 各六个。pnpm 的七天新�
 ## 限制
 
 Kimi 明确不在本次刷新范围内。Pi 和不使用 managed binary 的 DSH 不需要新对象。完整 workspace install 在解析新锁文件后进入了 Electron 原生模块重建，但这台机器尚未接受本地 Xcode license，因此不能完成该步骤；adapter 级校验不依赖这次原生构建。Claude 的独立 lint 仍会报告 `src/tests/usage.test.ts` 中原有的未使用 `thinkingTokens` 声明；本次刷新没有修改该文件。
+
+## 2026-10-13 不完整升级回退
+
+main 提交 `3d9b7cf1fe2872d8e5baa52916cf1cb1a0a6f0ea` 更新了 Claude、Codex、Grok 和 Pi 的 gitlink，却没有同步根锁文件、CLI SDK 依赖或托管运行时清单。`567afa18d1f0d45ebbe78fca7dde2a5dde3a7536` 的 CI 在 frozen install 阶段失败，没有进入测试。只修锁文件仍会使 Claude SDK 0.3.293、Codex 0.160.1 和 Grok 1.0.46 与 CLI 的 0.3.284/2.1.284、0.159.2 和 1.0.40 运行时约定不一致。
+
+将四个 gitlink 恢复到 CI 已成功的 `0b46cc2d8e33c6feafd08c00f51089456ab1e732` 所用组合，保留后续 registry 刷新及 main 的其他改动。这样可恢复依赖和运行时的一致性，无需发布新的生产产物或增加新包隔离例外。完整升级必须同时具备完整依赖图、匹配的 SDK/清单和已验证发布的产物；本地构建清单不能证明生产发布。继续保留 frozen-lockfile 和完整性校验。
+
+验证：frozen install、完整 `pnpm check`、格式化及格式检查、文档检查、113 项 GitHub 自动化测试均通过。CLI 使用要求的 2 GiB heap 构建，通过发布包依赖与 adapter smoke，并在独立数据目录下成功运行 `--help`。恢复的 20 个 canonical 产物 URL 对公开 range 请求均返回 HTTP 206；这只证明可下载，不是新的完整性回读。完整检查采用已安装的原生 Git helper 路径和 CI 的签名配置：会话注入的 broker helper 会导致一项递归 SSH fixture 出现 `context_unreadable`；使用原生 helper 后 18 项 Git transport 测试均通过，CLI 全套 4119 项通过（4 项跳过）。推送后精确 main SHA 的 Actions 结果与这些本地证据分开判断。
+
+公开 CI 证据：[失败的 main](https://github.com/LodyAI/Lody/actions/runs/38377855941)、[成功的回退基线](https://github.com/LodyAI/Lody/actions/runs/38370031341)。

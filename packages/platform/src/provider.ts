@@ -2,6 +2,7 @@ import type { PlatformCapabilities } from './capabilities';
 import type { CloudApi } from './cloud-api';
 import type { ReadonlyStore } from './store';
 import type { PlatformKind } from '@lody/shared/platform-kind';
+import type { PlatformE2eeWorkspaces } from './e2ee-workspaces';
 
 export {
   PLATFORM_ENV_VAR,
@@ -23,7 +24,12 @@ export interface PlatformUser {
 
 export type PlatformSessionState =
   | { status: 'loading' }
-  | { status: 'unauthenticated' }
+  | {
+      status: 'unauthenticated';
+      /** A transport failure is not confirmed logout. Ordinary cloud access
+       * remains unauthenticated; E2EE may resolve its local identity natively. */
+      uncertain?: true;
+    }
   | { status: 'authenticated'; user: PlatformUser };
 
 export interface PlatformIdentity {
@@ -41,6 +47,11 @@ export interface WorkspaceSummary {
   name: string;
   slug: string | null;
   role: string;
+  /** Display metadata only; runtime admission resolves the persisted descriptor. */
+  contentMode?: string;
+  contentModeVersion?: number;
+  cryptoOrgId?: string;
+  genesisHash?: string;
 }
 
 export type WorkspacesState =
@@ -98,6 +109,8 @@ export interface PlatformProvider {
   readonly kind: PlatformKind;
   identity: PlatformIdentity;
   workspaces: PlatformWorkspaces;
+  /** Optional E2EE control plane; absent in the local OSS composition. */
+  e2eeWorkspaces?: PlatformE2eeWorkspaces;
   capabilities: PlatformCapabilities;
   /**
    * Present only on a cloud implementation. A capability claiming availability

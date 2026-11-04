@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionHistoryInput, SessionMeta } from '@lody/shared';
-import { buildSessionArtifacts, toExportSessionSummary, toUserFacingAgentType } from './formatters';
+import type { SessionMeta } from '@lody/shared';
+import { toExportSessionSummary } from './formatters';
 import { buildTranscriptMarkdown } from './markdown';
 
 const createSessionMeta = (overrides: Partial<SessionMeta> = {}): SessionMeta => ({
@@ -13,179 +13,7 @@ const createSessionMeta = (overrides: Partial<SessionMeta> = {}): SessionMeta =>
   ...overrides,
 });
 
-const createHistoryEntry = (overrides: Partial<SessionHistoryInput> = {}): SessionHistoryInput => ({
-  id: 'turn-1',
-  role: 'assistant',
-  timestamp: '2026-03-23T10:01:00.000Z',
-  items: [],
-  fileDiff: [],
-  ...overrides,
-});
-
 describe('session export formatters', () => {
-  it('normalizes agent labels for user-facing export', () => {
-    expect(toUserFacingAgentType(createSessionMeta())).toBe('claude-code');
-    expect(
-      toUserFacingAgentType(
-        createSessionMeta({
-          cliType: 'registry',
-          agentType: 'kimi',
-        })
-      )
-    ).toBe('kimi');
-  });
-
-  it('builds export summary without internal agent ids', () => {
-    const summary = toExportSessionSummary(
-      createSessionMeta({
-        title: '  Export me  ',
-        repoFullName: 'loro-dev/lody',
-        baseBranch: 'main',
-        branchName: 'feat/export',
-      }),
-      'workspace-1'
-    );
-
-    expect(summary).toEqual({
-      sessionId: 'session-1',
-      title: 'Export me',
-      createdAt: '2026-03-23T10:00:00.000Z',
-      status: null,
-      archived: false,
-      workspaceId: 'workspace-1',
-      agent: {
-        type: 'claude-code',
-      },
-      project: undefined,
-      repoFullName: 'loro-dev/lody',
-      baseBranch: 'main',
-      branchName: 'feat/export',
-    });
-  });
-
-  it('extracts transcript artifacts, plans, tool calls, notices, and attachments', () => {
-    const artifacts = buildSessionArtifacts([
-      createHistoryEntry({
-        id: 'turn-1',
-        role: 'user',
-        items: [
-          { type: 'text', text: 'Ship the exporter' },
-          {
-            type: 'image',
-            imageId: 'img-1',
-            mimeType: 'image/png',
-            fileName: 'spec.png',
-            sizeBytes: 120,
-          },
-        ],
-      }),
-      createHistoryEntry({
-        id: 'turn-2',
-        role: 'assistant',
-        items: [
-          { type: 'thought', text: 'Need to gather session data first.' },
-          {
-            type: 'tool_call',
-            toolCallId: 'tool-1',
-            status: 'completed',
-            kind: 'read',
-            title: 'Read session schema',
-            content: [
-              { type: 'terminal_command', command: 'sed', args: ['-n', '1,10p', 'schema.ts'] },
-              { type: 'diff', path: 'schema.ts', newText: 'hidden' },
-            ],
-          },
-          {
-            type: 'system_notice',
-            name: 'chat_failed',
-            meta: { reason: 'acp_unknown_error', message: 'Retry later' },
-          },
-        ],
-        plan: [{ status: 'in_progress', content: 'Export sessions', priority: 'high' }],
-      }),
-    ]);
-
-    expect(artifacts.transcript).toHaveLength(2);
-    expect(artifacts.plans).toEqual([
-      {
-        turnId: 'turn-2',
-        timestamp: '2026-03-23T10:01:00.000Z',
-        entries: [{ status: 'in_progress', content: 'Export sessions', priority: 'high' }],
-      },
-    ]);
-    expect(artifacts.toolCalls).toEqual([
-      expect.objectContaining({
-        turnId: 'turn-2',
-        toolCallId: 'tool-1',
-        kind: 'read',
-        title: 'Read session schema',
-        content: [{ type: 'terminal_command', command: 'sed', args: ['-n', '1,10p', 'schema.ts'] }],
-      }),
-    ]);
-    expect(artifacts.systemNotices).toEqual([
-      {
-        turnId: 'turn-2',
-        timestamp: '2026-03-23T10:01:00.000Z',
-        role: 'assistant',
-        name: 'chat_failed',
-        meta: { reason: 'acp_unknown_error', message: 'Retry later' },
-      },
-    ]);
-    expect(artifacts.attachments).toEqual([
-      {
-        imageId: 'img-1',
-        mimeType: 'image/png',
-        fileName: 'img-1.png',
-        originalFileName: 'spec.png',
-        sizeBytes: 120,
-        width: null,
-        height: null,
-        sourceTurnIds: ['turn-1'],
-        relativePath: 'artifacts/attachments/files/img-1.png',
-      },
-    ]);
-    expect(artifacts.transcript[1]?.items).toEqual([
-      { type: 'thought', text: 'Need to gather session data first.' },
-      {
-        type: 'tool_call',
-        toolCallId: 'tool-1',
-        status: 'completed',
-        kind: 'read',
-        title: 'Read session schema',
-        content: [{ type: 'terminal_command', command: 'sed', args: ['-n', '1,10p', 'schema.ts'] }],
-      },
-      {
-        type: 'system_notice',
-        name: 'chat_failed',
-        meta: { reason: 'acp_unknown_error', message: 'Retry later' },
-      },
-    ]);
-  });
-
-  it('encodes attachment file names derived from unsafe image ids', () => {
-    const artifacts = buildSessionArtifacts([
-      createHistoryEntry({
-        items: [
-          {
-            type: 'image',
-            imageId: '../escape',
-            mimeType: 'image/png',
-            fileName: 'spec.png',
-            sizeBytes: 120,
-          },
-        ],
-      }),
-    ]);
-
-    expect(artifacts.attachments).toEqual([
-      expect.objectContaining({
-        imageId: '../escape',
-        fileName: '..%2Fescape.png',
-        relativePath: 'artifacts/attachments/files/..%2Fescape.png',
-      }),
-    ]);
-  });
-
   it('renders transcript markdown with thought blocks and attachment links', () => {
     const markdown = buildTranscriptMarkdown({
       session: toExportSessionSummary(createSessionMeta({ title: 'Exporter' }), 'workspace-1'),
@@ -200,7 +28,7 @@ describe('session export formatters', () => {
           endedAt: null,
           modelInfo: undefined,
           items: [
-            { type: 'text', text: 'Implemented the command.' },
+            { type: 'text', text: 'Implemented the command. See [Old](session://child).' },
             { type: 'thought', text: 'Need to keep this independent.' },
             {
               type: 'image',
@@ -228,6 +56,8 @@ describe('session export formatters', () => {
     });
 
     expect(markdown).toContain('# Exporter');
+    expect(markdown).toContain('[Open in Lody](lody://session/session-1?workspace=workspace-1)');
+    expect(markdown).toContain('[Old](lody://session/child?workspace=workspace-1)');
     expect(markdown).toContain('#### Thought');
     expect(markdown).toContain('Need to keep this independent.');
     expect(markdown).toContain('![diagram.png](artifacts/attachments/files/img-1.png)');

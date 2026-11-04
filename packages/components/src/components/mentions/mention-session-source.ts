@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { buildSessionLink } from '@lody/shared/session-link';
 import {
   hydrateSlugMentionsFromText,
   type HydratedMentions,
@@ -363,6 +364,7 @@ export function resolveSessionMentionIds(
 
 export type SessionMentionPromptFields = {
   sessionId: string;
+  workspaceId?: string;
   /**
    * Link label after `@`. Prefers the human title; callers fall back to the
    * composer slug when the title is unknown.
@@ -378,16 +380,17 @@ export function escapeSessionMentionLinkLabel(label: string): string {
 /**
  * Machine-readable form the agent receives for a session mention.
  *
- * Markdown link with a `session://` URI so the transcript stays readable while
+ * Markdown link with a `lody://session/` URI so the transcript stays readable while
  * Lody MCP can resolve the id via `lody_session_history`.
  */
 export function buildSessionMentionPrompt(fields: SessionMentionPromptFields): string {
   const title = fields.title.trim() || fields.sessionId;
   const label = escapeSessionMentionLinkLabel(`@${title}`);
-  return `[${label}](session://${fields.sessionId})`;
+  return `[${label}](${buildSessionLink(fields)})`;
 }
 
 export type SessionMentionRewriteContext = {
+  workspaceId?: string;
   /** Live mention items — title comes from here when the range only carries an id. */
   items?: readonly Pick<SessionMentionItem, 'sessionId' | 'title'>[];
 };
@@ -424,6 +427,7 @@ export function buildSessionMentionRewrites(
       end: mention.end,
       replacement: buildSessionMentionPrompt({
         sessionId: mention.value,
+        workspaceId: context.workspaceId,
         title,
       }),
       span: { kind: 'session', label, target: mention.value },

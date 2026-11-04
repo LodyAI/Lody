@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import React from 'react';
-import { flushSync } from 'react-dom';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -13,8 +13,15 @@ import type {
 } from '@lody/shared';
 
 import { LocalProjectItem } from '../src/components/loro-app-sidebar';
+import { SessionList, type SessionListRow } from '../src/components/session-list';
 import { initI18n } from '../src/i18n';
 import { Tooltip } from '@lody/ui/tooltip';
+
+// Under `act`, React drains effects and scheduled work before each call returns,
+// so nothing is left to run after the jsdom environment is torn down.
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 // A project hosted on a machine a teammate shared with the workspace. The row
 // must behave exactly like one on this user's own device: clicking it steers the
@@ -69,7 +76,7 @@ describe('sidebar local project row', () => {
 
   afterEach(() => {
     if (root) {
-      flushSync(() => root?.unmount());
+      act(() => root?.unmount());
     }
     root = undefined;
     container?.remove();
@@ -87,7 +94,7 @@ describe('sidebar local project row', () => {
     collapsed?: boolean;
     liveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
   }) {
-    flushSync(() => {
+    act(() => {
       root?.render(
         <Tooltip.Provider>
           <LocalProjectItem
@@ -137,12 +144,12 @@ describe('sidebar local project row', () => {
     expect(row?.getAttribute('role')).toBe('button');
     expect(row?.getAttribute('aria-disabled')).toBeNull();
 
-    flushSync(() => row?.click());
+    act(() => row?.click());
     expect(onNavigateProject).toHaveBeenCalledWith(machineId, project.id);
 
     const newChatButton = row?.querySelector<HTMLButtonElement>('button[aria-label="New chat"]');
     expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
-    flushSync(() => newChatButton?.click());
+    act(() => newChatButton?.click());
     expect(onNewChatInProject).toHaveBeenCalledWith(machineId, project.id);
     // Starting a fresh chat must not double as a plain row activation.
     expect(onNavigateProject).toHaveBeenCalledTimes(1);
@@ -156,7 +163,7 @@ describe('sidebar local project row', () => {
     expect(row?.getAttribute('role')).toBeNull();
     expect(row?.getAttribute('aria-disabled')).toBe('true');
 
-    flushSync(() => row?.click());
+    act(() => row?.click());
     expect(onNavigateProject).not.toHaveBeenCalled();
     expect(row?.querySelector('button[aria-label="New chat"]')).toBeNull();
   });
@@ -187,7 +194,7 @@ describe('sidebar local project row', () => {
     );
     expect(showAll?.textContent).toBe('Show all (7)');
 
-    flushSync(() => showAll?.click());
+    act(() => showAll?.click());
     expect(onToggleFullList).toHaveBeenCalledWith('local-project:machine-teammate:project-shared');
 
     render({ ...baseOptions, whetherShowFullList: true });
@@ -270,5 +277,95 @@ describe('sidebar local project row', () => {
     });
     expect(row?.querySelector('[data-session-row-indicator]')).toBeNull();
     expect(row?.getAttribute('aria-label')).toBe("Lody · Teammate's Mac · /workspace/lody");
+  });
+});
+
+// A Project group's row is a project row: the same hover controls in the same
+// places, the row itself starts a conversation, and there is no separate "+".
+describe('sidebar project group row', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    if (root) act(() => root?.unmount());
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    vi.restoreAllMocks();
+  });
+
+  const row = (sessionId: string, projectGroup: { id: string; name: string }): SessionListRow => ({
+    sessionId,
+    title: sessionId,
+    repoFullName: 'acme/web',
+    branchName: '',
+    latestMessageAt: '2026-10-18T00:00:00.000Z',
+    addedLines: 0,
+    deletedLines: 0,
+    isWorking: false,
+    hasUnreadMessages: false,
+    isOffline: false,
+    isWaitingPermission: false,
+    projectGroup,
+  });
+
+  function render() {
+    const handlers = {
+      onNewInProjectGroup: vi.fn(),
+      onOpenProjectGroupSettings: vi.fn(),
+      onArchiveProjectGroupChats: vi.fn(),
+      onMoveProjectGroup: vi.fn(),
+    };
+    act(() => {
+      root?.render(
+        <SessionList
+          sessions={[
+            row('shop-1', { id: 'shop', name: 'Shop' }),
+            // A deleted group still lists its conversations under the old name.
+            row('old-1', { id: 'gone', name: 'Old group' }),
+          ]}
+          repos={[]}
+          projectGroups={[
+            { projectId: 'shop', name: 'Shop', collapsed: false },
+            { projectId: 'docs', name: 'Docs', collapsed: false },
+          ]}
+          onToggleProjectGroupCollapsed={() => undefined}
+          {...handlers}
+        />
+      );
+    });
+    const groupRow = (id: string) =>
+      container?.querySelector<HTMLElement>(`[data-id="group:projectGroup:${id}"]`);
+    return { handlers, groupRow };
+  }
+
+  it('leaves a deleted group nothing to start, edit or move', () => {
+    const { handlers, groupRow } = render();
+    const old = groupRow('gone');
+    expect(old).toBeInstanceOf(HTMLElement);
+    expect(old?.querySelector('button[aria-label="New chat in this project"]')).toBeNull();
+    expect(old?.querySelector('button[aria-label="Reorder project"]')).toBeNull();
+    act(() => old?.click());
+    expect(handlers.onNewInProjectGroup).not.toHaveBeenCalled();
   });
 });

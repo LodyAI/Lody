@@ -33,6 +33,7 @@ export type LodyLiveActivitySyncPayload = {
   totalCount: number;
   statusCounts: LiveActivityStatusCounts;
   items: LiveActivityConversationItem[];
+  /** Legacy native bridge input. Current producers always send silent summaries. */
   permissionAlert?: LiveActivityPermissionAlert;
 };
 
@@ -61,19 +62,7 @@ type LodyLiveActivityWindow = Window & {
 
 const LIVE_ACTIVITY_RECHECK_INTERVAL_MS = 60_000;
 
-/**
- * Coalesces the multi-render sequence one logical change produces into a single
- * bridge call. A flush lands in the commit *after* the change that requested it,
- * so a new permission request first renders with the previous summary and only
- * then with the flushed one. Without this the bridge would receive both, and the
- * stale one would win: it marks the alert key as shown, so the fresh payload
- * would hit the "already alerted" early return and never be delivered.
- *
- * This is not a second throttle. It bounds nothing about how often the payload
- * is rebuilt — `LIVE_ACTIVITY_SUMMARY_THROTTLE_MS` does that — and on its own it
- * cannot, because a payload identity that changes faster than the window resets
- * it forever.
- */
+/** Coalesce the render that requests a throttle flush with its committed snapshot. */
 const LIVE_ACTIVITY_SYNC_DEBOUNCE_MS = 250;
 
 /**
@@ -125,19 +114,6 @@ function formatCompactUpdatedAt(value: number, nowMs: number, language: string):
   }
   const days = Math.max(1, Math.floor(elapsedMs / day));
   return isChinese ? `${days}天前` : `${days}d`;
-}
-
-function normalizeLiveActivitySyncPayload(
-  payload: LodyLiveActivitySyncPayload
-): LodyLiveActivitySyncPayload {
-  return {
-    activityId: payload.activityId,
-    workspaceId: payload.workspaceId,
-    workspaceName: payload.workspaceName,
-    totalCount: payload.totalCount,
-    statusCounts: payload.statusCounts,
-    items: payload.items,
-  };
 }
 
 /**
@@ -208,7 +184,6 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
   const now = useStableNow(LIVE_ACTIVITY_RECHECK_INTERVAL_MS);
   const userId = user?.id ?? null;
   const liveActivitiesEnabled = useAtomValue(iosLiveActivitiesEnabledAtom);
-  const shownPermissionAlertKeysRef = useRef<Set<string>>(new Set());
   const nativeIOSAppShell = isNativeIOSAppShell();
 
   // The id and the two fields it is built from travel together, and the teardown
@@ -277,7 +252,6 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
   // identity into the payload memo restored the debounce starvation for exactly
   // the case that matters most: a pending permission request during a sync burst.
   const permissionAlertKey = permissionAlertCandidate?.key ?? null;
-  const permissionAlertBody = permissionAlertCandidate?.sessionTitle ?? null;
 
   const summaryInput = useMemo<LiveActivitySummaryInput>(
     () => (enabled ? { sessions, agentConfigs, liveSessionStatuses } : EMPTY_SUMMARY_INPUT),
@@ -286,7 +260,7 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
 
   // A new permission candidate and a workspace switch each bypass the throttle:
   // those are the moments where a stale summary would be wrong on screen rather
-  // than merely late — the previous workspace's rows, or an alert next to a list
+  // than merely late — the previous workspace's rows, or a permission state next to a list
   // that does not contain the session asking for permission.
   const flushSignal = `${activityTarget?.activityId ?? ''}|${permissionAlertKey ?? ''}`;
   const throttledInput = useThrottledSnapshot(
@@ -295,9 +269,7 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
     flushSignal
   );
 
-  const payload = useMemo<
-    (LodyLiveActivitySyncPayload & { permissionAlertCandidateKey?: string }) | null
-  >(() => {
+  const payload = useMemo<LodyLiveActivitySyncPayload | null>(() => {
     if (!enabled || !activityTarget) return null;
     const { activityId, workspaceId, userId: currentUserId } = activityTarget;
     const nowMs = now.getTime();
@@ -330,7 +302,7 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
       currentUserId,
       liveSessionStatuses: throttledStatuses,
     });
-    const nextPayload: LodyLiveActivitySyncPayload & { permissionAlertCandidateKey?: string } = {
+    return {
       activityId,
       workspaceId,
       workspaceName,
@@ -338,26 +310,7 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
       statusCounts,
       items,
     };
-    if (permissionAlertKey !== null && permissionAlertBody !== null) {
-      nextPayload.permissionAlert = {
-        title: t('sessions.permissionRequired', 'Permission Required'),
-        body: permissionAlertBody,
-      };
-      nextPayload.permissionAlertCandidateKey = permissionAlertKey;
-    }
-    return nextPayload;
-  }, [
-    activityTarget,
-    defaultTitle,
-    enabled,
-    i18n.language,
-    now,
-    permissionAlertBody,
-    permissionAlertKey,
-    t,
-    throttledInput,
-    workspaceName,
-  ]);
+  }, [activityTarget, defaultTitle, enabled, i18n.language, now, t, throttledInput, workspaceName]);
 
   useEffect(() => {
     if (!payload) return undefined;
@@ -365,29 +318,8 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
     if (!bridge) return undefined;
 
     const handle = window.setTimeout(() => {
-      const permissionAlertCandidateKey = payload.permissionAlertCandidateKey;
-      const shouldShowPermissionAlert =
-        payload.permissionAlert !== undefined &&
-        permissionAlertCandidateKey !== undefined &&
-        !shownPermissionAlertKeysRef.current.has(permissionAlertCandidateKey);
-      if (shouldShowPermissionAlert) {
-        shownPermissionAlertKeysRef.current.add(permissionAlertCandidateKey);
-      }
-
-      // Rejected alternative: continuing normal summary sync while permission is pending can
-      // replace the just-triggered permission alert with the standard Live Activity UI.
-      if (payload.permissionAlert !== undefined && !shouldShowPermissionAlert) {
-        return;
-      }
-
-      const syncPayload = normalizeLiveActivitySyncPayload(payload);
-      if (shouldShowPermissionAlert) {
-        syncPayload.permissionAlert = payload.permissionAlert;
-      }
-      bridge.syncConversationSummary(syncPayload).catch((error: unknown) => {
-        if (shouldShowPermissionAlert && permissionAlertCandidateKey) {
-          shownPermissionAlertKeysRef.current.delete(permissionAlertCandidateKey);
-        }
+      // Ordinary push owns alerts. Keep refreshing the summary while requests are pending.
+      bridge.syncConversationSummary(payload).catch((error: unknown) => {
         console.error('Failed to sync Lody Live Activity', error);
       });
     }, LIVE_ACTIVITY_SYNC_DEBOUNCE_MS);

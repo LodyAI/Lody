@@ -1,7 +1,9 @@
 # Chat image selection and export
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](chat-share-image.zh.md)
 
 A user can select messages directly in a session conversation and preview them
 as one image card, then save it as PNG. Selection belongs to the chat surface;
@@ -14,7 +16,8 @@ virtual rows. Mouse drag, Shift range extension, Ctrl/Command inversion, and
 edge scrolling preserve chronological order. Cancelling selection restores the
 composer. Dismissing the preview retains the selection, so it can be reopened and
 adjusted, but finishing the share ends the whole flow: once the image is on the
-clipboard or written to disk, the preview closes and the selection goes with it.
+clipboard, written to disk, or handed to a native share target, the preview closes
+and the selection goes with it.
 Nothing is left armed behind a task the user has completed.
 
 A cancelled save dialog finishes nothing. It closes neither the preview nor the
@@ -36,6 +39,10 @@ type scale are the same on every card, and the preview offers four choices, none
 of which can change any of that: the card's size, how much ground shows around
 it, which ground, and which palette. The palette opens on whichever appearance
 the app is currently wearing.
+
+The selected palette applies to the whole card, including Markdown prose,
+emphasis, quotes, tables and code, independently of the app and system appearance.
+Preview and PNG export use that same palette.
 
 The card's size is a content decision, because it sets the measure: how much
 prose fits on a line, and whether a line of code survives without wrapping. It is
@@ -112,7 +119,11 @@ for reading is what a share link is for.
 PNG export captures the card and its ground, independent of preview scrolling
 or scaling. It waits for fonts and images, disables duplicate export or copy
 actions, and reports failures for retry. Electron uses its native save dialog;
-browsers download the file. Canceling the save dialog preserves the preview.
+browsers download the file. Native mobile apps stage the PNG locally and open
+the system share sheet, where iOS offers Save Image alongside other destinations.
+A completed system handoff finishes the flow; it does not certify which destination
+the user chose. Dismissing the save/share dialog preserves the preview and selection.
+Native failures remain retryable and never fall back to a browser download.
 
 A finished copy is announced outside the preview, because the preview is gone by
 then: a save has the native dialog or the browser's own download UI behind it,
@@ -141,3 +152,7 @@ and [card stories](../packages/components/src/stories/ChatShareCard.stories.tsx)
 covering both forms in both palettes. The redesign is recorded in
 [its note](../.agents/notes/implemented/feature/2026-09-14-chat-share-card-fixed-template.md).
 This draft does not claim visual acceptance.
+
+Palette isolation is covered by the [typography browser suite](../packages/components/tests/e2e/interface-typography.spec.ts);
+the [fix note](../.agents/notes/implemented/bug-fix/2026-10-06-chat-share-palette-isolation.md)
+records browser reproduction and PNG verification.

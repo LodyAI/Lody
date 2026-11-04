@@ -1,3 +1,4 @@
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 import { useMemo, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
@@ -20,18 +21,13 @@ import {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { AgentSelection } from '@/components/shared/agent-selector';
-import {
-  DEEPSEEK_DELEGATION_DISCUSSION_URL,
-  DeepSeekDelegationWarningContent,
-  shouldShowDeepSeekDelegationWarning,
-} from '@/components/shared/deepseek-delegation-warning';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
+import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   AGENT_ROLE_UNAVAILABLE_REASON_KEYS,
   type ComposerAgentRoleItem,
 } from '@/lib/composer-agent-roles';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
-import { openExternalUrl } from '@/lib/native-browser';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
@@ -112,22 +108,6 @@ const styles = stylex.create({
   emoji: { flexShrink: 0, fontSize: text.headlineSize, lineHeight: 1 },
   /** The mark a picker's value carries: an icon at rest, so a little quieter. */
   valueMark: { opacity: 0.8 },
-  /** A warning about the pick: a tint and a mark, never a fill or a border. */
-  warning: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: space[2],
-    paddingInline: space[3],
-    paddingBlock: '10px',
-    borderRadius: radius.large,
-    cornerShape: corner.shape,
-    backgroundColor: {
-      default: `color-mix(in oklab, ${colors.warning} 8%, transparent)`,
-      ':active': `color-mix(in oklab, ${colors.warning} 14%, transparent)`,
-    },
-    color: colors.label,
-    textDecoration: 'none',
-  },
 });
 
 /**
@@ -200,14 +180,15 @@ export function MobileRunConfigSheet({
      provider can fill with dozens of entries). Tapping one puts the caret at the
      bottom of the screen, exactly where the soft keyboard lands. */
   const keyboard = useKeyboardAwareSheet();
+  const maxHeight = useFoldAwareSheetHeight(85, true);
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
-        className={cn(
-          'h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60',
-          keyboard.contentClassName
-        )}
+        style={{
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
+        }}
+        className={cn('h-auto! rounded-t-2xl border-border/60', keyboard.contentClassName)}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
         <DrawerTitle className="sr-only">{title}</DrawerTitle>
@@ -274,8 +255,6 @@ function MobileRunConfigSheetRows({
   const {
     modelSelectors,
     interactionModeSelectors,
-    permissionModeSelectors,
-    modeSelectors,
     thoughtLevelSelectors,
     planModeSelectors,
     fastModeSelectors,
@@ -408,11 +387,6 @@ function MobileRunConfigSheetRows({
     () => modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue,
     [modelPickerOptions, modelValue]
   );
-  const showDeepSeekDelegationWarning = shouldShowDeepSeekDelegationWarning({
-    cliType: selectedAgentConfig?.cliType,
-    agentType: selectedAgentConfig?.agentType,
-    modelId: modelValue,
-  });
 
   /* ── Provider-specific interaction mode (for example Grok Agent / Plan / Ask) ── */
   const interactionSelector = interactionModeSelectors[0];
@@ -470,34 +444,32 @@ function MobileRunConfigSheetRows({
     [thinkingOptions, thinkingValue]
   );
 
-  /* ── Permission / mode (modeOptions first, else the mode selector) ── */
-  const explicitPermissionSelector = permissionModeSelectors[0];
-  const modeConfigSelector: AcpSelectConfigOptionSelector | undefined =
-    explicitPermissionSelector ?? modeSelectors[0];
-  const permissionOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
-    const source = explicitPermissionSelector
-      ? explicitPermissionSelector.options
-      : modeOptions.length > 0
-        ? modeOptions
-        : (modeConfigSelector?.options ?? []);
-    return source.map((opt) => ({
-      value: opt.value,
-      label: opt.label,
-      searchText: opt.label,
-      description: opt.description,
-      disabled: opt.disabled,
-      icon: permissionModeIcon(opt.value),
-    }));
-  }, [explicitPermissionSelector, modeConfigSelector, modeOptions]);
-  const permissionValue =
-    explicitPermissionSelector || modeOptions.length === 0
-      ? modeConfigSelector
-        ? ((resolveConfigOptionValue(
-            modeConfigSelector,
-            configOptionValues?.[modeConfigSelector.configId]
-          ) as string) ?? null)
-        : null
-      : selectedModeId;
+  /* ── Permission / mode — resolved by the one shared rule, so the sheet, the
+     desktop button, and the Role pane cannot disagree about which knob this
+     is or what to call it. ── */
+  const permissionFace = useMemo(
+    () =>
+      resolvePermissionModeFace({
+        modeOptions,
+        selectedModeId,
+        configOptionSelectors,
+        configOptionValues,
+      }),
+    [configOptionSelectors, configOptionValues, modeOptions, selectedModeId]
+  );
+  const permissionOptions = useMemo<MobileInlinePickerOption<string>[]>(
+    () =>
+      permissionFace.options.map((opt) => ({
+        value: opt.value,
+        label: opt.label,
+        searchText: opt.label,
+        description: opt.description,
+        disabled: opt.disabled,
+        icon: permissionModeIcon(opt.value),
+      })),
+    [permissionFace]
+  );
+  const permissionValue = permissionFace.value;
   const permissionLabel = useMemo(
     () => permissionOptions.find((opt) => opt.value === permissionValue)?.label ?? null,
     [permissionOptions, permissionValue]
@@ -519,7 +491,7 @@ function MobileRunConfigSheetRows({
   const modelSearchPlaceholder = t('chat.runConfig.modelSearchPlaceholder', 'Search models');
   const modelSearchEmptyLabel = t('chat.runConfig.modelSearchEmpty', 'No models match');
   const reasoningLabel = t('chat.runConfig.reasoningLabel', 'Reasoning');
-  const permissionRowLabel = t('chat.runConfig.permissionLabel', 'Permission');
+  const permissionRowLabel = permissionModeControlLabel(permissionFace, t);
   const planRowLabel = t('chat.mobileNewChat.planModeLabel', 'Plan');
   const fastRowLabel = t('chat.runConfig.fastLabel', 'Fast');
 
@@ -620,7 +592,7 @@ function MobileRunConfigSheetRows({
         return (
           <RunConfigRow key={selector.configId} label={selector.label}>
             <MobileInlinePicker<string>
-              id={`run-config-${selector.configId}`}
+              id={`run-config-option:${selector.configId}`}
               value={selectedValue}
               onChange={(nextValue) =>
                 onConfigOptionChange?.(selector.configId, nextValue as AcpConfigOptionValue)
@@ -667,21 +639,6 @@ function MobileRunConfigSheetRows({
         </RunConfigRow>
       ) : null}
 
-      {showDeepSeekDelegationWarning ? (
-        <a
-          href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(event) => {
-            event.preventDefault();
-            void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
-          }}
-          {...stylex.props(styles.warning)}
-        >
-          <DeepSeekDelegationWarningContent />
-        </a>
-      ) : null}
-
       {interactionSelector && interactionOptions.length > 0 ? (
         <RunConfigRow label={interactionSelector.label}>
           <MobileInlinePicker<string>
@@ -726,9 +683,9 @@ function MobileRunConfigSheetRows({
             id="run-config-permission"
             value={permissionValue}
             onChange={(value) => {
-              if (explicitPermissionSelector || modeOptions.length === 0) {
-                if (!modeConfigSelector) return;
-                onConfigOptionChange?.(modeConfigSelector.configId, value as AcpConfigOptionValue);
+              const source = permissionFace.source;
+              if (source?.kind === 'configOption') {
+                onConfigOptionChange?.(source.configId, value as AcpConfigOptionValue);
               } else {
                 onModeChange(value);
               }

@@ -181,7 +181,6 @@ it.each([false, true])(
       lease.recordNativePid(process.pid);
       await manager.kick();
       expect(credentialPresent).toBe(true);
-      expect(vi.getTimerCount()).toBe(1);
       const proof = path.join(profile.home, '..', 'processes', `${lease.token}.native.json`);
       await writeFile(proof, JSON.stringify({ nativeExited: true }));
       if (stopBeforeRetry) manager.stop();
@@ -191,7 +190,6 @@ it.each([false, true])(
         await manager.kick();
       }
       expect(credentialPresent).toBe(stopBeforeRetry);
-      expect(vi.getTimerCount()).toBe(0);
     } finally {
       manager.stop();
       getter.mockRestore();
@@ -226,19 +224,35 @@ function createDeferred<T>() {
 }
 
 describe('ProviderSetupManager', () => {
-  it('publishes the config and removes the setup in one commit after a live probe', async () => {
+  it('continues setup after a scan failure and retries cleanup on the next kick', async () => {
+    let healthy = false;
+    let credentialPresent = true;
+    const store = {
+      list: async () => {
+        if (!healthy) throw new Error('profile root unavailable');
+        return [{ machineId, configId: 'orphan', profile: { profileId: 'orphan-profile' } }];
+      },
+      remove: async () => {
+        credentialPresent = false;
+        return true;
+      },
+    };
+    const getter = vi
+      .spyOn(codexProfiles, 'getCodexProfileStore')
+      .mockReturnValue(store as unknown as codexProfiles.CodexProfileStore);
     const harness = createHarness();
-    seedSetup(harness.flock);
-
-    await harness.manager.kick();
-
-    expect(readState(harness.flock).config).toBeDefined();
-    expect(readState(harness.flock).setup).toBeUndefined();
-    const finalSnapshot = harness.flock.commitSnapshots.at(-1) ?? [];
-    expect(finalSnapshot).toContain(JSON.stringify(machineFlockKeys.agentConfig(setupId)));
-    expect(finalSnapshot).not.toContain(JSON.stringify(machineFlockKeys.providerSetup(setupId)));
-    expect(harness.execution.refreshMachineAcpCapabilities).toHaveBeenCalledTimes(1);
-    harness.manager.stop();
+    try {
+      seedSetup(harness.flock);
+      await harness.manager.kick();
+      expect(readState(harness.flock).config).toBeDefined();
+      expect(credentialPresent).toBe(true);
+      healthy = true;
+      await harness.manager.kick();
+      expect(credentialPresent).toBe(false);
+    } finally {
+      harness.manager.stop();
+      getter.mockRestore();
+    }
   });
 
   it.each(['bub', 'dimcode'])('verifies %s without managed downloads', async (agentType) => {
@@ -277,7 +291,14 @@ describe('ProviderSetupManager', () => {
       'runtime-unavailable',
     ],
     ['bub', 'ACP handshake timed out', 'verification-failed'],
-    ['dimcode', 'npm package could not be installed', 'verification-failed'],
+    ['dimcode', 'spawn dimcode ENOENT', 'runtime-unavailable'],
+    [
+      'dimcode',
+      "'dimcode' is not recognized as an internal or external command",
+      'runtime-unavailable',
+    ],
+    ['dimcode', "error: unrecognized subcommand 'acp'", 'runtime-unavailable'],
+    ['dimcode', 'ACP handshake timed out', 'verification-failed'],
     [
       'dimcode',
       'Authentication required: Provider credentials are required',

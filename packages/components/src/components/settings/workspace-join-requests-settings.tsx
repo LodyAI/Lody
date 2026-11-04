@@ -1,3 +1,7 @@
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState, type ReactNode } from 'react';
 import { Check, Copy, Link2, RotateCw, X } from 'lucide-react';
@@ -7,10 +11,12 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { useCloudAction, useCloudQuery } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getAppShareUrl } from '@/lib/app-location';
 import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { SeatCostNotice } from './invite-member-dialog';
 import { Select } from '@lody/ui/select';
 import { CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
@@ -93,12 +99,19 @@ const styles = stylex.create({
 
 export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
-  const state = useCloudQuery(cloudOperations.workspaceJoinRequests.getOwnerState, {
+  const state = useLegacyWorkspaceQuery(cloudOperations.workspaceJoinRequests.getOwnerState, {
     workspaceId,
   });
-  const rotateLink = useCloudMutation(cloudOperations.workspaceJoinRequests.rotateLink);
-  const revokeLink = useCloudMutation(cloudOperations.workspaceJoinRequests.revokeLink);
-  const reviewRequest = useCloudMutation(cloudOperations.workspaceJoinRequests.reviewRequest);
+  const rotateLink = useLegacyWorkspaceMutation(cloudOperations.workspaceJoinRequests.rotateLink);
+  const revokeLink = useLegacyWorkspaceMutation(cloudOperations.workspaceJoinRequests.revokeLink);
+  const refreshSeatTerms = useCloudAction(cloudOperations.billing.purchaseWorkspaceMemberSeat);
+  const reviewRequest = useLegacyWorkspaceMutation(
+    cloudOperations.workspaceJoinRequests.reviewRequest
+  );
+  const [approvalId, setApprovalId] = useState<string | null>(null);
+  const seatPreview = useCloudQuery(cloudOperations.billing.getWorkspaceSeatInvitePreview, {
+    workspaceId,
+  });
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [expiresInDays, setExpiresInDays] = useState('30');
   const activeLink = state?.activeLink ?? null;
@@ -277,9 +290,10 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
               icon
               disabled={busyAction !== null}
               onClick={() =>
-                void run(`approve:${request.id}`, () =>
-                  reviewRequest({ requestId: request.id, decision: 'approved' })
-                )
+                void run(`approve:${request.id}`, async () => {
+                  await refreshSeatTerms({ workspaceId });
+                  setApprovalId(request.id);
+                })
               }
             >
               {busyAction === `approve:${request.id}` ? (
@@ -305,14 +319,55 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
   }
 
   return (
-    <CompactSection
-      title={t('joinRequest.admin.title', 'Open join link')}
-      description={t(
-        'joinRequest.admin.description',
-        'People can request access; only you can approve them.'
-      )}
-    >
-      {lines}
-    </CompactSection>
+    <>
+      <Dialog.Root
+        open={approvalId !== null}
+        onOpenChange={(open) => {
+          if (!open && busyAction === null) setApprovalId(null);
+        }}
+      >
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>{t('joinRequest.admin.approve')}</Dialog.Title>
+            <Dialog.Description>{t('billing.seatApprovalConfirm')}</Dialog.Description>
+          </Dialog.Header>
+          <SeatCostNotice preview={seatPreview} />
+          <Dialog.Footer>
+            <Button
+              variant="secondary"
+              disabled={busyAction !== null}
+              onClick={() => setApprovalId(null)}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              disabled={
+                busyAction !== null ||
+                seatPreview === undefined ||
+                (seatPreview?.status === 'billed' && seatPreview.proratedAmount === null)
+              }
+              onClick={() => {
+                if (!approvalId) return;
+                void run(`approve:${approvalId}`, async () => {
+                  await reviewRequest({ requestId: approvalId, decision: 'approved' });
+                  setApprovalId(null);
+                });
+              }}
+            >
+              {t('joinRequest.admin.approve')}
+            </Button>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
+      <CompactSection
+        title={t('joinRequest.admin.title', 'Open join link')}
+        description={t(
+          'joinRequest.admin.description',
+          'People can request access; only you can approve them.'
+        )}
+      >
+        {lines}
+      </CompactSection>
+    </>
   );
 }

@@ -7,10 +7,7 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import wasm from 'vite-plugin-wasm';
 import { loroCrdtBundlerAlias, loroCrdtWasmUrlWorkaround } from './vite-wasm-workarounds.ts';
-import {
-  rendererBundleAliasPlugin,
-  rendererBundleAliases,
-} from './vite-renderer-bundle-aliases.ts';
+import { rendererBundleAliases } from './vite-renderer-bundle-aliases.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,7 +29,6 @@ export default defineConfig(async () => {
           }),
         ]),
     loroCrdtWasmUrlWorkaround(),
-    rendererBundleAliasPlugin(),
     react(),
     tsconfigPaths({ projects: ['tsconfig.vite.json'] }),
     wasm(),

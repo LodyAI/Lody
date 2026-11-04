@@ -1,6 +1,10 @@
-import { execFileSync } from 'node:child_process';
-
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { toShared } from '@/platform/process-options';
 import { isMissingEmail } from '@lody/shared';
+
+import { runCommandTextSyncLegacy } from '@lody/shared/node/process';
 
 export const DEFAULT_AI_GIT_AUTHOR_NAME = 'LodyAI';
 export const DEFAULT_AI_GIT_AUTHOR_EMAIL = 'agent@lody.ai';
@@ -64,17 +68,54 @@ const normalizeName = (name: string | undefined, email: string): string => {
   return email;
 };
 
-// Global scope only. Lody-managed bare repositories share one config across all
-// worktrees, so a repository-level `user.*` there is whatever some earlier agent
-// wrote (e.g. a test fixture identity) and would leak into every other session.
+/** `git config` blocks the caller's event loop, so a wedged git cannot stall it for long. */
+const GIT_CONFIG_TIMEOUT_MS = 5_000;
+
+// Git's config quoting differs from JSON (for example, it does not accept \r).
+const quoteConfigPath = (value: string): string =>
+  `"${value.replace(/[\\"\n\t\b]/g, (char) => {
+    if (char === '\n') return '\\n';
+    if (char === '\t') return '\\t';
+    if (char === '\b') return '\\b';
+    return `\\${char}`;
+  })}"`;
+
+// Only global identity is a host default; shared bare-repo config belongs to agents.
 const readGitConfig = (key: 'user.name' | 'user.email'): string | undefined => {
   try {
-    const output = execFileSync('git', ['config', '--global', key], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    });
-    return trimNonEmpty(output);
+    let configDir: string | undefined;
+    try {
+      let source = ['--global'];
+      const home = process.env.HOME;
+      if (process.env.GIT_CONFIG_GLOBAL === undefined && home) {
+        // --global selects one file, but ordinary Git reads XDG before ~/.gitconfig.
+        // Let Git resolve includes and precedence without querying repository config.
+        // A real file, rather than stdin, lets hasconfig conditions rescan the input.
+        const paths = [
+          path.resolve(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'git/config'),
+          path.resolve(home, '.gitconfig'),
+        ];
+        configDir = mkdtempSync(path.join(tmpdir(), 'lody-git-identity-'));
+        const configFile = path.join(configDir, 'config');
+        writeFileSync(
+          configFile,
+          paths.map((file) => `[include]\npath = ${quoteConfigPath(file)}\n`).join('')
+        );
+        source = ['--file', configFile];
+      }
+      const { stdout } = runCommandTextSyncLegacy(
+        {
+          command: 'git',
+          args: ['config', ...source, '--includes', '--get', key],
+          timeout: GIT_CONFIG_TIMEOUT_MS,
+          check: 'exit-0',
+        },
+        toShared()
+      );
+      return trimNonEmpty(stdout);
+    } finally {
+      if (configDir) rmSync(configDir, { recursive: true, force: true });
+    }
   } catch {
     return undefined;
   }

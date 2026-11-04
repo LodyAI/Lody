@@ -1,57 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EphemeralStore, type Value } from 'loro-crdt';
-import {
-  getLodySessionViewingPresenceKey,
-  parseLodyPresenceStates,
-  type LodyPresenceInstanceId,
-  type WorkspaceId,
-} from '@lody/shared';
+import { EphemeralStore } from 'loro-crdt';
+import { type WorkspaceId } from '@lody/shared';
 
 import { WorkspacePresenceTransport } from '../src/providers/workspace-presence-transport';
 import type { EphemeralRoomAuthCallback } from '../src/providers/ephemeral-room-transport';
-
-/**
- * Milestone-0 proof for the CLI PR poller: a local `EphemeralStore` write is
- * encoded and broadcast by `EphemeralStoreAdaptor` — the same adaptor both the
- * CLI publisher (`CliPresenceRuntime`) and the web `WorkspacePresenceTransport`
- * wire into `EphemeralStreamCrdt`. Bridging two stores with encode/apply
- * exercises the exact wasm primitives the adaptor drives over the wire, so a
- * browser-side `store.set` is observed by every room peer.
- */
-describe('session-viewing presence over EphemeralStore', () => {
-  it('propagates set/delete between bridged stores and survives schema parsing', () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(1_000_000);
-    const publisher = new EphemeralStore(90_000);
-    const observer = new EphemeralStore(90_000);
-    publisher.subscribeLocalUpdates((bytes) => {
-      observer.apply(bytes);
-    });
-
-    const key = getLodySessionViewingPresenceKey('user-1', 'instance-1' as LodyPresenceInstanceId);
-    const state = {
-      kind: 'session-viewing',
-      userId: 'user-1',
-      instanceId: 'instance-1',
-      sessionId: 'session-1',
-      since: 1_000,
-      updatedAt: 2_000,
-    };
-
-    publisher.set(key, state as unknown as Value);
-    // The observer parses the entry through the same schema the CLI poller uses.
-    expect(
-      parseLodyPresenceStates(observer.getAllStates() as Record<string, unknown>)[key]
-    ).toEqual(state);
-
-    vi.setSystemTime(1_000_001);
-    publisher.delete(key);
-    expect(observer.getAllStates()[key]).toBeUndefined();
-
-    publisher.destroy();
-    observer.destroy();
-  });
-});
 
 // Expose the production factory; do not inject a fake transport or adaptor.
 class ProductionPresenceTransport extends WorkspacePresenceTransport {
@@ -160,9 +112,12 @@ describe('production presence transport with the published Streams runtime', () 
   it.each(['request', 'unauthorized'] as const)(
     'recovers after a stalled %s token callback reaches the default deadline',
     async (reason) => {
-      vi.useFakeTimers();
+      vi.useFakeTimers({
+        toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+      });
       const store = new EphemeralStore(90_000);
       const tokenStalled = Promise.withResolvers<void>();
+      const tokenCancelled = Promise.withResolvers<void>();
       const recovering = Promise.withResolvers<void>();
       const appended = Promise.withResolvers<void>();
       let stall = true;
@@ -180,10 +135,17 @@ describe('production presence transport with the published Streams runtime', () 
       const factory = new ProductionPresenceTransport({
         workspaceId: 'workspace-test' as WorkspaceId,
       });
-      const transport = factory.open(store, async (context) => {
+      const transport = factory.open(store, async (context, signal) => {
         if (allowStall && stall && context?.reason === reason) {
           tokenStalled.resolve();
-          return new Promise<string>(() => {});
+          return new Promise<string>((_resolve, reject) => {
+            const abort = () => {
+              tokenCancelled.resolve();
+              reject(new DOMException('synthetic auth canceled', 'AbortError'));
+            };
+            if (signal?.aborted) abort();
+            else signal?.addEventListener('abort', abort, { once: true });
+          });
         }
         return 'test-token';
       });
@@ -200,7 +162,11 @@ describe('production presence transport with the published Streams runtime', () 
         await tokenStalled.promise;
         stall = false;
         await vi.advanceTimersByTimeAsync(10_001);
+        await tokenCancelled.promise;
         await recovering.promise;
+        // The published native owner retries only after actual callback cleanup.
+        // Its first default backoff, including jitter, is below this clock advance.
+        await vi.advanceTimersByTimeAsync(2_000);
         await appended.promise;
         await barrier;
         expect(result.value.pendingLocalCount).toBe(0);

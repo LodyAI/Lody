@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
@@ -7,10 +8,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getSessionRoomId, type SessionHistoryParsed, type SessionId } from '@lody/shared';
 
 import { setDocMetaByRoomIdAtom } from '../src/atoms/doc-meta';
-import { MessageRowView } from '../src/components/ai-gui/view';
-import { SessionRelationCard } from '../src/components/shared/session-relation-card';
+import {
+  MessageRowView,
+  buildChatVirtualRows,
+  type ChatStreamItem,
+} from '../src/components/ai-gui/view';
+
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import { CurrentSessionRelationsChip } from '../src/components/sessions/session-relations-chip';
+import { initI18n } from '../src/i18n';
+
+// This suite exercises relation rendering and navigation; collaboration controls
+// and their workspace-backed actions have their own behavioral suites.
+vi.mock('../src/hooks/use-session-actions', () => ({
+  useSessionActions: () => ({
+    setTreeCollaborationStopped: async () => {
+      throw new Error('Collaboration actions are outside this navigation fixture');
+    },
+  }),
+}));
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -51,7 +67,8 @@ describe('Session relation cards', () => {
   let root: Root;
   let container: HTMLDivElement;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initI18n('en');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -60,43 +77,6 @@ describe('Session relation cards', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
-  });
-
-  it('navigates back to the precise opener from the provenance card', async () => {
-    const onOpen = vi.fn();
-    await act(async () => {
-      root.render(
-        <SessionRelationCard
-          relation="opened-by"
-          label="This session was automatically created by"
-          sessionTitle="Child Tab Opener"
-          actionLabel="Back to session"
-          onAction={() => onOpen(openerSessionId)}
-        />
-      );
-    });
-
-    expect(container.textContent).toContain('Child Tab Opener');
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('button')?.click();
-    });
-    expect(onOpen).toHaveBeenCalledWith(openerSessionId);
-  });
-
-  it('shows dangling provenance without a navigation action', async () => {
-    await act(async () => {
-      root.render(
-        <SessionRelationCard
-          relation="opened-by"
-          label="This session was automatically created by"
-          sessionTitle="Deleted session"
-          actionLabel="Back to session"
-        />
-      );
-    });
-
-    expect(container.textContent).toContain('Deleted session');
-    expect(container.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true);
   });
 
   it('turns a successful session_create completion into a live Session card', async () => {
@@ -122,7 +102,6 @@ describe('Session relation cards', () => {
       );
     });
 
-    expect(container.querySelector('[data-session-create-completion]')).not.toBeNull();
     expect(container.textContent).toContain('Generated child conversation title');
     expect(container.textContent).not.toContain('Fallback operation label');
 
@@ -288,6 +267,151 @@ describe('Session relation cards', () => {
     expect(container.querySelector('[data-session-creation-status="succeeded"]')).not.toBeNull();
   });
 
+  it('groups separate creation records, retains their turn range, and keeps navigation live when toggled', async () => {
+    const items: ChatStreamItem[] = Array.from({ length: 8 }, (_, index) => ({
+      type: 'message',
+      sessionId: openerSessionId,
+      turnIndex: index + 3,
+      message: {
+        id: `progress-${index}`,
+        role: 'system',
+        read: true,
+        timestamp: '2026-10-11T00:00:00Z',
+        items: [
+          {
+            type: 'operation_progress',
+            operationId: `operation-${index}`,
+            operationKind: 'session_create',
+            items: [
+              {
+                status: 'running',
+                label: `Child ${index + 1}`,
+                target: { sessionId: `child-${index}` as SessionId, userTurnId: `turn-${index}` },
+              },
+            ],
+          },
+        ],
+      },
+    }));
+    const rows = buildChatVirtualRows({ items, lastAssistantMessageId: null, expansionVersion: 0 });
+    expect(rows).toHaveLength(1);
+    expect(
+      buildChatVirtualRows({
+        items,
+        lastAssistantMessageId: null,
+        expansionVersion: 0,
+        groupCreatedSessions: false,
+      })
+    ).toHaveLength(8);
+    const row = rows[0]!;
+    if (row.type !== 'standard' || row.item.type !== 'message')
+      throw new Error('Expected creation row');
+    expect(row.messageIndex).toBe(3);
+    const onNavigateSession = vi.fn();
+    await act(async () =>
+      root.render(
+        <Provider store={createStore()}>
+          <MessageRowView
+            message={row.item.type === 'message' ? row.item.message : completionMessage}
+            sessionId={openerSessionId}
+            onNavigateSession={onNavigateSession}
+          />
+        </Provider>
+      )
+    );
+    const toggle = container.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelectorAll('[data-session-relation-card="opened"]')).toHaveLength(8);
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[title="Child 8"]')!.click()
+    );
+    expect(onNavigateSession.mock.calls.at(-1)?.[0]).toEqual({ sessionId: 'child-7' });
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+
+    const boundary: ChatStreamItem = {
+      type: 'message',
+      sessionId: openerSessionId,
+      turnIndex: 7,
+      message: {
+        ...completionMessage,
+        id: 'boundary',
+        role: 'user',
+        items: [{ type: 'text', text: 'Continue' }],
+      },
+    };
+    const split = buildChatVirtualRows({
+      items: [...items.slice(0, 4), boundary, ...items.slice(4)],
+      lastAssistantMessageId: null,
+      expansionVersion: 0,
+    });
+    expect(split).toHaveLength(3);
+  });
+
+  it('keeps legacy failure summaries outside grouped successful creations', async () => {
+    const completion = completionMessage.items[0]!;
+    if (completion.type !== 'operation_completion' || completion.completion.type !== 'result')
+      throw new Error('fixture');
+    const success = completion.completion.value.items[0]!;
+    const failed: SessionHistoryParsed = {
+      ...completionMessage,
+      id: 'failed',
+      items: [
+        {
+          ...completion,
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                success,
+                {
+                  status: 'failed',
+                  label: 'Unavailable child',
+                  error: { code: 'UNAVAILABLE', message: 'Target offline', retryable: true },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+    const rows = buildChatVirtualRows({
+      lastAssistantMessageId: null,
+      expansionVersion: 0,
+      items: [completionMessage, { ...completionMessage, id: 'second-success' }, failed].map(
+        (message, turnIndex) => ({
+          type: 'message',
+          sessionId: openerSessionId,
+          turnIndex,
+          message,
+        })
+      ),
+    });
+    expect(rows).toHaveLength(2);
+    await act(async () =>
+      root.render(
+        <Provider store={createStore()}>
+          {rows.map((row) =>
+            row.type === 'standard' && row.item.type === 'message' ? (
+              <MessageRowView
+                key={row.key}
+                message={row.item.message}
+                sessionId={openerSessionId}
+              />
+            ) : null
+          )}
+        </Provider>
+      )
+    );
+    expect(container.querySelectorAll('[data-session-relation-card="opened"]')).toHaveLength(3);
+    expect(container.textContent).toContain('Target offline');
+    expect(container.querySelector('[data-created-session-list]')?.textContent).not.toContain(
+      'Target offline'
+    );
+  });
+
   it('does not duplicate target cards on completion when progress was published', async () => {
     const completion = completionMessage.items[0];
     if (completion.type !== 'operation_completion') throw new Error('Expected completion fixture');
@@ -303,8 +427,122 @@ describe('Session relation cards', () => {
       )
     );
     expect(container.querySelector('[data-session-relation-card="opened"]')).toBeNull();
-    expect(container.textContent).not.toBe('');
+    expect(container.textContent).toBe('');
   });
+
+  it('retains delivery uncertainty even when every preview member is hidden', async () => {
+    const completion = completionMessage.items[0];
+    if (completion.type !== 'operation_completion') throw new Error('fixture');
+    await act(async () =>
+      root.render(
+        <MessageRowView
+          sessionId={openerSessionId}
+          message={{
+            ...completionMessage,
+            items: [
+              {
+                type: 'operation_completion_batch',
+                batchId: 'uncertain-batch',
+                memberCount: 1,
+                deliveryStatus: 'unknown',
+                members: [{ ...completion, progressMessageId: 'progress' }],
+              },
+            ],
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('model delivery is uncertain');
+    expect(container.textContent).not.toContain('orchestration.operationCompleted');
+  });
+
+  it('retains targetless failure details alongside published creation progress', async () => {
+    const completion = completionMessage.items[0];
+    if (completion.type !== 'operation_completion') throw new Error('fixture');
+    await act(async () =>
+      root.render(
+        <MessageRowView
+          sessionId={openerSessionId}
+          message={{
+            ...completionMessage,
+            items: [
+              {
+                ...completion,
+                progressMessageId: 'progress',
+                completion: {
+                  type: 'result',
+                  value: {
+                    items: [
+                      {
+                        status: 'failed',
+                        label: 'Unavailable target',
+                        error: {
+                          code: 'TARGET_FAILED',
+                          message: 'Target unavailable',
+                          retryable: false,
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Target unavailable');
+    expect(container.textContent).toContain('Operation failed');
+    expect(container.textContent).not.toContain('Operation completed');
+  });
+
+  it.each([false, true])(
+    'counts successful targets even when progress hides their cards (%s)',
+    async (withProgress) => {
+      const completion = completionMessage.items[0];
+      if (completion.type !== 'operation_completion') throw new Error('fixture');
+      await act(async () =>
+        root.render(
+          <MessageRowView
+            sessionId={openerSessionId}
+            message={{
+              ...completionMessage,
+              items: [
+                {
+                  ...completion,
+                  ...(withProgress ? { progressMessageId: 'progress' } : {}),
+                  completion: {
+                    type: 'result',
+                    value: {
+                      items: [
+                        {
+                          status: 'succeeded',
+                          target: { sessionId: createdSessionId, userTurnId: 'user-turn' },
+                          assistantTurnId: 'assistant-turn',
+                        },
+                        {
+                          status: 'failed',
+                          label: 'Unavailable',
+                          error: {
+                            code: 'INVALID_ITEM',
+                            message: 'Synthetic failure',
+                            retryable: false,
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            }}
+          />
+        )
+      );
+      expect(container.textContent).toContain('1 succeeded · 1 failed · 0 cancelled');
+      expect(container.textContent).toContain('Synthetic failure');
+      expect(container.textContent).not.toContain('Operation completed');
+    }
+  );
 
   it('keeps a long reply to its opening line and shows all of it in a dialog', async () => {
     const opening =

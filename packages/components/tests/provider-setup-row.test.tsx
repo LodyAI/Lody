@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -61,7 +62,7 @@ function createFailedBubSetup(failureCode: ProviderSetupFailureCode): ProviderSe
   };
 }
 
-describe('ProviderSetupRow Bub recovery', () => {
+describe('ProviderSetupRow installation recovery', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -69,7 +70,8 @@ describe('ProviderSetupRow Bub recovery', () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     await initI18n('en');
     mocks.openExternalUrl.mockClear();
-    mocks.writeClipboard.mockClear();
+    mocks.writeClipboard.mockReset();
+    mocks.writeClipboard.mockResolvedValue(true);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -80,11 +82,13 @@ describe('ProviderSetupRow Bub recovery', () => {
     container.remove();
   });
 
-  const renderSetup = async (failureCode: ProviderSetupFailureCode) => {
+  const renderSetup = async (failureCode: ProviderSetupFailureCode, agentType = 'bub') => {
+    const setup = createFailedBubSetup(failureCode);
+    setup.config = { ...setup.config, agentType, name: agentType };
     await act(async () => {
       root.render(
         <ProviderSetupRow
-          setup={createFailedBubSetup(failureCode)}
+          setup={setup}
           machine={machine}
           onRetry={async () => {}}
           onDelete={async () => {}}
@@ -121,5 +125,25 @@ describe('ProviderSetupRow Bub recovery', () => {
     await renderSetup('verification-failed');
 
     expect(container.textContent).not.toContain(installCommand);
+  });
+
+  it.each([true, false])('shows Dimcode copy feedback only on success: %s', async (success) => {
+    mocks.writeClipboard.mockResolvedValue(success);
+    await renderSetup('runtime-unavailable', 'dimcode');
+
+    expect(container.querySelector('code')?.textContent).toBe('npm install -g dimcode');
+    expect(container.textContent).toContain(
+      'dimcode not detected. Install it with npm install -g dimcode'
+    );
+    expect(container.textContent).not.toContain('Open install guide');
+    expect(container.textContent).not.toContain('This runtime is not available');
+    const copy = container.querySelector<HTMLButtonElement>('button[aria-label="Copy"]');
+    expect(copy).not.toBeNull();
+    await act(async () => {
+      copy?.click();
+    });
+    expect(mocks.writeClipboard).toHaveBeenCalledWith('npm install -g dimcode');
+    expect(container.querySelector('button[aria-label="Copied"]') !== null).toBe(success);
+    expect(container.querySelector('button[aria-label="Copy"]') !== null).toBe(!success);
   });
 });

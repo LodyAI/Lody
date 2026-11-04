@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { DocumentCaptureButton } from './document-selection-surface';
 import type { ReactNode } from 'react';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
@@ -8,11 +9,11 @@ const styles = stylex.create({
   toolbar: {
     display: 'flex',
     flex: '0 0 auto',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
-    gap: space[2],
-    paddingInline: space[3],
-    paddingBlock: space[2],
+    gap: space[1],
+    paddingInline: space[2],
+    paddingBlock: space[1],
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
     borderBottomColor: colors.separator,
@@ -45,7 +46,13 @@ export function OfficeViewerFrame({
 }) {
   return (
     <section {...stylex.props(styles.root)} aria-label={label}>
-      {toolbar !== null ? <div {...stylex.props(styles.toolbar)}>{toolbar}</div> : null}
+      {toolbar !== null ? (
+        <div {...stylex.props(styles.toolbar)} data-document-toolbar>
+          {toolbar}
+          <span {...stylex.props(styles.spacer)} />
+          <DocumentCaptureButton />
+        </div>
+      ) : null}
       <div {...stylex.props(styles.body)}>{children}</div>
     </section>
   );

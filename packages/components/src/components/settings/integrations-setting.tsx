@@ -1,3 +1,8 @@
+import {
+  useLegacyWorkspaceAction,
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
@@ -5,25 +10,24 @@ import { AlertCircle, CheckCircle2, Github } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
-import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAppCapability } from '@/lib/app-platform';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/toast';
 import { useSettingsDataCache, type SettingsWorkspaceRepoWithStatus } from './settings-data-cache';
 import { MobileIntegrationsSettings } from '@/components/mobile/mobile-integrations-settings';
 import { GitHubSettingsView } from './github-settings-view';
 import { isElectronRenderer } from '@/lib/electron';
 import { openExternalUrl } from '@/lib/native-browser';
-import { useAuthClient } from '../../providers/convex-provider';
+import { getPersonalGitHubAuthorizationUrl } from '@/components/settings/github-personal-authorization';
+import { usePersonalGitHubAuthorization } from '@/hooks/use-personal-github-authorization';
 import { canRunAuthedWorkspaceQuery } from '@/lib/authed-convex-query';
 import { invalidateGitHubTokensForWorkspace } from '@/lib/github-token';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 
 const WIDE = '@media (min-width: 640px)';
@@ -88,18 +92,6 @@ const styles = stylex.create({
   },
   authorizeIcon: { width: '14px', height: '14px' },
 });
-
-type GithubSocialAuthOptions = {
-  provider: 'github';
-  callbackURL: string;
-};
-
-type AuthClientWithPersonalGithubAuth = {
-  linkSocial?: (options: GithubSocialAuthOptions) => Promise<unknown>;
-  signIn: {
-    social: (options: GithubSocialAuthOptions) => Promise<unknown>;
-  };
-};
 
 export type GitHubPersonalIdentityAuthorizationState = 'missing' | 'authorized' | 'expired';
 
@@ -222,7 +214,6 @@ function CloudIntegrationsSettings() {
   const { t } = useTranslation();
   const getConvexErrorMessage = useConvexErrorMessage();
   const isMobile = useIsMobile();
-  const authClient = useAuthClient() as unknown as AuthClientWithPersonalGithubAuth;
   const {
     workspaceId: currentWorkspaceId,
     canManageGithub: canManage,
@@ -239,20 +230,24 @@ function CloudIntegrationsSettings() {
     ? currentWorkspaceId
     : null;
   const workspaceAuthReady = authedWorkspaceId !== null;
+  const authorizePersonal = usePersonalGitHubAuthorization(authedWorkspaceId, currentWorkspaceSlug);
   const workspaceAuthPending =
     Boolean(currentWorkspaceId) && (isConvexAuthLoading || !isConvexAuthenticated);
-  const canAuthorizePersonalGitHub = !isElectronRenderer() && !isNativeAppShell();
+  const authorizeInBrowser = isElectronRenderer() || isNativeAppShell();
+  const canAuthorizePersonalGitHub = Boolean(currentWorkspaceSlug);
 
-  const personalOperationSettings = useCloudQuery(
+  const personalOperationSettings = useLegacyWorkspaceQuery(
     cloudOperations.github.getPersonalOperationSettings,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );
-  const createGitHubInstallState = useCloudAction(cloudOperations.github.createGitHubInstallState);
-  const setRepoEnabled = useCloudMutation(cloudOperations.github.setRepoEnabled);
-  const setPersonalOperationPreference = useCloudMutation(
+  const createGitHubInstallState = useLegacyWorkspaceAction(
+    cloudOperations.github.createGitHubInstallState
+  );
+  const setRepoEnabled = useLegacyWorkspaceMutation(cloudOperations.github.setRepoEnabled);
+  const setPersonalOperationPreference = useLegacyWorkspaceMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useCloudAction(
+  const refreshPersonalGitHubProfile = useLegacyWorkspaceAction(
     cloudOperations.github.refreshPersonalGitHubProfile
   );
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);
@@ -420,23 +415,6 @@ function CloudIntegrationsSettings() {
     refreshPersonalGitHubProfile,
   ]);
 
-  // authorize() navigates away to GitHub OAuth, so the start-call promise can't
-  // observe success. The OAuth round-trip lands back on this route with
-  // ?githubPersonalAuth=1; clear the authorizing spinner once the workspace
-  // settings query reports `authorized` for that return. Guarded by a ref to run
-  // at most once per return.
-  const personalAuthSucceededAtRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!authedWorkspaceId) return;
-    if (personalAuthorizationState !== 'authorized') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('githubPersonalAuth') !== '1') return;
-    const dedupeKey = `${authedWorkspaceId}:${personalGithubAccountId ?? 'unknown'}`;
-    if (personalAuthSucceededAtRef.current === dedupeKey) return;
-    personalAuthSucceededAtRef.current = dedupeKey;
-    setAuthorizingPersonalGitHub(false);
-  }, [authedWorkspaceId, personalAuthorizationState, personalGithubAccountId]);
-
   const handleTogglePersonalIdentity = useCallback(
     async (enabled: boolean) => {
       if (!authedWorkspaceId) return;
@@ -463,17 +441,21 @@ function CloudIntegrationsSettings() {
 
   const handleAuthorizePersonalGitHub = useCallback(async () => {
     if (!authedWorkspaceId || !canAuthorizePersonalGitHub) return;
-    const callbackUrl = new URL(window.location.href);
-    callbackUrl.searchParams.set('githubPersonalAuth', '1');
-    const callbackURL = `${callbackUrl.pathname}${callbackUrl.search}${callbackUrl.hash}`;
-
     setAuthorizingPersonalGitHub(true);
     try {
-      if (typeof authClient.linkSocial === 'function') {
-        await authClient.linkSocial({ provider: 'github', callbackURL });
-      } else {
-        await authClient.signIn.social({ provider: 'github', callbackURL });
+      if (authorizeInBrowser) {
+        const opened = await openExternalUrl(
+          getPersonalGitHubAuthorizationUrl(currentWorkspaceSlug!)
+        );
+        if (!opened) {
+          throw new Error(
+            t('settings.integrations.github.personalIdentityAuthFailed', 'Authorization failed')
+          );
+        }
+        setAuthorizingPersonalGitHub(false);
+        return;
       }
+      await authorizePersonal();
     } catch (err) {
       const message =
         err instanceof Error
@@ -482,7 +464,14 @@ function CloudIntegrationsSettings() {
       toast.error(message);
       setAuthorizingPersonalGitHub(false);
     }
-  }, [authClient, authedWorkspaceId, canAuthorizePersonalGitHub, t]);
+  }, [
+    authorizePersonal,
+    authedWorkspaceId,
+    authorizeInBrowser,
+    canAuthorizePersonalGitHub,
+    currentWorkspaceSlug,
+    t,
+  ]);
 
   if (isMobile) return <MobileIntegrationsSettings />;
 

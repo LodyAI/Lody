@@ -34,9 +34,8 @@ export function seedScheduleAgentRunRef(
     runtimeOverrides: config.runtimeOverrides,
     machine: machine ?? null,
   });
-  const values: Record<string, string> = {};
-  for (const [id, value] of Object.entries(cached?.configOptionValues ?? {}))
-    values[id] = String(value);
+  const values: NonNullable<AgentRunRef['configOptionValues']> = {};
+  for (const [id, value] of Object.entries(cached?.configOptionValues ?? {})) values[id] = value;
   // Seed the permission shown by the composer:
   // an advertised `_permission` option wins; otherwise the mode list; otherwise
   // a `mode`-category option (how probed custom/registry agents publish it).
@@ -47,7 +46,7 @@ export function seedScheduleAgentRunRef(
         selector.configId !== 'interaction_mode' &&
         values[selector.configId] === undefined
       )
-        values[selector.configId] = String(selector.currentValue);
+        values[selector.configId] = selector.currentValue;
   };
   const permissionOptions = options.configOptionSelectors.some(
     (selector) => selector.category === '_permission'

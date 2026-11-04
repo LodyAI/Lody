@@ -1,5 +1,5 @@
 import { World, setWorldConstructor } from '@cucumber/cucumber';
-import { ElectronHarness } from './electron-harness.js';
+import { ElectronHarness, type ElectronLaunchOptions } from './electron-harness.js';
 import { OnboardingPage } from './pages/onboarding-page.js';
 import { ReviewPage } from './pages/review-page.js';
 import { SessionPage } from './pages/session-page.js';
@@ -70,9 +70,9 @@ export class LodyWorld extends World {
     this.harness = new ElectronHarness(this.artifacts);
   }
 
-  async launch(): Promise<void> {
+  async launch(options: ElectronLaunchOptions = {}): Promise<void> {
     if (!this.harness) throw new Error('Scenario was not prepared');
-    await this.harness.launch();
+    await this.harness.launch(options);
     if (!this.harness.page) throw new Error('Electron did not open a main window');
     this.onboarding = new OnboardingPage(this.harness.page);
     this.reviewPage = new ReviewPage(this.harness.page);

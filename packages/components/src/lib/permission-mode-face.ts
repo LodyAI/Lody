@@ -21,6 +21,19 @@ export type PermissionModeFace = {
   value: string | null;
   label: string | null;
   /**
+   * What the resolved control actually is, so callers name it honestly.
+   * Only an explicit `_permission` config option is a 'permission' knob;
+   * legacy ACP modes and a mode-category selector standing in are 'mode' —
+   * labelling an interaction-style mode list "Permission" misleads (the
+   * Agent / Plan / Ask case).
+   */
+  semantics: 'permission' | 'mode';
+  /**
+   * The provider's own name for the selector when the control resolves to a
+   * config option ("Mode", "Permission Mode", …); `null` for legacy modes.
+   */
+  selectorLabel: string | null;
+  /**
    * Where that value lives, so a caller can ask whether something else — an
    * Agent Role — already pins it. `null` when this agent exposes no permission
    * control at all.
@@ -75,6 +88,21 @@ export function resolvePermissionModeFace({
     options,
     value,
     label: options.find((option) => option.value === value)?.label ?? null,
+    semantics: explicitPermissionSelector ? 'permission' : 'mode',
+    selectorLabel: modeConfigSelector?.label ?? null,
     source: options.length > 0 ? source : null,
   };
 }
+
+/**
+ * The noun a control should name itself with. Real permission knobs keep the
+ * translated "Permission"; everything else names itself — the provider's
+ * selector label when it has one, else "Mode".
+ */
+export const permissionModeControlLabel = (
+  face: Pick<PermissionModeFace, 'semantics' | 'selectorLabel'>,
+  t: (key: string, defaultValue: string) => string
+): string =>
+  face.semantics === 'permission'
+    ? t('chat.runConfig.permissionLabel', 'Permission')
+    : (face.selectorLabel ?? t('chat.runConfig.modeLabel', 'Mode'));

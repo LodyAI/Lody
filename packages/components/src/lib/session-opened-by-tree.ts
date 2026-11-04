@@ -155,6 +155,68 @@ function resolve<T>(
   return openerById;
 }
 
+/**
+ * Cross-group placement for the Workspace sidebar, applied before each group
+ * builds its own tree. An opened Session whose topmost rendered ancestor sits in
+ * another group moves into that ancestor's group, so the tree there can indent
+ * it: a Role dispatched from a Local Project to another Machine lands in Chats
+ * or a GitHub group, and would otherwise lose its place under the opener.
+ *
+ * `groupBySessionId` holds every row the Workspace groups render, keyed by its
+ * natural group. Returns only the moved rows and their target group. A chain
+ * whose ancestor is missing stays put; a cycle stays put, matching the tree's
+ * degradation to top-level rows. Each row still lands in exactly one group.
+ */
+export function placeOpenedSessionsWithOpeners<G>(
+  groupBySessionId: ReadonlyMap<string, G>,
+  getOpenedBySessionId: (sessionId: string) => string | null | undefined
+): Map<string, G> {
+  const topmostById = new Map<string, string | null>();
+  for (const selfId of groupBySessionId.keys()) {
+    let cursor = normalizeSessionRowId(getOpenedBySessionId(selfId));
+    let topmost: string | null = null;
+    const seen = new Set<string>([selfId]);
+    while (cursor && !seen.has(cursor) && groupBySessionId.has(cursor)) {
+      seen.add(cursor);
+      topmost = cursor;
+      cursor = normalizeSessionRowId(getOpenedBySessionId(cursor));
+    }
+    topmostById.set(selfId, topmost);
+  }
+
+  const moved = new Map<string, G>();
+  topmostById.forEach((topmost, id) => {
+    // Only a root hosts nested rows; a cycle has no root and stays put.
+    if (topmost === null || topmostById.get(topmost) !== null) return;
+    const target = groupBySessionId.get(topmost);
+    if (target !== undefined && target !== groupBySessionId.get(id)) moved.set(id, target);
+  });
+  return moved;
+}
+
+/** Section membership only: descendants follow a pinned opener without changing their own pin. */
+export function getPinnedSessionTreeIds<T>(
+  items: readonly T[],
+  options: Pick<BuildOpenedBySessionTreeOptions<T>, 'getId' | 'getOpenedBySessionId'> & {
+    isPinned: (item: T) => boolean;
+  }
+): Set<string> {
+  const { getId, getOpenedBySessionId, isPinned } = options;
+  const pinned = new Set(items.filter(isPinned).map(getId));
+  if (pinned.size === 0) return pinned;
+  // An independently pinned row starts a pinned subtree even when its opener
+  // stays in the ordinary section. Resolve only among visible sidebar rows.
+  const openerById = resolve(items, getId, (item) =>
+    isPinned(item) ? null : getOpenedBySessionId(item)
+  );
+  for (const item of items) {
+    const id = getId(item);
+    const opener = openerById?.get(id);
+    if (opener && pinned.has(opener)) pinned.add(id);
+  }
+  return pinned;
+}
+
 export function buildOpenedBySessionTree<T>(
   items: readonly T[],
   options: BuildOpenedBySessionTreeOptions<T>

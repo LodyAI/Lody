@@ -11,6 +11,7 @@ import {
   type ComponentType,
   type CSSProperties,
   type ReactNode,
+  Children,
   createContext,
   lazy,
   useState,
@@ -37,14 +38,19 @@ import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkMath from 'remark-math';
 import { Check, Copy, MessagesSquare } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CONVERSATION_FONT_SIZE, inlineMathEnabledAtom } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
 import { writeTextToClipboard } from '@/lib/clipboard';
+import { toast } from '@/lib/toast';
+import { AgentFileLinkIndexContext, useAgentFileLinkMatch } from './agent-file-link-context';
+import { isAbsoluteFilePath } from '@/lib/session-local-file-path';
 import {
   isMarkdownAgentFileHref,
+  getMarkdownAgentFileCopyPath,
   parseMarkdownAgentFileHref,
 } from '@/lib/markdown-agent-file-link';
 import { matchWholeFilePath, splitTextIntoFilePathSegments } from '@/lib/linkify-file-paths';
@@ -55,6 +61,7 @@ import {
 import { cn } from '@/lib/utils';
 import { usePrLinkInterceptor } from './pr-link-context';
 import { parseSessionLinkHref, useSessionLinkNavigator } from './session-link-context';
+import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
 import {
   SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
   SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
@@ -62,7 +69,6 @@ import {
   useSessionSearchBlock,
 } from '@/components/sessions/session-search-context';
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
-import { useResolvedTheme, type ResolvedTheme } from '../../theme-provider';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
 import { MarkdownDiffBlock } from './markdown-diff-block';
@@ -79,11 +85,14 @@ import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-
 import { SessionReadonlyContext } from './session-readonly-context';
 import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
 import { ContextMenu } from '@/ui/armed-overlays';
+import { remarkCodexFileCitations } from '@/lib/remark-codex-file-citations';
+import { SessionFileCardLayout } from './session-file-card';
 import { MarkdownFileImage, MarkdownFileResourcesContext } from './markdown-file-image';
 import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
+import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { rehypeHeadingAnchors } from './markdown-heading-anchors';
-
-export { createMarkdownMermaidConfig } from './markdown-mermaid';
+import { createMarkdownParseCache } from '@/lib/markdown-parse-cache';
+import { PrRemoteImage, PrRemoteImageContext } from './pr-remote-image';
 
 /**
  * Conversation surfaces provide this capability at their boundary. Rendering
@@ -91,16 +100,14 @@ export { createMarkdownMermaidConfig } from './markdown-mermaid';
  * file-actions menu.
  */
 export const AgentFileLinkContextMenuItemsContext = createContext<
-  ((href: string) => readonly MarkdownAgentFileLinkMenuItem[]) | undefined
+  ((href: string, copyPath?: string) => readonly MarkdownAgentFileLinkMenuItem[]) | undefined
 >(undefined);
 
 type MarkdownCodeProps = ComponentPropsWithoutRef<'code'> & {
   node?: unknown;
 };
 
-type MarkdownLinkProps = ComponentPropsWithoutRef<'a'> & {
-  node?: unknown;
-};
+type MarkdownLinkProps = ComponentPropsWithoutRef<'a'> & ExtraProps;
 
 type MarkdownPictureProps = ComponentPropsWithoutRef<'picture'> & {
   node?: unknown;
@@ -276,7 +283,7 @@ const markdownStyles = stylex.create({
     fontFamily: 'var(--font-mono)',
     fontSize: 'var(--markdown-code-font-size)',
     lineHeight: 'var(--markdown-code-line-height)',
-    color: conversation.reading,
+    color: 'inherit',
   },
 });
 
@@ -412,21 +419,21 @@ const SESSION_LINK_CHIP_CLASS_NAME =
   'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-center gap-[0.35em] rounded-md px-[0.4em] align-[-0.12em] text-[0.92em] leading-[1.55] transition-colors';
 
 /**
- * A `[Title](session://<id>)` link as a conversation chip. It is a button, not
- * an anchor: `session://` is not a navigable URL, so the only way there is the
- * in-app Session navigation. Without one (share pages, read-only surfaces) the
+ * A session resource link as a conversation chip, using in-app navigation
+ * instead of sending the URI to the OS. Without navigation (read-only surfaces) the
  * chip still names the conversation but does nothing.
  */
 function MarkdownSessionLink({
-  sessionId,
+  target,
   children,
   inert,
 }: {
-  sessionId: SessionId;
+  target: SessionLink;
   children: ReactNode;
   inert: boolean;
 }) {
   const navigate = useSessionLinkNavigator();
+  const sessionId = target.sessionId;
   // Composer mentions label the link `@Title`; the glyph already says "session".
   const title = markdownLinkText(children).trim().replace(/^@/u, '') || sessionId;
   const body = (
@@ -448,7 +455,13 @@ function MarkdownSessionLink({
       data-session-link={sessionId}
       title={title}
       className={cn(SESSION_LINK_CHIP_CLASS_NAME, 'cursor-pointer')}
-      onClick={() => navigate({ sessionId })}
+      onClick={() =>
+        navigate({
+          ...target,
+          sessionId: sessionId as SessionId,
+          tabSessionId: target.tabSessionId as SessionId | undefined,
+        })
+      }
     >
       {body}
     </button>
@@ -820,7 +833,10 @@ const remarkLinkifyFilePaths = () => {
 
       if (child.type === 'inlineCode' && typeof child.value === 'string') {
         const path = matchWholeFilePath(child.value);
-        return path ? { nodes: [createTextLinkNode(path, path)] } : undefined;
+        if (!path) return undefined;
+        const link = createTextLinkNode(path, path);
+        link.data = { hProperties: { 'data-file-path-inline-code': child.value } };
+        return { nodes: [link] };
       }
 
       return undefined;
@@ -862,6 +878,8 @@ const remarkMarkUnclosedFences = () => (tree: unknown, file: MarkdownFile) => {
 
 const MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkCjkFriendly,
+  remarkCodexFileCitations,
   remarkRepairMalformedGfmAutolinks,
   remarkLinkifyPlainUrls,
   remarkLinkifyFilePaths,
@@ -871,6 +889,14 @@ const MARKDOWN_REMARK_PLUGINS = [
 const INLINE_MATH_REMARK_PLUGINS = [
   ...MARKDOWN_REMARK_PLUGINS,
   remarkSingleDollarTextMath,
+] satisfies StreamdownProps['remarkPlugins'];
+const CACHED_MARKDOWN_REMARK_PLUGINS = [
+  ...MARKDOWN_REMARK_PLUGINS,
+  createMarkdownParseCache(),
+] satisfies StreamdownProps['remarkPlugins'];
+const CACHED_INLINE_MATH_REMARK_PLUGINS = [
+  ...INLINE_MATH_REMARK_PLUGINS,
+  createMarkdownParseCache(),
 ] satisfies StreamdownProps['remarkPlugins'];
 
 const KATEX_REHYPE_PLUGIN = [
@@ -946,15 +972,11 @@ const readCodeElement = (pre: HastElement | undefined) => {
   };
 };
 
-function MarkdownPre({
-  node,
-  theme,
-  ...props
-}: ComponentPropsWithoutRef<'pre'> & ExtraProps & { theme: ResolvedTheme }) {
+function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & ExtraProps) {
   const block = readCodeElement(node);
   if (!block) return <pre {...props} />;
   if (block.language === 'mermaid' && !block.isIncomplete) {
-    return <MarkdownMermaidBlock code={block.code} theme={theme} />;
+    return <MarkdownMermaidBlock code={block.code} />;
   }
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
   return <MarkdownFencedCodeBlock {...block} />;
@@ -962,23 +984,36 @@ function MarkdownPre({
 
 const AgentFileLink = ({
   href,
+  copyPath = getMarkdownAgentFileCopyPath(href),
   children,
   onFilePathClick,
   copyAgentFileLabel,
   openAgentFileLabel,
   getContextMenuItems,
+  fileCard = false,
 }: {
   href: string;
+  copyPath?: string;
+  fileCard?: boolean;
   children: ReactNode;
   onFilePathClick?: (href: string) => void;
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
-  getContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
+  getContextMenuItems?: (
+    href: string,
+    copyPath?: string
+  ) => readonly MarkdownAgentFileLinkMenuItem[];
 }) => {
   const [didCopy, setDidCopy] = useState(false);
+  useEffect(() => {
+    if (!didCopy) return undefined;
+    const timeout = window.setTimeout(() => setDidCopy(false), 1200);
+    return () => window.clearTimeout(timeout);
+  }, [didCopy]);
   const hasOpenAction = Boolean(onFilePathClick);
   const iconPath = parseMarkdownAgentFileHref(href)?.filePath ?? href;
-  const contextMenuItems = getContextMenuItems?.(href) ?? [];
+  const contextMenuItems = getContextMenuItems?.(href, copyPath) ?? [];
+  const { t } = useTranslation();
 
   const handleClick = useCallback(async () => {
     if (onFilePathClick) {
@@ -986,14 +1021,25 @@ const AgentFileLink = ({
       return;
     }
 
-    const ok = await writeTextToClipboard(href);
+    const ok = await writeTextToClipboard(copyPath);
     if (!ok) return;
 
     setDidCopy(true);
-    window.setTimeout(() => setDidCopy(false), 1200);
-  }, [href, onFilePathClick]);
+    toast.success(t('sessions.fileViewer.pathCopied', 'File path copied'));
+  }, [copyPath, href, onFilePathClick, t]);
 
-  const link = (
+  const link = fileCard ? (
+    <SessionFileCardLayout
+      inline
+      fileName={markdownLinkText(children)}
+      subtitle={hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}
+      actionIcon={hasOpenAction ? null : didCopy ? <Check /> : <Copy />}
+      isInteractive
+      onClick={() => {
+        void handleClick();
+      }}
+    />
+  ) : (
     <button
       type="button"
       onClick={() => {
@@ -1078,6 +1124,73 @@ const AgentFileLink = ({
   );
 };
 
+/**
+ * In a live file preview, a plain-text link to an image file shows the image
+ * itself (same loading rules as `![]()`) instead of the copy-path chip. Links
+ * with their own markup (e.g. a badge image) or a line anchor keep the chip.
+ */
+function MarkdownFileImageLink({
+  href,
+  label,
+  fallback,
+}: {
+  href: string;
+  label: ReactNode;
+  fallback: ReactNode;
+}) {
+  const resources = useContext(MarkdownFileResourcesContext);
+  const content = Children.toArray(label);
+  const target = parseMarkdownAgentFileHref(href);
+  if (
+    !resources ||
+    !target ||
+    target.startLine != null ||
+    !getImageMimeTypeForPath(target.filePath) ||
+    resolveMarkdownImagePath(resources.documentPath, href) === null ||
+    !content.every((child) => typeof child === 'string' || typeof child === 'number')
+  ) {
+    return fallback;
+  }
+  const text = content.join('').trim();
+  return <MarkdownFileImage src={href} alt={text && text !== href ? text : undefined} />;
+}
+
+/** Keep candidate provenance in the AST, and decide presentation against live index state. */
+function AgentFileLinkCandidate({
+  href,
+  children,
+  fileCard,
+  inlineCode,
+  sourcePath,
+  ...props
+}: {
+  href: string;
+  children: ReactNode;
+  fileCard: boolean;
+  inlineCode?: string;
+  sourcePath?: string;
+} & Omit<ComponentPropsWithoutRef<typeof AgentFileLink>, 'fileCard' | 'href' | 'children'>) {
+  const { matched: liveMatched, valid } = useAgentFileLinkMatch(href);
+  const matched = useSelectionStableValue(liveMatched);
+  if (!matched) {
+    if (inlineCode !== undefined)
+      return <code {...stylex.props(markdownStyles.inlineCode)}>{inlineCode}</code>;
+    return <>{fileCard ? (sourcePath ?? href) : children}</>;
+  }
+  const link = (
+    <AgentFileLink
+      {...props}
+      onFilePathClick={valid ? props.onFilePathClick : undefined}
+      href={href}
+      copyPath={sourcePath ?? getMarkdownAgentFileCopyPath(href)}
+      fileCard={fileCard}
+    >
+      {children}
+    </AgentFileLink>
+  );
+  return fileCard ? link : <MarkdownFileImageLink href={href} label={children} fallback={link} />;
+}
+
 function isWorkspaceResourceHref(href: string): boolean {
   try {
     return (
@@ -1095,16 +1208,17 @@ const createMarkdownComponents = ({
   onAgentFileLinkClick,
   getAgentFileLinkContextMenuItems,
   readonly,
-  theme,
   headingAnchors,
   compact,
 }: {
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
   onAgentFileLinkClick?: (href: string) => void;
-  getAgentFileLinkContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
+  getAgentFileLinkContextMenuItems?: (
+    href: string,
+    copyPath?: string
+  ) => readonly MarkdownAgentFileLinkMenuItem[];
   readonly: boolean;
-  theme: ResolvedTheme;
   headingAnchors: boolean;
   compact: boolean;
 }): Components => ({
@@ -1216,7 +1330,7 @@ const createMarkdownComponents = ({
       )}
     />
   ),
-  pre: (props) => <MarkdownPre {...props} theme={theme} />,
+  pre: (props) => <MarkdownPre {...props} />,
   code: (props: MarkdownCodeProps) => {
     const { className, children, style: _style, node: _node, ...rest } = props;
     return (
@@ -1226,7 +1340,8 @@ const createMarkdownComponents = ({
     );
   },
   table: (props) => <MarkdownTable {...props} />,
-  a: (props: MarkdownLinkProps) => {
+  a: function MarkdownLink(props: MarkdownLinkProps) {
+    const fileIndex = useContext(AgentFileLinkIndexContext);
     const { children, href, node: _node, rel, ...rest } = props;
     if (!href) return <span>{children}</span>;
     if (headingAnchors && href.startsWith('#')) {
@@ -1236,10 +1351,10 @@ const createMarkdownComponents = ({
         </a>
       );
     }
-    const linkedSessionId = parseSessionLinkHref(href);
-    if (linkedSessionId) {
+    const linkedSession = parseSessionLink(href);
+    if (linkedSession) {
       return (
-        <MarkdownSessionLink sessionId={linkedSessionId} inert={readonly}>
+        <MarkdownSessionLink target={linkedSession} inert={readonly}>
           {children}
         </MarkdownSessionLink>
       );
@@ -1250,17 +1365,26 @@ const createMarkdownComponents = ({
       return <span>{children}</span>;
     }
 
-    if (isMarkdownAgentFileHref(href)) {
+    if (
+      (fileIndex !== null && !href.startsWith('//') && isAbsoluteFilePath(href)) ||
+      isMarkdownAgentFileHref(href)
+    ) {
+      const fileCard = _node?.properties?.['data-codex-file-citation'] === true;
+      const inlineCode = _node?.properties?.['data-file-path-inline-code'];
+      const sourcePath = _node?.properties?.['data-file-path-source'];
       return (
-        <AgentFileLink
+        <AgentFileLinkCandidate
           href={href}
+          fileCard={fileCard}
+          inlineCode={typeof inlineCode === 'string' ? inlineCode : undefined}
+          sourcePath={typeof sourcePath === 'string' ? sourcePath : undefined}
           onFilePathClick={onAgentFileLinkClick}
           copyAgentFileLabel={copyAgentFileLabel}
           openAgentFileLabel={openAgentFileLabel}
           getContextMenuItems={getAgentFileLinkContextMenuItems}
         >
           {children}
-        </AgentFileLink>
+        </AgentFileLinkCandidate>
       );
     }
 
@@ -1275,7 +1399,7 @@ const createMarkdownComponents = ({
           {...rest}
           className={cn(
             rest.className,
-            'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-center rounded-md px-[0.4em] align-[-0.12em] text-[0.92em] leading-[1.55] transition-colors'
+            'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-baseline rounded-md px-[0.4em] align-baseline text-[1em] leading-[1.55] transition-colors'
           )}
         >
           <GitHubReferenceChip reference={githubReference} />
@@ -1299,6 +1423,7 @@ const createMarkdownComponents = ({
 function ConversationMarkdownImage(props: MarkdownImageProps) {
   const readonly = useContext(SessionReadonlyContext);
   const resources = useContext(MarkdownFileResourcesContext);
+  const prRemoteImage = useContext(PrRemoteImageContext);
   // No workspace URI fetch is mounted for an anonymous publication.
   // Typed share images are handled separately through the manifest attachment reader.
   if (readonly) {
@@ -1327,6 +1452,16 @@ function ConversationMarkdownImage(props: MarkdownImageProps) {
     resolveMarkdownImagePath(resources.documentPath, props.src) !== null
   ) {
     return <MarkdownFileImage src={props.src} alt={props.alt} />;
+  }
+  if (prRemoteImage && typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true) {
+    const src = typeof props.src === 'string' ? props.src : '';
+    const httpsSrc = src.startsWith('//') ? `https:${src}` : src;
+    if (/^https:\/\//i.test(httpsSrc)) {
+      // A recycled row must not carry one-image consent to a different URL.
+      return <PrRemoteImage key={httpsSrc} src={httpsSrc} alt={props.alt} />;
+    }
+    // A local/inline image cannot smuggle an external request through srcset.
+    return <SizedMarkdownImage {...props} srcSet={undefined} />;
   }
   return <SizedMarkdownImage {...props} />;
 }
@@ -1424,6 +1559,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   searchBlockId,
   headingAnchors = false,
   compact = false,
+  muted = false,
+  allowImages = true,
 }: {
   text: string;
   size?: MarkdownRendererSize;
@@ -1438,6 +1575,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   headingAnchors?: boolean;
   /** Tool prose shares the control role without scaling nested code a second time. */
   compact?: boolean;
+  /** Use secondary text color without changing prose typography. */
+  muted?: boolean;
+  /** Keep images as alt text on surfaces that do not load message attachments. */
+  allowImages?: boolean;
 }) {
   ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
     text,
@@ -1447,10 +1588,12 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     searchBlockId,
   }));
   const { t } = useTranslation();
-  const resolvedTheme = useSelectionStableValue(useResolvedTheme());
   const readonly = useContext(SessionReadonlyContext);
   const getAgentFileLinkContextMenuItems = useContext(AgentFileLinkContextMenuItemsContext);
   const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    void import('./markdown-math-copy');
+  }, []);
   /** Text nodes split for search marks in this block, with what to undo. */
   const searchSplitsRef = useRef<SearchTextSplit[]>([]);
   const search = useSelectionStableValue(useSessionSearch());
@@ -1484,29 +1627,29 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     canvasLabel,
   });
 
-  const currentComponents = useMemo(
-    () =>
-      createMarkdownComponents({
-        copyAgentFileLabel,
-        openAgentFileLabel,
-        onAgentFileLinkClick,
-        getAgentFileLinkContextMenuItems,
-        readonly: readonly !== null,
-        theme: resolvedTheme,
-        headingAnchors,
-        compact,
-      }),
-    [
+  const currentComponents = useMemo(() => {
+    const components = createMarkdownComponents({
       copyAgentFileLabel,
-      getAgentFileLinkContextMenuItems,
-      onAgentFileLinkClick,
       openAgentFileLabel,
-      readonly,
-      resolvedTheme,
+      onAgentFileLinkClick,
+      getAgentFileLinkContextMenuItems,
+      readonly: readonly !== null,
       headingAnchors,
       compact,
-    ]
-  );
+    });
+    return allowImages
+      ? components
+      : { ...components, img: ({ alt }: MarkdownImageProps) => <span>{alt}</span> };
+  }, [
+    allowImages,
+    copyAgentFileLabel,
+    getAgentFileLinkContextMenuItems,
+    onAgentFileLinkClick,
+    openAgentFileLabel,
+    readonly,
+    headingAnchors,
+    compact,
+  ]);
 
   const components = useSelectionStableValue(currentComponents);
   const remarkPlugins = inlineMathEnabled ? INLINE_MATH_REMARK_PLUGINS : MARKDOWN_REMARK_PLUGINS;
@@ -1533,10 +1676,20 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     return () => window.clearTimeout(timeout);
   }, [isStreaming, streamingRendererActive]);
 
+  // Search needs the complete current text in the same commit as its index.
+  // The stream engine reveals buffered text asynchronously and can replace marks.
+  const showStreamingMarkdown = streamingRendererActive && !(search?.isOpen && search.query);
+
   const staticMarkdown = (
     <Markdown
       components={components}
-      remarkPlugins={remarkPlugins}
+      remarkPlugins={
+        isStreaming || streamingRendererActive
+          ? remarkPlugins
+          : inlineMathEnabled
+            ? CACHED_INLINE_MATH_REMARK_PLUGINS
+            : CACHED_MARKDOWN_REMARK_PLUGINS
+      }
       rehypePlugins={rehypePlugins}
       urlTransform={markdownUrlTransform}
     >
@@ -1679,7 +1832,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     });
 
     return clearSearchHighlights;
-  }, [search?.isOpen, search?.query, searchBlockId, searchMatch, text]);
+  }, [search?.isOpen, search?.query, searchBlockId, searchMatch, text, showStreamingMarkdown]);
 
   return (
     <MarkdownCompactContext.Provider value={compact}>
@@ -1687,14 +1840,14 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         ref={containerRef}
         data-search-block-id={searchBlockId}
         {...withClassName(
-          stylex.props(markdownStyles.root, compact && markdownStyles.muted),
+          stylex.props(markdownStyles.root, (compact || muted) && markdownStyles.muted),
           cn(MARKDOWN_BASE_CLASSNAME, className)
         )}
         style={markdownFontSizeStyle(normalizedSize, compact)}
         onClick={handleContainerClick}
         onKeyDown={handleContainerKeyDown}
       >
-        {streamingRendererActive ? (
+        {showStreamingMarkdown ? (
           <Suspense fallback={staticMarkdown}>
             <StreamingMarkdown
               animateOnMount={false}

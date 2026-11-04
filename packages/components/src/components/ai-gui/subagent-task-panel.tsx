@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Ban, Check, ChevronRight, CircleDashed, CircleHelp, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import { Tabs } from '@lody/ui/tabs';
 import { Dialog } from '@/ui/dialog';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
@@ -13,6 +14,7 @@ import { SubagentTaskDetail } from './subagent-task-detail';
 import {
   actorOf,
   durationOf,
+  groupOf,
   isRunning,
   latestActionOf,
   LiveElapsed,
@@ -20,6 +22,7 @@ import {
   stateLabel,
   stateOf,
   type SubagentTask,
+  type TaskGroup,
   type TaskState,
 } from './subagent-task-state';
 
@@ -126,6 +129,45 @@ function TaskMark({ state }: { state: TaskState }) {
   );
 }
 
+function TaskRows({
+  tasks,
+  onOpen,
+}: {
+  tasks: readonly SubagentTask[];
+  onOpen: (taskId: string) => void;
+}) {
+  const ordered = useMemo(() => orderAsTree(tasks), [tasks]);
+  return (
+    <div {...withClassName(stylex.props(styles.rows), SCROLLBAR)}>
+      {ordered.map(({ task, depth }, index) => (
+        <div key={task.taskId} {...stylex.props(index > 0 && styles.rowRuled)}>
+          <SubagentTaskRow task={task} depth={depth} onOpen={onOpen} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A tab's label, with a spinner while any of its tasks is still live. The mark
+ * is cut to the label's cap height: at its usual size it outweighs the 13px
+ * label beside it and pulls the eye off the text's centre.
+ */
+function GroupTab({ group, tasks }: { group: TaskGroup; tasks: readonly SubagentTask[] }) {
+  const { t } = useTranslation();
+  const running = tasks.some(isRunning);
+  const label =
+    group === 'subagents'
+      ? t('sessions.subagentTasks.subagentsTab', 'Subagents')
+      : t('sessions.subagentTasks.tasksTab', 'Tasks');
+  return (
+    <Tabs.Tab value={group} data-subagent-task-tab={group}>
+      {running ? <Spinner size="small" label={null} className="size-3" /> : null}
+      <span>{label}</span>
+    </Tabs.Tab>
+  );
+}
+
 export const SubagentTaskPanel = ({
   tasks,
   onCancel,
@@ -148,7 +190,14 @@ export const SubagentTaskPanel = ({
   renderHistory?: (task: SubagentTask) => ReactNode;
 }) => {
   const { t } = useTranslation();
-  const ordered = useMemo(() => orderAsTree(tasks), [tasks]);
+  const groups = useMemo(() => {
+    const subagents: SubagentTask[] = [];
+    const others: SubagentTask[] = [];
+    for (const task of tasks) (groupOf(task) === 'tasks' ? others : subagents).push(task);
+    return { subagents, tasks: others };
+  }, [tasks]);
+  // Subagents first; a tab the reader chose stays chosen as the tasks change.
+  const [group, setGroup] = useState<TaskGroup>('subagents');
   const runningCount = useMemo(() => tasks.filter(isRunning).length, [tasks]);
   const hasRunning = runningCount > 0;
   const [userExpanded, setUserExpanded] = useState(false);
@@ -170,6 +219,8 @@ export const SubagentTaskPanel = ({
   // While work is in flight the group stays open (live status). Once every task
   // has settled it folds to its summary line, which opens it again.
   const expanded = hasRunning || userExpanded;
+  // Tabs only when there is something to tell apart: one kind stays one list.
+  const grouped = groups.subagents.length > 0 && groups.tasks.length > 0;
   const canToggle = !hasRunning;
 
   // Background-ness is stated once in the summary rather than badged per row.
@@ -217,13 +268,24 @@ export const SubagentTaskPanel = ({
         </span>
       </button>
       {expanded ? (
-        <div {...withClassName(stylex.props(styles.rows), SCROLLBAR)}>
-          {ordered.map(({ task, depth }, index) => (
-            <div key={task.taskId} {...stylex.props(index > 0 && styles.rowRuled)}>
-              <SubagentTaskRow task={task} depth={depth} onOpen={openTask} />
-            </div>
-          ))}
-        </div>
+        grouped ? (
+          <div {...stylex.props(styles.tabs)}>
+            <Tabs.Root value={group} onValueChange={(value) => setGroup(value as TaskGroup)}>
+              <Tabs.List size="small">
+                <GroupTab group="subagents" tasks={groups.subagents} />
+                <GroupTab group="tasks" tasks={groups.tasks} />
+              </Tabs.List>
+              <Tabs.Panel value="subagents">
+                <TaskRows tasks={groups.subagents} onOpen={openTask} />
+              </Tabs.Panel>
+              <Tabs.Panel value="tasks">
+                <TaskRows tasks={groups.tasks} onOpen={openTask} />
+              </Tabs.Panel>
+            </Tabs.Root>
+          </div>
+        ) : (
+          <TaskRows tasks={tasks} onOpen={openTask} />
+        )
       ) : null}
       <Dialog.Root open={open && shownTask !== null} onOpenChange={setOpen}>
         <Dialog.Content

@@ -1,3 +1,4 @@
+import { isAbsoluteFilePath } from './session-local-file-path';
 import {
   normalizeMarkdownAgentFilePath,
   parseMarkdownAgentFileHref,
@@ -43,6 +44,39 @@ export function resolveMarkdownImagePath(documentPath: string, src: string): str
   return prefix + segments.join('/');
 }
 
+export function normalizeIndexedRelativePath(path: string): string | null {
+  if (isAbsoluteFilePath(path) || path.startsWith('~') || path.endsWith('/')) return null;
+  const segments = path.split('/').filter(Boolean);
+  // Parent traversal can cross a symlink; lexical folding would confirm a different file.
+  if (segments.includes('..') || segments.at(-1) === '.') return null;
+  return segments.filter((segment) => segment !== '.').join('/') || null;
+}
+
+/** Chat links already identify their target; do not discover or reroot other worktrees. */
+export function resolveDirectMarkdownFileOpenTarget(href: string): SessionFileOpenTarget | null {
+  const target = parseMarkdownAgentFileHref(href);
+  if (!target) return null;
+  let path = target.filePath;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    /* Literal percent sign. */
+  }
+  if (
+    !path ||
+    Array.from(path).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+  )
+    return null;
+  path = path.replace(/\\/gu, '/');
+  return {
+    filePath: normalizeIndexedRelativePath(path) ?? path,
+    fromMarkdownLink: true,
+    ...(target.startLine === undefined ? {} : { startLine: target.startLine }),
+    ...(target.endLine === undefined ? {} : { endLine: target.endLine }),
+    ...(target.lineSuffixFormat === undefined ? {} : { lineSuffixFormat: target.lineSuffixFormat }),
+  };
+}
+
 export type SessionFileOpenTargetInput = {
   readonly rawPath: string;
   readonly pathKind: SessionFileOpenPathKind;
@@ -60,6 +94,7 @@ export type SessionFileOpenTarget = {
   readonly endLine?: number;
   /** True when the path was parsed as an agent-written link, for analytics. */
   readonly fromMarkdownLink: boolean;
+  readonly resolveMarkdownLink?: boolean;
   readonly lineSuffixFormat?: 'github' | 'colon' | 'vscode';
 };
 
@@ -92,6 +127,16 @@ export function resolveSessionFileOpenTarget(
     };
   }
 
+  let sourcePath = input.rawPath;
+  try {
+    sourcePath = decodeURIComponent(sourcePath);
+  } catch {
+    /* Keep malformed escapes verbatim. */
+  }
+  const relativeSource =
+    !/^(?:[\\/]|[a-z]:[\\/]|~)/i.test(sourcePath.trim()) &&
+    !sourcePath.split(/[\\/]/).includes('..');
+
   const normalizedPath = normalizeMarkdownAgentFilePath(
     input.rawPath,
     input.workspacePath,
@@ -105,6 +150,7 @@ export function resolveSessionFileOpenTarget(
     ...(startLine === undefined ? {} : { startLine }),
     ...(endLine === undefined ? {} : { endLine }),
     fromMarkdownLink: parsedTarget != null,
+    ...(relativeSource ? { resolveMarkdownLink: true } : {}),
     ...(parsedTarget?.lineSuffixFormat === undefined
       ? {}
       : { lineSuffixFormat: parsedTarget.lineSuffixFormat }),

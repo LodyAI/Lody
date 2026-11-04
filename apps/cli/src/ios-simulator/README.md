@@ -1,7 +1,8 @@
 # Simulator preview implementation
 
-`service.ts` owns ephemeral operations, `control-leases.ts` excludes competing
-sessions across workspaces, and `devices.ts` is the simctl boundary. Lifecycle RPC
+`service.ts` adapts the legacy iOS wire contract to the shared
+[device preview core](../device-preview/README.md), which owns ephemeral operations
+and machine-wide platform-scoped leases. `devices.ts` is the simctl boundary. Lifecycle RPC
 uses the shared `iosSimulator: 1` capability and `ios-simulator/control` command
 union. Browser owns a separate service and separate transport instances.
 
@@ -14,7 +15,9 @@ failure does not interrupt local viewing; explicit start retries that endpoint.
 Stop ends both endpoints. Remote revocation conservatively ends any operation with
 a remote attachment, including its local endpoint. Device shutdown is never implied.
 
-The pinned Baguette executable runs in an IPC-owned worker. The native HTTP API
+The pinned Baguette executable runs in an IPC-owned worker. Worker, native server,
+simctl and guest-helper processes start through `@lody/shared/node/process`;
+cancellation joins the shared whole-tree termination policy. The native HTTP API
 stays on loopback; only the bound device's MJPEG stream and validated one/two-finger
 input cross `gateway.ts`, along with typed device controls on the private preview
 connection. `device-controls.ts` maps these controls to fixed native endpoints;

@@ -86,6 +86,70 @@ describe('AgentClient Kimi authentication and resume', () => {
     connectionMocks.request.mockResolvedValue({});
   });
 
+  it.each(['new', 'load', 'resume'] as const)(
+    'publishes %s commands and applies only current-session changes',
+    async (mode) => {
+      const client = new AgentClient({
+        sessionId: 'commands' as SessionId,
+        logger: createSilentLogger(),
+        terminalManager: {} as never,
+        agentConfig: { cliType: 'builtin', agentType: mode === 'resume' ? 'pi' : 'opencode' },
+        onUpdateMessage: () => {},
+        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      });
+      const availableCommands = [{ name: 'review-a', description: 'Review A' }];
+      connectionMocks.newSession.mockResolvedValue({ sessionId: 'commands-a', availableCommands });
+      connectionMocks.loadSession.mockResolvedValue({ availableCommands });
+      connectionMocks.resumeSession.mockResolvedValue({ availableCommands });
+      await client.startSession(
+        {} as never,
+        '/project-a',
+        mode === 'new' ? undefined : ('commands-a' as ACPSessionId)
+      );
+      expect(client.getAvailableCommands()).toEqual(availableCommands);
+      await client.sessionUpdate({
+        sessionId: 'commands-a',
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [],
+        },
+      });
+      expect(client.getAvailableCommands()).toEqual([]);
+      await client.sessionUpdate({
+        sessionId: 'detached',
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands,
+        },
+      });
+      expect(client.getAvailableCommands()).toEqual([]);
+      client.adoptPreparedSession({ sessionId: 'replacement' });
+      expect(client.getAvailableCommands()).toBeUndefined();
+    }
+  );
+
+  it('retains notification-only startup commands when the session response omits them', async () => {
+    const client = new AgentClient({
+      sessionId: 'commands' as SessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      onUpdateMessage: () => {},
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+    });
+    connectionMocks.newSession.mockImplementation(async () => {
+      await client.sessionUpdate({
+        sessionId: 'commands-a',
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name: 'review-a', description: 'Review A' }],
+        },
+      });
+      return { sessionId: 'commands-a' };
+    });
+    await client.startSession({} as never, '/project-a');
+    expect(client.getAvailableCommands()).toEqual([{ name: 'review-a', description: 'Review A' }]);
+  });
+
   it('marks live child observations unknown on transport loss and refuses orphan permissions', async () => {
     const notifications: AcpSessionNotification[] = [];
     const client = new AgentClient({
@@ -162,6 +226,49 @@ describe('AgentClient Kimi authentication and resume', () => {
     expect(await client.requestPermission(request)).toEqual({ outcome: { outcome: 'cancelled' } });
   });
 
+  it('reports native work from the Core activity level of the current ACP session', async () => {
+    const activity = (state: string, backgroundTaskCount: number, sessionId = 'new-session') =>
+      client.extNotification?.('_lody/session/activity_update', {
+        version: 1,
+        sessionId,
+        state,
+        backgroundTaskCount,
+      });
+    const client = createClient('claude');
+    connectionMocks.initialize.mockResolvedValue({
+      ...initializeResponse(),
+      agentCapabilities: { _meta: { lody: { sessionActivity: { version: 1 } } } },
+    });
+    await client.startSession({} as never, '/tmp');
+    expect(client.getNativeWork()).toBeNull();
+
+    await activity('idle', 1);
+    expect(client.getNativeWork()).toBe('background');
+    await activity('running', 1);
+    expect(client.getNativeWork()).toBe('running');
+    await activity('requires_action', 0);
+    expect(client.getNativeWork()).toBe('running');
+    // A level for another ACP session never replaces this session's level.
+    await activity('idle', 0, 'other-session');
+    expect(client.getNativeWork()).toBe('running');
+    await activity('idle', 0);
+    expect(client.getNativeWork()).toBeNull();
+  });
+
+  it('ignores activity levels from an agent that did not advertise them', async () => {
+    const client = createClient('claude');
+    await client.startSession({} as never, '/tmp');
+
+    await client.extNotification?.('_lody/session/activity_update', {
+      version: 1,
+      sessionId: 'new-session',
+      state: 'running',
+      backgroundTaskCount: 2,
+    });
+
+    expect(client.getNativeWork()).toBeNull();
+  });
+
   it('retains terminal auth methods and surfaces -32000 as a structured error', async () => {
     const protocolError = Object.assign(new Error('Authentication required'), { code: -32000 });
     connectionMocks.newSession.mockRejectedValue(protocolError);
@@ -215,13 +322,13 @@ describe('AgentClient Kimi authentication and resume', () => {
     expect(connectionMocks.initialize).toHaveBeenCalledWith(
       expect.objectContaining({
         clientCapabilities: expect.objectContaining({
-          _meta: {
+          _meta: expect.objectContaining({
             'cognition.ai/subagentSupport': true,
-            lody: {
+            lody: expect.objectContaining({
               elicitation: { version: 1, answerNotes: true },
               subagentEvents: { version: 1 },
-            },
-          },
+            }),
+          }),
         }),
       })
     );

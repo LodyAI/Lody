@@ -73,3 +73,41 @@ export function getStaticHtmlPreviewLogicalUrl(filePath: string): string {
   logicalUrl.searchParams.set('path', filePath);
   return logicalUrl.toString();
 }
+
+/** Non-executable preview for engines without credentialless frames.
+ * Keep CSS and embedded media, but remove document-driven navigation even when
+ * activated by a user. The iframe must also have an empty sandbox permission set.
+ */
+export function buildReadOnlyHtmlPreviewDocument(sourceHtml: string): string {
+  const document = new DOMParser().parseFromString(sourceHtml, 'text/html');
+  document
+    .querySelectorAll(
+      'script, noscript, template, base, meta, iframe, frame, frameset, object, embed, link, animate, animateMotion, animateTransform, set'
+    )
+    .forEach((element) => element.remove());
+  for (const element of document.querySelectorAll('*')) {
+    for (const attribute of [...element.attributes]) {
+      if (
+        attribute.localName.toLowerCase().startsWith('on') ||
+        ['href', 'action', 'formaction', 'srcdoc', 'target', 'autofocus'].includes(
+          attribute.localName.toLowerCase()
+        )
+      )
+        element.removeAttributeNode(attribute);
+    }
+  }
+  const policy = document.createElement('meta');
+  policy.httpEquiv = 'Content-Security-Policy';
+  policy.content = STATIC_HTML_PREVIEW_CONTENT_SECURITY_POLICY.replace(
+    "script-src 'unsafe-inline'",
+    "script-src 'none'"
+  );
+  const referrer = document.createElement('meta');
+  referrer.name = 'referrer';
+  referrer.content = 'no-referrer';
+  const viewport = document.createElement('meta');
+  viewport.name = 'viewport';
+  viewport.content = 'width=device-width, initial-scale=1';
+  document.head.prepend(policy, referrer, viewport);
+  return `<!doctype html>\n${document.documentElement.outerHTML}`;
+}

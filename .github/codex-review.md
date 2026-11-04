@@ -12,7 +12,16 @@ request solves the linked Issue and no P0/P1 remains, react 👍 and stop.
 - **P0:** exploitable security, secret leak, auth or capability bypass, data
   loss, or a broken public/cloud/local repository boundary.
 - **P1:** likely shipped user-facing breakage, or a durable catalog/session
-  contract violation that will ship.
+  contract violation that will ship. This includes a failure-containment
+  regression: compared with the base, an ordinary failure such as storage
+  quota, a network drop or an absent peer now aborts independent cleanup, keeps
+  safely reusable resources unavailable, destroys state within its owned recovery
+  lifetime, blocks terminal shutdown indefinitely, or gates work
+  unrelated to the hazard. Verify the underlying safety contract before judging
+  an exclusion necessary or redundant. See
+  [failure containment](../.agents/docs/failure-containment.md); the
+  [review skill](../.agents/skills/failure-containment-review/SKILL.md) traces
+  these from trigger to user-visible effect.
 - Do not report P2+, style, nits, formatting, or lint. Those belong in CI.
 
 ## Security first
@@ -24,7 +33,8 @@ Follow `SECURITY.md`; do not request public disclosure of a vulnerability.
 
 ## Do not flag
 
-- Extreme or hypothetical edge cases of an otherwise working solution.
+- Extreme or hypothetical edge cases of an otherwise working solution. The
+  ordinary failures listed under P1 are not hypothetical.
 - Missing tests for those edge cases.
 - Alternative designs, extra coverage, or completeness once the Issue is met.
 - Duplication or "could extract this" unless this diff adds more than 100

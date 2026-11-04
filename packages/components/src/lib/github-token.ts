@@ -23,7 +23,7 @@ const DEFAULT_PERSONAL_TOKEN_CACHE_MS = 45 * 60 * 1000;
 const DEFAULT_APP_TOKEN_CACHE_MS = 15 * 60 * 1000;
 
 const tokenCache = new Map<string, TokenEntry>();
-const inFlightRequests = new Map<string, Promise<TokenEntry>>();
+const inFlightRequests = new Map<string, InFlightToken>();
 let tokenCacheGeneration = 0;
 
 const GITHUB_TOKEN_INVALIDATION_CHANNEL = 'lody:github-token-invalidation';
@@ -129,6 +129,69 @@ export class GitHubPersonalIdentityPermissionError extends Error {
   }
 }
 
+type InFlightToken = {
+  promise: Promise<TokenEntry>;
+  /** Token this fetch was told the caller rejected, if any. */
+  rejectedToken: string | undefined;
+};
+
+/**
+ * One acquisition path for cached, expired and rejected tokens. Callers that
+ * observed a 401 pass the token they used: it is dropped only while it is still
+ * the cached one, so a late 401 reuses a newer token instead of refreshing again,
+ * and concurrent rejections of one token share one refresh.
+ */
+async function acquireToken(
+  key: string,
+  fetchEntry: (rejectedToken: string | undefined) => Promise<TokenEntry>,
+  rejectedToken?: string
+): Promise<TokenEntry> {
+  const cached = tokenCache.get(key);
+  if (
+    cached &&
+    cached.token !== rejectedToken &&
+    cached.expiresAt - Date.now() > SAFETY_WINDOW_MS
+  ) {
+    return cached;
+  }
+  if (cached && cached.token === rejectedToken) tokenCache.delete(key);
+
+  const existing = inFlightRequests.get(key);
+  if (existing) {
+    const entry = await existing.promise;
+    if (
+      rejectedToken === undefined ||
+      existing.rejectedToken === rejectedToken ||
+      entry.token !== rejectedToken
+    ) {
+      return entry;
+    }
+    // The shared fetch was not told about this rejection and returned the same token.
+    const retry = inFlightRequests.get(key);
+    if (retry?.rejectedToken === rejectedToken) return await retry.promise;
+    invalidateCachedToken(key, rejectedToken);
+  }
+
+  const requestGeneration = tokenCacheGeneration;
+  const request: InFlightToken = {
+    rejectedToken,
+    promise: fetchEntry(rejectedToken)
+      .then((entry) => {
+        if (requestGeneration === tokenCacheGeneration && inFlightRequests.get(key) === request) {
+          tokenCache.set(key, entry);
+        }
+        return entry;
+      })
+      .finally(() => {
+        if (inFlightRequests.get(key) === request) {
+          inFlightRequests.delete(key);
+        }
+      }),
+  };
+  inFlightRequests.set(key, request);
+  return await request.promise;
+}
+
 /**
  * Get a repo-scoped GitHub token.
  *
@@ -138,134 +201,98 @@ export class GitHubPersonalIdentityPermissionError extends Error {
  */
 export async function getGitHubRepoToken(
   workspaceId: string,
-  repoFullName: string
+  repoFullName: string,
+  options?: { rejectedToken?: string }
 ): Promise<string> {
-  const key = cacheKey(workspaceId, repoFullName);
-
-  const cached = tokenCache.get(key);
-  if (cached && cached.expiresAt - Date.now() > SAFETY_WINDOW_MS) {
-    return cached.token;
-  }
-
-  const existing = inFlightRequests.get(key);
-  if (existing) {
-    const entry = await existing;
-    return entry.token;
-  }
-
-  const requestGeneration = tokenCacheGeneration;
-  const request = (async (): Promise<TokenEntry> => {
-    const result = await requireGitHubTokenPort().getRepoToken({ workspaceId, repoFullName });
-
-    if (!result.success) {
-      throw new GitHubClientTokenError(result.errorCode, result.errorMessage);
-    }
-
-    const entry: TokenEntry = {
-      token: result.token,
-      expiresAt: normalizeExpiresAt(result.expiresAt, 'app'),
-      tokenSource: 'app',
-    };
-    if (requestGeneration === tokenCacheGeneration) {
-      tokenCache.set(key, entry);
-    }
-    return entry;
-  })();
-
-  inFlightRequests.set(key, request);
-
-  try {
-    const entry = await request;
-    return entry.token;
-  } finally {
-    if (inFlightRequests.get(key) === request) {
-      inFlightRequests.delete(key);
-    }
-  }
+  const entry = await acquireToken(
+    cacheKey(workspaceId, repoFullName),
+    async () => {
+      const result = await requireGitHubTokenPort().getRepoToken({ workspaceId, repoFullName });
+      if (!result.success) {
+        throw new GitHubClientTokenError(result.errorCode, result.errorMessage);
+      }
+      return {
+        token: result.token,
+        expiresAt: normalizeExpiresAt(result.expiresAt, 'app'),
+        tokenSource: 'app',
+      };
+    },
+    options?.rejectedToken
+  );
+  return entry.token;
 }
 
 /**
- * Invalidate cached token for a repo (e.g. after a 401 from GitHub).
+ * Invalidate cached token for a repo (e.g. after a 401 from GitHub). With
+ * `rejectedToken`, a newer cached token is kept.
  */
-export function invalidateGitHubRepoToken(workspaceId: string, repoFullName: string) {
-  tokenCache.delete(cacheKey(workspaceId, repoFullName));
+export function invalidateGitHubRepoToken(
+  workspaceId: string,
+  repoFullName: string,
+  rejectedToken?: string
+) {
+  invalidateCachedToken(cacheKey(workspaceId, repoFullName), rejectedToken);
+}
+
+function invalidateCachedToken(key: string, rejectedToken: string | undefined) {
+  if (rejectedToken === undefined || tokenCache.get(key)?.token === rejectedToken) {
+    tokenCache.delete(key);
+  }
 }
 
 export async function getGitHubOperationToken(
   workspaceId: string,
   repoFullName: string,
   operation: GitHubOperation,
-  options?: { invalidatedPersonalToken?: string }
+  options?: { invalidatedPersonalToken?: string; rejectedToken?: string }
 ): Promise<TokenEntry> {
-  const key = operationCacheKey(workspaceId, repoFullName, operation);
+  const rejected = options?.rejectedToken ?? options?.invalidatedPersonalToken;
+  const fetchToken = async (rejectedToken: string | undefined): Promise<TokenEntry> => {
+    // Only personal tokens are long-lived enough for the backend to hand back again.
+    const invalidatedPersonalToken =
+      rejectedToken !== undefined && rejectedToken === options?.invalidatedPersonalToken
+        ? rejectedToken
+        : undefined;
+    const result = await requireGitHubTokenPort().getOperationToken({
+      workspaceId,
+      repoFullName,
+      operation,
+      ...(invalidatedPersonalToken ? { invalidatedPersonalToken } : {}),
+    });
 
-  if (!options?.invalidatedPersonalToken) {
-    const cached = tokenCache.get(key);
-    if (cached && cached.expiresAt - Date.now() > SAFETY_WINDOW_MS) {
-      return cached;
+    if (!result.success) {
+      throw new GitHubClientTokenError(result.errorCode, result.errorMessage);
     }
 
-    const existing = inFlightRequests.get(key);
-    if (existing) {
-      return await existing;
-    }
-  }
-
-  const requestGeneration = tokenCacheGeneration;
-  const request = (async (): Promise<TokenEntry> => {
-    const fetchToken = async (): Promise<TokenEntry> => {
-      const result = await requireGitHubTokenPort().getOperationToken({
-        workspaceId,
-        repoFullName,
-        operation,
-        ...(options?.invalidatedPersonalToken
-          ? { invalidatedPersonalToken: options.invalidatedPersonalToken }
-          : {}),
-      });
-
-      if (!result.success) {
-        throw new GitHubClientTokenError(result.errorCode, result.errorMessage);
-      }
-
-      const tokenSource: GitHubTokenSource = result.tokenSource === 'personal' ? 'personal' : 'app';
-      const entry: TokenEntry = {
-        token: result.token,
-        expiresAt: normalizeExpiresAt(result.expiresAt, tokenSource),
-        tokenSource,
-      };
-      return entry;
+    const tokenSource: GitHubTokenSource = result.tokenSource === 'personal' ? 'personal' : 'app';
+    return {
+      token: result.token,
+      expiresAt: normalizeExpiresAt(result.expiresAt, tokenSource),
+      tokenSource,
     };
+  };
 
-    let entry: TokenEntry;
-    try {
-      entry = await fetchToken();
-    } catch (error) {
-      if (!isGitHubOperationTokenConnectionLostError(error)) throw error;
-      entry = await fetchToken();
-    }
-    if (requestGeneration === tokenCacheGeneration) {
-      tokenCache.set(key, entry);
-    }
-    return entry;
-  })();
-
-  inFlightRequests.set(key, request);
-
-  try {
-    return await request;
-  } finally {
-    if (inFlightRequests.get(key) === request) {
-      inFlightRequests.delete(key);
-    }
-  }
+  return await acquireToken(
+    operationCacheKey(workspaceId, repoFullName, operation),
+    async (rejectedToken) => {
+      try {
+        return await fetchToken(rejectedToken);
+      } catch (error) {
+        if (!isGitHubOperationTokenConnectionLostError(error)) throw error;
+        return await fetchToken(rejectedToken);
+      }
+    },
+    rejected
+  );
 }
 
 export function invalidateGitHubOperationToken(
   workspaceId: string,
   repoFullName: string,
-  operation: GitHubOperation
+  operation: GitHubOperation,
+  rejectedToken?: string
 ) {
-  tokenCache.delete(operationCacheKey(workspaceId, repoFullName, operation));
+  invalidateCachedToken(operationCacheKey(workspaceId, repoFullName, operation), rejectedToken);
 }
 
 export function invalidateGitHubTokensForWorkspace(workspaceId: string) {
@@ -326,8 +353,9 @@ export async function withGitHubTokenRetry<T>(
     return await run(token);
   } catch (error) {
     if (error instanceof GitHubAuthError) {
-      invalidateGitHubRepoToken(workspaceId, repoFullName);
-      const freshToken = await getGitHubRepoToken(workspaceId, repoFullName);
+      const freshToken = await getGitHubRepoToken(workspaceId, repoFullName, {
+        rejectedToken: token,
+      });
       return run(freshToken);
     }
     throw error;
@@ -354,8 +382,8 @@ export async function withGitHubOperationTokenRetry<T>(
     }
 
     if (error instanceof GitHubAuthError) {
-      invalidateGitHubOperationToken(workspaceId, repoFullName, operation);
       const freshEntry = await getGitHubOperationToken(workspaceId, repoFullName, operation, {
+        rejectedToken: entry.token,
         ...(entry.tokenSource === 'personal' ? { invalidatedPersonalToken: entry.token } : {}),
       });
       return run(freshEntry.token);

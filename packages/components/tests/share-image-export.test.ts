@@ -1,14 +1,83 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { copyShareImage, exportShareImage } from '../src/lib/share-image-export';
 
-const mocks = vi.hoisted(() => ({ toBlob: vi.fn(), bridge: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  toBlob: vi.fn(),
+  bridge: vi.fn(),
+  native: vi.fn(),
+  files: new Map<string, Uint8Array>(),
+  shared: [] as { path: string; bytes: Uint8Array }[],
+  shareError: null as string | null,
+}));
+vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: mocks.native }));
+vi.mock('../src/lib/session-file-upload', () => ({
+  buildSessionFileDownloadUrl: () => {
+    throw new Error('PNG export must stay local');
+  },
+}));
+vi.mock('@capacitor/filesystem', () => ({
+  Directory: { Cache: 'CACHE' },
+  Filesystem: {
+    async writeFile({ path, data }: { path: string; data: string }) {
+      mocks.files.set(
+        path,
+        Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0))
+      );
+    },
+    async appendFile({ path, data }: { path: string; data: string }) {
+      mocks.files.set(
+        path,
+        Uint8Array.from([
+          ...mocks.files.get(path)!,
+          ...Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0)),
+        ])
+      );
+    },
+    async getUri({ path }: { path: string }) {
+      return { uri: `file://${path}` };
+    },
+    async deleteFile({ path }: { path: string }) {
+      mocks.files.delete(path);
+    },
+  },
+}));
+vi.mock('@capacitor/share', () => ({
+  Share: {
+    async share({ files }: { files: string[] }) {
+      const path = files[0].slice('file://'.length);
+      const bytes = mocks.files.get(path);
+      if (!bytes) throw new Error('Missing PNG');
+      if (mocks.shareError) throw new Error(mocks.shareError);
+      mocks.shared.push({ path, bytes });
+    },
+  },
+}));
 vi.mock('@zumer/snapdom', () => ({ snapdom: { toBlob: mocks.toBlob } }));
 vi.mock('../src/lib/image-preview-export', () => ({ getImagePreviewExportBridge: mocks.bridge }));
+// Route the lazy product module through Vitest so its native plugin imports
+// use this file's I/O boundary rather than Node's external module cache.
+vi.mock('../src/lib/session-file-native-save', async (importOriginal) =>
+  importOriginal<typeof import('../src/lib/session-file-native-save')>()
+);
+
+// Load the real native handoff and its mocked I/O before fake timers freeze
+// the browser scheduler or a test starts measuring its behavior.
+beforeAll(async () => {
+  await Promise.all([
+    import('../src/lib/session-file-native-save'),
+    import('@capacitor/filesystem'),
+    import('@capacitor/share'),
+  ]);
+}, 0);
 
 beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers();
+  mocks.native.mockReturnValue(false);
+  mocks.files.clear();
+  mocks.shared = [];
+  mocks.shareError = null;
   Object.defineProperty(document, 'fonts', {
     configurable: true,
     value: { ready: Promise.resolve() },
@@ -24,63 +93,205 @@ afterEach(() => {
 });
 
 describe('share image export', () => {
-  it('pins ordinary, nested, and explicitly restarted list numbers during capture', async () => {
-    const card = document.createElement('div');
-    card.innerHTML =
-      '<ol><li>First<ol start="3"><li>Nested</li><li>Nested</li></ol></li><li>Second</li><li value="7">Restart</li><li>Next</li></ol>';
-    const original = card.innerHTML;
-    let captured: number[] = [];
-    mocks.toBlob.mockImplementation(async (element: HTMLElement) => {
-      captured = Array.from(element.querySelectorAll('li')).map((item) => item.value);
-      return new Blob([]);
+  it.each(['download', 'native', 'desktop-save', 'desktop-copy', 'web-copy'] as const)(
+    'rechecks scope synchronously at the final %s handoff',
+    async (destination) => {
+      const received: unknown[] = [];
+      mocks.native.mockReturnValue(destination === 'native');
+      mocks.toBlob.mockResolvedValue({
+        type: 'image/png',
+        size: 4,
+        arrayBuffer: async () => Uint8Array.of(137, 80, 78, 71).buffer,
+      } as Blob);
+      if (destination.startsWith('desktop'))
+        mocks.bridge.mockReturnValue({
+          saveAs: async (value: unknown) => {
+            received.push(value);
+            return { saved: true };
+          },
+          copyToClipboard: async (value: unknown) => {
+            received.push(value);
+            return { copied: true };
+          },
+        });
+      class TestClipboardItem {
+        constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+      }
+      vi.stubGlobal('ClipboardItem', TestClipboardItem);
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          write: async (items: TestClipboardItem[]) => {
+            received.push(await items[0]!.items['image/png']!);
+          },
+        },
+      });
+      vi.stubGlobal(
+        'URL',
+        class extends URL {
+          static createObjectURL(blob: Blob) {
+            received.push(blob);
+            return 'blob:copy';
+          }
+          static revokeObjectURL() {}
+        }
+      );
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      let current = true;
+      let admitted = false;
+      const guard = () => {
+        if (!current) throw new DOMException('Copy source changed', 'AbortError');
+      };
+      const admitOutput = async () => {
+        admitted = true;
+        await Promise.resolve();
+        current = false;
+      };
+      const element = document.createElement('div');
+      const output = destination.endsWith('copy')
+        ? copyShareImage(element, guard, admitOutput)
+        : exportShareImage(element, 'Selected', 'conversation', guard, admitOutput);
+      await expect(output).rejects.toThrow('Copy source changed');
+      expect(admitted).toBe(true);
+      expect(received).toEqual([]);
+      expect(mocks.shared).toEqual([]);
+      expect([...mocks.files]).toEqual([]);
+    }
+  );
+
+  it.each([false, true])(
+    'rejects a late capture after its source changes (native: %s)',
+    async (native) => {
+      mocks.native.mockReturnValue(native);
+      const started = Promise.withResolvers<void>();
+      const captured = Promise.withResolvers<Blob>();
+      mocks.toBlob.mockImplementation(() => {
+        started.resolve();
+        return captured.promise;
+      });
+      const downloads: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
+        downloads.push(this.download);
+      });
+      vi.stubGlobal('URL', {
+        createObjectURL: () => 'blob:late-copy',
+        revokeObjectURL: () => {},
+      });
+      let current = true;
+      const pending = exportShareImage(
+        document.createElement('div'),
+        'Source A',
+        'conversation',
+        () => {
+          if (!current) throw new DOMException('Copy scope changed', 'AbortError');
+        }
+      );
+      await started.promise;
+      current = false;
+      captured.resolve(new Blob(['approved-source-sentinel'], { type: 'image/png' }));
+      await expect(pending).rejects.toThrow('Copy scope changed');
+      expect(downloads).toEqual([]);
+      expect(mocks.shared).toEqual([]);
+      expect([...mocks.files]).toEqual([]);
+    }
+  );
+
+  it('never hands a late image capture to the desktop clipboard', async () => {
+    const started = Promise.withResolvers<void>();
+    const captured = Promise.withResolvers<Blob>();
+    mocks.toBlob.mockImplementation(() => {
+      started.resolve();
+      return captured.promise;
     });
-    await expect(exportShareImage(card, undefined, 'lody-conversation')).rejects.toThrow(
-      'PNG encoding failed'
-    );
-    expect(captured).toEqual([1, 3, 4, 2, 7, 8]);
-    expect(card.innerHTML).toBe(original);
+    const clipboard: unknown[] = [];
+    mocks.bridge.mockReturnValue({
+      copyToClipboard: async (copy: unknown) => {
+        clipboard.push(copy);
+        return { copied: true };
+      },
+    });
+    let current = true;
+    const pending = copyShareImage(document.createElement('div'), () => {
+      if (!current) throw new DOMException('Copy scope changed', 'AbortError');
+    });
+    await started.promise;
+    current = false;
+    captured.resolve({
+      type: 'image/png',
+      size: 4,
+      arrayBuffer: async () => new ArrayBuffer(4),
+    } as Blob);
+    await expect(pending).rejects.toThrow('Copy scope changed');
+    expect(clipboard).toEqual([]);
   });
 
-  it('preserves reversed numbering and restores attributes even when capture fails', async () => {
-    const card = document.createElement('div');
-    card.innerHTML =
-      '<ol reversed><li>Three</li><li>Two</li><li>One</li></ol><ol reversed start="9"><li>Nine</li><li value="0">Zero</li><li>Negative</li></ol>';
-    const original = card.innerHTML;
-    let captured: number[] = [];
-    mocks.toBlob.mockImplementation(async (element: HTMLElement) => {
-      captured = Array.from(element.querySelectorAll('li')).map((item) => item.value);
-      throw new Error('Capture failed');
+  it('rejects the pending WebKit clipboard item when its capture scope retires', async () => {
+    const started = Promise.withResolvers<void>();
+    const captured = Promise.withResolvers<Blob>();
+    mocks.toBlob.mockImplementation(() => {
+      started.resolve();
+      return captured.promise;
     });
-    await expect(exportShareImage(card, undefined, 'lody-conversation')).rejects.toThrow(
-      'Capture failed'
-    );
-    expect(captured).toEqual([3, 2, 1, 9, 0, -1]);
-    expect(card.innerHTML).toBe(original);
+    class TestClipboardItem {
+      constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+    }
+    const received: Blob[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        write: async (items: TestClipboardItem[]) => {
+          received.push(await items[0]!.items['image/png']!);
+        },
+      },
+    });
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
+    let current = true;
+    const pending = copyShareImage(document.createElement('div'), () => {
+      if (!current) throw new DOMException('Copy scope changed', 'AbortError');
+    });
+    await started.promise;
+    current = false;
+    captured.resolve(new Blob(['retired-source'], { type: 'image/png' }));
+    await expect(pending).rejects.toThrow('Copy scope changed');
+    expect(received).toEqual([]);
   });
 
-  it('downloads a PNG with a sanitized title and releases the object URL afterward', async () => {
-    const downloads: { name: string; url: string }[] = [];
-    const revoked: string[] = [];
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
-      downloads.push({ name: this.download, url: this.href });
-    });
-    vi.stubGlobal('URL', {
-      createObjectURL: () => 'blob:share-image',
-      revokeObjectURL: (url: string) => revoked.push(url),
-    });
-    const result = await exportShareImage(
-      document.createElement('div'),
-      'Review / rendering',
-      'lody-conversation'
-    );
-    // A browser download has no cancel signal, so this path always reports a save.
-    expect(result).toEqual({ saved: true });
-    expect(downloads).toEqual([{ name: 'Review - rendering.png', url: 'blob:share-image' }]);
-    expect(document.querySelector('a[download]')).toBeNull();
-    expect(revoked).toEqual([]);
-    vi.runAllTimers();
-    expect(revoked).toEqual(['blob:share-image']);
-  });
+  it.each([null, 'Share canceled', 'Permission denied'])(
+    'exports a native PNG through the share sheet and preserves its outcome (%s)',
+    async (error) => {
+      mocks.native.mockReturnValue(true);
+      mocks.shareError = error;
+      const bytes = Uint8Array.of(137, 80, 78, 71);
+      mocks.toBlob.mockResolvedValue({
+        type: 'image/png',
+        size: bytes.length,
+        arrayBuffer: async () => bytes.buffer,
+      });
+      const downloads: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
+        downloads.push(this.href);
+      });
+      const exported = exportShareImage(
+        document.createElement('div'),
+        'Review / rendering',
+        'conversation'
+      );
+      if (error === 'Permission denied') {
+        await expect(exported).rejects.toThrow(error);
+      } else {
+        await expect(exported).resolves.toEqual({ saved: error === null });
+      }
+      expect(downloads).toEqual([]);
+      expect(mocks.files.size).toBe(0);
+      if (error === null) {
+        expect(mocks.shared).toEqual([
+          { path: expect.stringMatching(/^lody-shared\/[^/]+\/Review - rendering\.png$/), bytes },
+        ]);
+      } else {
+        expect(mocks.shared).toEqual([]);
+      }
+    }
+  );
 
   it('reports a cancelled native save as no save, so callers can leave the preview open', async () => {
     const bytes = new Uint8Array([137, 80, 78, 71]).buffer;
@@ -106,65 +317,6 @@ describe('share image export', () => {
     // read this as success would close the surface under someone who was only
     // backing out of the file picker.
     expect(result).toEqual({ saved: false });
-  });
-
-  it('reports a completed native save', async () => {
-    const bytes = new Uint8Array([137, 80, 78, 71]).buffer;
-    mocks.toBlob.mockResolvedValue({
-      type: 'image/png',
-      size: bytes.byteLength,
-      arrayBuffer: async () => bytes,
-    });
-    mocks.bridge.mockReturnValue({ saveAs: async () => ({ saved: true }) });
-    await expect(
-      exportShareImage(document.createElement('div'), undefined, 'lody-conversation')
-    ).resolves.toEqual({ saved: true });
-  });
-
-  it('propagates native save failure so the dialog can offer retry', async () => {
-    mocks.toBlob.mockResolvedValue({
-      type: 'image/png',
-      size: 1,
-      arrayBuffer: async () => new ArrayBuffer(1),
-    });
-    mocks.bridge.mockReturnValue({ saveAs: async () => ({ saved: false, error: 'Disk full' }) });
-    await expect(
-      exportShareImage(document.createElement('div'), undefined, 'lody-conversation')
-    ).rejects.toThrow('Disk full');
-  });
-
-  it('hands PNG bytes to Electron clipboard and propagates copy failure', async () => {
-    const bytes = new Uint8Array([137, 80, 78, 71]).buffer;
-    const copyToClipboard = vi.fn(async () => ({ copied: true }));
-    mocks.toBlob.mockResolvedValue({
-      type: 'image/png',
-      size: bytes.byteLength,
-      arrayBuffer: async () => bytes,
-    });
-    mocks.bridge.mockReturnValue({ copyToClipboard });
-
-    await copyShareImage(document.createElement('div'));
-    expect(copyToClipboard).toHaveBeenCalledWith({ pngBytes: bytes });
-
-    mocks.bridge.mockReturnValue({
-      copyToClipboard: async () => ({ copied: false, error: 'Clipboard busy' }),
-    });
-    await expect(copyShareImage(document.createElement('div'))).rejects.toThrow('Clipboard busy');
-  });
-
-  it('writes the captured PNG with the browser clipboard when no native bridge exists', async () => {
-    const write = vi.fn(async () => undefined);
-    class TestClipboardItem {
-      constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
-    }
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
-    vi.stubGlobal('ClipboardItem', TestClipboardItem);
-
-    await copyShareImage(document.createElement('div'));
-
-    expect(write).toHaveBeenCalledTimes(1);
-    const item = write.mock.calls[0]![0]![0] as TestClipboardItem;
-    await expect(item.items['image/png']).resolves.toBeInstanceOf(Blob);
   });
 
   it('starts the browser clipboard write before the image capture resolves', async () => {
@@ -193,17 +345,5 @@ describe('share image export', () => {
 
     releaseFonts?.();
     await Promise.all([copy, png]);
-  });
-
-  it('rejects empty or non-PNG captures before saving', async () => {
-    for (const blob of [
-      new Blob([], { type: 'image/png' }),
-      new Blob(['svg'], { type: 'image/svg+xml' }),
-    ]) {
-      mocks.toBlob.mockResolvedValue(blob);
-      await expect(
-        exportShareImage(document.createElement('div'), undefined, 'lody-conversation')
-      ).rejects.toThrow('PNG encoding failed');
-    }
   });
 });

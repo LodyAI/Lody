@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as acp from '@agentclientprotocol/sdk';
 import type { SessionInfo } from '@agentclientprotocol/sdk';
 import type { ACPSessionId } from '@lody/shared';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -28,6 +28,28 @@ function session(sessionId: string, title: string): SessionInfo {
 }
 
 describe('history session catalog client', () => {
+  it('uses the Lody npm cache and surfaces startup stderr for an npx history process', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'history-npx-'));
+    const executable = path.join(root, 'npx');
+    try {
+      await writeFile(
+        executable,
+        '#!/bin/sh\nread -r request\nprintf "npm error code ETARGET\\ncache=%s\\n" "$npm_config_cache" >&2\nexit 1\n'
+      );
+      await chmod(executable, 0o755);
+      vi.spyOn(loginShell, 'getLoginShellEnvLegacy').mockResolvedValue({});
+      await expect(
+        listHistorySessionsForLocalProject({
+          provider: { cliType: 'custom', agentType: 'custom', customAcp: { command: executable } },
+          rootPath: root,
+          logger: { debug() {}, info() {}, warn() {}, error() {} } as unknown as Logger,
+        })
+      ).rejects.toThrow(/ETARGET[\s\S]*cache=.*npm-cache/);
+    } finally {
+      vi.restoreAllMocks();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it('releases its process registration when removal wins before environment preparation', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'codex-history-use-'));
     let cleaned = false;
@@ -59,7 +81,7 @@ describe('history session catalog client', () => {
       if (!profile) throw new Error('Missing synthetic profile');
       await store.markChatgptReady(profile);
       vi.spyOn(profileStore, 'getCodexProfileStore').mockReturnValue(store);
-      vi.spyOn(loginShell, 'getLoginShellEnv').mockResolvedValue({});
+      vi.spyOn(loginShell, 'getLoginShellEnvLegacy').mockResolvedValue({});
       vi.spyOn(store, 'isReady').mockImplementation(async () => {
         expect(await store.remove(profile)).toBe(false);
         return false;
@@ -176,7 +198,6 @@ describe('history session catalog client', () => {
 
 describe('requestHistorySessionReplay', () => {
   const acpSessionId = 'session-1' as ACPSessionId;
-  const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 
   function initializeResponse(
     overrides: Partial<acp.InitializeResponse> = {}
@@ -189,54 +210,60 @@ describe('requestHistorySessionReplay', () => {
     };
   }
 
-  it('uses the advertised Lody read-only method for builtin Codex', async () => {
-    const request = vi.fn(async () => ({}));
-    const loadSession = vi.fn(async () => ({}));
+  it.each(['codex', 'deepseek'] as const)(
+    'uses advertised read-only history for %s',
+    async (agentType) => {
+      const request = vi.fn(async () => ({}));
+      const loadSession = vi.fn(async () => ({}));
 
-    const runtimeConfig = await requestHistorySessionReplay({
-      provider: codexProvider,
-      acpSessionId,
-      cwd: '/repo/project',
-      connection: { request, loadSession } as never,
-      initResponse: initializeResponse({
-        agentCapabilities: {
-          _meta: {
-            lody: {
-              sessionHistory: {
-                version: 1,
-                method: '_lody/session/history/read',
-              },
-            },
-          },
-        },
-      }),
-    });
-
-    expect(request).toHaveBeenCalledWith('_lody/session/history/read', {
-      sessionId: acpSessionId,
-    });
-    expect(loadSession).not.toHaveBeenCalled();
-    expect(runtimeConfig).toBeUndefined();
-  });
-
-  it('fails closed when builtin Codex does not advertise the read-only method', async () => {
-    const request = vi.fn(async () => ({}));
-    const loadSession = vi.fn(async () => ({}));
-
-    await expect(
-      requestHistorySessionReplay({
-        provider: codexProvider,
+      const runtimeConfig = await requestHistorySessionReplay({
+        provider: { cliType: 'builtin', agentType },
         acpSessionId,
         cwd: '/repo/project',
         connection: { request, loadSession } as never,
         initResponse: initializeResponse({
-          agentCapabilities: { loadSession: true },
+          agentCapabilities: {
+            _meta: {
+              lody: {
+                sessionHistory: {
+                  version: 1,
+                  method: '_lody/session/history/read',
+                },
+              },
+            },
+          },
         }),
-      })
-    ).rejects.toThrow('agentCapabilities._meta.lody.sessionHistory version 1');
-    expect(request).not.toHaveBeenCalled();
-    expect(loadSession).not.toHaveBeenCalled();
-  });
+      });
+
+      expect(request).toHaveBeenCalledWith('_lody/session/history/read', {
+        sessionId: acpSessionId,
+      });
+      expect(loadSession).not.toHaveBeenCalled();
+      expect(runtimeConfig).toBeUndefined();
+    }
+  );
+
+  it.each(['codex', 'deepseek'] as const)(
+    'fails closed when %s lacks read-only history',
+    async (agentType) => {
+      const request = vi.fn(async () => ({}));
+      const loadSession = vi.fn(async () => ({}));
+
+      await expect(
+        requestHistorySessionReplay({
+          provider: { cliType: 'builtin', agentType },
+          acpSessionId,
+          cwd: '/repo/project',
+          connection: { request, loadSession } as never,
+          initResponse: initializeResponse({
+            agentCapabilities: { loadSession: true },
+          }),
+        })
+      ).rejects.toThrow('agentCapabilities._meta.lody.sessionHistory version 1');
+      expect(request).not.toHaveBeenCalled();
+      expect(loadSession).not.toHaveBeenCalled();
+    }
+  );
 
   it("keeps loadSession for non-Codex providers and returns the session's runtime selection", async () => {
     const request = vi.fn(async () => ({}));
@@ -331,7 +358,7 @@ describe('resolveHistoryACPProcessLaunch', () => {
   });
 
   it('uses the same registry ACP local launch as normal sessions', async () => {
-    const provider = { cliType: 'registry', agentType: 'amp-acp' } as const;
+    const provider = { cliType: 'registry', agentType: 'goose' } as const;
     const sessionLaunch = resolveACPProcessLaunch(provider);
     const historyLaunch = await resolveHistoryACPProcessLaunch({
       provider,
@@ -340,7 +367,7 @@ describe('resolveHistoryACPProcessLaunch', () => {
 
     expect(historyLaunch.command).toBe(sessionLaunch.command);
     expect(historyLaunch.args).toEqual(sessionLaunch.args);
-    expect(historyLaunch.command).toBe('npx');
-    expect(historyLaunch.args).toEqual(['--prefer-offline', '-y', 'amp-acp']);
+    expect(historyLaunch.command).toBe('goose');
+    expect(historyLaunch.args).toEqual(['--acp=true']);
   });
 });

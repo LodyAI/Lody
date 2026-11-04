@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {
   forwardRef,
   Fragment,
@@ -10,7 +11,18 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, CloudOff, FileText, FolderOpen, Home, Loader2 } from 'lucide-react';
+import {
+  ChevronRight,
+  CloudOff,
+  Eye,
+  EyeClosed,
+  FileText,
+  FolderOpen,
+  Home,
+  Loader2,
+} from 'lucide-react';
+import { Button } from '@lody/ui/button';
+import { ReadOnlyHtmlPreview } from '@/components/sessions/read-only-html-preview';
 import { Spinner } from '@/ui/spinner';
 import type { FileTreeItem } from '@lody/shared';
 
@@ -19,6 +31,7 @@ import { conversationFontSizeAtom, extendedCodeLanguagesEnabledAtom } from '@/at
 import { FileIcon, FolderIcon } from '@/components/icons/file-icons';
 import { MobileEdgeBackSwipeZone } from '@/components/mobile/mobile-edge-back-swipe';
 import { SessionFileImagePreview } from '@/components/sessions/session-file-image-preview';
+import { SessionFileVideoPreview } from '@/components/sessions/session-file-video-preview';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { MarkdownFileResources } from '@/components/ai-gui/markdown-file-image';
 import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
@@ -27,6 +40,7 @@ import { useFileWorkspaceTree } from '@/hooks/use-code-session';
 import { isNativeAppShell } from '@/lib/native-platform';
 import type { FileWorkspaceProvider, FileWorkspaceSnapshot } from '@/lib/file-workspace-provider';
 import { getImageMimeTypeForPath, isSvgPath } from '@/lib/image-file-preview';
+import { getVideoMimeTypeForPath } from '@/lib/video-file-preview';
 import {
   getSessionFileLanguageId,
   getSessionFileMonacoLanguageId,
@@ -48,6 +62,7 @@ const MOBILE_TABBAR_CLEARANCE =
 const MOBILE_SAFE_AREA_CLEARANCE = 'pb-[calc(var(--k-safe-area-bottom,0px)+1rem)]';
 
 const ROOT_PATH = '';
+const videoStyles = stylex.create({ frame: { height: '100%', minHeight: 0 } });
 
 export type MobileProjectFileBrowserHandle = {
   /** Pop one level (folder listing or file preview). No-op at the root. */
@@ -684,6 +699,13 @@ function MobileFilePreview({
   // Raster/binary images (png/jpeg/gif/webp/…) arrive as raw bytes. A binary
   // snapshot without bytes is an image that was too large to transfer.
   if (snapshot.kind === 'binary') {
+    if (getVideoMimeTypeForPath(path) && snapshot.bytes !== undefined) {
+      return (
+        <div className={cn(stylex.props(videoStyles.frame).className, bottomClearanceClassName)}>
+          <SessionFileVideoPreview path={path} bytes={snapshot.bytes} />
+        </div>
+      );
+    }
     if (isImage && snapshot.bytes && snapshot.bytes.byteLength > 0) {
       return (
         <MobileImagePreview
@@ -735,6 +757,7 @@ function MobileFilePreview({
     <MobileTextPreview
       path={content.path}
       text={snapshot.text}
+      truncated={snapshot.truncated}
       onScrollActivity={onScrollActivity}
       bottomClearanceClassName={bottomClearanceClassName}
     />
@@ -773,19 +796,59 @@ function MobileImagePreview({
 function MobileTextPreview({
   path,
   text,
+  truncated,
   onScrollActivity,
   bottomClearanceClassName,
 }: {
   readonly path: string;
   readonly text: string;
+  readonly truncated?: boolean;
   readonly onScrollActivity?: (scrollTop: number) => void;
   readonly bottomClearanceClassName: string;
 }) {
+  const { t } = useTranslation();
+  const [showHtml, setShowHtml] = useState(true);
   const resolvedTheme = useResolvedTheme();
   const activeVSCodeTheme = useActiveVSCodeTheme();
   const conversationFontSize = useAtomValue(conversationFontSizeAtom);
   const extendedCodeLanguagesEnabled = useAtomValue(extendedCodeLanguagesEnabledAtom);
   const language = getSessionFileLanguageId(path, extendedCodeLanguagesEnabled);
+
+  if (/\.(?:html|htm)$/iu.test(path) && !truncated) {
+    return (
+      <div className={cn(stylex.props(htmlStyles.root).className, bottomClearanceClassName)}>
+        <div {...stylex.props(htmlStyles.toolbar)}>
+          <Button
+            variant="ghost"
+            icon
+            aria-pressed={showHtml}
+            aria-label={
+              showHtml
+                ? t('sessions.fileViewer.preview.hide', 'Hide preview')
+                : t('sessions.fileViewer.preview.show', 'Preview')
+            }
+            onClick={() => setShowHtml((value) => !value)}
+          >
+            {showHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
+          </Button>
+        </div>
+        {showHtml ? (
+          <ReadOnlyHtmlPreview text={text} />
+        ) : (
+          <SessionMonacoTextViewer
+            key={path}
+            text={text}
+            language="html"
+            resolvedTheme={resolvedTheme}
+            vscodeTheme={activeVSCodeTheme ?? null}
+            readOnly
+            className={stylex.props(htmlStyles.source).className}
+            onScrollChange={({ scrollTop }) => onScrollActivity?.(scrollTop)}
+          />
+        )}
+      </div>
+    );
+  }
 
   if (isSessionMarkdownPath(path)) {
     return (
@@ -872,3 +935,9 @@ function StatusPanel({
     </div>
   );
 }
+
+const htmlStyles = stylex.create({
+  root: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' },
+  toolbar: { display: 'flex', flexShrink: 0 },
+  source: { flex: 1, minHeight: 0 },
+});

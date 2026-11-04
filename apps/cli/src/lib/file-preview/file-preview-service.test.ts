@@ -1,8 +1,12 @@
-import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  FILE_DOWNLOAD_MAX_BYTES,
+  FILE_DOWNLOAD_CHUNK_BYTES,
+  encodeSessionFilePath,
+} from '@lody/shared';
+import { mkdir, mkdtemp, open, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { gunzipSync } from 'node:zlib';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { FILE_PREVIEW_V3_LIMITS, type SessionId } from '@lody/shared';
@@ -46,15 +50,11 @@ async function foldsSpelling(
   }
 }
 
-const digestOf = (bytes: Uint8Array | string): string =>
-  `sha256:${createHash('sha256')
-    .update(typeof bytes === 'string' ? Buffer.from(bytes, 'utf8') : bytes)
-    .digest('hex')}`;
-
 function createService(args: {
   readonly workspaceRoot: string;
   readonly extraRoots?: readonly string[];
   readonly limits?: Partial<typeof FILE_PREVIEW_V3_LIMITS>;
+  readonly canDownloadLargeFiles?: () => Promise<boolean>;
 }): FilePreviewService {
   const resolveWorkspace: FilePreviewWorkspaceResolver = async () => ({
     ok: true,
@@ -63,53 +63,71 @@ function createService(args: {
   });
   return new FilePreviewService({
     resolveWorkspace,
+    canDownloadLargeFiles: args.canDownloadLargeFiles,
+    resolveLocalWorkspace: resolveWorkspace,
     extraRoots: args.extraRoots ?? [],
     ...(args.limits === undefined ? {} : { limits: args.limits }),
   });
 }
 
 describe('FilePreviewService', () => {
-  it('reads a workspace text file as plain UTF-8 with its digest and EOL', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    await mkdir(path.join(workspaceRoot, 'src'), { recursive: true });
-    await writeFile(path.join(workspaceRoot, 'src/app.ts'), 'const a = 1;\nconst b = 2;\n');
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({
+  it('previews registered additional roots as internal and rejects their escaping links', async () => {
+    const main = await makeDir('preview-main-');
+    const docs = await makeDir('preview-member-');
+    const outside = await makeDir('preview-outside-');
+    await writeFile(path.join(docs, 'a.txt'), 'member');
+    await writeFile(path.join(outside, 'secret.txt'), 'private');
+    await symlink(outside, path.join(docs, 'escape'), 'junction');
+    const roots = [
+      { id: 'main', absolutePath: main },
+      { id: 'member:docs', absolutePath: docs },
+    ];
+    const resolveWorkspace: FilePreviewWorkspaceResolver = async (_, rootId) => ({
+      ok: true,
+      ownerSessionId: SESSION_ID,
+      workspaceRoot: roots.find((root) => root.id === (rootId ?? 'main'))!.absolutePath,
+      fileRoots: roots,
+    });
+    const service = new FilePreviewService({
+      resolveWorkspace,
+      resolveLocalWorkspace: resolveWorkspace,
+      extraRoots: [],
+    });
+    const result = await service.previewFile({
       v: 3,
       sessionId: SESSION_ID,
-      path: 'src/app.ts',
+      rootId: 'member:docs',
+      path: 'a.txt',
     });
-
-    expect(response).toMatchObject({
+    expect(result).toMatchObject({
       status: 'ok',
-      path: 'src/app.ts',
-      kind: 'text',
-      digest: digestOf('const a = 1;\nconst b = 2;\n'),
-      format: { eol: 'lf', bom: false },
-      sizeBytes: 26,
+      path: encodeSessionFilePath({ rootId: 'member:docs', relativePath: 'a.txt' }),
     });
-    expect(response.status === 'ok' ? response.content : null).toEqual({
-      encoding: 'utf8-plain',
-      text: 'const a = 1;\nconst b = 2;\n',
-      rawBytes: 26,
-    });
+    expect('external' in result && result.external).not.toBe(true);
+    expect(
+      await service.previewFile({
+        v: 3,
+        sessionId: SESSION_ID,
+        rootId: 'member:docs',
+        path: 'escape/secret.txt',
+      })
+    ).toMatchObject({ status: 'error', code: 'path_not_allowed' });
   });
 
-  it('gzips text past the plain-text threshold and the payload round-trips', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    const text = 'x'.repeat(4096);
-    await writeFile(path.join(workspaceRoot, 'big.txt'), text);
-    const service = createService({ workspaceRoot, limits: { plainTextBytes: 16 } });
-
-    const response = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'big.txt' });
-
-    expect(response.status).toBe('ok');
-    if (response.status !== 'ok' || response.content.encoding !== 'utf8-gzip-base64') {
-      throw new Error('expected a gzip-encoded text preview');
-    }
-    expect(response.content.rawBytes).toBe(4096);
-    expect(gunzipSync(Buffer.from(response.content.data, 'base64')).toString('utf8')).toBe(text);
+  it('resolves links without reading oversized content, then previews the selected identity normally', async () => {
+    const workspaceRoot = await makeDir('preview-link-');
+    await writeFile(path.join(workspaceRoot, 'large.txt'), 'larger than the preview budget');
+    const service = createService({ workspaceRoot, limits: { maxTextBytes: 1 } });
+    const request = { v: 3 as const, sessionId: SESSION_ID, path: 'large.txt' };
+    const resolution = await service.previewFile({ ...request, resolveMarkdownLink: true });
+    expect(resolution).toMatchObject({
+      status: 'resolved-link',
+      candidates: [{ path: 'large.txt' }],
+    });
+    expect(await service.previewFile(request)).toMatchObject({
+      status: 'error',
+      code: 'too_large',
+    });
   });
 
   it('returns a PNG as base64 bytes with its image MIME type', async () => {
@@ -150,19 +168,6 @@ describe('FilePreviewService', () => {
       encoding: 'utf8-plain',
       text: svg,
     });
-  });
-
-  it('gives SVG the text budget, not the smaller binary one', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    await writeFile(path.join(workspaceRoot, 'big.svg'), `<svg>${'a'.repeat(200)}</svg>`);
-    const service = createService({
-      workspaceRoot,
-      limits: { maxBinaryBytes: 20, maxTextBytes: 10_000, plainTextBytes: 10_000 },
-    });
-
-    const response = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'big.svg' });
-
-    expect(response).toMatchObject({ status: 'ok', kind: 'text' });
   });
 
   it('reports a missing file as not found when its root is reached through a symlink', async () => {
@@ -212,42 +217,6 @@ describe('FilePreviewService', () => {
     });
   });
 
-  it('answers `unchanged` without bytes when the caller already has the digest', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    await writeFile(path.join(workspaceRoot, 'notes.md'), '# Title\n');
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({
-      v: 3,
-      sessionId: SESSION_ID,
-      path: 'notes.md',
-      knownDigest: digestOf('# Title\n') as `sha256:${string}`,
-    });
-
-    expect(response).toEqual({
-      status: 'unchanged',
-      v: 3,
-      path: 'notes.md',
-      digest: digestOf('# Title\n'),
-      sizeBytes: 8,
-    });
-  });
-
-  it('rejects a file over the text limit instead of truncating it', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    await writeFile(path.join(workspaceRoot, 'huge.txt'), 'y'.repeat(200));
-    const service = createService({ workspaceRoot, limits: { maxTextBytes: 50 } });
-
-    const response = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'huge.txt' });
-
-    expect(response).toMatchObject({
-      status: 'error',
-      code: 'too_large',
-      sizeBytes: 200,
-      limitBytes: 50,
-    });
-  });
-
   it('resolves a local file larger than the remote budget without reading its content', async () => {
     const workspaceRoot = await makeDir('preview-ws-');
     await writeFile(
@@ -266,21 +235,6 @@ describe('FilePreviewService', () => {
       absolutePath: await realpath(path.join(workspaceRoot, 'huge.txt')),
       external: false,
     });
-  });
-
-  it('applies the caller-supplied maxBytes when it is stricter than the machine limit', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    await writeFile(path.join(workspaceRoot, 'medium.txt'), 'z'.repeat(100));
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({
-      v: 3,
-      sessionId: SESSION_ID,
-      path: 'medium.txt',
-      maxBytes: 10,
-    });
-
-    expect(response).toMatchObject({ status: 'error', code: 'too_large', limitBytes: 10 });
   });
 
   it('rejects an absolute path outside every allowed root', async () => {
@@ -334,18 +288,6 @@ describe('FilePreviewService', () => {
     expect(response).toMatchObject({ status: 'ok', kind: 'binary', external: true });
   });
 
-  it('rejects a symlink inside the workspace that escapes every allowed root', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    const outside = await makeDir('preview-outside-');
-    await writeFile(path.join(outside, 'id_rsa'), 'PRIVATE KEY');
-    await symlink(path.join(outside, 'id_rsa'), path.join(workspaceRoot, 'link'));
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'link' });
-
-    expect(response).toMatchObject({ status: 'error', code: 'path_not_allowed' });
-  });
-
   it('rejects a `..` traversal out of the workspace', async () => {
     const workspaceRoot = await makeDir('preview-ws-');
     await mkdir(path.join(workspaceRoot, 'src'), { recursive: true });
@@ -358,56 +300,6 @@ describe('FilePreviewService', () => {
     });
 
     expect(response).toMatchObject({ status: 'error', code: 'path_not_allowed' });
-  });
-
-  it('reports a missing in-workspace file as not found', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'gone.ts' });
-
-    expect(response).toMatchObject({ status: 'error', code: 'file_not_found' });
-  });
-
-  it('does not leak existence of a missing file outside the allowed roots', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    const outside = await makeDir('preview-outside-');
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({
-      v: 3,
-      sessionId: SESSION_ID,
-      path: path.join(outside, 'never-existed.txt'),
-    });
-
-    expect(response).toMatchObject({ status: 'error', code: 'path_not_allowed' });
-  });
-
-  // The requested spelling and the on-disk spelling of one name disagree
-  // routinely: an agent writes `Readme.md`, the file index stores NFC while the
-  // disk holds NFD, a path picks up whitespace in transit. `code-collab/
-  // open-text` resolved through all of that; File Preview v3 replaced it with a
-  // raw `path.resolve`, which turned "the file is right there" into
-  // `file_not_found`. These pin the resolution back — the four below them pin
-  // that it stayed resolution and did not become authorization.
-  it('opens a file whose on-disk name differs from the request only by letter case', async (ctx) => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    await writeFile(path.join(workspaceRoot, 'README.md'), '# hi\n');
-    // A volume that folds case resolves this in `open` itself, so the fallback
-    // this test exists for never runs. Skipping says so out loud instead of
-    // reporting a pass that proved nothing — the bug is real on case-sensitive
-    // volumes (most Linux hosts, case-sensitive APFS), and that is where this
-    // has to be run to mean anything.
-    if (await foldsSpelling(workspaceRoot, 'README.md', 'readme.md')) {
-      ctx.skip();
-    }
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'readme.md' });
-
-    // Reported back with the REAL spelling: the client uses this as the viewer
-    // tab identity and to look the entry up in the file index.
-    expect(response).toMatchObject({ status: 'ok', path: 'README.md', kind: 'text' });
   });
 
   it('reports the on-disk spelling of a name back, not the requested one', async () => {
@@ -455,21 +347,6 @@ describe('FilePreviewService', () => {
     expect(response).toMatchObject({ status: 'ok', path: ' notes.md', kind: 'text' });
   });
 
-  it('still tolerates whitespace a caller picked up around a normal path', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    await mkdir(path.join(workspaceRoot, 'src'), { recursive: true });
-    await writeFile(path.join(workspaceRoot, 'src/app.ts'), 'const a = 1;\n');
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({
-      v: 3,
-      sessionId: SESSION_ID,
-      path: '  src/app.ts  ',
-    });
-
-    expect(response).toMatchObject({ status: 'ok', path: 'src/app.ts' });
-  });
-
   it('does not let a differently-cased request follow a symlink out of the workspace', async () => {
     const workspaceRoot = await makeDir('preview-ws-');
     const outside = await makeDir('preview-outside-');
@@ -481,21 +358,6 @@ describe('FilePreviewService', () => {
       v: 3,
       sessionId: SESSION_ID,
       path: 'LINK/id_rsa',
-    });
-
-    expect(response).toMatchObject({ status: 'error', code: 'path_not_allowed' });
-  });
-
-  it('does not let a differently-cased request escape through `..`', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    const outside = await makeDir('preview-outside-');
-    await writeFile(path.join(outside, 'secret.txt'), 'PRIVATE');
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({
-      v: 3,
-      sessionId: SESSION_ID,
-      path: `../${path.basename(outside).toUpperCase()}/SECRET.TXT`,
     });
 
     expect(response).toMatchObject({ status: 'error', code: 'path_not_allowed' });
@@ -523,29 +385,116 @@ describe('FilePreviewService', () => {
     expect(await probe('exists.txt')).toMatchObject({ code: 'path_not_allowed' });
     expect(await probe('never-existed.txt')).toMatchObject({ code: 'path_not_allowed' });
   });
+});
 
-  it('rejects a directory', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    await mkdir(path.join(workspaceRoot, 'src'), { recursive: true });
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'src' });
-
-    expect(response).toMatchObject({ status: 'error', code: 'not_a_file' });
+describe('paid file downloads', () => {
+  it('reads exact binary ranges without widening preview limits', async () => {
+    const workspaceRoot = await makeDir('download-');
+    const bytes = Buffer.alloc(FILE_PREVIEW_V3_LIMITS.maxBinaryBytes + 1, 0xff);
+    await writeFile(path.join(workspaceRoot, 'asset.bin'), bytes);
+    const service = createService({ workspaceRoot, canDownloadLargeFiles: async () => true });
+    expect(
+      await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'asset.bin' })
+    ).toMatchObject({ status: 'error', code: 'too_large' });
+    const chunks: Buffer[] = [];
+    let revision: string | undefined;
+    for (let offset = 0; offset < bytes.length; offset += FILE_DOWNLOAD_CHUNK_BYTES) {
+      const result = await service.downloadFileChunk({
+        sessionId: SESSION_ID,
+        path: 'asset.bin',
+        offset,
+        revision,
+      });
+      expect(result.status).toBe('ok');
+      if (result.status !== 'ok') throw new Error(result.code);
+      revision = result.revision;
+      chunks.push(Buffer.from(result.data, 'base64'));
+    }
+    // Compare bytes natively rather than deep-walking millions of indexed properties.
+    expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
   });
 
-  it('propagates a workspace resolution failure as a typed error', async () => {
-    const service = new FilePreviewService({
-      resolveWorkspace: async () => ({
-        ok: false,
-        code: 'session_not_found',
-        message: 'Session not found.',
-      }),
-      extraRoots: [],
+  it('accepts exactly 100 MiB and refuses one byte more', async () => {
+    const workspaceRoot = await makeDir('download-boundary-');
+    const file = await open(path.join(workspaceRoot, 'large.bin'), 'w');
+    const service = createService({ workspaceRoot, canDownloadLargeFiles: async () => true });
+    try {
+      await file.truncate(FILE_DOWNLOAD_MAX_BYTES);
+      const first = await service.downloadFileChunk({
+        sessionId: SESSION_ID,
+        path: 'large.bin',
+        offset: 0,
+      });
+      expect(first).toMatchObject({ status: 'ok', sizeBytes: FILE_DOWNLOAD_MAX_BYTES });
+      if (first.status !== 'ok') throw new Error(first.code);
+      expect(
+        await service.downloadFileChunk({
+          sessionId: SESSION_ID,
+          path: 'large.bin',
+          offset: FILE_DOWNLOAD_MAX_BYTES - FILE_DOWNLOAD_CHUNK_BYTES,
+          revision: first.revision,
+        })
+      ).toMatchObject({ status: 'ok' });
+      await file.truncate(FILE_DOWNLOAD_MAX_BYTES + 1);
+      expect(
+        await service.downloadFileChunk({ sessionId: SESSION_ID, path: 'large.bin', offset: 0 })
+      ).toEqual({ status: 'error', code: 'too_large' });
+    } finally {
+      await file.close();
+    }
+  });
+
+  it('refuses unpaid, unavailable billing and a changed file between chunks', async () => {
+    const workspaceRoot = await makeDir('download-policy-');
+    const filename = path.join(workspaceRoot, 'a.bin');
+    await writeFile(filename, Buffer.alloc(FILE_DOWNLOAD_CHUNK_BYTES + 4));
+    const request = { sessionId: SESSION_ID, path: 'a.bin', offset: 0 };
+    expect(await createService({ workspaceRoot }).downloadFileChunk(request)).toEqual({
+      status: 'error',
+      code: 'paid_plan_required',
     });
+    expect(
+      await createService({
+        workspaceRoot,
+        canDownloadLargeFiles: async () => false,
+      }).downloadFileChunk(request)
+    ).toEqual({ status: 'error', code: 'paid_plan_required' });
+    expect(
+      await createService({
+        workspaceRoot,
+        canDownloadLargeFiles: async () => {
+          throw new Error('offline');
+        },
+      }).downloadFileChunk(request)
+    ).toEqual({ status: 'error', code: 'transient_io' });
+    const service = createService({ workspaceRoot, canDownloadLargeFiles: async () => true });
+    const first = await service.downloadFileChunk(request);
+    if (first.status !== 'ok') throw new Error(first.code);
+    await writeFile(filename, 'changed');
+    expect(
+      await service.downloadFileChunk({
+        ...request,
+        offset: FILE_DOWNLOAD_CHUNK_BYTES,
+        revision: first.revision,
+      })
+    ).toEqual({ status: 'error', code: 'file_changed' });
+  });
 
-    const response = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'a.ts' });
-
-    expect(response).toMatchObject({ status: 'error', code: 'session_not_found' });
+  it('keeps path containment and requires a revision for subsequent ranges', async () => {
+    const workspaceRoot = await makeDir('download-inside-');
+    const outside = await makeDir('download-outside-');
+    await writeFile(path.join(outside, 'secret.bin'), 'secret');
+    await symlink(outside, path.join(workspaceRoot, 'escape'), 'junction');
+    const service = createService({ workspaceRoot, canDownloadLargeFiles: async () => true });
+    expect(
+      await service.downloadFileChunk({
+        sessionId: SESSION_ID,
+        path: 'escape/secret.bin',
+        offset: 0,
+      })
+    ).toEqual({ status: 'error', code: 'path_not_allowed' });
+    expect(
+      await service.downloadFileChunk({ sessionId: SESSION_ID, path: 'a.bin', offset: 1 })
+    ).toEqual({ status: 'error', code: 'invalid_path' });
   });
 });

@@ -1,3 +1,8 @@
+import { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
+import { selectHistoryActionRows } from './history-selection';
+import type { SubagentRunItem } from '../ai';
+import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
+import type { SessionSubagentRun } from './types';
 import { selectTurnOutput } from './read';
 import { applyHistoryAction, historyActionTarget } from './history-actions';
 import {
@@ -16,6 +21,7 @@ import {
   type LoroEventBatch,
   type LoroList,
   type LoroMap,
+  type LoroText,
 } from 'loro-crdt';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
@@ -25,7 +31,11 @@ import {
   parseHistoryWrite,
 } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
-import { pickDirectoryInputConfig, pickDirectoryScalars } from './directory';
+import {
+  SESSION_DIRECTORY_SCALAR_KEYS,
+  pickDirectoryInputConfig,
+  pickDirectoryScalars,
+} from './directory';
 import { createHistoryWriter, type HistoryWriter } from '../history-writer';
 import type { SessionSnapshotService } from './snapshot';
 import {
@@ -120,6 +130,97 @@ const readLength = (value: unknown): number => {
   return isContainer(value) && value.kind() === 'List' ? (value as LoroList).length : 0;
 };
 
+/** Convert a map except its explicitly projected children, without a recursive
+ * toJSON crossing those children. Plain legacy JSON has already been decoded. */
+const projectMap = (
+  value: unknown,
+  projections: Record<string, (field: unknown) => unknown>
+): Record<string, unknown> => {
+  const raw =
+    isContainer(value) && value.kind() === 'Map'
+      ? (value as LoroMap).getShallowValue()
+      : value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(raw)) {
+    const field = readField(value, key);
+    const project = Object.prototype.hasOwnProperty.call(projections, key)
+      ? projections[key]
+      : undefined;
+    result[key] = project ? project(field) : isContainer(field) ? field.toJSON() : field;
+  }
+  return result;
+};
+
+const listValueAt = (value: unknown, index: number): unknown =>
+  Array.isArray(value)
+    ? value[index]
+    : isContainer(value) && value.kind() === 'List'
+      ? (value as LoroList).get(index)
+      : undefined;
+
+const displayTextTail = (value: unknown): string | undefined =>
+  typeof value === 'string'
+    ? value.slice(-512)
+    : isContainer(value) && value.kind() === 'Text'
+      ? (value as LoroText).slice(
+          Math.max(0, (value as LoroText).length - 512),
+          (value as LoroText).length
+        )
+      : undefined;
+
+/** The inline task row only needs a latest-action line. Never read tool content,
+ * raw output or an entire child text just to derive that line. */
+const latestRunStep = (items: unknown): SubagentRunItem[] => {
+  for (let index = readLength(items) - 1; index >= 0; index--) {
+    const item = listValueAt(items, index);
+    const type = readString(readField(item, 'type'));
+    if (type === 'tool_call')
+      return [
+        {
+          type,
+          toolCallId: readString(readField(item, 'toolCallId')) ?? '',
+          status: (readString(readField(item, 'status')) ?? 'pending') as Extract<
+            SubagentRunItem,
+            { type: 'tool_call' }
+          >['status'],
+          title: displayTextTail(readField(item, 'title')),
+          toolName: displayTextTail(readField(item, 'toolName')),
+        },
+      ];
+    if (type === 'thought') return [{ type, text: '' }];
+    if (type === 'plan') return [{ type, entries: [] }];
+    if (type === 'text') {
+      const tail = displayTextTail(readField(item, 'text')) ?? '';
+      if (tail.trim()) return [{ type, text: tail }];
+    }
+  }
+  return [];
+};
+
+const displayTurn = (value: unknown): SessionTurn | undefined => {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    (isContainer(value) && value.kind() !== 'Map')
+  )
+    return undefined;
+  const turn = projectMap(value, {
+    items: (items) =>
+      Array.from({ length: readLength(items) }, (_, index) => {
+        const item = listValueAt(items, index);
+        if (readString(readField(item, 'type')) !== 'subagent_task')
+          return isContainer(item) ? item.toJSON() : item;
+        return projectMap(item, {
+          run: (run) => (run == null ? run : projectMap(run, { items: latestRunStep })),
+        });
+      }),
+  });
+  return turn as unknown as SessionTurn;
+};
+
 export function createLoroSessionData(options: LoroSessionDataOptions) {
   const { sessionId, doc } = options;
   const writer = options.writer ?? createHistoryWriter(doc);
@@ -130,16 +231,44 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
    * Shallow send config source for a user turn: small collections only, never
    * the body. The container crossings here are cheap; the projection is not.
    */
+  const metadataScalars = (map: LoroMap, names: readonly string[]): Record<string, unknown> => {
+    const source: Record<string, unknown> = {};
+    for (const name of names) {
+      const value = map.get(name);
+      if (value !== undefined)
+        source[name] = isContainer(value)
+          ? value.kind() === 'Text'
+            ? value.toString()
+            : value.kind() === 'List'
+              ? []
+              : {}
+          : value;
+    }
+    return source;
+  };
   const shallowInputConfigSource = (map: LoroMap): unknown => {
     const config = map.get('inputConfig');
-    if (!isContainer(config)) return config;
+    if (!isContainer(config)) {
+      if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
+      const source = config as Record<string, unknown>;
+      return Object.fromEntries(
+        SESSION_DIRECTORY_INPUT_CONFIG_KEYS.filter((key) => source[key] !== undefined).map(
+          (key) => [key, source[key]]
+        )
+      );
+    }
     if (config.kind() !== 'Map') return undefined;
     const configMap = config as LoroMap;
-    const value = { ...configMap.getShallowValue() } as Record<string, unknown>;
-    for (const key of ['mcpServerIds', 'configOptionValues'] as const) {
+    const value = metadataScalars(configMap, SESSION_DIRECTORY_INPUT_CONFIG_KEYS);
+    for (const key of [
+      'agentRoleSnapshot',
+      'memory',
+      'mcpServerIds',
+      'configOptionValues',
+    ] as const) {
       if (value[key] === undefined) continue;
       const field = configMap.get(key);
-      value[key] = isContainer(field) ? (field as LoroList).toJSON() : field;
+      value[key] = isContainer(field) ? field.toJSON() : field;
     }
     return value;
   };
@@ -174,9 +303,22 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     if (isContainer(value)) {
       if (value.kind() !== 'Map') return { position, state: 'invalid' };
       const map = value as LoroMap;
-      const scalars = pickDirectoryScalars(map.getShallowValue());
+      const scalars = pickDirectoryScalars(metadataScalars(map, SESSION_DIRECTORY_SCALAR_KEYS));
       if (!scalars) return { position, state: 'invalid' };
-      const row: SessionDirectoryRow = { position, state: 'ready', turnId: scalars.id, scalars };
+      const row: SessionDirectoryRow = {
+        metadataVersion: 1,
+        position,
+        state: 'ready',
+        turnId: scalars.id,
+        scalars,
+      };
+      const userId = readString(map.get('userId'));
+      if (userId !== undefined) Object.assign(row, { userId });
+      const scheduleRun = map.get('scheduleRun');
+      if (scheduleRun !== undefined)
+        Object.assign(row, {
+          scheduleRun: isContainer(scheduleRun) ? scheduleRun.toJSON() : scheduleRun,
+        });
       // Send config is present for user turns but projected on first read;
       // counts are deliberately omitted here (one container crossing each) and
       // arrive with a summary or a hydration read.
@@ -191,10 +333,13 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       const itemCount = Array.isArray(record.items) ? record.items.length : undefined;
       const planCount = Array.isArray(record.plan) ? record.plan.length : undefined;
       const row: SessionDirectoryRow = {
+        metadataVersion: 1,
         position,
         state: 'ready',
         turnId: scalars.id,
         scalars,
+        ...(typeof record.userId === 'string' ? { userId: record.userId } : {}),
+        ...(record.scheduleRun !== undefined ? { scheduleRun: record.scheduleRun } : {}),
         ...(itemCount !== undefined ? { itemCount } : {}),
         ...(planCount !== undefined ? { planCount } : {}),
       };
@@ -375,6 +520,35 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       const position = positions.get(turnId);
       return position === undefined ? { state: 'missing' } : readSlot(list, position);
     },
+    readTurnForDisplay(turnId: string): SessionTurnRead {
+      ensureIdentityIndex();
+      const position = positions.get(turnId);
+      if (position === undefined) return { state: 'missing' };
+      const turn = displayTurn(list.get(position));
+      return turn ? { state: 'ready', turn } : { state: 'invalid' };
+    },
+    readSubagentRun(
+      turnId: string,
+      rootSessionId: string,
+      runId: string
+    ): SessionSubagentRun | undefined {
+      ensureIdentityIndex();
+      const position = positions.get(turnId);
+      if (position === undefined) return undefined;
+      const items = readField(list.get(position), 'items');
+      for (let index = 0; index < readLength(items); index++) {
+        const item = listValueAt(items, index);
+        if (
+          readString(readField(item, 'type')) !== 'subagent_task' ||
+          readString(readField(item, 'taskId')) !== runId
+        )
+          continue;
+        const run = readField(item, 'run');
+        if (readString(readField(run, 'sessionId')) !== rootSessionId) continue;
+        return (isContainer(run) ? run.toJSON() : run) as SessionSubagentRun;
+      }
+      return undefined;
+    },
     readRange(from: number, to: number) {
       const lo = Math.max(0, Math.min(from, list.length));
       const hi = Math.max(lo, Math.min(to, list.length));
@@ -424,21 +598,19 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
 
   const commands: SessionHistoryCommands = {
     async applyHistoryAction(action) {
+      if (action.kind === 'operation-progress')
+        return { matched: writer.updateOperationProgress(action) };
       let matched = action.kind === 'user-status' && action.requeueUndelivered === true;
       const apply = (entries: SessionHistoryInput[]) => {
         const result = applyHistoryAction(entries, action);
         matched = result.matched;
         return result.turns;
       };
-      if (action.kind === 'operation-progress') {
-        const preview = applyHistoryAction(writer.readStored(), action);
-        if (!preview.matched) return { matched: false };
-      }
       const target = historyActionTarget(action);
       if (action.kind === 'user-status') writer.updateCopies(action.turnId, apply);
       else if (target !== undefined)
         writer.updateEntry(target, (entry) => apply([entry])[0] ?? entry);
-      else writer.update(apply);
+      else writer.updateSelected((rows) => selectHistoryActionRows(rows, action), apply);
       return { matched };
     },
     async appendTurn(turn) {
@@ -460,14 +632,25 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       try {
         // The shared planner runs inside the writer's conditional commit, so the
         // eligibility/goal re-check and the write are one atomic step.
-        restoreRange = writer.updateWithRollback((turns) => {
-          const next = planEditableTailReplacement(
-            turns as unknown as readonly SessionTurn[],
-            input
-          );
-          plan = next;
-          return next.turns as unknown as SessionHistoryInput[];
-        });
+        restoreRange = writer.updateSelectedWithRollback(
+          (rows) => {
+            let start = rows.length;
+            for (let i = rows.length - 1; i >= 0; i--)
+              if (rows[i]?.role === 'user') {
+                start = i;
+                break;
+              }
+            return rows.slice(start).map((_, offset) => start + offset);
+          },
+          (turns) => {
+            const next = planEditableTailReplacement(
+              turns as unknown as readonly SessionTurn[],
+              input
+            );
+            plan = next;
+            return next.turns as unknown as SessionHistoryInput[];
+          }
+        );
       } catch (error) {
         // A domain refusal proves nothing was written; a `HistoryWriteError` is a
         // validated pre-write refusal. Both are safe to report as `rejected`.
@@ -571,5 +754,45 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     identityDirty = true;
   };
 
-  return { sessionId, history, commands, writer, snapshots, dispose };
+  const readLatestGoal = (): SessionGoalMessage | null => {
+    for (let position = list.length - 1; position >= 0; position -= 1) {
+      const items = readField(list.get(position), 'items');
+      for (let index = readLength(items) - 1; index >= 0; index -= 1) {
+        const item = listValueAt(items, index);
+        if (
+          readString(readField(item, 'type')) !== 'goal' ||
+          readString(readField(item, 'threadId')) === undefined ||
+          readString(readField(item, 'objective')) === undefined ||
+          readString(readField(item, 'status')) === undefined
+        )
+          continue;
+        const goal = resolveLatestSessionGoalFromHistory([
+          { items: [isContainer(item) ? item.toJSON() : item] },
+        ]);
+        if (goal) return structuredClone(goal);
+      }
+    }
+    return null;
+  };
+
+  const readLatestUserId = (): string | undefined => {
+    for (let position = list.length - 1; position >= 0; position--) {
+      const entry = list.get(position);
+      if (readString(readField(entry, 'role')) !== 'user') continue;
+      const userId = readString(readField(entry, 'userId'));
+      if (userId?.trim()) return userId;
+    }
+    return undefined;
+  };
+
+  return {
+    sessionId,
+    history,
+    commands,
+    writer,
+    snapshots,
+    readLatestGoal,
+    readLatestUserId,
+    dispose,
+  };
 }

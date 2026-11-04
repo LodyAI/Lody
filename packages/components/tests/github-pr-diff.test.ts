@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { GitHubPullRequestFile } from '@lody/shared';
-import { resolvePrCompareRange, sumPrFileStats } from '../src/lib/github-pr-diff';
+
+import { resolvePrCompareRange } from '../src/lib/github-pr-diff';
 
 const commits = [
   {
@@ -75,21 +75,5 @@ describe('PR diff commit ranges', () => {
         selection: { type: 'commit', sha: 'missing' },
       })
     ).toEqual({ from: 'base', to: 'c', historical: false });
-  });
-
-  it('sums file stats for the selected compare response', () => {
-    const file = (additions: number, deletions: number): GitHubPullRequestFile => ({
-      path: 'file.ts',
-      previousPath: null,
-      status: 'modified',
-      additions,
-      deletions,
-      changes: additions + deletions,
-      sha: null,
-      blobUrl: null,
-      rawUrl: null,
-      patch: null,
-    });
-    expect(sumPrFileStats([file(2, 1), file(4, 3)])).toEqual({ additions: 6, deletions: 4 });
   });
 });

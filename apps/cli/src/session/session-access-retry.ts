@@ -184,11 +184,11 @@ export interface AccessRetryOptions {
   /** Consecutive auth-cause failures before escalating. Default 5. */
   readonly escalateAfter?: number;
   /** First backoff delay. Default 2s. */
-  readonly baseDelay?: Duration.DurationInput;
+  readonly baseDelay?: Duration.Input;
   /** Backoff cap. Default 1m. */
-  readonly maxDelay?: Duration.DurationInput;
+  readonly maxDelay?: Duration.Input;
   /** Per-attempt timeout for the verify call. Default 10s. */
-  readonly verifyTimeout?: Duration.DurationInput;
+  readonly verifyTimeout?: Duration.Input;
   /**
    * Add randomness to delays (anti-thundering-herd). Default true; tests set
    * false for exact, deterministic timing under TestClock.
@@ -208,68 +208,68 @@ export interface AccessRetryOptions {
  * Interruption (e.g. the turn is superseded or the session is unwatched) simply
  * stops the fiber — no failure, no side effects.
  */
-export const verifyMachineAccessWithRetry = (
+export const verifyMachineAccessWithRetry = Effect.fnUntraced(function* (
   opts: AccessRetryOptions
-): Effect.Effect<void, AccessDenied> =>
-  Effect.gen(function* () {
-    const escalateAfter = opts.escalateAfter ?? 5;
-    // Single-fiber context — no concurrent access, plain `let` suffices over Ref.
-    let authFailures = 0;
+): Effect.fn.Return<void, AccessDenied> {
+  const escalateAfter = opts.escalateAfter ?? 5;
+  // Single-fiber context — no concurrent access, plain `let` suffices over Ref.
+  let authFailures = 0;
 
-    const attempt = Effect.tryPromise({
-      try: () => opts.verify(),
-      // Defensive: the contract says `verify` never rejects, but if it does we
-      // treat it as a transient network failure rather than crashing the fiber.
-      catch: (error): AccessIndeterminate =>
-        new AccessIndeterminate({ cause: 'network', error: String(error) }),
-    }).pipe(
-      Effect.timeout(opts.verifyTimeout ?? Duration.seconds(10)),
-      // A hung verify is just another transient failure → retry.
-      Effect.catchTag('TimeoutException', () =>
-        Effect.fail(new AccessIndeterminate({ cause: 'network', error: 'verify timed out' }))
-      ),
-      Effect.flatMap((verification): Effect.Effect<void, AccessDenied | AccessIndeterminate> => {
-        if (verification.outcome === 'allowed') {
-          return Effect.void;
-        }
-        if (verification.outcome === 'denied') {
-          return Effect.fail(new AccessDenied({ reason: verification.reason }));
-        }
-        return Effect.fail(
-          new AccessIndeterminate({ cause: verification.cause, error: verification.error })
-        );
-      }),
-      // Escalate once after sustained auth failures; keep retrying afterward.
-      Effect.tapError((error) =>
-        Effect.sync(() => {
-          if (error._tag === 'AccessIndeterminate' && error.cause === 'auth') {
-            authFailures += 1;
-            if (authFailures === escalateAfter) {
-              opts.onAuthEscalation();
-            }
+  const attempt = Effect.tryPromise({
+    try: () => opts.verify(),
+    // Defensive: the contract says `verify` never rejects, but if it does we
+    // treat it as a transient network failure rather than crashing the fiber.
+    catch: (error): AccessIndeterminate =>
+      new AccessIndeterminate({ cause: 'network', error: String(error) }),
+  }).pipe(
+    Effect.timeout(opts.verifyTimeout ?? Duration.seconds(10)),
+    // A hung verify is just another transient failure → retry.
+    Effect.catchTag('TimeoutError', () =>
+      Effect.fail(new AccessIndeterminate({ cause: 'network', error: 'verify timed out' }))
+    ),
+    Effect.flatMap((verification): Effect.Effect<void, AccessDenied | AccessIndeterminate> => {
+      if (verification.outcome === 'allowed') {
+        return Effect.void;
+      }
+      if (verification.outcome === 'denied') {
+        return Effect.fail(new AccessDenied({ reason: verification.reason }));
+      }
+      return Effect.fail(
+        new AccessIndeterminate({ cause: verification.cause, error: verification.error })
+      );
+    }),
+    // Escalate once after sustained auth failures; keep retrying afterward.
+    Effect.tapError((error) =>
+      Effect.sync(() => {
+        if (error._tag === 'AccessIndeterminate' && error.cause === 'auth') {
+          authFailures += 1;
+          if (authFailures === escalateAfter) {
+            opts.onAuthEscalation();
           }
-        })
-      )
-    );
+        }
+      })
+    )
+  );
 
-    const cappedBackoff = Schedule.union(
-      Schedule.exponential(opts.baseDelay ?? Duration.seconds(2)),
-      // union takes the SHORTER delay, so once the exponential exceeds this it
-      // settles into a steady interval — i.e. a cap.
-      Schedule.spaced(opts.maxDelay ?? Duration.minutes(1))
-    );
-    const jittered = opts.jitter === false ? cappedBackoff : Schedule.jittered(cappedBackoff);
-    // Retry while the failure is indeterminate; a definitive AccessDenied makes
-    // `whileInput` false, which stops the schedule and propagates the denial.
-    const policy = Schedule.whileInput(
-      jittered,
-      (error: AccessDenied | AccessIndeterminate) => error._tag === 'AccessIndeterminate'
-    );
+  const cappedBackoff = Schedule.min([
+    Schedule.exponential(opts.baseDelay ?? Duration.seconds(2)),
+    // min takes the SHORTER delay, so once the exponential exceeds this it
+    // settles into a steady interval — i.e. a cap.
+    Schedule.spaced(opts.maxDelay ?? Duration.minutes(1)),
+  ]);
+  const jittered = opts.jitter === false ? cappedBackoff : Schedule.jittered(cappedBackoff);
+  // Retry while the failure is indeterminate; a definitive AccessDenied makes
+  // `while` false, which stops the schedule and propagates the denial.
+  const policy = Schedule.while(
+    jittered,
+    ({ input }: { input: AccessDenied | AccessIndeterminate }) =>
+      input._tag === 'AccessIndeterminate'
+  );
 
-    yield* Effect.retry(attempt, policy).pipe(
-      // The retry policy loops forever on AccessIndeterminate (whileInput), so
-      // this is unreachable at runtime. Absorb it here so callers only handle
-      // the definitive AccessDenied — no dead branches in the watcher.
-      Effect.catchTag('AccessIndeterminate', () => Effect.void)
-    );
-  });
+  yield* Effect.retry(attempt, policy).pipe(
+    // The retry policy loops forever on AccessIndeterminate (whileInput), so
+    // this is unreachable at runtime. Absorb it here so callers only handle
+    // the definitive AccessDenied — no dead branches in the watcher.
+    Effect.catchTag('AccessIndeterminate', () => Effect.void)
+  );
+});

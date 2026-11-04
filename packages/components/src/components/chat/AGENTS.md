@@ -6,7 +6,7 @@ Index and rationale: [README.md](README.md).
 ## Composer and selectors
 
 - `attachment-add-menu.tsx` owns the single composer "+" menu and per-turn MCP
-  selection (`ChatComposer mcp` → `AttachmentAddMenuMcp`), never the footer row.
+  selection (`ChatComposer mcp` → `AttachmentAddMenuMcp`) and Schedule send.
   MCP uses a desktop hover submenu or a touch panel on the same surface with a
   back row. Toggling keeps it open; an empty catalog hides the entry.
 - Desktop project pickers use DropdownMenu with local/GitHub projects by recency.
@@ -19,7 +19,7 @@ Index and rationale: [README.md](README.md).
 - Single-member workspaces pass no project-sharing state. Otherwise local project
   options and the selected desktop trigger show only effective `Private`; hide Team
   and unresolved states. Effective access is `machine.sharedWithTeam &&
-  project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`;
+project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`;
   its project share mutation also shares the machine atomically. Use
   `useConvexErrorMessage` for failures (auth recovery, no raw Convex toast).
   GitHub options have no access badge. A desktop machine option is local only when
@@ -27,10 +27,10 @@ Index and rationale: [README.md](README.md).
 - The sharing-review landing notice has two distinct durable actions: dismissal
   keeps the current source revision quiet, while "Don't remind me again"
   suppresses that user's notice for the workspace across future revisions.
-- The composer box border is 1px (`border`), not a 0.5px hairline. Light fill is
-  `--composer`; the session info bar uses the same fill. Both share
-  `COMPOSER_ELEVATION_CLASS`. The info bar uses `INFO_BAR_ELEVATION_CLASS`.
-  Dark fill stays `bg-input/90`.
+- The composer box border is 1px. Light fill is `--composer`, dark fill is
+  `bg-input/90`; it stays `rounded-2xl` with a soft wide lift
+  (`COMPOSER_ELEVATION_CLASS`). The session info bar shares the light fill and
+  uses `INFO_BAR_ELEVATION_CLASS`.
 - Desktop footer order: run config → permission → usage. Provider interaction mode
   belongs inside run config; the standalone button is explicit permission mode,
   falling back to legacy ACP modes. Plus / model / mode share `gap-x-1.5`; when
@@ -62,7 +62,7 @@ Index and rationale: [README.md](README.md).
   replace (incomplete selection → empty search). Plain `/chat` stays plain; restored
   defaults/auto-selection never rewrite it. Mobile keeps base context with no callback.
 - `use-chat-landing-draft-session.ts` owns the landing's reserved session id, and
-  images, files, ACP preparation, and `startSession({ sessionId }, firstTurn)`
+  images, files, and `startSession({ sessionId }, firstTurn)`
   MUST consume that same identity. Attachment hooks never reset it independently;
   reset only after a full draft clear. Submit blocks while `hasBlockingImages` or
   `hasBlockingFiles`.
@@ -80,13 +80,9 @@ Index and rationale: [README.md](README.md).
   `startSession` accepts. Failure must reveal the unchanged draft; only acceptance
   may clear resources or reset the reserved id. The accepted history entry is
   direct-authored into the renderer's own session store.
-- Draft ACP preparation uses that same reserved id. It carries no prompt, env, or
-  secret-shaped ACP option values; it may include the current sanitized
-  mode/model/options. It is debounced/best-effort, replaced when routing or run
-  config changes, cancelled on idle, and never awaited by submit. Once the initial
-  user turn is locally accepted, submit MUST hand the lease to the durable session
-  before clearing the draft or navigating; a successful handoff must not send
-  `session/prepare-cancel`.
+- The landing never warms an agent for a draft: the machine starts ACP and the
+  worktree when the first turn is dispatched. Do not reintroduce `session/prepare`
+  ([decision](../../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
 - `chat-landing-view.tsx` renders `ChatComposer`; stateful loading stays in
   `chat-landing.tsx`, session-mention drop handling in the view. Paint the page-level
   `ConversationDropOverlay` when sidebar drag starts, before `dragenter`. Desktop
@@ -105,6 +101,9 @@ Index and rationale: [README.md](README.md).
   state, share the same neutral foreground level.
 - The ACP provider cycle command uses the same single-machine scope as the visible
   provider menu. Never cycle all workspace configs while retaining the old machine id.
+- Home starts folded; Now/Week is local. Stage-fit Now priorities; keep Week
+  tiles hand-placed, empty-safe. Honor reduced motion; load Now-only Codex forecast.
+  [Contract](../../../../../.agents/notes/implemented/feature/2026-10-16-home-week-tiles.md).
 - Mobile composer pickers rely on `MobileInlinePicker` plus
   `MobileInlinePickerRowSlot` so dropdown panels project to a full-row slot,
   never resizing a narrow footer chip.

@@ -8,7 +8,7 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import * as tar from 'tar';
 import { z } from 'zod';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { withFileLock } from '@/utils/file-lock';
+import { fileLocksLegacy } from '@/utils/file-lock';
 import { getCliHttpFetch, type CliFetch } from '@/utils/http-transport';
 import manifest from './cloudflared-manifest.json';
 import notices from './cloudflared-notices.generated.json';
@@ -71,7 +71,7 @@ export async function ensureCloudflaredBinary(options: {
     `/api/runtimes/cloudflared/${version}/${platform}/${artifact.fileName}`,
     channel
   );
-  return withFileLock(
+  return fileLocksLegacy.withLock(
     `cloudflared-${version}-${platform}`,
     async () => {
       options.signal.throwIfAborted();
@@ -173,6 +173,6 @@ export async function ensureCloudflaredBinary(options: {
         await rm(scratch, { recursive: true });
       }
     },
-    { locksDir: join(root, 'locks'), timeout: 5 * 60_000 }
+    { locksDir: join(root, 'locks'), timeout: 5 * 60_000, signal: options.signal }
   );
 }

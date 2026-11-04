@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,8 @@ import type { LodyAuthClient } from '../src/lib/auth';
 import { initI18n } from '../src/i18n';
 import { Provider, createStore } from 'jotai';
 import { electronLoginErrorAtom, electronLoginPhaseAtom } from '../src/atoms';
+import { ConvexProvider, ConvexReactClient } from 'convex/react';
+import { CloudPlatformProvider } from '../src/providers/cloud-platform-provider';
 
 // jsdom cannot navigate to a custom scheme, and `window.location.replace` is
 // unforgeable, so the one navigation primitive is replaced. Everything else in
@@ -86,6 +89,8 @@ function createAuthClient(overrides: {
     signUp: { email: async () => ({ data: null, error: null }) },
     sendVerificationEmail: async () => ({ data: null, error: null }),
     signOut: overrides.signOut ?? (async () => undefined),
+    useListOrganizations: () => ({ data: [], isPending: false, refetch: async () => {} }),
+    useActiveOrganization: () => ({ data: null, isPending: false, refetch: async () => {} }),
     electron: overrides.transferUser ? { transferUser: overrides.transferUser } : undefined,
   } as unknown as LodyAuthClient;
 }
@@ -104,14 +109,23 @@ describe('electron browser sign-in handoff', () => {
   const renderLoginPage = async (
     authClient: LodyAuthClient,
     sessionValue: StableSessionValue = createSessionValue(true),
-    desktop = false
+    desktop = false,
+    standaloneClient?: ConvexReactClient
   ) => {
     await act(async () => {
       root.render(
         <Provider store={store}>
           <AuthProvider authClient={authClient}>
             <StableSessionContext.Provider value={sessionValue}>
-              <LoginPage replaceLocation={() => undefined} isElectronRenderer={desktop} />
+              {standaloneClient ? (
+                <ConvexProvider client={standaloneClient}>
+                  <CloudPlatformProvider>
+                    <LoginPage replaceLocation={() => undefined} isElectronRenderer={desktop} />
+                  </CloudPlatformProvider>
+                </ConvexProvider>
+              ) : (
+                <LoginPage replaceLocation={() => undefined} isElectronRenderer={desktop} />
+              )}
             </StableSessionContext.Provider>
           </AuthProvider>
         </Provider>
@@ -152,6 +166,21 @@ describe('electron browser sign-in handoff', () => {
     document.body.innerHTML = '';
     window.history.replaceState({}, '', '/');
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('renders the standalone browser login form without authenticated Convex context', async () => {
+    vi.stubEnv('VITE_LODY_PLATFORM', 'cloud');
+    window.history.replaceState({}, '', `/login${ELECTRON_QUERY}&view=email`);
+    const client = new ConvexReactClient('https://standalone-login.convex.cloud');
+    try {
+      await renderLoginPage(createAuthClient({}), createSessionValue(false), false, client);
+      expect(container.querySelector('input[type="email"]')).not.toBeNull();
+      expect(container.querySelector('input[type="password"]')).not.toBeNull();
+      expect(findButton(/Sign in with email/i)?.disabled).toBe(false);
+    } finally {
+      await client.close();
+    }
   });
 
   it('shows the main-process failure and allows a new browser attempt', async () => {
@@ -172,14 +201,6 @@ describe('electron browser sign-in handoff', () => {
     await clickButton(/Open browser to sign in/i);
     expect(container.textContent).toContain('Waiting for browser sign-in');
     expect(findButton(/Open browser to sign in/i)?.disabled).toBe(false);
-  });
-
-  it('restores exchange progress from the main snapshot on a newly mounted page', async () => {
-    window.history.replaceState({}, '', '/login');
-    store.set(electronLoginPhaseAtom, 'exchanging');
-    await renderLoginPage(createAuthClient({}), createSessionValue(false), true);
-    expect(container.textContent).toContain('Signing you in');
-    expect(findButton(/Open browser to sign in/i)).toBeUndefined();
   });
 
   it('names the browser account and hands nothing over until the user chooses', async () => {

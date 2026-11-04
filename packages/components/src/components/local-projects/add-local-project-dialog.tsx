@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
@@ -46,6 +46,10 @@ import {
   type RemoteDirectoryPickerMachine,
 } from './use-remote-directory-picker';
 import { MobileAddLocalProjectFlow } from './mobile-add-local-project-flow';
+import {
+  RemoteDirectoryNewFolderAction,
+  RemoteDirectoryNewFolderControl,
+} from './remote-directory-new-folder-control';
 
 export type {
   RemoteDirectoryOpResult,
@@ -393,7 +397,9 @@ export function RemoteDirectoryPicker(props: RemoteDirectoryPickerArgs) {
   const headerTitle =
     c.phase === 'machine'
       ? t('localProjects.add.pickMachine', 'Choose a machine')
-      : t('localProjects.add.title', 'Add a folder');
+      : props.selectionOnly
+        ? t('settings.projectGroups.selectFolders')
+        : t('localProjects.add.title', 'Add a folder');
 
   return (
     <div {...stylex.props(styles.picker)}>
@@ -433,6 +439,7 @@ export function RemoteDirectoryPicker(props: RemoteDirectoryPickerArgs) {
         />
       ) : (
         <BrowseStep
+          selectionOnly={props.selectionOnly}
           roots={c.roots}
           current={c.current}
           status={c.status}
@@ -442,6 +449,11 @@ export function RemoteDirectoryPicker(props: RemoteDirectoryPickerArgs) {
           pathDraft={c.pathDraft}
           adding={c.adding}
           addError={c.addError}
+          creating={c.creating}
+          newFolderAction={<RemoteDirectoryNewFolderAction controller={c} />}
+          newFolderControl={<RemoteDirectoryNewFolderControl controller={c} />}
+          newFolderOpen={c.newFolderOpen}
+          canAddCurrentFolder={c.canAddCurrentFolder}
           sep={c.sep}
           onNavigate={c.navigate}
           onEntryClick={c.entryClick}
@@ -584,6 +596,7 @@ function MachineOwnerNotice({ machine }: { machine: RemoteDirectoryPickerMachine
 }
 
 function BrowseStep({
+  selectionOnly,
   roots,
   current,
   status,
@@ -593,6 +606,11 @@ function BrowseStep({
   pathDraft,
   adding,
   addError,
+  creating,
+  newFolderAction,
+  newFolderControl,
+  newFolderOpen,
+  canAddCurrentFolder,
   sep,
   onNavigate,
   onEntryClick,
@@ -605,6 +623,7 @@ function BrowseStep({
   onPathDraftChange,
   onPathSubmit,
 }: {
+  selectionOnly?: boolean;
   roots: LocalProjectBrowseRootsResult | null;
   current: LocalProjectBrowseDirectoryResult | null;
   status: RemoteDirectoryBrowseStatus;
@@ -614,6 +633,11 @@ function BrowseStep({
   pathDraft: string;
   adding: boolean;
   addError: string | null;
+  creating: boolean;
+  newFolderAction: ReactNode;
+  newFolderControl: ReactNode;
+  newFolderOpen: boolean;
+  canAddCurrentFolder: boolean;
   sep: '/' | '\\';
   onNavigate: (absolutePath: string) => void;
   onEntryClick: (entry: LocalProjectBrowseDirectoryEntry) => void;
@@ -700,6 +724,7 @@ function BrowseStep({
             {status === 'loading' ? (
               <Spinner {...stylex.props(styles.icon14, styles.hint)} aria-hidden />
             ) : null}
+            {newFolderAction}
             <Button
               type="button"
               variant="ghost"
@@ -806,6 +831,7 @@ function BrowseStep({
 
       {/* Footer */}
       <div {...stylex.props(styles.footer)}>
+        {newFolderControl}
         {addError ? (
           <p {...stylex.props(styles.message, styles.messageError)}>
             <AlertTriangle {...stylex.props(styles.icon14, styles.messageMark)} />
@@ -833,19 +859,21 @@ function BrowseStep({
             )}
           </div>
           <div {...stylex.props(styles.actions)}>
+            {!newFolderOpen ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                onClick={onCancel}
+                disabled={adding || creating}
+              >
+                {t('common.cancel', 'Cancel')}
+              </Button>
+            ) : null}
             <Button
               type="button"
-              variant="secondary"
               size="small"
-              onClick={onCancel}
-              disabled={adding}
-            >
-              {t('common.cancel', 'Cancel')}
-            </Button>
-            <Button
-              type="button"
-              size="small"
-              disabled={!current || status !== 'ready' || adding}
+              disabled={!canAddCurrentFolder}
               onClick={onAddCurrentFolder}
             >
               {adding ? (
@@ -853,7 +881,9 @@ function BrowseStep({
               ) : (
                 <FolderPlus {...stylex.props(styles.icon16)} />
               )}
-              {t('localProjects.add.useThisFolder', 'Add')}
+              {selectionOnly
+                ? t('settings.projectGroups.selectFolder')
+                : t('localProjects.add.useThisFolder', 'Add')}
             </Button>
           </div>
         </div>
@@ -945,6 +975,7 @@ function StatusPanel({
 }
 
 export interface AddLocalProjectDialogProps {
+  selectionOnly?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isMobile?: boolean;
@@ -961,6 +992,7 @@ export interface AddLocalProjectDialogProps {
  * full-height mobile flow inside a bottom Drawer on mobile.
  */
 export function AddLocalProjectDialog({
+  selectionOnly,
   open,
   onOpenChange,
   isMobile,
@@ -973,7 +1005,9 @@ export function AddLocalProjectDialog({
 }: AddLocalProjectDialogProps) {
   const { t } = useTranslation();
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
-  const a11yTitle = t('localProjects.add.title', 'Add a folder');
+  const a11yTitle = selectionOnly
+    ? t('settings.projectGroups.selectFolders')
+    : t('localProjects.add.title', 'Add a folder');
   const a11yDescription = t(
     'localProjects.add.dialogDescription',
     'Browse the machine and choose a folder to add as a local project.'
@@ -1012,6 +1046,7 @@ export function AddLocalProjectDialog({
         <Dialog.Title {...stylex.props(styles.srOnly)}>{a11yTitle}</Dialog.Title>
         <Dialog.Description {...stylex.props(styles.srOnly)}>{a11yDescription}</Dialog.Description>
         <RemoteDirectoryPicker
+          selectionOnly={selectionOnly}
           machines={machines}
           machinesLoading={machinesLoading}
           initialMachineId={initialMachineId}

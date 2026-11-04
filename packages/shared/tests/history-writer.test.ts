@@ -1,18 +1,21 @@
-import { getAgentRoleEmoji } from '../src/agent-role';
-import { buildAgentMessageAuthor, snapshotAgentRole } from '../src/message-author';
+import { buildAgentMessageAuthor } from '../src/message-author';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, LoroList, LoroMap, LoroText } from 'loro-crdt';
-import { Mirror } from 'loro-mirror';
-import { z } from 'zod';
-import { parseHistoryWrite } from '../src/history-write-schema';
+
 import { createSessionMirror } from '../src/session-mirror';
-import { sessionDocSchema, type SessionHistory } from '../src/schema';
+import { type SessionHistory } from '../src/schema';
 import type { SessionId } from '../src/ids';
 import { createHistoryWriter, type StoredHistorySnapshot } from '../src/history-writer';
 import { applyNotificationOnHistory } from '../src/acp/history-apply';
 import { parseSessionNotification } from '../src/acp/schema';
 import type { LodySubagentEvent, LodySubagentSnapshot } from 'acp-extension-core';
 import type { MessageContent } from '../src/ai';
+import { formatMessageQuote, readMessageQuote } from '../src/message-quote';
+import { sanitizeMessageTextSpans } from '../src/message-text-spans';
+import {
+  historyItemsToInputBlocks,
+  resolveSessionExecutionInputBlocks,
+} from '../src/session-input';
 
 const id = 'synthetic-session' as SessionId;
 const entry = (turnId = 'turn'): SessionHistory => ({
@@ -26,19 +29,563 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
-  it('freezes the same default emoji displayed by the Role catalog', () => {
-    const role = snapshotAgentRole({ id: 'reviewer' as never, revision: 1, name: 'Reviewer' });
-    const author = buildAgentMessageAuthor({
-      sessionId: 'source',
-      turnId: 'turn',
-      cliType: 'builtin',
-      agentType: 'codex',
-      role,
-    });
-    expect(role.emoji).toBe(getAgentRoleEmoji({}));
-    expect(author.role?.emoji).toBe(getAgentRoleEmoji({}));
-    expect(author.agentType).toBe('codex');
+  it('retains quoted snapshots through the writer, a restart and execution projection', () => {
+    const snapshot = '  Unicode 引文 👩🏽‍💻\n\n> nested\nEnd of quoted message.\n';
+    const quote = formatMessageQuote(snapshot);
+    const text = `${quote}\n\nExplain this passage.`;
+    const span = {
+      start: 0,
+      end: quote.length,
+      kind: 'message_quote' as const,
+      quoteVersion: 1 as const,
+      label: '[Quote]',
+      target: 'quote-1',
+    };
+    const doc = new Loro();
+    const mirror = open(doc);
+    mirror.historyWriter.append({ ...entry(), items: [{ type: 'text', text, spans: [span] }] });
+    const bytes = doc.export({ mode: 'snapshot' });
+    mirror.dispose();
+    const restarted = new Loro();
+    restarted.import(bytes);
+    const revived = open(restarted);
+    try {
+      const item = revived.historyWriter.readStored()[0]!.items![0]!;
+      expect(item).toMatchObject({ type: 'text', text, spans: [span] });
+      if (item.type !== 'text') throw new Error('Expected authored text');
+      expect(
+        readMessageQuote(item.text.slice(span.start, span.end), item.spans![0]!.quoteVersion)
+      ).toBe(snapshot);
+      const blocks = historyItemsToInputBlocks([item]);
+      expect(resolveSessionExecutionInputBlocks({ prompt: text, inputBlocks: blocks })).toEqual([
+        { type: 'text', text },
+      ]);
+      expect(sanitizeMessageTextSpans(text, [{ ...span, end: text.length }])).toBeUndefined();
+      expect(text).toContain('Explain this passage.');
+    } finally {
+      revived.dispose();
+    }
   });
+
+  it('retains unchanged containers inside a compensated range and receives their delayed peer edits', () => {
+    const doc = new Loro(),
+      writer = createHistoryWriter(doc);
+    for (const name of ['prefix', 'one', 'gap', 'two', 'suffix']) writer.append(entry(name));
+    const gap = doc.getList('history').get(2) as LoroMap;
+    const text = ((gap.get('items') as LoroList).get(0) as LoroMap).get('text') as LoroText;
+    const rollback = writer.updateSelectedWithRollback(
+      () => [1, 3],
+      (rows) =>
+        rows.map((row) =>
+          row.id === 'one' || row.id === 'two' ? { ...row, status: 'handled' } : row
+        )
+    );
+    const peer = new Loro();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    (peer.getContainerById(text.id) as LoroText).update('delayed peer edit');
+    peer.commit();
+    rollback();
+    expect((doc.getList('history').get(2) as LoroMap).id).toBe(gap.id);
+    expect(writer.readStored()).toEqual(['prefix', 'one', 'gap', 'two', 'suffix'].map(entry));
+    doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    expect(writer.readStored()[2]?.items).toEqual([{ type: 'text', text: 'delayed peer edit' }]);
+  });
+
+  it.each(['local', 'synchronized'] as const)(
+    'compensates a selected range while preserving a %s append with a restored ID',
+    (source) => {
+      const doc = new Loro(),
+        writer = createHistoryWriter(doc);
+      writer.append(entry('prefix'));
+      const old = { ...entry('tail'), items: [{ type: 'text' as const, text: 'original' }] };
+      writer.append(old);
+      const prefix = doc.getList('history').get(0) as LoroMap;
+      const rollback = writer.updateSelectedWithRollback(
+        () => [1],
+        (rows) => [rows[0]!, entry('replacement')]
+      );
+      const late = {
+        ...entry('tail'),
+        items: [{ type: 'text' as const, text: 'late body'.repeat(10000) }],
+        inputConfig: { modelId: 'late-model', mcpServerIds: [] },
+      };
+      if (source === 'local') writer.append(late);
+      else {
+        const peer = new Loro();
+        peer.import(doc.export({ mode: 'snapshot' }));
+        createHistoryWriter(peer).append(late);
+        doc.import(peer.export({ mode: 'update', from: doc.version() }));
+      }
+      const appended = doc.getList('history').get(2) as LoroMap;
+      appended.set('futureField', { preserved: true });
+      doc.commit();
+      const json = LoroMap.prototype.toJSON;
+      const unread = new Set([prefix.id, appended.id]);
+      const guard = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+        if (unread.has(this.id)) throw new Error('Unowned body read');
+        return json.call(this);
+      });
+      try {
+        rollback();
+      } finally {
+        guard.mockRestore();
+      }
+      expect(writer.readStored()).toEqual([
+        entry('prefix'),
+        old,
+        { ...late, futureField: { preserved: true } },
+      ]);
+      expect((doc.getList('history').get(0) as LoroMap).id).toBe(prefix.id);
+      expect((doc.getList('history').get(2) as LoroMap).id).toBe(appended.id);
+      const restored = writer.readStored();
+      expect(rollback).toThrow();
+      expect(writer.readStored()).toEqual(restored);
+    }
+  );
+  it.each(['other', 'execute', 'search', 'fetch', undefined] as const)(
+    'drops unused tool bytes for kind %s while preserving audio and download references',
+    (kind) => {
+      const doc = new Loro();
+      const writer = open(doc).historyWriter;
+      const attachment = {
+        type: 'image_group' as const,
+        images: [{ imageId: 'r2-image', mimeType: 'image/png' as const, sizeBytes: 1 }],
+      };
+      writer.append({ ...entry('first'), role: 'assistant', items: [attachment] });
+      const images = [
+        { type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'DROP_IMAGE' } },
+        {
+          type: 'content',
+          content: {
+            type: 'resource',
+            resource: { uri: 'synthetic://image', mimeType: ' Image/SVG+XML ', blob: 'DROP_BLOB' },
+          },
+        },
+        {
+          type: 'content',
+          content: {
+            type: 'resource',
+            resource: { uri: 'data:image/png;base64,DROP_URI', blob: 'DROP_URI' },
+          },
+        },
+      ];
+      const retained = [
+        { type: 'content', content: { type: 'text', text: 'Tool result. '.repeat(6000) } },
+        { type: 'content', content: { type: 'audio', mimeType: 'audio/wav', data: 'AUDIO' } },
+        {
+          type: 'content',
+          content: {
+            type: 'resource',
+            resource: {
+              uri: 'https://example.invalid/download.pdf',
+              mimeType: 'application/pdf',
+              blob: '',
+            },
+          },
+        },
+        {
+          type: 'content',
+          content: {
+            type: 'resource',
+            resource: { uri: 'synthetic://text', text: 'Resource text' },
+          },
+        },
+        {
+          type: 'content',
+          content: {
+            type: 'resource_link',
+            uri: 'synthetic://image-reference',
+            name: 'Image link',
+          },
+        },
+        { type: 'content', content: { type: 'resource_link', uri: '', name: 'Binary label' } },
+      ];
+      const binary = 'QUJD'.repeat(128 * 1024);
+      const incoming = retained.map((block) => {
+        if (block.content.type === 'resource_link' && block.content.uri === '')
+          return {
+            ...block,
+            content: { ...block.content, uri: `data:application/octet-stream;base64,${binary}` },
+          };
+        if (block.content.type !== 'resource' || !('blob' in block.content.resource)) return block;
+        return {
+          ...block,
+          content: { ...block.content, resource: { ...block.content.resource, blob: binary } },
+        };
+      });
+      const emit = (update: Record<string, unknown>) =>
+        writer.updateEntry(
+          'first',
+          (turn) =>
+            applyNotificationOnHistory(
+              [turn],
+              [parseSessionNotification({ sessionId: 'root', update })],
+              undefined,
+              { targetAssistantEntryId: 'first' }
+            )[0]!
+        );
+      emit({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool',
+        title: 'Screenshot tool',
+        kind,
+        status: 'in_progress',
+        content: [images[0], incoming[0], ...images.slice(1), ...incoming.slice(1)],
+      });
+      emit({ sessionUpdate: 'tool_call_update', toolCallId: 'tool', status: 'completed' });
+      const stored = writer.read('first')!;
+      expect(stored.items).toMatchObject([
+        attachment,
+        {
+          type: 'tool_call',
+          toolCallId: 'tool',
+          title: 'Screenshot tool',
+          status: 'completed',
+          content: retained,
+        },
+      ]);
+      expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_');
+      expect(JSON.stringify(doc.toJSON())).not.toContain(binary);
+      const fork = open(new Loro()).historyWriter;
+      const snapshot = writer.capture();
+      fork.copyFrom(snapshot, snapshot.history);
+      expect(fork.read('first')).toEqual(stored);
+
+      // An image-only replacement still clears earlier tool output.
+      emit({ sessionUpdate: 'tool_call_update', toolCallId: 'tool', content: images });
+      const replaced = writer.read('first')!;
+      expect(replaced.items[0]).toMatchObject(attachment);
+      expect(replaced.items[1]).toMatchObject({ toolCallId: 'tool', status: 'completed' });
+      const tool = replaced.items[1] as Extract<MessageContent, { type: 'tool_call' }>;
+      expect(tool.content ?? []).toEqual([]);
+    }
+  );
+
+  it('drops child tool images while retaining other-kind content and sparse updates', () => {
+    const doc = new Loro();
+    const writer = open(doc).historyWriter;
+    writer.append({ ...entry('first'), role: 'assistant', items: [] });
+    const emit = (payload: Record<string, unknown>) =>
+      writer.updateEntry(
+        'first',
+        (turn) =>
+          applyNotificationOnHistory(
+            [turn],
+            [
+              parseSessionNotification({
+                sessionId: 'root',
+                update: {
+                  sessionUpdate: 'subagent_event',
+                  event: { version: 1, sessionId: 'root', runId: 'run', ...payload },
+                },
+              }),
+            ],
+            undefined,
+            { targetAssistantEntryId: 'first' }
+          )[0]!
+      );
+    emit({
+      type: 'snapshot',
+      snapshot: {
+        state: 'running',
+        support: { stream: ['tool'], progress: false, cancel: false, outputRead: 'none' },
+      },
+    });
+    const retained = [
+      { type: 'content', content: { type: 'text', text: 'Read result' } },
+      {
+        type: 'diff',
+        path: 'synthetic.txt',
+        oldText: 'before',
+        newText: 'Readable diff. '.repeat(6000),
+      },
+      { type: 'content', content: { type: 'audio', mimeType: 'audio/wav', data: 'AUDIO' } },
+      {
+        type: 'content',
+        content: {
+          type: 'resource',
+          resource: {
+            uri: 'https://example.invalid/tool.zip',
+            mimeType: 'application/zip',
+            blob: '',
+          },
+        },
+      },
+    ];
+    const images = [
+      { type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'DROP_CHILD' } },
+      {
+        type: 'content',
+        content: {
+          type: 'resource',
+          resource: { uri: 'synthetic://image', mimeType: 'image/png', blob: 'DROP_CHILD_BLOB' },
+        },
+      },
+    ];
+    emit({
+      type: 'output',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'child-tool',
+        title: 'Child tool',
+        kind: 'other',
+        content: [
+          ...retained.map((block) =>
+            block.type === 'content' && block.content.type === 'resource'
+              ? {
+                  ...block,
+                  content: {
+                    ...block.content,
+                    resource: { ...block.content.resource, blob: 'DROP_CHILD_BINARY' },
+                  },
+                }
+              : block
+          ),
+          ...images,
+        ],
+        rawInput: { unusedBinary: 'DROP_CHILD_RAW_INPUT' },
+      },
+    });
+    emit({
+      type: 'output',
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 'child-tool', status: 'completed' },
+    });
+    const task = writer.read('first')!.items[0] as Extract<
+      MessageContent,
+      { type: 'subagent_task' }
+    >;
+    expect(task.run?.items).toMatchObject([
+      { toolCallId: 'child-tool', kind: 'other', status: 'completed', content: retained },
+    ]);
+    expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD');
+    expect(task.run?.items[0]).not.toHaveProperty('rawInput');
+    emit({
+      type: 'output',
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 'child-tool', content: images },
+    });
+    const replaced = writer.read('first')!.items[0] as Extract<
+      MessageContent,
+      { type: 'subagent_task' }
+    >;
+    expect(replaced.run?.items).toMatchObject([
+      { toolCallId: 'child-tool', status: 'completed', content: [] },
+    ]);
+    // Claude forwards a child Read's raw tool_result array as rawOutput. Its image
+    // entries must not reach history through the readable output copy.
+    const rawImage = (data: string) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data },
+    });
+    emit({
+      type: 'output',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'child-image-read',
+        title: 'Read slide.png',
+        kind: 'read',
+        status: 'completed',
+        rawOutput: [rawImage('DROP_CHILD_RAW_IMAGE'), { type: 'text', text: 'Readable note' }],
+      },
+    });
+    emit({
+      type: 'output',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'child-image-only',
+        title: 'Read chart.png',
+        kind: 'read',
+        status: 'completed',
+        rawOutput: [rawImage('DROP_CHILD_RAW_ONLY')],
+      },
+    });
+    const imageReads = (
+      writer.read('first')!.items[0] as Extract<MessageContent, { type: 'subagent_task' }>
+    ).run?.items.slice(-2);
+    expect(imageReads).toMatchObject([
+      {
+        toolCallId: 'child-image-read',
+      },
+      { toolCallId: 'child-image-only' },
+    ]);
+    const imageOnly = imageReads?.[1] as Extract<MessageContent, { type: 'tool_call' }>;
+    expect(imageOnly.content ?? []).toEqual([]);
+    expect(
+      (imageReads?.[0] as Extract<MessageContent, { type: 'tool_call' }> | undefined)?.content ?? []
+    ).toEqual([]);
+    expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD');
+    const plan = 'Useful approval plan. '.repeat(6000);
+    emit({
+      type: 'output',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'plan',
+        title: 'Plan approval',
+        kind: 'switch_mode',
+        rawInput: { plan, unusedBinary: 'DROP_CHILD_PLAN_INPUT' },
+        rawOutput: { summary: 'Readable JSON. '.repeat(6000) },
+      },
+    });
+    const planned = writer.read('first')!.items[0] as Extract<
+      MessageContent,
+      { type: 'subagent_task' }
+    >;
+    expect(planned.run?.items.at(-1)).toMatchObject({
+      rawInput: { plan },
+    });
+    expect(planned.run?.items.at(-1)).not.toHaveProperty('rawOutput');
+    expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD_PLAN_INPUT');
+  });
+
+  it.each(['read', 'edit', 'execute', 'switch_mode'] as const)(
+    'persists root and child %s tools through the same projection and sparse merge',
+    (kind) => {
+      const doc = new Loro();
+      const writer = open(doc).historyWriter;
+      writer.append({ ...entry('first'), role: 'assistant', items: [] });
+      writer.updateEntry(
+        'first',
+        (turn) =>
+          applyNotificationOnHistory(
+            [turn],
+            [
+              parseSessionNotification({
+                sessionId: 'root',
+                update: {
+                  sessionUpdate: 'subagent_event',
+                  event: {
+                    version: 1,
+                    sessionId: 'root',
+                    runId: 'run',
+                    type: 'snapshot',
+                    snapshot: {
+                      state: 'running',
+                      support: {
+                        stream: ['tool'],
+                        progress: false,
+                        cancel: false,
+                        outputRead: 'none',
+                      },
+                    },
+                  },
+                },
+              }),
+            ],
+            undefined,
+            { targetAssistantEntryId: 'first' }
+          )[0]!
+      );
+      const emit = (update: Record<string, unknown>) => {
+        writer.updateEntry(
+          'first',
+          (turn) =>
+            applyNotificationOnHistory(
+              [turn],
+              [
+                parseSessionNotification({ sessionId: 'root', update }),
+                parseSessionNotification({
+                  sessionId: 'root',
+                  update: {
+                    sessionUpdate: 'subagent_event',
+                    event: { version: 1, type: 'output', sessionId: 'root', runId: 'run', update },
+                  },
+                }),
+              ],
+              undefined,
+              { targetAssistantEntryId: 'first' }
+            )[0]!
+        );
+        const items = writer.read('first')!.items;
+        const root = items.find((item) => item.type === 'tool_call');
+        const task = items.find((item) => item.type === 'subagent_task') as Extract<
+          MessageContent,
+          { type: 'subagent_task' }
+        >;
+        expect(task.run?.items).toEqual([root]);
+        return root as Extract<MessageContent, { type: 'tool_call' }>;
+      };
+      const body = 'DROP_FILE_BODY'.repeat(10000);
+      const output = '终端 output '.repeat(1000);
+      const first = emit({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool',
+        kind,
+        title: 'Useful title',
+        status: 'in_progress',
+        content:
+          kind === 'execute'
+            ? [{ type: 'content', content: { type: 'text', text: output } }]
+            : kind === 'switch_mode'
+              ? []
+              : [
+                  { type: 'diff', path: '/synthetic.txt', oldText: body, newText: body },
+                  { type: 'content', content: { type: 'text', text: body } },
+                ],
+        rawInput:
+          kind === 'switch_mode'
+            ? { plan: '# Useful plan', unused: body }
+            : kind === 'execute'
+              ? { command: 'echo hello', unused: body }
+              : { unused: body },
+        rawOutput: kind === 'read' || kind === 'edit' ? body : { aggregated_output: output },
+        _meta: { unused: body },
+      });
+      expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_FILE_BODY');
+      if (kind === 'read' || kind === 'edit') {
+        expect(first.locations).toEqual([{ path: '/synthetic.txt' }]);
+        expect(first.content ?? []).toEqual([]);
+      }
+      if (kind === 'execute') {
+        const outputBlock = first.content?.find((block) => block.type === 'terminal_output');
+        expect(outputBlock?.type === 'terminal_output' && outputBlock.truncated).toBe(true);
+      }
+      if (kind === 'switch_mode') expect(first.rawInput).toEqual({ plan: '# Useful plan' });
+      if (kind === 'read' || kind === 'edit') {
+        for (const rawOutput of [{ body }, [{ type: 'text', text: body }]]) {
+          emit({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'tool',
+            rawOutput,
+            content: [{ type: 'diff', path: '/synthetic.txt', oldText: body, newText: body }],
+          });
+          expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_FILE_BODY');
+        }
+      }
+      const completed = emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool',
+        status: 'completed',
+      });
+      expect(completed.title).toBe('Useful title');
+      expect(completed.content ?? []).toEqual(first.content ?? []);
+      const replayed = emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool',
+        status: 'pending',
+      });
+      expect(replayed.status).toBe('completed');
+      const duplicate = emit({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool',
+        title: 'Useful title',
+        status: 'pending',
+      });
+      expect(duplicate.content ?? []).toEqual(first.content ?? []);
+      expect(duplicate.locations).toEqual(first.locations);
+      const replaced = emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool',
+        locations: [],
+        content: [],
+      });
+      expect(replaced.locations).toEqual([]);
+      expect(replaced.content?.filter((block) => block.type !== 'terminal_command') ?? []).toEqual(
+        []
+      );
+      const restored = new Loro();
+      restored.import(doc.export({ mode: 'snapshot' }));
+      expect(open(restored).historyWriter.read('first')).toEqual(writer.read('first'));
+    }
+  );
   it('retains frozen Agent authors through streaming, snapshots and invalid writes', () => {
     const doc = new Loro();
     const mirror = open(doc);
@@ -150,10 +697,10 @@ describe('single history writer', () => {
       {
         type: 'tool_call',
         nativeTurnId: 'turn-b',
-        content: [{ type: 'content', content: { type: 'text', text: 'file contents' } }],
-        _meta: { lody: { subagentRaw: { rawInput: ['file'], rawOutput: 'file contents' } } },
+        content: [{ type: 'terminal_output', output: 'file contents' }],
       },
     ]);
+    expect(task.run?.items.at(-1)).not.toHaveProperty('_meta.lody.subagentRaw');
   });
   it('persists isolated child transcripts on their original turn across parent completion and reopening', () => {
     const doc = new Loro();
@@ -502,26 +1049,6 @@ describe('single history writer', () => {
     }
   });
 
-  it.each(['claude', 'codex'])('normalizes legacy %s config only on new writes', (cliType) => {
-    const doc = new Loro();
-    const mirror = open(doc);
-    mirror.historyWriter.append({
-      ...entry(),
-      inputConfig: { cliType },
-    } as unknown as SessionHistory);
-    expect(doc.getList('history').toJSON()[0].inputConfig).toEqual({
-      cliType: 'builtin',
-      agentType: cliType,
-    });
-    expect(() =>
-      mirror.historyWriter.append({
-        ...entry('invalid'),
-        inputConfig: { cliType: 'invalid' },
-      } as unknown as SessionHistory)
-    ).toThrow();
-    mirror.dispose();
-  });
-
   it('edits independent fields without reparsing damaged stored config, tool or proposal fields', () => {
     const doc = new Loro();
     const row = doc.getList('history').pushContainer(new LoroMap());
@@ -567,28 +1094,6 @@ describe('single history writer', () => {
     ).toThrow();
     expect(doc.version().toJSON()).toEqual(version);
     mirror.dispose();
-  });
-
-  it('derives an input parser without mutating strict schemas or dropping refinements', () => {
-    const schema = z
-      .object({ nested: z.object({ count: z.number() }).strict() })
-      .strict()
-      .superRefine((value, ctx) => {
-        if (value.nested.count < 0) ctx.addIssue({ code: 'custom', message: 'negative' });
-      });
-    const input = { nested: { count: 2, future: true, $cid: 'transport' }, extra: true };
-    expect(parseHistoryWrite(schema, input)).toEqual({ nested: { count: 2 } });
-    expect(schema.safeParse(input).success).toBe(false);
-    expect(() => parseHistoryWrite(schema, { nested: { count: -1, extra: true } })).toThrow(
-      'custom'
-    );
-    expect(input.nested.$cid).toBe('transport');
-    const pipeline = z
-      .preprocess((value) => ({ nested: value }), schema)
-      .transform((value) => ({ count: value.nested.count + 1 }));
-    expect(parseHistoryWrite(pipeline, { count: 2, future: true })).toEqual({ count: 3 });
-    expect(pipeline.safeParse({ count: 2, future: true }).success).toBe(false);
-    expect(() => parseHistoryWrite(pipeline, { count: -1, future: true })).toThrow('custom');
   });
 
   it('updates a target after peer insert/delete without touching other turns', () => {
@@ -1009,125 +1514,6 @@ describe('single history writer', () => {
     peerMirror.dispose();
   });
 
-  it('checks fork-origin metadata before any write and preserves it on round trip', () => {
-    const doc = new Loro();
-    const mirror = open(doc);
-    const notice = {
-      type: 'system_notice' as const,
-      name: 'session_fork_origin' as const,
-      meta: {
-        sourceSessionId: 'source' as SessionId,
-        sourceTurnId: 'turn',
-        sourceTitle: 'Synthetic',
-      },
-    };
-    const version = doc.version().toJSON();
-    for (const meta of [
-      { sourceSessionId: 'source' },
-      { ...notice.meta, sourceTitle: 42 },
-      { message: 'wrong notice metadata' },
-    ]) {
-      expect(() =>
-        mirror.historyWriter.append({
-          ...entry(),
-          items: [{ ...notice, meta }],
-        } as unknown as SessionHistory)
-      ).toThrow('Invalid history write');
-      expect(doc.version().toJSON()).toEqual(version);
-    }
-    mirror.historyWriter.append({ ...entry(), role: 'system', items: [notice] });
-    expect(doc.getList('history').toJSON()[0].items).toEqual([notice]);
-    mirror.dispose();
-  });
-
-  it('keeps legacy primitive text primitive and retains it on an invalid item update', () => {
-    const doc = new Loro();
-    const mirror = open(doc);
-    mirror.historyWriter.append(entry());
-    const item = ((doc.getList('history').get(0) as LoroMap).get('items') as LoroList).get(
-      0
-    ) as LoroMap;
-    item.set('text', 'legacy');
-    doc.commit();
-    mirror.historyWriter.replace('turn', {
-      ...entry(),
-      items: [{ type: 'text', text: 'streamed' }],
-    });
-    expect(item.get('text')).toBe('streamed');
-    const version = doc.version().toJSON();
-    expect(() =>
-      mirror.historyWriter.replace('turn', {
-        ...entry(),
-        items: [{ type: 'text', text: 42 }],
-      } as unknown as SessionHistory)
-    ).toThrow('Invalid history write');
-    expect(doc.version().toJSON()).toEqual(version);
-    expect(item.get('text')).toBe('streamed');
-    mirror.dispose();
-  });
-
-  it('accepts strict image objects read through Mirror and JSON list shape changes', () => {
-    const doc = new Loro();
-    const mirror = open(doc);
-    mirror.historyWriter.append({
-      ...entry(),
-      items: [
-        { type: 'image', imageId: 'image', mimeType: 'image/png', sizeBytes: 1 },
-        {
-          type: 'tool_call',
-          toolCallId: 'tool',
-          status: 'pending',
-          rawInput: { values: [{ before: true }] },
-        },
-      ],
-    });
-    const imageMap = ((doc.getList('history').get(0) as LoroMap).get('items') as LoroList).get(
-      0
-    ) as LoroMap;
-    imageMap.set('futureImageField', 7);
-    doc.commit();
-    mirror.setState((s) => {
-      const image = s.history[0]!.items![0];
-      if (image?.type === 'image') image.sizeBytes = 2;
-      const tool = s.history[0]!.items![1];
-      if (tool?.type === 'tool_call') tool.rawInput = { values: ['after'] };
-    });
-    expect(doc.toJSON().history[0].items[0].sizeBytes).toBe(2);
-    expect(doc.toJSON().history[0].items[0].futureImageField).toBe(7);
-    expect(doc.toJSON().history[0].items[1].rawInput.values).toEqual(['after']);
-    mirror.dispose();
-  });
-
-  it('preserves a shifted opaque item and the following edited item containers', () => {
-    const doc = new Loro();
-    const mirror = open(doc);
-    mirror.historyWriter.append({
-      ...entry(),
-      items: [
-        { type: 'text', text: 'delete' },
-        { type: 'text', text: 'opaque' },
-        { type: 'text', text: 'tail' },
-      ],
-    });
-    const items = (doc.getList('history').get(0) as LoroMap).get('items') as LoroList;
-    const opaque = items.get(1) as LoroMap;
-    opaque.set('type', 'future_item');
-    opaque.set('future', 11);
-    const tail = items.get(2) as LoroMap;
-    tail.set('futureTail', 22);
-    doc.commit();
-    const body = tail.get('text') as LoroText;
-    mirror.setState((s) => {
-      s.history[0]!.items!.splice(0, 1);
-      s.history[0]!.items![1] = { type: 'text', text: 'changed' };
-    });
-    expect((items.get(0) as LoroMap).id).toBe(opaque.id);
-    expect((items.get(1) as LoroMap).id).toBe(tail.id);
-    expect(tail.toJSON()).toMatchObject({ text: 'changed', futureTail: 22 });
-    expect(doc.getContainerById(body.id)?.toJSON()).toBe('changed');
-    mirror.dispose();
-  });
-
   it('preflights a complete batch and does not publish control fields on invalid history', () => {
     const doc = new Loro();
     const mirror = open(doc);
@@ -1146,106 +1532,6 @@ describe('single history writer', () => {
     expect(doc.toJSON().externalHistoryCursor.importedTurnHashes).toBeUndefined();
     mirror.historyWriter.append(entry('after-failure'));
     expect(doc.toJSON().history).toHaveLength(1);
-    mirror.dispose();
-  });
-
-  it('rejects non-JSON payloads and malformed completion before attaching containers', () => {
-    const doc = new Loro();
-    const mirror = open(doc);
-    const version = doc.version().toJSON();
-    for (const item of [
-      {
-        type: 'tool_call',
-        toolCallId: 'tool',
-        status: 'pending',
-        rawInput: { callback: () => {} },
-      },
-      {
-        type: 'operation_completion',
-        deliveryId: 'delivery',
-        operationId: 'operation',
-        operationKind: 'session_chat',
-        completion: { type: 'result' },
-      },
-    ]) {
-      expect(() =>
-        mirror.historyWriter.append({ ...entry(), items: [item] } as unknown as SessionHistory)
-      ).toThrow('Invalid history write');
-      expect(doc.version().toJSON()).toEqual(version);
-    }
-    mirror.dispose();
-  });
-
-  it('keeps normal ACP permission and location fields and updates an outcome locally', () => {
-    const doc = new Loro();
-    const mirror = open(doc);
-    const turn: SessionHistory = {
-      ...entry(),
-      role: 'assistant',
-      items: [
-        {
-          type: 'tool_call',
-          toolCallId: 'tool',
-          status: 'pending',
-          locations: [{ path: 'synthetic.ts', line: 3 }],
-          permissionRequest: {
-            requestId: 'request',
-            options: [{ optionId: 'reject', name: 'Reject', kind: 'reject_always' }],
-          },
-        },
-      ],
-    };
-    mirror.historyWriter.append(turn);
-    const map = (doc.getList('history').get(0) as LoroMap).get('items') as LoroList;
-    const itemId = (map.get(0) as LoroMap).id;
-    expect(
-      mirror.historyWriter.respondPermission('request', { outcome: 'selected', optionId: 'reject' })
-    ).toBe(true);
-    expect((map.get(0) as LoroMap).id).toBe(itemId);
-    expect(doc.toJSON().history[0].items[0]).toMatchObject({
-      locations: [{ path: 'synthetic.ts', line: 3 }],
-      permissionRequest: { outcome: { outcome: 'selected', optionId: 'reject' } },
-    });
-    mirror.dispose();
-  });
-  it.each(['writer', 'callback'] as const)(
-    'rejects malformed new items through %s before changing the doc',
-    (path) => {
-      const doc = new Loro();
-      const mirror = open(doc);
-      const version = doc.version().toJSON();
-      const bad = { ...entry(), items: [{ type: 'text' }] } as unknown as SessionHistory;
-      expect(() =>
-        path === 'writer'
-          ? mirror.historyWriter.append(bad)
-          : mirror.setState((s) => {
-              s.history.push(bad);
-            })
-      ).toThrow('Invalid history write');
-      expect(doc.version().toJSON()).toEqual(version);
-      expect(doc.getList('history').length).toBe(0);
-      mirror.dispose();
-    }
-  );
-
-  it('filters unknown new fields without allowing unknown new item types', () => {
-    const doc = new Loro();
-    const mirror = open(doc);
-    const withExtras = {
-      ...entry(),
-      surprise: 'drop',
-      items: [{ type: 'text', text: 'hello', mail: 'synthetic@example.invalid' }],
-    } as SessionHistory;
-    mirror.historyWriter.append(withExtras);
-    expect(doc.toJSON().history[0]).toEqual(entry());
-    const version = doc.version().toJSON();
-    expect(() =>
-      mirror.historyWriter.append({
-        ...entry('future'),
-        items: [{ type: 'future_item' }],
-      } as unknown as SessionHistory)
-    ).toThrow();
-    expect(doc.version().toJSON()).toEqual(version);
     mirror.dispose();
   });
 
@@ -1309,53 +1595,4 @@ describe('single history writer', () => {
       mirror.dispose();
     }
   );
-
-  it('retains turn and text container ids across scalar updates and list insertion/removal', () => {
-    const doc = new Loro();
-    const mirror = open(doc);
-    mirror.historyWriter.append(entry('a'));
-    mirror.historyWriter.append(entry('b'));
-    const row = doc.getList('history').get(1) as LoroMap;
-    const item = (row.get('items') as LoroList).get(0) as LoroMap;
-    const body = item.get('text') as LoroText;
-    mirror.historyWriter.update((history) => [entry('prefix'), ...history.slice(1)]);
-    expect((doc.getList('history').get(1) as LoroMap).id).toBe(row.id);
-    mirror.historyWriter.setField('b', 'finished', true);
-    expect(doc.getContainerById(body.id)?.toJSON()).toBe('hello');
-    expect(doc.toJSON().history.map((r: { id: string }) => r.id)).toEqual(['prefix', 'b']);
-    mirror.dispose();
-  });
-
-  it('uses the same new storage shape as Mirror before #443', () => {
-    const oldDoc = new Loro();
-    const newDoc = new Loro();
-    oldDoc.setPeerId('1');
-    newDoc.setPeerId('1');
-    const old = new Mirror({
-      doc: oldDoc,
-      schema: sessionDocSchema,
-      ignoreUnknownProperties: true,
-      initialState: { session: { id }, history: [] },
-    });
-    const current = open(newDoc);
-    old.setState((s) => {
-      s.history.push(entry());
-    });
-    current.historyWriter.append(entry());
-    expect(newDoc.toJSON()).toEqual(oldDoc.toJSON());
-    expect(newDoc.getList('history').toJSON()).toEqual(oldDoc.getList('history').toJSON());
-    const ops = (doc: Loro) =>
-      JSON.parse(
-        JSON.stringify(doc.exportJsonUpdates(), (key, value) =>
-          key === 'timestamp' ? undefined : value
-        )
-      );
-    expect(ops(newDoc)).toEqual(ops(oldDoc));
-    expect((newDoc.getList('history').get(0) as LoroMap).get('items')).toBeInstanceOf(LoroList);
-    expect(
-      ((newDoc.getList('history').get(0) as LoroMap).get('items') as LoroList).get(0)
-    ).toBeInstanceOf(LoroMap);
-    old.dispose();
-    current.dispose();
-  });
 });

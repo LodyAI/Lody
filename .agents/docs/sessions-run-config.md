@@ -4,6 +4,12 @@ The composer footer knobs (Agent / Model / Interaction / Reasoning / Permission)
 Agent Role selection on every surface, attachments, and the two durable run-config
 authorities.
 
+Persisted and draft composers share `useSessionAcpSelectorContext`, which subscribes
+to the exact bound Provider and passes its runtime overrides to model and command
+catalog readers. This keeps extension-enabled Pi catalogs usable while rejecting
+catalogs for removed or changed selections; a missing or mismatched Provider cannot
+lend another launch configuration's catalog.
+
 Independent Plan uses ACP Core's boolean `plan_mode`. Shared capability discovery
 and selector ordering recognize it as Plan; UI changes and semantic run-config
 dispatch send booleans without changing permissions. Static Codex, Grok, Kimi,
@@ -30,7 +36,11 @@ this page is the full text of the rules summarised there.
   Agent/Model/Interaction/Reasoning plus provider-defined select side submenus +
   Plan/Fast toggle rows) and
   `DesktopPermissionModeButton` (permission icon + full name; flat permission
-  list). Explicit `_permission` config options take precedence over legacy ACP
+  list). Its tooltip/aria noun follows what the face resolved — "Permission"
+  only for an explicit `_permission` option, otherwise the provider's selector
+  label or "Mode" (`permissionModeControlLabel`), so a mode list such as
+  Agent/Plan/Ask never reads "Permission". Explicit `_permission` config
+  options take precedence over legacy ACP
   modes; provider interaction modes stay inside the run-config dropdown. Both
   are also used by the desktop chat landing; `DesktopRunConfigMenu` receives an
   explicit agent selection/machine scope rather than reading `SessionMeta`.
@@ -44,12 +54,6 @@ this page is the full text of the rules summarised there.
   Submenus do not center against the whole parent
   popup or clamp to its bottom. Intent:
   [run-config submenu placement](../../specs/composer-run-config-submenu-placement.md).
-  Builtin DeepSeek Harness sessions using a non-Pro model show the same linked
-  delegation-cost warning here and in `MobileRunConfigSheet`: until upstream DSH
-  fixes child-route inheritance, a delegated child may use the session's
-  creation-time DeepSeek-V4-Pro seed rather than the parent's visible model.
-  Keep the warning tied to that agent/model combination and its upstream
-  discussion rather than turning it into a global banner.
   Agent/Model/Reasoning option selection closes the dropdown and must not return
   keyboard focus to its trigger; Plan/Fast toggle rows intentionally stay open.
   Once the model list reaches `OPTION_SEARCH_MIN_OPTIONS`
@@ -119,12 +123,19 @@ this page is the full text of the rules summarised there.
   ready because its transient provider defaults are not a valid run config.
   Programmatic Turns inherit the current
   Role only after their final run-config overrides are applied; if an override
-  breaks a value the Role pins, freeze explicit None instead of a lying Role id.
+  breaks a non-Plan value the Role pins, freeze explicit None. Independent Plan
+  is a per-turn override: valid boolean `plan_mode` toggles and legacy
+  `collaboration_mode` default/plan switches retain the Role, revision, snapshot,
+  and memory. Selecting the Role still seeds its saved Plan value; dispatch uses
+  the actual composer/override value, without rewriting the Role catalog. Missing
+  or invalid Plan values still fail matching. Permission-based Plan (`modeId`
+  or permission options) remains a pinned permission, not this exception.
   A legacy/non-composer Turn with both fields absent inherits the most recent
   explicit selection; only `agentRoleId: null` means None. Keep unsynced catalog
   rows and not-yet-hydrated Session docs in the unknown state — neither may
   turn a durable Role into explicit None. If the catalog row is still unknown,
-  an unsent manual run-config edit drops stale Role provenance to unknown.
+  an unsent manual run-config edit freezes explicit None for the outgoing Turn,
+  so programmatic fallback cannot reattach a stale Role or its memory binding.
   Session provenance remains the legacy fallback when the selected Turn
   predates these fields; never rewrite `SessionMeta.agentRoleId`, which records
   creation provenance only.
@@ -184,18 +195,26 @@ this page is the full text of the rules summarised there.
   there instead of being forced in. That channel is a PURE DERIVATION: user
   edits are the only stored selection state, and effective values resolve per
   render (user edit > runtime baseline > turn preference > capability default;
-  a full runtime snapshot owns the non-user config table). Never reintroduce a
+  a full runtime snapshot owns the non-user config table). Existing-session knob
+  edits, including explicit Fast off, live in a sparse account/workspace/session/
+  target-scoped draft. A successful local send consumes only its captured field
+  generations; remote Turns and navigation preserve unsent edits. Returning to the
+  same target restores its draft. Confirmed deletion and account teardown invalidate
+  stale callbacks. See [private run-config drafts](../../specs/session-run-config-drafts.md).
+  Landing and new-session drafts retain their component-local selection lifetime.
+  Never reintroduce a
   reducer that stores the resolved selection or an effect that reconciles it —
   two dispatches disagreeing about a runtime-omitted key plus options rebuilt
   from the selection was a synchronous #185 render loop on session open. The footer names a Role only while
   `isComposerAgentRoleApplied` still holds (`lib/composer-agent-roles.ts`):
-  every value the Role pins is what will run. Moving a knob takes the name away
+  every non-Plan pin matches, and independent Plan may be overridden as above.
+  Moving another pinned knob takes the name away
   rather than clearing the preference, which would re-seed the value just
   changed. With a Role selected the TRIGGER carries the Role and nothing else,
   and the model/reasoning/permission/Plan/Fast values render beside it as inert
-  dimmed text: a Role IS the whole configuration, so changing one of those by
-  hand is exactly what unnames it, and a knob that silently unnames the thing
-  next to it is a trap. Permission is one of those values
+  dimmed text. Changing a pinned non-Plan value by hand unnames the Role;
+  independent Plan remains adjustable inside the menu. Permission is pinned
+  when present
   (`doesAgentRolePinPermissionMode`), so `DesktopPermissionModeButton` is not
   rendered at all while a Role that pins it is selected — but it STAYS a button
   when the Role pins nothing there, because an agent with no permission control
@@ -249,6 +268,10 @@ this page is the full text of the rules summarised there.
   only once the workspace catalog can answer — before that, "not in the list"
   means "not loaded yet", so the stored id must not be overwritten with null.
   `SessionMeta.agentRoleId`/`agentRoleRevision` record provenance only.
+  Configuration-source caching retains detached tail metadata, memoized by weak
+  message identity, and lazy index rows for older user turns. This preserves array
+  reuse without retaining evicted message bodies. The [streaming-cost decision](../notes/implemented/bug-fix/2026-09-16-streaming-cost-scales-with-conversation-length.md)
+  explains the full tail configuration and lazy historical-source distinction.
   A Role also appears in **Recently used**, because a Role IS one of those whole
   combinations: the record carries `agentRoleId`, that id is part of
   `getRecentRunConfigKey` (the same knobs picked by hand are a DIFFERENT entry —
@@ -261,8 +284,10 @@ this page is the full text of the rules summarised there.
   its `inputConfig`; `resolveSessionConversationConfig` reads the latest accepted
   or queued Turn. ACP `config_option_update`/`current_mode_update` events update
   the separate shared `SessionDoc.acpRuntimeConfig` baseline, causally fenced by
-  the driving `userTurnId`. A queued Turn and a newer accepted Turn always beat
-  an older runtime event. Apply that shared baseline only to composer fields the
+  the driving `userTurnId`. The composer checks that identity against indexed
+  configuration sources, so unloaded message bodies cannot discard a valid runtime
+  baseline and revive an older Plan request. A queued Turn and a newer accepted Turn
+  always beat an older runtime event. Apply that shared baseline only to composer fields the
   local user has not edited; local unsent choices remain a private draft until
   send freezes them into a Turn. Never infer runtime config from a permission
   click or its history outcome: consent is not proof that the agent applied the

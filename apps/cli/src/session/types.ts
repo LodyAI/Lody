@@ -13,6 +13,7 @@ import {
   type SessionTurnInputConfig,
 } from '@lody/shared';
 import type { SessionActivePresencePhase } from '@/lib/loro/session-active-presence';
+import type { SessionStartStage } from './session-start-stage';
 /**
  * 会话配置
  */
@@ -26,25 +27,31 @@ export interface SessionConfig {
   agentCliType: AgentConfigCliType;
   agentType: string;
   /** Config selected by the driving turn and carried into ACP session startup. */
+  modelId?: SessionTurnInputConfig['modelId'];
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
   /** Selection carried by the dispatching turn; ACP startup must not re-read history for it. */
+  memory?: import('@lody/shared').MemoryBinding;
   mcpServerIds: McpServerId[];
   /** Launch spec for this execution request; durable default lives on the agent config. */
   customAcp?: CustomAcpLaunchSpec;
   /** Advanced runtime binary override for builtin Claude/Codex. */
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   project?: ProjectRef;
+  projectRun?: import('@lody/shared').SessionProjectRun;
+  /**
+   * Encrypted turns: rejects execution inputs outside the authorized project scope.
+   * Called on every Project group or parent project read from synced metadata,
+   * because those can change after authorization.
+   */
+  authorizeExecutionInputs?: (input: {
+    project?: ProjectRef;
+    projectRun?: import('@lody/shared').SessionProjectRun;
+  }) => Promise<void>;
   // undefined means create a new session
   sessionId?: SessionId;
   // promptBuildConfig: PromptBuildConfig;
   env?: Record<string, string>;
-  /** Runtime-only policy, derived from the driving requester (never environment flags). */
-  githubCredentialPolicy?: {
-    allowLocalAuth: boolean;
-    /** Requester enabled "Act as you"; commits and credentials prefer their identity. */
-    personalEnabled?: boolean;
-    stateFilePath?: string;
-  };
   assumeDocExisting?: boolean;
   // for local session
   title?: string;
@@ -85,6 +92,9 @@ export interface SessionConfig {
 
   /** Reports active-presence phase to the owner; does not write presence directly. */
   onPresencePhase?: (phase: SessionActivePresencePhase, detail?: string) => void;
+
+  /** Reports each start step as it begins, so a failure can name where it stopped. */
+  onStartStage?: (stage: SessionStartStage) => void;
 
   /** Parent session ID for child tab sessions. When set, reuse the parent's workspace directory. */
   parentSessionId?: SessionId;

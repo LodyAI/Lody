@@ -8,7 +8,8 @@ import { Button } from '@lody/ui/button';
  * (`ai-gui/view.tsx`) and the Code Collab file preview
  * (`sessions/session-file-image-preview.tsx`) both mount it, so the gestures
  * stay identical: pinch-to-zoom, double-tap zoom, wheel zoom, drag-to-pan, and
- * a close button in the top-right corner.
+ * a close button in the top-right corner. Touch holds open the image action menu;
+ * move or add a second finger before 500 ms to keep panning/pinching instead.
  */
 const meta = {
   title: 'Shared/ZoomableImageViewer',
@@ -55,11 +56,14 @@ const GALLERY_IMAGES = [
 function ViewerHarness({
   images,
   initiallyOpen = true,
+  allowAnnotation = false,
 }: {
   images: { key: string; src: string }[];
   initiallyOpen?: boolean;
+  allowAnnotation?: boolean;
 }) {
   const [index, setIndex] = useState<number | null>(initiallyOpen ? 0 : null);
+  const [annotatedKey, setAnnotatedKey] = useState('');
 
   return (
     <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-muted/20">
@@ -70,16 +74,30 @@ function ViewerHarness({
       <Button onClick={() => setIndex(1)} disabled={images.length < 2}>
         before.png
       </Button>
+      {annotatedKey && <p>Annotating {annotatedKey}</p>}
       <ZoomableImageViewer
         open={index !== null}
         onClose={() => setIndex(null)}
         images={images}
         index={index ?? 0}
         onIndexChange={setIndex}
+        onAnnotate={
+          allowAnnotation
+            ? (item) => {
+                setAnnotatedKey(item.key);
+                setIndex(null);
+              }
+            : undefined
+        }
       />
     </div>
   );
 }
+
+export const AnnotateGallery: Story = {
+  args: { open: true, onClose: () => {}, images: GALLERY_IMAGES, index: 0 },
+  render: () => <ViewerHarness images={GALLERY_IMAGES} allowAnnotation />,
+};
 
 /** One image: no arrows, close button only. Matches the file preview. */
 export const SingleImage: Story = {
@@ -105,4 +123,11 @@ export const Gallery: Story = {
 export const KeyboardGallery: Story = {
   args: { open: false, onClose: () => {}, images: GALLERY_IMAGES, index: 0 },
   render: () => <ViewerHarness images={GALLERY_IMAGES} initiallyOpen={false} />,
+};
+
+/** Use touch emulation or a device: hold the photo, then test menu dismissal and pinch cancellation. */
+export const TouchGallery: Story = {
+  args: { open: true, onClose: () => {}, images: GALLERY_IMAGES, index: 0 },
+  globals: { viewport: { value: 'mobile1', isRotated: false } },
+  render: () => <ViewerHarness images={GALLERY_IMAGES} />,
 };

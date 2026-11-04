@@ -22,16 +22,25 @@ bound, so the windowed path avoids mirroring it into memory as an array. Everyth
 `getState()` has no `history` key and `setState` receives a draft without one,
 so the ordinary spellings of a second path do not compile. What types cannot
 close is a deliberate escape — a cast that puts the key back, or reaching past
-the store into the raw `LoroDoc` — and
-`tests/no-materialized-history-in-components.test.ts` fails on those. No component reads the raw history list; composition injects the shared reader.
+the store into the raw `LoroDoc`. Do not bypass these boundaries. No component
+reads the raw history list; composition injects the shared reader.
 
 Full-history actions use the authoritative consistent full-read operation.
 Performance comparisons must use the current full-Mirror baseline.
 
+## Conversation exports
+
+Conversation Markdown/PNG exports use `usePlaintextCopy` before capture and
+repeat runtime admission and its source guard before output. Unknown cloud mode
+cannot authorize a copy; encrypted copies require a fresh explicit choice.
+Cancellation retains selection and cannot remove a user destination.
+[Ownership](hooks/README.md#explicit-plaintext-copies).
+
 ## Lightweight hosted entries
 
 - `lib/client-build-info.ts` owns build provenance for About and reports. Bug report
-  metadata contains only build constants, distinct from remote machine logs.
+  diagnostics use `lib/client-diagnostics.ts`'s environment allowlist and a bounded
+  tail from `lib/client-log.ts`, distinct from remote machine logs.
 
 - Public/auth entry points that bypass the full product router import route-agnostic
   surfaces. Keep host navigation behind callback props so those surfaces do not import
@@ -41,11 +50,11 @@ Performance comparisons must use the current full-Mirror baseline.
 
 ## Soft-keyboard viewport handling
 
-- Native non-iOS side drawers without snap points use `ui/drawer.tsx`'s live
-  viewport bottom inset when input repositioning is enabled. Never cache a
-  keyboard-shrunken drawer height or infer keyboard visibility from focus:
-  Android-compatible shells can resize the WebView and retain input focus on hide.
-  Preserve the separate iOS native keyboard offset and bottom-sheet handling.
+- Side drawers without snap points keep CSS sizing on native shells or explicit
+  `repositionInputs={true}`. `ui/drawer.tsx` disables Vaul's cached height there:
+  iOS surfaces own their native keyboard offset; other hosts use its live viewport
+  bottom inset. Never cache a focused drawer's height across folds/rotation or infer
+  keyboard visibility from focus. Preserve separate bottom-sheet handling.
   `repositionInputs={false}` explicitly opts out of both Vaul repositioning and
   this inset; callers using it own their keyboard layout.
 
@@ -86,11 +95,12 @@ Performance comparisons must use the current full-Mirror baseline.
 
 ## Workspace transitions
 
-- Default app entry opens the workspace chat landing; never persist or restore the
-  last visited route. Explicit deep links and requested window targets retain their destination.
-  Entry/workspace gate redirects use `BootNavigate`; `PreloadedMainLayout` owns its
-  boot-shell Suspense fallback. Keep a visible shell until the destination commits;
-  the hidden warm window's `/` remains neutral.
+- Default to chat; never restore the last route; preserve deep links and window
+  targets. `BootNavigate` hints geometry; `PreloadedMainLayout` owns code fallback.
+  `BootShellBoundary` inside the route error boundary holds one shell through gates
+  until recovery or destination commits; animation never gates readiness. Boot and
+  real cards share frames. `DocumentStyle` owns updates; retire inline first-paint
+  styles only after live commit. Keep the hidden warm window's `/` neutral.
 
 - Dock counts derive from complete active metadata and the sidebar's child activity
   summary. Publish absolute snapshots, including zero, on change and every 30 seconds;
@@ -105,13 +115,16 @@ Performance comparisons must use the current full-Mirror baseline.
   and the mobile workspace stack do not start early. The workspace identity's
   syncing state follows that same scoped readiness, not the coarser connection
   state; an online transport does not imply that workspace data is ready.
+  A cold start (no workspace ready yet in this page) has no layout to keep: it
+  continues the boot shell, and only a real switch says "Switching workspace"
+  ([decision](../../../.agents/notes/implemented/bug-fix/2026-10-16-cold-start-workspace-wait.md)).
 
 ## Billing data
 
-- When authenticated user and workspace resolution completes, preload the billing
-  overview into the existing session-scoped billing-page cache. The preload is only
-  a latency optimization: billing permissions, quota checks, destructive-operation
-  guards, and Stripe invoice history keep their existing live/on-demand data paths.
+- After auth/workspace resolution, preload billing overview into the session-scoped
+  cache for latency only. A rejected preload stays inside its leaf and never reaches
+  the route error boundary. Permissions, quotas, destructive guards, and Stripe invoice
+  history remain live/on-demand.
 
 ## ACP selectors
 

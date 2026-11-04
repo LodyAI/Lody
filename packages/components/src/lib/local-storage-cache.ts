@@ -210,6 +210,7 @@ export const builtinPathLauncherIdSchema = z.enum([
   'sublime',
   'warp',
   'xcode',
+  'delta',
 ]);
 
 export type BuiltinPathLauncherId = z.infer<typeof builtinPathLauncherIdSchema>;

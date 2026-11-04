@@ -14,6 +14,18 @@ Translation: current
 Agent 可用性、目标会话检查和凭据排除保持不变。移除这道重复检查不会自动
 批准 provider 的权限请求。
 
+## 保留执行设置的类型
+
+复用会话控件也必须复用 ACP 的 `string | boolean` 值契约。默认值、编辑、
+会话/Role 提案、持久化定义及准备好的会话轮次均保留原始类型；select 的
+字符串 `"false"` 不是布尔值。凭据排除及选项大小限制保持有效。
+
+定时任务协议 v2 声明此契约。新客户端创建、编辑、恢复、执行时要求目标支持
+v2；旧机器仍可查看、暂停及删除任务。旧定义保持可读，不改写 Registry 指纹、
+activation 或冻结的运行标识。显示和交接时，仅对目标 Agent 声明为 boolean
+的选项转换精确的旧值 `"true"`/`"false"`。未知选项和其他值仍由普通会话校验，
+缺少能力数据不允许猜测类型。此兼容不会重跑已耗尽重试次数或已提交的工作。
+
 ## 依据
 
 - [Shared validation](../packages/shared/src/schedule-types.ts)

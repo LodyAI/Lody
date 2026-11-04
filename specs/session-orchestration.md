@@ -6,8 +6,8 @@ Translation: current
 [中文](session-orchestration.zh.md)
 
 When an Agent delegates asynchronous work through Lody, each delegated target
-continues the causal chain from the driving human turn. Lody accepts at most 32
-such hops. A command issued by a turn already at depth 32 is rejected before an
+continues the causal chain from the driving human turn. Lody accepts at most 16
+such hops. A command issued by a turn already at depth 16 is rejected before an
 Operation or target Session is created, with the non-retryable
 `CHAIN_DEPTH_EXCEEDED` error.
 
@@ -18,9 +18,118 @@ an ordinary human turn starts at zero. The limit remains fixed in the shared
 protocol contract; changing it requires updating every producer, recovery path,
 executable model, and this Spec.
 
-Machine-side review automation runs outside this MCP delegation chain. It keeps
-its own round, token, and authority budgets while reacting to external review and
-CI state.
+The experimental Review agent automation is retired. It no longer runs outside
+this delegation chain; see [Review agent retirement](review-agent-retirement.md).
+
+## Replying to the current task sender
+
+When an Agent-authored input from A drives B's active turn, B must not create a
+new chat back to A. Single and legacy chats fail before dispatch with non-retryable
+`REVERSE_CHAT_FORBIDDEN`. Batch items targeting A fail independently; a batch of
+only such targets is rejected before Operation acceptance. Other targets remain
+available, and already accepted retries retain their fixed identity.
+
+This restriction uses the exact active input's sender, not Session containment or
+older conversation history. A later human input or an input from another Session
+replaces this scope. Known Agent sender provenance is required; legacy inputs
+without it remain readable and retain existing behavior. This change does not add
+note tools or change result delivery timing.
+
+## Agent chat to a busy Session
+
+An orchestrating Agent sends corrections or new information to a Session that is
+still working. `lody_session_chat` and `lody_session_chat_many` steer that input
+into the running turn on either Machine when its agent accepts steering, regardless
+of the human's queue or guide preference and of who started the running turn. A
+target whose agent cannot acknowledge a steer queues the input as its next ordinary
+turn. The steered input gets its own reply, which becomes its Operation result.
+
+Steering hands off the running work; it does not fail it. A delegated input whose
+running turn is handed off to a steered input continues through that successor.
+Its Operation completes when the work completes, with the successor's final reply,
+and never reports `TARGET_FAILED` merely because it was steered.
+
+A chat that sends its input returns a delivery receipt saying what actually
+happened: `steered`, `queued` behind the running turn, or `dispatched` to an idle
+target. A steer that falls back to the queue reports `queued`. The receipt is
+response-only and never persisted, so older readers are unaffected. It is absent
+when the outcome is uncertain or was decided by an earlier attempt or replay.
+
+On the calling Machine, a steer that is provably not delivered becomes the next
+ordinary turn, as it does for a human. An uncertain delivery is never replayed: the item fails with
+non-retryable `STEER_DELIVERY_UNKNOWN`, and the requesting Agent decides whether
+to resend.
+
+Remote targets use the shared active-assistant history resolver. Connection setup
+has a separate 15-second deadline; once connected, the steer request gets its own
+five-second response timeout, matching the UI. Late setup cannot send after fallback.
+If remote setup or delivery cannot confirm an outcome and no daemon owns recovery, promote only
+an unchanged `pending_apply` turn to ordinary dispatch. This favors availability
+over duplicate avoidance: a lost acknowledgement can cause a duplicate follow-up,
+but must never strand an input whose RPC did not arrive. Never resend the steer
+or cancel the target. An execution-owned settled outcome remains authoritative.
+Remote recovery replay promotes an orphan still awaiting steer without a new offer.
+Idle targets and missing active-turn evidence keep ordinary dispatch. Evidence: `sendSessionChatResult` in
+`apps/cli/src/commands/session.ts`, its suite `session-default-fallback.test.ts`,
+and item reconciliation in `apps/cli/src/orchestration/coordinator-workflow.ts`.
+Remote fallback rationale: [decision note](../.agents/notes/implemented/feature/2026-11-02-cross-machine-agent-steer.md).
+
+## Coordinating many Sessions
+
+One Agent coordinates a dozen long-running Sessions across Machines. It must tell
+what each Session is doing and why delegated work stopped, without reading full
+transcripts or inspecting processes on the Machine. Lody makes this state observable.
+Judging whether two pieces of work overlap is left to the coordinating Agent,
+because tasks cannot be enumerated as fixed keys. Lody does not claim tasks,
+lock tasks or reject sends as duplicates.
+
+- **Pull request lookup.** `lody_session_list` filters by pull request URL or
+  number using Session metadata `pullRequests`, without opening Session rooms.
+- **Identity, not content.** List and status items carry the title, associated
+  pull requests and branch. They carry no message text: previews of message
+  content must not enter Session metadata.
+- **Live activity.** `lody_session_status_many` asks the Machine that owns a busy
+  Session for turn start, last output time, the current action and queued inputs
+  at query time. The data is not published on presence channels. When the Machine
+  cannot answer, status keeps the existing `idle`/`busy` value with activity
+  `unknown`.
+- **Sender provenance.** An Agent-authored input reaches the target agent with
+  a Lody header naming the source Session and stating it is not human input.
+  Human inputs are unchanged. The header is derived from the recorded author at
+  execution time and is not written to history.
+- **Quoted authority.** An Agent relaying a human instruction may cite the
+  original message. Lody appends the original text with its recorded author,
+  checked against history. An unresolvable citation is delivered marked as an
+  unverified relay rather than rejected. No delegation token exists.
+- **Failure causes.** A failed target keeps its top-level code and adds a typed
+  cause: quota exhausted with its reset time from the existing capacity
+  observation, Machine offline, user stopped, or agent error with the original
+  message. An unclassifiable failure is an agent error, never a guessed cause.
+- **Result timing.** Completion results carry when the input was sent and how
+  many later inputs the target received meanwhile. Lody does not mark results
+  as superseded; the coordinating Agent judges staleness.
+- **History reads.** `lody_session_history` accepts `direction` (`backward`, the
+  default newest-first paging, or `forward` from the oldest), `role`, `since` and
+  `maxChars`. Cursors keep absolute positions, so later inputs never shift a page.
+  Text over `maxChars` is truncated with `truncated` and the original length,
+  never dropped.
+- **Short Session ids.** A unique prefix of a Session id in the workspace
+  resolves to that Session. An ambiguous prefix fails with
+  `SESSION_ID_AMBIGUOUS` listing at most eight candidates with id and title.
+- **Queued inputs.** A requester may list, withdraw or replace its own queued
+  inputs that have not started. A started input returns `ALREADY_STARTED` and is
+  never cancelled by this path.
+- **Machine resources.** `lody_machine_list` reports agent quota with reset times
+  and disk usage. Lody does not manage or report agent-held locks.
+
+These additions avoid errors by design rather than adding gates. Uncertain
+observations degrade to `unknown` or an informational field; only an impossible
+request fails. New failure causes are tagged Effect errors, serialized to
+`{code, cause, retryable}` only at the MCP boundary.
+
+Out of scope: Lody-managed resource locks, review prompt templates (Agent Roles
+already carry fixed instructions), a checkpoint-before-cancel API, and changing
+completion output, which already omits tool calls.
 
 ## Session creation configuration
 
@@ -46,6 +155,12 @@ a different explicit mode rather than silently overwriting it. An explicit Role
 remains authoritative: manual target and configuration fields are ignored before
 capability validation, command identity and dispatch.
 
+The CLI `lody session create --agent-role <idOrName>` resolves the same catalog
+Role by fixed id or unique name. The Role's machine, agent config, run
+configuration and Prompt prefix take precedence; overridden manual flags are
+reported as ignored, and the work-context flags (`--repo`, `--local-project`,
+`--branch`, `--worktree`) still apply.
+
 An explicit permission selection may be broader than the parent's. The caller
 must act within its user authorization. This interface introduces no permission
 ranking, escalation approval rule or safety boundary relative to CLI creation.
@@ -55,7 +170,43 @@ Explicit selectors participate in the canonical command fingerprint. Reordering
 map keys is the same request; changing selections under an accepted Operation id
 is `OPERATION_ID_REUSED`. Acceptance freezes each effective target dispatch config.
 Retry and recovery use that config rather than recomputing requester defaults or
-Role configuration. No Operation storage migration is required.
+Role configuration. Effective inherited mode/model/options retain internal provenance;
+replay keeps compatible values and drops incompatible inherited values, even when catalog
+freshness is unconfirmed. Current explicit selections remain strict. Effort and Fast use
+the effective target model on both initial validation and frozen replay.
+
+Internally synthesized builtin modes retain separate provenance so replay does not
+reinterpret a fallback default as an explicit user selection. Before the fixed UserTurn
+is authored, the default is re-derived against available capabilities. Interrupted
+materialization preserves only authored values reachable from its frozen inherited or
+synthesized provenance, without rewriting history or relaxing the complete immutable-input
+identity check. Provenance fields are not public MCP input or Session history. Existing
+stored inherited-default markers remain readable; no storage migration is required.
+
+## Runtime model rejection
+
+After acceptance, an agent rejection of the requested model must produce a
+GUI-visible `agent_warning` identifying that model, including for Codex and Claude.
+This applies to creation and subsequent turns, including resume, whether the model
+is supplied as `modelId` or through its advertised config option. Runtime state
+continues to reflect the agent's confirmed model. Reporting uses the existing
+asynchronous warning path; it does not stop the turn or guarantee display before
+the prompt starts.
+
+## Frozen turn input
+
+A failed Role-backed start retried through a different execution path must retain
+the same accepted instructions and attachments. A turn's `inputConfig.prompt` is
+its effective frozen text, including any Agent Config and Role instructions composed
+at acceptance. `inputBlocks` retain authored text for display/editing and structured
+attachments for execution; their raw text cannot override that frozen prompt.
+
+Create, continue, steer and recovery share this interpretation. Role identity,
+revision and snapshot remain provenance, never a request to resolve today's Role.
+Legacy inputs without a prompt derive text from their existing blocks/history;
+an explicit empty prompt contains no execution text and may accompany attachments.
+Runtime instructions, attachment materialization and history replay remain separate
+from the frozen task, so whole provider requests need not be byte-identical.
 
 ## Local and cloud execution
 
@@ -70,8 +221,101 @@ Recovery uses the frozen prompt, Role revision and dispatch configuration. Befor
 replaying a missing target input, cloud confirms remote document catch-up; OSS
 confirms the authoritative daemon repo and rechecks the fixed Turn under the
 existing materialization claim. Missing cloud connectivity never counts as local
-authority in a cloud workspace. Completion uses the existing single-owner Delivery
-protocol. No persisted schema or hosted API changes are required.
+authority in a cloud workspace. Completion writes directly to the native Inbox in
+the same Operation transaction; the result-consumption rules below control execution.
+This changes local persisted storage, not the hosted API.
+
+## User-controlled conversation-tree stop
+
+The related-conversations tree exposes a confirmed stop action for the whole
+creation/containment tree. A durable user-owned barrier blocks execution, MCP
+delegation and automatic completion wake-ups until the user explicitly restores
+collaboration. Active turns stop through normal cancellation; pending input is
+preserved without promotion. Late completions retain their result and record
+`COLLABORATION_STOPPED` without replaying that continuation after restoration.
+Descendants created after the snapshot inherit stopped ancestors. This does not
+include unrelated existing conversations merely contacted through MCP.
+
+Every target machine must advertise the control capability before the UI writes
+metadata. Offline machines enforce the barrier after receiving it; the UI must
+not promise simultaneous cancellation or rollback of already performed work.
+
+## Inbox database unavailable at startup
+
+Failure to open or activate Inbox must not prevent workspace startup or ordinary
+human conversations. Report degraded availability through the existing runtime
+warning channel; Inbox-dependent Agent tasks and automatic continuations return
+an explicit unavailable error without accessing the database. The coordinator owns
+bounded-backoff recovery, canceled on shutdown; incompatible schema/protocol errors
+do not auto-retry. Recovery preserves existing submission evidence and never replays
+unknown input. Authentication, E2EE and local/cloud boundaries remain unchanged.
+
+## Idempotent message consumption
+
+Operation completion receipts enter the durable Inbox with wake eligibility. If a
+Session is idle, unpaused and has no active execution or accepted queued input,
+one wakeable receipt grants a persistent automatic intent. Busy Sessions defer
+consumption until the current execution returns its slot. Stop blocks receipt-driven
+wakes until fresh human or Agent-chat input. Result persistence and wake intent creation
+share the completion transaction; reopen recovers an unsubmitted intent without a new event.
+Suppressing user-facing completion notifications for Agent-initiated turns does not
+suppress Operation receipts or their wake eligibility.
+
+Wake eligibility is distinct from membership: one wakeable receipt carries all
+unconsumed, unclaimed results in the same Session/User queue, including passive
+results. Snapshot the queue watermark and freeze members only when claiming the
+batch. Arrivals before claim coalesce; arrivals after claim stay queued for a later
+batch. Duplicate receipts/releases never create duplicate execution; empty queues
+never start a model. Submitted or unknown members never re-enter another batch.
+
+Stop, fresh input acceptance and actual transport initiation share Session admission.
+Inbox-aware Stop persists pause before cancellation and cancels pre-Stop queued input eligibility
+while retaining history. The pause blocks only automatic completion wakes. Input sent
+after Stop by a human or by another Session's Agent chat ranks the same: it is admitted,
+clears the pause and carries saved results; old instructions require a new send.
+Receipts still decide only whether an input is recorded as human. Failed exits
+never auto-continue. Normal future turns resume receipt-driven scheduling. A failed exit
+alone grants no wake, but later wakeable receipts may grant one after slot retirement.
+
+Unconfirmed resource release never blocks later input. Retire interrupted executions,
+finish their inputs as unknown without replay, clear legacy blocks and preserve queued
+work. Report uncertainty and attempt bounded background cleanup; cleanup failure cannot
+prevent input or shutdown. Never reuse an Agent whose termination failed: detach the old
+Session and create a new ACP. Restart retirement may log a warning when history is not
+available. Cleanup state never gates admission, and no offline attestation is required.
+
+An automatic batch yields atomically to pre-submission human acceptance. A human input
+already being prepared survives later queued human input. Keep admission from the
+submission fence through synchronous transport initiation, without an intervening
+async check. Fresh input cannot revive a Stop-canceled execution. Execution identities
+and queued input identities remain distinct.
+
+Members and batchId are fixed. Preserve human text, attachments, config and causal
+depth; results are reference data. Automatic depth advances the maximum current/member
+depth by one. Never submit an empty automatic batch. Preview is bounded to 64 KiB;
+read complete contents through Session/user-bound pages of at most 128 KiB. Large
+individual members use ordered JSON fragments, not additional model turns.
+
+Post-fence uncertainty is permanent unknown submission, never replay. Human-plus-batch
+inputs also disable whole-input stale-ACP replay. Retry settlement writes only. Raw
+request/resource release differs from waiter cancellation or Scope close: retain full
+failures and shared shutdown receipts; recovery uses old handles without blocking successors.
+
+Preserve released Operation rows, author/input snapshots, recovery state and retired
+IDs across upgrade; active Operations continue reconciliation. Delete only per-Delivery
+storage/execution and unclaimed compatibility result copies. Never import or replay
+the old completion-notification backlog. Preserve current Inbox pause, resource ownership and
+unknown/submitted batch evidence; deleting data is not proof of physical release.
+Schema/protocol v2 requires host launch v3. Supported launches end the previous
+Worker before ownership transfer and reject earlier contracts before storage access.
+Passive result data does not count as running work. Preserve ordinary no-batch user
+recovery, retired current Operation IDs and tree-stop rules.
+
+Stop producers negotiate Inbox v2 before adding cancelId/pauseInbox or publishing a
+control-request marker. Without it, use the released cancel fields and assistant Turn
+ID marker. A new CLI treats Stop without pause-protocol fields as ordinary execution
+cancellation, without persistent Inbox pause that an old client cannot resume. Missing
+receipts still do not imply human authority. Inbox-aware Stop retains the pause rules above.
 
 ## Implementation evidence
 
@@ -79,5 +323,43 @@ The implementation guard is `apps/cli/src/mcp/lody-mcp-server.ts`, the shared
 limit is `packages/shared/src/session-orchestration.ts`, and the executable
 Operation model is `apps/cli/src/orchestration/operation-model.ts`.
 
-This draft records the requested limit of 32. Runtime and deployed-client
+Consumption and retention are implemented in
+`apps/cli/src/orchestration/operation-store.ts`, continuation submission in
+`apps/cli/src/session/session-execution-service.ts`, and reconciliation in
+`apps/cli/src/orchestration/operation-coordinator.ts`. Their owning suites cover
+transport failure, claim/settlement races, restart and result expiry.
+
+Steer handoff completion follows applied records in the Session's
+`steerOperationLedger` (`findSteerSuccessor` in `coordinator-model.ts`), covered by
+the `steer handoff` cases in `operation-coordinator.test.ts`. Delivery receipts are
+mapped by `deliveryFromSteerResponse` in `apps/cli/src/commands/session.ts` and
+covered by `session-default-fallback.test.ts`.
+
+The Coordinating many Sessions tools live in `apps/cli/src/mcp/lody-mcp-server.ts`
+(pull request filter, short ids, history paging, quotes, `lody_session_queue`),
+with live activity, sender headers and queued-input withdrawal answered by the
+owning Machine in `apps/cli/src/lib/message-handler.ts` behind the
+`sessionLiveActivity`, `machineDiskStatus` and `sessionInputWithdraw` protocol
+capabilities; older Machines degrade to `unknown` or an error outcome. Quota and
+disk come from `apps/cli/src/lib/resource-discovery.ts`. Two items remain
+unimplemented because they would add fields to strictly validated synced results
+that older clients reject: the count of later inputs in completion results, and a
+typed failure cause with a structured reset time. Failures currently carry the
+agent's failure reason and original message as text. Withdrawal of a started
+input reports the `already_started` outcome rather than an error code. No
+mixed-version multi-Machine run has been performed.
+
+This draft records the requested limit of 16. Runtime and deployed-client
 acceptance remain to be verified after dependencies are installed.
+
+## User Stop of delegated work
+
+When a user manually stops the exact input delegated to a target Session, that
+target is terminally cancelled and remains queryable, but its cancellation is
+not an automatic receipt to the delegating Agent. It cannot enter a later human
+or automatic batch, including after restart or deadline reconciliation. A new
+user message in the target starts independent work and never revives this receipt.
+In a multi-target Operation, only the manually stopped targets are omitted from
+the automatic receipt; other targets retain normal result delivery. If all
+targets are omitted, no receipt or wake is created. Errors, deadlines, and
+explicit requester Operation cancellation keep their existing behavior.

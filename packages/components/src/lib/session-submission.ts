@@ -12,9 +12,13 @@ import type {
 } from '@lody/shared';
 import {
   getSessionRoomId,
+  getMachineRoomId,
   getServerNow,
-  NEW_SESSION_HISTORY_BACKEND,
+  LEGACY_SESSION_HISTORY_BACKEND,
   normalizeSessionTurnInputConfig,
+  resolveNewSessionHistoryBackend,
+  type MachineMeta,
+  type SessionHistoryBackendKind,
   SessionStatusFactory,
 } from '@lody/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -27,6 +31,8 @@ export type StartSessionResult = CreateSessionResult & { historyEntry: SessionHi
 /** UI bindings supply observation/admission, not another history writer. */
 export type SessionSubmissionPorts = {
   runtime: WorkspaceRuntime | null;
+  /** Default backend for new sessions when the payload has no explicit choice. */
+  defaultHistoryBackend?: SessionHistoryBackendKind;
   assertSessionCreateAllowed: (sessionId: SessionId) => void;
   recordWorkspaceActivity: (workspaceId: string | undefined) => void;
   publishSessionMeta: (roomId: string, meta: SessionMeta) => void;
@@ -40,7 +46,10 @@ export type SessionSubmissionPorts = {
   onRpcDelivered: (sessionId: SessionId, turnId: string) => void;
 };
 
-function buildSessionCreateResult(payload: SessionToCreate): CreateSessionResult {
+function buildSessionCreateResult(
+  payload: SessionToCreate,
+  defaultHistoryBackend: SessionHistoryBackendKind
+): CreateSessionResult {
   const sessionId = payload.sessionId ?? (uuidv4() as SessionId);
   const sessionMeta: SessionMeta = {
     id: sessionId,
@@ -52,9 +61,9 @@ function buildSessionCreateResult(payload: SessionToCreate): CreateSessionResult
     cliType: payload.cliType,
     agentType: payload.agentType,
     // Backend selection is a creation policy, not caller-provided turn data.
-    // Flip NEW_SESSION_HISTORY_BACKEND only when the corresponding adapter is
-    // registered on every client that can open the session.
-    historyBackend: NEW_SESSION_HISTORY_BACKEND,
+    // The backend identity is persisted at creation and remains immutable for
+    // the session lifetime. Existing sessions retain their stored backend.
+    historyBackend: payload.historyBackend ?? defaultHistoryBackend,
     agentConfigId: payload.agentConfigId,
     acpSessionId: undefined,
     diffStats: undefined,
@@ -72,6 +81,11 @@ function buildSessionCreateResult(payload: SessionToCreate): CreateSessionResult
   }
   if (payload.project) {
     sessionMeta.project = payload.project;
+  }
+  // The creation snapshot of a multi-repository Session. After this write the
+  // owning daemon is its only writer.
+  if (payload.projectRun) {
+    sessionMeta.projectRun = payload.projectRun;
   }
   if (
     payload.isWorktree === true ||
@@ -105,6 +119,7 @@ function buildSessionCreateResult(payload: SessionToCreate): CreateSessionResult
 export function createSessionSubmission(ports: SessionSubmissionPorts) {
   const {
     runtime,
+    defaultHistoryBackend = LEGACY_SESSION_HISTORY_BACKEND,
     assertSessionCreateAllowed,
     recordWorkspaceActivity,
     publishSessionMeta,
@@ -113,11 +128,31 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     onRpcDelivered,
   } = ports;
 
+  const prepareCreate = async (payload: SessionToCreate): Promise<CreateSessionResult> => {
+    const encrypted = runtime?.contentMode === 'e2ee';
+    const wanted = encrypted
+      ? LEGACY_SESSION_HISTORY_BACKEND
+      : (payload.historyBackend ?? defaultHistoryBackend);
+    const machine =
+      wanted === 'roost'
+        ? ((await runtime!.repo.getDocMeta(getMachineRoomId(payload.machineId)))?.meta as
+            | MachineMeta
+            | undefined)
+        : undefined;
+    const backend = encrypted
+      ? LEGACY_SESSION_HISTORY_BACKEND
+      : resolveNewSessionHistoryBackend(machine, {
+          requested: payload.historyBackend,
+          preferred: defaultHistoryBackend,
+        });
+    return buildSessionCreateResult({ ...payload, historyBackend: backend }, backend);
+  };
+
   const createSession = async (payload: SessionToCreate): Promise<CreateSessionResult> => {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    const { sessionId, sessionMeta } = buildSessionCreateResult(payload);
+    const { sessionId, sessionMeta } = await prepareCreate(payload);
     const sessionRoomId = getSessionRoomId(sessionId);
     // The local Flock index is the session-count source of truth. Incomplete
     // local state fails open so session creation never depends on Convex
@@ -149,7 +184,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    const { sessionId, sessionMeta } = buildSessionCreateResult(payload);
+    const { sessionId, sessionMeta } = await prepareCreate(payload);
     // The accept unit includes the first user message, so the meta it
     // publishes already carries that activity. Written here, not by a
     // follow-up touch: a close between acceptance and the first turn must
@@ -192,6 +227,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       dispatch?: boolean;
       guideExpectedTurnId?: string;
       attachments?: SessionAttachmentDraft[];
+      onAccepted?: () => void;
     }
   ) => {
     if (!runtime) {
@@ -240,7 +276,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
           : { kind: options?.dispatch ? 'dispatch' : 'history' },
         undefined,
         undefined,
-        options?.attachments
+        options?.attachments,
+        options?.onAccepted
       );
     } else {
       await runtime.writer.appendSessionTurn(sessionId, entry, dispatch);
@@ -266,7 +303,11 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       throw new Error('Runtime not ready');
     }
     // A held send is written and dispatched by the pending queue.
-    if (runtime.pendingSends?.has(userTurnId)) return;
+    if (
+      runtime.pendingSends?.has(userTurnId) ||
+      runtime.pendingSends?.ownsDelivery?.(userTurnId, 'dispatch')
+    )
+      return;
     await dispatchUserTurn(runtime, sessionId, userTurnId, {
       ...options,
       onAccepted: () => onRpcDelivered(sessionId, userTurnId),
@@ -283,7 +324,11 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       throw new Error('Runtime not ready');
     }
     // A held guide is offered by the pending queue once it is written.
-    if (runtime.pendingSends?.has(userTurnId)) return false;
+    if (
+      runtime.pendingSends?.has(userTurnId) ||
+      runtime.pendingSends?.ownsDelivery?.(userTurnId, 'guide')
+    )
+      return false;
     return steerUserTurn(runtime, sessionId, expectedTurnId, userTurnId, {
       machineId: options?.machineId,
       onApplied: () => onRpcDelivered(sessionId, userTurnId),

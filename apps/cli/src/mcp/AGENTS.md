@@ -2,12 +2,11 @@
 
 Parent instructions apply. Background: [README.md](README.md).
 
-- Route local Session/catalog tools via `session/call-tool` to the daemon repo, never a
-  second writer. Reuse SDK-parsed arguments and validate daemon inputs in
-  `session-tool-router.ts`; scope identity/host operations with AsyncLocalStorage in
-  `session-command-environment.ts`. Require an active local user Turn and exact
-  workspace/machine scope. Cloud retains authenticated commands and remote recovery
-  confirmation.
+- Route Session/catalog tools via `session/call-tool` to the daemon repo in every
+  composition, never a second replica or child `lody` CLI. Reuse SDK-parsed arguments
+  and validate daemon inputs in `session-tool-router.ts`; scope replica/identity with
+  ALS in `session-command-environment.ts`. Require exact workspace/machine scope
+  and an active Turn (local: its user). Cloud keeps authenticated commands/recovery.
 
 - MCP sharing requires the active Turn user to equal the CLI authenticated account.
   Fail closed on shared-machine account mismatch; never substitute the machine owner.
@@ -33,31 +32,55 @@ Parent instructions apply. Background: [README.md](README.md).
   Before accepting an Operation, freeze the Role target, Prompt prefix, revision and run
   config. Recovery uses the frozen canonical Prompt and dispatch config, never rereading
   the Role. Roles may target any reachable Machine; Local
-  Projects default to child Sessions only for same-Machine Roles. `readDelegatedMachineAccess`
+  Projects default to child Sessions only for same-Machine Roles; a remote Role
+  defaults to the Local Project's linked GitHub repository only when the workspace enables it. `readDelegatedMachineAccess`
   requires access for both executing Machine owner and driving human (owned, or shared with
   shared project), never trusting synced `MachineMeta.ownerUserId`.
-- Derive orchestration identity only from the active execution runtime's dispatch payload;
-  reject absent runtime/userId, never infer from daemon credential, Session owner or history.
-  Freeze `requesterUserId` and `sourceTurnId` at Operation acceptance; requester Session id
-  already identifies the Session. Author snapshots are presentation only. Recovery uses the Operation
-  owner Machine and current authorization, not a frozen daemon account.
-- Direct Role creation stays on the ordinary `lody_session_create` and
-  `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,
-  and run-config fields but remove them before resolution: the current Role row is authoritative
-  and those fields must not influence validation, canonical identity, recovery, or dispatch.
+- Operation identity comes only from active Host dispatch; reject absent runtime/userId.
+  Never infer it from credentials, Session owner or history. Freeze requesterUserId/sourceTurnId.
+  Resolve pending notification provenance from exact input before acceptance; unsynced input
+  is retryable, never empty origins. Authors are not authorization. Recovery uses owner
+  Machine/current access.
+- With `agentRoleId`, create tools require `agentRoleMachineId` for multi-machine
+  Roles. Strip manual target/run-config before resolution,
+  validation, identity, recovery or dispatch; the Role is authoritative.
+- Role create/update only propose. Save checks ownership, patches latest text;
+  replicas may overwrite. CLI shares [flow](README.md#agent-role-proposals).
 
 ## Session tool contracts
 
-- `lody_ios_simulator_preview` is the native-app tool; web previews remain
+- Align chain caps and MCP guidance; create/chat forbid courtesy, duplicate callbacks
+  and depth-limit evasion. Reject new chats to the active input's Agent sender; isolate
+  rejected batch items.
+  Prefer the active Turn's frozen audience for sender checks; read exact input history
+  only when the sender is unresolved. Sender provenance does not grant user authority.
+
+- Single and batch chats pass `steerActiveTurn`, steering a turn running on the calling
+  daemon; recovery replay never steers. Never activate a steered or existing `pending_apply`
+  turn. Uncertain delivery fails the item with `STEER_DELIVERY_UNKNOWN`, never a replay.
+  [Contract](../../../../specs/session-orchestration.md#agent-chat-to-a-busy-session).
+
+- Catalog uncertainty is not `INVALID_ITEM`; only retryable failures abort batches.
+  Agent capability defaults require fresh catalogs. Internal inferred defaults
+  rederive until authored. Explicit choices/access stay strict.
+  [Freshness/retries](README.md#machine-catalog-retry-guidance).
+
+- `lody_ios_simulator_preview` and `lody_android_emulator_preview` are the native-app tools; web previews remain
   `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
   the daemon resolves the active user. Return operation handles, never viewer URLs or
   raw preview/transport errors. Reuse simulator lifecycle/schema, never a second owner.
 
-- Resource discovery uses `lib/resource-discovery.ts` for CLI and MCP. Resolve the
-  active Turn user for MCP, never the daemon owner. Role list/get use
-  `canReadAgentRole`; explicit Role creation retains its separate existing contract.
-  Preserve unavailable readable Roles and three-state presence. List MCP entries
-  through the allowlisted summary, never return launch/connection credentials.
+- Discovery shares `lib/resource-discovery.ts`: daemon caches report `catalog_syncing`
+  until first baseline; Role target validation requires fresh sync. Standalone CLI
+  syncs unless `--offline`. Use active Turn identity and `canReadAgentRole`;
+  explicit creation keeps its separate grant contract. Keep unavailable readable Roles,
+  three-state presence and credential allowlists.
+- MCP defaults first wait up to one second for the daemon reader's baseline. On timeout,
+  only a persisted remote checkpoint for that workspace Flock permits cached defaults;
+  business rows alone are insufficient because they can be authored locally. Without
+  evidence, return retryable `SYNC_UNAVAILABLE` before accepting an Operation. Freeze
+  accepted IDs. Explicit selections bypass defaults. Session startup keeps complete
+  local selected rows with a warning; cold missing rows fail. Waits never stop the reader.
 - Directory cursors bind resource, workspace, user and filters. Operations additionally
   bind requester Session and query only that user's machine-local rows; list replies
   contain no canonical prompt or assistant output. See
@@ -71,25 +94,40 @@ Parent instructions apply. Background: [README.md](README.md).
 - Chat inherits omitted mode/model/options from the target's last model turn, else last
   matching turn. Explicit fields/category options win; model changes drop old options.
   Validate effort/Fast against the final model, never reject on probe mismatch; missing
-  per-model data defers to runtime. Drop incompatible inherited selectors; fill builtin
-  mode only if empty. [Inheritance rationale](README.md#chat-configuration).
+  per-model data defers to runtime. Drop incompatible inherited selectors even after
+  unconfirmed freshness; only explicit misses block. Fill builtin mode only if empty. [Inheritance rationale](README.md#chat-configuration).
 - `lody_session_create_options` publishes modes and option ids/types/choices per agent config,
   never current values. Stay sparse by default (online Machines, one agent config, the current
   local project, no GitHub fetch), expanding only through explicit query inputs.
   Explicit permissions may exceed the parent; follow the caller's user authorization.
+  Daemon-hosted reads use the daemon replica and do not start Streams sync.
+  Retryable `SYNC_UNAVAILABLE` means that replica cannot validate the selection.
+  [Freshness](README.md#machine-catalog-retry-guidance).
 - Machine presence is online/offline/unknown. `getOnlineMachineIds() === null` means
-  unknown; block dispatch/report `MACHINE_OFFLINE` only for definite offline. Unknown
-  proceeds under its own deadline. Expose three-state liveness, never a boolean.
+  unknown; block dispatch/report `MACHINE_OFFLINE` only for definite offline, never on
+  an RPC timeout. Unknown proceeds under its own deadline. Expose three-state liveness,
+  never a boolean.
   Contract: `specs/loro-ephemeral-presence-channel.md`;
   [cold-start rationale](README.md#machine-presence).
 - `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);
   keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and
-  Machine RPC snapshot. Operation rules: [orchestration/AGENTS.md](../orchestration/AGENTS.md).
+  Machine RPC snapshot. Other Machines' Sessions use [transient reads](../lib/loro/AGENTS.md#opening-a-doc-pulls-its-stream);
+  an unreadable Session degrades only its own item.
+  Operation rules: [orchestration/AGENTS.md](../orchestration/AGENTS.md).
 - `session_history` pages through `SessionData.history.readVisiblePage`, never `getHistory()`:
   `limit` counts displayable turns, the cursor is the raw position from the previous page, and
   hidden/empty rows never shift it. A page reports `hasMore` from the underlying raw rows, so a
   scan budget never claims the history ended. Session mentions expand to
-  `[@Title](session://<sessionId>)`; resolve them with this tool, accepting a bare id or a
-  `session://` URI.
-  ([note](../../../../.agents/notes/implemented/feature/2026-09-18-session-mention-uri-and-paste.md))
+  `[@Title](lody://session/<id>?workspace=<id>)`; accept bare ids and legacy
+  `session://` URIs too. Explicit workspace must match the tool context.
+  ([contract](../../../../specs/deep-links.md))
+
+- Single create/chat attachments require durable Operations and the calling daemon's
+  `sessionInputAttachments` capability. Resolve paths inside the calling Session's
+  authoritative workspace, never the daemon cwd or target workspace. Freeze references
+  before acceptance; retries use stored references. Legacy wait and batch schemas reject
+  attachment arguments. See [input Spec](../../../../specs/cli-session-attachments.md).
+
+- The user-owned inherited `collaborationStopped` barrier rejects delegation. Agents and
+  completion callbacks must never clear it; execution also fences setup and prompt dispatch.

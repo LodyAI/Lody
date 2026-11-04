@@ -1,0 +1,111 @@
+# Platform contracts
+
+This package contains platform-neutral composition contracts. The optional
+`PlatformE2eeWorkspaces` port supports developer creation and public ledger
+inspection with persistent host custody. It never enables document transports;
+see the [workspace bootstrap guide](../../.agents/docs/e2ee-workspace-bootstrap.md).
+
+Hosted entries may pass `createE2eeRuntime: E2eeRuntimeFactory` to the shared
+`createRouter`. Its cloud provider borrows the returned `E2eeWorkspaceRuntime`
+without changing optional methods or reader labels. Standalone login without
+an authenticated context skips the factory; local and Electron keep their existing
+owners. The callback is synchronous and pure, receiving only a read-only live
+session store. Acquire the host's Layers outside render or lazily in its methods,
+and retain the application executor/resources through confirmed retirement.
+Account routing never replaces desktop approval or per-operation host admission.
+Returning `undefined` leaves the optional runtime absent; no host is enabled by default.
+[Personal-host composition](../e2ee-client/README.md#shared-platform-runtime)
+explains the owned implementation.
+
+The separate `./host-keys` entry adds
+an unconnected host identity lifecycle seam using the workspace's Effect version.
+It does not enable encrypted workspaces or register IPC handlers.
+
+`makeHostIdentityStore(purpose, backend)` fixes the identity purpose in trusted
+host composition. CLI callers may receive only a machine store. Account/device
+references come from that host, not an envelope or renderer's assertion. This
+separation is an assembly rule, not an OS isolation claim against a compromised host.
+
+Create is insert-only and succeeds after a fresh read verifies both public keys.
+Read requires the expected public identity and never creates or repairs a key.
+Inspect discovers only existing public keys after an uncertain create; discovery
+does not enroll a device or grant authority.
+Errors contain fixed categories and optional numeric native status, not raw
+messages or private material. Ambiguous native authentication/decode failures
+retain `reason: unknown`. A failed or interrupted creation may have committed:
+reconcile the same reference before any further action. There is no automatic
+retry, replacement, deletion, private-key export or arbitrary signing operation.
+
+No private handle is retained by this first interface. Purpose-specific signing,
+envelope opening, scoped handle invalidation, lock-screen cancellation, and recovery
+remain dependent on the reviewed crypto contracts and later host adapters. Key
+storage must live independently of ordinary caches and logout cleanup.
+
+## Streams token port
+
+`CloudStreamsTokenPort.createTokenProvider` creates the native shared token
+provider under its caller's Scope. Official cloud composition supplies credentials
+and HTTP; the local port has no such capability. Dispose native providers before
+cloud-port disposal. Renderer/durable Promise callers still use the explicit
+`createTokenProviderLegacy` and `LoroStreamsTokenProviderLegacy` compatibility
+boundary. [Token ownership](../shared/src/loro-streams-token/README.md) explains
+shared leases, failure retention and the remaining consumers.
+
+## Validation
+
+```sh
+pnpm --filter @lody/platform test
+# Explicit opt-in on macOS with the existing Xcode command-line tools:
+LODY_TEST_HOST_KEYS_MACOS=1 pnpm --filter @lody/platform test test/host-keys.macos.test.ts --maxWorkers=1
+```
+
+The native fixture generates a random UUID and an isolated temporary file
+keychain. All queries include that keychain, UUID service and fixed synthetic
+account/device/purpose. It never reads existing user items or changes the default
+keychain/search list. UI is forbidden in each child process. Cleanup deletes only
+its two known items, verifies missing, then deletes the fixture keychain; failure
+retains the path for explicit recovery and fails the suite. A timeout, signal or
+spawn error is always failure even with exit zero.
+
+The fixture stores Ed25519/X25519 bytes with Security, restores them into CryptoKit
+software memory and runs only a fixed internal self-test. Only public keys leave
+the child. This is **not a shipping macOS adapter or a hardware execution claim**.
+Swift's best-effort buffer clearing does not prove all private memory copies erased.
+Apple documents [Curve25519 storage as generic passwords](https://developer.apple.com/documentation/cryptokit/storing-cryptokit-keys-in-the-keychain)
+and [the Secure Enclave P-256 boundary](https://developer.apple.com/documentation/security/protecting-keys-with-the-secure-enclave).
+
+The file-keychain fixture does not validate app entitlements, signed Electron/CLI
+packaging, screen lock, a human denying access, upgrades or unattended operation.
+Windows/Linux stores and actual Web/iOS/Android devices need separate adapters and
+validation; none inherit this macOS result. All-platform Beta remains unaccepted.
+
+## Team membership
+
+The optional runtime member methods submit a native signed KeyPackage, inspect
+pending applications, approve/reject, revoke an invitation and reconcile key
+installation. Email automatic admission and link approval remain distinct.
+Callers must retain the original request on a lost response; membership and key
+readiness are separate. Credentials and private keys never cross this port.
+
+## Encrypted machine sharing
+
+`E2eeMachineSharingTransport` is an unconnected host transport interface using the
+canonical `@lody/cloud-api` DTOs. It supplies no provider or renderer capability.
+The host retains exact original frames, reconciles uncertain writes, verifies
+consecutive policy versions and owns execution freshness before using the core
+pure authorization decision. Every scope includes the ledger-qualified machine binding generation. Removal
+closes the old resource; readmission starts at revision one in a new resource,
+while atomic replacement preserves generation. Storage tombstones cannot replace
+verified history pins. The separate
+`E2eeMachineSharingDisplayReader.latestForMember` port accepts account membership
+only and returns ciphertext/untrusted metadata, with no execution freshness.
+See the [pending sharing contract](../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
+
+## Portable personal-device runtime
+
+The existing `E2eeWorkspaceRuntime` contract is also implemented by the opt-in
+[`@lody/e2ee-client`](../e2ee-client/README.md) factory. Its application Scope owns
+pinned identity, real capability Layers and bounded retirement. Reader open never
+creates an identity; the shared provider requires an eligible usable epoch before
+content opens. Preserve the returned readerOwner and expected account on release.
+No public local-only selector or authenticated product-cloud entry is changed.

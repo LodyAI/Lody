@@ -79,6 +79,7 @@ describe('MessageHandler chat resume', () => {
       setSessionMode: vi.fn(async () => {}),
       unstable_setSessionModel: vi.fn(async () => {}),
       setSessionConfigOption: vi.fn(async () => undefined),
+      getAvailableCommands: () => [],
       getConfigOptions: vi.fn(() => []),
       currentModel: undefined,
     };
@@ -117,7 +118,7 @@ describe('MessageHandler chat resume', () => {
       hasSession: vi.fn(),
       initialize: vi.fn(),
       releaseGitHubRepoOwner: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     };
 
     const handler = new MessageHandler(

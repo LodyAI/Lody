@@ -59,7 +59,10 @@ const clampOffset = (offsetPx: number, size: number) =>
  *    or before it (the group header), at 0;
  * 5. the turn exists (hydrated or as a placeholder): its first row, at 0 —
  *    the anchor is kept, and resolves again once its row is back;
- * 6. the turn is gone: the next surviving turn in the old order, else the
+ * 6. the turn is grouped into another turn's row (`groupTurnIds`): that row,
+ *    at 0. Grouping follows the neighbours' hydration, so falling further
+ *    would move the hydration window and ungroup the turn again: a loop;
+ * 7. the turn is gone: the next surviving turn in the old order, else the
  *    previous one, at 0.
  *
  * Fixed rows resolve to themselves; a missing agent-activity or trailing row
@@ -137,6 +140,9 @@ export function resolveAnchor(
   }
   if (covering >= 0) return { index: covering, offsetPx: 0, fellBack: true };
   if (firstOfTurn >= 0) return { index: firstOfTurn, offsetPx: 0, fellBack: true };
+
+  const grouping = rows.findIndex((row) => row.groupTurnIds?.includes(anchor.turnId));
+  if (grouping >= 0) return { index: grouping, offsetPx: 0, fellBack: true };
 
   // The turn is gone: the next surviving turn in the old order, else the previous.
   let next = -1;

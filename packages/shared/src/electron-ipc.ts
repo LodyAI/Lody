@@ -137,7 +137,7 @@ export const ELECTRON_PUBLIC_BROWSER_STATE_CHANNEL = 'publicBrowser.state';
 
 export type ElectronPublicBrowserInteraction = {
   browserId: string;
-  source: 'pointer' | 'keyboard';
+  source: 'pointer' | 'pointerdown' | 'pointerleave' | 'wheel' | 'keyboard';
 };
 
 const LocalPathLauncherStringSchema = z
@@ -214,6 +214,8 @@ export type LaunchLocalPathResult =
     };
 
 export type ShowSessionCompletionNotificationInput = {
+  /** New renderers already checked visibility of this specific source. */
+  allowWhileForeground?: boolean;
   sessionId: string;
   workspaceSlug?: string;
   title: string;
@@ -355,6 +357,11 @@ export type ElectronCliState = {
   runtime?: CliRuntimeState;
   runtimeOwnership?: 'owned' | 'external';
   message?: string;
+  /**
+   * Fatal because a Host owns the runtime endpoint but refuses this desktop
+   * (on Windows, typically one started elevated or in a service session).
+   */
+  hostAccessDenied?: true;
   retryAttempt?: number;
   retryInMs?: number;
   lastExitCode?: number | null;
@@ -427,6 +434,7 @@ export type ElectronLoginState = {
     | 'browser_open_failed'
     | 'authorization_expired'
     | 'exchange_failed'
+    | 'exchange_certificate_failed'
     | 'exchange_rejected'
     | 'exchange_timeout'
     | 'secure_storage_unavailable'
@@ -435,6 +443,36 @@ export type ElectronLoginState = {
   /** Credential-free failure summary (HTTP status/server code or local error) for support. */
   errorDetail: string | null;
 };
+
+/** Which Lody process reported the storage write failure that started a check. */
+export type ElectronStorageGuardSource = 'renderer' | 'cli';
+
+export type ElectronStorageGuardVolume = {
+  freeBytes: number;
+  totalBytes: number;
+  /** Free space this volume needs before Lody resumes. */
+  resumeFreeBytes: number;
+};
+
+/**
+ * Whether the desktop has stopped Lody until disk space is freed. Set only when a
+ * storage write failed AND a volume holding Lody data was then found short of space.
+ */
+export type ElectronStorageGuardState = {
+  blocked: boolean;
+  source?: ElectronStorageGuardSource;
+  /** The most constrained volume holding Lody data, at the last check. */
+  volume?: ElectronStorageGuardVolume;
+};
+
+export type ElectronStorageGuardRelaunchOutcome =
+  | 'quitting'
+  | 'cancelled'
+  | 'still_low'
+  | 'check_failed';
+
+/** `CliRuntimeIssue.code` the CLI reports when a write to its local repository fails. */
+export const CLI_STORAGE_WRITE_FAILED_ISSUE_CODE = 'storage_write_failed';
 
 export type ElectronUpdaterPhase =
   | 'idle'

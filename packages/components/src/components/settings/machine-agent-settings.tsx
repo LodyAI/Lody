@@ -1,10 +1,14 @@
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
+import { useMachineRpcFeatureReason } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
-import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   type AcpSessionMonitorSnapshot,
@@ -20,7 +24,7 @@ import { Check, ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
-import { developerModeEnabledAtom, reviewAgentFeatureEnabledAtom } from '@/atoms/settings';
+import { developerModeEnabledAtom } from '@/atoms/settings';
 import { settingsDialogOpenAtom } from '@/atoms/settings';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
@@ -56,7 +60,6 @@ import {
 import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
-import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { useMachineMonitor } from '@/hooks/use-machine-monitor';
@@ -67,6 +70,11 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
+import { MobileSettingsFoldPanels } from '@/components/mobile/mobile-settings-fold-panels';
+import {
+  MobileSettingsFoldContext,
+  useMobileSettingsFold,
+} from '@/components/mobile/mobile-settings-fold-context';
 import {
   MachineListFilterButton,
   MachineTabList,
@@ -84,7 +92,6 @@ import {
   MachineConnectedResources,
   type MachineConnectedProject,
 } from './my-machine-connected-resources';
-import { ReviewPolicySection } from './review-policy-setting';
 import {
   AgentConfigDialog,
   type AgentConfigDialogMode,
@@ -188,7 +195,6 @@ const styles = stylex.create({
     paddingTop: space[2],
     paddingBottom: SHEET_BOTTOM,
   },
-  sheetPolicy: { flexGrow: 1, minHeight: 0, overflowY: 'auto', paddingBottom: SHEET_BOTTOM },
   /** A row of the machine picker: the whole line is the choice. */
   pickerRow: {
     boxSizing: 'border-box',
@@ -413,10 +419,10 @@ export function MachineAgentSettings({
   const { openSettings } = useOpenSettings();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const settingsFold = useMobileSettingsFold();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const authToken = useAtomValue(authTokenAtom);
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
-  const reviewAgentEnabled = useAtomValue(reviewAgentFeatureEnabledAtom);
   const setSettingsDialogOpen = useSetAtom(settingsDialogOpenAtom);
   const sessionMetaCache = useAtomValue(sessionMetaCacheAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -461,7 +467,6 @@ export function MachineAgentSettings({
     useSetAtom(machineSettingsFilterAtom),
   ];
   const [mobileMachinePickerOpen, setMobileMachinePickerOpen] = useState(false);
-  const [mobileReviewPolicyOpen, setMobileReviewPolicyOpen] = useState(false);
   const effectiveFilter = filter;
   const [desktopExpandedMachineId, setDesktopExpandedMachineId] = useState<MachineId | null>(
     selectedMachineId
@@ -548,6 +553,7 @@ export function MachineAgentSettings({
       const projects = projectsByMachineId.get(entry.machineId) ?? [];
       projects.push({
         key,
+        localProjectId: entry.project.id,
         name: entry.project.name,
         rootPath: entry.project.rootPath,
         sharedWithTeam: accessByProjectKey.get(key)?.sharedWithTeam ?? false,
@@ -765,7 +771,7 @@ export function MachineAgentSettings({
     : mode === 'machines' && remoteMachinesAvailable && visibleSelectedMachineId === null
       ? undefined
       : resolvedDesktopMachine;
-  const credentialState = useCloudQuery(
+  const credentialState = useLegacyWorkspaceQuery(
     cloudOperations.machineCredentials.getMachineCredentialState,
     mode === 'machines' &&
       workspaceId &&
@@ -774,7 +780,7 @@ export function MachineAgentSettings({
       ? { workspaceId, machineId: resolvedSelectedMachine.id }
       : 'skip'
   );
-  const revokeMachineCredentialsMutation = useCloudMutation(
+  const revokeMachineCredentialsMutation = useLegacyWorkspaceMutation(
     cloudOperations.machineCredentials.revokeMachineCredentials
   );
 
@@ -842,6 +848,7 @@ export function MachineAgentSettings({
   const sharedWithTeam = resolvedSelectedMachine
     ? (accessByMachineId.get(resolvedSelectedMachine.id)?.sharedWithTeam ?? false)
     : false;
+  const providerUnavailableReason = useMachineRpcFeatureReason(resolvedSelectedMachine?.id);
   const isLocal = !!resolvedSelectedMachine && resolvedSelectedMachine.id === localMachineId;
   const isOwn = resolvedSelectedMachine ? isOwnMachine(resolvedSelectedMachine) : false;
   const selectedIsOnline =
@@ -1156,6 +1163,7 @@ export function MachineAgentSettings({
             agentType: payload.agentType,
             customAcp: payload.customAcp,
             runtimeOverrides: payload.runtimeOverrides,
+            magpieGatewayUrl: payload.magpieGatewayUrl,
             env: payload.env,
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
@@ -1178,6 +1186,7 @@ export function MachineAgentSettings({
             agentType: payload.agentType,
             customAcp: payload.customAcp,
             runtimeOverrides: payload.runtimeOverrides,
+            magpieGatewayUrl: payload.magpieGatewayUrl,
             env: payload.env,
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
@@ -1295,66 +1304,68 @@ export function MachineAgentSettings({
   // retains its list → detail navigation because the detail owns device controls.
   if (isMobile) {
     if (mode === 'agents') {
+      const fold = remoteMachinesAvailable && resolvedSelectedMachine ? settingsFold : null;
       return (
-        <div {...stylex.props(styles.column, styles.fill, styles.scroll)}>
-          {banner ? <div {...stylex.props(styles.bannerSlot)}>{banner}</div> : null}
-          <div {...stylex.props(styles.mobileBody)}>
-            {remoteMachinesAvailable && resolvedSelectedMachine ? (
-              <MobileSettingsSection title={t('settings.tabs.machines', 'Machines')}>
-                <MobileSettingsRow
-                  label={
-                    <div {...stylex.props(styles.machineLabel)}>
-                      <span
-                        aria-hidden
-                        {...stylex.props(styles.dot, selectedIsOnline && styles.dotOnline)}
-                      />
-                      <span {...stylex.props(styles.machineName)}>
-                        {resolvedSelectedMachine.name || resolvedSelectedMachine.id}
-                      </span>
-                    </div>
-                  }
-                  helper={
-                    <span>
-                      {selectedIsOnline
-                        ? t('workspace.machines.online', 'Online')
-                        : t('workspace.machines.offline', 'Offline')}
-                      {isLocal ? ` · ${t('workspace.machines.thisDevice', 'This device')}` : ''}
-                    </span>
-                  }
-                  onClick={() => setMobileMachinePickerOpen(true)}
-                  trailing={<ChevronRight {...stylex.props(styles.icon16)} />}
-                />
-              </MobileSettingsSection>
-            ) : null}
-            {resolvedSelectedMachine ? (
-              <MachineProvidersSection
-                key={resolvedSelectedMachine.id}
-                variant="mobile-list"
-                machine={resolvedSelectedMachine}
-                configs={configsForMachine}
-                setups={setupsForMachine}
-                onAddConfig={() => openCreateDialog(resolvedSelectedMachine)}
-                onEditConfig={(config) => openEditDialog(resolvedSelectedMachine, config)}
-                onDeleteConfig={handleDeleteConfig}
-                onRefreshConfig={handleRefreshConfig}
-                onRetrySetup={handleRetrySetup}
-                onDeleteSetup={handleDeleteSetup}
-              />
-            ) : null}
-            {reviewAgentEnabled ? (
-              <MobileSettingsSection>
-                <MobileSettingsRow
-                  label={t('settings.review.title', 'Review agent')}
-                  helper={t(
-                    'settings.review.machineConfigHelper',
-                    'Choose the reviewer used by sessions on each machine.'
-                  )}
-                  onClick={() => setMobileReviewPolicyOpen(true)}
-                  trailing={<ChevronRight {...stylex.props(styles.icon16)} />}
-                />
-              </MobileSettingsSection>
-            ) : null}
-          </div>
+        <div {...stylex.props(styles.column, styles.fill, !fold && styles.scroll)}>
+          <MobileSettingsFoldContext.Provider value={fold}>
+            <MobileSettingsFoldPanels
+              upper={
+                <>
+                  {banner ? <div {...stylex.props(styles.bannerSlot)}>{banner}</div> : null}
+                  <div {...stylex.props(styles.mobileBody)}>
+                    {remoteMachinesAvailable && resolvedSelectedMachine ? (
+                      <MobileSettingsSection title={t('settings.tabs.machines', 'Machines')}>
+                        <MobileSettingsRow
+                          label={
+                            <div {...stylex.props(styles.machineLabel)}>
+                              <span
+                                aria-hidden
+                                {...stylex.props(styles.dot, selectedIsOnline && styles.dotOnline)}
+                              />
+                              <span {...stylex.props(styles.machineName)}>
+                                {resolvedSelectedMachine.name || resolvedSelectedMachine.id}
+                              </span>
+                            </div>
+                          }
+                          helper={
+                            <span>
+                              {selectedIsOnline
+                                ? t('workspace.machines.online', 'Online')
+                                : t('workspace.machines.offline', 'Offline')}
+                              {isLocal
+                                ? ` · ${t('workspace.machines.thisDevice', 'This device')}`
+                                : ''}
+                            </span>
+                          }
+                          onClick={() => setMobileMachinePickerOpen(true)}
+                          trailing={<ChevronRight {...stylex.props(styles.icon16)} />}
+                        />
+                      </MobileSettingsSection>
+                    ) : null}
+                  </div>
+                </>
+              }
+              lower={
+                <div {...stylex.props(styles.mobileBody)}>
+                  {resolvedSelectedMachine ? (
+                    <MachineProvidersSection
+                      key={resolvedSelectedMachine.id}
+                      variant="mobile-list"
+                      machine={resolvedSelectedMachine}
+                      configs={configsForMachine}
+                      setups={setupsForMachine}
+                      onAddConfig={() => openCreateDialog(resolvedSelectedMachine)}
+                      onEditConfig={(config) => openEditDialog(resolvedSelectedMachine, config)}
+                      onDeleteConfig={handleDeleteConfig}
+                      onRefreshConfig={handleRefreshConfig}
+                      onRetrySetup={handleRetrySetup}
+                      onDeleteSetup={handleDeleteSetup}
+                    />
+                  ) : null}
+                </div>
+              }
+            />
+          </MobileSettingsFoldContext.Provider>
           {remoteMachinesAvailable ? (
             <Drawer open={mobileMachinePickerOpen} onOpenChange={setMobileMachinePickerOpen}>
               <DrawerContent className="max-h-[80dvh]!">
@@ -1406,24 +1417,6 @@ export function MachineAgentSettings({
                       );
                     })}
                   </div>
-                </div>
-              </DrawerContent>
-            </Drawer>
-          ) : null}
-          {reviewAgentEnabled ? (
-            <Drawer open={mobileReviewPolicyOpen} onOpenChange={setMobileReviewPolicyOpen}>
-              <DrawerContent className="h-[88dvh]! max-h-[88dvh]!">
-                <DrawerTitle {...stylex.props(styles.sheetTitle)}>
-                  {t('settings.review.title', 'Review agent')}
-                </DrawerTitle>
-                <DrawerDescription {...stylex.props(styles.srOnly)}>
-                  {t(
-                    'settings.review.machineConfigHelper',
-                    'Choose the reviewer used by sessions on each machine.'
-                  )}
-                </DrawerDescription>
-                <div {...stylex.props(styles.sheetPolicy)}>
-                  {mobileReviewPolicyOpen ? <ReviewPolicySection /> : null}
                 </div>
               </DrawerContent>
             </Drawer>
@@ -1790,6 +1783,10 @@ export function MachineAgentSettings({
               variant="secondary"
               size="small"
               onClick={() => openCreateDialog(resolvedSelectedMachine)}
+              data-testid="agent-provider-add"
+              data-machine-id={resolvedSelectedMachine.id}
+              disabled={!!providerUnavailableReason}
+              title={providerUnavailableReason}
             >
               <Plus {...stylex.props(styles.addGlyph)} />
               {t('settings.agent.provider.addProvider', 'Add provider')}
@@ -1830,7 +1827,6 @@ export function MachineAgentSettings({
           {t('settings.agent.machineTabs.selectPromptAgent', 'Select a machine.')}
         </div>
       )}
-      <ReviewPolicySection />
       {dialog}
     </div>
   );

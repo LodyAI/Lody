@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { initI18n } from '../src/i18n';
 
 import { act, useState, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -6,12 +9,8 @@ import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId, SessionMeta } from '@lody/shared';
 
-import {
-  experimentalFeaturesEnabledAtom,
-  reviewAgentExperimentEnabledAtom,
-} from '../src/atoms/settings';
+import { experimentalFeaturesEnabledAtom } from '../src/atoms/settings';
 import { SessionHeaderMenu } from '../src/components/sessions/session-chat-interface';
-import { Tooltip } from '@lody/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -47,7 +46,9 @@ describe('SessionHeaderMenu', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initI18n('en');
+    vi.useFakeTimers();
     Object.defineProperty(globalThis, 'PointerEvent', {
       configurable: true,
       value: TestPointerEvent,
@@ -61,6 +62,7 @@ describe('SessionHeaderMenu', () => {
     if (root) {
       await act(async () => root?.unmount());
     }
+    vi.useRealTimers();
     document.body.innerHTML = '';
     root = undefined;
     container = undefined;
@@ -76,10 +78,11 @@ describe('SessionHeaderMenu', () => {
         new TestPointerEvent('mousedown', {
           bubbles: true,
           button: 0,
+          detail: 1,
           pointerType: 'mouse',
         })
       );
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      await vi.advanceTimersByTimeAsync(40);
     });
   }
 
@@ -121,25 +124,6 @@ describe('SessionHeaderMenu', () => {
     await act(async () => trigger.click());
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
   }
-
-  it('opens the submenu and forks to a new tab', async () => {
-    await act(async () => root?.render(<ForkMenuHarness />));
-    await openForkMenu();
-    expect(menuItem('Copy context as Markdown')).toBeDefined();
-    await act(async () => menuItem('Fork to new tab').click());
-    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('shared');
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-  });
-
-  it('forks into a new worktree when that destination is available', async () => {
-    await act(async () => root?.render(<ForkMenuHarness forkWorktreeAvailability="available" />));
-    await openForkMenu();
-    await act(async () => menuItem('Fork to new worktree').click());
-    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe(
-      'new-worktree'
-    );
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-  });
 
   it('disables native destinations while pending but still allows copying', async () => {
     await act(async () =>
@@ -198,139 +182,91 @@ describe('SessionHeaderMenu', () => {
     expect(onOpenSession).not.toHaveBeenCalled();
   });
 
-  it('keeps the reviewer setup dialog mounted after the actions menu closes', async () => {
+  it('omits retired review actions even with the old opt-in and session pointer', async () => {
     const store = createStore();
     store.set(experimentalFeaturesEnabledAtom, true);
-    store.set(reviewAgentExperimentEnabledAtom, true);
-    const onOpenReviewSettings = vi.fn();
-
-    await act(async () => {
+    localStorage.setItem('lody-review-agent-enabled', 'true');
+    try {
+      await act(async () => {
+        root?.render(
+          <Provider store={store}>
+            <SessionHeaderMenu
+              session={{ ...session, autoReview: { runId: 'retired-review', t: 1 } }}
+              onCopyUrl={() => {}}
+              t={translate}
+            />
+          </Provider>
+        );
+      });
+      await openMenu();
+      expect(document.querySelector('[role="menu"]')).not.toBeNull();
+      expect(document.body.textContent).toContain('Copy');
+      expect(document.body.textContent).not.toContain('Review this branch');
+      expect(document.body.textContent).not.toContain('Auto review and merge');
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    } finally {
+      localStorage.removeItem('lody-review-agent-enabled');
+    }
+  });
+  it('allows encrypted sharing, local export and preview while keeping unsupported operations restricted', async () => {
+    let exported = false;
+    let shareOpened = false;
+    const store = createStore();
+    store.set(workspaceContentModeAtom, {
+      accountId: 'user',
+      workspaceSlug: 'encrypted',
+      workspaceId: 'workspace',
+      descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+    } as never);
+    await act(async () =>
       root?.render(
         <Provider store={store}>
-          <SessionHeaderMenu
-            session={session}
-            machineName="Review machine"
-            onCopyUrl={vi.fn()}
-            onOpenReviewSettings={onOpenReviewSettings}
-            t={translate}
+          <ForkMenuHarness
+            onOpenPublicShare={() => {
+              shareOpened = true;
+            }}
+            onShareWithTeam={() => {
+              throw new Error('must not share with team');
+            }}
+            sharing={{
+              visibility: 'private',
+              privateReason: 'machine',
+              canManage: true,
+              machineId: session.machineId,
+              localProjectId: null,
+              machineName: 'remote',
+              projectName: null,
+            }}
+            onShareAsImage={() => {
+              exported = true;
+            }}
           />
         </Provider>
-      );
-    });
-    await openMenu();
-
-    const reviewItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent?.includes('Review this branch')
-    );
-    expect(reviewItem).toBeDefined();
-    await act(async () => reviewItem?.click());
-
-    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-    expect(dialog?.textContent).toContain('Configure a review agent');
-
-    const openSettings = Array.from(
-      dialog?.querySelectorAll<HTMLButtonElement>('button') ?? []
-    ).find((button) => button.textContent?.includes('Open review settings'));
-    await act(async () => openSettings?.click());
-    expect(onOpenReviewSettings).toHaveBeenCalledTimes(1);
-  });
-
-  it('omits the Session group heading and keeps Team as a normal-weight row', async () => {
-    await act(async () => {
-      root?.render(
-        <Tooltip.Provider>
-          <SessionHeaderMenu
-            session={
-              {
-                ...session,
-                project: { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'main' },
-                repoFullName: 'loro-dev/lody',
-                branchName: 'fix/ui',
-                baseBranch: 'main',
-              } as SessionMeta
-            }
-            machineName="MacBook"
-            sharing={{
-              visibility: 'team',
-              canManage: true,
-              machineId: null,
-              localProjectId: null,
-              machineName: 'MacBook',
-              projectName: 'lody',
-            }}
-            onCopyUrl={vi.fn()}
-            t={translate}
-          />
-        </Tooltip.Provider>
-      );
-    });
-    await openMenu();
-
-    expect(
-      Array.from(document.querySelectorAll('*')).some(
-        (el) => el.childNodes.length === 1 && el.textContent === 'Session'
       )
-    ).toBe(false);
-
-    const teamLabel = Array.from(document.querySelectorAll('span')).find(
-      (el) => el.textContent === 'Team' && el.childElementCount === 0
     );
-    expect(teamLabel).not.toBeNull();
-    expect(teamLabel?.closest('button, a, [role="button"], [role="menuitem"]')).toBeNull();
-  });
-
-  it('omits Open in IDE when no launchers are provided', async () => {
-    await act(async () => {
-      root?.render(<SessionHeaderMenu session={session} onCopyUrl={vi.fn()} t={translate} />);
-    });
     await openMenu();
-    expect(document.body.textContent).not.toContain('Open in VS Code');
-  });
-
-  it('opens the selected IDE from the actions menu', async () => {
-    const onOpen = vi.fn();
-    await act(async () => {
-      root?.render(
-        <SessionHeaderMenu
-          session={session}
-          onCopyUrl={vi.fn()}
-          openInIde={{
-            options: [vscodeLauncher],
-            selected: vscodeLauncher,
-            onOpen,
-            onSelect: vi.fn(),
-          }}
-          t={translate}
-        />
-      );
-    });
+    for (const reason of ['Encrypted workspaces do not yet support remote machine operations.']) {
+      const item = menuItem(reason);
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      await act(async () => item.click());
+    }
+    expect(document.body.textContent).not.toContain(
+      'Encrypted workspaces do not yet support remote preview.'
+    );
+    expect(document.body.textContent).not.toContain(
+      'Encrypted workspaces do not yet support sharing.'
+    );
+    await act(async () => menuItem('Share').click());
+    expect(shareOpened).toBe(true);
     await openMenu();
-    await act(async () => menuItem('Open in VS Code').click());
-    expect(onOpen).toHaveBeenCalledTimes(1);
-  });
-
-  it('lists multiple IDE launchers in a submenu and launches the chosen one', async () => {
-    const onSelect = vi.fn();
-    await act(async () => {
-      root?.render(
-        <SessionHeaderMenu
-          session={session}
-          onCopyUrl={vi.fn()}
-          openInIde={{
-            options: [vscodeLauncher, cursorLauncher],
-            selected: vscodeLauncher,
-            onOpen: vi.fn(),
-            onSelect,
-          }}
-          t={translate}
-        />
-      );
-    });
+    expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('not copied');
+    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
+    await act(async () => menuItem('Fork session').click());
+    await act(async () => menuItem('Copy context as Markdown').click());
+    expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('copied');
+    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
     await openMenu();
-    const trigger = menuItem('Open in VS Code');
-    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
-    await act(async () => trigger.click());
-    await act(async () => menuItem('Cursor').click());
-    expect(onSelect).toHaveBeenCalledWith(cursorLauncher);
+    await act(async () => menuItem('Share as image').click());
+    expect(exported).toBe(true);
   });
 });

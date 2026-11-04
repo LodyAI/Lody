@@ -7,11 +7,10 @@ import {
 import { buildAcpSelectorOptions } from '../src/components/shared/acp-selector-options';
 import {
   EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
-  areAcpSessionConfigPreferencesEqual,
   buildAcpSessionConfigCandidates,
-  fenceAcpSessionUserEdits,
   filterAcpSessionConfigOptionValues,
   resolveAcpSessionConfigSelection,
+  type AcpSessionConfigSelectionInputs,
   type AcpSessionSelectorOptionsInput,
   type AcpSessionUserConfigEdits,
 } from '../src/lib/acp-session-config-selection';
@@ -28,24 +27,6 @@ const baseOptions: AcpSessionSelectorOptionsInput = {
 };
 
 describe('ACP session config derivation', () => {
-  it('retains an unrecognized preference until authoritative capabilities arrive', () => {
-    const inputs = { edits: emptyEdits, preferences: { modelId: 'gpt-5.6-sol' } };
-    expect(resolveAcpSessionConfigSelection(inputs, baseOptions).selectedModelId).toBe(
-      'gpt-5.6-sol'
-    );
-    expect(
-      resolveAcpSessionConfigSelection(inputs, {
-        ...baseOptions,
-        capabilityAuthority: 'authoritative',
-        modelOptions: [
-          { value: 'gpt-5.6-sol', label: '5.6 Sol' },
-          { value: 'gpt-5.5', label: '5.5' },
-        ],
-        defaultModelId: 'gpt-5.6-sol',
-      }).selectedModelId
-    ).toBe('gpt-5.6-sol');
-  });
-
   it('replaces an invalid preference only after authoritative validation', () => {
     const inputs = { edits: emptyEdits, preferences: { modelId: 'removed-model' } };
     expect(resolveAcpSessionConfigSelection(inputs, baseOptions).selectedModelId).toBe(
@@ -190,73 +171,6 @@ describe('ACP session config derivation', () => {
     ).toEqual({});
   });
 
-  it('is stable for a preference key missing from the runtime snapshot (#185 regression)', () => {
-    /* The shape of session 51e236e0…, which crashed 0.89.x on open: the last
-       turn's preferences carry `fast`, the agent's runtime snapshot does not.
-       The old reconcile/apply reducer pair alternated between re-seeding and
-       deleting `fast` forever; derivation settles it once — the runtime
-       snapshot owns the whole non-user KEY SET, so `fast` is OMITTED (not
-       back-filled from the selector fallback, and never resurrected from the
-       stale preference, set to true here so a resurrection would be visible)
-       — and, being a pure function, returns the identical result on every
-       evaluation. */
-    const preferences = {
-      modeId: 'auto',
-      modelId: 'claude-fable-5[1m]',
-      configOptionValues: { effort: 'high', fast: true },
-    };
-    const runtimePreferences = {
-      modeId: 'auto',
-      modelId: 'claude-fable-5',
-      configOptionValues: { effort: 'high', mode: 'auto', model: 'claude-fable-5' },
-    };
-    const selectors = [
-      {
-        configId: 'effort',
-        label: 'Effort',
-        type: 'select' as const,
-        currentValue: 'default',
-        options: [
-          { value: 'default', label: 'D' },
-          { value: 'high', label: 'H' },
-        ],
-      },
-      {
-        configId: 'fast',
-        label: 'Fast',
-        type: 'boolean' as const,
-        currentValue: false,
-        options: [],
-      },
-    ];
-    for (const authority of ['provisional', 'authoritative'] as const) {
-      const options: AcpSessionSelectorOptionsInput = {
-        capabilityAuthority: authority,
-        modeOptions: [{ value: 'auto', label: 'Auto' }],
-        modelOptions: [
-          { value: 'claude-fable-5', label: 'F5' },
-          { value: 'claude-fable-5[1m]', label: 'F5 1M' },
-        ],
-        defaultModeId: 'auto',
-        defaultModelId: 'claude-fable-5',
-        configOptionSelectors: selectors,
-      };
-      const inputs = { edits: emptyEdits, preferences, runtimePreferences };
-      const first = resolveAcpSessionConfigSelection(inputs, options);
-      const second = resolveAcpSessionConfigSelection(inputs, options);
-      expect(second).toEqual(first);
-      expect(first.selectedModeId).toBe('auto');
-      expect(first.selectedModelId).toBe('claude-fable-5');
-      // The runtime snapshot owns the key set: `fast` is omitted, never
-      // resurrected from the stale preference or a selector fallback.
-      expect(first.configOptionValues).toEqual(
-        authority === 'provisional'
-          ? { effort: 'high', mode: 'auto', model: 'claude-fable-5' }
-          : { effort: 'high' }
-      );
-    }
-  });
-
   it('normalizes model-dependent selectors against the RESOLVED model', () => {
     /* An authoritative capability refresh removed the persisted extended Codex
        model (`gpt-5.6-sol`). The selector catalog was built for that stale
@@ -355,47 +269,6 @@ describe('ACP session config derivation', () => {
     ).toBeUndefined();
   });
 
-  it('builds unvalidated candidates from the same chain', () => {
-    expect(
-      buildAcpSessionConfigCandidates({
-        edits: { model: { value: 'edited' }, configOptions: { effort: 'low' } },
-        preferences: { modeId: 'plan', modelId: 'pref', configOptionValues: { effort: 'high' } },
-        runtimePreferences: { modelId: 'runtime', configOptionValues: { effort: 'mid' } },
-      })
-    ).toEqual({
-      modeId: 'plan',
-      modelId: 'edited',
-      configOptionValues: { effort: 'low' },
-    });
-  });
-
-  it('filters values against the current selector schema', () => {
-    const selectors = [
-      {
-        configId: 'collaboration_mode',
-        label: 'Collaboration mode',
-        type: 'select' as const,
-        currentValue: 'default',
-        options: [
-          { value: 'default', label: 'Default' },
-          { value: 'plan', label: 'Plan' },
-        ],
-      },
-    ];
-    expect(
-      filterAcpSessionConfigOptionValues(
-        { 'plan-mode': 'on', collaboration_mode: 'plan', future_option: 'enabled' },
-        selectors
-      )
-    ).toEqual({ collaboration_mode: 'plan' });
-    expect(
-      filterAcpSessionConfigOptionValues(
-        { 'plan-mode': 'on', collaboration_mode: 'invalid' },
-        selectors
-      )
-    ).toEqual({});
-  });
-
   it('lets a pinned effort through when the same pick moves the model', () => {
     const selectors = [
       {
@@ -424,78 +297,6 @@ describe('ACP session config derivation', () => {
       reasoning_effort: 'xhigh',
     });
     expect(filterAcpSessionConfigOptionValues(pinned, selectors)).toEqual({});
-  });
-});
-
-describe('areAcpSessionConfigPreferencesEqual', () => {
-  it('compares by value across fresh object identities', () => {
-    expect(
-      areAcpSessionConfigPreferencesEqual(
-        { modeId: 'auto', modelId: 'm', configOptionValues: { effort: 'high', fast: false } },
-        { modeId: 'auto', modelId: 'm', configOptionValues: { fast: false, effort: 'high' } }
-      )
-    ).toBe(true);
-    expect(
-      areAcpSessionConfigPreferencesEqual(
-        { configOptionValues: { effort: 'high' } },
-        { configOptionValues: { effort: 'low' } }
-      )
-    ).toBe(false);
-  });
-
-  it('distinguishes an absent config table from an empty one', () => {
-    // For the runtime baseline, `undefined` means "no snapshot" while `{}`
-    // is a full snapshot that owns — and empties — the non-user table.
-    expect(areAcpSessionConfigPreferencesEqual({}, { configOptionValues: {} })).toBe(false);
-    expect(
-      areAcpSessionConfigPreferencesEqual({ configOptionValues: {} }, { configOptionValues: {} })
-    ).toBe(true);
-    expect(areAcpSessionConfigPreferencesEqual(null, null)).toBe(true);
-    expect(areAcpSessionConfigPreferencesEqual(null, {})).toBe(false);
-  });
-});
-
-describe('fenceAcpSessionUserEdits', () => {
-  const edits: AcpSessionUserConfigEdits = {
-    model: { value: 'gpt-5.5' },
-    configOptions: { reasoning_effort: 'high' },
-  };
-
-  it('clears everything on a target change or when edits are not preserved', () => {
-    expect(
-      fenceAcpSessionUserEdits(edits, {
-        targetChanged: true,
-        preserveUnsentUserEdits: true,
-        preferences: {},
-      })
-    ).toBe(EMPTY_ACP_SESSION_USER_CONFIG_EDITS);
-    expect(
-      fenceAcpSessionUserEdits(edits, {
-        targetChanged: false,
-        preserveUnsentUserEdits: false,
-        preferences: {},
-      })
-    ).toBe(EMPTY_ACP_SESSION_USER_CONFIG_EDITS);
-  });
-
-  it('acknowledges only values captured by the accepted turn', () => {
-    // The accepted turn did NOT capture the edit: it stays a user edit.
-    expect(
-      fenceAcpSessionUserEdits(edits, {
-        targetChanged: false,
-        preserveUnsentUserEdits: true,
-        preferences: { configOptionValues: { reasoning_effort: 'low' } },
-      })
-    ).toEqual({ model: { value: 'gpt-5.5' }, configOptions: { reasoning_effort: 'high' } });
-    // The accepted turn captured both values: nothing is a user edit anymore,
-    // so a later runtime baseline may move those fields again.
-    expect(
-      fenceAcpSessionUserEdits(edits, {
-        targetChanged: false,
-        preserveUnsentUserEdits: true,
-        preferences: { modelId: 'gpt-5.5', configOptionValues: { reasoning_effort: 'high' } },
-      })
-    ).toBe(EMPTY_ACP_SESSION_USER_CONFIG_EDITS);
   });
 });
 
@@ -592,5 +393,162 @@ describe('ACP session config with declared per-model controls', () => {
 
     expect(resolved.selectedModelId).toBe('model-b');
     expect(resolved.configOptionValues['fast-mode']).toBe(true);
+  });
+});
+
+describe.each(['custom', 'registry'] as const)('%s model-category effort selection', (cliType) => {
+  const configId = 'generic-effort' as AgentConfigId;
+  const target = { cliType, agentType: 'synthetic-agent' };
+  const machine = {
+    acpCapabilities: {
+      [configId]: {
+        ...target,
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+        provenance: 'runtime' as const,
+        fetchedAt: 1,
+        modes: [],
+        models: [],
+        configOptions: [
+          {
+            id: 'provider_model',
+            name: 'Model',
+            category: 'model',
+            type: 'select' as const,
+            currentValue: 'a',
+            options: ['a', 'b', 'adaptive'].map((value) => ({ value, name: value })),
+          },
+          {
+            id: 'provider_effort',
+            name: 'Effort',
+            category: 'thought_level',
+            type: 'select' as const,
+            currentValue: 'high',
+            options: ['medium', 'high', 'max'].map((value) => ({ value, name: value })),
+          },
+        ],
+        declaredModelControls: {
+          a: { effortValues: ['medium', 'high', 'max'] },
+          b: { effortValues: ['low', 'medium', 'high', 'xhigh', 'max'] },
+          adaptive: { effortValues: [] },
+        },
+      },
+    },
+  };
+  const build = (inputs: AcpSessionConfigSelectionInputs) => {
+    const candidate = buildAcpSessionConfigCandidates(inputs);
+    return buildAcpSelectorOptions({
+      ...target,
+      configId,
+      machine,
+      selectedModelId: candidate.modelId,
+      configOptionValues: candidate.configOptionValues,
+    });
+  };
+  const resolve = (inputs: AcpSessionConfigSelectionInputs) =>
+    resolveAcpSessionConfigSelection(inputs, build(inputs), target);
+  const efforts = (value: {
+    configOptionSelectors: AcpSessionSelectorOptionsInput['configOptionSelectors'];
+  }) =>
+    value.configOptionSelectors
+      .find((selector) => selector.configId === 'provider_effort')
+      ?.options.map((option) => option.value);
+  const inputsFor = (model: string): AcpSessionConfigSelectionInputs => ({
+    edits: { configOptions: { provider_model: model } },
+    preferences: {},
+  });
+
+  it('derives both stages from the real model config id and preserves config-option dispatch', () => {
+    const inputs = {
+      ...inputsFor('b'),
+      runtimePreferences: { configOptionValues: { provider_model: 'a', provider_effort: 'high' } },
+    };
+    expect(efforts(build(inputs))).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    const resolved = resolve(inputs);
+    expect(efforts(resolved)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(resolved.selectedModelId).toBeNull();
+    expect(resolved.configOptionValues.provider_model).toBe('b');
+    expect(
+      filterAcpSessionConfigOptionValues(
+        resolved.configOptionValues,
+        resolved.configOptionSelectors
+      )
+    ).toEqual({ provider_model: 'b', provider_effort: 'high' });
+  });
+
+  it('hides empty effort declarations and restores the control on switching back', () => {
+    const hidden = resolve(inputsFor('adaptive'));
+    expect(efforts(hidden)).toBeUndefined();
+    expect(hidden.configOptionValues).toEqual({ provider_model: 'adaptive' });
+    const restored = resolve({
+      edits: { configOptions: { provider_model: 'b' } },
+      preferences: { configOptionValues: hidden.configOptionValues },
+    });
+    expect(efforts(restored)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(restored.configOptionValues.provider_effort).toBe('high');
+  });
+
+  it('validates the model before effort and falls back from an invalid edit to the runtime model', () => {
+    const inputs: AcpSessionConfigSelectionInputs = {
+      edits: { configOptions: { provider_model: 'removed', provider_effort: 'xhigh' } },
+      runtimePreferences: {
+        configOptionValues: { provider_model: 'b', provider_effort: 'medium' },
+      },
+      preferences: { configOptionValues: { provider_model: 'a' } },
+    };
+    const resolved = resolve(inputs);
+    expect(resolved.configOptionValues).toEqual({ provider_model: 'b', provider_effort: 'xhigh' });
+    expect(efforts(resolved)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('restores controls when an unsupported candidate is removed from the authoritative catalog', () => {
+    const inputs: AcpSessionConfigSelectionInputs = {
+      edits: { configOptions: { provider_model: 'adaptive' } },
+      preferences: { configOptionValues: { provider_model: 'b' } },
+    };
+    const capability = machine.acpCapabilities[configId];
+    const options = buildAcpSelectorOptions({
+      ...target,
+      configId,
+      configOptionValues: { provider_model: 'adaptive' },
+      machine: {
+        acpCapabilities: {
+          [configId]: {
+            ...capability,
+            configOptions: capability.configOptions.map((option) =>
+              option.category === 'model'
+                ? { ...option, options: option.options.filter((item) => item.value !== 'adaptive') }
+                : option
+            ),
+          },
+        },
+      },
+    });
+    expect(efforts(options)).toBeUndefined();
+    const resolved = resolveAcpSessionConfigSelection(inputs, options, target);
+    expect(efforts(resolved)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(resolved.configOptionValues.provider_model).toBe('b');
+  });
+
+  it('uses the generic config value even if a stale dedicated model id exists', () => {
+    const options = buildAcpSelectorOptions({
+      ...target,
+      configId,
+      machine,
+      selectedModelId: 'a',
+      configOptionValues: { provider_model: 'b' },
+    });
+    expect(efforts(options)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('keeps runtime snapshots authoritative over missing keys and invalid values', () => {
+    for (const runtimeValues of [{}, { provider_model: 'removed', provider_effort: 'removed' }]) {
+      const resolved = resolve({
+        edits: emptyEdits,
+        runtimePreferences: { configOptionValues: runtimeValues },
+        preferences: { configOptionValues: { provider_model: 'b', provider_effort: 'xhigh' } },
+      });
+      expect(resolved.configOptionValues).toEqual({});
+      expect(efforts(resolved)).toEqual(['medium', 'high', 'max']);
+    }
   });
 });

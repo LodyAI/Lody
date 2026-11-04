@@ -80,7 +80,7 @@ export function SessionPendingSendsHost({ runtime }: { runtime: WorkspaceRuntime
     [runtime, setPendingMetas, setSendStatuses]
   );
 
-  const hasPending = sends.length > 0;
+  const hasPending = sends.some(send => !send.persisted);
   useEffect(() => {
     if (!hasPending) return undefined;
     const confirmLeave = (event: BeforeUnloadEvent) => {

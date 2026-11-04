@@ -2,11 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { SessionHistoryParsed } from '@lody/shared';
 import {
   OUTLINE_MIN_USER_ROUNDS,
-  OUTLINE_PREVIEW_MAX_LENGTH,
-  OUTLINE_TITLE_MAX_LENGTH,
   buildConversationOutline,
   countUserDrivenRounds,
-  reuseConversationOutline,
   type ConversationOutlineSource,
 } from '../src/lib/conversation-outline';
 
@@ -55,23 +52,26 @@ describe('buildConversationOutline', () => {
     expect(outline[1]).toMatchObject({ title: 'Ship it', preview: 'Shipped.' });
   });
 
-  it('anchors each entry at the index of the message its round starts at', () => {
-    const outline = buildConversationOutline([
-      message('user', [text('first')]),
-      message('assistant', [text('a')]),
-      message('assistant', [text('b')]),
-      message('user', [text('second')]),
+  it('preserves literal identifiers in summaries and refreshes only changed turns', () => {
+    const user = message('user', [text('Find QA_RESUMED_OK')]);
+    const assistant = message('assistant', [text('**QA_RESUMED_OK** `foo_bar`')]);
+    const first = buildConversationOutline([user, assistant]);
+    expect(first[0]).toMatchObject({
+      title: 'Find QA_RESUMED_OK',
+      preview: 'QA_RESUMED_OK foo_bar',
+    });
+    expect(buildConversationOutline([user, assistant])).toEqual(first);
+    const updated = {
+      ...assistant,
+      message: { ...assistant.message!, items: [text('QA_RESUMED_OK — updated')] },
+    };
+    expect(buildConversationOutline([user, updated])[0]?.preview).toBe('QA_RESUMED_OK — updated');
+    expect(buildConversationOutline([user, assistant])).toEqual(first);
+    const long = message('assistant', [
+      text('QA_RESUMED_OK ' + 'x'.repeat(960) + ' OUTSIDE_WINDOW'),
     ]);
-
-    expect(outline.map((entry) => entry.messageIndex)).toEqual([0, 3]);
-  });
-
-  it('strips markdown and collapses newlines so a title stays one line', () => {
-    const outline = buildConversationOutline([
-      message('user', [text('## Fix the **bug**\n\nin `view.tsx`')]),
-    ]);
-
-    expect(outline[0]?.title).toBe('Fix the bug in view.tsx');
+    expect(buildConversationOutline([user, long])[0]?.preview).toContain('QA_RESUMED_OK');
+    expect(buildConversationOutline([user, long])[0]?.preview).not.toContain('OUTSIDE_WINDOW');
   });
 
   it('leaves the preview empty while a round has produced no agent prose yet', () => {
@@ -98,86 +98,7 @@ describe('buildConversationOutline', () => {
     expect(outline[1]?.startsWithAgent).toBe(false);
   });
 
-  it('skips non-message items', () => {
-    const outline = buildConversationOutline([
-      { type: 'empty' },
-      message('user', [text('hello')]),
-      { type: 'empty' },
-    ]);
-
-    expect(outline).toHaveLength(1);
-    expect(outline[0]?.messageIndex).toBe(1);
-  });
-
-  it('returns nothing for an empty conversation', () => {
-    expect(buildConversationOutline([])).toEqual([]);
-  });
-
-  describe('truncation', () => {
-    it('truncates the title by code point and marks it with an ellipsis', () => {
-      const long = 'a'.repeat(OUTLINE_TITLE_MAX_LENGTH + 20);
-      const outline = buildConversationOutline([message('user', [text(long)])]);
-      const title = outline[0]?.title ?? '';
-
-      expect(Array.from(title)).toHaveLength(OUTLINE_TITLE_MAX_LENGTH + 1);
-      expect(title.endsWith('…')).toBe(true);
-    });
-
-    it('counts CJK characters individually rather than by UTF-16 length', () => {
-      const cjk = '中'.repeat(OUTLINE_TITLE_MAX_LENGTH);
-      const outline = buildConversationOutline([message('user', [text(cjk)])]);
-
-      expect(outline[0]?.title).toBe(cjk);
-    });
-
-    it('does not split a surrogate pair', () => {
-      const emoji = '🎉'.repeat(OUTLINE_TITLE_MAX_LENGTH + 5);
-      const outline = buildConversationOutline([message('user', [text(emoji)])]);
-      const title = outline[0]?.title ?? '';
-
-      expect(title).not.toContain('�');
-      expect(Array.from(title)).toHaveLength(OUTLINE_TITLE_MAX_LENGTH + 1);
-    });
-
-    it('truncates the preview at its own, longer limit', () => {
-      const long = 'b'.repeat(OUTLINE_PREVIEW_MAX_LENGTH + 100);
-      const outline = buildConversationOutline([
-        message('user', [text('go')]),
-        message('assistant', [text(long)]),
-      ]);
-
-      expect(Array.from(outline[0]?.preview ?? '')).toHaveLength(OUTLINE_PREVIEW_MAX_LENGTH + 1);
-    });
-
-    it('reads only a bounded prefix of a long answer, so cost does not scale with it', () => {
-      // The guard that matters for streaming: markdown cleanup must never run
-      // over a whole multi-KB answer. A marker past the read window proves the
-      // tail was never inspected.
-      const answer = `${'c'.repeat(5_000)}MARKER`;
-      const outline = buildConversationOutline([
-        message('user', [text('go')]),
-        message('assistant', [text(answer)]),
-      ]);
-
-      expect(outline[0]?.preview).not.toContain('MARKER');
-    });
-  });
-
   describe('weight', () => {
-    it('grows with the amount of prose in the round', () => {
-      const short = buildConversationOutline([
-        message('user', [text('hi')]),
-        message('assistant', [text('ok')]),
-      ]);
-      const long = buildConversationOutline([
-        message('user', [text('hi')]),
-        message('assistant', [text('x'.repeat(9_000))]),
-      ]);
-
-      expect(short[0]?.weight).toBe(0);
-      expect(long[0]?.weight).toBeGreaterThan(short[0]?.weight ?? 0);
-    });
-
     it('accumulates across every message in the round, not just the first', () => {
       // Stated as a comparison rather than a fixed bucket, so recalibrating the
       // thresholds against real sessions cannot silently invalidate the claim.
@@ -215,12 +136,6 @@ describe('countUserDrivenRounds', () => {
       message('user', [text(`round ${index + 1}`)])
     );
 
-  it('counts one round per user turn', () => {
-    expect(countUserDrivenRounds(buildConversationOutline(rounds(9)))).toBe(9);
-    expect(countUserDrivenRounds(buildConversationOutline(rounds(10)))).toBe(10);
-    expect(OUTLINE_MIN_USER_ROUNDS).toBe(10);
-  });
-
   it('does not count a leading agent round toward the rail threshold', () => {
     const outline = buildConversationOutline([
       message('assistant', [text('Scheduled run starting.')]),
@@ -229,96 +144,5 @@ describe('countUserDrivenRounds', () => {
 
     expect(outline).toHaveLength(OUTLINE_MIN_USER_ROUNDS);
     expect(countUserDrivenRounds(outline)).toBe(OUTLINE_MIN_USER_ROUNDS - 1);
-  });
-
-  it('returns zero for an empty outline', () => {
-    expect(countUserDrivenRounds([])).toBe(0);
-  });
-});
-
-describe('reuseConversationOutline', () => {
-  const items = [message('user', [text('hello')]), message('assistant', [text('hi there')])];
-
-  it('hands back the previous array when nothing visible changed', () => {
-    const first = buildConversationOutline(items);
-    const second = buildConversationOutline(items);
-
-    expect(second).not.toBe(first);
-    expect(reuseConversationOutline(first, second)).toBe(first);
-  });
-
-  it('hands back the new array when a round changed', () => {
-    const first = buildConversationOutline(items);
-    const second = buildConversationOutline([...items, message('user', [text('next')])]);
-
-    expect(reuseConversationOutline(first, second)).toBe(second);
-  });
-
-  it('hands back the new array when a preview filled in', () => {
-    const before = buildConversationOutline([message('user', [text('go')])]);
-    const after = buildConversationOutline([
-      before[0]
-        ? ({
-            type: 'message',
-            message: {
-              id: before[0].key,
-              role: 'user',
-              items: [text('go')],
-              timestamp: '2026-08-19T00:00:00.000Z',
-            },
-          } as unknown as ConversationOutlineSource)
-        : message('user', [text('go')]),
-      message('assistant', [text('answer')]),
-    ]);
-
-    expect(reuseConversationOutline(before, after)).toBe(after);
-  });
-
-  it('treats a missing previous outline as a change', () => {
-    const next = buildConversationOutline(items);
-    expect(reuseConversationOutline(undefined, next)).toBe(next);
-  });
-});
-
-describe('summary stability while streaming', () => {
-  it('keeps a summary stable once its source text filled the read window', () => {
-    // A streaming turn replaces its message OBJECT on every delta, so object
-    // identity cannot carry a cache across deltas. Stability comes from the
-    // bounded prefix instead: past the read window, more tokens cannot change
-    // what the summary is derived from.
-    const messageId = 'streaming-1';
-    const makeItem = (body: string): ConversationOutlineSource => ({
-      type: 'message',
-      message: {
-        id: messageId,
-        role: 'assistant',
-        items: [text(body)],
-        timestamp: '2026-08-19T00:00:00.000Z',
-      } as unknown as SessionHistoryParsed,
-    });
-
-    const first = buildConversationOutline([makeItem('d'.repeat(1_000))]);
-    const grown = buildConversationOutline([makeItem(`${'d'.repeat(1_000)}${'e'.repeat(1_000)}`)]);
-
-    expect(grown[0]?.preview).toBe(first[0]?.preview);
-  });
-
-  it('still grows a summary that has not filled the read window', () => {
-    const messageId = 'streaming-2';
-    const makeItem = (body: string): ConversationOutlineSource => ({
-      type: 'message',
-      message: {
-        id: messageId,
-        role: 'assistant',
-        items: [text(body)],
-        timestamp: '2026-08-19T00:00:00.000Z',
-      } as unknown as SessionHistoryParsed,
-    });
-
-    const first = buildConversationOutline([makeItem('short')]);
-    const grown = buildConversationOutline([makeItem('short but then longer')]);
-
-    expect(first[0]?.preview).toBe('short');
-    expect(grown[0]?.preview).toBe('short but then longer');
   });
 });

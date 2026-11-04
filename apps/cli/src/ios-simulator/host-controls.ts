@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { Effect } from 'effect';
+import { processLayer, runCommand } from '@lody/shared/node/process';
 import type { IosSimulatorDeviceControl } from '@lody/shared';
 
 export type SimulatorHostControl =
@@ -16,34 +17,26 @@ export async function runSimulatorHostControl(
 ): Promise<void> {
   async function run(args: string[], input?: string): Promise<number | null> {
     signal.throwIfAborted();
-    return new Promise((resolve, reject) => {
-      const child = spawn(executable, args, {
-        stdio: ['pipe', 'ignore', 'ignore'],
-        // The IPC worker has a filtered environment. simctl decodes stdin with
-        // the locale, so an unset locale rejects non-ASCII pasteboard contents.
-        env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' },
-      });
-      let kill: ReturnType<typeof setTimeout> | undefined;
-      const cancel = () => {
-        child.kill('SIGTERM');
-        kill ??= setTimeout(() => child.kill('SIGKILL'), 1000);
-      };
-      signal.addEventListener('abort', cancel, { once: true });
-      if (signal.aborted) cancel();
-      // EPIPE is reported by the child's exit status, never with the input contents.
-      child.stdin.on('error', () => {});
-      child.stdin.end(input);
-      let failed = false;
-      child.once('error', () => {
-        failed = true;
-      });
-      child.once('close', (code) => {
-        clearTimeout(kill);
-        signal.removeEventListener('abort', cancel);
-        if (signal.aborted || failed) reject(new Error('Simulator control failed.'));
-        else resolve(code);
-      });
-    });
+    try {
+      const result = await Effect.runPromise(
+        Effect.provide(
+          runCommand({
+            command: executable,
+            args,
+            input: input ?? '',
+            // simctl decodes stdin with the locale; keep Unicode clipboard input.
+            env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' },
+            abandonPolicy: { graceMs: 1000, killWaitMs: 2000 },
+          }),
+          processLayer({})
+        ),
+        { signal }
+      );
+      return result.code;
+    } catch {
+      // Keep command input and subprocess diagnostics out of RPC and logs.
+      throw new Error('Simulator control failed.');
+    }
   }
   let code: number | null;
   switch (control.kind) {

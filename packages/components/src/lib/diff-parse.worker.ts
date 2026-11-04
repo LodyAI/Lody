@@ -1,5 +1,5 @@
+import { compactParsedFileDiff } from './code-collab-diff-metadata-bounds';
 import { parseDiffFromFile, type FileDiffMetadata, type SupportedLanguages } from '@pierre/diffs';
-import { stripParsedFileDiffFullText } from './code-collab-diff-metadata-bounds';
 
 type DiffParseWorkerRequest = {
   readonly id: number;
@@ -152,7 +152,7 @@ function parseAndPostResult(message: DiffParseWorkerRequest): void {
         : Date.now();
     ctx.postMessage({
       id: message.id,
-      result: stripParsedFileDiffFullText(result),
+      result: compactParsedFileDiff(result),
       durationMs: endedAt - startedAt,
     });
   } catch (error) {

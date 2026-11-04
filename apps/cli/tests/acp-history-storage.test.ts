@@ -193,8 +193,14 @@ describe('session history storage (integration)', () => {
       expect(
         intermediateTasks.map((item) => ({ id: item.taskId, items: item.run?.items }))
       ).toMatchObject([
-        { id: 'run-a', items: [{ type: 'tool_call', status: 'completed', content: [diffA] }] },
-        { id: 'run-b', items: [{ type: 'tool_call', status: 'in_progress', content: [diffB] }] },
+        {
+          id: 'run-a',
+          items: [{ type: 'tool_call', status: 'completed', locations: [{ path: diffA.path }] }],
+        },
+        {
+          id: 'run-b',
+          items: [{ type: 'tool_call', status: 'in_progress', locations: [{ path: diffB.path }] }],
+        },
       ]);
       await appendACPNotificationsToAssistantEntry(
         doc,
@@ -233,7 +239,7 @@ describe('session history storage (integration)', () => {
               toolCallId: 'shared-native-id',
               status: 'completed',
               title: 'Edit A',
-              content: [diffA],
+              locations: [{ path: diffA.path }],
             },
           ],
         },
@@ -245,11 +251,13 @@ describe('session history storage (integration)', () => {
               toolCallId: 'shared-native-id',
               status: 'completed',
               title: 'Edit B',
-              content: [diffB],
+              locations: [{ path: diffB.path }],
             },
           ],
         },
       ]);
+      expect(JSON.stringify(history)).not.toContain(diffA.oldText);
+      expect(JSON.stringify(history)).not.toContain(diffB.newText);
       expect(editsSeen).toEqual([
         {
           path: diffA.path,

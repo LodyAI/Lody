@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { createHistoryWriter } from '@lody/shared';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { renderToString } from 'katex';
+import 'katex/contrib/copy-tex';
 import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
 import type { ConversationView } from '../src/lib/conversation-view';
 import {
@@ -88,7 +91,7 @@ function Probe({
   );
 }
 function select(from: number, to = from) {
-  const elements = viewport.querySelectorAll('[data-conversation-row-key] span');
+  const elements = viewport.querySelectorAll('[data-conversation-row-key] > span');
   const first = elements[from]!.firstChild!;
   const last = elements[to]!.firstChild!;
   document.getSelection()!.setBaseAndExtent(first, 0, last, last.textContent!.length);
@@ -125,66 +128,51 @@ it('retains the complete interval after pointerup and holds prose until selectio
   expect(viewport.textContent).toContain('updated prose');
 });
 
-it('pins real history bodies before the viewport lease releases, then allows eviction', async () => {
-  const doc = reimport(buildSessionDoc(buildFixtureHistory(20)));
-  const view = await openReaderView(doc, {
-    sessionId: FIXTURE_SESSION_ID,
-    maxHydrated: 1,
-    tailKeep: 0,
-    scheduleIdle: createManualIdle().scheduleIdle,
-    yieldToEventLoop: () => Promise.resolve(),
-  });
+it('copies and retains local input without inventing history, and releases it on removal', async () => {
+  const doc = reimport(buildSessionDoc([]));
+  const view = await openReaderView(doc, { sessionId: FIXTURE_SESSION_ID });
   dispose = () => {
     view.dispose();
     doc.free();
   };
-  const head = view.acquireRange(0, 3);
-  await head.ready;
-  const rows = Array.from({ length: 3 }, (_, i) => row(view.index(i)!.id, i));
+  const rows = [{ ...row('local-input', -1), local: true }];
   await act(async () => root.render(<Probe rows={rows} view={view} />));
-  await act(async () => select(0, 2));
-  head.release();
-  const distant = view.acquireRange(30, 35);
-  await distant.ready;
-  expect([0, 1, 2].map((i) => view.isHydrated(i))).toEqual([true, true, true]);
-  await act(async () => {
-    document.getSelection()!.removeAllRanges();
-    document.dispatchEvent(new Event('selectionchange'));
-  });
-  expect([0, 1, 2].filter((i) => view.isHydrated(i)).length).toBeLessThan(3);
-  distant.release();
-});
-
-it('blocks incomplete native copy without replacing clipboard contents and recovers after loading', async () => {
-  const rows = [row('a', 0), row('loading', 1, false), row('c', 2)];
-  await act(async () => root.render(<Probe rows={rows} />));
-  await act(async () => select(0, 2));
+  await act(async () => select(0));
   const copy = new Event('copy', { bubbles: true, cancelable: true });
   await act(async () => viewport.dispatchEvent(copy));
-  expect(copy.defaultPrevented).toBe(true);
-  expect(viewport.querySelector('output')!.textContent).toBe('copy incomplete');
-  await act(async () => root.render(<Probe rows={rows.map((r) => ({ ...r, ready: true }))} />));
-  const retry = new Event('copy', { bubbles: true, cancelable: true });
-  await act(async () => viewport.dispatchEvent(retry));
-  expect(retry.defaultPrevented).toBe(false);
-  expect(document.getSelection()!.toString()).toContain('loading original prose');
+  expect(copy.defaultPrevented).toBe(false);
+  expect(document.getSelection()!.toString()).toContain('local-input original prose');
+  expect(state.keepMounted).toEqual([1]);
+  expect(state.holds.has('local-input')).toBe(true);
+  expect(state.holds.get('local-input')).toBeUndefined();
+  expect(view.turnCount).toBe(0);
+  await act(async () => root.render(<Probe rows={[]} view={view} />));
+  expect(state.keepMounted).toEqual([]);
+  expect(document.getSelection()!.isCollapsed).toBe(true);
 });
 
-it('keeps a touch-cancelled provisional turn until the native range arrives', async () => {
-  const rows = [row('a', 0), row('b', 1)];
+it('blocks formula clipboard conversion until every selected row is ready', async () => {
+  const rows = [row('a', 0), row('loading', 1, false), row('c', 2)];
   await act(async () => root.render(<Probe rows={rows} />));
-  await act(async () => {
-    viewport.querySelector('span')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-    document.dispatchEvent(new Event('pointercancel'));
-  });
-  expect(state.keepMounted).toEqual([1]);
-  await act(async () => select(0));
-  expect(state.activeRef.current).toBe(true);
-  await act(async () => {
-    document.getSelection()!.removeAllRanges();
-    document.dispatchEvent(new Event('selectionchange'));
-  });
-  expect(state.keepMounted).toEqual([]);
+  viewport.querySelector('span')!.insertAdjacentHTML('beforeend', renderToString('x^2'));
+  await act(async () => select(0, 2));
+  const contents = new Map<string, string>();
+  const copy = () => {
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData: (format: string, value: string) => contents.set(format, value) },
+    });
+    viewport.dispatchEvent(event);
+  };
+
+  await act(async () => copy());
+  expect(contents.size).toBe(0);
+  expect(viewport.querySelector('output')!.textContent).toBe('copy incomplete');
+
+  await act(async () => root.render(<Probe rows={rows.map((r) => ({ ...r, ready: true }))} />));
+  await act(async () => copy());
+  expect(contents.get('text/plain')).toContain('$x^2$');
+  expect(contents.get('text/plain')).toContain('loading original prose');
 });
 
 it('releases a cancelled touch candidate when scrolling produces no native selection', async () => {

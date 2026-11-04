@@ -488,6 +488,12 @@ export type AskUserQuestionElicitation = {
   meta: AskUserQuestionPermissionMeta;
   fieldKeys: string[];
   customFieldKeys?: Array<string | undefined>;
+  /** Droid's wire values are private to the active request, not displayed labels. */
+  droidFields?: Array<{
+    key: string;
+    choices: Array<{ label: string; value: string }>;
+    multiSelect: boolean;
+  }>;
   autoResolutionMs?: number | null;
 };
 
@@ -562,6 +568,129 @@ const parseElicitationOptions = (source: unknown[]): AskUserQuestionOption[] => 
 };
 
 /**
+ * Droid's AskUser form pairs option IDs with visible labels and a companion
+ * `question_N_other` field. Recognize only its complete, required form shape;
+ * arbitrary ACP forms and Core's explicit note associations stay unchanged.
+ */
+function parseDroidElicitation(schema: Record<string, unknown>): AskUserQuestionElicitation | null {
+  if (!isRecord(schema.properties) || !Array.isArray(schema.required)) return null;
+  const properties = schema.properties;
+  const required = schema.required;
+  const entries = Object.entries(properties).filter(([key]) => /^question_\d+$/.test(key));
+  if (entries.length === 0 || schema.required.length !== entries.length) return null;
+  if (entries.some(([key]) => !required.includes(key))) return null;
+  const consumed = new Set<string>();
+  const questions: AskUserQuestion[] = [];
+  const fields: NonNullable<AskUserQuestionElicitation['droidFields']> = [];
+  for (const [key, prop] of entries) {
+    if (
+      !isRecord(prop) ||
+      typeof prop.title !== 'string' ||
+      typeof prop.description !== 'string' ||
+      !prop.description.trim()
+    )
+      return null;
+    consumed.add(key);
+    const source = getEnumOptionSource(prop);
+    const multiSelect = prop.type === 'array';
+    if (source === null) {
+      if (prop.type !== 'string') return null;
+      questions.push({
+        id: key,
+        header: prop.title,
+        question: prop.description,
+        options: [],
+        multiSelect: false,
+        allowCustomAnswer: true,
+      });
+      fields.push({ key, choices: [], multiSelect: false });
+      continue;
+    }
+    if (
+      (multiSelect
+        ? !isRecord(prop.items) || !Array.isArray(prop.items.anyOf)
+        : prop.type !== 'string' || !Array.isArray(prop.oneOf)) ||
+      !isFreeTextProperty(properties[`${key}_other`])
+    )
+      return null;
+    const choices: Array<{ label: string; value: string }> = [];
+    let otherCount = 0;
+    for (const entry of source) {
+      if (!isEnumOption(entry) || typeof entry.title !== 'string' || !entry.title.trim())
+        return null;
+      if (entry.const === 'other') {
+        otherCount++;
+        continue;
+      }
+      if (!/^option_\d+$/.test(entry.const)) return null;
+      choices.push({ label: entry.title, value: entry.const });
+    }
+    if (
+      otherCount !== 1 ||
+      choices.length === 0 ||
+      new Set(choices.map((choice) => choice.label)).size !== choices.length ||
+      new Set(choices.map((choice) => choice.value)).size !== choices.length
+    )
+      return null;
+    consumed.add(`${key}_other`);
+    questions.push({
+      id: key,
+      header: prop.title,
+      question: prop.description,
+      options: choices.map(({ label }) => ({ label })),
+      multiSelect,
+      allowCustomAnswer: true,
+    });
+    fields.push({ key, choices, multiSelect });
+  }
+  if (Object.keys(properties).some((key) => !consumed.has(key))) return null;
+  return {
+    meta: { source: 'lody', version: 1, allowCustomAnswer: true, questions },
+    fieldKeys: fields.map((field) => field.key),
+    droidFields: fields,
+  };
+}
+
+/** Convert displayed Droid answers back to the original option IDs and companion fields. */
+function buildDroidElicitationResponse(
+  fields: NonNullable<AskUserQuestionElicitation['droidFields']>,
+  answers: AskUserQuestionAnswers
+): CreateElicitationResponse {
+  const content: Record<string, string | string[]> = Object.create(null);
+  for (const field of fields) {
+    const answer = answers[field.key];
+    if (field.choices.length === 0) {
+      if (typeof answer !== 'string' || !answer.trim()) return { action: 'cancel' };
+      content[field.key] = answer;
+      continue;
+    }
+    if (typeof answer !== 'string' && !Array.isArray(answer)) return { action: 'cancel' };
+    const values = Array.isArray(answer) ? answer : [answer];
+    if (
+      (!field.multiSelect && values.length !== 1) ||
+      values.length === 0 ||
+      new Set(values).size !== values.length
+    )
+      return { action: 'cancel' };
+    const selected: string[] = [];
+    let custom: string | undefined;
+    for (const value of values) {
+      if (typeof value !== 'string' || !value.trim()) return { action: 'cancel' };
+      const choice = field.choices.find((entry) => entry.label === value);
+      if (choice) selected.push(choice.value);
+      else {
+        if (custom !== undefined) return { action: 'cancel' };
+        custom = value;
+        selected.push('other');
+      }
+    }
+    content[field.key] = field.multiSelect ? selected : selected[0]!;
+    if (custom !== undefined) content[`${field.key}_other`] = custom;
+  }
+  return { action: 'accept', content };
+}
+
+/**
  * Parse an ACP form elicitation produced by Claude's AskUserQuestion tool back
  * into `AskUserQuestionPermissionMeta`. Returns `null` for elicitations that are
  * not AskUserQuestion-shaped (url mode, or a form with no enum-backed question
@@ -574,6 +703,11 @@ export function parseAskUserQuestionElicitationRequest(
 
   const schema = request.requestedSchema;
   if (!isRecord(schema) || !isRecord(schema.properties)) return null;
+  if (
+    request.message === 'Droid needs your answers to continue.' &&
+    !getLodyElicitationMeta(request._meta)
+  )
+    return parseDroidElicitation(schema);
 
   const entries = Object.entries(schema.properties);
   const requestMeta = getLodyElicitationMeta(request._meta);
@@ -641,11 +775,12 @@ export function parseAskUserQuestionElicitationRequest(
     const description = typeof prop.description === 'string' ? prop.description : '';
     const noteFieldId = noteFieldKeyByQuestionId.get(key);
     const noteProp = noteFieldId === undefined ? undefined : schema.properties[noteFieldId];
-    // For a single-question form the prompt rides on the request `message`;
-    // multi-question forms carry each prompt in the field `description`.
-    const question = singleQuestion
-      ? message || description || header
-      : description || message || header;
+    // Core forms carry each prompt in the field description, even for one
+    // question. Legacy Claude single-question forms use the request message.
+    const question =
+      singleQuestion && !isLodyForm
+        ? message || description || header
+        : description || message || header;
 
     questions.push({
       ...(isLodyForm ? { id: key } : {}),
@@ -722,8 +857,10 @@ export function buildAskUserQuestionElicitationResponse(
     _meta: isRecord(outcome._meta) ? outcome._meta : null,
   });
   if (!answers) {
-    return { action: 'accept', content: {} };
+    return elicitation.droidFields ? { action: 'cancel' } : { action: 'accept', content: {} };
   }
+  if (elicitation.droidFields)
+    return buildDroidElicitationResponse(elicitation.droidFields, answers);
 
   const content: Record<string, AskUserQuestionAnswerValue> = Object.create(null);
   elicitation.meta.questions.forEach((question, index) => {

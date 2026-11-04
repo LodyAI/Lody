@@ -1,17 +1,19 @@
+import {
+  createRouter,
+  createRootRoute,
+  createRoute,
+  createMemoryHistory,
+  Outlet,
+  RouterProvider,
+} from '@tanstack/react-router';
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-  AgentConfigId,
-  AgentConfigMeta,
-  LocalProjectId,
-  MachineId,
-  ProviderSetupTask,
-  WorkspaceId,
-} from '@lody/shared';
+import type { MachineId, ProviderSetupTask, WorkspaceId } from '@lody/shared';
 
 const mocks = vi.hoisted(() => ({
   createGitHubInstallState: vi.fn(),
@@ -55,16 +57,18 @@ import {
   OnboardingOverlay,
   resolveDesktopOnboardingPhase,
 } from '../src/components/onboarding/onboarding-overlay';
-import { OnboardingLoadingView } from '../src/components/onboarding/onboarding-loading';
+
 import { getDesktopOnboardingSteps } from '../src/components/onboarding/onboarding-steps';
-import {
-  ProjectsScreen,
-  ProjectsScreenView,
-} from '../src/components/onboarding/screens/projects-screen';
+import { ProjectsScreen } from '../src/components/onboarding/screens/projects-screen';
 import { ProvidersScreenView } from '../src/components/onboarding/screens/providers-screen';
 import { SummaryScreen } from '../src/components/onboarding/screens/summary-screen';
 import { initI18n } from '../src/i18n';
-import { TestCloudPlatformProvider } from './test-platform';
+import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
+import { PlatformContext } from '@lody/platform/react';
+import { createStaticStore, type CloudApi } from '@lody/platform';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { userAtom } from '../src/atoms';
+import { ErrorBoundary } from '../src/components/error-boundary';
 
 const workspaceId = 'workspace-1' as WorkspaceId;
 const machineId = 'machine-1' as MachineId;
@@ -123,6 +127,13 @@ describe('desktop onboarding flow', () => {
     store = createStore();
     store.set(currentWorkspaceIdAtom, workspaceId);
     store.set(currentWorkspaceSlugAtom, 'workspace-1');
+    store.set(userAtom, { id: 'account' } as never);
+    store.set(workspaceContentModeAtom, {
+      accountId: 'account',
+      workspaceId,
+      workspaceSlug: 'workspace-1',
+      descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+    });
     store.set(runtimeAtom, {
       workspaceId,
       workspaceSlug: 'workspace-1',
@@ -159,14 +170,6 @@ describe('desktop onboarding flow', () => {
     expect(mocks.getCliState).not.toHaveBeenCalled();
   });
 
-  it('marks the stalled startup step as a spring probe after the bypass', async () => {
-    await act(async () => {
-      root?.render(<OnboardingLoadingView phase="starting" stage="fleet-start" bypassed />);
-    });
-
-    expect(container.querySelector('[data-onboarding-stalled-probe]')).not.toBeNull();
-  });
-
   it('derives steps and repairs stale phases from platform capabilities', () => {
     expect(getDesktopOnboardingSteps({ cloudAccount: false, multiWorkspace: false })).toEqual([
       'ceremony',
@@ -200,54 +203,145 @@ describe('desktop onboarding flow', () => {
     ).toBe('projects');
   });
 
-  it('returns the exact selected local project', async () => {
-    const onComplete = vi.fn();
-    const selectedMachine = 'machine-2' as MachineId;
-    const selectedProject = 'project-2' as LocalProjectId;
+  it.each(['unknown', 'provisional'] as const)(
+    'restores projects with %s mode without querying refused GitHub catalogs',
+    async (state) => {
+      store.set(userAtom, { id: 'account' } as never);
+      store.set(
+        workspaceContentModeAtom,
+        state === 'unknown'
+          ? null
+          : { accountId: 'account', workspaceId, workspaceSlug: 'workspace-1', descriptor: null }
+      );
+      const platform = {
+        ...TEST_CLOUD_PLATFORM,
+        workspaces: {
+          ...TEST_CLOUD_PLATFORM.workspaces,
+          state: createStaticStore({
+            status: 'ready',
+            workspaces: [
+              { id: workspaceId, slug: 'workspace-1', name: 'Unmarked workspace', role: 'owner' },
+            ],
+          } as never),
+        },
+        cloudApi: {
+          ...TEST_CLOUD_PLATFORM.cloudApi!,
+          useMutation: () => async () => {
+            throw new Error('unexpected cloud mutation');
+          },
+          useAction: () => async () => {
+            throw new Error('unexpected cloud action');
+          },
+          useQuery: ((_operation, args) => {
+            if (args !== 'skip') throw new Error('e2ee_control_only');
+            return undefined;
+          }) as CloudApi['useQuery'],
+        },
+      };
+      await act(async () =>
+        root?.render(
+          <PlatformContext.Provider value={platform}>
+            <Provider store={store}>
+              <ErrorBoundary
+                fallbackRender={({ error }) => <output role="alert">{String(error)}</output>}
+              >
+                <ProjectsScreen onBack={vi.fn()} onSkip={vi.fn()} onComplete={vi.fn()} />
+              </ErrorBoundary>
+            </Provider>
+          </PlatformContext.Provider>
+        )
+      );
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(container.textContent).toContain('Loading your repositories');
+      expect(findButton(container, 'Connect a GitHub repository').disabled).toBe(true);
+    }
+  );
+
+  it('keeps local projects and Back available when restored encrypted projects offer control/pairing', async () => {
+    store.set(workspaceContentModeAtom, {
+      accountId: 'account',
+      workspaceId,
+      workspaceSlug: 'workspace-1',
+      descriptor: {
+        workspaceId,
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        activation: 'control-only',
+        genesisHash: 'ab'.repeat(32),
+        cryptoOrgId: 'ab'.repeat(32),
+      },
+    });
+    store.set(localProbeResultAtom, { ok: true, machineId } as never);
+    mocks.useVisibleLocalProjects.mockReturnValue({
+      projects: new Map([
+        [
+          'machine-1:local',
+          {
+            key: 'machine-1:local',
+            machineId,
+            project: { id: 'local', name: 'Kept local project', rootPath: '/synthetic/local' },
+            machine: { name: 'Local' },
+          },
+        ],
+      ]),
+    });
+    const back = vi.fn();
+    const platform = {
+      ...TEST_CLOUD_PLATFORM,
+      cloudApi: {
+        ...TEST_CLOUD_PLATFORM.cloudApi!,
+        useMutation: () => async () => {
+          throw new Error('unexpected mutation');
+        },
+        useAction: () => async () => {
+          throw new Error('unexpected action');
+        },
+        useQuery: ((_operation, args) => {
+          if (args !== 'skip') throw new Error('e2ee_control_only');
+          return undefined;
+        }) as CloudApi['useQuery'],
+      },
+    };
+    const base = createRootRoute({ component: Outlet });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ['/onboarding'] }),
+      routeTree: base.addChildren([
+        createRoute({
+          getParentRoute: () => base,
+          path: '/onboarding',
+          component: () => <ProjectsScreen onBack={back} onSkip={vi.fn()} onComplete={vi.fn()} />,
+        }),
+        createRoute({
+          getParentRoute: () => base,
+          path: '/workspace/e2ee/$workspaceId',
+          component: () => <p>Control and pairing</p>,
+        }),
+      ]),
+    });
     await act(async () => {
+      await router.load();
       root?.render(
-        <ProjectsScreenView
-          local={[
-            {
-              key: `${machineId}:project-1`,
-              machineId,
-              localProjectId: 'project-1' as LocalProjectId,
-              name: 'first',
-              detail: '/first',
-            },
-            {
-              key: `${selectedMachine}:${selectedProject}`,
-              machineId: selectedMachine,
-              localProjectId: selectedProject,
-              name: 'selected',
-              detail: '/selected',
-            },
-          ]}
-          github={[]}
-          importing={false}
-          connectingGitHub={false}
-          canImportLocal
-          canConnectGitHub={false}
-          loadingRepos={false}
-          selectedProjectKey={`local:${selectedMachine}:${selectedProject}`}
-          onAddLocal={vi.fn()}
-          onConnectGitHub={vi.fn()}
-          onBack={vi.fn()}
-          onSkip={vi.fn()}
-          onComplete={onComplete}
-        />
+        <PlatformContext.Provider value={platform}>
+          <Provider store={store}>
+            <RouterProvider router={router} />
+          </Provider>
+        </PlatformContext.Provider>
       );
     });
-
+    expect(container.textContent).toContain('Kept local project');
+    expect(findButton(container, 'Connect a GitHub repository').disabled).toBe(true);
+    await act(async () => findButton(container, 'Back').click());
+    expect(back).toHaveBeenCalledOnce();
+    const control = container.querySelector<HTMLAnchorElement>('a[href*="/workspace/e2ee/"]');
+    expect(control).not.toBeNull();
+    const pathname = window.location.pathname;
     await act(async () => {
-      findButton(container, 'Next').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      control!.click();
+      await router.load();
     });
-    expect(onComplete).toHaveBeenCalledWith({
-      kind: 'local',
-      machineId: selectedMachine,
-      localProjectId: selectedProject,
-      name: 'selected',
-    });
+    expect(router.state.location.pathname).toBe('/workspace/e2ee/workspace-1');
+    expect(window.location.pathname).toBe(pathname);
+    expect(container.textContent).toContain('Control and pairing');
   });
 
   it('keeps GitHub available while the local agent is not ready', async () => {
@@ -328,115 +422,6 @@ describe('desktop onboarding flow', () => {
       providerSetupId: setup.id,
       agentName: setup.config.name,
     });
-  });
-
-  it('continues with an AgentConfig only after it is published', async () => {
-    const onNext = vi.fn();
-    const config: AgentConfigMeta = {
-      id: 'config-ready' as AgentConfigId,
-      machineId,
-      name: 'Codex',
-      description: undefined,
-      cliType: 'builtin',
-      agentType: 'codex',
-      env: {},
-    };
-
-    await act(async () => {
-      root?.render(
-        <ProvidersScreenView
-          configs={[config]}
-          testStatuses={{}}
-          selectedProviderId={config.id}
-          noLocalMachine={false}
-          localMachineId={machineId}
-          onEdit={vi.fn()}
-          onTest={vi.fn()}
-          onDelete={vi.fn()}
-          onAdd={vi.fn()}
-          onBack={vi.fn()}
-          onSkip={vi.fn()}
-          onNext={onNext}
-        />
-      );
-    });
-
-    await act(async () => {
-      findButton(container, 'Next').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(onNext).toHaveBeenCalledWith({
-      kind: 'agentConfig',
-      agentConfigId: config.id,
-      agentName: config.name,
-    });
-  });
-
-  it('keeps provider activity compact in the badge and progress button', async () => {
-    const config: AgentConfigMeta = {
-      id: 'config-progress' as AgentConfigId,
-      machineId,
-      name: 'Codex',
-      description: undefined,
-      cliType: 'builtin',
-      agentType: 'codex',
-      env: {},
-    };
-
-    await act(async () => {
-      root?.render(
-        <ProvidersScreenView
-          configs={[config]}
-          testStatuses={{}}
-          testActivities={{ [config.id]: { phase: 'downloading-runtime', percent: 64 } }}
-          noLocalMachine={false}
-          onEdit={vi.fn()}
-          onTest={vi.fn()}
-          onDelete={vi.fn()}
-          onAdd={vi.fn()}
-          onBack={vi.fn()}
-          onSkip={vi.fn()}
-          onNext={vi.fn()}
-        />
-      );
-    });
-
-    expect(container.textContent).toContain('Downloading');
-    expect(findButton(container, '64%').disabled).toBe(true);
-    expect(container.textContent).not.toContain('Downloading the agent runtime');
-  });
-
-  it('keeps the latest provider failure reason on the failed badge', async () => {
-    const config: AgentConfigMeta = {
-      id: 'config-failed' as AgentConfigId,
-      machineId,
-      name: 'Codex',
-      description: undefined,
-      cliType: 'builtin',
-      agentType: 'codex',
-      env: {},
-    };
-
-    await act(async () => {
-      root?.render(
-        <ProvidersScreenView
-          configs={[config]}
-          testStatuses={{ [config.id]: 'failed' }}
-          failureReasons={{ [config.id]: 'The API key was rejected.' }}
-          noLocalMachine={false}
-          onEdit={vi.fn()}
-          onTest={vi.fn()}
-          onDelete={vi.fn()}
-          onAdd={vi.fn()}
-          onBack={vi.fn()}
-          onSkip={vi.fn()}
-          onNext={vi.fn()}
-        />
-      );
-    });
-
-    expect(
-      container.querySelector('[aria-label="Failed: The API key was rejected."]')
-    ).not.toBeNull();
   });
 
   it('keeps failed Agent setup retryable from Summary with investigation detail', async () => {

@@ -1,20 +1,20 @@
-import { execFile } from 'child_process';
+import { toShared } from '@/platform/process-options';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
 
 import type { RepoId, SessionId, SessionMeta } from '@lody/shared';
+
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
 import { getWorktreeManager } from './worktree-manager';
 
-const execFileAsync = promisify(execFile);
 const GIT_PROBE_TIMEOUT_MS = 30_000;
 
 /**
- * What the workspace knows about the root Session that owns a worktree directory.
+ * What the workspace knows about the root Session that owns a managed workdir.
  *
  * `unknown` is not evidence of anything: the same data directory serves every
  * workspace this machine joins, so a directory this workspace has never heard
@@ -30,6 +30,8 @@ export type WorktreeOwnerState =
 export type WorktreeGcDeps = {
   /** `<data>/repos`; every Lody-created worktree lives at `<reposDir>/<repoId>/worktrees/<sessionId>`. */
   reposDir: string;
+  /** `<data>/chats`; no-project workdirs are named after their root Session. */
+  chatsDir: string;
   logger: Logger;
   /**
    * Whether workspace metadata is complete enough to trust an `archived` or
@@ -56,6 +58,7 @@ export type WorktreeGcDeps = {
    * written back). Restore reads `branchName`, so the real name must be kept.
    */
   recordArchivedBranch: (sessionId: SessionId, branchName: string) => Promise<void>;
+  archiveProjectGroup?: (input: { sessionId: SessionId; worktreePath: string }) => Promise<void>;
   now?: () => number;
   retryBaseDelayMs?: number;
   retryMaxDelayMs?: number;
@@ -66,7 +69,7 @@ export type WorktreeGcSweepResult = {
   scanned: number;
   /** Directories removed by this sweep. */
   removed: SessionId[];
-  /** Directories whose removal threw and will be retried with backoff. */
+  /** Directories whose cleanup failed and will be retried with backoff. */
   failed: SessionId[];
 };
 
@@ -83,12 +86,13 @@ type RepoSource =
  * whose root Session is archived or deleted is removed, after a backup commit,
  * with its branch preserved. There is no request and no acknowledgement; the
  * directory's existence is the only evidence that work remains, so every sweep
- * is safe to repeat.
+ * is safe to repeat. Chat workdirs are also reconciled, but archive removes only
+ * empty directories because they have no Git backup.
  */
 export class WorktreeGarbageCollector {
   private readonly deps: WorktreeGcDeps;
-  private readonly inFlight = new Set<SessionId>();
-  private readonly retryState = new Map<SessionId, { attempt: number; notBeforeMs: number }>();
+  private readonly inFlight = new Set<string>();
+  private readonly retryState = new Map<string, { attempt: number; notBeforeMs: number }>();
   private sweepPromise: Promise<WorktreeGcSweepResult> | null = null;
   private rerunRequested = false;
 
@@ -173,7 +177,69 @@ export class WorktreeGarbageCollector {
         }
       }
     }
+    // Keep the existing worktree sweep ahead of chat filesystem I/O.
+    await this.sweepChatWorkdirs(result);
     return result;
+  }
+
+  private async sweepChatWorkdirs(result: WorktreeGcSweepResult): Promise<void> {
+    const { chatsDir } = this.deps;
+    if (!this.isRetryDue(chatsDir)) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(chatsDir, { withFileTypes: true });
+      this.retryState.delete(chatsDir);
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return;
+      this.scheduleRetry(chatsDir);
+      this.deps.logger.warn(
+        `[worktree-gc] Failed to read chat workdirs ${chatsDir}; will retry: ${formatErrorMessage(error)}`
+      );
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !SAFE_SESSION_DIR_RE.test(entry.name)) continue;
+      const sessionId = entry.name as SessionId;
+      result.scanned += 1;
+      const workdir = path.join(chatsDir, sessionId);
+      if (this.inFlight.has(workdir) || !this.isRetryDue(workdir)) continue;
+      this.inFlight.add(workdir);
+      try {
+        const state = await this.deps.readOwnerState(sessionId);
+        if (state.kind !== 'archived' && state.kind !== 'deleted') continue;
+        if (this.deps.isRuntimeActive(sessionId)) {
+          this.deps.logger.debug(
+            `[worktree-gc] ${sessionId} runtime still releasing; deferring chat workdir removal`
+          );
+          continue;
+        }
+        if (state.kind === 'archived') {
+          // rmdir checks emptiness at removal; never discard an archived chat's files.
+          try {
+            await fs.promises.rmdir(workdir);
+          } catch (error) {
+            const code = error instanceof Error && 'code' in error ? error.code : undefined;
+            if (code !== 'ENOTEMPTY' && code !== 'EEXIST') throw error;
+            this.retryState.delete(workdir);
+            continue;
+          }
+        } else {
+          await fs.promises.rm(workdir, { recursive: true, force: true });
+        }
+        this.retryState.delete(workdir);
+        result.removed.push(sessionId);
+        this.deps.logger.info(`[worktree-gc] Removed ${state.kind} chat workdir ${workdir}`);
+      } catch (error) {
+        this.scheduleRetry(workdir);
+        result.failed.push(sessionId);
+        this.deps.logger.warn(
+          `[worktree-gc] Failed to clean chat workdir ${workdir}; will retry: ${formatErrorMessage(error)}`
+        );
+      } finally {
+        this.inFlight.delete(workdir);
+      }
+    }
   }
 
   /** Returns the branch the removed worktree was on, when git could tell. */
@@ -184,6 +250,12 @@ export class WorktreeGarbageCollector {
     meta: SessionMeta | undefined;
   }): Promise<string | null> {
     const { repoId, sessionId, worktreePath, meta } = input;
+    if (repoId.startsWith('project-')) {
+      if (!meta?.projectRun || meta.projectRun.root !== repoId || !this.deps.archiveProjectGroup)
+        throw new Error('Project group snapshot is unavailable; preserving its directory');
+      await this.deps.archiveProjectGroup({ sessionId, worktreePath });
+      return null;
+    }
     // Resolve the owning repository BEFORE anything destructive. A worktree
     // whose repository cannot be found is preserved: the backup commit has
     // nowhere to go, and the directory may hold the only copy of the work.
@@ -248,11 +320,16 @@ export class WorktreeGarbageCollector {
   private async isInsideGitWorkTree(dir: string): Promise<boolean> {
     if (!fs.existsSync(dir)) return false;
     try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
-        cwd: dir,
-        timeout: GIT_PROBE_TIMEOUT_MS,
-        encoding: 'utf8',
-      });
+      const { stdout } = await runCommandTextLegacy(
+        {
+          command: 'git',
+          args: ['rev-parse', '--is-inside-work-tree'],
+          cwd: dir,
+          timeout: GIT_PROBE_TIMEOUT_MS,
+          check: 'exit-0',
+        },
+        toShared()
+      );
       return stdout.trim() === 'true';
     } catch {
       return false;
@@ -288,17 +365,17 @@ export class WorktreeGarbageCollector {
       .map((entry) => entry.name as SessionId);
   }
 
-  private isRetryDue(sessionId: SessionId): boolean {
-    const retry = this.retryState.get(sessionId);
+  private isRetryDue(key: string): boolean {
+    const retry = this.retryState.get(key);
     return !retry || retry.notBeforeMs <= this.now();
   }
 
-  private scheduleRetry(sessionId: SessionId): void {
-    const attempt = (this.retryState.get(sessionId)?.attempt ?? 0) + 1;
+  private scheduleRetry(key: string): void {
+    const attempt = (this.retryState.get(key)?.attempt ?? 0) + 1;
     const base = this.deps.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
     const max = this.deps.retryMaxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS;
     const delayMs = Math.min(base * 2 ** (attempt - 1), max);
-    this.retryState.set(sessionId, { attempt, notBeforeMs: this.now() + delayMs });
+    this.retryState.set(key, { attempt, notBeforeMs: this.now() + delayMs });
   }
 
   private now(): number {

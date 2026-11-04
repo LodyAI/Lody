@@ -9,6 +9,7 @@ import { stylexOptions } from '../../ui/stylex-options';
 import topLevelAwait from '../vite-top-level-await-fixed.cjs';
 import { emojibaseAssetsPlugin } from '../vite-emojibase-assets';
 import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
+import { preservePdfWorkerExports } from '../vite-pdf-worker';
 
 // The shell can export NODE_ENV=production even while running Storybook's dev
 // server. Vite's React plugin then disables its refresh runtime while the
@@ -27,6 +28,18 @@ const config: StorybookConfig = {
     options: {},
   },
   async viteFinal(viteConfig) {
+    // 1.0.10 declares its source web-component module as a side effect, but ships
+    // dist files. Prebundling drops registration of <diffs-container> entirely.
+    viteConfig.optimizeDeps = {
+      ...viteConfig.optimizeDeps,
+      exclude: [
+        ...(viteConfig.optimizeDeps?.exclude ?? []),
+        '@pierre/diffs',
+        '@pierre/diffs/react',
+        '@pierre/diffs/worker',
+      ],
+      include: [...(viteConfig.optimizeDeps?.include ?? []), '@pierre/diffs > lru_map'],
+    };
     // In an embedded checkout pnpm stores these assets outside the public
     // workspace. Allow only the resolved font packages, not the private repo.
     viteConfig.server = {
@@ -56,7 +69,12 @@ const config: StorybookConfig = {
     viteConfig.worker = {
       ...(viteConfig.worker ?? {}),
       format: 'es',
-      plugins: () => [loroCrdtWasmUrlWorkaround(), wasm(), topLevelAwait()],
+      plugins: () => [
+        preservePdfWorkerExports(),
+        loroCrdtWasmUrlWorkaround(),
+        wasm(),
+        topLevelAwait(),
+      ],
     };
 
     if (process.env.STORYBOOK_DEBUG_PLUGINS === '1') {

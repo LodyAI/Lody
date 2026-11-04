@@ -21,6 +21,9 @@ Translation: current
 行内编辑器继续使用浮动菜单。停靠面板位于包含输入框上方附件和控件的整个
 composer 框之上，且不得越过视口顶部留白。
 
+光标测量不得改变 body 的位置选择器状态，避免在打开菜单或更改查询时触发
+全页面样式重算。
+
 ## 证据
 
 - [主 composer](../packages/components/src/components/chat/chat-composer.tsx)

@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import { TestOrdinaryWorkspaceProvider } from './test-platform';
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -52,7 +54,11 @@ function Probe() {
 }
 const render = async () => {
   await act(async () => {
-    root.render(<Probe />);
+    root.render(
+      <TestOrdinaryWorkspaceProvider workspaceId="review-identity">
+        <Probe />
+      </TestOrdinaryWorkspaceProvider>
+    );
   });
 };
 beforeEach(() => {
@@ -136,4 +142,25 @@ it('keeps the identity gate closed when safe repair is unavailable', async () =>
   expect(result.error?.message).toContain('repository identity');
   await expect(result.refresh()).resolves.toBeUndefined();
   expect(result.threads).toEqual([]);
+});
+
+it('allows anonymous review reads without allowing comment writes', async () => {
+  mocks.versions = { identityPending: true };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () => new Response(JSON.stringify({ id: 101, private: false, full_name: 'org/old' }))
+    )
+  );
+  await render();
+  expect(result.error).toBeNull();
+  await expect(
+    result.runWithToken('read', async (token, repo) => ({ token, repo }))
+  ).resolves.toEqual({ token: '', repo: 'org/old' });
+  await expect(
+    result.runWithToken('write', async () => {
+      writes.push('unsafe');
+    })
+  ).rejects.toThrow('repository identity');
+  expect(writes).toEqual([]);
 });

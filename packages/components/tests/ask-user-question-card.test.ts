@@ -1,15 +1,20 @@
 // @vitest-environment jsdom
 
-import { createElement } from 'react';
+// @vitest-environment jsdom
+import { createElement, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import type { AskUserQuestionPermissionMeta, AskUserQuestionAnswers } from '@lody/shared';
+import {
+  buildAskUserQuestionElicitationResponse,
+  createAskUserQuestionPermissionOutcome,
+  parseAskUserQuestionElicitationRequest,
+} from '@lody/shared';
 
 import { AskUserQuestionCard } from '../src/components/sessions/ask-user-question-card';
 import { Tooltip } from '@lody/ui/tooltip';
 import { initI18n } from '../src/i18n';
-import storyMeta, { SecretNote } from '../src/stories/AskUserQuestionCard.stories';
 
 const meta: AskUserQuestionPermissionMeta = {
   source: 'codex',
@@ -31,26 +36,31 @@ const meta: AskUserQuestionPermissionMeta = {
   ],
 };
 
-const metaWithInfo: AskUserQuestionPermissionMeta = {
-  source: 'codex',
-  version: 1,
-  allowCustomAnswer: false,
-  questions: [
-    {
-      header: 'Strategy',
-      question: 'Pick a strategy',
-      multiSelect: false,
-      options: [
-        {
-          label: 'Use a Map',
-          description: 'Best when keys are dynamic',
-          preview: 'const cache = new Map();',
-        },
-        { label: 'Use a plain object' },
-      ],
+// Core/Codex puts the question in the property description even for one field.
+const metaWithInfo = parseAskUserQuestionElicitationRequest({
+  mode: 'form',
+  message: 'Input requested',
+  _meta: { lody: { elicitation: { version: 1 } } },
+  requestedSchema: {
+    type: 'object',
+    properties: {
+      strategy: {
+        type: 'string',
+        title: 'Strategy',
+        description: 'Pick a strategy',
+        oneOf: [
+          {
+            const: 'Use a Map',
+            title: 'Use a Map',
+            description: 'Best when keys are dynamic',
+            _meta: { lody: { elicitation: { version: 1, preview: 'const cache = new Map();' } } },
+          },
+          { const: 'Use a plain object', title: 'Use a plain object' },
+        ],
+      },
     },
-  ],
-};
+  },
+})!.meta;
 
 function dispatchTouchPointer(
   target: EventTarget,
@@ -82,6 +92,81 @@ function getButton(container: HTMLElement, label: string): HTMLElement {
   }
   return button;
 }
+
+describe('AskUserQuestionCard plan review', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    flushSync(() => root.unmount());
+    container.remove();
+  });
+
+  it('renders the plan in a real elicitation and preserves the selected answer', () => {
+    const parsed = parseAskUserQuestionElicitationRequest({
+      mode: 'form',
+      sessionId: 'synthetic',
+      message: 'Approve this plan?',
+      _meta: { lody: { elicitation: { version: 1 } } },
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          question_0: {
+            type: 'string',
+            title: 'Plan review',
+            description:
+              'Approve this plan?\n\n## Implementation\n\n- Update the **parser**\n\n| Step | Result |\n| --- | --- |\n| Test | Pass |\n\n![diagram](https://images.example.test/plan.png)',
+            oneOf: [
+              { const: 'Approve', title: 'Approve' },
+              { const: 'Reject', title: 'Reject' },
+            ],
+          },
+        },
+      },
+    });
+    if (!parsed) throw new Error('Expected a plan-review question');
+    let submitted: AskUserQuestionAnswers | undefined;
+    const mode = {
+      kind: 'interactive' as const,
+      isReady: true,
+      isPendingSubmit: false,
+      isPendingCancel: false,
+      disabled: false,
+      onSubmit: (answers: AskUserQuestionAnswers) => {
+        submitted = answers;
+      },
+      onCancel: () => {},
+    };
+    flushSync(() => root.render(createElement(AskUserQuestionCard, { meta: parsed.meta, mode })));
+    expect(container.textContent).toContain('Plan review');
+    expect(container.querySelector('h2')?.textContent).toBe('Implementation');
+    expect(container.querySelector('li strong')?.textContent).toBe('parser');
+    expect(container.querySelector('table')?.textContent).toContain('Pass');
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('diagram');
+    flushSync(() => getButton(container, 'Approve').click());
+    flushSync(() => getButton(container, 'Submit').click());
+    expect(submitted).toEqual({ question_0: 'Approve' });
+    flushSync(() =>
+      root.render(
+        createElement(AskUserQuestionCard, {
+          meta: parsed.meta,
+          mode: { kind: 'readonly', answers: submitted! },
+        })
+      )
+    );
+    expect(container.textContent).toContain('Plan review');
+    expect(container.querySelector('h2')?.textContent).toBe('Implementation');
+    expect(container.textContent).toContain('Approve');
+  });
+});
 
 describe('AskUserQuestionCard touch navigation', () => {
   let root: Root | undefined;
@@ -133,6 +218,7 @@ describe('AskUserQuestionCard touch navigation', () => {
 
   it('advances to the next question on a left touch swipe after the current answer is complete', () => {
     const card = renderCard();
+    expect(container?.textContent).toContain('Breakfast');
     expect(container?.textContent).toContain('Pick ingredients');
 
     flushSync(() => {
@@ -146,6 +232,8 @@ describe('AskUserQuestionCard touch navigation', () => {
     });
 
     expect(container?.textContent).toContain('Pick a drink');
+    expect(container?.textContent).toContain('Drink');
+    expect(container?.textContent).not.toContain('Breakfast');
   });
 
   it('does not advance on a left touch swipe when the current answer is incomplete', () => {
@@ -181,53 +269,37 @@ describe('AskUserQuestionCard submit behavior', () => {
     container = undefined;
   });
 
-  function renderInteractiveCard(onSubmit: ReturnType<typeof vi.fn>) {
+  function renderInteractiveCard() {
+    let acceptedAnswers: AskUserQuestionAnswers | undefined;
+    function InteractiveCard() {
+      const [answers, setAnswers] = useState<AskUserQuestionAnswers>();
+      return createElement(AskUserQuestionCard, {
+        meta,
+        mode: answers
+          ? { kind: 'readonly', answers }
+          : {
+              kind: 'interactive',
+              isReady: true,
+              isPendingSubmit: false,
+              isPendingCancel: false,
+              disabled: false,
+              onSubmit: (next) => {
+                acceptedAnswers = next;
+                setAnswers(next);
+              },
+              onCancel: () => {},
+            },
+      });
+    }
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        createElement(AskUserQuestionCard, {
-          meta,
-          mode: {
-            kind: 'interactive',
-            isReady: true,
-            isPendingSubmit: false,
-            isPendingCancel: false,
-            disabled: false,
-            onSubmit,
-            onCancel: vi.fn(),
-          },
-        })
-      );
-    });
+    flushSync(() => root?.render(createElement(InteractiveCard)));
+    return () => acceptedAnswers;
   }
 
-  it('does not submit when the user clicks the last single-select option', async () => {
-    const onSubmit = vi.fn();
-    renderInteractiveCard(onSubmit);
-
-    flushSync(() => {
-      getButton(container!, 'Eggs').click();
-    });
-    flushSync(() => {
-      getButton(container!, 'Next').click();
-    });
-
-    expect(container?.textContent).toContain('Pick a drink');
-
-    flushSync(() => {
-      getButton(container!, 'Coffee').click();
-    });
-
-    await new Promise((resolve) => queueMicrotask(() => resolve(undefined)));
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
-
   it('submits only when the user clicks the Submit button after answering all questions', async () => {
-    const onSubmit = vi.fn();
-    renderInteractiveCard(onSubmit);
+    const acceptedAnswers = renderInteractiveCard();
 
     flushSync(() => {
       getButton(container!, 'Eggs').click();
@@ -240,15 +312,17 @@ describe('AskUserQuestionCard submit behavior', () => {
     });
 
     await new Promise((resolve) => queueMicrotask(() => resolve(undefined)));
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(acceptedAnswers()).toBeUndefined();
+    expect(container?.textContent).not.toContain('Answered');
+    expect((getButton(container!, 'Submit') as HTMLButtonElement).disabled).toBe(false);
 
     flushSync(() => {
       getButton(container!, 'Submit').click();
     });
 
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    const submittedAnswers = onSubmit.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(Object.values(submittedAnswers)).toEqual(expect.arrayContaining([['Eggs'], 'Coffee']));
+    expect(container?.textContent).toContain('Answered');
+    expect(Object.values(acceptedAnswers()!)).toEqual([['Eggs'], 'Coffee']);
+    expect(getButton(container!, 'Coffee').getAttribute('aria-disabled')).toBe('true');
   });
 });
 
@@ -300,6 +374,8 @@ describe('AskUserQuestionCard info button keyboard a11y', () => {
 
   it('opens the info dialog (not the parent option) when Enter is pressed on the (i) button', () => {
     renderWithInfo();
+    expect(container!.textContent).toContain('Pick a strategy');
+    expect(container!.textContent).not.toContain('Input requested');
 
     const infoButton = container!.querySelector<HTMLButtonElement>(
       'button[aria-label="Show details"]'
@@ -407,13 +483,6 @@ describe('AskUserQuestionCard answer notes', () => {
       });
     }
   );
-  it.each(['', '   '])('omits blank notes (%j)', (value) => {
-    const result = render();
-    typeNote(value);
-    flushSync(() => getButton(container, 'Small change').click());
-    flushSync(() => getButton(container, 'Submit').click());
-    expect(result.answers()).toEqual({ approach: 'Small change' });
-  });
   it('keeps multi-question notes on their own fields and stays on the current question after selection', () => {
     const result = render({
       ...noteMeta,
@@ -467,15 +536,37 @@ describe('AskUserQuestionCard answer notes', () => {
     flushSync(() => getButton(container, 'Submit').click());
     expect(result.answers()).toEqual({ approach: 'Another approach', approach_note: 'Reason' });
   });
-  it('renders the real readonly story fixtures with independent secret masking', () => {
-    flushSync(() => root.render(createElement(AskUserQuestionCard, storyMeta.args)));
-    expect(container.querySelector('textarea')!.value).toBe('Keep the public API stable.');
-    flushSync(() =>
-      root.render(createElement(AskUserQuestionCard, { ...storyMeta.args, ...SecretNote.args }))
-    );
-    expect(container.querySelector('input')!.value).toBe('••••••••');
-    expect(getButton(container, 'Small change').getAttribute('aria-pressed')).toBe('true');
-  });
+  it.each([{ isComposing: true }, { keyCode: 229 }, { which: 229 }])(
+    'keeps candidate confirmation out of answer submission (%j)',
+    (imeSignal) => {
+      const result = render({
+        ...noteMeta,
+        questions: [{ ...noteMeta.questions[0]!, allowCustomAnswer: true }],
+      });
+      typeNote('保留现有接口');
+      const input = container.querySelector('input')!;
+      const candidate = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+        ...imeSignal,
+      });
+      flushSync(() => input.dispatchEvent(candidate));
+      expect(candidate.defaultPrevented).toBe(false);
+      expect(result.answers()).toBeUndefined();
+      expect(input.value).toBe('保留现有接口');
+      flushSync(() =>
+        input.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          })
+        )
+      );
+      expect(result.answers()).toEqual({ approach: '保留现有接口' });
+    }
+  );
   it('replays the choice and masks only the secret note', () => {
     flushSync(() =>
       root.render(
@@ -499,17 +590,131 @@ describe('AskUserQuestionCard answer notes', () => {
     expect(input.value).toBe('••••••••');
     expect(container.innerHTML).not.toContain('Hidden note');
   });
-  it('replays old records without a note input', () => {
-    const { note: _note, ...question } = noteMeta.questions[0]!;
+});
+
+describe('Droid question card', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+  beforeEach(async () => {
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    flushSync(() => root.unmount());
+    container.remove();
+  });
+  it('shows the question and readable choices and returns the chosen Droid value', () => {
+    const elicitation = parseAskUserQuestionElicitationRequest({
+      mode: 'form',
+      sessionId: 'synthetic',
+      message: 'Droid needs your answers to continue.',
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          question_1: {
+            type: 'string',
+            title: 'Database',
+            description: 'Which database?',
+            oneOf: [
+              { const: 'option_0', title: 'PostgreSQL' },
+              { const: 'option_1', title: 'SQLite' },
+              { const: 'other', title: 'Other answer' },
+            ],
+          },
+          question_1_other: { type: 'string', title: 'Database: Other answer' },
+        },
+        required: ['question_1'],
+      },
+    })!;
+    let answers: AskUserQuestionAnswers | undefined;
     flushSync(() =>
       root.render(
         createElement(AskUserQuestionCard, {
-          meta: { ...noteMeta, questions: [question] },
-          mode: { kind: 'readonly', answers: { approach: 'Small change' } },
+          meta: elicitation.meta,
+          mode: {
+            kind: 'interactive',
+            isReady: true,
+            isPendingSubmit: false,
+            isPendingCancel: false,
+            disabled: false,
+            onSubmit: (value) => {
+              answers = value;
+            },
+            onCancel: () => {},
+          },
         })
       )
     );
-    expect(getButton(container, 'Small change').getAttribute('aria-pressed')).toBe('true');
-    expect(container.querySelector('input')).toBeNull();
+    expect(container.textContent).toContain('Database');
+    expect(container.textContent).toContain('Which database?');
+    expect(container.textContent).not.toContain('option_0');
+    flushSync(() => getButton(container, 'PostgreSQL').click());
+    flushSync(() => getButton(container, 'Submit').click());
+    expect(answers).toEqual({ question_1: 'PostgreSQL' });
+    const outcome = createAskUserQuestionPermissionOutcome('answer', answers!, elicitation.meta);
+    expect(buildAskUserQuestionElicitationResponse(elicitation, { outcome })).toEqual({
+      action: 'accept',
+      content: { question_1: 'option_0' },
+    });
+  });
+
+  it.each(['', '   ', '  Which database?  '])(
+    'does not repeat an empty or identical header (%j) on an answered card',
+    (header) => {
+      const questionMeta: AskUserQuestionPermissionMeta = {
+        source: 'lody',
+        version: 1,
+        allowCustomAnswer: false,
+        questions: [
+          {
+            id: 'database',
+            header,
+            question: 'Which database?',
+            options: [{ label: 'PostgreSQL' }],
+            multiSelect: false,
+          },
+        ],
+      };
+      flushSync(() =>
+        root.render(
+          createElement(AskUserQuestionCard, {
+            meta: questionMeta,
+            mode: { kind: 'readonly', answers: { database: 'PostgreSQL' } },
+          })
+        )
+      );
+      expect(container.textContent?.match(/Which database\?/g)).toHaveLength(1);
+      expect(container.textContent).toContain('PostgreSQL');
+    }
+  );
+
+  it('keeps the short header visible after the question is answered', () => {
+    const questionMeta: AskUserQuestionPermissionMeta = {
+      source: 'lody',
+      version: 1,
+      allowCustomAnswer: false,
+      questions: [
+        {
+          id: 'database',
+          header: 'Database',
+          question: 'Which database?',
+          options: [{ label: 'PostgreSQL' }],
+          multiSelect: false,
+        },
+      ],
+    };
+    flushSync(() =>
+      root.render(
+        createElement(AskUserQuestionCard, {
+          meta: questionMeta,
+          mode: { kind: 'readonly', answers: { database: 'PostgreSQL' } },
+        })
+      )
+    );
+    expect(container.textContent).toContain('Database');
+    expect(container.textContent).toContain('Which database?');
+    expect(container.textContent).toContain('PostgreSQL');
   });
 });

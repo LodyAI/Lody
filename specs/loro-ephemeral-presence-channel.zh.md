@@ -60,7 +60,7 @@ ephemeral 通道面向最新状态。它不随文档流持久化，不重放历�
 ## 证据
 
 通道常量、负载 schema 与时效判定位于 `packages/shared/src/presence.ts`。工作区传输、它的两个
-store 以及机器心跳定时器位于 `apps/cli/src/lib/loro/presence.ts`；会话活跃状态的唯一所有者是
+store 以及机器心跳定时器位于 `apps/cli/src/lib/loro/workspace-presence.ts`；会话活跃状态的唯一所有者是
 `apps/cli/src/lib/loro/session-active-presence.ts`。读取端的解释逻辑位于
 `packages/components/src/atoms/presence.ts`，CLI 侧位于 `apps/cli/src/commands/machine.ts`，
 其 `onlineStatus` 字段让三种状态穿过 `--json` 到达调用方。`apps/cli/src/mcp/lody-mcp-server.ts`

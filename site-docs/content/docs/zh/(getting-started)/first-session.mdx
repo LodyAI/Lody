@@ -1,0 +1,161 @@
+---
+title: 第一次会话
+description: 完整跑通一次 Lody 会话——启动会话、引导 Agent、审阅 diff，并决定结果怎么处理。
+---
+
+# 第一次会话
+
+[快速开始](/zh/docs/quickstart)会帮你装好并连上 Lody。这一页补上它没讲的部分：一次完整的会话，
+从空的输入框，到一个你已经审阅过的结果。这里的内容在本地项目上就能完成，不需要 GitHub，也不需要
+同时跑多个 Agent。
+
+<Callout type="info" title="开始之前">
+- Lody 已安装并登录。如果没有，请先看[快速开始](/zh/docs/quickstart)。
+- 你已经添加了一个项目——普通本地目录就可以。见[本地项目](/zh/docs/local-project)。
+- 你已经有一个在该机器上 **Test** 通过的 Agent Config。见 [Agent Config](/zh/docs/quickstart)。
+</Callout>
+
+## 选一个足够小的任务
+
+会话就是你和某个 Agent 围绕一个任务的一段对话。任务足够小时，你很快就能审阅结果，Agent 也有足够
+上下文把它做完。适合第一次会话的任务长这样：
+
+- “加一个 `/health` 接口，返回应用版本号。”
+- “修掉 `src/parser.test.ts` 里失败的测试，并解释原因。”
+- “把包里的 `fetchUser` 重命名为 `getUser`，并更新调用方。”
+
+第一次会话不要一上来就做一个完整的功能模块。当你发现一个会话装不下时，[推荐工作流](/zh/docs/workflow)
+会告诉你怎样拆任务。
+
+<Callout title="一个会话，一个任务" type="idea">
+后面所有文档都建立在这个习惯上。如果一个会话开始同时做两件不相关的事，停掉它，另开一个会话，而不是
+把第一个会话越拉越长。
+</Callout>
+
+## 走完一次会话
+
+<Steps>
+<Step>
+
+### 1. 从主页输入框启动
+
+打开 Lody，用主页的输入框开始。发送前先选好：
+
+- **项目**（Git 项目还要选分支）；
+- **Agent Config** 和**模型**；
+- 你放心的**权限范围**。
+
+然后写清楚任务，包括你关心的文件或行为，以及你会怎样判断它做完了。
+
+```text
+加一个 /health 接口，返回 { "status": "ok", "version": <package version> }。
+补一个测试，断言 status 和 version 字段。不要改其它路由。
+```
+
+</Step>
+<Step>
+
+### 2. 看这一轮的进展
+
+Lody 会创建会话并实时展示 Agent 的工作。一个**轮次（round）**就是一次 Agent 回复加上它产生的文件
+改动。一轮进行中，你可以：
+
+- 发一条消息[**引导（steer）**](/zh/docs/claude-codex-capabilities#steer-运行中的任务)正在跑的任务，而不是等它跑完；
+- 在[**侧边对话（Side Chat）**](/zh/docs/session#右侧栏浏览器和侧边对话)里问一个问题，不打断主任务（需要 Agent 支持原生 Fork）；
+- 如果方向不对，直接停止这一轮。
+
+</Step>
+<Step>
+
+### 3. 审阅 diff
+
+一轮结束后，回复下方会列出改动的文件和增删行数。点击任意文件就能在 [diff 标签页](/zh/docs/diff-viewer)
+里打开，也可以用 **Files** 和 **Changes** 侧栏浏览整个会话的改动。
+
+</Step>
+<Step>
+
+### 4. 继续下一轮
+
+在同一个会话里接着聊。每条追问只聚焦一件事：
+
+```text
+测试通过了，但版本号是在请求时从 package.json 读的。
+改成模块常量只读一次，保持响应结构不变。
+```
+
+“看进展、审 diff、继续追问”可以按任务需要重复多次。如果对话变得很长，或者 Agent 开始跟丢上下文，
+不如用一段简短总结新开一个会话。
+
+</Step>
+<Step>
+
+### 5. 决定结果怎么处理
+
+改动看起来没问题之后，你有几种选择：
+
+- **保留分支。** 从会话里复制当前分支名，在你自己的编辑器里测试或推送。
+- **在本地打开。** 桌面端可以用 **Open in** 把工作树用编辑器打开。
+- **创建 Pull Request。** GitHub 会话可以在对话上方点 **Create PR**。Lody 会把 PR 关联回会话并同步
+  CI 状态。这也是[推荐工作流](/zh/docs/workflow)的起点。
+- **归档会话。** 工作完成后从侧边栏归档。归档会回收工作树，但保留分支和对话，之后随时可以恢复。
+  见[归档会话](/zh/docs/session#archive-sessions)。
+
+</Step>
+</Steps>
+
+## 第一次会话常见的坑
+
+<Accordions>
+<Accordion title="一次要得太多">
+又长又多的要求会让 Agent 和审阅都变难。把工作拆成一次只产出一个可审阅改动的会话。见[并行 Coding Agents](/zh/docs/parallel-agents)。
+</Accordion>
+<Accordion title="没选项目或 Agent Config">
+项目为空或选错，Agent 就会在错误的目录里工作。发送前检查输入框里的项目、分支、Agent Config 和模型。
+</Accordion>
+<Accordion title="只在最后才审阅">
+当轮 diff 读起来便宜，也容易评论。每轮都审，错误方向就不会蔓延到整个改动里。
+</Accordion>
+<Accordion title="从不归档">
+完成的会话会一直占着工作树。合并或放弃之后及时归档，让机器回收空间。
+</Accordion>
+</Accordions>
+
+## 常见问题
+
+### 第一次会话需要 GitHub 吗？
+
+不需要。GitHub 带来 Pull Request、CI 状态和 review 评论同步；而本地项目会话本身就能聊天、改文件、
+看 diff 并完成审阅。见[本地项目](/zh/docs/local-project)。
+
+### 什么是“轮次（round）”？
+
+轮次就是一次 Agent 回复加上这次回复产生的文件改动。Lody 会在每轮结束后给出 diff，让你持续审阅，
+而不是等到最后读一整份巨大的 diff。见[差异查看](/zh/docs/diff-viewer)。
+
+### Agent 改了我没让它改的东西怎么办？
+
+打开那个文件的 diff，留一条评论，或者在同一个会话里追问，让 Agent 改回来。如果改动和任务无关，直接
+让它撤销，并让会话保持聚焦。
+
+### 能停止正在跑的会话吗？
+
+可以。用输入框里的停止按钮取消当前轮次。被停止的会话会留在列表里，你可以再发一条消息继续。
+
+### 归档后的会话去哪儿了？
+
+会进入侧边栏右下角的归档列表。对话和分支都会保留；恢复会话时会自动重建工作树。见[归档会话](/zh/docs/session#archive-sessions)。
+
+## 下一步
+
+<Cards>
+  <Card href="/zh/docs/concepts" title="概念与术语表">
+    理解会话、Agent Config、角色、运行时和工作树之间的关系。
+  </Card>
+  <Card href="/zh/docs/workflow" title="推荐工作流">
+    把一次会话变成可复用的“从需求到 PR”流程。
+  </Card>
+  <Card href="/zh/docs/diff-viewer" title="差异查看">
+    更细致地审阅当轮和整个会话的改动。
+  </Card>
+</Cards>

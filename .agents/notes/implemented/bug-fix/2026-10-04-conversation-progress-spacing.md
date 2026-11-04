@@ -46,3 +46,23 @@ Root checks in the primary worktree remain blocked by missing dependencies;
 document checks report the same 62 pre-existing errors, with no new errors or
 SHA-protected topics.
 The Spec remains draft; implementation does not imply human approval.
+
+## Collapsed user messages
+
+The larger reading leading also applies to user text. A long user message
+collapses behind "Show more" under a height cap. That cap was a fixed 160px,
+chosen when user text used 20px lines (exactly 8 lines). At 24px it held 6.67
+line boxes, so the clip edge ran through the glyphs of the seventh row. The cap
+is now a whole number of the user text's own line boxes: seven, which is the
+closest to the previous visual height. A `mask-image` fades the last visible
+row, so the collapsed bubble reads as continuing without a matched overlay
+colour. Expanding or searching removes both the cap and the mask. Any future
+leading change keeps the clip between rows because the cap is derived from the
+same token.
+
+Browser assertions cover five theme, width and size combinations. In each, no
+visible row extends past the clip edge, the cap equals seven line boxes, the
+fade starts one line box above the edge, and expanding removes the mask. On the
+previous 160px cap, all five fail because one row crosses the edge by 2–4px.
+Before/after screenshots from the isolated desktop E2E harness are in
+[#1293](https://github.com/LodyAI/Lody/pull/1293).

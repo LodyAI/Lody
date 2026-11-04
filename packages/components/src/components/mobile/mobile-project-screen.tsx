@@ -11,6 +11,7 @@ import {
   Pin,
   Search,
   Settings as SettingsIcon,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -31,7 +32,6 @@ import {
   SessionRowAuthorAvatar,
   type SessionRowOpenedByTreeSlot,
 } from '@/components/sidebar-row-shared';
-import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { MobileEdgeBackSwipeZone } from './mobile-edge-back-swipe';
 import { MobileFilterPillBar, type FilterPill } from './mobile-filter-pill-bar';
 import {
@@ -39,6 +39,8 @@ import {
   type MobileChatGroupBy,
   type MobileChatListSelectionLabels,
 } from './mobile-chat-list';
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
+import { MobileSettingsFoldContext } from './mobile-settings-fold-context';
 import { MobileInitialLetterAvatar } from './mobile-initial-letter-avatar';
 import {
   MobileWorkspaceTabBar,
@@ -302,8 +304,15 @@ function StatusIndicator({
     return <Spinner className="h-4 w-4 shrink-0 text-primary" aria-label="running" />;
   }
   if (hasUnreadMessages) {
+    /* The 8px dot lives in a 16px node box, like the spinner and the hand.
+       Without the box it is 8px wide, so a widened child slot (`w-8
+       justify-start`) left-aligns it 4px off the tree node while the 16px
+       marks stay centered. Keeping the node box the same width for every
+       status keeps the dot on the trunk and in line with the top-level rows. */
     return (
-      <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="unread" />
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-label="unread">
+        <span className="h-2 w-2 rounded-full bg-primary" />
+      </span>
     );
   }
   return null;
@@ -674,6 +683,12 @@ export function MobileProjectScreen({
   /* Scroll container handed to `MobileWorkspaceTabBar` so the dock
      collapses while the user scrolls. */
   const listScrollRef = useRef<HTMLDivElement>(null);
+  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+  const setListRef = useCallback((element: HTMLDivElement | null) => {
+    listScrollRef.current = element;
+    setListElement(element);
+  }, []);
+  const settingsFold = useHorizontalFoldLayout(listElement, selectedProjectTab === 'settings');
   const [filesScrollSignal, setFilesScrollSignal] =
     useState<MobileWorkspaceTabBarScrollSignal | null>(null);
   const handleFilesScrollActivity = useCallback((scrollTop: number) => {
@@ -819,13 +834,15 @@ export function MobileProjectScreen({
         </AnimatePresence>
 
         <div
-          ref={listScrollRef}
+          ref={setListRef}
           className={cn(
-            'scrollbar-pro relative min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
+            'scrollbar-pro relative min-h-0 flex-1 pt-1 [scrollbar-gutter:auto]',
+            settingsFold ? 'overflow-hidden' : 'overflow-y-auto',
             /* The bottom tabbar floats fixed at the viewport bottom,
                so the scrollable content needs padding to clear it
                (height + safe-area). Same trick the home screen uses. */
-            'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
+            !settingsFold &&
+              'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
           )}
         >
           {selectedProjectTab === 'chat' ? (
@@ -884,8 +901,9 @@ export function MobileProjectScreen({
             )
           ) : null}
           {selectedProjectTab === 'files' ? renderedFilesTabContent : null}
-          {selectedProjectTab === 'settings'
-            ? (settingsTabContent ?? (
+          {selectedProjectTab === 'settings' ? (
+            <MobileSettingsFoldContext.Provider value={settingsFold}>
+              {settingsTabContent ?? (
                 <ProjectTabPlaceholder
                   icon={
                     <SettingsIcon
@@ -897,8 +915,9 @@ export function MobileProjectScreen({
                   title={labels.settingsTabPlaceholderTitle ?? labels.settingsTab ?? '设置'}
                   body={labels.settingsTabPlaceholderBody ?? '即将上线'}
                 />
-              ))
-            : null}
+              )}
+            </MobileSettingsFoldContext.Provider>
+          ) : null}
         </div>
 
         {showProjectTabBar ? (
@@ -1144,7 +1163,7 @@ function ProjectListFilterToggle({
         open && 'border-primary/40 bg-primary/15 text-primary'
       )}
     >
-      <CarbonSettingsAdjust className="h-4 w-4 text-current" aria-hidden="true" />
+      <SlidersHorizontal className="h-4 w-4 text-current" strokeWidth={1.8} aria-hidden="true" />
       {hasActiveFilters && !open ? (
         <span
           aria-hidden="true"

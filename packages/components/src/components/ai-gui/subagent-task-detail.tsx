@@ -1,4 +1,12 @@
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Check, Copy } from 'lucide-react';
@@ -28,19 +36,20 @@ import { ToolCommandSection, ToolDetailSheet } from './tool-call-detail';
 const SCROLLBAR = 'scrollbar-pro';
 const FOLLOW_SLACK_PX = 24;
 
-/** The brief, whole, with one-tap copy. A background command reads as code. */
+/** A brief or a linked command, whole, with one-tap copy. */
 function TaskBrief({
   task,
   body,
   fontSize,
+  isCommand = false,
 }: {
   task: SubagentTask;
   body: string;
   fontSize: ConversationFontSize;
+  isCommand?: boolean;
 }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
-  const isCommand = task.taskType === 'local_bash';
   return (
     <div {...stylex.props(styles.bodyWrap)}>
       <div
@@ -107,6 +116,68 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
  * steps on the way says so under whatever did arrive.
  */
 function TaskActivity({
+  task,
+  renderHistory,
+  onHistoryReady,
+}: {
+  task: SubagentTask;
+  renderHistory?: (task: SubagentTask) => ReactNode;
+  onHistoryReady?: () => void;
+}) {
+  const { t } = useTranslation();
+  const source = task.history;
+  const owner = JSON.stringify([task.run?.sessionId, task.taskId]);
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState<{
+    source: NonNullable<SubagentTask['history']>;
+    owner: string;
+    run?: SubagentTask['run'];
+  } | null>(null);
+  useEffect(() => {
+    if (!source) return undefined;
+    let cancelled = false;
+    void source.read().then(
+      (run) => {
+        if (!cancelled) setLoaded({ source, owner, run });
+      },
+      () => {
+        if (!cancelled) setLoaded({ source, owner });
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [source, owner, attempt]);
+  useLayoutEffect(() => {
+    if (loaded?.source === source && loaded?.owner === owner && loaded?.run) onHistoryReady?.();
+  }, [loaded, source, owner, onHistoryReady]);
+  if (!source) return <MaterializedTaskActivity task={task} renderHistory={renderHistory} />;
+  if (loaded?.owner === owner && loaded.run) {
+    return (
+      <MaterializedTaskActivity task={{ ...task, run: loaded.run }} renderHistory={renderHistory} />
+    );
+  }
+  return (
+    <Section label={t('sessions.subagentTasks.activity', 'Activity')}>
+      {loaded?.source === source ? (
+        <Button
+          variant="ghost"
+          size="small"
+          onClick={() => {
+            setLoaded(null);
+            setAttempt((value) => value + 1);
+          }}
+        >
+          {t('common.retry', 'Retry')}
+        </Button>
+      ) : (
+        <Spinner size="small" />
+      )}
+    </Section>
+  );
+}
+
+function MaterializedTaskActivity({
   task,
   renderHistory,
 }: {
@@ -198,16 +269,17 @@ function CancelTaskAction({
  */
 function useFollowEnd(ref: RefObject<HTMLDivElement | null>, follow: boolean, content: unknown) {
   const pinned = useRef(follow);
-  useLayoutEffect(() => {
+  const followEnd = useCallback(() => {
     const node = ref.current;
     if (node && pinned.current) node.scrollTop = node.scrollHeight;
-  }, [ref, content]);
+  }, [ref]);
+  useLayoutEffect(followEnd, [followEnd, content]);
   const onScroll = () => {
     const node = ref.current;
     if (!node) return;
     pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight <= FOLLOW_SLACK_PX;
   };
-  return onScroll;
+  return { onScroll, followEnd };
 }
 
 /** The task at full depth: what it is, the whole brief, its run, its result, its cost. */
@@ -243,7 +315,7 @@ export function SubagentTaskDetail({
     running &&
     task.taskKind === 'subagent' &&
     (task.run ? runCancellation && task.run.snapshot.support.cancel : true);
-  const onScroll = useFollowEnd(scrollerRef, running, task);
+  const { onScroll, followEnd } = useFollowEnd(scrollerRef, running, task);
 
   return (
     <>
@@ -270,19 +342,19 @@ export function SubagentTaskDetail({
         onScroll={onScroll}
         {...withClassName(stylex.props(styles.detail), SCROLLBAR)}
       >
-        {body ? (
-          <Section
-            label={
-              task.taskType === 'local_bash'
-                ? t('sessions.subagentTasks.command', 'Command')
-                : t('sessions.subagentTasks.brief', 'Brief')
-            }
-          >
+        {body && body !== task.command ? (
+          <Section label={t('sessions.subagentTasks.brief', 'Brief')}>
             <TaskBrief task={task} body={body} fontSize={fontSize} />
           </Section>
         ) : null}
 
-        <TaskActivity task={task} renderHistory={renderHistory} />
+        {task.command ? (
+          <Section label={t('sessions.subagentTasks.command', 'Command')}>
+            <TaskBrief task={task} body={task.command} fontSize={fontSize} isCommand />
+          </Section>
+        ) : null}
+
+        <TaskActivity task={task} renderHistory={renderHistory} onHistoryReady={followEnd} />
 
         {/* A legacy task has no steps; the one line the row shows is all it has. */}
         {!task.run && latest ? (

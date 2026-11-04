@@ -334,7 +334,7 @@ const deepseekHarnessEditOfficial: AgentConfigMeta = {
   agentType: 'deepseek',
   env: {
     DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
-    DEEPSEEK_BASE_URL: 'https://api.deepseek.com/v1',
+    DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
   },
 };
 

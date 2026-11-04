@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
@@ -23,6 +24,7 @@ const dependencyBlocks = [
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 const workspacePackageNames = new Set();
 const requiredPublishedRuntimeDependencies = [
+  '@loro-dev/roost-node',
   '@napi-rs/keyring',
   'better-sqlite3',
   'loro-crdt',
@@ -38,7 +40,10 @@ const requiredPublishedRuntimeDependencies = [
 // repackages node-pty 1.1.0-beta14, which predates the queued pty writer and writes
 // through tty.WriteStream, where EAGAIN is masked and can block (microsoft/node-pty#833).
 const requiredExactPublishedRuntimeDependencies = ['loro-crdt'];
-const requiredPinnedPublishedRuntimeDependencies = new Map([['@lydell/node-pty', '1.2.0-beta.14']]);
+const requiredPinnedPublishedRuntimeDependencies = new Map([
+  ['@lydell/node-pty', '1.2.0-beta.14'],
+  ['@loro-dev/roost-node', '0.3.1'],
+]);
 
 for (const block of dependencyBlocks) {
   const dependencies = packageJson[block];
@@ -98,6 +103,7 @@ runDeepSeekAdapterBundleSmoke();
 runGrokAdapterBundleSmoke();
 runDevinAdapterBundleSmoke();
 runPublishedRuntimeSmoke();
+runPublishedInternalCommandSmoke();
 runWorkspaceWatchWorkerSmoke();
 runDiffWorkerSmoke();
 runTurnDiffStoreWorkerSmoke();
@@ -279,7 +285,7 @@ function runDeepSeekAdapterBundleSmoke() {
   }
 
   for (const presetId of ['standard', 'ptc', 'minimal', 'cordis']) {
-    const presetPath = path.join(distDir, 'deepseek-agent-presets', presetId, 'agent.cordis.yml');
+    const presetPath = path.join(distDir, 'deepseek-agent-presets', `${presetId}.yml`);
     if (!fs.existsSync(presetPath)) {
       console.error(`Published CLI DeepSeek preset is missing: ${presetPath}`);
       process.exit(1);
@@ -385,7 +391,37 @@ probeDb.close();
 requireFromBundle('@lydell/node-pty');
 requireFromBundle.resolve('loro-crdt');
 requireFromBundle.resolve('tinypool');
-originalStdoutWrite('Published CLI runtime CJS dependency smoke passed.\\n');
+const { RoostNativeClient } = await import('@loro-dev/roost-node');
+const { createPrivateKey, createPublicKey } = await import('node:crypto');
+const { mkdtemp, rm } = await import('node:fs/promises');
+const { tmpdir } = await import('node:os');
+const { join } = await import('node:path');
+const roostSeed = new Uint8Array(32).fill(17);
+const key = createPrivateKey({
+  key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), roostSeed]),
+  format: 'der', type: 'pkcs8',
+});
+const roostOwner = createPublicKey(key).export({ format: 'der', type: 'spki' }).subarray(-32);
+const roostDirectory = await mkdtemp(join(tmpdir(), 'lody-published-roost-'));
+const roost = new RoostNativeClient({
+  dbPath: join(roostDirectory, 'history.db'), seed: roostSeed, allowedOwners: [roostOwner],
+  clockMs: 1700000000000n, maxQueuedRequests: 8, maxQueuedBytes: 4096,
+});
+try {
+  await roost.ready;
+  const stream = roost.stream('published-smoke');
+  const content = '{"text":"published Roost"}';
+  const id = (await stream.create([], content)).updates[0].turnId;
+  await stream.seal(id, 1n);
+  const read = await stream.readTurn(id);
+  if (read.kind !== 'found' || read.turn.contentJson !== content || !read.turn.hashVerified) {
+    throw new Error('Published Roost SQLite/Worker probe failed');
+  }
+} finally {
+  await roost.close();
+  await rm(roostDirectory, { recursive: true, force: true });
+}
+originalStdoutWrite('Published CLI runtime dependency smoke passed.\\n');
 originalExit(0);
 `;
 
@@ -401,7 +437,7 @@ originalExit(0);
       stdio: 'pipe',
     });
   } catch (error) {
-    console.error('Published CLI runtime CJS dependency smoke failed.');
+    console.error('Published CLI runtime dependency smoke failed.');
     if (error && typeof error === 'object') {
       const output = error;
       if ('stdout' in output && output.stdout) {
@@ -412,6 +448,51 @@ originalExit(0);
       }
     }
     process.exit(1);
+  }
+}
+
+function runPublishedInternalCommandSmoke() {
+  const dataDir = fs.mkdtempSync(path.join(tmpdir(), 'lc-'));
+  const env = { ...process.env, LODY_DATA_DIR: dataDir, LODY_LOG_MODE: 'none' };
+  delete env.LODY_MCP_HTTP_TOKEN;
+  const run = (args) =>
+    spawnSync(process.execPath, [path.join(distDir, 'index.js'), ...args], {
+      cwd: cliRoot,
+      env,
+      input: '',
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+  try {
+    // The normal help route loads every command; the internal route must expose
+    // the same helper surface without loading the user-command registry.
+    const normal = run(['help', '__internal']);
+    const internal = run(['__internal', '--help']);
+    if (
+      normal.status !== 0 ||
+      internal.status !== 0 ||
+      !normal.stdout.includes('lody-mcp-http-host') ||
+      !normal.stdout.includes('lody-mcp-server') ||
+      normal.stdout !== internal.stdout ||
+      normal.stderr !== internal.stderr
+    ) {
+      throw new Error('Published internal command help differs from the normal CLI route');
+    }
+
+    const missingToken = run(['__internal', 'lody-mcp-http-host']);
+    if (
+      missingToken.status !== 2 ||
+      !missingToken.stderr.includes('LODY_MCP_HTTP_TOKEN is required')
+    ) {
+      throw new Error('Published MCP HTTP host did not reject its missing token');
+    }
+
+    const stdio = run(['__internal', 'lody-mcp-server']);
+    if (stdio.status !== 0) {
+      throw new Error(`Published MCP stdio entry did not close on EOF: ${stdio.stderr}`);
+    }
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
   }
 }
 

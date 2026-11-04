@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type ReactNode } from 'react';
-import { ArrowUp, Bot, Github } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 
@@ -14,10 +14,7 @@ import {
   MobileNewChatSheetContent,
   type MobileNewChatSheetContentProps,
 } from '@/components/mobile/mobile-new-chat-sheet';
-import {
-  MobileInlinePickerCoordinator,
-  MobileInlinePickerRowSlot,
-} from '@/components/mobile/mobile-inline-picker';
+import { MobileInlinePickerRowSlot } from '@/components/mobile/mobile-inline-picker';
 import { Button } from '@lody/ui/button';
 import { registerBuiltInCommands } from '@/lib/commands';
 
@@ -105,20 +102,6 @@ const sampleFileItems: ChatComposerFileItem[] = [
   },
 ];
 
-// A pill that mimics the look of the real selector chips so the mobile sheet
-// rows read like the production form without wiring live workspace data.
-function SelectorPill({ icon: Icon, label }: { icon: typeof Bot; label: string }) {
-  return (
-    <button
-      type="button"
-      className="inline-flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-card px-3 text-sm"
-    >
-      <Icon className="h-4 w-4 opacity-70" />
-      <span className="truncate">{label}</span>
-    </button>
-  );
-}
-
 /**
  * Desktop landing — the actual `ChatLandingView` (which renders
  * `WebChatLandingScreen` → `ChatComposer`) with attachments populated.
@@ -197,16 +180,10 @@ function MobileNewChatDemo() {
   const contentProps: MobileNewChatSheetContentProps = {
     labels: {
       title: '新建对话',
-      machineLabel: '机器',
-      contextTypeLabel: '类型',
-      perTypeLabel: '仓库',
+      backAriaLabel: 'Back',
     },
-    coordinator: MobileInlinePickerCoordinator,
-    machineNode: <SelectorPill icon={Bot} label="Aurora · Mac Studio" />,
-    contextTypeNode: <SelectorPill icon={Github} label="GitHub" />,
-    perTypeNode: <SelectorPill icon={Github} label="loro-dev/lody" />,
+    targetNode: <span className="text-lg font-semibold">loro-dev/lody</span>,
     composer,
-    showCloseButton: true,
   };
 
   return (

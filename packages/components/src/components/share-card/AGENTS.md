@@ -3,10 +3,15 @@
 Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink; edit this file only.
 Intent: [chat image export](../../../../../specs/chat-share-image.md). Rationale:
 [the redesign note](../../../../../.agents/notes/implemented/feature/2026-09-14-chat-share-card-fixed-template.md).
+WebKit export sharpness: [rendering decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-29-webkit-share-image-sharpness.md).
 
 - `chat-share-card.tsx` is ONE fixed template, not an appearance editor: one gutter
   per band, left-aligned turns, unconditional code wrap, no height cap, no QR.
   Size, `mat`, backdrop and palette are the ONLY choices; none changes the layout.
+- Pin both the bundled CSS variables and the StyleX product/conversation themes
+  on the card's scope. CSS aliases inherited from the app root retain its resolved
+  colours. Markdown dark selectors must respect `.light-scope` / `.dark-scope`.
+  Rationale: [palette isolation](../../../../../.agents/notes/implemented/bug-fix/2026-10-06-chat-share-palette-isolation.md).
 - Size (`chat`/`post`) sets the measure and is asked as where the image goes, never
   as a number; the device only seeds it, and decides nothing else about the image.
 - `mat` is the one continuous dimension — a slider, because a live preview answers

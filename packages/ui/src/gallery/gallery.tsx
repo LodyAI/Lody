@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { ScrollAreaDemo } from './scroll-area-demo';
 import {
   Fragment,
   useEffect,
@@ -1844,8 +1845,10 @@ function CompactMenu() {
     <Menu.Root>
       <Menu.Trigger render={<Button variant="secondary" />}>Two choices</Menu.Trigger>
       <Menu.Content width="compact">
-        <Menu.Item>Local</Menu.Item>
-        <Menu.Item>Worktree</Menu.Item>
+        <Menu.CheckboxItem indicatorSide="end" defaultChecked>
+          Online
+        </Menu.CheckboxItem>
+        <Menu.CheckboxItem indicatorSide="end">My machines</Menu.CheckboxItem>
       </Menu.Content>
     </Menu.Root>
   );
@@ -3832,6 +3835,15 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <Swatch key={token.name} {...token} />
             ))}
           </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Scroll area"
+        rule="A neutral position mark: a transparent track, a rounded thumb, and the same gray ramp for native controls. Hover reveals the area; scroll-only visibility follows the list's activity."
+      >
+        <PaletteSplit palettes={palettes}>
+          <ScrollAreaDemo />
         </PaletteSplit>
       </Section>
 

@@ -44,7 +44,8 @@ export type ServerTimeResponse = z.infer<typeof serverTimeResponseSchema>;
  *
  * ## Usage
  *
- * 1. Call syncTime() once at application startup with a function that fetches server time
+ * 1. Long-lived cloud applications maintain calibration with maintainTimeSync().
+ *    One-shot commands may call syncTime() directly.
  * 2. Use getServerNow() instead of Date.now() for all time-sensitive operations
  */
 
@@ -54,16 +55,31 @@ let serverTimeOffset = 0;
 /** Whether time sync has been completed */
 let isSynced = false;
 
+export type ServerTimeFetcher = (signal?: AbortSignal) => Promise<number>;
+
+// A wall-clock correction during the request makes the midpoint meaningless.
+const CLOCK_DISCONTINUITY_MS = 1_000;
+
 /**
  * Synchronize local time with server time.
- * Should be called once at application startup.
+ * Failed and cancelled samples preserve the last calibration.
  *
  * @param getServerTime - A function that returns a Promise resolving to the server timestamp in milliseconds
  */
-export async function syncTime(getServerTime: () => Promise<number>): Promise<void> {
+export async function syncTime(
+  getServerTime: ServerTimeFetcher,
+  signal?: AbortSignal
+): Promise<void> {
+  signal?.throwIfAborted();
   const localBefore = Date.now();
-  const serverTime = await getServerTime();
+  const elapsedBefore = performance.now();
+  const serverTime = await getServerTime(signal);
   const localAfter = Date.now();
+  const elapsed = performance.now() - elapsedBefore;
+  signal?.throwIfAborted();
+  if (Math.abs(localAfter - localBefore - elapsed) > CLOCK_DISCONTINUITY_MS) {
+    throw new Error('System clock changed during time synchronization');
+  }
 
   // Use round-trip midpoint to approximate when server generated timestamp
   const localMid = (localBefore + localAfter) / 2;
@@ -127,13 +143,15 @@ const DEFAULT_TIME_SYNC_TIMEOUT_MS = 5000;
 export function createServerTimeFetcher(
   url: string,
   timeoutMs: number = DEFAULT_TIME_SYNC_TIMEOUT_MS
-): () => Promise<number> {
-  return async () => {
+): ServerTimeFetcher {
+  return async (signal) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const response = await fetch(url, { signal: controller.signal });
+      const response = await fetch(url, {
+        signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+      });
       if (!response.ok) {
         throw new Error(`Time sync failed: ${response.status} ${response.statusText}`);
       }
@@ -142,6 +160,7 @@ export function createServerTimeFetcher(
       return parsed.serverTime;
     } finally {
       clearTimeout(timeoutId);
+      controller.abort();
     }
   };
 }

@@ -13,6 +13,7 @@ import {
   CircleDot,
   CircleX,
   Copy,
+  Database,
   Folder,
   GitBranch,
   Loader2,
@@ -27,7 +28,7 @@ import { Separator } from '@lody/ui/separator';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
-import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
+import type { PrStatus, SessionHistoryBackendKind, SessionPullRequestCiState } from '@lody/shared';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 
@@ -362,6 +363,8 @@ export type SessionInfoCardProps = {
   folderName?: string | null;
   /** Name of the machine the session runs on. */
   machineName?: string | null;
+  /** Resolved from the session's persisted choice, independently of the experiment switch. */
+  historyBackend?: SessionHistoryBackendKind;
   branchName?: string | null;
   prStatus?: PrStatus | null;
   /** Compact CI rollup written by the CLI poller for the selected PR. */
@@ -391,9 +394,9 @@ export type SessionInfoCardProps = {
  *
  * One kind of fact per row, each behind a 14px mark in one column: where the
  * work lives (the owner's avatar or a folder), the branch (its glyph says
- * worktree or plain branch), whose it is and on which machine, who may open
- * it. Under the one separator, the pull request, its CI verdict and the diff
- * share a status line; CI jobs belong to the PR tab.
+ * worktree or plain branch), whose it is and on which machine, its history
+ * backend, who may open it. Under the one separator, the pull request, its CI
+ * verdict and the diff share a status line; CI jobs belong to the PR tab.
  */
 export function SessionInfoCard({
   kind,
@@ -405,6 +408,7 @@ export function SessionInfoCard({
   repoFullName,
   folderName,
   machineName,
+  historyBackend,
   branchName,
   prStatus,
   prCiState,
@@ -443,7 +447,7 @@ export function SessionInfoCard({
   const glyph = stylex.props(styles.glyph);
 
   // Where the work lives, then on which branch, then whose it is and on which
-  // machine, then who may open it.
+  // machine, then its history backend, then who may open it.
   const rows: { key: string; mark: ReactNode; label: string; value: ReactNode }[] = [];
   if (repoFullName || folderName) {
     rows.push({
@@ -509,6 +513,18 @@ export function SessionInfoCard({
       mark: <Monitor {...glyph} aria-hidden="true" />,
       label: machineLabel,
       value: <span {...stylex.props(styles.truncate)}>{machineName}</span>,
+    });
+  }
+  if (historyBackend) {
+    rows.push({
+      key: 'history-backend',
+      mark: <Database {...glyph} aria-hidden="true" />,
+      label: t('sessions.infoCard.historyBackend', 'History backend'),
+      value: (
+        <span {...stylex.props(styles.truncate)}>
+          {historyBackend === 'roost' ? 'Roost' : 'Loro'}
+        </span>
+      ),
     });
   }
   if (sharing) {

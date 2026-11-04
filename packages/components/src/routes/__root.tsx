@@ -1,3 +1,5 @@
+import { receiveMagpieImportAtom } from '@/atoms/magpie-import';
+import { isMagpieImportLink } from '@lody/shared';
 import {
   createRootRouteWithContext,
   Outlet,
@@ -19,7 +21,9 @@ import { trackDeferredPostHogPageView } from '../lib/deferred-posthog';
 import { scheduleIdleTask } from '../lib/idle-task';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { keepAppRootOffBodyTail } from '../lib/body-tail-sentinel';
+import { BootShellBoundary } from '@/components/boot-shell-boundary';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { StorageFullGuard } from '@/components/storage-full-guard';
 import { isMissingEmail } from '@lody/shared';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { ConvexProvider, useAuthClient } from '../providers/convex-provider';
@@ -28,12 +32,23 @@ import { persistAuthToken, signOutWithoutRedirect } from '../lib/auth';
 import { setLoginHintCookie } from '../lib/login-hint-cookie';
 import i18next from 'i18next';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
-import { onIpcEvent } from '@/lib/electron-ipc-client';
+import { buildSessionLink, parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import {
+  SESSION_DEEP_LINK_EVENT,
+  pendingSessionLinkAtom,
+  resolveSessionLinkWorkspace,
+  watchSessionLinkRequest,
+  isSessionLinkDestination,
+} from '@/lib/session-deep-link';
+import { formatExplicitSessionTabSearch } from '@/lib/session-tab-url';
+import { usePlatformWorkspaces } from '@lody/platform/react';
+import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
+import { onIpcEvent, getIpcServices } from '@/lib/electron-ipc-client';
 import { useStableSession } from '@/hooks/useStableSession';
 import { normalizeCurrentUserFromSessionUser } from '@/lib/current-user';
 import { writeAuthBootstrapSnapshot } from '@/lib/auth-bootstrap';
 import { toast } from '@/lib/toast';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   authTokenAtom,
   electronDeepLinkSignInInProgressAtom,
@@ -47,6 +62,7 @@ import { resolveDesktopCheckoutReturnDeepLinkPath } from '@/lib/desktop-checkout
 import { resolveDesktopGitHubInstallDeepLinkPath } from '@/lib/desktop-github-install-deep-link';
 import { LodyPostHogProvider } from '../providers/posthog-provider';
 import { AppLaunchAnalyticsTracker } from '@/components/app-launch-analytics-tracker';
+import { ReferralLeadAttacher } from '@/components/referral-lead-attacher';
 import { ShortcutAnalyticsTracker } from '@/components/commands/shortcut-analytics-tracker';
 import { ERROR_BOUNDARY_PROBE_EVENT, consumeErrorBoundaryProbe } from '@/lib/error-boundary-probe';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -86,7 +102,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 function RootComponent() {
-  const { authClient } = useRouter().options.context;
+  const { authClient, createE2eeRuntime, prepareE2eeCreation } = useRouter().options.context;
   useLayoutEffect(() => keepAppRootOffBodyTail(), []);
 
   // Local (open-source) platform: same inner app shell, but the auth/Convex
@@ -107,7 +123,10 @@ function RootComponent() {
     <ConvexProvider authClient={authClient}>
       <StableSessionProvider>
         <AuthenticatedConvexProvider>
-          <CloudPlatformProvider>
+          <CloudPlatformProvider
+            createE2eeRuntime={createE2eeRuntime}
+            prepareE2eeCreation={prepareE2eeCreation}
+          >
             <RootApp />
           </CloudPlatformProvider>
         </AuthenticatedConvexProvider>
@@ -208,6 +227,14 @@ function RootApp() {
     <LodyPostHogProvider>
       {telemetryEnabled && <AppLaunchAnalyticsTracker isElectron={isElectron} />}
       {telemetryEnabled && <ShortcutAnalyticsTracker />}
+      <SessionDeepLinkRouter />
+      <ReferralLeadAttacher
+        userId={
+          hasRawUser && !isPending && !isRetrying && !error && !isOptimistic
+            ? (currentUser?.id ?? null)
+            : null
+        }
+      />
       {isElectron && <DesktopDeepLinkRouter />}
       <ThemeProvider>
         <InterfaceFontController enabled={isElectron} />
@@ -215,14 +242,19 @@ function RootApp() {
           <AppInitializer>
             <LanguageProvider>
               <>
-                <Toast.Provider manager={toastManager} closeLabel={i18next.t('common.close', 'Close')} />
-                <RuntimeProvider>
-                  {/* Location-driven effects and the Outlet boundary subscribe to
-                      router state in these two small components, so a navigation
-                      no longer re-renders the whole provider stack above. */}
-                  <RootLocationEffects />
-                  <RootOutletBoundary />
-                </RuntimeProvider>
+                <Toast.Provider
+                  manager={toastManager}
+                  closeLabel={i18next.t('common.close', 'Close')}
+                />
+                {/* Auth invalidation must remain mounted even if the runtime fails. */}
+                <RootLocationEffects />
+                {/* Outside the runtime boundary: a full disk can be what broke the runtime. */}
+                {isElectron && <StorageFullGuard />}
+                <ErrorBoundary name="RootRuntime" variant="page" propagateAuthErrors={false}>
+                  <RuntimeProvider>
+                    <RootOutletBoundary />
+                  </RuntimeProvider>
+                </ErrorBoundary>
                 {/* <TanStackRouterDevtools /> */}
               </>
             </LanguageProvider>
@@ -375,8 +407,10 @@ function RootOutletBoundary() {
       showErrorDetails
       propagateAuthErrors={false}
     >
-      <ErrorBoundaryProbe />
-      <Outlet />
+      <BootShellBoundary>
+        <ErrorBoundaryProbe />
+        <Outlet />
+      </BootShellBoundary>
     </ErrorBoundary>
   );
 }
@@ -399,11 +433,129 @@ function navigateToResolvedPath(navigate: ReturnType<typeof useNavigate>, path: 
   void navigate({ to, search, replace: true });
 }
 
+function SessionDeepLinkRouter() {
+  const store = useStore();
+  const navigationTarget = useAtomValue(pendingSessionLinkAtom);
+  const location = useLocation();
+  const [settledNavigation, setSettledNavigation] = useState<{
+    target: SessionLink;
+    slug: string;
+  } | null>(null);
+  const setNavigationTarget = useSetAtom(pendingSessionLinkAtom);
+  const workspaces = usePlatformWorkspaces();
+  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const navigate = useNavigate();
+  const [pending, setPending] = useState<SessionLink | null>(null);
+  useEffect(() => {
+    if (!navigationTarget) return undefined;
+    return watchSessionLinkRequest(store, navigationTarget, () => {
+      toast.error(i18next.t('deepLink.openFailed', 'Unable to open this conversation.'));
+    });
+  }, [navigationTarget, store]);
+  useEffect(() => {
+    if (!settledNavigation || settledNavigation.target !== navigationTarget) return;
+    if (
+      !isSessionLinkDestination(
+        navigationTarget,
+        settledNavigation.slug,
+        location.pathname,
+        location.search.tab
+      )
+    ) {
+      setNavigationTarget(null);
+    }
+  }, [
+    navigationTarget,
+    settledNavigation,
+    location.pathname,
+    location.search,
+    setNavigationTarget,
+  ]);
+  useEffect(() => {
+    const receive = (raw: unknown) => {
+      if (typeof raw !== 'string') return;
+      const link = parseSessionLink(raw);
+      if (link) {
+        setNavigationTarget(null);
+        setPending(link);
+      }
+    };
+    const onOpen = (event: Event) => receive((event as CustomEvent<unknown>).detail);
+    window.addEventListener(SESSION_DEEP_LINK_EVENT, onOpen);
+    return () => {
+      window.removeEventListener(SESSION_DEEP_LINK_EVENT, onOpen);
+    };
+  }, [setNavigationTarget]);
+  useEffect(() => {
+    // Let auth/provisioning and the default landing settle before applying the explicit target.
+    if (!pending) return;
+    const resolution = resolveSessionLinkWorkspace(pending, workspaces, currentWorkspaceId);
+    if (resolution.kind === 'wait') return;
+    const { workspaceId } = resolution;
+    setPending(null);
+    if (resolution.kind === 'unavailable') {
+      toast.error(
+        i18next.t(
+          'deepLink.workspaceUnavailable',
+          'This workspace is unavailable in this version of Lody. Open the link in the installation that owns it.'
+        )
+      );
+      const app = getIpcServices()?.app;
+      if (app)
+        void app
+          .getLinkInstallations()
+          .then((installations) => {
+            for (const installation of installations) {
+              toast.info(installation.name, {
+                duration: 0,
+                action: {
+                  label: i18next.t('deepLink.openHere', 'Open with this app'),
+                  onClick: () => {
+                    void app
+                      .openSessionInInstallation(
+                        buildSessionLink({ ...pending, workspaceId }),
+                        installation.scheme
+                      )
+                      .catch(() =>
+                        toast.error(
+                          i18next.t('deepLink.openFailed', 'Unable to open this conversation.')
+                        )
+                      );
+                  },
+                },
+              });
+            }
+          })
+          .catch(() => {});
+      return;
+    }
+    const target = { ...pending, workspaceId };
+    setNavigationTarget(target);
+    void navigate({
+      to: '/$workspaceName/sessions/$sessionId',
+      params: { workspaceName: resolution.slug, sessionId: pending.sessionId },
+      search: { tab: formatExplicitSessionTabSearch(pending.tabSessionId ?? pending.sessionId) },
+    })
+      .then(() => {
+        if (store.get(pendingSessionLinkAtom) === target)
+          setSettledNavigation({ target, slug: resolution.slug });
+      })
+      .catch(() => {
+        if (store.get(pendingSessionLinkAtom) === target) {
+          setNavigationTarget(null);
+          toast.error(i18next.t('deepLink.openFailed', 'Unable to open this conversation.'));
+        }
+      });
+  }, [pending, workspaces, currentWorkspaceId, navigate, setNavigationTarget, store]);
+  return null;
+}
+
 function DesktopDeepLinkRouter() {
   const location = useLocation();
   const navigate = useNavigate();
   const postHog = usePostHog();
   const localMachineId = useAtomValue(localMachineIdAtom);
+  const receiveMagpieImport = useSetAtom(receiveMagpieImportAtom);
   const currentUser = useAtomValue(userAtom);
   const { isAuthenticated: isConvexAuthenticated, isLoading: isConvexAuthLoading } =
     useAuthenticatedConvex();
@@ -470,6 +622,18 @@ function DesktopDeepLinkRouter() {
       return undefined;
     }
     return onIpcEvent('app.deepLink', (url) => {
+      if (isMagpieImportLink(url)) {
+        try {
+          receiveMagpieImport(url);
+        } catch {
+          toast.error(i18next.t('magpieImport.invalidLink', 'This Magpie import link is invalid.'));
+        }
+        return;
+      }
+      if (parseSessionLink(url)) {
+        window.dispatchEvent(new CustomEvent(SESSION_DEEP_LINK_EVENT, { detail: url }));
+        return;
+      }
       const invitePath = resolveDesktopInviteDeepLinkPath(url);
       const machinePairingRequestId = readDesktopMachinePairingRequestId(url);
       const openLocalProjectPath = resolveDesktopOpenLocalProjectDeepLinkPath(
@@ -503,7 +667,8 @@ function DesktopDeepLinkRouter() {
       }
 
       if (invitePath) {
-        void navigate({ to: invitePath, replace: true });
+        const target = new URL(invitePath, 'https://lody.invalid');
+        void navigate({ to: target.pathname, hash: target.hash.slice(1), replace: true });
         return;
       }
 
@@ -531,7 +696,7 @@ function DesktopDeepLinkRouter() {
 
       navigateToResolvedPath(navigate, targetPath);
     });
-  }, [location.pathname, navigate, postHog]);
+  }, [location.pathname, navigate, postHog, receiveMagpieImport]);
 
   return null;
 }

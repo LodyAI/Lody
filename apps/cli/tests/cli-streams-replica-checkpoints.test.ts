@@ -14,11 +14,12 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
-import { getLoroMetaStreamId, type WorkspaceId } from '@lody/shared';
-import type { LoroStreamsTokenProvider } from '@lody/platform';
+import { getLoroMetaStreamId, getWorkspaceFlockDocId, type WorkspaceId } from '@lody/shared';
+import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { LoroRepo } from 'loro-repo';
 import {
   createCliSqliteRepoStore,
+  hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
   type CliSqliteRepoStore,
   type DocumentCursorScope,
@@ -39,7 +40,7 @@ const tokenProvider = {
   getShardHostSuffix: () => undefined,
   invalidate: () => {},
   createAuthCallback: () => async () => 'streams-jwt',
-} as unknown as LoroStreamsTokenProvider;
+} as unknown as LoroStreamsTokenProviderLegacy;
 
 const toArrayBuffer = (value: Uint8Array): ArrayBuffer => value.slice().buffer as ArrayBuffer;
 
@@ -135,6 +136,7 @@ async function withTransport<T>(
   run: (adapter: Awaited<ReturnType<typeof createCliStreamsTransport>>['adapter']) => Promise<T>
 ): Promise<T> {
   const { adapter } = await createCliStreamsTransport({
+    content: { mode: 'plaintext' },
     workspaceId,
     tokenProvider,
     repo: cliProcess.repo,
@@ -168,6 +170,75 @@ afterEach(async () => {
 });
 
 describe('CLI Streams checkpoints are bound to the replica that loaded them', () => {
+  it.each(['import', 'importBatch'] as const)(
+    'preserves pending-only %s updates across a SQLite restart',
+    async (method) => {
+      const remote = new LoroDoc();
+      remote.setPeerId(1n);
+      remote.getText('t').insert(0, 'base|');
+      const snapshot = remote.export({ mode: 'snapshot' });
+      const beforeA = remote.oplogVersion();
+      remote.getText('t').push('A');
+      const updateA = remote.export({ mode: 'update', from: beforeA });
+      const beforeB = remote.oplogVersion();
+      remote.getText('t').push('B');
+      const updateB = remote.export({ mode: 'update', from: beforeB });
+
+      const daemon = await openCliProcess();
+      const docId = `session-pending-${method}`;
+      const doc = (await daemon.repo.openPersistedDoc(docId)).doc;
+      doc.import(snapshot);
+      await daemon.repo.flush();
+      const applied = doc.oplogVersion().encode();
+
+      const imported = method === 'import' ? doc.import(updateB) : doc.importBatch([updateB]);
+      // B has been received, but cannot emit an applied change before A arrives.
+      expect(imported.success.size).toBe(0);
+      expect(imported.pending?.size).toBeGreaterThan(0);
+      expect(doc.getText('t').toString()).toBe('base|');
+      expect(doc.oplogVersion().encode()).toEqual(applied);
+      await daemon.repo.flush();
+      await closeCliProcess(daemon);
+
+      const restarted = await openCliProcess();
+      const restored = (await restarted.repo.openPersistedDoc(docId)).doc;
+      expect(restored.getText('t').toString()).toBe('base|');
+      expect(restored.oplogVersion().encode()).toEqual(applied);
+      restored.import(updateA);
+      expect(restored.getText('t').toString()).toBe('base|AB');
+      expect(restored.oplogVersion().encode()).toEqual(remote.oplogVersion().encode());
+      await restarted.repo.flush();
+      await closeCliProcess(restarted);
+
+      const reopened = await openCliProcess();
+      const complete = (await reopened.repo.openPersistedDoc(docId)).doc;
+      expect(complete.getText('t').toString()).toBe('base|AB');
+      expect(complete.oplogVersion().encode()).toEqual(remote.oplogVersion().encode());
+    }
+  );
+
+  it('recognizes remote catalog history only after real Streams persistence, across restart and purge', async () => {
+    const daemon = await openCliProcess();
+    const docId = getWorkspaceFlockDocId(workspaceId);
+    const local = await daemon.repo.openFlockDoc(docId);
+    local.flock.set(['project', 'locally-authored'], 'local');
+    await daemon.repo.flush();
+    expect(hasPersistedFlockRemoteState(daemon.store.dbPath, docId)).toBe(false);
+    const remote = new Flock('remote');
+    remote.set(['project', 'remote-project'], 'remote');
+    createStreamsServer(remote.exportFile());
+    expect(
+      (await withTransport(daemon, (adapter) => adapter.syncFlockDoc(docId, local.flock))).ok
+    ).toBe(true);
+    expect(local.flock.get(['project', 'remote-project'])).toBe('remote');
+    expect(hasPersistedFlockRemoteState(daemon.store.dbPath, docId)).toBe(true);
+    await closeCliProcess(daemon);
+    const restarted = await openCliProcess();
+    expect(hasPersistedFlockRemoteState(restarted.store.dbPath, docId)).toBe(true);
+    await restarted.store.storageAdapter.deleteFlockDoc?.(docId);
+    expect(hasPersistedFlockRemoteState(restarted.store.dbPath, docId)).toBe(false);
+  });
+
   it('bootstraps a process that hydrated before another process advanced the shared file', async () => {
     const server = createStreamsServer(metaSnapshotWithA());
     // The one-shot command opens first, while the file is still empty.

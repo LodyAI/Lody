@@ -9,7 +9,6 @@ import {
   CodeCollabV2Service,
   type CodeCollabV2FileIndexPublication,
 } from './code-collab-v2-service';
-import { CodeCollabFileIndexChangedPublishError } from './code-collab-flock-publish';
 
 type TestOwnerState = {
   readonly fileTree: CodeCollabV2FileTreeState;
@@ -66,6 +65,7 @@ describe('CodeCollabV2Service targeted file-index repair', () => {
   });
 
   const createService = (options: {
+    readonly taskTimeoutMs?: number;
     readonly publishFileIndex: (
       publication: CodeCollabV2FileIndexPublication
     ) => Promise<{ changed: boolean }>;
@@ -81,6 +81,7 @@ describe('CodeCollabV2Service targeted file-index repair', () => {
         message: 'unused',
       }),
       publishFileIndex: options.publishFileIndex,
+      taskTimeoutMs: options.taskTimeoutMs,
       publishFileIndexSignal: options.publishFileIndexSignal,
       fileIndexRepairBaseDelayMs: 1_000,
       fileIndexRepairMaxDelayMs: 30_000,
@@ -108,145 +109,67 @@ describe('CodeCollabV2Service targeted file-index repair', () => {
     await getTestApi(service).publishOwnerState(ownerSessionId, state);
   };
 
-  it('reconciles remote state only on initial activation and repair', async () => {
-    const publications: CodeCollabV2FileIndexPublication[] = [];
+  it('aborts a timed-out publication, admits a newer snapshot and preserves late failure observation', async () => {
+    const started = deferred();
+    let rejectOld: (error: Error) => void = () => {};
+    let oldSignal: AbortSignal | undefined;
+    const published: string[][] = [];
+    let first = true;
     const service = createService({
+      taskTimeoutMs: 100,
       publishFileIndex: async (publication) => {
-        publications.push(publication);
-        return { changed: true };
-      },
-    });
-    const state = seedOwner(service, OWNER_A, 'one.ts');
-
-    await publishOwner(service, OWNER_A, state);
-    state.fileTree['two.ts'] = true;
-    await publishOwner(service, OWNER_A, state);
-
-    expect(publications.map((publication) => publication.reconcileRemote)).toEqual([true, false]);
-  });
-
-  it('retries only the owner whose publication failed', async () => {
-    const publications: CodeCollabV2FileIndexPublication[] = [];
-    let ownerBAttempts = 0;
-    const service = createService({
-      publishFileIndex: async (publication) => {
-        publications.push(publication);
-        if (publication.ownerSessionId === OWNER_B && ownerBAttempts++ === 0) {
-          throw new Error('transport failed');
+        if (first) {
+          first = false;
+          oldSignal = publication.signal;
+          started.resolve();
+          await new Promise<void>((_resolve, reject) => {
+            rejectOld = reject;
+          });
         }
+        publication.signal?.throwIfAborted();
+        published.push(Object.keys(publication.fileIndex));
         return { changed: true };
       },
     });
-    const ownerAState = seedOwner(service, OWNER_A, 'a.ts');
-    const ownerBState = seedOwner(service, OWNER_B, 'b.ts');
-
-    await publishOwner(service, OWNER_A, ownerAState);
-    await expect(publishOwner(service, OWNER_B, ownerBState)).rejects.toThrow('transport failed');
-
-    await vi.advanceTimersByTimeAsync(999);
-    expect(publications.map((publication) => publication.ownerSessionId)).toEqual([
-      OWNER_A,
-      OWNER_B,
-    ]);
-
-    await vi.advanceTimersByTimeAsync(1);
-    expect(publications.map((publication) => publication.ownerSessionId)).toEqual([
-      OWNER_A,
-      OWNER_B,
-      OWNER_B,
-    ]);
-    expect(publications.at(-1)?.reconcileRemote).toBe(true);
-
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(publications).toHaveLength(3);
-  });
-
-  it('backs off repeated repair failures exponentially', async () => {
-    const publishFileIndex = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('first failure'))
-      .mockRejectedValueOnce(new Error('second failure'))
-      .mockResolvedValue({ changed: true });
-    const service = createService({ publishFileIndex });
-    const state = seedOwner(service, OWNER_A, 'retry.ts');
-
-    await expect(publishOwner(service, OWNER_A, state)).rejects.toThrow('first failure');
-
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(publishFileIndex).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1_999);
-    expect(publishFileIndex).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(publishFileIndex).toHaveBeenCalledTimes(3);
-  });
-
-  it('retries the signal after a changed file index fails post-sync', async () => {
-    const publishFileIndex = vi
-      .fn()
-      .mockRejectedValueOnce(
-        new CodeCollabFileIndexChangedPublishError(new Error('post-sync failed'))
-      )
-      .mockResolvedValue({ changed: false });
-    const publishFileIndexSignal = vi.fn(async () => {});
-    const service = createService({ publishFileIndex, publishFileIndexSignal });
-    const state = seedOwner(service, OWNER_A, 'partial.ts');
-
-    await expect(publishOwner(service, OWNER_A, state)).rejects.toBeInstanceOf(
-      CodeCollabFileIndexChangedPublishError
+    const state = seedOwner(service, OWNER_A, 'old.ts');
+    const timedOut = expect(publishOwner(service, OWNER_A, state)).rejects.toThrow(
+      'exceeded 100ms'
     );
-    expect(publishFileIndexSignal).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(1_000);
-
-    expect(publishFileIndex).toHaveBeenCalledTimes(2);
-    expect(publishFileIndexSignal).toHaveBeenCalledTimes(1);
-  });
-
-  it('cancels a pending repair after a newer publication succeeds or the service is disposed', async () => {
-    const publishFileIndex = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('transport failed'))
-      .mockResolvedValue({ changed: true });
-    const service = createService({ publishFileIndex });
-    const state = seedOwner(service, OWNER_A, 'latest.ts');
-
-    await expect(publishOwner(service, OWNER_A, state)).rejects.toThrow('transport failed');
+    await started.promise;
+    await vi.advanceTimersByTimeAsync(100);
+    await timedOut;
+    expect(oldSignal?.aborted).toBe(true);
+    delete state.fileTree['old.ts'];
+    state.fileTree['new.ts'] = true;
     await publishOwner(service, OWNER_A, state);
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(publishFileIndex).toHaveBeenCalledTimes(2);
-
-    publishFileIndex.mockRejectedValueOnce(new Error('transport failed again'));
-    state.fileTree['newer.ts'] = true;
-    await expect(publishOwner(service, OWNER_A, state)).rejects.toThrow('transport failed again');
-    service.dispose();
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(publishFileIndex).toHaveBeenCalledTimes(3);
+    rejectOld(new Error('Late old transport failure'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(published).toEqual([['new.ts']]);
   });
 
-  it('drops a queued repair when a newer in-flight publication succeeds first', async () => {
-    const newerStarted = deferred();
-    const releaseNewer = deferred();
-    const publishFileIndex = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('transport failed'))
-      .mockImplementationOnce(async () => {
-        newerStarted.resolve();
-        await releaseNewer.promise;
+  it('cancels active publication on disposal without publishing a late snapshot or scheduling repair', async () => {
+    const started = deferred();
+    const gate = deferred();
+    let signal: AbortSignal | undefined;
+    const published: string[][] = [];
+    const service = createService({
+      publishFileIndex: async (publication) => {
+        signal = publication.signal;
+        started.resolve();
+        await gate.promise;
+        publication.signal?.throwIfAborted();
+        published.push(Object.keys(publication.fileIndex));
         return { changed: true };
-      })
-      .mockResolvedValue({ changed: true });
-    const service = createService({ publishFileIndex });
-    const state = seedOwner(service, OWNER_A, 'queued.ts');
-
-    await expect(publishOwner(service, OWNER_A, state)).rejects.toThrow('transport failed');
-    const newerPublication = publishOwner(service, OWNER_A, state);
-    await newerStarted.promise;
-
-    await vi.advanceTimersByTimeAsync(1_000);
-    releaseNewer.resolve();
-    await newerPublication;
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(publishFileIndex).toHaveBeenCalledTimes(2);
+      },
+    });
+    const state = seedOwner(service, OWNER_A, 'old.ts');
+    const cancelled = expect(publishOwner(service, OWNER_A, state)).rejects.toThrow('cancelled');
+    await started.promise;
+    service.dispose();
+    await cancelled;
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(signal?.aborted).toBe(true);
+    expect(published).toEqual([]);
   });
 });

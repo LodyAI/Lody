@@ -1,4 +1,7 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
+import type { WorkspaceRuntime } from '../src/atoms/runtime';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import {
   getSessionRoomId,
@@ -10,7 +13,7 @@ import {
 } from '@lody/shared';
 import { createConversationSession } from '../src/lib/conversation-view';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
-import { finalizePreparedSend } from '../src/lib/session-attachment-preparation';
+
 import {
   clearSessionImageCache,
   peekSessionImageUrl,
@@ -61,11 +64,15 @@ vi.mock('../src/lib/electron-session-file-sender', () => ({
 }));
 
 const cleanup: Array<() => Promise<void>> = [];
+beforeEach(() => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+});
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
   Object.assign(local, { enabled: false, machineId: null, files: [], fail: false });
   upload.run = undefined;
   clearSessionImageCache();
+  vi.unstubAllGlobals();
 });
 
 const SESSION = 'session' as SessionId;
@@ -75,7 +82,7 @@ const MACHINE = 'machine' as MachineId;
  * The real workspace pending queue over a runtime whose session documents are
  * real Loro docs: "written" means present in that document's history.
  */
-function fixture() {
+function fixture(encrypted = false) {
   const sessions = new Map<SessionId, ReturnType<typeof createConversationSession>>();
   const docs: LoroDoc[] = [];
   const open = (sessionId: SessionId) => {
@@ -97,6 +104,7 @@ function fixture() {
       return {
         sessionData: session.sessionData,
         getState: () => session.mirror.getState(),
+        setState: session.mirror.setState.bind(session.mirror),
         waitUntilSynced: async () => {},
       } as never;
     },
@@ -105,6 +113,7 @@ function fixture() {
   const dispatched: string[] = [];
   const dispatchListeners = new Set<() => void>();
   const runtime = {
+    contentMode: encrypted ? 'e2ee' : 'plaintext',
     sendResources: resources,
     repo: {
       getDocMeta: async (roomId: string) =>
@@ -127,11 +136,23 @@ function fixture() {
   } as unknown as SessionSendRuntime;
   const pending = createWorkspacePendingSends({
     runtime,
+    ...(encrypted
+      ? {
+          localIdentity: {
+            accountId: 'attachment-test-account',
+            workspaceId: 'workspace',
+            genesisHash: 'a'.repeat(64),
+            signingPublicKey: 'b'.repeat(64),
+          },
+        }
+      : {}),
+    accountId: 'attachment-test-account',
+    workspaceId: 'workspace',
     token: () => 'token',
     localMachineId: () => local.machineId as MachineId | null,
   });
   cleanup.push(async () => {
-    pending.dispose();
+    await pending.dispose();
     await resources.dispose();
     for (const session of sessions.values()) session.dispose();
     for (const doc of docs) doc.free();
@@ -148,7 +169,7 @@ function fixture() {
       dispatchListeners.add(check);
       check();
     });
-  return { pending, turns, metas, delivered };
+  return { runtime, pending, turns, metas, delivered };
 }
 
 function until(
@@ -383,32 +404,6 @@ it('transfers a canceled first send creation to the next text message', async ()
   });
 });
 
-it('finalizing an already finalized input does not duplicate its attachment blocks', async () => {
-  const { buildDraftUserHistoryEntry } = await import('../src/lib/session-attachment-draft');
-  const value = send('only', ['image']);
-  const attachments = value.attachments.map((item) => ({
-    ...item,
-    ready: {
-      type: 'image' as const,
-      imageId: item.id,
-      mimeType: item.mimeType,
-      fileName: item.name,
-      sizeBytes: 5,
-    },
-  }));
-  const draft = buildDraftUserHistoryEntry(
-    { userId: 'account', timestamp: '2026-01-01T00:00:00Z', inputBlocks: [] },
-    attachments
-  );
-  expect(draft?.items).toEqual([]);
-  const first = finalizePreparedSend({ ...value, attachments });
-  expect(first.entry.items).toHaveLength(2);
-  expect(first.attachments.every((item) => item.ready && !item.source)).toBe(true);
-  const again = finalizePreparedSend({ ...value, ...first });
-  expect(again.entry.items).toEqual(first.entry.items);
-  expect(again.entry.inputConfig).toEqual(first.entry.inputConfig);
-});
-
 it('writes a failed cloud image through the same-machine local handoff as a file receipt', async () => {
   Object.assign(local, { enabled: true, machineId: 'machine' });
   const f = fixture();
@@ -470,3 +465,141 @@ it.each(['remote', 'no-capability', 'canceled', 'file-limit', 'local-failure'])(
     expect(held.attachments[0]?.source).toBeInstanceOf(Blob);
   }
 );
+
+it('admits an already prepared local file in an encrypted workspace without uploading it', async () => {
+  const f = fixture();
+  const entry = {
+    id: 'prepared-local',
+    role: 'user',
+    userId: 'account',
+    timestamp: '2026-10-27T00:00:00Z',
+    items: [{ type: 'text', text: 'local file' }],
+    fileDiff: [],
+    inputConfig: { inputBlocks: [{ type: 'text', text: 'local file' }] },
+  };
+  const file = {
+    type: 'file',
+    transport: 'local',
+    fileId: '/local/private.txt',
+    fileName: 'private.txt',
+    mimeType: 'text/plain',
+    sizeBytes: 7,
+    sha256: 'a'.repeat(64),
+    textPreview: false,
+    uploadedAt: 1,
+    machineId: MACHINE,
+  };
+  const result = await acceptSessionUserTurn(
+    { ...f.runtime, workspaceId: 'workspace', contentMode: 'e2ee' } as unknown as WorkspaceRuntime,
+    SESSION,
+    entry as SessionHistory,
+    { kind: 'dispatch' },
+    undefined,
+    undefined,
+    [{ id: 'local', kind: 'file', name: 'private.txt', ready: file }] as never
+  );
+  expect(result).toBe('written');
+  expect(f.turns()[0]?.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'file', transport: 'local', fileId: '/local/private.txt' }),
+    ])
+  );
+});
+
+it('rejects unprotected or mismatched prepared references and keeps the encrypted Roost fence', async () => {
+  const f = fixture(true);
+  const value = send('rejected', ['image.png']);
+  expect(() => f.pending.enqueue({ ...value, historyBackend: 'roost' })).toThrow(
+    'e2ee_feature_unavailable'
+  );
+  expect(() => f.pending.enqueue({ ...value, workspaceId: 'other' })).toThrow(
+    'attachment_workspace_mismatch'
+  );
+  expect(() =>
+    f.pending.enqueue({
+      ...value,
+      attachments: value.attachments.map((item) => ({
+        ...item,
+        ready: { type: 'image', ...ready(new File(['x'], 'image.png')) },
+      })),
+    })
+  ).toThrow('e2ee_attachment_unprotected');
+  expect(f.pending.getSnapshot()).toEqual([]);
+  expect(f.turns()).toEqual([]);
+});
+
+it('refuses an unprotected preparation receipt without losing the draft source', async () => {
+  const f = fixture(true);
+  // An older/miswired preparation adapter returning a plaintext receipt must
+  // never be enough to commit it into encrypted conversation content.
+  upload.run = async (file) => ready(file);
+  f.pending.enqueue(send('unprotected', ['image.png']));
+  const held = await failed(f.pending, 'unprotected');
+  expect(held.error).toBe('e2ee_attachment_unprotected');
+  expect(await held.attachments[0]?.source?.text()).toBe('image.png');
+  expect(f.turns()).toEqual([]);
+  expect(local.files).toEqual([]);
+});
+
+it('keeps an unknown-mode text draft unconsumed across rejection and an explicit retry', async () => {
+  const f = fixture();
+  const mode = Promise.withResolvers<void>();
+  const waiting = Promise.withResolvers<void>();
+  void mode.promise.catch(() => {});
+  let draft = 'C1 unaccepted draft sentinel';
+  const entry = send('unknown-text', []).entry;
+  entry.inputConfig!.inputBlocks = [{ type: 'text', text: draft }];
+  let admitted = false;
+  const runtime = {
+    ...f.runtime,
+    workspaceId: 'workspace',
+    contentMode: 'plaintext',
+    waitForContentAdmission: () => {
+      waiting.resolve();
+      return admitted ? Promise.resolve() : mode.promise;
+    },
+  } as unknown as WorkspaceRuntime;
+  const sending = acceptSessionUserTurn(
+    runtime,
+    SESSION,
+    entry,
+    { kind: 'history' },
+    undefined,
+    undefined,
+    undefined,
+    () => {
+      draft = '';
+    }
+  );
+  const rejectedSend = expect(sending).rejects.toThrow('mode unavailable');
+  void rejectedSend.catch(() => {});
+  try {
+    await Promise.race([waiting.promise, sending.catch(() => {})]);
+    expect(draft).toBe('C1 unaccepted draft sentinel');
+    expect(f.turns()).toEqual([]);
+    mode.reject(new Error('mode unavailable'));
+    await rejectedSend;
+    expect(draft).toBe('C1 unaccepted draft sentinel');
+    admitted = true;
+    await acceptSessionUserTurn(
+      runtime,
+      SESSION,
+      entry,
+      { kind: 'history' },
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        draft = '';
+      }
+    );
+    expect(draft).toBe('');
+    expect(f.turns().map((turn) => turn.inputConfig?.inputBlocks)).toEqual([
+      [{ type: 'text', text: 'C1 unaccepted draft sentinel' }],
+    ]);
+  } finally {
+    mode.reject(new Error('mode unavailable'));
+    await sending.catch(() => {});
+    await rejectedSend.catch(() => {});
+  }
+});

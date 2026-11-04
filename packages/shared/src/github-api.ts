@@ -474,7 +474,7 @@ export interface GitHubReadRequestOptions {
 }
 
 function authHeaders(token: string) {
-  return { ...GITHUB_API_HEADERS, authorization: `Bearer ${token}` };
+  return { ...GITHUB_API_HEADERS, ...(token ? { authorization: `Bearer ${token}` } : {}) };
 }
 
 const DEFAULT_GITHUB_FILE_READ_MAX_BYTES = 1024 * 1024;
@@ -1388,7 +1388,7 @@ async function githubFetchFileBodyAtCommit<T>(
   const res = await fetch(apiUrl.toString(), {
     headers: {
       accept: 'application/vnd.github.raw',
-      authorization: `Bearer ${token}`,
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       'x-github-api-version': '2022-11-28',
     },
   });
@@ -1411,7 +1411,7 @@ async function githubFetchFileBodyAtCommit<T>(
       commitHash
     )}/${encodedPath}`;
     const rawRes = await fetch(rawUrl, {
-      headers: { authorization: `Bearer ${token}` },
+      headers: token ? { authorization: `Bearer ${token}` } : {},
     });
     if (rawRes.status === 404) {
       throw new GitHubFileNotFoundError({ repoFullName, path, commitHash });
@@ -1966,6 +1966,15 @@ const GithubPullRequestDetailsSchema = z
     commits: z.number().optional(),
     mergeable: z.boolean().nullable().optional(),
     mergeable_state: z.string().nullable().optional(),
+    stack: z
+      .object({
+        number: z.number().int().positive(),
+        position: z.number().int().positive(),
+        size: z.number().int().positive(),
+        base: z.object({ ref: z.string() }),
+      })
+      .nullable()
+      .optional(),
   })
   .passthrough()
   .transform(
@@ -1993,6 +2002,14 @@ const GithubPullRequestDetailsSchema = z
       commits: item.commits ?? 0,
       mergeable: item.mergeable ?? null,
       mergeableState: normalizeMergeableState(item.mergeable_state),
+      stack: item.stack
+        ? {
+            number: item.stack.number,
+            position: item.stack.position,
+            size: item.stack.size,
+            baseRef: item.stack.base.ref,
+          }
+        : null,
     })
   );
 
@@ -2094,12 +2111,47 @@ export async function githubFetchPullRequestDetails(
   prNumber: number,
   options?: GitHubReadRequestOptions
 ): Promise<GitHubPullRequestDetails> {
-  return fetchGithubJson(
+  const details = await fetchGithubJson(
     `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}`,
     token,
     GithubPullRequestDetailsSchema,
-    options
+    { ...options, headers: { 'x-github-api-version': '2026-03-10' } }
   );
+  if (!details.stack) return details;
+  try {
+    const stack = await fetchGithubJson(
+      `https://api.github.com/repos/${repoFullName}/stacks/${details.stack.number}`,
+      token,
+      z.object({
+        pull_requests: z.array(
+          z.object({
+            number: z.number(),
+            title: z.string(),
+            state: z.enum(['open', 'closed']),
+            draft: z.boolean(),
+            merged_at: z.string().nullable(),
+          })
+        ),
+      }),
+      { ...options, headers: { 'x-github-api-version': '2026-03-10' } }
+    );
+    return {
+      ...details,
+      stack: {
+        ...details.stack,
+        pullRequests: stack.pull_requests.map((pr) => ({
+          number: pr.number,
+          title: pr.title,
+          state: pr.state,
+          draft: pr.draft,
+          merged: pr.merged_at !== null,
+        })),
+      },
+    };
+  } catch {
+    // Membership still provides useful context when the stack read fails.
+    return details;
+  }
 }
 
 /** Fetch commits in GitHub's oldest-to-newest pull request order. */

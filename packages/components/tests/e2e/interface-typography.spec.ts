@@ -6,6 +6,231 @@ const story = '/iframe.html?id=settings-interfacetypography--unified&viewMode=st
 const rhythmStory =
   '/iframe.html?id=sessions-assistantturnalignment--conversation-rhythm&viewMode=story';
 
+for (const previewScale of [1, 0.65]) {
+  test(`WebKit share export preserves geometry and detail at preview scale ${previewScale}`, async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'webkit', 'Exercises WebKit SVG rasterization');
+    await page.goto('/iframe.html?id=sessions-chatsharecard--markdown-palette&viewMode=story');
+    const result = await page.evaluate(async (scale) => {
+      document.body.innerHTML = `<div style="transform:scale(${scale});transform-origin:top left"><div id="capture" style="box-sizing:border-box;width:392px;padding:16px;background:#183f60;font:15px Arial">
+        <div style="position:relative;padding:24px 20px;background:white;border-radius:22px;box-shadow:0 28px 70px -20px rgba(2,10,18,.6)">
+          <div style="position:absolute;left:260px;top:20px;width:32px;height:18px;background:rgb(255,0,255)"></div>
+          <h2 style="font-size:17px">Exporting a clear conversation</h2>
+          <p>Why does text look blurry in the saved image?</p>
+          <p>Here is a useful answer with small text, punctuation, and fine details: 0123456789.</p>
+          <p>WebKit should render the SVG at the final pixel size before saving the PNG.</p>
+        </div></div></div>`;
+      const path = '/src/lib/share-image-export.ts';
+      const { exportShareImage } = await import(/* @vite-ignore */ path);
+      let captured: Blob | undefined;
+      const createObjectURL = URL.createObjectURL;
+      const click = HTMLAnchorElement.prototype.click;
+      URL.createObjectURL = (blob) => {
+        captured = blob as Blob;
+        return createObjectURL.call(URL, blob);
+      };
+      HTMLAnchorElement.prototype.click = () => {};
+      let withoutShadow: Blob | undefined;
+      try {
+        await exportShareImage(document.getElementById('capture')!, 'test', 'test');
+        const withShadow = captured;
+        document.querySelector<HTMLElement>('#capture > div')!.style.boxShadow = 'none';
+        await exportShareImage(document.getElementById('capture')!, 'test', 'test');
+        withoutShadow = captured;
+        captured = withShadow;
+      } finally {
+        URL.createObjectURL = createObjectURL;
+        HTMLAnchorElement.prototype.click = click;
+      }
+      if (!captured || !withoutShadow) throw new Error('No exported PNG');
+      const image = await createImageBitmap(captured);
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d')!;
+      context.drawImage(image, 0, 0);
+      const original = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      const unshadowed = await createImageBitmap(withoutShadow);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(unshadowed, 0, 0);
+      const plain = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let minX = canvas.width;
+      let minY = canvas.height;
+      let maxX = -1;
+      let maxY = -1;
+      let markerPixels = 0;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          const i = (y * canvas.width + x) * 4;
+          if (original[i] > 245 && original[i + 1] < 10 && original[i + 2] > 245) {
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+            markerPixels++;
+          }
+        }
+      }
+      let shadowPixels = 0;
+      for (let i = 0; i < original.length; i += 4) {
+        if (plain[i] - original[i] > 5) shadowPixels++;
+      }
+      const half = document.createElement('canvas');
+      half.width = canvas.width / 2;
+      half.height = canvas.height / 2;
+      half.getContext('2d')!.drawImage(image, 0, 0, half.width, half.height);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(half, 0, 0, canvas.width, canvas.height);
+      const blurred = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      const edges = (pixels: Uint8ClampedArray) => {
+        let sum = 0;
+        for (let y = 110; y < canvas.height - 70; y++) {
+          for (let x = 70; x < canvas.width - 70; x++) {
+            const i = (y * canvas.width + x) * 4;
+            sum += Math.abs(pixels[i] * 2 - pixels[i - 4] - pixels[i + 4]);
+          }
+        }
+        return sum;
+      };
+      return {
+        width: image.width,
+        sharpnessRatio: edges(original) / edges(blurred),
+        shadowPixels,
+        minX,
+        minY,
+        maxX,
+        maxY,
+        markerPixels,
+      };
+    }, previewScale);
+    expect(result.width).toBe(784);
+    expect(result.sharpnessRatio).toBeGreaterThan(1.65);
+    expect(result.shadowPixels).toBeGreaterThan(1000);
+    // The marker is 260px/20px from the card, which starts 16px inside the capture.
+    expect(result.minX).toBe(552);
+    expect(result.minY).toBe(72);
+    expect(result.maxX).toBe(615);
+    expect(result.maxY).toBe(107);
+    expect(result.markerPixels).toBe(64 * 36);
+  });
+}
+
+for (const appTheme of ['light', 'dark'] as const) {
+  for (const cardTheme of ['light', 'dark'] as const) {
+    test(`share Markdown uses the card palette: ${cardTheme} card in ${appTheme} app`, async ({
+      page,
+    }) => {
+      await page.route('https://**/*', (route) => route.abort());
+      await page.emulateMedia({ colorScheme: appTheme === 'light' ? 'dark' : 'light' });
+      await page.goto(
+        `/iframe.html?id=sessions-chatsharecard--markdown-palette&viewMode=story&globals=theme:${appTheme}&args=theme:${cardTheme}`
+      );
+      await expect(page.locator('html')).toHaveClass(new RegExp(appTheme));
+      const card = page.locator(`.${cardTheme}-scope`);
+      const light = cardTheme === 'light';
+      const reading = light ? 'rgb(29, 29, 32)' : 'rgb(228, 229, 231)';
+      const strong = light ? 'rgb(26, 27, 30)' : 'rgb(240, 241, 242)';
+      await expect(card.locator('.markdown-renderer')).toHaveCSS('color', reading);
+      await expect(card.locator('strong')).toHaveCSS('color', strong);
+      await expect(card.locator('h2')).toHaveCSS('color', strong);
+      await expect(card.locator('blockquote')).toHaveCSS(
+        'color',
+        light ? 'rgb(107, 114, 128)' : 'rgb(156, 159, 163)'
+      );
+      await expect(card.locator('td').first()).toHaveCSS('color', reading);
+      const code = card.locator('[data-streamdown="code-block"]');
+      await expect(code).toHaveCSS('color', light ? 'rgb(26, 27, 30)' : 'rgb(215, 216, 217)');
+      await expect(code).toHaveCSS(
+        'background-color',
+        light ? 'rgb(239, 239, 241)' : 'color(srgb 0.112915 0.120345 0.131685)'
+      );
+      await expect(code.locator('pre')).toHaveCSS('white-space', 'pre-wrap');
+      await expect(code.getByRole('button', { name: 'Copy code' })).toBeHidden();
+    });
+  }
+
+  test(`share palette switches keep the ${appTheme} app theme`, async ({ page }) => {
+    await page.route('https://**/*', (route) => route.abort());
+    await page.goto(
+      `/iframe.html?id=sessions-chatshareimagedialog--default&viewMode=story&globals=theme:${appTheme}`
+    );
+    for (const [label, scope, color] of [
+      ['Light', 'light-scope', 'rgb(29, 29, 32)'],
+      ['Dark', 'dark-scope', 'rgb(228, 229, 231)'],
+      ['Light', 'light-scope', 'rgb(29, 29, 32)'],
+    ]) {
+      await page.getByRole('radio', { name: label, exact: true }).click();
+      await expect(page.locator(`.${scope} .markdown-renderer`).first()).toHaveCSS('color', color);
+      await expect(page.locator('html')).toHaveClass(new RegExp(appTheme));
+    }
+  });
+}
+
+for (const appTheme of ['light', 'dark'] as const) {
+  for (const cardTheme of ['light', 'dark'] as const) {
+    for (const aspect of ['portrait', 'wide'] as const) {
+      test(`usage share uses the card palette: ${cardTheme} ${aspect} in ${appTheme} app`, async ({
+        page,
+      }) => {
+        await page.route('https://**/*', (route) => route.abort());
+        await page.emulateMedia({ colorScheme: appTheme === 'light' ? 'dark' : 'light' });
+        await page.goto(
+          `/iframe.html?id=settings-usagesharecard--team-portrait&viewMode=story&globals=theme:${appTheme}&args=theme:${cardTheme};aspect:${aspect}`
+        );
+        const card = page.locator(`.${cardTheme}-scope`);
+        const foreground = cardTheme === 'light' ? 'rgb(26, 27, 30)' : 'rgb(215, 216, 217)';
+        await expect(card.getByText('1.3B', { exact: true })).toHaveCSS('color', foreground);
+        await expect(card.getByText('Ada Lovelace', { exact: true })).toHaveCSS(
+          'color',
+          cardTheme === 'light' ? 'rgb(107, 114, 128)' : 'rgb(156, 159, 163)'
+        );
+        const initials = card.getByText('AD', { exact: true });
+        await expect(initials).toHaveCSS('color', foreground);
+        await expect(initials).toHaveCSS(
+          'background-color',
+          cardTheme === 'light' ? 'rgb(230, 232, 237)' : 'rgb(46, 46, 46)'
+        );
+        await expect(page.locator('html')).toHaveClass(new RegExp(appTheme));
+      });
+    }
+  }
+
+  test(`usage share without a pinned palette follows the ${appTheme} app`, async ({ page }) => {
+    await page.route('https://**/*', (route) => route.abort());
+    await page.goto(
+      `/iframe.html?id=settings-usagesharecard--team-portrait&viewMode=story&globals=theme:${appTheme}&args=theme:!undefined`
+    );
+    const foreground = appTheme === 'light' ? 'rgb(26, 27, 30)' : 'rgb(215, 216, 217)';
+    await expect(page.getByText('1.3B', { exact: true })).toHaveCSS('color', foreground);
+    await expect(page.getByText('AD', { exact: true })).toHaveCSS('color', foreground);
+    await expect(page.locator('.light-scope, .dark-scope')).toHaveCount(0);
+  });
+
+  test(`usage share palette switches keep the ${appTheme} app theme`, async ({ page }) => {
+    await page.route('https://**/*', (route) => route.abort());
+    await page.goto(
+      `/iframe.html?id=settings-usageshareimagedialog--default&viewMode=story&globals=theme:${appTheme}`
+    );
+    await page.getByRole('combobox', { name: 'Card', exact: true }).click();
+    await page.getByRole('option', { name: 'Workspace and members', exact: true }).click();
+    for (const [label, scope, color] of [
+      ['Light', 'light-scope', 'rgb(26, 27, 30)'],
+      ['Dark', 'dark-scope', 'rgb(215, 216, 217)'],
+      ['Light', 'light-scope', 'rgb(26, 27, 30)'],
+    ]) {
+      await page.getByRole('combobox', { name: 'Theme', exact: true }).click();
+      await page.getByRole('option', { name: label, exact: true }).click();
+      await expect(page.locator(`.${scope}`).getByText('AD', { exact: true })).toHaveCSS(
+        'color',
+        color
+      );
+      await expect(page.locator('html')).toHaveClass(new RegExp(appTheme));
+    }
+  });
+}
+
 for (const theme of ['light', 'dark']) {
   test(`subagent thought prose shares its activity summary and tool size: ${theme}`, async ({
     page,
@@ -251,6 +476,72 @@ for (const mode of ['progress', 'progress-streaming']) {
     await read.click();
     await expect(step).toHaveCount(0);
     await expect(paragraphs.nth(1)).toBeVisible();
+  });
+}
+
+for (const [theme, width, size] of [
+  ['dark', 1120, 14],
+  ['light', 720, 16],
+  ['dark', 420, 12],
+  ['light', 1120, 13],
+  ['dark', 720, 15],
+] as const) {
+  test(`collapsed user text clips between lines, not through one: ${theme}, ${width}px, ${size}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1500 });
+    await page.addInitScript(
+      (fontSize) => localStorage.setItem('lody-conversation-font-size', JSON.stringify(fontSize)),
+      size
+    );
+    await page.goto(
+      `${rhythmStory.replace('--conversation-rhythm', '--conversation-rhythm-long-user')}&globals=theme:${theme}`
+    );
+    const user = page.locator('[data-conversation-turn-id="rhythm-user-1"]');
+    const text = user.locator('[data-search-block-id]');
+    const readingLeading = (24 * size) / 14;
+    const toggle = user.getByRole('button', { name: 'Show more', exact: true });
+    // The dev Storybook can take longer than the 5s expect timeout to mount the story.
+    await toggle.waitFor();
+    await metrics(text, size, readingLeading);
+
+    const clip = await text.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rows = new Map<number, number>();
+      for (const rect of range.getClientRects()) {
+        if (rect.height === 0) continue;
+        rows.set(rect.top, Math.max(rows.get(rect.top) ?? 0, rect.bottom));
+      }
+      return {
+        top: box.top,
+        bottom: box.bottom,
+        overflow: node.scrollHeight - node.clientHeight,
+        rows: Array.from(rows, ([top, bottom]) => ({ top, bottom })),
+      };
+    });
+    expect(clip.overflow).toBeGreaterThan(0);
+    const visible = clip.rows.filter((row) => row.top < clip.bottom - 0.5);
+    expect(visible.length).toBeGreaterThanOrEqual(5);
+    for (const row of visible) {
+      expect(row.bottom).toBeLessThanOrEqual(clip.bottom + 0.5);
+    }
+    expect(clip.bottom - clip.top).toBeCloseTo(7 * readingLeading, 0);
+    // The fade covers exactly the last visible row and leaves the rows above opaque.
+    const fadeStart = await text.evaluate((node) => {
+      const mask = getComputedStyle(node).maskImage;
+      const stop = /100%[^,]*?([\d.]+)px|([\d.]+)px[^,]*?100%/.exec(mask);
+      return stop ? node.getBoundingClientRect().bottom - parseFloat(stop[1] ?? stop[2]!) : null;
+    });
+    expect(fadeStart).not.toBeNull();
+    expect(fadeStart!).toBeCloseTo(clip.bottom - readingLeading, 0);
+
+    await toggle.click();
+    await expect(user.getByRole('button', { name: 'Show less', exact: true })).toBeVisible();
+    expect(await text.evaluate((node) => node.scrollHeight - node.clientHeight)).toBe(0);
+    await expect(text).toHaveCSS('mask-image', 'none');
+    await expect(text).toContainText('Do not reuse any running application or its data.');
   });
 }
 

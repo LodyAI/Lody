@@ -10,6 +10,10 @@ import { feedbackPaletteTheme } from '../feedback/feedback.tokens.stylex';
 import { fieldPaletteTheme } from '../field/field.tokens.stylex';
 import { kbdPaletteTheme } from '../kbd/kbd.tokens.stylex';
 import { popupPaletteTheme } from '../popup/popup.tokens.stylex';
+import {
+  scrollbarPaletteTheme,
+  scrollbarNativeTheme,
+} from '../scroll-area/scroll-area.tokens.stylex';
 import { tablePaletteTheme } from '../table/table.tokens.stylex';
 import { togglePaletteTheme } from '../toggle/toggle.tokens.stylex';
 import { tooltipPaletteTheme } from '../tooltip/tooltip.tokens.stylex';
@@ -40,6 +44,8 @@ const componentPaletteThemes = [
   fieldPaletteTheme,
   kbdPaletteTheme,
   popupPaletteTheme,
+  scrollbarPaletteTheme,
+  scrollbarNativeTheme,
   tablePaletteTheme,
   togglePaletteTheme,
   tooltipPaletteTheme,

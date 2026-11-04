@@ -1,4 +1,5 @@
-import { Effect, Either, Schema } from 'effect';
+import { parseWorkflowRuns, type WorkflowRunObservation } from './workflow-runs';
+import { Effect, Semaphore, Result, Schema } from 'effect';
 import {
   getServerNow,
   type PrStatus,
@@ -25,6 +26,8 @@ export type PrObservation = {
   url: string;
   status: PrStatus;
   headRefName: string;
+  headSha?: string;
+  headRepository?: string;
   updatedAt: string;
   /** Rollup CI state of the head commit; null when the commit has no checks. */
   ciState: SessionPullRequestCiState | null;
@@ -33,6 +36,8 @@ export type PrObservation = {
 };
 
 export type ParsedPrPollBatch = {
+  workflowRuns?: WorkflowRunObservation[];
+  workflowGap?: boolean;
   /**
    * One entry per requested status alias. `ok: true, pr: null` is a CONFIRMED
    * GitHub null (deleted/moved PR); `ok: false` is a malformed/missing alias —
@@ -142,6 +147,8 @@ const PullRequestNodeSchema = Schema.Struct({
   isDraft: Schema.Boolean,
   updatedAt: Schema.String,
   headRefName: Schema.String,
+  headRefOid: Schema.optional(Schema.String),
+  headRepository: Schema.optional(Schema.NullOr(Schema.Struct({ nameWithOwner: Schema.String }))),
   mergeable: Schema.NullOr(Schema.String),
   mergeStateStatus: Schema.NullOr(Schema.String),
   commits: Schema.Struct({
@@ -168,7 +175,7 @@ const BatchResponseSchema = Schema.Struct({
   data: Schema.NullOr(
     Schema.Struct({
       // Alias keys are dynamic (`p0`, `d0o`, ...), validated per alias below.
-      repository: Schema.NullOr(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+      repository: Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown)),
       rateLimit: Schema.NullOr(RateLimitSchema),
     })
   ),
@@ -190,7 +197,8 @@ function projectPullRequestNode(
   node: Schema.Schema.Type<typeof PullRequestNodeSchema>
 ): PrObservation | null {
   const status = mapPullRequestStatus(node.state, node.isDraft);
-  if (!status) {
+  const updatedAtMs = Date.parse(node.updatedAt);
+  if (!status || !Number.isFinite(updatedAtMs) || updatedAtMs <= 0) {
     return null;
   }
   const rollupState = node.commits.nodes[0]?.commit.statusCheckRollup?.state;
@@ -199,6 +207,8 @@ function projectPullRequestNode(
     url: node.url,
     status,
     headRefName: node.headRefName,
+    headSha: node.headRefOid,
+    headRepository: node.headRepository?.nameWithOwner.toLowerCase(),
     updatedAt: node.updatedAt,
     ciState: mapStatusCheckRollupState(rollupState),
     mergeState: mapMergeState({
@@ -272,11 +282,11 @@ export function parsePrPollBatchResponse(
   body: unknown,
   batch: Pick<PrPollBatchQuery, 'statusAliases' | 'discoveryAliases'>
 ): PrPollQueryOutcome {
-  const decoded = Schema.decodeUnknownEither(BatchResponseSchema)(body);
-  if (Either.isLeft(decoded)) {
+  const decoded = Schema.decodeUnknownResult(BatchResponseSchema)(body);
+  if (Result.isFailure(decoded)) {
     return { kind: 'network-error', message: 'Malformed GraphQL response body' };
   }
-  const response = decoded.right;
+  const response = decoded.success;
   const errors = response.errors ?? [];
 
   const rateLimited = errors.find((error) => error.type === 'RATE_LIMITED');
@@ -317,8 +327,8 @@ export function parsePrPollBatchResponse(
       pullRequests.push({ prNumber, pr: null, ok: value === null });
       continue;
     }
-    const node = Schema.decodeUnknownEither(PullRequestNodeSchema)(value);
-    const pr = Either.isRight(node) ? projectPullRequestNode(node.right) : null;
+    const node = Schema.decodeUnknownResult(PullRequestNodeSchema)(value);
+    const pr = Result.isSuccess(node) ? projectPullRequestNode(node.success) : null;
     pullRequests.push({ prNumber, pr, ok: pr !== null });
   }
 
@@ -334,12 +344,12 @@ export function parsePrPollBatchResponse(
       entry.ok = false;
       continue;
     }
-    const list = Schema.decodeUnknownEither(DiscoveryAliasSchema)(value);
-    if (Either.isLeft(list)) {
+    const list = Schema.decodeUnknownResult(DiscoveryAliasSchema)(value);
+    if (Result.isFailure(list)) {
       entry.ok = false;
       continue;
     }
-    for (const node of list.right.nodes) {
+    for (const node of list.success.nodes) {
       const pr = projectPullRequestNode(node);
       if (pr) {
         entry.prs.push(pr);
@@ -390,19 +400,95 @@ export class GitHubGraphQlClient {
   private readonly timeoutMs: number;
   private readonly endpoint: string;
   private readonly nowMs: () => number;
-  private readonly semaphore: Effect.Semaphore;
+  private readonly semaphore: Semaphore.Semaphore;
 
   constructor(private readonly options: GitHubGraphQlClientOptions) {
     this.fetchFn = options.fetchFn ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.endpoint = options.endpoint ?? GITHUB_GRAPHQL_ENDPOINT;
     this.nowMs = options.nowMs ?? getServerNow;
-    this.semaphore = Effect.runSync(Effect.makeSemaphore(options.concurrency ?? 2));
+    this.semaphore = Effect.runSync(Semaphore.make(options.concurrency ?? 2));
   }
 
   async executeBatch(batch: PrPollBatchQuery, token: string): Promise<PrPollQueryOutcome> {
     return await Effect.runPromise(
-      this.semaphore.withPermits(1)(Effect.promise(() => this.doFetch(batch, token)))
+      Semaphore.withPermits(this.semaphore, 1)(Effect.promise(() => this.doFetch(batch, token)))
+    );
+  }
+
+  async executeWorkflows(
+    repoFullName: string,
+    headSha: string,
+    token: string
+  ): Promise<PrPollQueryOutcome> {
+    return Effect.runPromise(
+      Semaphore.withPermits(
+        this.semaphore,
+        1
+      )(
+        Effect.tryPromise(async (): Promise<PrPollQueryOutcome> => {
+          if (
+            !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repoFullName) ||
+            !/^[a-f0-9]{40,64}$/i.test(headSha)
+          )
+            return { kind: 'network-error', message: 'Invalid workflow repository' } as const;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+          try {
+            const response = await this.fetchFn(
+              `https://api.github.com/repos/${repoFullName}/actions/runs?per_page=100&head_sha=${headSha}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  Accept: 'application/vnd.github+json',
+                },
+                signal: controller.signal,
+                redirect: 'error',
+              }
+            );
+            if (response.status === 401)
+              return { kind: 'token-invalid', message: 'Workflow credential rejected' } as const;
+            if (response.status === 429 || response.headers.get('x-ratelimit-remaining') === '0')
+              return {
+                kind: 'rate-limited',
+                resetAtMs: Number(response.headers.get('x-ratelimit-reset')) * 1000 || null,
+                message: 'Workflow observation rate limited',
+              } as const;
+            if (response.status === 403 || response.status === 404)
+              return {
+                kind: 'repo-not-found-or-forbidden',
+                message: 'Workflow observation unavailable',
+              } as const;
+            if (!response.ok)
+              return { kind: 'network-error', message: 'Workflow request failed' } as const;
+            const result = parseWorkflowRuns(await response.json(), repoFullName);
+            return {
+              kind: 'success',
+              batch: {
+                pullRequests: [],
+                discoveries: [],
+                workflowRuns: result.runs,
+                workflowGap: result.gap,
+                rateLimit: {
+                  cost: 1,
+                  remaining: Number(response.headers.get('x-ratelimit-remaining') ?? 0),
+                  limit: Number(response.headers.get('x-ratelimit-limit') ?? 5000),
+                  resetAtMs: Number(response.headers.get('x-ratelimit-reset')) * 1000 || null,
+                },
+              },
+            } as const;
+          } finally {
+            clearTimeout(timer);
+          }
+        }).pipe(
+          Effect.catch(() =>
+            Effect.succeed({
+              kind: 'network-error',
+              message: 'Workflow transport unavailable',
+            } as const)
+          )
+        )
+      )
     );
   }
 

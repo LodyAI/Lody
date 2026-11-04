@@ -9,6 +9,22 @@ import { SESSION_DIRECTORY_INPUT_CONFIG_KEYS, type SessionDirectoryScalars } fro
 // shallow record (a Loro map's `getShallowValue()`, or a stored domain turn)
 // into those fields so every adapter projects the same shape.
 
+export const SESSION_DIRECTORY_SCALAR_KEYS = [
+  'id',
+  'role',
+  'timestamp',
+  'status',
+  'read',
+  'cancellationReason',
+  'finished',
+  'endedAt',
+  'sendStatus',
+  'userTurnId',
+  'acpTurnId',
+  'startedAt',
+  'permissionWaitMs',
+] as const;
+
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -23,13 +39,16 @@ export function pickDirectoryScalars(source: unknown): SessionDirectoryScalars |
     timestamp: typeof source.timestamp === 'string' ? source.timestamp : '',
   };
   if (typeof source.status === 'string') scalars.status = source.status;
+  if (typeof source.read === 'boolean') scalars.read = source.read;
+  if (source.cancellationReason === 'user_stop') scalars.cancellationReason = 'user_stop';
   if (typeof source.finished === 'boolean') scalars.finished = source.finished;
   if (typeof source.endedAt === 'number') scalars.endedAt = source.endedAt;
   if (source.sendStatus === 'timeout') scalars.sendStatus = 'timeout';
   if (typeof source.userTurnId === 'string') scalars.userTurnId = source.userTurnId;
   if (typeof source.acpTurnId === 'string') scalars.acpTurnId = source.acpTurnId;
   if (typeof source.startedAt === 'number') scalars.startedAt = source.startedAt;
-  if (typeof source.permissionWaitMs === 'number') scalars.permissionWaitMs = source.permissionWaitMs;
+  if (typeof source.permissionWaitMs === 'number')
+    scalars.permissionWaitMs = source.permissionWaitMs;
   return scalars as SessionDirectoryScalars;
 }
 
@@ -44,6 +63,7 @@ export function pickDirectoryInputConfig(source: unknown): unknown {
     if (source[key] !== undefined) picked[key] = source[key];
   }
   const normalized = normalizeSessionTurnInputConfig({
+    memory: picked.memory,
     mcpServerIds: picked.mcpServerIds,
     configOptionValues: picked.configOptionValues,
     cliType: picked.cliType,

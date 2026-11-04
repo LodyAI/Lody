@@ -210,6 +210,7 @@ export class LocalProjectRpcFileProvider extends LazyDirectoryFileProvider {
       snapshot: {
         kind: 'text',
         text: result.content,
+        ...(result.truncated ? { truncated: true } : {}),
       },
     };
   }

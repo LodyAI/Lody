@@ -16,7 +16,9 @@ The editor uses `MachineMeta.timeZone`; older machines without this metadata
 use the viewer's device zone. The preview names the machine and exposes the IANA
 zone in its tooltip. Once summaries include the display zone. The list and
 proposal summary use the machine zone when available; absent metadata uses the
-device zone. An advanced stored cron rule retains its explicit zone.
+device zone. A one-time scheduled message is personal, so its list instant uses
+the viewer's current zone instead. An advanced stored cron rule retains its
+explicit zone.
 
 ## Input, switching, and durability
 

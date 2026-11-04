@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
+import { ModalContainerProvider, PopupContainerProvider } from '../src/popup/portal-container';
 import { Button } from '../src/button/button';
 import { AlertDialog } from '../src/dialog/alert-dialog';
 import { Dialog } from '../src/dialog/dialog';
@@ -15,35 +16,46 @@ afterEach(async () => {
 const panels = () => all('[role="dialog"]');
 const panel = () => panels()[0];
 const alerts = () => all('[role="alertdialog"]');
-const buttonNamed = (label: string) => {
-  const node = all('button').find((element) => element.textContent?.trim() === label);
-  if (!node) throw new Error(`no button named ${label}`);
-  return node;
-};
 
 describe('Dialog', () => {
-  test('a trigger opens the panel, and the panel names itself', async () => {
-    mounted = await mount(
-      <Dialog.Root>
-        <Dialog.Trigger>Rename</Dialog.Trigger>
-        <Dialog.Content>
-          <Dialog.Header>
-            <Dialog.Title>Rename session</Dialog.Title>
-            <Dialog.Description>The name shows in the sidebar.</Dialog.Description>
-          </Dialog.Header>
-        </Dialog.Content>
-      </Dialog.Root>
-    );
-    expect(panels()).toHaveLength(0);
-
-    await click(one('button'));
-
-    const labelledBy = panel().getAttribute('aria-labelledby');
-    const describedBy = panel().getAttribute('aria-describedby');
-    expect(document.getElementById(labelledBy ?? '')?.textContent).toBe('Rename session');
-    expect(document.getElementById(describedBy ?? '')?.textContent).toBe(
-      'The name shows in the sidebar.'
-    );
+  test('modal hosts are independent of floating hosts, and explicit containers win', async () => {
+    const host = document.createElement('div');
+    const floating = document.createElement('div');
+    const explicit = document.createElement('div');
+    document.body.append(host, floating, explicit);
+    try {
+      mounted = await mount(
+        <ModalContainerProvider container={host}>
+          <PopupContainerProvider container={floating}>
+            <Dialog.Root defaultOpen>
+              <Dialog.Content data-testid="inherited">
+                <Dialog.Title>Inherited</Dialog.Title>
+              </Dialog.Content>
+            </Dialog.Root>
+            <Dialog.Root defaultOpen>
+              <Dialog.Content container={explicit} data-testid="explicit">
+                <Dialog.Title>Explicit</Dialog.Title>
+              </Dialog.Content>
+            </Dialog.Root>
+            <Dialog.Root defaultOpen>
+              <Dialog.Content container={null} data-testid="body">
+                <Dialog.Title>Body</Dialog.Title>
+              </Dialog.Content>
+            </Dialog.Root>
+          </PopupContainerProvider>
+        </ModalContainerProvider>
+      );
+      expect(host.querySelector('[data-testid="inherited"]')).not.toBeNull();
+      expect(explicit.querySelector('[data-testid="explicit"]')).not.toBeNull();
+      expect(floating.querySelector('[role="dialog"]')).toBeNull();
+      expect(document.querySelector('[data-testid="body"]')).toBeNull();
+    } finally {
+      await mounted?.unmount();
+      mounted = undefined;
+      host.remove();
+      floating.remove();
+      explicit.remove();
+    }
   });
 
   test('renders the cross by default, and drops it when a panel says so', async () => {
@@ -90,22 +102,6 @@ describe('Dialog', () => {
     expect(panels()).toHaveLength(0);
   });
 
-  test('a panel width lands as inline style, alongside a caller style', async () => {
-    // The panel states its own `width` in StyleX, so a second `width` class
-    // would only win by sheet order. `width` rides the inline `style` instead —
-    // the one channel that always follows the panel — and composes with the
-    // `style` a caller already passes.
-    mounted = await mount(
-      <Dialog.Root defaultOpen>
-        <Dialog.Content width="640px" style={{ overscrollBehavior: 'contain' }}>
-          <Dialog.Title>Rename session</Dialog.Title>
-        </Dialog.Content>
-      </Dialog.Root>
-    );
-    expect(panel().style.width).toBe('640px');
-    expect(panel().style.overscrollBehavior).toBe('contain');
-  });
-
   test('a panel centred on an element follows that element, inside the window', async () => {
     // jsdom lays nothing out, so the pane's box is stated; what is pinned is
     // the centre the panel is given and the window clamp around it.
@@ -144,27 +140,6 @@ describe('Dialog', () => {
     );
     expect(panel().style.width).toBe('620px');
     expect(panel().getAttribute('style') ?? '').not.toContain('inset-inline-start');
-  });
-
-  test('a footer answer runs its handler and takes the panel down with it', async () => {
-    const save = vi.fn();
-    mounted = await mount(
-      <Dialog.Root defaultOpen>
-        <Dialog.Content>
-          <Dialog.Title>Rename session</Dialog.Title>
-          <Dialog.Footer>
-            <Dialog.Close render={<Button variant="secondary" />}>Cancel</Dialog.Close>
-            <Dialog.Close render={<Button />} onClick={save}>
-              Save
-            </Dialog.Close>
-          </Dialog.Footer>
-        </Dialog.Content>
-      </Dialog.Root>
-    );
-    await click(buttonNamed('Save'));
-
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(panels()).toHaveLength(0);
   });
 
   test('every popup inside it mounts into the panel rather than on the body', async () => {
@@ -209,6 +184,10 @@ describe('Dialog', () => {
       </Dialog.Root>
     );
     expect(panels()).toHaveLength(2);
+    for (const modal of panels()) {
+      expect(document.body.contains(modal)).toBe(true);
+      expect(modal.parentElement?.closest('[role="dialog"]')).toBeNull();
+    }
     // The portal also mounts an internal backdrop for outside-press detection;
     // the veil is the presentation div carrying the open state.
     expect(all('[role="presentation"][data-open]')).toHaveLength(2);

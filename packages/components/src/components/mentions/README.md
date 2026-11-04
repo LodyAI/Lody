@@ -4,12 +4,12 @@ Product-level mention sources built on the `src/ui/mention` primitive. Binding
 rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
 [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md).
 
-| Area | Owner | Responsibility |
-| --- | --- | --- |
-| Composer entry | [combined-mention-textarea.tsx](combined-mention-textarea.tsx) | Registers triggers and connects sources to the input. |
-| Menu | [mention-registry.ts](mention-registry.ts), [mention-two-level-menu.tsx](mention-two-level-menu.tsx) | Builds views and renders rows, including merged typed slash results. |
-| Source search | Source modules below | Apply source-specific visibility and availability before ranking. |
-| Commit lifecycle | [mention-expansion.ts](mention-expansion.ts), [mention-hydration.ts](mention-hydration.ts) | Preserve and expand selected ranges. |
+| Area             | Owner                                                                                                | Responsibility                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Composer entry   | [combined-mention-textarea.tsx](combined-mention-textarea.tsx)                                       | Registers triggers and connects sources to the input.                |
+| Menu             | [mention-registry.ts](mention-registry.ts), [mention-two-level-menu.tsx](mention-two-level-menu.tsx) | Builds views and renders rows, including merged typed slash results. |
+| Source search    | Source modules below                                                                                 | Apply source-specific visibility and availability before ranking.    |
+| Commit lifecycle | [mention-expansion.ts](mention-expansion.ts), [mention-hydration.ts](mention-hydration.ts)           | Preserve and expand selected ranges.                                 |
 
 ## Files
 
@@ -23,8 +23,14 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
   funnel, both through `hooks/use-fire-once` rather than private refs.
   `category_enter` is reported from the resolved view, not a row callback: a
   navigation item never fires `onMentionSelect`, and the keyboard route counts.
+  Candidate descriptions fill the space between the heading and bottom facts,
+  with an ellipsis after the last complete line that fits. Paths stay visible
+  and the detail pane does not scroll. See the
+  [description sizing decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-20-mention-description-space.md).
 - `file-at-mention.tsx` and `mention-project-file-source.ts` load file paths and
-  provide draft hydration. [`file-search/`](file-search/README.md) owns the
+  provide draft hydration. GitHub discovery shares its cache and in-flight request;
+  fetch failures remain visible without analytics reporting. See the
+  [fetch contract](../../../../../specs/mention-file-fetch.md). [`file-search/`](file-search/README.md) owns the
   cancellable Worker, React lifecycle, and bounded path ranking.
 - `mention-session-source.ts` owns session slugs, candidates, the slug → id cache,
   hydration, the drop-time insertion, and the before-send expansion. Transfer
@@ -38,7 +44,7 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
   source.
 - `issue-pr-hash-mention.tsx` provides cached GitHub issue/PR lookup, ranking,
   hydration, and post-insert title hints.
-- `mention-skill-source.tsx` provides `$` skill discovery (`￥` is a menu alias), provider directory
+- `mention-skill-source.tsx` provides `$` skill discovery (`￥` and `¥` are menu aliases), provider directory
   filtering, hydration, and the before-send prompt expansion.
 - `mention-prompt-shortcut-source.tsx` filters visible and available Prompt
   Shortcuts before the shared slash ranker orders them. Agent Commands use that
@@ -51,7 +57,14 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
   where an `@` token ends. Both the file and session hydrators scan with it.
 - `mention-persistence.ts` stores and restores a draft's ranges.
 - `mention-chips.tsx` owns the kind → glyph and kind → colour tables for both chip
-  surfaces; `message-text-chips.tsx` paints the transcript chip.
+  surfaces; `message-text-chips.tsx` paints the transcript chip. Its paste button
+  shares the prose baseline through its label, while the clipboard icon stays centered.
+- Chat quote drafts reuse external atomic range editing, with a read-only preview
+  and a dedicated `message_quote` history span. The shared formatter includes full
+  snapshots in ACP text; supported editing rehydrates only validated quote spans.
+  The [quote contract](../../../../../specs/conversation-message-quotes.md) and
+  [decision/evidence](../../../../../.agents/notes/implemented/feature/2026-11-01-conversation-selection-quote-reintroduction.md)
+  distinguish this interaction from generic editable pasted text.
 - `mention-rank.ts` and `vscode-fuzzy-score.ts` own matching for files, sessions,
   Roles, Issues, and PRs. The vendored score is taken from the pinned VS Code
   source identified in its header; AGENTS.md states what must survive an update.

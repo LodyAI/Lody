@@ -1,5 +1,10 @@
+import { resolveSessionPullRequests } from '@lody/shared';
+import path from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { WorkspaceGitService } from './workspace-git-service';
 import {
   getSessionRoomId,
+  resolveSessionFilePath,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   type ProjectRef,
@@ -37,7 +42,6 @@ type SessionPullRequestMeta = NonNullable<SessionMeta['pullRequests']>[number];
 
 type WorkspaceSessionContext = {
   ownerSessionId: SessionId;
-  ownerDoc: SessionDocument;
   ownerMeta: SessionMeta | undefined;
   /** The active session's own meta, already read to find the owner. */
   activeMeta: SessionMeta | undefined;
@@ -48,15 +52,27 @@ type WorkspaceSessionContext = {
 export class TurnPostProcessingService {
   constructor(private readonly deps: TurnPostProcessingServiceDeps) {}
 
+  private gitRunner(
+    session: ISession,
+    signal?: AbortSignal,
+    cwd = session.getWorkdir()
+  ): GitRunner {
+    return async (args) => {
+      signal?.throwIfAborted();
+      const output = await session.exec('git', args, cwd, false);
+      signal?.throwIfAborted();
+      return output;
+    };
+  }
   private resolvePullRequests(
     ownerMeta: SessionMeta | undefined,
     activeMeta: SessionMeta | undefined
   ): readonly SessionPullRequestMeta[] {
-    const ownerPullRequests = ownerMeta?.pullRequests ?? [];
+    const ownerPullRequests = resolveSessionPullRequests(ownerMeta);
     if (ownerPullRequests.length > 0) {
       return ownerPullRequests;
     }
-    return activeMeta?.pullRequests ?? [];
+    return resolveSessionPullRequests(activeMeta);
   }
 
   private async resolveWorkspaceSessionContext(
@@ -68,7 +84,6 @@ export class TurnPostProcessingService {
     if (ownerSessionId === activeSessionId) {
       return {
         ownerSessionId,
-        ownerDoc: activeDoc,
         ownerMeta: activeMeta,
         activeMeta,
         ownerRoomId: getSessionRoomId(ownerSessionId),
@@ -80,7 +95,6 @@ export class TurnPostProcessingService {
     const ownerMeta = await ownerDoc.getMetaState();
     return {
       ownerSessionId,
-      ownerDoc,
       ownerMeta,
       activeMeta,
       ownerRoomId: getSessionRoomId(ownerSessionId),
@@ -98,10 +112,18 @@ export class TurnPostProcessingService {
    * session's behalf anymore, so leaving stale `false`s here would hide real
    * unpublished work behind a PR that looks current.
    */
-  async syncWorkspaceGitState(sessionId: SessionId, session: ISession): Promise<void> {
+  async syncWorkspaceGitState(
+    sessionId: SessionId,
+    session: ISession,
+    signal?: AbortSignal
+  ): Promise<void> {
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
+      if (workspace.ownerMeta?.projectRun) {
+        await new WorkspaceGitService(this.deps).syncSession(sessionId, session, signal);
+        return;
+      }
       // Gate here rather than at the cancellation callers: they reach this from
       // several sites that carry no `ProjectRef`, and a second copy of the rule
       // is how those routes drift apart. A child Tab's own meta may omit
@@ -111,11 +133,12 @@ export class TurnPostProcessingService {
       if (!resolveProjectGitHubRepo(project)) {
         return;
       }
-      const runGit: GitRunner = (args) => session.exec('git', args, session.getWorkdir(), false);
+      const runGit = this.gitRunner(session, signal);
       const metaPatch = await this.probeWorkspaceGitState(sessionId, runGit);
       if (Object.keys(metaPatch).length === 0) {
         return;
       }
+      signal?.throwIfAborted();
       await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
     } catch (error) {
       this.deps.logger.debug(
@@ -157,10 +180,50 @@ export class TurnPostProcessingService {
       turnStartWorkingTreeDiff?: GitWorkingTreeDiffBaseline | null;
       preferredBaseBranch?: string;
       skipHistoryFileDiff?: boolean;
+      signal?: AbortSignal;
     }
   ): Promise<SessionHistoryInput['fileDiff']> {
+    const signal = options.signal;
+    signal?.throwIfAborted();
+    const ownerDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const ownerContext = await this.resolveWorkspaceSessionContext(sessionId, ownerDoc);
+    if (ownerContext.ownerMeta?.projectRun) {
+      await new WorkspaceGitService(this.deps).syncSession(sessionId, session, signal);
+      const fileDiff: NonNullable<SessionHistoryInput['fileDiff']> = [];
+      const root = await realpath(session.getWorkdir());
+      for (const member of Object.values(ownerContext.ownerMeta.projectRun.members)) {
+        const cwd = await realpath(path.join(root, member.path)).catch(() => null);
+        if (
+          !cwd ||
+          resolveSessionFilePath([{ id: 'main', absolutePath: root }], cwd)?.relativePath !==
+            member.path
+        )
+          continue;
+        const stats = await getGitDiffStats(this.gitRunner(session, signal, cwd), {
+          preferredBaseBranch: member.base,
+          countWorkingTreeFileLines: (file) => countWorkingTreeTextFileLines(cwd, file),
+        }).catch(() => null);
+        if (stats)
+          fileDiff.push(
+            ...stats.commitFileDiff.map((file) => ({
+              ...file,
+              filePath: `${member.path}/${file.filePath}`,
+            }))
+          );
+      }
+      if (options.skipHistoryFileDiff !== true) {
+        const backend = await createSessionBackend(ownerDoc, await ownerDoc.getMetaState());
+        signal?.throwIfAborted();
+        await backend.applyHistoryAction({
+          kind: 'assistant-file-diff',
+          change: { kind: 'set', value: fileDiff },
+          turnId: options.turnId,
+        });
+      }
+      return fileDiff;
+    }
     const workdir = session.getWorkdir();
-    const runGit: GitRunner = (args) => session.exec('git', args, workdir, false);
+    const runGit = this.gitRunner(session, signal);
 
     let fileDiff: SessionHistoryInput['fileDiff'] = [];
     let diffStats: SessionMeta['diffStats'] = { allChange: { add: 0, del: 0 } };
@@ -196,6 +259,7 @@ export class TurnPostProcessingService {
       // a stale `false` would hide Create PR / Commit & Push on a session that
       // really does have unpublished work, until a later turn recomputes it.
       const metaPatch: Partial<SessionMeta> = { diffStats, ...(await workspaceGitState) };
+      signal?.throwIfAborted();
       await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
     } catch (error) {
       this.deps.logger.debug(
@@ -207,6 +271,7 @@ export class TurnPostProcessingService {
       try {
         const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
         const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+        signal?.throwIfAborted();
         await backend.applyHistoryAction({
           kind: 'assistant-file-diff',
           change: { kind: 'set', value: fileDiff },
@@ -225,6 +290,7 @@ export class TurnPostProcessingService {
     sessionDoc: SessionDocument;
     project?: ProjectRef;
     branchName?: string | null;
+    signal?: AbortSignal;
   }): Promise<DetectedPullRequest | null> {
     const { sessionId, session, sessionDoc, project, branchName } = ctx;
     const githubRepo = resolveProjectGitHubRepo(project);
@@ -255,6 +321,7 @@ export class TurnPostProcessingService {
     }
 
     try {
+      ctx.signal?.throwIfAborted();
       const associated = await this.deps.prAssociation.associatePullRequest({
         repoFullName: detected.repoFullName,
         prNumber: detected.prNumber,
@@ -265,7 +332,7 @@ export class TurnPostProcessingService {
         workspaceId: this.deps.workspaceId,
       });
       if (!associated) {
-        this.deps.logger.debug(`[${sessionId}] PR association backend call was rejected`);
+        this.deps.logger.trace(`[${sessionId}] PR association backend call was rejected or paused`);
         return detected;
       }
       this.deps.logger.debug(`[${sessionId}] Associated PR #${detected.prNumber} with session`);
@@ -276,16 +343,8 @@ export class TurnPostProcessingService {
       return detected;
     }
 
-    try {
-      await workspace.ownerDoc.addPullRequest({
-        url: detected.prUrl,
-        status: detected.status,
-      });
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to write PR to local doc: ${formatErrorMessage(error)}`
-      );
-    }
+    // The reconciler is the only association-list publisher. Turn completion
+    // may establish hosted linkage, but must not race its fresh-meta writeback.
     return detected;
   }
 }

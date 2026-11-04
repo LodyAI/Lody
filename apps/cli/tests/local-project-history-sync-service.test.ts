@@ -1049,6 +1049,9 @@ describe('history import persistence', () => {
 
     expect(catalogClient.list.mock.calls[0]?.[0].provider).toEqual({
       ...provider,
+      agentConfigId: 'config-1',
+      magpieGatewayUrl: undefined,
+      codexProfile: undefined,
       customAcp: undefined,
       runtimeOverrides: { codexPath: '/opt/codex' },
       env: { CODEX_HOME: '/profiles/work' },

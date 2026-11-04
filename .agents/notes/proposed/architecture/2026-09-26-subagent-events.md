@@ -206,9 +206,9 @@ equivalence checks, not proof of live-provider parity or a repository-wide audit
 
 Source entry points: [Claude routing](../../../../packages/acp-extension-claude/src/native-subagents.ts),
 [Codex routing](../../../../packages/acp-extension-codex/src/subagents/CodexSubagentEventRouter.ts),
-[Kimi ACP](../../../../packages/acp-extension-kimi/packages/acp-server/src/session.ts),
-[Kimi task output](../../../../packages/acp-extension-kimi/packages/agent-core-v2/src/agent/tools/agent/subagent-task.ts),
-[Pi tasks](../../../../packages/acp-extension-pi/src/subagents.ts),
+[Kimi ACP](https://github.com/LodyAI/acp-extension-kimi/blob/4befe38ffe0a1d8b0313162c40e7359ed95e5244/packages/acp-server/src/session.ts),
+[Kimi task output](https://github.com/LodyAI/acp-extension-kimi/blob/4befe38ffe0a1d8b0313162c40e7359ed95e5244/packages/agent-core-v2/src/agent/tools/agent/subagent-task.ts),
+[Pi tasks](https://github.com/LodyAI/acp-extension-pi/blob/49570ee8f6358e804d3c2481a378960009ad478f/src/subagents.ts),
 [DSH adapter](../../../../packages/acp-extension-dsh/src/adapter.ts),
 [Grok events](https://github.com/xai-org/grok-build/blob/f0e3be1100ef5252488e3be8bb0e91cf68d8c305/crates/codegen/xai-grok-shell/src/extensions/notification.rs),
 [Grok routing](https://github.com/xai-org/grok-build/blob/f0e3be1100ef5252488e3be8bb0e91cf68d8c305/crates/codegen/xai-grok-shell/src/leader/server.rs).

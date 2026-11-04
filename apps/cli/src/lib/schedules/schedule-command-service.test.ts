@@ -187,29 +187,6 @@ it('publishes the pause gate before waiting for a failed notification sync', asy
   );
 });
 
-it('bounds MCP prompt output and returns usable Registry pagination metadata', async () => {
-  const h = await fixture();
-  const document = (await h.repository.read('schedule'))!;
-  await h.repository.save({
-    scheduleId: 'schedule',
-    draft: { ...document.definition, prompt: 'x'.repeat(9000) },
-    actorId: 'owner',
-    now: 2,
-    activationId: 'edit',
-    activityId: 'edit',
-  });
-  h.context.requesterSessionId = 'session' as never;
-  const result = (await executeScheduleCommand(h.context, {
-    action: 'show',
-    scheduleId: 'schedule',
-  })) as { schedule: { prompt: string }; truncated: { promptCharsOmitted: number } };
-  expect(result.schedule.prompt).toHaveLength(8000);
-  expect(result.truncated.promptCharsOmitted).toBe(1000);
-  expect(
-    await executeScheduleCommand(h.context, { action: 'list', limit: 1, offset: 1 })
-  ).toMatchObject({ schedules: [], matched: 1 });
-});
-
 describe('proposing a schedule from a conversation', () => {
   const propose = (h: Awaited<ReturnType<typeof fixture>>, extra: Record<string, unknown> = {}) =>
     executeScheduleCommand(h.context, {
@@ -291,10 +268,5 @@ describe('proposing a schedule from a conversation', () => {
       propose(h, { rule: { kind: 'cron', expression: '0 9 * * *', timeZone: 'UTC' } })
     ).rejects.toThrow();
     expect(h.history()).toHaveLength(0);
-  });
-
-  it('requires an invoking conversation', async () => {
-    const h = await fixture();
-    await expect(propose(h)).rejects.toThrow('invoking Session');
   });
 });

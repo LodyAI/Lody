@@ -272,6 +272,38 @@ export const Default: Story = {
   render: (args) => <TaskListDemo {...args} />,
 };
 
+export const LongTitles: Story = {
+  name: 'Long Titles',
+  args: {
+    ...DEFAULT_ARGS,
+    selectedSessionId: undefined,
+    repos: [{ repoFullName: 'lody-dev/product', collapsed: false }],
+    sessions: [
+      {
+        ...DEFAULT_ARGS.sessions[0]!,
+        sessionId: 'long-title',
+        repoFullName: 'lody-dev/product',
+        title: 'Polish the animated sidebar title for long conversations',
+        prUrl: undefined,
+        prNumber: undefined,
+        isWorking: false,
+        hasUnreadMessages: false,
+      },
+      {
+        ...DEFAULT_ARGS.sessions[1]!,
+        sessionId: 'short-title',
+        repoFullName: 'lody-dev/product',
+        title: 'A short title stays still',
+        prUrl: undefined,
+        prNumber: undefined,
+        isWorking: false,
+        hasUnreadMessages: false,
+      },
+    ],
+  },
+  render: (args) => <TaskListDemo {...args} containerClassName="w-[300px]" />,
+};
+
 /**
  * The desktop row context menu carrying every action: right-click a row (or its
  * hover ⋯) on a repo session like "Browser notifications" — pin, mark unread,

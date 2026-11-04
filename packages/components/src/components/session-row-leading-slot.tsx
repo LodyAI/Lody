@@ -1,5 +1,7 @@
 import type { TFunction } from 'i18next';
 import { ChevronDown, MoreHorizontal } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { text } from '@lody/ui/tokens/scales.stylex';
 import { cn } from '@/lib/utils';
 
 // Shared presentation only: anonymous readers must not import sidebar workspace controls.
@@ -14,14 +16,15 @@ export type SessionRowOpenedByTreeSlot =
       kind: 'child';
       isLastChild: boolean;
       /**
-       * First nested row under an opener. Optional: Workspace-mode rows omit it
-       * because every row is one title line. Updated-mode two-line openers pass
+       * First nested row under an opener. Optional: a list whose openers are one
+       * Lists whose openers are one title line omit it (mobile). Lists whose openers carry a
+       * second line (desktop GitHub worktree and local-project worktree rows, Updated mode) pass
        * this with {@link tallOpener} so the upward trunk still meets the chevron.
        */
       isFirstChild?: boolean;
       /**
-       * Opener is taller than the 30px title-line contract (Updated-mode project
-       * subtitle). Stretch the first child's upward trunk to close the gap.
+       * Opener is taller than a one-line row (a project or branch/time second line).
+       * Stretch the first child's upward trunk to close the gap.
        */
       tallOpener?: boolean;
     };
@@ -30,22 +33,36 @@ const TREE_CHILD_SLOT_CLASS = 'w-[26px] justify-start';
 const TREE_CONTROL_LEFT_CLASS = 'left-[7px]';
 const TREE_LINE_CLASS = 'bg-sidebar-foreground/20';
 /**
- * Cover row padding/border from the 14px slot, plus 1px for list `gap-px`.
+ * The trunk is drawn from the ROW's height, not from a copy of it.
  *
- * These two lengths are a contract with the caller's row box: they span exactly one
- * 30px row (1px border + `py-1` + a 20px title line) and the 1px gap after it, so a
- * trunk ends where the next row's trunk starts and nesting reads as one line. A row
- * with different padding, a larger title line, or no `gap-px` breaks the line into a
- * dash per row. Rationale: `.agents/docs/components-sidebar-session-tree.md`.
+ * A row is border + padding around one title line, and each list owns that
+ * arithmetic, so the slot reads the result from `--sidebar-row-height`. Unset, it
+ * is the app's one-line row: 1px border and 3px padding on each side around one
+ * subheadline line (`8px + leading`, 26px at the default size). A list whose rows
+ * are a different box sets the property on itself (the anonymous share reader does).
+ *
+ * The 14px slot is centered in the row, so it has `(row - 14px) / 2` to the row's
+ * edge on each side. A trunk reaches that far up, and that far plus the list's 1px
+ * `gap-px` down; one row's trunk then ends where the next one starts and nesting
+ * reads as one line. Because the reach follows the row, a row that is taller or
+ * shorter (the interface font size, a new title line height) cannot silently turn
+ * the line into a dash per row. Rationale:
+ * `.agents/docs/components-sidebar-session-tree.md`.
+ *
+ * A first child under a two-line opener (desktop local worktree or Updated mode) also climbs the
+ * opener's project/branch line: its 4px gap plus one footnote line.
  */
-const TREE_TRUNK_FROM_PREV_CLASS = '-top-2';
-/**
- * Extra reach for a first child under a two-line opener (title + project
- * subtitle with 4px gap and slightly taller padding). 8px (the one-line
- * contract) + ~20px subtitle block = 28px = `-top-7`.
- */
-const TREE_TRUNK_FROM_TALL_OPENER_CLASS = '-top-7';
-const TREE_TRUNK_INTO_NEXT_CLASS = '-bottom-[9px]';
+const tree = stylex.create({
+  fromPreviousRow: {
+    top: `calc((var(--sidebar-row-height, calc(8px + ${text.subheadlineLeading})) - 14px) / -2)`,
+  },
+  fromTallOpener: {
+    top: `calc((var(--sidebar-row-height, calc(8px + ${text.subheadlineLeading})) - 14px) / -2 - 4px - ${text.footnoteLeading})`,
+  },
+  intoNextRow: {
+    bottom: `calc((var(--sidebar-row-height, calc(8px + ${text.subheadlineLeading})) - 14px) / -2 - 1px)`,
+  },
+});
 
 /**
  * Maps one {@link OpenedBySessionTreeNode} to the leading slot's tree state.
@@ -145,10 +162,13 @@ export function SessionRowLeadingSlot({
               'absolute w-px',
               TREE_LINE_CLASS,
               TREE_CONTROL_LEFT_CLASS,
-              childTree.isFirstChild && childTree.tallOpener
-                ? TREE_TRUNK_FROM_TALL_OPENER_CLASS
-                : TREE_TRUNK_FROM_PREV_CLASS,
-              childTree.isLastChild ? 'bottom-1/2' : TREE_TRUNK_INTO_NEXT_CLASS
+              stylex.props(
+                childTree.isFirstChild && childTree.tallOpener
+                  ? tree.fromTallOpener
+                  : tree.fromPreviousRow,
+                !childTree.isLastChild && tree.intoNextRow
+              ).className,
+              childTree.isLastChild && 'bottom-1/2'
             )}
           />
           <span

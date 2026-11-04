@@ -1,6 +1,8 @@
+import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowRight, Building2, Check, Plus, RotateCcw } from 'lucide-react';
@@ -9,7 +11,17 @@ import type { WorkspaceId } from '@lody/shared';
 import { setWorkspaceContextAtom } from '@/atoms/workspace-context';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { toast } from '@/lib/toast';
-import { useCloudQuery, usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
+import {
+  useCloudQuery,
+  usePlatform,
+  usePlatformSession,
+  usePlatformWorkspaces,
+} from '@lody/platform/react';
+import { readWorkspaceModeEvidence, retainWorkspaceModeProof } from '@/lib/e2ee-workspace-storage';
+import {
+  EncryptedWorkspaceMark,
+  isListedEncryptedWorkspace,
+} from '@/components/e2ee/encrypted-workspace-mark';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
@@ -110,9 +122,12 @@ export interface WorkspaceListEntry {
   id: string;
   name: string;
   slug: string;
+  /** Display-only listing metadata; selection still verifies the persisted mode. */
+  encrypted?: boolean;
 }
 
 export interface WorkspaceScreenViewProps {
+  onOpenEncryptedCreation?: () => void;
   /** All workspaces the current user is a member of. */
   workspaces: WorkspaceListEntry[];
   /** Load state of the workspace list itself; non-ready never looks like "empty". */
@@ -168,6 +183,7 @@ export interface WorkspaceScreenViewProps {
 }
 
 export function WorkspaceScreenView({
+  onOpenEncryptedCreation,
   workspaces,
   workspacesStatus,
   workspacesError,
@@ -321,6 +337,11 @@ export function WorkspaceScreenView({
         ) : null
       }
     >
+      {onOpenEncryptedCreation && (
+        <Button variant="secondary" disabled={writePending} onClick={onOpenEncryptedCreation}>
+          {t('e2ee.create.open')}
+        </Button>
+      )}
       <AnimatePresence mode="wait" initial={false}>
         {creating ? (
           <motion.div
@@ -519,7 +540,15 @@ export function WorkspaceScreenView({
                           <Building2 {...stylex.props(surface.icon20)} />
                         </span>
                         <span {...stylex.props(surface.textColumn)}>
-                          <span {...stylex.props(surface.title)}>{workspace.name}</span>
+                          <span {...stylex.props(surface.title)}>
+                            {workspace.name}
+                            {workspace.encrypted ? (
+                              <>
+                                {' '}
+                                <EncryptedWorkspaceMark className="inline-block align-[-2px]" />
+                              </>
+                            ) : null}
+                          </span>
                           <span {...stylex.props(surface.detail)}>
                             {hasSlug
                               ? `/${workspace.slug}`
@@ -565,6 +594,24 @@ export function WorkspaceScreenView({
 interface WorkspaceScreenProps {
   onBack: () => void;
   onNext: () => void;
+}
+
+/** Wraps a failed content-mode check so the toast keeps the generic switch copy. */
+class WorkspaceModeCheckError extends Error {
+  constructor(cause: unknown) {
+    super('Workspace mode check failed', { cause });
+    this.name = 'WorkspaceModeCheckError';
+  }
+}
+
+/** Unreadable local records cannot prove plaintext, so they count as evidence. */
+function hasLocalEncryptedEvidence(accountId: string, workspaceId: string): boolean {
+  try {
+    const evidence = readWorkspaceModeEvidence(localStorage, accountId, workspaceId);
+    return evidence.encrypted || evidence.rejected;
+  } catch {
+    return true;
+  }
 }
 
 // Existing names stay untouched here. A missing slug is repaired inline because
@@ -618,9 +665,13 @@ function WorkspaceSlugAvailabilityProbe({
 }
 
 export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
+  const navigate = useNavigate();
   const { t } = useTranslation();
   const analytics = useOnboardingAnalytics();
   const platform = usePlatform();
+  const encryptedCreationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
+  const session = usePlatformSession();
+  const accountId = session.status === 'authenticated' ? session.user.id : null;
   const workspaceState = usePlatformWorkspaces();
   const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
 
@@ -630,6 +681,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         id: workspace.id,
         name: workspace.name,
         slug: workspace.slug ?? '',
+        encrypted: isListedEncryptedWorkspace(workspace),
       })),
     [workspaceState]
   );
@@ -853,7 +905,13 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     if (selectedWorkspaceId === null || writePending) return;
     const target = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
     if (!target?.slug) return;
-    if (selectedWorkspaceId === activeWorkspaceId) {
+    // Only a workspace that may be encrypted needs its mode before activation;
+    // the workspace runtime verifies every other workspace in the background.
+    const verifyMode = Boolean(
+      platform.e2eeWorkspaces &&
+      (target.encrypted || (accountId && hasLocalEncryptedEvidence(accountId, target.id)))
+    );
+    if (selectedWorkspaceId === activeWorkspaceId && !verifyMode) {
       commitWorkspaceContext(target);
       onNext();
       return;
@@ -869,7 +927,23 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     });
     const switchWrite = trackWorkspaceWrite(
       platform.workspaces,
-      platform.workspaces.setActive(selectedWorkspaceId)
+      (async () => {
+        if (verifyMode && platform.e2eeWorkspaces) {
+          try {
+            const mode = await platform.e2eeWorkspaces.describe({
+              workspaceId: selectedWorkspaceId,
+            });
+            if (!accountId || mode.workspaceId !== selectedWorkspaceId)
+              throw new Error('Unknown workspace content mode');
+            retainWorkspaceModeProof(localStorage, accountId, target.slug, mode);
+            if ('contentMode' in mode && mode.contentMode === 'e2ee') return mode;
+          } catch (error) {
+            throw new WorkspaceModeCheckError(error);
+          }
+        }
+        await platform.workspaces.setActive(selectedWorkspaceId);
+        return null;
+      })()
     );
     const staleTimer = setTimeout(() => {
       if (writeAttemptRef.current !== attempt) return;
@@ -897,7 +971,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       );
     }, WORKSPACE_WRITE_STALE_MS);
     void switchWrite.then(
-      () => {
+      (mode) => {
         clearTimeout(staleTimer);
         if (writeAttemptRef.current !== attempt) return;
         setSaving(false);
@@ -907,6 +981,14 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
           operation: 'workspace_switch',
           attempt,
         });
+        if (mode?.contentMode === 'e2ee') {
+          commitWorkspaceContext(null);
+          void navigate({
+            to: '/workspace/e2ee/$workspaceId',
+            params: { workspaceId: mode.workspaceId },
+          });
+          return;
+        }
         commitWorkspaceContext(target);
         onNext();
       },
@@ -915,7 +997,10 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         if (writeAttemptRef.current !== attempt) return;
         setSaving(false);
         setWritePending(false);
-        console.error('[onboarding] Failed to switch workspace:', error);
+        console.error(
+          '[onboarding] Failed to switch workspace:',
+          error instanceof WorkspaceModeCheckError ? error.cause : error
+        );
         analytics.capture('onboarding/operation_failed', {
           step: 'workspace',
           operation: 'workspace_switch',
@@ -926,17 +1011,23 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         commitWorkspaceContext(activeWorkspace);
         toast.error(
           t('onboarding.workspace.switchFailed', 'Could not switch workspace. Try again.'),
-          { description: error instanceof Error ? error.message : String(error) }
+          // Mode-check failures are internal codes; the generic copy stands alone.
+          error instanceof WorkspaceModeCheckError
+            ? undefined
+            : { description: error instanceof Error ? error.message : String(error) }
         );
       }
     );
   }, [
+    navigate,
     activeWorkspace,
     activeWorkspaceId,
     analytics,
     commitWorkspaceContext,
     onNext,
     platform.workspaces,
+    platform.e2eeWorkspaces,
+    accountId,
     selectedWorkspaceId,
     t,
     writePending,
@@ -1107,6 +1198,11 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         </ErrorBoundary>
       ) : null}
       <WorkspaceScreenView
+        onOpenEncryptedCreation={
+          encryptedCreationEnabled
+            ? () => void navigate({ to: '/workspace/create', search: { allowExisting: true } })
+            : undefined
+        }
         workspaces={workspaces}
         workspacesStatus={workspaceState.status}
         workspacesError={

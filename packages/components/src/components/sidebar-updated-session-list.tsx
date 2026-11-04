@@ -13,6 +13,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import {
   Archive,
+  Folders,
   Folder,
   GitBranch,
   GitPullRequest,
@@ -29,6 +30,8 @@ import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { SIDEBAR_ROW_LINE_CLASS, sidebarSurface } from './sidebar-surface';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import { Tooltip } from '@lody/ui/tooltip';
 import { ContextMenu } from '@lody/ui/context-menu';
@@ -50,11 +53,15 @@ import {
   SidebarSessionTitleText,
   SessionRowOpenedByMenuItems,
   buildSessionRowOpenedByTreeSlot,
+  SidebarBranchSegment,
   type SidebarRowKind,
   type SessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
+  SIDEBAR_ROW_TEXT_CLASS,
+  SIDEBAR_CAPTION_TEXT_CLASS,
 } from '@/components/sidebar-row-shared';
 import { sessionSendStatesAtom } from '@/atoms/session-send-status';
+import { sidebarShowBranchNamesAtom } from '@/atoms/sidebar-state';
 import {
   sidebarCollapsedOpenedBySessionsAtom,
   toggleSidebarCollapsedOpenedBySessionAtom,
@@ -71,6 +78,7 @@ import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type {
   LocalProjectHistoryProvider,
   PrStatus,
+  SessionHistoryBackendKind,
   SessionId,
   SessionPullRequestCiState,
   SessionPullRequestReadiness,
@@ -100,8 +108,8 @@ export type SidebarUpdatedItem = {
    * Sidebar row this one nests under — the opener's ROOT Session when the opener
    * is a child Tab, otherwise the opener itself. It is also the root route for
    * precise child-Tab navigation; it never replaces `openedBySessionId`.
-   * Nesting is still resolved WITHIN one rendered section, so a pinned opener
-   * and an unpinned opened Session (different sections) both stay top-level.
+   * Nesting is resolved within one rendered section; desktop section placement
+   * keeps pinned openers together with their visible opened Sessions.
    */
   openedByRowSessionId?: string | null;
   /**
@@ -126,6 +134,7 @@ export type SidebarUpdatedItem = {
   branchName?: string | null;
   /** Name of the machine the session runs on, shown in the hover info card. */
   machineName?: string | null;
+  historyBackend?: SessionHistoryBackendKind;
   latestMessageAt: Date | number | string;
   isPinned?: boolean;
   isWorking?: boolean;
@@ -143,6 +152,11 @@ export type SidebarUpdatedItem = {
   isWorktree?: boolean;
   externalHistoryProvider?: LocalProjectHistoryProvider | null;
   sharing?: SessionSharingState;
+  /**
+   * Set for a Project group conversation: `subtitle` is the group's name and
+   * the project line shows the group mark instead of a folder.
+   */
+  projectGroup?: boolean;
 };
 
 /**
@@ -380,6 +394,13 @@ export type SidebarUpdatedSessionListProps = {
    * those rows still live next to their project groups.
    */
   showProjectContext?: boolean;
+  /**
+   * When true, rows that carry a branch show it after the project segment on
+   * the same second line. Read from the shared
+   * `sidebarShowBranchNamesAtom`; the Workspace rows use the same preference
+   * for their branch/time line.
+   */
+  showBranchContext?: boolean;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -415,6 +436,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   showProjectContext = false,
 }: SidebarUpdatedSessionListProps) {
   const { t } = useTranslation();
+  const showBranchContext = useAtomValue(sidebarShowBranchNamesAtom);
   const merged: SidebarUpdatedSessionListLabels = useMemo(
     () => ({
       heading: labels?.heading ?? t('sidebar.updated.heading', defaultLabels.heading),
@@ -599,7 +621,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                     );
                     const prevNode = visibleNodes[nodeIndex - 1];
                     const treeSlot: SessionRowOpenedByTreeSlot | undefined =
-                      openedByTree?.kind === 'child' && showProjectContext
+                      openedByTree?.kind === 'child' && (showProjectContext || showBranchContext)
                         ? {
                             ...openedByTree,
                             isFirstChild: prevNode?.depth === 0,
@@ -619,6 +641,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           isMobile={isMobile}
                           showPinnedIcon={showPinnedIcon}
                           showProjectContext={showProjectContext}
+                          showBranchContext={showBranchContext}
                           href={getItemHref?.(node.item.id)}
                           onSelect={onSelectItem}
                           onArchive={onArchiveItem}
@@ -684,7 +707,9 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   if (!label) return null;
   const repoFullName = item.repoFullName ?? (item.kind === 'github' ? label : null);
   const isGithub = item.kind === 'github';
-  const mark = isGithub ? (
+  const mark = item.projectGroup ? (
+    <Folders className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+  ) : isGithub ? (
     <UpdatedGitHubOwnerMark repoFullName={repoFullName} />
   ) : item.kind === 'local' ? (
     <Folder className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
@@ -694,7 +719,11 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   return (
     <div
       data-sidebar-updated-project={item.kind}
-      className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-sidebar-foreground-muted"
+      className={cn(
+        'flex min-w-0 items-center gap-1',
+        SIDEBAR_CAPTION_TEXT_CLASS,
+        stylex.props(sidebarSurface.meta).className
+      )}
     >
       <span
         className={cn(
@@ -716,6 +745,7 @@ type UpdatedItemRowProps = {
   isMobile: boolean;
   showPinnedIcon: boolean;
   showProjectContext?: boolean;
+  showBranchContext?: boolean;
   href?: string;
   onSelect?: (id: string, tabSessionId?: string) => void;
   onArchive?: (id: string) => void;
@@ -740,6 +770,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   isMobile,
   showPinnedIcon,
   showProjectContext = false,
+  showBranchContext = false,
   href,
   onSelect,
   onArchive,
@@ -834,7 +865,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   // other actions in both organize modes — keeping it consistent rather than
   // inventing a new mobile entry point here.
   // Reverse leg of the opened-by relationship. Available even when the row is
-  // NOT nested (opener pinned into the other section, archived, or filtered
+  // NOT nested (opener archived or filtered
   // out), which is exactly when the tree cannot show the link.
   const openerSessionId = normalizeSessionRowId(item.openedBySessionId);
   const openerRootSessionId = normalizeSessionRowId(item.openedByRowSessionId) ?? openerSessionId;
@@ -865,15 +896,19 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 
   const isNestedChild = openedByTree?.kind === 'child';
   const showProjectLine = showProjectContext && !isNestedChild;
+  // The branch rides on the same second line as the project segment; nested
+  // children skip it like the project context does.
+  const showBranchLine = showBranchContext && Boolean(branchName) && !isNestedChild;
+  const showMetaLine = showProjectLine || showBranchLine;
   const projectLabel = showProjectLine ? resolveUpdatedItemProjectLabel(item) : null;
   const titleNode = (
     <SidebarSessionTitleText
       sessionId={item.id}
       selected={showSelectedState}
-      className={cn(
-        'min-w-0 flex-1 truncate font-normal',
-        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
-      )}
+      className={
+        stylex.props(sidebarSurface.title, showSelectedState && sidebarSurface.titleSelected)
+          .className
+      }
     >
       {item.title}
     </SidebarSessionTitleText>
@@ -904,18 +939,19 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's
         // group-hover and reveal every row's archive button at once.
-        'group/row relative flex w-full items-start rounded-md px-2 text-left',
-        showProjectLine ? 'py-1.5' : 'py-1',
-        'border border-transparent bg-transparent',
-        !showSelectedState &&
-          onSelect &&
-          !isMobile &&
-          // Hover marks the row with its fill only; the title keeps its color.
-          'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
-        showSelectedState &&
-          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+        'group/row relative flex w-full items-start text-left',
+        // Hover marks the row with its fill only; the title keeps its color.
         // Unselected titles sit below the reading column's brightness.
-        !showSelectedState && 'text-sidebar-row-foreground',
+        stylex.props(
+          sidebarSurface.row,
+          showMetaLine ? sidebarSurface.tall : sidebarSurface.snug,
+          showSelectedState
+            ? sidebarSurface.selected
+            : onSelect && !isMobile && sidebarSurface.hover
+        ).className,
+        'border border-transparent',
+        // StyleX has no attribute selector: an open row menu keeps the hover fill here.
+        !showSelectedState && onSelect && !isMobile && 'data-[menu-open]:bg-sidebar-hover',
         // Keyboard-only focus ring — see SessionList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.
@@ -956,9 +992,13 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       ) : null}
 
       <div
-        className={cn('flex w-full min-w-0 items-start text-sm', isMobile ? 'gap-1.5' : 'gap-2')}
+        className={cn(
+          'flex w-full min-w-0 items-start',
+          SIDEBAR_ROW_TEXT_CLASS,
+          isMobile ? 'gap-1.5' : 'gap-2'
+        )}
       >
-        <div className="flex h-5 shrink-0 items-center">
+        <div className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
           <SessionRowLeadingSlot
             showMenuButton={hasMenuActions}
             menuLabel={contextMenuLabels.moreActions}
@@ -969,21 +1009,25 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           />
         </div>
         {item.owner ? (
-          <span className="flex h-5 shrink-0 items-center">
+          <span className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
             <SessionRowAuthorAvatar author={item.owner} />
           </span>
         ) : null}
         {showPinnedIcon && item.isPinned ? (
-          <span className="flex h-5 shrink-0 items-center">
+          <span className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
             <Pin
               aria-hidden="true"
               className="relative -top-px h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
             />
           </span>
         ) : null}
-        <div className={cn('min-w-0 flex-1', showProjectLine && 'flex flex-col gap-1')}>
+        <div className={cn('min-w-0 flex-1', showMetaLine && 'flex flex-col gap-1')}>
           <div
-            className={cn('flex h-5 min-w-0 items-center truncate text-sm')}
+            className={cn(
+              'flex min-w-0 items-center truncate',
+              SIDEBAR_ROW_LINE_CLASS,
+              SIDEBAR_ROW_TEXT_CLASS
+            )}
             // Double-click to rename is scoped to the title only, so double-clicking
             // elsewhere on the row (e.g. the two-step Archive confirm button) cannot
             // accidentally trigger a rename.
@@ -996,10 +1040,15 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           >
             {titleNode}
           </div>
-          {showProjectLine ? <UpdatedItemProjectLine item={item} /> : null}
+          {showMetaLine ? (
+            <div data-sidebar-session-meta="" className="flex min-w-0 items-center gap-1.5">
+              {showProjectLine ? <UpdatedItemProjectLine item={item} /> : null}
+              {showBranchLine ? <SidebarBranchSegment branchName={branchName} /> : null}
+            </div>
+          ) : null}
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
-        <div className="flex h-5 shrink-0 items-center">
+        <div className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
           <SidebarRowEndSlot
             sessionId={item.id}
             isWaitingPermission={item.isWaitingPermission}
@@ -1013,7 +1062,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
               (item.kind === 'local' && item.isWorktree) ? (
                 <span
                   className={cn(
-                    'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',
+                    'flex select-none items-center gap-1.5 tabular-nums',
+                    SIDEBAR_CAPTION_TEXT_CLASS,
+                    stylex.props(sidebarSurface.faint).className,
                     useAnchor && 'z-20'
                   )}
                 >
@@ -1231,6 +1282,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       // so a local session in the Updated list isn't left with only title + time.
       folderName={item.kind === 'local' ? (item.subtitle ?? undefined) : undefined}
       machineName={item.machineName}
+      historyBackend={item.historyBackend}
       branchName={branchName}
       prStatus={showPr ? prStatus : undefined}
       prCiState={item.prCiState}

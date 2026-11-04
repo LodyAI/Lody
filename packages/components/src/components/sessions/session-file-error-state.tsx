@@ -1,3 +1,7 @@
+import {
+  protectedFileWriteDeniedMessage,
+  workspaceFeatureUnavailableMessage,
+} from '@/lib/workspace-feature';
 import type { CodeCollabContentUnavailableReason } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
 import { Copy, ExternalLink, FolderOpen, Loader2, Share2 } from 'lucide-react';
@@ -262,6 +266,20 @@ export function getSessionFileErrorPresentation(
     };
   }
 
+  // Protected-workspace refusals (Guest role, host without signed file RPC) arrive
+  // as `permission_denied`; "Access denied" would wrongly blame filesystem rights.
+  const trimmed = message.trim();
+  if (
+    trimmed === protectedFileWriteDeniedMessage() ||
+    trimmed === workspaceFeatureUnavailableMessage('rpc')
+  ) {
+    return {
+      kind: 'content-unavailable',
+      title: t('sessions.fileError.protected.title', 'Not available in this encrypted workspace'),
+      description: trimmed,
+    };
+  }
+
   if (reason) {
     return providerReasonPresentation(reason, t);
   }
@@ -346,7 +364,9 @@ export function SessionFileErrorState({
   message,
   reason,
   fileActions,
+  onRetry,
 }: {
+  readonly onRetry?: () => void;
   readonly message: string;
   readonly reason?: CodeCollabContentUnavailableReason;
   readonly fileActions?: SessionFileErrorActions;
@@ -354,14 +374,18 @@ export function SessionFileErrorState({
   const { t } = useTranslation();
   const presentation = getSessionFileErrorPresentation(message, reason, t);
   const actions = fileActions && offersFileActions(presentation.kind) ? fileActions : undefined;
-  return <SessionFileNoticeCard presentation={presentation} fileActions={actions} />;
+  return (
+    <SessionFileNoticeCard presentation={presentation} fileActions={actions} onRetry={onRetry} />
+  );
 }
 
 /** Shared presentation for files that cannot be displayed inline. */
 export function SessionFileNoticeCard({
   presentation,
   fileActions: actions,
+  onRetry,
 }: {
+  readonly onRetry?: () => void;
   readonly presentation: Pick<
     SessionFileErrorPresentation,
     'title' | 'description' | 'technicalDetails'
@@ -378,6 +402,13 @@ export function SessionFileNoticeCard({
       <section data-testid="session-file-error-state" {...stylex.props(styles.card)}>
         <h2 {...stylex.props(styles.title)}>{presentation.title}</h2>
         <p {...stylex.props(styles.description)}>{presentation.description}</p>
+        {onRetry ? (
+          <div {...stylex.props(styles.actions)}>
+            <Button size="small" variant="secondary" onClick={onRetry}>
+              {t('common.retry', 'Retry')}
+            </Button>
+          </div>
+        ) : null}
         {actions ? (
           <div {...stylex.props(styles.actions)}>
             {actions.onShare ? (

@@ -31,6 +31,7 @@ export type FileWorkspaceProviderEntry = {
 
 export type FileWorkspaceTextSnapshot = {
   readonly kind: 'text';
+  readonly truncated?: boolean;
   readonly text: string;
   readonly eol?: 'lf' | 'crlf' | 'mixed' | 'unknown';
 };
@@ -88,6 +89,7 @@ export interface FileWorkspaceProvider {
   searchFiles(query: string): Promise<readonly FileWorkspaceProviderEntry[]>;
   getFile(pathOrFileId: string): Promise<FileWorkspaceProviderEntry | null>;
   openFile(pathOrFileId: string): Promise<FileWorkspaceOpenResult>;
+  downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   saveText(pathOrFileId: string, text: string): Promise<FileWorkspaceOpenResult>;
   updateLiveText?(pathOrFileId: string, text: string): Promise<void>;
   subscribeText?(pathOrFileId: string, callback: (text: string) => void): () => void;

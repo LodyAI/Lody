@@ -33,84 +33,59 @@ const createDocument = () => {
 };
 
 describe('SessionDocument ACP runtime config', () => {
-  it('merges same-turn patches and makes replay idempotent', () => {
+  it('keeps commands within one runtime across turns, clears them, and replaces the runtime', async () => {
     const doc = createDocument();
-
-    expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
-        acpSessionId: 'acp-1' as never,
-        configOptionValues: { collaboration_mode: 'default' },
-      })
-    ).toBe(true);
-    expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
-        acpSessionId: 'acp-1' as never,
-        modelId: 'gpt-5.6-sol',
-      })
-    ).toBe(true);
-    expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
-        acpSessionId: 'acp-1' as never,
-        modelId: 'gpt-5.6-sol',
-      })
-    ).toBe(false);
-
-    expect(doc.mirror?.getState().acpRuntimeConfig).toEqual({
-      acpSessionId: 'acp-1',
-      basedOnUserTurnId: 'turn-1',
-      revision: 2,
-      modelId: 'gpt-5.6-sol',
-      configOptionValues: { collaboration_mode: 'default' },
+    await doc.applyAcpRuntimeConfigPatch('turn-1', {
+      acpSessionId: 'acp-1' as never,
+      availableCommands: [{ name: 'review-a', description: 'Review A' }],
     });
-  });
-
-  it('rejects missing and stale turns, then starts a clean snapshot for the latest turn', async () => {
-    const doc = createDocument();
     expect(
-      doc.applyAcpRuntimeConfigPatch('missing', {
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-1' as never,
-        modeId: 'plan',
+        availableCommands: [{ name: 'review-a', description: 'Review A' }],
       })
     ).toBe(false);
-    expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
-        acpSessionId: 'acp-1' as never,
-        modeId: 'plan',
-        configOptionValues: { collaboration_mode: 'plan' },
-      })
-    ).toBe(true);
-
-    await updateTestHistory(doc, (history) => [
-      ...history,
-      historyEntry('assistant-1', 'assistant'),
-      historyEntry('turn-2', 'user'),
+    await updateTestHistory(doc, (history) => [...history, historyEntry('turn-2', 'user')]);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', {
+      acpSessionId: 'acp-1' as never,
+      modelId: 'model-b',
+    });
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([
+      { name: 'review-a', description: 'Review A' },
     ]);
-
     expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-1' as never,
-        modeId: 'default',
+        availableCommands: [{ name: 'stale' }],
       })
     ).toBe(false);
-    expect(
-      doc.applyAcpRuntimeConfigPatch('turn-2', {
-        acpSessionId: 'acp-2' as never,
-        modeId: 'default',
-      })
-    ).toBe(true);
-    expect(doc.mirror?.getState().acpRuntimeConfig).toEqual({
-      acpSessionId: 'acp-2',
-      basedOnUserTurnId: 'turn-2',
-      revision: 2,
-      modeId: 'default',
+    await doc.applyAcpRuntimeConfigPatch('turn-2', {
+      acpSessionId: 'acp-1' as never,
+      availableCommands: [],
     });
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([]);
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-2', {
+        acpSessionId: 'acp-1' as never,
+        availableCommands: [],
+      })
+    ).toBe(false);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', {
+      acpSessionId: 'acp-2' as never,
+      availableCommands: [{ name: 'review-b' }],
+    });
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([
+      { name: 'review-b' },
+    ]);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', { acpSessionId: 'acp-3' as never });
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toBeUndefined();
   });
 
-  it('never persists sensitive option ids even when a caller passes them directly', () => {
+  it('never persists sensitive option ids even when a caller passes them directly', async () => {
     const doc = createDocument();
 
     expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-sensitive' as never,
         configOptionValues: {
           api_token: 'secret-value',

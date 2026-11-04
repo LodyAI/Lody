@@ -1,4 +1,8 @@
 import { assertProductWindowSender } from '../assert-sender'
+import { parseSessionLink, INSTALLATION_LINK_SCHEMES } from '@lody/shared/session-link'
+import { desktopInstallationProfile, mainPlatformKind } from '../../platform'
+import { getDesktopCallbackProtocol } from '../../desktop-channel'
+import { isDefaultLodyProtocolClient, setDefaultLodyProtocolClient } from '../../protocol-client'
 import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
@@ -30,6 +34,11 @@ import { setMenuLanguage } from '../../menu'
 import { localFileActionError } from '../../services/local-file-action-error'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
 import { takePendingRendererLocalClear } from '../../services/local-reset-service'
+import {
+  clearDesktopLocalResetRequest,
+  writeDesktopLocalResetRequest
+} from '@lody/shared/node/desktop-local-reset'
+import { quitAndRelaunch, type RelaunchQuitOutcome } from '../../relaunch-intent'
 import { parseWindowBadge } from '../../services/window-badge-service'
 import {
   findWindow,
@@ -112,6 +121,44 @@ export class AppIpc extends IpcService {
   static override readonly groupName = 'app'
 
   @IpcMethod()
+  async getDefaultLinkHandler() {
+    assertProductWindowSender(getIpcContext().event)
+    return { isDefault: isDefaultLodyProtocolClient() }
+  }
+
+  @IpcMethod()
+  async setDefaultLinkHandler() {
+    assertProductWindowSender(getIpcContext().event)
+    const requested = setDefaultLodyProtocolClient()
+    return { requested, isDefault: isDefaultLodyProtocolClient() }
+  }
+
+  @IpcMethod()
+  async getLinkInstallations() {
+    assertProductWindowSender(getIpcContext().event)
+    return INSTALLATION_LINK_SCHEMES.flatMap((scheme) => {
+      if (scheme === getDesktopCallbackProtocol(desktopInstallationProfile)) return []
+      const name = app.getApplicationNameForProtocol(`${scheme}://session/probe`)
+      return name ? [{ scheme, name }] : []
+    })
+  }
+
+  @IpcMethod()
+  async openSessionInInstallation(raw: string, scheme: string) {
+    assertProductWindowSender(getIpcContext().event)
+    if (
+      !INSTALLATION_LINK_SCHEMES.includes(scheme) ||
+      typeof raw !== 'string' ||
+      !parseSessionLink(raw)?.workspaceId
+    ) {
+      throw new Error('Invalid installation link')
+    }
+    const target = new URL(raw)
+    target.protocol = `${scheme}:`
+    await shell.openExternal(target.href)
+  }
+
+  @IpcMethod()
   async getAppIconState() {
     assertProductWindowSender(getIpcContext().event)
     return getIpcServiceDeps().appIconService.getState()
@@ -157,6 +204,31 @@ export class AppIpc extends IpcService {
     for (const window of productWindows) {
       if (window.webContents !== event.sender) window.destroy()
     }
+  }
+
+  /**
+   * Arms the same one-shot reset `lody app reset-cache` writes, then quits and
+   * relaunches, so the reset runs in a fresh process before any window loads (a
+   * renderer reload keeps a storage backend that already failed). Quit goes
+   * through the normal barrier: renderers may answer Stay, and the embedded CLI
+   * must confirm exit. When the app stays running, the request is withdrawn so it
+   * cannot fire at some later launch, and `cancelled` lets the caller recover.
+   */
+  @IpcMethod()
+  async relaunchIntoLocalReset(mode: unknown): Promise<RelaunchQuitOutcome> {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (mode !== 'cache' && mode !== 'hard') throw new Error('Invalid local reset mode')
+    await writeDesktopLocalResetRequest({ mode, platform: mainPlatformKind })
+    const outcome = await quitAndRelaunch()
+    if (outcome === 'cancelled') {
+      await clearDesktopLocalResetRequest({ platform: mainPlatformKind }).catch(
+        (error: unknown) => {
+          console.error('[Electron] Could not withdraw a cancelled local reset', error)
+        }
+      )
+    }
+    return outcome
   }
 
   /**
@@ -265,6 +337,31 @@ export class AppIpc extends IpcService {
       return {
         ok: false as const,
         error: 'completion_failed' as const,
+        message: formatUnknownError(error)
+      }
+    }
+  }
+
+  @IpcMethod()
+  async restartOnboarding() {
+    const { event } = getIpcContext()
+    const { getMainWindow, restartOnboarding } = getIpcServiceDeps()
+    const mainWindow = getMainWindow()
+    if (
+      !mainWindow ||
+      mainWindow.isDestroyed() ||
+      event.sender !== mainWindow.webContents ||
+      event.senderFrame !== event.sender.mainFrame
+    ) {
+      return { ok: false as const, error: 'untrusted_sender' as const }
+    }
+    try {
+      restartOnboarding(mainWindow)
+      return { ok: true as const }
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: 'restart_failed' as const,
         message: formatUnknownError(error)
       }
     }
@@ -401,6 +498,12 @@ export class AppIpc extends IpcService {
 
   @IpcMethod()
   async openExternalUrl(urlRaw: string) {
+    if (typeof urlRaw === 'string' && parseSessionLink(urlRaw)) {
+      const { event } = getIpcContext()
+      assertProductWindowSender(event)
+      event.sender.send('app.deepLink', urlRaw)
+      return { opened: true, url: urlRaw }
+    }
     const externalUrl = normalizeExternalHttpUrl(urlRaw)
     if (!externalUrl) {
       return { opened: false, error: 'invalid_url' }

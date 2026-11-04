@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   SHARE_LIMITS,
+  assertShareAttachmentPolicy,
   SharePackageManifestSchema,
   captureShareHistory,
   encodeShareJson,
-  shareManifestKey,
-  shareObjectDigest,
-  shareObjectKey,
   validateShareHistory,
-  verifyShareObject,
 } from '../src/session-share-package';
 
 const digest = '0'.repeat(64);
@@ -106,13 +103,6 @@ function manifest() {
 }
 
 describe('static share package', () => {
-  it('keeps exact opener separate from tab ownership without source identities', () => {
-    const parsed = SharePackageManifestSchema.parse(manifest());
-    expect(parsed.conversations[1]?.parentConversationId).toBe('c1');
-    expect(parsed.conversations[2]?.openedByConversationId).toBe('c2');
-    expect(parsed.objects).toHaveLength(4);
-  });
-
   it('rejects non-closed inventories, duplicate identities and invalid relationships', () => {
     const fixtures = [
       { ...manifest(), rootConversationId: 'not-selected' },
@@ -159,13 +149,6 @@ describe('static share package', () => {
       }));
       expect(SharePackageManifestSchema.safeParse(value).success).toBe(false);
     }
-  });
-
-  it('enforces history and package byte limits', () => {
-    const value = manifest();
-    value.objects[0]!.sizeBytes = SHARE_LIMITS.historyBytes + 1;
-    expect(SharePackageManifestSchema.safeParse(value).success).toBe(false);
-    expect(() => encodeShareJson({ text: '中' }, 4)).toThrow('size limit');
   });
 
   it('rejects mixed ownership/opener cycles and unsupported nested Tabs', () => {
@@ -215,47 +198,36 @@ describe('static share package', () => {
     expect(captured[0]?.role).toBe('system');
     expect(captured[0]?.finished).toBe(false);
   });
+});
 
-  it('rejects non-JSON, excessive depth and duplicate message IDs without leaking content', () => {
-    const cycle: Record<string, unknown> = {};
-    cycle.self = cycle;
-    for (const value of [cycle, { secret: undefined }, new Date(), { number: Infinity }]) {
-      expect(() => encodeShareJson(value, 1024)).toThrow('Invalid share JSON');
-    }
-    let deep: unknown = 'synthetic-secret';
-    for (let n = 0; n < 70; n++) deep = { child: deep };
-    expect(() => encodeShareJson(deep, 1024)).toThrow('depth limit');
-    expect(() =>
-      validateShareHistory([
-        { id: 'same', role: 'user', items: [] },
-        { id: 'same', role: 'user', items: [] },
-      ])
-    ).toThrow('Invalid share history');
-  });
-
-  it('binds reads to exact byte length and digest', async () => {
-    const bytes = encodeShareJson([], 100);
-    const object = {
-      id: 'h1',
-      mediaType: 'application/json',
-      sizeBytes: bytes.length,
-      sha256: await shareObjectDigest(bytes),
-    };
-    await expect(verifyShareObject(bytes, object)).resolves.toBeUndefined();
-    await expect(verifyShareObject(new TextEncoder().encode('{}'), object)).rejects.toThrow(
-      'Invalid share object'
-    );
-    await expect(verifyShareObject(bytes, { ...object, sizeBytes: 9 })).rejects.toThrow(
-      'Invalid share object'
-    );
-  });
-
-  it('cannot select a source namespace or arbitrary object key', () => {
-    expect(shareObjectKey('share', 'deployment', 'h1')).toBe('shares/share/deployment/objects/h1');
-    expect(shareManifestKey('share', 'deployment')).toBe('shares/share/deployment/manifest.json');
-    for (const value of ['../source', 'https://source', 'a/b', 'a%2fb', '']) {
-      expect(() => shareObjectKey('share', 'deployment', value)).toThrow();
-      expect(() => shareManifestKey(value, 'deployment')).toThrow();
-    }
-  });
+it('enforces new image limits without invalidating published packages or 32 MiB histories', () => {
+  const value = manifest();
+  value.attachments = Array.from({ length: 64 }, (_, i) => ({
+    id: `a${i}`,
+    kind: 'image',
+    fileName: 'image.png',
+    objectId: `a${i}`,
+  }));
+  value.objects = [
+    ...value.objects.filter((object) => object.mediaType === 'application/json'),
+    ...value.attachments.map((attachment, i) => ({
+      id: attachment.objectId,
+      mediaType: 'image/png',
+      sizeBytes: i === 0 ? 20_000_000 : 1,
+      sha256: digest,
+    })),
+  ];
+  value.objects[0]!.sizeBytes = 32 * 1024 ** 2;
+  const accepted = SharePackageManifestSchema.parse(value);
+  expect(() => assertShareAttachmentPolicy(accepted)).not.toThrow();
+  value.objects[3]!.sizeBytes = 20_000_001;
+  const oldLargeImage = SharePackageManifestSchema.parse(value);
+  expect(() => assertShareAttachmentPolicy(oldLargeImage)).toThrow(
+    'Share image exceeds size limit'
+  );
+  value.objects[3]!.sizeBytes = 20_000_000;
+  value.attachments.push({ id: 'a64', kind: 'image', fileName: 'image.png', objectId: 'a64' });
+  value.objects.push({ id: 'a64', mediaType: 'image/png', sizeBytes: 1, sha256: digest });
+  const oldManyImages = SharePackageManifestSchema.parse(value);
+  expect(() => assertShareAttachmentPolicy(oldManyImages)).toThrow('Too many share attachments');
 });

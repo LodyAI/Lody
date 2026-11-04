@@ -15,7 +15,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtin Grok must default `clientCapabilities.terminal` to false.
 - ACP file reads map native `ENOENT` to `RequestError.resourceNotFound`; preserve
   other failures and session validation rather than returning empty content.
-- Send the driving turn's config on every session establishment as `_meta.lody.sessionConfig`;
+- Send the driving turn's model/config on session establishment as `_meta.lody.sessionConfig`;
   provider-specific startup translation belongs in the ACP adapter. `session/set_config_option`
   stays the live-session switch, and a successful selection becomes a later replacement's
   startup state.
@@ -29,13 +29,15 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   daemon process.
 - MCP HTTP: loopback bind plus bearer token; on Linux prove the peer socket's uid via
   `/proc/net/tcp{,6}`, REJECT an unprovable peer, and refuse to start when it is
-  unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. The stdio config is an explicit env
-  allowlist, never inheritance: keep `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, and
+  unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. Stdio uses an explicit env allowlist: keep `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, and
   `LODY_SERVER_URL` so cloud MCP orchestration uses the daemon's deployment, let local platform
   assembly clear them before agent startup, and never add CLI credentials or secrets.
 - Pass the same MCP config on initial and replacement DeepSeek Harness sessions.
-- Workspace MCP resolution stays TWO phases: call `loadExternalMcpServers` BEFORE `initialize`,
-  never between `initialize` and `newSession`.
+- Workspace MCP resolution starts before `initialize` to overlap the handshake.
+  Before the first remote baseline, complete selected rows may start locally with a
+  config warning. Missing selected rows preserve the typed cold error and may reload
+  once before provider-session establishment; still missing fails initialization.
+  Check completeness before preparing local authentication so a recheck cannot repeat it.
 - Acknowledged steer ends `applied`, `not-applied`, or `unknown`. Only adapter proof maps
   `not-applied`; transport/process ambiguity stays `unknown`. Await the request answer even
   after the turn response; Session execution never classifies provider errors.
@@ -48,24 +50,30 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtins use `setting.ts`'s `resolveACPProcessLaunchAsync()`. [Codex profiles](../../../../specs/codex-account-profiles.md)
   forbid upstream keys in shared/child env. Process records delay deletion, never
   restrict same-profile concurrency.
-- `deepseek-harness-runtime.ts` is NOT managed: no download, prefetch, override, or
-  auth integration. Preserve logical npx argv for recovery; Windows uses npm's JS
-  entry without cmd.exe. Keep npm, the forwarder, DSH and native Job children
-  windowless without changing stdio, environment or containment. npx installs the
-  closure; `dsh --profile` uses `process.execPath` with inherited `ELECTRON_RUN_AS_NODE`.
-  Credentials stay in env, never config. Model/reasoning use the Agent request
-  waterfall; permissions use Harness presets; `agent_preset` uses
-  `AgentPresets.mount/recompose`, never UI-only state.
-  Presets change only before the first prompt. Per-Agent ACP stdio/HTTP MCP
-  belongs in the adapter, not host composition. JSONL encoding detection
-  is READ-ONLY: fail mixed roots naming both paths; never modify artifacts.
-- `managed-agent-runtime.ts`: Codex/Claude/Grok/Devin pins come only from their
-  `<name>-runtime-manifest.json`; reject dependency/manifest version mismatches and never
-  duplicate pins beside the manager. Do not loosen the metadata
-  schema or accept unknown legacy fields. Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
+  Catalog scans skip unreadable profiles with one warning per file; selected-account validation stays strict.
+- `deepseek-harness-runtime.ts` is not managed: no download/prefetch/override/auth.
+  Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
+  npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.
+  DSH pins Node checked in child cwd; no Electron fallback.
+  Provider ID isolates homes; preserve user YAML/settings and legacy history:
+  [contract](../../../../specs/deepseek-harness-settings.md).
+  Credentials stay in env. Models/reasoning use the Agent request waterfall;
+  permissions use Harness presets. `agent_preset` uses `AgentPresets.mount/recompose`
+  only before the first prompt. Per-Agent ACP stdio/HTTP MCP belongs in the adapter.
+  Never modify JSONL; mixed roots fail naming both paths.
+- `managed-agent-runtime.ts`: native pins live only in `<name>-runtime-manifest.json`.
+  Reject version mismatches and unknown legacy fields; do not duplicate pins or weaken the schema.
+  Read Claude metadata from the adapter's installed SDK; the CLI dev SDK may differ.
+  Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.
   `LODY_RUNTIME_BASE_URL` is an explicit mirror override only.
+- Invalid caches remain unlaunchable; status reports absence with a warning. Repairs publish
+  verified generations without moving existing paths. Status, install and launch share selection:
+  filter base and completed generations by current pins and host compatibility, then rank them.
+  Cleanup preserves unreadable originals and generation trees while reader lifetimes are unknown.
+  Downloads stop after 60 seconds idle;
+  progressing transfers have no total deadline, and later calls resume retained partial bytes.
 - Install cancellation, here and in `acp-binary-manager.ts`: concurrent installs share one
   download but keep independent consumer leases; cancelling one caller must not stop others, and
   only the last aborts fetch, checksum, and extraction. An immediate retry waits for an aborted
@@ -73,9 +81,11 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   to the shared abort signal; ZIP cancellation destroys the yauzl endpoint, awaits the
   relay/output pipeline, and fences cleanup on the reader's real close/error event — never await
   the yauzl endpoint, whose `destroy()` does not settle.
+- Builtin Dimcode is user-installed.
 - `npx-cache.ts`: ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE` to the active
   profile's `npm-cache`. Automatic `_npx`/`_cacache` cleanup is allowed ONLY for that Lody-owned
-  cache.
+  cache. Cold initialize timeout never authorizes clearing `_cacache`; whole-cache
+  recovery requires a corruption signature. [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 
 ## `acp-authentication.ts`
 
@@ -86,29 +96,38 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Claude capability refresh runs its native status command first so missing credentials surface
   as structured auth-required state before adapter startup; explicit environment-authenticated
   paths bypass it.
-- Registry/custom/Devin initialization advertises no terminal capability; only agent-driven methods
-  are runnable (`env_var` rejected as deprecated, `terminal` unsupported until Machine RPC has a
-  real interactive-terminal bridge). Method lists and elicitations stay on the original
-  long-running request with one pending interaction at a time; replies carry an interaction id
-  and use the encrypted authentication-input path on remote Machines. Bound URL schemes, sizes,
+- Registry/custom/Devin advertises no terminal capability; only agent-driven methods run.
+  Reject deprecated `env_var`; `terminal` needs a real Machine RPC interactive bridge.
+  Keep method lists/elicitations on the original request, one pending interaction at a time.
+  Replies carry interaction ids and use encrypted remote authentication-input. Bound URL schemes, sizes,
   ids, labels, options, and defaults before they enter progress, under a shared serialized-byte
   budget for the form.
+- A protocol agent's `initialize` methods are the sign-in entry point; record them on the
+  Provider's capability row and let the reader pick one.
 - Machine RPC may name only a persisted Provider `configId`; the daemon freezes
   machine/CLI/agent/launch/env/runtime fields before spawning, capability refresh included, and
   later replies can never replace that launch target.
 
 ## Capabilities and titles
 
-- `getStaticBuiltinAcpCapabilities()` applies only to `cliType: 'builtin'` without runtime
-  overrides. `machine/acp-capabilities-refresh` is always a real runtime probe, cached per
-  `agentConfigId` and the launched runtime version; an aborted probe must NOT update
-  the cache, and requests/responses carry that id to keep configs of one provider isolated.
-  `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
-  writes ignore `fetchedAt` when comparing entries.
-- Core `sessionTitle` v1 transfers title generation to the live ACP process after
-  initialization; tagged `generated`/`explicit` updates qualify, never `fallback`/`unset`.
-  Legacy managed Claude/Codex/Grok retain ownership without runtime overrides;
-  only Claude/Grok trust untagged titles. Sanitize internal instructions and preserve
-  user-set titles. Contract: [session titles](../../../../specs/acp-session-titles.md).
+- Static builtin capabilities exclude runtime overrides. Cache probes by `agentConfigId`
+  and launched version; requests/responses carry that id. Only probes replace Provider
+  command previews; actual lists stay in Session control state. Aborted probes never
+  write, and updates never hot-swap ACP. Flock ignores `fetchedAt`.
+- Capability probes own unique temporary workdirs, never inherited cwd/projects. Remove
+  after shutdown even on failure/cancellation; removal errors never replace probe
+  outcomes. Keep provider homes unchanged.
+- Core `sessionTitle` v1 owns titles after init except builtin Codex.
+  Lody owns Codex titles/settings; never the adapter. Accept `generated`/`explicit`,
+  not `fallback`/`unset`. Untagged titles: only legacy managed Claude/Grok without overrides.
+  Strip internal instructions; keep user titles.
+  Isolated titles: accept absent phases; prefer final answers; discard commentary/pre-prompt
+  text; sanitize. [Rules](README.md#session-titles).
 - NEVER derive a git ref from prompt text: refs reach the remote and no filter proves a
-  prompt secret-free. Worktree sessions keep `session/<id>` unless the agent renames it.
+  prompt secret-free. Worktree sessions keep their allocated ref unless the agent renames it.
+
+## Shell
+
+LoginShellCache lives in the app root. Legacy binds it; no Promise cache/timer.
+Reader cancellation preserves siblings. Await disposal; replace only after release.
+[Decision](README.md#login-shell-cache).

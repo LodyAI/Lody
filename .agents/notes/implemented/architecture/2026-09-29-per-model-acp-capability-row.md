@@ -83,6 +83,16 @@ ids.
   (`isPerModelControlConfigId`) now pass through even when the outgoing model has no
   such control. The selection resolution then validates them against the incoming
   model, so `fast=true` survives a switch away from a model without Fast.
+- **Role editor model switch** ([#1308](https://github.com/LodyAI/Lody/issues/1308)):
+  the editor shows the agent's defaults and stores them on the first edit. Defaults
+  fill only unset fields, so switching a Claude Code Role from a model with Fast to
+  one without kept `fast`, and the composer never matched the Role. When the model
+  changes, the editor builds the incoming model's selectors and keeps each stored
+  value the incoming model still accepts. A value it no longer offers, such as `fast`
+  on a model without Fast or an effort outside the new ladder, is dropped and the
+  defaults refill it. Values with no selector stay; re-selecting the current model
+  changes nothing. Resetting every option except permission was rejected because it
+  also dropped Plan and still-valid effort.
 - **MCP**:
   - a model declared without Fast rejects `fastMode=true` and treats `false` as a
     no-op;
@@ -95,6 +105,10 @@ ids.
 - **Concurrent writes**: no write-sequence guard yet, so two concurrent probes of one
   config may land out of order. This affects display only.
 - **Old clients**: they ignore the new row family and behave as before.
+- **Undeclared Fast in the Role editor**: without a declaration Lody keeps the probed
+  selectors, so a new Role on a model that lacks Fast can still store `fast` when
+  the probe ran on a model with it. Roles that already store an unsupported value
+  are not migrated.
 
 ## Verification
 
@@ -110,4 +124,6 @@ ids.
   Fast toggle are shown, and that undeclared models are unchanged.
 - Removing each of the three mechanisms (declared effort, Fast normalization, the
   read-time merge) fails its test.
+- `agent-role-form.test.ts` covers the Role editor switch: an accepted value and a
+  value without a selector stay, an unoffered effort and `fast` are dropped.
 - Not verified: real adapters end to end.

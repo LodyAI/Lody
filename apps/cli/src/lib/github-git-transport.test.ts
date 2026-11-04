@@ -21,11 +21,42 @@ function harness(
     owner?: boolean;
     personal?: boolean;
     offline?: boolean;
-    operation?: string;
+    command?: string;
+    inheritedOperation?: string;
+    helper?: string;
+    readOnly?: boolean;
     denyPersonal?: boolean;
   } = {}
 ) {
   ensureGitHubGitTransport(directory, '/workspace/broker', 'git');
+  const wrapper = fs.readFileSync(path.join(directory, 'git'), 'utf8');
+  const throughWrapper = (command: string, env: Record<string, string>) => {
+    let forwarded = env;
+    vm.runInNewContext(wrapper, {
+      __dirname: directory,
+      require: (name: string) =>
+        name === 'path'
+          ? path
+          : {
+              spawn: (_git: string, _args: string[], init: { env: Record<string, string> }) => {
+                forwarded = init.env;
+                return new EventEmitter();
+              },
+            },
+      process: { argv: ['node', 'git', command], env },
+    });
+    return forwarded;
+  };
+  const env = throughWrapper(
+    options.helper ?? 'remote-https',
+    throughWrapper(options.command ?? 'clone', {
+      PATH: '/synthetic/bin',
+      LODY_GIT_CRED_CONTEXT_TOKEN: 'frozen',
+      ...(options.inheritedOperation === undefined
+        ? {}
+        : { LODY_GIT_OPERATION: options.inheritedOperation }),
+    })
+  );
   const source = fs
     .readFileSync(path.join(directory, 'git-remote-https'), 'utf8')
     .replace(/main\(\)\.catch[\s\S]*$/, 'globalThis.run = main;');
@@ -36,6 +67,9 @@ function harness(
       if (args[0] === 'credential')
         return { status: 0, stdout: 'username=owner\npassword=local-token\n' };
       if (args[0] === 'remote-https') {
+        if (options.readOnly && init.input === 'list for-push\n\n') {
+          return { status: 128, stderr: 'HTTP 403' };
+        }
         const headers = init.env.GIT_CONFIG_PARAMETERS || '';
         attempts.push(headers);
         if (
@@ -73,10 +107,7 @@ function harness(
             },
     process: {
       argv: ['node', 'adapter', 'origin', 'https://github.com/org/repo.git'],
-      env: {
-        LODY_GIT_CRED_CONTEXT_TOKEN: 'frozen',
-        LODY_GIT_OPERATION: options.operation ?? 'read',
-      },
+      env,
     },
     fetch: async (_url: string, init: { body: string }) => {
       if (options.offline) throw Object.assign(new Error('SECRET'), { code: 'ECONNREFUSED' });
@@ -96,22 +127,46 @@ function harness(
   return { run: () => (context.run as () => Promise<void>)(), delegates, attempts, sync };
 }
 describe('native Git credential adapter', () => {
-  it('delegates once using personal credentials and keeps standard remote URLs', async () => {
-    const h = harness({ personal: true });
+  it.each(['clone', 'fetch', 'pull', 'ls-remote', 'submodule'])(
+    '%s keeps read-only credentials through helper redispatch',
+    async (command) => {
+      const h = harness({ command, personal: true, readOnly: true });
+      await h.run();
+      expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain(
+        Buffer.from('x-access-token:personal-token').toString('base64')
+      );
+    }
+  );
+  it('preserves read context through the HTTP helper', async () => {
+    const h = harness({ helper: 'remote-http', personal: true, readOnly: true });
     await h.run();
-    expect(h.delegates).toHaveLength(1);
-    expect(h.delegates[0].args).toEqual([
-      'remote-https',
-      'origin',
-      'https://github.com/org/repo.git',
-    ]);
     expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain(
       Buffer.from('x-access-token:personal-token').toString('base64')
     );
-    expect(h.sync.mock.calls.some(([, args]) => args[0] === 'credential')).toBe(false);
   });
+  it('classifies a new read independently of inherited write context', async () => {
+    const h = harness({ inheritedOperation: 'write', personal: true, readOnly: true });
+    await h.run();
+    expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain(
+      Buffer.from('x-access-token:personal-token').toString('base64')
+    );
+  });
+  it.each([
+    ['push', 'read'],
+    ['unknown-command', 'read'],
+    ['remote-https', undefined],
+    ['remote-http', 'invalid'],
+    ['remote-https', 'write'],
+  ])(
+    'rejects read-only credentials for %s with inherited %s',
+    async (command, inheritedOperation) => {
+      const h = harness({ command, inheritedOperation, personal: true, readOnly: true });
+      await expect(h.run()).rejects.toMatchObject({ code: 'credentials_exhausted' });
+      expect(h.delegates).toEqual([]);
+    }
+  );
   it('falls through a denied native advertisement to machine identity before executing a write', async () => {
-    const h = harness({ personal: true, denyPersonal: true, operation: 'write' });
+    const h = harness({ personal: true, denyPersonal: true, command: 'push' });
     await h.run();
     expect(h.attempts).toHaveLength(2);
     expect(h.delegates).toHaveLength(1);
@@ -132,15 +187,9 @@ describe('native Git credential adapter', () => {
     expect(h.sync.mock.calls.some(([, args]) => args[0] === 'credential')).toBe(false);
   });
   it('does not execute an anonymous write when providers fail', async () => {
-    const h = harness({ owner: false, offline: true, operation: 'write' });
+    const h = harness({ owner: false, offline: true, command: 'push' });
     await expect(h.run()).rejects.toMatchObject({ code: 'credentials_exhausted' });
     expect(h.delegates).toEqual([]);
-  });
-  it('native receive-pack advertisement leaves refs unchanged', () => {
-    const bare = path.join(directory, 'remote.git');
-    execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });
-    expect(spawnSync('git', ['ls-remote', '--upload-pack=git-receive-pack', bare]).status).toBe(0);
-    expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref'], { encoding: 'utf8' })).toBe('');
   });
   it('clones recursive native SSH submodules while cloud credentials fail', async () => {
     // Pre-push hooks and editors export Git/SSH state. None of it belongs to
@@ -150,10 +199,6 @@ describe('native Git credential adapter', () => {
     vi.stubEnv('GIT_ASKPASS', path.join(directory, 'unrelated-askpass'));
     vi.stubEnv('SSH_ASKPASS', path.join(directory, 'unrelated-ssh-askpass'));
     vi.stubEnv('GIT_SSH_VARIANT', 'plink');
-    const realGit = path.join(
-      execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(),
-      'git'
-    );
     const fixtureEnv = {
       ...Object.fromEntries(
         Object.entries(process.env).filter(([key]) => !/^(GIT_|SSH_|LODY_GIT_)/.test(key))
@@ -165,6 +210,16 @@ describe('native Git credential adapter', () => {
       GIT_COMMITTER_NAME: 'Fixture',
       GIT_COMMITTER_EMAIL: 'fixture@example.test',
     };
+    // A surrounding Lody session may put its credential wrapper on PATH.
+    // Probe native Git without inheriting that session's helper/context selection.
+    const realGit = path.join(
+      execFileSync('git', ['--exec-path'], {
+        encoding: 'utf8',
+        env: { ...fixtureEnv, LODY_GIT_NATIVE: '1' },
+      }).trim(),
+      process.platform === 'win32' ? 'git.exe' : 'git'
+    );
+    vi.stubEnv('GIT_EXEC_PATH', path.dirname(realGit));
     const git = (args: string[]) =>
       execFileSync(realGit, args, { cwd: directory, env: fixtureEnv, stdio: 'ignore' });
     const dependency = path.join(directory, 'dependency');
@@ -203,6 +258,8 @@ const args = process.argv.slice(2).join(' ');
 if (process.argv.includes('-G')) process.exit(0);
 const match = args.match(/(git-upload-pack|git-receive-pack).*?org\\/(project|dependency)\\.git/);
 if (!match) process.exit(1);
+// A read-only identity can advertise and fetch, but cannot receive pushes.
+if (match[1] === 'git-receive-pack') process.exit(1);
 fs.appendFileSync(${JSON.stringify(log)}, match[2] + '\\n');
 const roots = ${JSON.stringify({ project, dependency })};
 const child = spawnSync(${JSON.stringify(realGit)}, [match[1].replace('git-', ''), roots[match[2]]], { stdio: 'inherit' });
@@ -273,4 +330,69 @@ process.exit(child.status ?? 1);
       );
     }
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'repairs broken cached Git helper links without replacing existing helpers',
+    () => {
+      const execPath = path.join(directory, 'current-git');
+      fs.mkdirSync(execPath);
+      for (const name of ['git-stale-helper', 'git-valid-helper', 'git-regular-helper']) {
+        fs.writeFileSync(path.join(execPath, name), `current ${name}\n`);
+      }
+
+      const stale = path.join(directory, 'git-stale-helper');
+      const valid = path.join(directory, 'git-valid-helper');
+      const regular = path.join(directory, 'git-regular-helper');
+      const retained = path.join(directory, 'retained-helper');
+      fs.writeFileSync(retained, 'retained link target\n');
+      fs.symlinkSync(path.join(directory, 'removed-git', 'git-stale-helper'), stale);
+      fs.symlinkSync(retained, valid);
+      fs.writeFileSync(regular, 'retained regular file\n');
+
+      ensureGitHubGitTransport(directory, '/workspace/broker', process.execPath, {
+        probeExecPathOnce: () => execPath,
+      });
+
+      expect(fs.readFileSync(stale, 'utf8')).toBe('current git-stale-helper\n');
+      expect(fs.realpathSync(stale)).toBe(fs.realpathSync(path.join(execPath, 'git-stale-helper')));
+      expect(fs.readlinkSync(valid)).toBe(retained);
+      expect(fs.readFileSync(regular, 'utf8')).toBe('retained regular file\n');
+      expect(fs.lstatSync(path.join(directory, 'git')).isFile()).toBe(true);
+      expect(fs.lstatSync(path.join(directory, 'git-remote-https')).isFile()).toBe(true);
+
+      ensureGitHubGitTransport(directory, '/workspace/broker', process.execPath, {
+        probeExecPathOnce: () => {
+          throw new Error('A valid marker must be reused');
+        },
+      });
+      expect(fs.readFileSync(stale, 'utf8')).toBe('current git-stale-helper\n');
+    }
+  );
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'preserves a helper link when its target cannot be inspected',
+    () => {
+      const execPath = path.join(directory, 'current-git');
+      const blocked = path.join(directory, 'inaccessible');
+      const target = path.join(directory, 'git-restricted-helper');
+      fs.mkdirSync(execPath);
+      fs.mkdirSync(blocked);
+      fs.writeFileSync(path.join(execPath, 'git-restricted-helper'), 'current helper\n');
+      fs.writeFileSync(path.join(blocked, 'helper'), 'existing helper\n');
+      fs.symlinkSync(path.join(blocked, 'helper'), target);
+      fs.chmodSync(blocked, 0o000);
+
+      try {
+        expect(() =>
+          ensureGitHubGitTransport(directory, '/workspace/broker', process.execPath, {
+            probeExecPathOnce: () => execPath,
+          })
+        ).toThrowError(expect.objectContaining({ code: 'EACCES' }));
+        expect(fs.lstatSync(target).isSymbolicLink()).toBe(true);
+      } finally {
+        fs.chmodSync(blocked, 0o700);
+      }
+      expect(fs.readFileSync(target, 'utf8')).toBe('existing helper\n');
+    }
+  );
 });

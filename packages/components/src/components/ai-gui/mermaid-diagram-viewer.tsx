@@ -12,6 +12,7 @@ import { Maximize, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
+import { WINDOW_CAPTION_CLEAR_TOP } from '@/ui/window-drag-region';
 
 /**
  * The full-screen viewer for a rendered Mermaid diagram.
@@ -24,7 +25,8 @@ import { cn } from '@/lib/utils';
  *
  * 1. Controls sit in a bar padded by the `--safe-area-*` variables (the same
  *    ones `tailwind/index.css` maps to `env(safe-area-inset-*)`), never at a
- *    fixed offset from the viewport edge.
+ *    fixed offset from the viewport edge. Its top also clears the Windows
+ *    caption-button strip, which the OS draws above every web layer.
  * 2. There is always more than one exit: the close button, a click anywhere
  *    off the diagram, and Escape.
  * 3. The stacking order comes from the app's z-index scale, so the viewer
@@ -100,7 +102,6 @@ const CONTROL_CLASS_NAME = 'h-11 w-11 shrink-0 text-muted-foreground';
  * otherwise override a `px-*` class outright and drop the gutter it replaces;
  * each value carries its own gutter instead.
  */
-const SAFE_AREA_TOP = 'var(--safe-area-top, env(safe-area-inset-top, 0px))';
 const SAFE_AREA_RIGHT = 'calc(0.25rem + var(--safe-area-right, env(safe-area-inset-right, 0px)))';
 const SAFE_AREA_BOTTOM = 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))';
 const SAFE_AREA_LEFT = 'calc(0.25rem + var(--safe-area-left, env(safe-area-inset-left, 0px)))';
@@ -645,7 +646,7 @@ function OpenMermaidDiagramViewer({
       <div
         className="flex shrink-0 items-center justify-end gap-1"
         style={{
-          paddingTop: SAFE_AREA_TOP,
+          paddingTop: WINDOW_CAPTION_CLEAR_TOP,
           paddingLeft: SAFE_AREA_LEFT,
           paddingRight: SAFE_AREA_RIGHT,
         }}
