@@ -1377,6 +1377,8 @@ async function openWorkspaceOwned(
   // A revoked credential need not reach an idle daemon through token expiry or a
   // workspace access-list change. Keep a bounded authenticated check plus a ledger
   // refresh so the exact refusal or the next verified record arrives on its own.
+  // In J08 the daemon's machine credential stays valid, so the ledger refresh is
+  // what observes the revoked desktop; a revoked machine takes the exact-code path.
   startAuthorityCheck();
   const authorizeScheduleExecution = (
     request: ScheduleAuthorizationRequest,
