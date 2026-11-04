@@ -202,6 +202,40 @@ describe('inspectNpxInstallState', () => {
     expect(state.kind).toBe('ready');
     if (state.kind === 'ready') {
       expect(state.dirs).toEqual([hashDir]);
+      expect(state.resolvedVersion).toBe(version);
+    }
+  });
+
+  it('reports the installed version of a tagged install', () => {
+    const tagged = healthyInstall(root, 'aa11', pkg, '0.50.0');
+    tagged.files[rootPackageJson] = JSON.stringify({ _npx: { packages: [`${pkg}@alpha`] } });
+
+    const state = inspectNpxInstallState(pkg, 'alpha', { io: makeIo(tagged), roots: [root] });
+
+    expect(state.kind).toBe('ready');
+    if (state.kind === 'ready') expect(state.resolvedVersion).toBe('0.50.0');
+  });
+
+  it('refuses to name a build when two ready dirs disagree', () => {
+    const first = healthyInstall(root, 'aa11', pkg, '0.50.0');
+    const second = healthyInstall(root, 'bb22', pkg, '0.52.0');
+    const taggedRoot = JSON.stringify({ _npx: { packages: [`${pkg}@alpha`] } });
+    const io = makeIo({
+      dirs: { [root]: ['aa11', 'bb22'], [join(root, 'aa11')]: [], [join(root, 'bb22')]: [] },
+      files: {
+        ...first.files,
+        ...second.files,
+        [join(root, 'aa11', 'package.json')]: taggedRoot,
+        [join(root, 'bb22', 'package.json')]: taggedRoot,
+      },
+    });
+
+    const state = inspectNpxInstallState(pkg, 'alpha', { io, roots: [root] });
+
+    expect(state.kind).toBe('ready');
+    if (state.kind === 'ready') {
+      expect(state.dirs).toEqual([join(root, 'aa11'), join(root, 'bb22')]);
+      expect(state.resolvedVersion).toBeUndefined();
     }
   });
 

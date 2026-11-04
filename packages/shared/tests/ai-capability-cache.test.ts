@@ -35,18 +35,28 @@ describe('ACP capability cache compatibility', () => {
     expect(getReadableAcpCapabilityCacheEntry(preview)).toBe(preview);
   });
 
-  it('retires only the old Sorbet method list while keeping other capabilities', () => {
-    const old = {
+  it('retires only the Sorbet builds that could not discover methods', () => {
+    const stale = {
       ...entry(ACP_CAPABILITY_CACHE_VERSION),
       agentType: 'sorbet',
       sourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.4',
       authMethods: [],
     };
-    const { authMethods: _methods, ...retained } = old;
-    expect(getReadableAcpCapabilityCacheEntry(old)).toEqual(retained);
-    const current = { ...old, sourceVersion: `${old.sourceVersion}+auth-discovery:1` };
-    expect(getReadableAcpCapabilityCacheEntry(current)).toEqual(current);
-    const other = { ...old, agentType: 'devin' };
+    const { authMethods: _methods, ...retained } = stale;
+    // Both the bare build and a suffixed source version name the same bad build.
+    expect(getReadableAcpCapabilityCacheEntry(stale)).toEqual(retained);
+    const suffixed = { ...stale, sourceVersion: `${stale.sourceVersion}+auth-discovery:1` };
+    const { authMethods: _suffixedMethods, ...suffixedRetained } = suffixed;
+    expect(getReadableAcpCapabilityCacheEntry(suffixed)).toEqual(suffixedRetained);
+    // Later builds, and entries whose build the npx cache could not name, keep the list.
+    for (const version of ['0.1.0-alpha.5', '0.1.0-alpha.6', 'alpha']) {
+      const current = {
+        ...stale,
+        sourceVersion: `builtin-sorbet:@sorbetai/acp@${version}+auth-discovery:1`,
+      };
+      expect(getReadableAcpCapabilityCacheEntry(current)).toEqual(current);
+    }
+    const other = { ...stale, agentType: 'devin' };
     expect(getReadableAcpCapabilityCacheEntry(other)).toEqual(other);
   });
 

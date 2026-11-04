@@ -465,6 +465,27 @@ export const isAcpCapabilityCacheEntryCurrent = (
 ): entry is AcpCapabilityCacheEntry => entry?.cacheVersion === ACP_CAPABILITY_CACHE_VERSION;
 
 /**
+ * Prefix of the capability source version Lody stamps for builtin Sorbet; the build
+ * segment follows it, optionally suffixed with `+<probe capability>`.
+ */
+const SORBET_SOURCE_VERSION_PREFIX = 'builtin-sorbet:@sorbetai/acp@';
+
+/** Sorbet builds that could not discover sign-in methods, so their probe wrote none. */
+const SORBET_STALE_AUTH_DISCOVERY_VERSIONS: ReadonlySet<string> = new Set(['0.1.0-alpha.4']);
+
+/**
+ * The Sorbet build an entry came from: the installed version when the npx cache could
+ * name it, otherwise the dist-tag Lody launched through. `undefined` for other agents.
+ */
+const readSorbetBuildVersion = (entry: AcpCapabilityCacheEntry): string | undefined => {
+  if (entry.cliType !== 'builtin' || entry.agentType !== 'sorbet') return undefined;
+  const sourceVersion = entry.sourceVersion;
+  if (!sourceVersion?.startsWith(SORBET_SOURCE_VERSION_PREFIX)) return undefined;
+  const [build] = sourceVersion.slice(SORBET_SOURCE_VERSION_PREFIX.length).split('+', 1);
+  return build ? build : undefined;
+};
+
+/**
  * A parsed capability entry remains readable regardless of the producer's cache version.
  * `cacheVersion` is a refresh hint, not a data-compatibility gate: mixed-version clients
  * keep using fields they understand while a newer probe converges the stored entry.
@@ -475,12 +496,11 @@ export const getReadableAcpCapabilityCacheEntry = (
   if (!entry) {
     return undefined;
   }
-  // Older Sorbet probes omitted URL elicitation and always returned an empty
-  // method list. Preserve other capabilities while forcing method discovery.
+  // Sorbet is on a floating dist-tag, so the build that wrote an entry is only knowable
+  // from the version stamped into `sourceVersion`. Drop the method list those early
+  // builds could not discover; every other entry keeps the list it reported.
   if (
-    entry.cliType === 'builtin' &&
-    entry.agentType === 'sorbet' &&
-    entry.sourceVersion === 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.4' &&
+    SORBET_STALE_AUTH_DISCOVERY_VERSIONS.has(readSorbetBuildVersion(entry) ?? '') &&
     entry.authMethods !== undefined
   ) {
     const { authMethods: _staleAuthMethods, ...compatible } = entry;

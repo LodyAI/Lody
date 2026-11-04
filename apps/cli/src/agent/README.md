@@ -44,7 +44,11 @@ context/message-flow.md "Upstream".
   `@sorbetai/acp@alpha` through the isolated npx cache. npm revalidates its tag with
   a five-second fetch timeout and no fetch retries; network errors can retry a ready
   tagged install offline. A cold offline install can still fail. The tag is not a
-  capability version: capability refresh probes again because the version is unknown.
+  capability version: capability refresh probes again because the version is unknown,
+  and the stamped source version reports the installed build when the npx cache can name
+  it, falling back to the tag when it cannot. Its state lives at `<LodyDataDir>/sorbet`:
+  the agent owns that store's format, atomicity and migration, so Lody never parses,
+  rewrites, exports or previews it.
   The `dimcode acp` builtin is user-installed. Users manage Dimcode installation and versions; Lody disables
   upstream auto-update in its child process and never downloads a fallback. Credentials
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
