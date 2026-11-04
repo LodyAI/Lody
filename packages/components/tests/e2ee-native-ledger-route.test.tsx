@@ -886,6 +886,53 @@ it('offers the routed workspace only after a successful approved host open', asy
   ]);
 });
 
+// Account-wide pairing spec: the new device advances automatically and opens the
+// workspace once the current key is installed.
+// Workspaces join independently: the request as a whole stays waiting while
+// another workspace it asked for is still pending (or was not selected).
+it('opens the workspace by itself once account pairing joins this device to it, while another requested workspace is still pending', async () => {
+  fixture.workspaces = {
+    status: 'ready',
+    activeWorkspaceId: workspaceId,
+    workspaces: [{ id: workspaceId, slug: 'protected-home', name: 'Protected', role: 'member' }],
+  };
+  fixture.port = displayPort(async () => [] as never);
+  let joined = false;
+  fixture.port.runtime = {
+    open: async () => {
+      if (!joined)
+        throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
+      return local.status;
+    },
+    status: async () => local.status,
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    recordCreated: async () => {
+      throw new PersonalHostError({ code: 'unsupported' });
+    },
+    close: async () => {},
+    accountPairingRequest: async () => {
+      joined = true;
+      return {
+        direction: 'requester-shows',
+        pairingString: '50M6-HA79-55MT',
+        expiresAt: Date.now() + 600_000,
+        status: 'waiting',
+        workspaces: [
+          { workspaceId, name: 'Protected', state: 'joined' },
+          { workspaceId: 'other-workspace', name: 'Other', state: 'pending' },
+        ],
+      };
+    },
+  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  await act(async () => {});
+  expect(fixture.navigation).toEqual([
+    { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+  ]);
+});
+
 // "Workspaces" must lead to the workspaces the account already has. The create
 // route is where a mobile account at its plan limit has no way forward, and this
 // workspace's own chat route would hand an unopened encrypted workspace straight

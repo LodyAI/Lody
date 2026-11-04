@@ -296,6 +296,20 @@ export function makeAccountPairing(input: {
   /** Workspaces whose last install attempt found an unrelated unfinished
    * per-workspace pairing on this device; recomputed on every poll. */
   const blocked = new Map<string, Set<string>>();
+  /** Each workspace this device listed for pairing, by genesis. A workspace that
+   * joined needs no pairing afterwards and leaves the requester list, while the
+   * request still names it. */
+  const listedByGenesis = new Map<string, { workspaceId: string; name: string }>();
+  const requesterWorkspaces = () =>
+    Effect.tap(input.requesterWorkspaces(), (workspaces) =>
+      Effect.sync(() => {
+        for (const workspace of workspaces)
+          listedByGenesis.set(hex(workspace.genesis), {
+            workspaceId: workspace.workspaceId,
+            name: workspace.name,
+          });
+      })
+    );
   /** One pairing operation at a time, so sign-then-journal and accept stay atomic. */
   const serial = Semaphore.makeUnsafe(1);
   /** A parsed code is wiped however the work ends, including failure and interruption. */
@@ -328,7 +342,7 @@ export function makeAccountPairing(input: {
   const joinedSet = (lookupId: string) => store.joined(lookupId);
   const stateOf = Effect.fnUntraced(function* (row: RequestRow) {
     const request = yield* fromResult(decodePairingRequest(row.request), 'corrupt');
-    const workspaces = yield* input.requesterWorkspaces();
+    const workspaces = yield* requesterWorkspaces();
     const joined = yield* sql(joinedSet(row.lookup_id));
     const settled = (yield* terminal(row.lookup_id))?.state;
     const secret = secrets.get(row.lookup_id);
@@ -349,9 +363,9 @@ export function makeAccountPairing(input: {
       expiresAt: request.expiresAt,
       status,
       workspaces: request.rows.map((item) => {
-        const workspace = workspaces.find(
-          (candidate) => hex(candidate.genesis) === hex(item.genesis)
-        );
+        const workspace =
+          workspaces.find((candidate) => hex(candidate.genesis) === hex(item.genesis)) ??
+          listedByGenesis.get(hex(item.genesis));
         const workspaceId = workspace?.workspaceId ?? hex(item.genesis);
         return {
           workspaceId,
@@ -367,7 +381,7 @@ export function makeAccountPairing(input: {
   });
   const submitExact = (row: RequestRow, request: PairingRequest) =>
     Effect.gen(function* () {
-      const workspaces = yield* input.requesterWorkspaces();
+      const workspaces = yield* requesterWorkspaces();
       yield* relay.submit({
         lookupId: row.lookup_id,
         requestHex: hex(row.request),
@@ -412,7 +426,7 @@ export function makeAccountPairing(input: {
           const lookupId = hex(keys.lookupId);
           const used = yield* sql(store.hasRequest(lookupId));
           if (used || (yield* terminal(lookupId))) return yield* Effect.fail(fail('pairing-used'));
-          const workspaces = yield* input.requesterWorkspaces();
+          const workspaces = yield* requesterWorkspaces();
           if (workspaces.length === 0) return yield* Effect.fail(fail('invalid-input'));
           const rows: PairingRequestRow[] = [];
           // Each workspace stands alone: one that cannot prepare an identity now
@@ -476,7 +490,7 @@ export function makeAccountPairing(input: {
       yield* settle(row.lookup_id, 'requester', 'declined');
       return yield* stateOf(row);
     }
-    const workspaces = yield* input.requesterWorkspaces();
+    const workspaces = yield* requesterWorkspaces();
     const digest = yield* fromResult(pairingRequestDigest(request), 'corrupt');
     yield* withKeys(secret, (keys) =>
       Effect.gen(function* () {

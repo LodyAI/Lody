@@ -491,6 +491,18 @@ function WorkspaceControlRoute() {
     }
   };
   const refresh = () => setGeneration((value) => value + 1);
+  // Account-wide pairing advances by itself: once this device joined, it opens the
+  // workspace as soon as the approved host open succeeds (key installed).
+  const accountPairingJoined = useRef<string | null>(null);
+  const onAccountPairingJoined = () => {
+    accountPairingJoined.current = identity;
+    refresh();
+  };
+  useEffect(() => {
+    if (accountPairingJoined.current !== identity || !canOpen || !workspaceSlug) return;
+    accountPairingJoined.current = null;
+    void navigate({ to: '/$workspaceName/chat', params: { workspaceName: workspaceSlug } });
+  }, [identity, canOpen, workspaceSlug, navigate]);
   const manageMember = async (work: () => Promise<void>) => {
     const owner = readOwner.current;
     if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
@@ -563,9 +575,10 @@ function WorkspaceControlRoute() {
         <E2eeAccountPairingRequest
           key={identity + ':account-pairing'}
           runtime={port.runtime}
+          workspaceId={workspaceId}
           // Web asks first: a browser is often shared or public.
           autoStart={isElectronRenderer() || isNativeAppShell()}
-          onJoined={refresh}
+          onJoined={onAccountPairingJoined}
         />
         <E2eePersonalPairing
           key={identity}
