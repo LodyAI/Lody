@@ -149,7 +149,16 @@ export function LodyAgentAccountsController({
     try {
       const result = await runtime.requestLocalSorbetProviders(machineId, {
         method: 'sorbet/providers-create',
-        params: { configId, provider: draft },
+        params: {
+          configId,
+          provider: {
+            name: draft.name,
+            protocol: draft.protocol,
+            baseUrl: draft.baseUrl,
+            // The form keeps a readonly list; the wire type is a plain array.
+            models: draft.models.map((model) => ({ id: model.id })),
+          },
+        },
       });
       if (result.type !== 'sorbet/providers-create') throw new Error('Unexpected response');
       if (providerGeneration.current === current) {

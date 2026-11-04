@@ -354,7 +354,7 @@ describe('Sorbet credentials ACP handshake', () => {
           }) as never,
         }
       );
-      expect(result).toEqual([]);
+      expect(result).toEqual({ kind: 'credentials', credentials: [] });
       expect(attempts).toHaveLength(2);
       expect(attempts[1]).toContain('--offline');
       expect(fs.readFileSync(marker, 'utf8')).toBe('logout\n');

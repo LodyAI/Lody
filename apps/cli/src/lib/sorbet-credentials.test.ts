@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { createSorbetCredentialsHandler } from './sorbet-credentials';
@@ -12,6 +12,9 @@ const machine = 'machine' as MachineId;
 const logger = {} as Logger;
 
 describe('daemon Sorbet credentials', () => {
+  // Queued once-values would otherwise leak into the next test's first call.
+  beforeEach(() => run.mockReset());
+
   it('uses only the selected local builtin identity, never persisted launch inputs', async () => {
     const config = {
       id,
@@ -24,7 +27,12 @@ describe('daemon Sorbet credentials', () => {
     };
     const document = { getAgentConfigById: vi.fn(async () => config as never) };
     const handler = createSorbetCredentialsHandler(document, machine, logger);
-    run.mockResolvedValueOnce([{ providerId: 'x', type: 'oauth' }]).mockResolvedValueOnce([]);
+    run
+      .mockResolvedValueOnce({
+        kind: 'credentials',
+        credentials: [{ providerId: 'x', type: 'oauth' }],
+      })
+      .mockResolvedValueOnce({ kind: 'credentials', credentials: [] });
     expect(await handler.list(id)).toEqual([{ providerId: 'x', type: 'oauth' }]);
     await handler.logout(id, 'x');
     expect(document.getAgentConfigById).toHaveBeenCalledWith(id, machine);
@@ -52,7 +60,7 @@ describe('daemon Sorbet credentials', () => {
         requestSignal.addEventListener('abort', resolve, { once: true })
       );
       await cleanup;
-      return [];
+      return { kind: 'credentials', credentials: [] };
     });
     const logout = handler.logout(id, 'example', signal.signal);
     await started;
