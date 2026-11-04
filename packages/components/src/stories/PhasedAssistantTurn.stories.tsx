@@ -22,6 +22,11 @@ const base: SessionHistoryParsed = {
 const meta = { title: 'Sessions/PhasedAssistantTurn', component: SessionChatStreamView, parameters: { layout: 'fullscreen' } } satisfies Meta<typeof SessionChatStreamView>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+const storyArgs = {
+  sessionId,
+  items: [],
+  renderMessageRow: ({ message, sessionId: id }) => <MessageRowView message={message} sessionId={id} />,
+} satisfies Story['args'];
 
 function Scene({ mode }: { mode: 'finished' | 'streaming' | 'interrupted' | 'legacy' }) {
   const message: SessionHistoryParsed = {
@@ -36,7 +41,7 @@ function Scene({ mode }: { mode: 'finished' | 'streaming' | 'interrupted' | 'leg
   return <div className="h-[600px] w-full bg-background"><SessionChatStreamView sessionId={sessionId} items={items} lastAssistantMessageId={message.id} lastCompletedAssistantMessageId={message.finished ? message.id : undefined} agentActivityLabel={mode === 'streaming' ? 'Working' : undefined} renderMessageRow={({ message: row, sessionId: id }) => <MessageRowView message={row} sessionId={id} />} /></div>;
 }
 
-export const Finished: Story = { render: () => <Scene mode="finished" /> };
-export const Streaming: Story = { render: () => <Scene mode="streaming" /> };
-export const Interrupted: Story = { render: () => <Scene mode="interrupted" /> };
-export const LegacyUnphased: Story = { render: () => <Scene mode="legacy" /> };
+export const Finished: Story = { args: storyArgs, render: () => <Scene mode="finished" /> };
+export const Streaming: Story = { args: storyArgs, render: () => <Scene mode="streaming" /> };
+export const Interrupted: Story = { args: storyArgs, render: () => <Scene mode="interrupted" /> };
+export const LegacyUnphased: Story = { args: storyArgs, render: () => <Scene mode="legacy" /> };
