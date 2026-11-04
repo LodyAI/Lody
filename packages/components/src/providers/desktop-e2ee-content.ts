@@ -23,9 +23,9 @@ const NO_TOKEN_STORAGE = {
  */
 function untilAborted<A>(
   work: Promise<A>,
-  signals: ReadonlyArray<AbortSignal | undefined>
+  signals: ReadonlyArray<AbortSignal | null | undefined>
 ): Promise<A> {
-  const owned = signals.filter((signal): signal is AbortSignal => signal !== undefined);
+  const owned = signals.filter((signal): signal is AbortSignal => signal != null);
   return new Promise<A>((resolve, reject) => {
     const detach = () => {
       for (const signal of owned) signal.removeEventListener('abort', onAbort);
