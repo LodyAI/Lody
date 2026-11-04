@@ -47,14 +47,22 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** What the agents are doing: what needs you, the plan usage, what runs, what finished, what to pick back up. */
+/**
+ * What the agents are doing: what needs you, the plan usage, what runs, what finished, what to
+ * pick back up. The usage tile draws the plan's two segments side by side — the 5-hour one and the
+ * week — each with its own percent used and its own reset; the week's used to be dropped.
+ */
 export const Now: Story = {};
 
 export const NoAgentsRunning: Story = {
   args: { now: homeNowFixture('idle') },
 };
 
-/** The 5-hour window is nearly spent; the Codex reset the forecast knows about sits beside it. */
+/**
+ * The 5-hour window is nearly spent; the Codex reset the forecast knows about sits beside it. In
+ * the half tile two meters no longer fit, so the week's reset reads as a countdown ("Weekly in
+ * 20h") in the head.
+ */
 export const NowNearReset: Story = {
   args: {
     usage: homeWeekUsageFixture('nearReset'),

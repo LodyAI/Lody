@@ -42,22 +42,21 @@ function nowRow(id: string, overrides: Partial<HomeNowRow> = {}): HomeNowRow {
   };
 }
 
-const usage = (resetsInHours = 2): HomeWeekUsage => ({
+const usage = (resetsInHours = 2, weekResetsInHours: number | null = 98): HomeWeekUsage => ({
   name: null,
-  windows: [
-    {
-      usedPercent: 38,
-      remainingPercent: 62,
-      windowDurationSeconds: 5 * 60 * 60,
-      resetsAtEpochSeconds: NOW_MS / 1000 + resetsInHours * 60 * 60,
-    },
-    {
-      usedPercent: 21,
-      remainingPercent: 79,
-      windowDurationSeconds: 7 * 24 * 60 * 60,
-      resetsAtEpochSeconds: null,
-    },
-  ],
+  window: {
+    usedPercent: 38,
+    remainingPercent: 62,
+    windowDurationSeconds: 5 * 60 * 60,
+    resetsAtEpochSeconds: NOW_MS / 1000 + resetsInHours * 60 * 60,
+  },
+  otherWindow: {
+    usedPercent: 21,
+    remainingPercent: 79,
+    windowDurationSeconds: 7 * 24 * 60 * 60,
+    resetsAtEpochSeconds:
+      weekResetsInHours == null ? null : NOW_MS / 1000 + weekResetsInHours * 60 * 60,
+  },
 });
 
 const CODEX: HomeWeekUsageSource = {
@@ -329,16 +328,41 @@ describe('HomeDashboard', () => {
   describe('plan usage', () => {
     const text = () => byTestId('home-now')?.textContent ?? '';
 
-    it('shows one window, the shortest, with how much is used and when it resets', () => {
-      render({ usage: usage(2) });
+    it('puts the plan’s two segments side by side, each with how much is used and its reset', () => {
+      render({ usage: usage(2, 98) });
       expect(text()).toContain('Plan usage');
-      expect(text()).toContain('5 hours');
-      expect(text()).toContain('38% used');
-      expect(text()).toContain('Resets in about 2 hours');
-      expect(text()).not.toContain('Weekly');
-      expect(container.querySelectorAll('[data-usage-fill]')).toHaveLength(1);
+      const meters = Array.from(
+        byTestId('home-week-usage')!.querySelectorAll('[data-usage-window]')
+      ).map((meter) => meter.textContent ?? '');
+      expect(meters).toHaveLength(2);
+      expect(meters[0]).toContain('5 hours');
+      expect(meters[0]).toContain('38% used');
+      expect(meters[0]).toContain('Resets in about 2 hours');
+      // The week behind the 5-hour segment: its own percent and its own reset, beside it.
+      expect(meters[1]).toContain('Weekly');
+      expect(meters[1]).toContain('21% used');
+      expect(meters[1]).toContain('Resets in 4 days');
+      expect(container.querySelectorAll('[data-usage-fill]')).toHaveLength(2);
       expect(byTestId('home-week-forecast')).toBeNull();
       expect(byTestId('home-week-usage')?.getAttribute('data-column')).toBe('1 / span 2');
+    });
+
+    it('shows one meter when the provider reports one window', () => {
+      render({ usage: { ...usage(), otherWindow: null } });
+      expect(container.querySelectorAll('[data-usage-window]')).toHaveLength(1);
+      expect(byTestId('home-week-usage-other-window')).toBeNull();
+      expect(text()).toContain('Plan usage');
+    });
+
+    it('keeps the week’s reset in a half tile as a countdown', () => {
+      render({
+        usage: usage(2, 20),
+        forecast: { title: 'Codex reset forecast', chancePercent: 65, when: 'Today 2:00 PM' },
+      });
+      // Beside the forecast the tile is half as wide: one meter, and the other window's reset in
+      // the head as a countdown rather than two columns of labels.
+      expect(container.querySelectorAll('[data-usage-window]')).toHaveLength(1);
+      expect(byTestId('home-week-usage-other-window')?.textContent).toBe('Weekly in 20h');
     });
 
     it('words a scheduled reset without a probability', () => {
