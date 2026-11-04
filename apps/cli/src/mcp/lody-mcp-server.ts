@@ -35,6 +35,7 @@ import {
   getAcpCapabilityCacheKey,
   getMachineFlockAcpCapabilities,
   getMachineFlockDocId,
+  getMachineFlockRateLimits,
   getServerNow,
   getSessionRoomId,
   hasAgentRunConfigSelection,
@@ -85,8 +86,12 @@ import {
   type LodyOperationItemResult,
   type LodyOperationSnapshot,
   type SessionTurnInputConfig,
+  type SessionHistoryInput,
   hasPendingUserTurnActivation,
   normalizeSessionTurnInputConfig,
+  describeChatFailure,
+  readChatFailureNotice,
+  type LodyTurnFailure,
 } from '@lody/shared';
 import { makeLocalControlClientAuto } from '@lody/shared/node/local-ipc';
 import {
@@ -168,7 +173,10 @@ import { captureSessionCommandEvent } from '@/commands/analytics-events';
 import { captureCli, initCliAnalytics } from '@/lib/analytics/posthog';
 import { registerDiscoveryTools } from './discovery-tools';
 import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
-import { summarizeDiscoveryAgent as summarizeAgentConfig } from '@/lib/resource-discovery';
+import {
+  agentConfigQuotaResetAt,
+  summarizeDiscoveryAgent as summarizeAgentConfig,
+} from '@/lib/resource-discovery';
 import {
   SessionDiscoveryFilterShape,
   matchesSessionDiscovery,
@@ -1696,12 +1704,14 @@ type SessionExecutionSnapshot = {
   phase: 'idle' | 'queued' | 'initializing' | 'running' | 'waiting';
   activeTurnId?: string;
   queuedTurnCount: number;
+  lastTurnFailure?: LodyTurnFailure;
 };
 
 const resolveSessionExecutionSnapshot = (args: {
   live: SessionLiveWorking;
   activeTurnId?: string;
   queuedTurnCount: number;
+  lastTurnFailure?: LodyTurnFailure;
 }): SessionExecutionSnapshot => {
   const phase =
     args.live.status === 'requestPermission'
@@ -1718,6 +1728,7 @@ const resolveSessionExecutionSnapshot = (args: {
     phase,
     ...(args.activeTurnId ? { activeTurnId: args.activeTurnId } : {}),
     queuedTurnCount: args.queuedTurnCount,
+    ...(args.lastTurnFailure ? { lastTurnFailure: args.lastTurnFailure } : {}),
   };
 };
 
@@ -1772,6 +1783,59 @@ const readSessionDocForMcp = async <T>(
     ? await read(await manager.getOrCreateSessionDoc(session.id))
     : await manager.readSessionDocTransiently(session.id, read, { remoteSyncTimeoutMs });
 
+const FAILURE_DIRECTORY_SCAN_ROWS = 64;
+const FAILURE_NOTICE_SCAN_ROWS = 16;
+
+/**
+ * The latest failed user Turn and its following chat_failed notice. Status is a
+ * bounded directory scan: it reads bodies only for the failed Turn and a short
+ * notice window, never the full transcript or another Session.
+ */
+const readLastTurnFailure = async (
+  backend: Awaited<ReturnType<typeof createSessionBackend>>,
+  directory: readonly import('@lody/shared/session-data').SessionDirectoryRow[]
+): Promise<LodyTurnFailure | undefined> => {
+  const start = Math.max(0, directory.length - FAILURE_DIRECTORY_SCAN_ROWS);
+  for (let index = directory.length - 1; index >= start; index -= 1) {
+    const row = directory[index];
+    const scalars = row?.scalars;
+    if (row?.state !== 'ready' || !scalars || scalars.role !== 'user') continue;
+    // The newest user Turn is authoritative: a queued, running, handled or
+    // canceled Turn means the Session has no current failure to report, even
+    // when an older Turn failed. Recovery clears this signal on the next call.
+    if (scalars.status !== 'failed') return undefined;
+    const notices: SessionHistoryInput[] = [];
+    let assistantTurnId: string | undefined;
+    const end = Math.min(directory.length, index + FAILURE_NOTICE_SCAN_ROWS);
+    for (let next = index; next < end; next += 1) {
+      const read = await backend.history.readAt(directory[next]!.position);
+      if (read.state !== 'ready') continue;
+      if (next > index && read.turn.role === 'user') break;
+      if (read.turn.role === 'assistant' && read.turn.userTurnId === scalars.id)
+        assistantTurnId = read.turn.id;
+      if (read.turn.role === 'system') notices.push(read.turn as SessionHistoryInput);
+    }
+    const notice = readChatFailureNotice(notices);
+    const noticeAt = notice?.at ? Date.parse(notice.at) : Number.NaN;
+    const turnAt = Date.parse(scalars.timestamp);
+    const referenceMs = Number.isFinite(noticeAt)
+      ? noticeAt
+      : Number.isFinite(turnAt)
+        ? turnAt
+        : getServerNow();
+    const failure = describeChatFailure(notice, referenceMs);
+    return {
+      reason: failure.reason,
+      ...(failure.detail ? { detail: failure.detail } : {}),
+      at: failure.at ?? scalars.timestamp,
+      ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
+      turnId: scalars.id,
+      ...(assistantTurnId ? { assistantTurnId } : {}),
+    };
+  }
+  return undefined;
+};
+
 const readSessionExecutionSnapshot = async (
   manager: LoroDocumentManager,
   session: SessionMeta,
@@ -1791,10 +1855,13 @@ const readSessionExecutionSnapshot = async (
       const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
       const queuedTurnCount =
         queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
+      // A malformed body degrades the optional failure hint, not the status item.
+      const lastTurnFailure = await readLastTurnFailure(backend, directory).catch(() => undefined);
       return resolveSessionExecutionSnapshot({
         live,
         ...(activeTurnId ? { activeTurnId } : {}),
         queuedTurnCount,
+        ...(lastTurnFailure ? { lastTurnFailure } : {}),
       });
     },
     // Status does not wait: presence and RPC carry liveness, and the briefly
@@ -2207,6 +2274,7 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
           // classification instead of failing every sibling.
           return { sessionId, ok: false as const, error: normalizeMcpError(error) };
         }
+        const { lastTurnFailure, ...executionSnapshot } = execution;
         return {
           sessionId,
           ok: true as const,
@@ -2216,8 +2284,9 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
               live: liveWorking,
               executionState: execution.executionState,
             }),
+            ...(lastTurnFailure ? { lastTurnFailure } : {}),
             execution: {
-              ...execution,
+              ...executionSnapshot,
               ...(liveWorking.status ? { liveStatus: liveWorking.status } : {}),
               liveSource: liveWorking.source,
               // Busy without a daemon answer (older daemon, offline or read failure)
@@ -2728,6 +2797,17 @@ const readMachineAcpCapabilities = async (
   );
 };
 
+const readMachineRateLimits = async (
+  manager: LoroDocumentManager,
+  workspaceId: WorkspaceId,
+  machineId: MachineId
+): Promise<Record<string, import('acp-extension-core').RateLimit>> => {
+  const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+  return getMachineFlockRateLimits(
+    readMachineFlockRowsFromFlock(handle.flock, { families: ['rateLimit'] })
+  );
+};
+
 const buildSessionWorkContext = async (
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
@@ -2950,6 +3030,7 @@ const buildSessionCreateOptions = async (
       workspaceId,
       selectedMachine.id
     );
+    const rateLimits = await readMachineRateLimits(manager, workspaceId, selectedMachine.id);
     const localProjectQuery = normalizeCliValue(input.localProjectQuery)?.toLowerCase();
     const currentLocalProjectId =
       currentSession.machineId === selectedMachine.id && currentSession.project?.kind === 'local'
@@ -3037,9 +3118,19 @@ const buildSessionCreateOptions = async (
         onlineStatus: machineLivenessOf(machine.id),
         canUse: true,
       })),
-      agentConfigs: agentConfigs.map((config) =>
-        summarizeAgentConfig(config, acpCapabilities[getAcpCapabilityCacheKey(config.id)])
-      ),
+      agentConfigs: agentConfigs.map((config) => {
+        const summary = summarizeAgentConfig(
+          config,
+          acpCapabilities[getAcpCapabilityCacheKey(config.id)]
+        );
+        const availableAt = agentConfigQuotaResetAt(rateLimits, config.id);
+        return availableAt
+          ? {
+              ...summary,
+              availability: { state: 'unavailable', reason: 'quota_exhausted', availableAt },
+            }
+          : summary;
+      }),
       localProjects: summarizedLocalProjects,
       githubRepos: {
         queryRequired: repoQuery === undefined,
@@ -5446,7 +5537,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Get Lody session statuses',
       description:
-        'Return ordered independent summary, execution, Machine, observation, and action snapshots for 1-50 known Session ids.',
+        'Return ordered independent summary, execution, Machine, observation, and action snapshots for 1-50 known Session ids. A Session whose latest user Turn failed also reports lastTurnFailure with reason, detail, at and resetAt.',
       inputSchema: SessionStatusManyToolInputSchema,
     },
     async (args: SessionStatusManyToolInput) => {
@@ -5462,7 +5553,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     SESSION_HISTORY_TOOL_NAME,
     {
       title: 'Read Lody session history',
-      description: `Read one bounded visible transcript page, oldest-to-newest. For session mentions pass the full lody://session/<sessionId>?workspace=<workspaceId> URI as sessionId; its workspace must match this tool context. Bare IDs and legacy session:// URIs are also accepted. Omit cursor for the newest page; nextCursor reads older entries. Use direction forward to read oldest-first and resume later from nextCursor; role, since and maxChars narrow and cap entries. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
+      description: `Read one bounded visible transcript page, oldest-to-newest. For session mentions pass the full lody://session/<sessionId>?workspace=<workspaceId> URI as sessionId; its workspace must match this tool context. Bare IDs and legacy session:// URIs are also accepted. Omit cursor for the newest page; nextCursor reads older entries. Use direction forward to read oldest-first and resume later from nextCursor; role, since and maxChars narrow and cap entries. Failed entries carry isError and errorReason. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
       inputSchema: SessionHistoryToolInputSchema,
     },
     async (args: SessionHistoryToolInput) => {
