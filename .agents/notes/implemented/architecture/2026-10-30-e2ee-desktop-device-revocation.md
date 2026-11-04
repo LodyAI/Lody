@@ -78,9 +78,14 @@ asked the server.
   is never treated as an inconclusive server check. A reader token is retired when
   its last acquisition closes, including while another window retains the owner.
   The renderer's 200 ms deadline still bounds durable activation. A late prepared
-  dispatch accelerates only a turn whose current stored status still permits
-  starting, checked before storing the original and again before sending. Increasing
-  that deadline was rejected because it also bounds the pre-write withdrawal gate;
+  dispatch accelerates a still-dispatchable user turn (`pending`, `seen`, or
+  `processing`), checked before storing the original and again before sending.
+  `processing` is not terminal: durable activation may have claimed the same turn
+  during the wait, and the receiver deduplicates its exact turn ID. Canceled or
+  terminal turns never accelerate. The 300 ms main wait deliberately keeps a short
+  credential-verdict opportunity; shrinking it to race the renderer would not
+  guarantee fast preparation across native I/O, so the late path must remain usable.
+  Increasing the renderer deadline was rejected because it also bounds the pre-write withdrawal gate;
   awaiting the whole cloud timeout was rejected because it delays RPC acceleration.
 - **Reader hint.** Revocation keeps workspace membership visible, so nothing made
   a revoked window refresh. After recording a loss, main sends each reader window a

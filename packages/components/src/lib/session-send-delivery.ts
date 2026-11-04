@@ -2,6 +2,7 @@ import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
   isSessionHistoryStatusAwaitingStart,
+  isSessionHistoryPendingForDispatch,
   normalizeSessionTurnInputConfig,
   type MachineId,
   type SessionHistory,
@@ -313,11 +314,13 @@ export async function dispatchUserTurn(
           ? error.late
               .then(async (prepared) => {
                 const current = await readUserTurn(runtime, sessionId, userTurnId);
-                if (!current || !isSessionHistoryStatusAwaitingStart(current.status)) return false;
+                if (!isSessionHistoryPendingForDispatch(current)) return false;
                 await store(prepared);
-                // Storage may yield while cancellation or a competing execution wins.
+                // Durable activation may already be processing; it is still dispatchable.
+                // The receiver deduplicates this turn id. Recheck after storage yields
+                // so cancellation or terminal completion still stops the late send.
                 const latest = await readUserTurn(runtime, sessionId, userTurnId);
-                if (!latest || !isSessionHistoryStatusAwaitingStart(latest.status)) return false;
+                if (!isSessionHistoryPendingForDispatch(latest)) return false;
                 return send(prepared);
               })
               .catch(unavailable)
