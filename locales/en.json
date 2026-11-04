@@ -206,8 +206,6 @@
   "e2ee.create.requestRemoved": "This saved request can no longer be created ({{code}}), so it was removed from this device. Start a new request with another name or handle, or create a regular workspace.",
   "settings.beta.e2eeWorkspace": "Encrypted workspace creation",
   "settings.beta.e2eeWorkspaceHelper": "Create a workspace with a device identity and signed permission history. Existing workspaces are unchanged.",
-  "settings.beta.e2eeAccountPairing": "Account-wide device pairing",
-  "settings.beta.e2eeAccountPairingHelper": "Add a device to all your encrypted workspaces with one scanned or pasted code. Requires host support; the existing pairing stays available.",
   "e2ee.mode.failed": "Workspace mode could not be verified",
   "e2ee.mode.failedHelp": "No conversation data was opened. Retry the connection to verify this workspace’s persisted mode.",
   "e2ee.mode.timedOutHelp": "Sign in and connect to the internet, then retry. This device has no saved mode proof for this workspace, so its conversation data cannot open offline yet.",
