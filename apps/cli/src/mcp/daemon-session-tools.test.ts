@@ -769,6 +769,70 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
+  it('reports the latest failed turn and marks its history entry', async () => {
+    stubCreateOptionsReaders();
+    const doc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'failed-user',
+      role: 'user',
+      status: 'failed',
+      timestamp: '2026-11-03T20:15:00.000Z',
+      items: [{ type: 'text', text: 'run the delegated work' }],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'failed-notice',
+      role: 'system',
+      timestamp: '2026-11-03T20:15:01.000Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your 5-hour limit · resets 6am (UTC)",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as never);
+
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [
+        {
+          ok: true,
+          sessionId,
+          value: {
+            lastTurnFailure: {
+              reason: 'usage_limit',
+              detail: "You've hit your 5-hour limit · resets 6am (UTC)",
+              at: '2026-11-03T20:15:01.000Z',
+              resetAt: '2026-11-04T06:00:00.000Z',
+              turnId: 'failed-user',
+            },
+          },
+        },
+      ],
+    });
+
+    const history = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_history', { sessionId })
+    );
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    expect(JSON.parse(history.content[0]?.text ?? '{}').items).toContainEqual(
+      expect.objectContaining({
+        id: 'failed-user',
+        isError: true,
+        errorReason: 'usage_limit',
+      })
+    );
+  });
+
   async function createRemoteSession() {
     const otherMachineId = 'synthetic-other-machine' as MachineId;
     await manager.registerMachine(otherMachineId, {

@@ -1,10 +1,11 @@
 import type {
+  LodyError,
   MessageContent,
   SessionHistoryInput,
   SessionMeta,
   StoredLodyOperation,
 } from '@lody/shared';
-import { readChatFailureNotice } from '@lody/shared';
+import { describeChatFailure, readChatFailureNotice } from '@lody/shared';
 import {
   getOperationProgressTargetKey,
   type OperationProgressStatusByTarget,
@@ -59,22 +60,46 @@ export const assistantOutputPreview = (
   return text.length > 0 ? truncateTargetOutput(text) : undefined;
 };
 
-const MAX_FAILURE_DETAIL_CHARS = 500;
+const failureReferenceMs = (output: readonly SessionHistoryInput[]): number => {
+  const notice = readChatFailureNotice(output);
+  const parsed = notice?.at ? Date.parse(notice.at) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : Date.now();
+};
 
 /**
  * Explains a failed target from the durable `chat_failed` notice recorded after
- * its user turn. The reason and original message travel in the error message so
- * older readers of the strict Operation result schema keep working. Without a
- * notice the generic text stands; a cause is never guessed.
+ * its user turn. The reason and redacted provider text travel in the message so
+ * older readers of the strict Operation result schema keep working; current
+ * readers also get the normalized cause and quota reset as structured fields.
+ * Without a notice the generic text stands; a cause is never guessed.
  */
-export const targetFailureMessage = (output: readonly SessionHistoryInput[]): string => {
+export const targetFailureError = (
+  output: readonly SessionHistoryInput[],
+  assistantTurnId?: string
+): LodyError => {
   const notice = readChatFailureNotice(output);
-  if (!notice) return 'Target Turn failed.';
-  const detail = notice.message
-    ? `: ${Array.from(notice.message).slice(0, MAX_FAILURE_DETAIL_CHARS).join('')}`
-    : '';
-  return `Target Turn failed (${notice.reason ?? 'unknown'})${detail}`;
+  if (!notice)
+    return {
+      code: 'TARGET_FAILED',
+      message: 'Target Turn failed.',
+      retryable: false,
+      reason: 'unknown',
+    };
+  const failure = describeChatFailure(notice, failureReferenceMs(output));
+  const detail = failure.detail ? `: ${failure.detail}` : '';
+  return {
+    code: 'TARGET_FAILED',
+    message: `Target Turn failed (${notice.reason ?? 'unknown'})${detail}`,
+    retryable: failure.retryable,
+    reason: failure.reason,
+    ...(failure.detail ? { detail: failure.detail } : {}),
+    ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
+    ...(assistantTurnId ? { assistantTurnId } : {}),
+  };
 };
+
+export const targetFailureMessage = (output: readonly SessionHistoryInput[]): string =>
+  targetFailureError(output).message;
 
 export const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>
   entry.role === 'assistant' && (entry.finished === true || typeof entry.endedAt === 'number');

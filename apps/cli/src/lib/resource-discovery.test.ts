@@ -65,6 +65,40 @@ const source = (overrides: Partial<DiscoverySource> = {}): DiscoverySource => ({
 });
 
 describe('resource discovery across MCP and CLI', () => {
+  it('marks an Agent config unavailable until its scoped quota resets', async () => {
+    const resetsAtEpochSeconds = 4_102_444_800;
+    const discovery = new ResourceDiscovery(
+      source({
+        rateLimits: async () => ({
+          'provider::agent::builtin::weekly': {
+            limitId: 'weekly',
+            scope: { providerId: 'codex' },
+            windows: [{ usedPercent: 100, windowDurationSeconds: 604800, resetsAtEpochSeconds }],
+          },
+        }),
+      })
+    );
+
+    const listed = await discovery.list('agent_config', {});
+    expect(listed.items[0]).toMatchObject({
+      id: 'agent',
+      availability: {
+        state: 'unavailable',
+        reason: 'quota_exhausted',
+        availableAt: new Date(resetsAtEpochSeconds * 1000).toISOString(),
+      },
+    });
+
+    const machines = await discovery.list('machine', {});
+    expect(machines.items[0]?.quota).toEqual([
+      expect.objectContaining({
+        agentConfigId: 'agent',
+        exhausted: true,
+        unavailableUntil: new Date(resetsAtEpochSeconds * 1000).toISOString(),
+      }),
+    ]);
+  });
+
   it('reports quota windows and opt-in machine resources without failing on an unavailable machine', async () => {
     const discovery = new ResourceDiscovery(
       source({
