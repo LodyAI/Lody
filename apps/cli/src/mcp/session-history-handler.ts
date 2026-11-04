@@ -1,3 +1,4 @@
+import { describeChatFailure, readChatFailureNotice } from '@lody/shared';
 import { pageVisibleTranscript, type SessionHistoryReader } from '@lody/shared/session-data';
 import { isVisibleTranscriptTurn, toSessionTranscriptEntry } from '@/commands/session';
 import {
@@ -37,6 +38,25 @@ const capEntryText = (entry: SessionHistoryPageEntry, maxChars: number | undefin
   };
 };
 
+const FAILURE_NOTICE_SCAN_ROWS = 16;
+
+/** Read the system-notice rows between a failed user Turn and the next input. */
+const readFollowingChatFailure = async (
+  history: SessionHistoryReader,
+  position: number
+): Promise<ReturnType<typeof readChatFailureNotice>> => {
+  const total = await history.count();
+  const notices: import('@lody/shared/session-data').SessionTurn[] = [];
+  const end = Math.min(total, position + FAILURE_NOTICE_SCAN_ROWS);
+  for (let index = position + 1; index < end; index += 1) {
+    const read = await history.readAt(index);
+    if (read.state !== 'ready') continue;
+    if (read.turn.role === 'user') break;
+    if (read.turn.role === 'system') notices.push(read.turn);
+  }
+  return readChatFailureNotice(notices);
+};
+
 export async function buildSessionHistoryForReader(
   params: {
     sessionId: string;
@@ -61,10 +81,37 @@ export async function buildSessionHistoryForReader(
     ...(forward || position < Number.MAX_SAFE_INTEGER ? { cursor: String(position) } : {}),
     isVisible,
   });
-  const entries: SessionHistoryPageEntry[] = [];
+  const formattedEntries: Array<{
+    entry: SessionHistoryPageEntry;
+    turn: (typeof page.turns)[number];
+  }> = [];
   page.turns.forEach((turn, offset) => {
     const formatted = toSessionTranscriptEntry(page.positions[offset] ?? 0, turn);
-    if (formatted) entries.push(capEntryText(formatted, params.maxChars));
+    if (formatted) formattedEntries.push({ entry: capEntryText(formatted, params.maxChars), turn });
+  });
+  const failedTurns = new Map<string, ReturnType<typeof describeChatFailure>>();
+  for (const [offset, turn] of page.turns.entries()) {
+    if (turn.role !== 'user' || turn.status !== 'failed') continue;
+    const notice = await readFollowingChatFailure(
+      params.history,
+      page.positions[offset] ?? 0
+    ).catch(() => undefined);
+    const noticeAt = notice?.at ? Date.parse(notice.at) : Number.NaN;
+    const turnAt = Date.parse(turn.timestamp);
+    failedTurns.set(
+      turn.id,
+      describeChatFailure(
+        notice,
+        Number.isFinite(noticeAt) ? noticeAt : Number.isFinite(turnAt) ? turnAt : Date.now()
+      )
+    );
+  }
+  const entries = formattedEntries.map(({ entry, turn }) => {
+    const failure =
+      turn.role === 'assistant' && turn.userTurnId
+        ? failedTurns.get(turn.userTurnId)
+        : failedTurns.get(turn.id);
+    return failure ? { ...entry, isError: true as const, errorReason: failure.reason } : entry;
   });
   return buildSessionHistoryPage({
     sessionId: params.sessionId,

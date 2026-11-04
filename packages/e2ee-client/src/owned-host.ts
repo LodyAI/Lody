@@ -194,6 +194,8 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         approvalOriginals: () => call(raw.approvalOriginals()),
         refresh: () => call(raw.refresh()),
         keyRound: () => call(raw.keyRound()),
+        keyDeliveryEvidence: (...args: Parameters<RawSession['keyDeliveryEvidence']>) =>
+          call(raw.keyDeliveryEvidence(...args)),
         status: () => call(raw.status()),
         execute: (...args: Parameters<RawSession['execute']>) => call(raw.execute(...args)),
         resume: () => call(raw.resume()),

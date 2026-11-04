@@ -650,14 +650,14 @@ describe('LodyFleet local E2EE pairing during startup', () => {
 
   // A daemon started after the workspace was created: its local catalog has
   // never seen the workspace, and the live list has not been delivered yet.
-  const coldFleet = async () => {
+  const coldFleet = async (e2ee = {} as NonNullable<CloudPort['e2ee']>) => {
     let push: (snapshot: Snapshot) => void = () => {};
     const cloudPort: CloudPort = {
       ...createTestCloudPort((onValue) => {
         push = onValue;
         return () => {};
       }),
-      e2ee: {} as NonNullable<CloudPort['e2ee']>,
+      e2ee,
     };
     const { fleet: harness } = createFleetHarness(
       createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
@@ -701,6 +701,45 @@ describe('LodyFleet local E2EE pairing during startup', () => {
         type: 'prepare',
         machineId: 'machine-1',
         ...material,
+      });
+    } finally {
+      native.mockRestore();
+    }
+  });
+
+  it('re-enabling a local agent revoked while stopped offers a fresh machine identity, not the revoked key', async () => {
+    const legacy = await import('../src/lib/e2ee/workspace-legacy');
+    const { CloudE2eeDeviceRevoked } = await import('../src/lib/cloud-e2ee-errors');
+    const revoked = material;
+    const fresh = { ...material, signingPublicKey: 'de'.repeat(32) };
+    // The real preparation retains its machine key unless this device's exact
+    // credential check reports revocation (no receipt exists: the agent was stopped).
+    const native = vi
+      .spyOn(legacy, 'prepareCliE2eeMachineLegacy')
+      .mockImplementation(async (options) => {
+        if (!options.cloud) return revoked as never;
+        try {
+          await options.cloud.getContentToken({
+            workspaceId: options.workspaceId,
+            credential: 'synthetic-credential',
+          } as never);
+          return revoked as never;
+        } catch (error) {
+          if (error instanceof CloudE2eeDeviceRevoked) return fresh as never;
+          throw error;
+        }
+      });
+    try {
+      const { fleet, push } = await coldFleet({
+        getContentToken: async () => {
+          throw new CloudE2eeDeviceRevoked();
+        },
+      } as unknown as NonNullable<CloudPort['e2ee']>);
+      const reply = fleet.dispatchLocalE2eePairing(prepare);
+      push({ status: 'authorized', userId: 'user-1', workspaces: [encrypted] });
+      await expect(reply).resolves.toMatchObject({
+        type: 'prepare',
+        signingPublicKey: fresh.signingPublicKey,
       });
     } finally {
       native.mockRestore();
@@ -775,7 +814,8 @@ describe('LodyFleet shutdown ordering', () => {
   });
 
   it('retains the writer for a failed workspace release and releases it after recovery', async () => {
-    const { getProcessLocalLoroWriterLegacy } = await import('@lody/shared/local-loro-writer/legacy');
+    const { getProcessLocalLoroWriterLegacy } =
+      await import('@lody/shared/local-loro-writer/legacy');
     const { makeLocalLoroWriterOwner } = await import('@lody/shared/local-loro-writer');
     const writer = getProcessLocalLoroWriterLegacy();
     const owner = makeLocalLoroWriterOwner();

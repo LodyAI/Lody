@@ -105,6 +105,8 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   the cursor at line 1 and cancel navigation. The line decoration uses Monaco's
   themed `rangeHighlight` class. See the
   [first-click navigation fix](../notes/implemented/bug-fix/2026-10-05-file-link-line-navigation.md).
+  Find action tooltips stay on one line while Find is open to prevent overlap in
+  narrow editors; see the [tooltip decision](../notes/implemented/bug-fix/2026-09-16-session-monaco-find-tooltip.md).
   The save hook compares the complete editor text with the accepted open/refresh
   snapshot or successful save result. Undo to that baseline clears Unsaved, disables
   Save, enables Refresh and releases leave protection; redo restores pending edits.

@@ -4022,7 +4022,7 @@ const SessionDetail = ({
   }, [replaceSessionUrlPr]);
 
   const handleOpenBrowser = useCallback(
-    (tabSessionId?: SessionId, navigateCandidate = false) => {
+    (tabSessionId?: SessionId, navigateCandidate = isMobile) => {
       requireWorkspaceFeature(
         { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
         'remote-preview'

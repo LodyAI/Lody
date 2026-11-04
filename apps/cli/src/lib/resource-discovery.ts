@@ -6,6 +6,7 @@ import {
   summarizeAgentRunConfigCapabilities,
   normalizeAgentRoleRunConfig,
   getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
+  parseRateLimitEntryKey,
   type AcpCapabilityCacheEntry,
   type AgentConfigMeta,
   type AgentRole,
@@ -27,6 +28,8 @@ export type DiscoveryResource = 'machine' | 'project' | 'agent_config' | 'agent_
 export type DiscoveryAvailability = {
   state: 'available' | 'unavailable' | 'unknown';
   reason?: string;
+  /** Next known instant at which an exhausted quota makes the row usable again. */
+  availableAt?: string;
 };
 export type DiscoveryRow = {
   id: string;
@@ -222,10 +225,15 @@ export class ResourceDiscovery {
     }
     const configs = new Map<string, AgentConfigMeta>();
     const capabilities = new Map<string, AcpCapabilityCacheEntry>();
+    const rateLimitsByMachine = new Map<string, Record<string, unknown>>();
     for (const machine of authorized) {
       for (const config of await source.configs(machine.id)) configs.set(config.id, config);
       for (const [key, capability] of Object.entries(await source.capabilities(machine.id)))
         capabilities.set(`${machine.id}:${key}`, capability);
+      if (resource === 'agent_config' && source.rateLimits) {
+        const rateLimits = await source.rateLimits(machine.id).catch(() => undefined);
+        if (rateLimits) rateLimitsByMachine.set(machine.id, rateLimits);
+      }
     }
     const capabilityOf = (config: AgentConfigMeta) => {
       const entry = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
@@ -239,9 +247,18 @@ export class ResourceDiscovery {
     if (resource === 'agent_config')
       return [...configs.values()].map((config) => {
         const capability = capabilityOf(config);
+        const quotaResetAt = agentConfigQuotaResetAt(
+          rateLimitsByMachine.get(config.machineId) ?? {},
+          config.id
+        );
+        const base = availability(config.machineId);
+        const state: DiscoveryAvailability =
+          base.state === 'available' && quotaResetAt
+            ? { state: 'unavailable', reason: 'quota_exhausted', availableAt: quotaResetAt }
+            : base;
         return {
           ...summarizeDiscoveryAgent(config, capability),
-          availability: availability(config.machineId),
+          availability: state,
           capabilityStatus: capability ? 'reported' : 'unknown',
         };
       });
@@ -422,23 +439,60 @@ const isCurrentRateLimit = (value: unknown): value is RateLimit => {
   );
 };
 
+const quotaResetMs = (window: RateLimit['windows'][number], nowMs: number): number | undefined => {
+  const reset = window.resetsAtEpochSeconds;
+  if (typeof reset !== 'number' || !Number.isFinite(reset)) return undefined;
+  return reset * 1000 > nowMs ? reset * 1000 : undefined;
+};
+
+/**
+ * The next instant at which an exhausted scoped quota for one Agent config
+ * clears. Unscoped legacy rows cannot be attributed to a config and are skipped.
+ */
+export function agentConfigQuotaResetAt(
+  rateLimits: Record<string, unknown>,
+  agentConfigId: string,
+  nowMs = Date.now()
+): string | undefined {
+  let latest: number | undefined;
+  for (const [key, value] of Object.entries(rateLimits)) {
+    if (!isCurrentRateLimit(value)) continue;
+    if (parseRateLimitEntryKey(key).agentConfigId !== agentConfigId) continue;
+    for (const window of value.windows) {
+      if (window.usedPercent < 100) continue;
+      const reset = quotaResetMs(window, nowMs);
+      if (reset !== undefined) latest = Math.max(latest ?? 0, reset);
+    }
+  }
+  return latest === undefined ? undefined : new Date(latest).toISOString();
+}
+
 export function summarizeMachineQuota(rateLimits: Record<string, unknown>) {
-  return Object.values(rateLimits)
-    .filter(isCurrentRateLimit)
-    .flatMap((limit) =>
-      limit.windows.map((window) => ({
-        provider: limit.scope.providerId,
-        ...(limit.scope.modelId ? { model: limit.scope.modelId } : {}),
-        ...(limit.limitName ? { limit: limit.limitName } : {}),
-        ...(window.label ? { label: window.label } : {}),
-        usedPercent: window.usedPercent,
-        exhausted: window.usedPercent >= 100,
-        ...(typeof window.resetsAtEpochSeconds === 'number' &&
-        Number.isFinite(window.resetsAtEpochSeconds)
-          ? { resetsAt: new Date(window.resetsAtEpochSeconds * 1000).toISOString() }
-          : {}),
-      }))
-    )
+  const nowMs = Date.now();
+  return Object.entries(rateLimits)
+    .filter((entry): entry is [string, RateLimit] => isCurrentRateLimit(entry[1]))
+    .flatMap(([key, limit]) => {
+      const { agentConfigId } = parseRateLimitEntryKey(key);
+      return limit.windows.map((window) => {
+        const resetsAtMs = quotaResetMs(window, nowMs);
+        return {
+          provider: limit.scope.providerId,
+          ...(limit.scope.modelId ? { model: limit.scope.modelId } : {}),
+          ...(agentConfigId ? { agentConfigId } : {}),
+          ...(limit.limitName ? { limit: limit.limitName } : {}),
+          ...(window.label ? { label: window.label } : {}),
+          usedPercent: window.usedPercent,
+          exhausted: window.usedPercent >= 100,
+          ...(typeof window.resetsAtEpochSeconds === 'number' &&
+          Number.isFinite(window.resetsAtEpochSeconds)
+            ? { resetsAt: new Date(window.resetsAtEpochSeconds * 1000).toISOString() }
+            : {}),
+          ...(window.usedPercent >= 100 && resetsAtMs !== undefined
+            ? { unavailableUntil: new Date(resetsAtMs).toISOString() }
+            : {}),
+        };
+      });
+    })
     .sort((left, right) => right.usedPercent - left.usedPercent)
     .slice(0, MAX_QUOTA_WINDOWS);
 }

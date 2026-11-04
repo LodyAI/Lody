@@ -115,13 +115,14 @@ and every signed admission before I/O. Unknown outcomes cannot replace them;
 verify competing ledger bytes or a terminal server reservation before retirement.
 New accounts replay genuine history from their independently retained genesis;
 server labels never establish native identity. [Decision](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md).
-Approval never awaits a key round: `E2eeIpc` owns later delivery and retries it from
-due polls ([delivery](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md#key-delivery-after-admission)).
+Approval, including account-pairing approval, never awaits a key round: `E2eeIpc` owns later delivery and retries it from
+a bounded main-owned due timer and due polls ([delivery](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md#key-delivery-after-admission)).
 
 Removal erases `member_joins` and `personal_join_histories`. All three join installs
 clear the removed marker only after verifying a different retained signing key.
 Only parsed HTTP 560 codes `e2ee_member_removed`/`e2ee_device_revoked` from explicitly
-credential-bound endpoints may produce `E2eeMemberRemovedError`/`E2eeDeviceRevokedError`.
+credential-bound endpoints (content-grant action: also HTTP 200) may produce
+`E2eeMemberRemovedError`/`E2eeDeviceRevokedError`.
 JWT, transport, parsing and unrelated endpoint failures never authorize cleanup,
 even with matching codes or types. The account boundary projects typed results,
 including causes, to their exact codes with the `accessLoss` marker.

@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import type { MachineId, SessionId, WorkspaceId } from './ids';
 import type { SessionTurnInputConfig } from './ai';
+import { LodyFailureReasonSchema } from './session-failure';
 
 export const LODY_OPERATION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 export const LODY_OPERATION_ID_MAX_LENGTH = 64;
@@ -24,6 +25,14 @@ export const LodyErrorSchema = z
     code: z.string().trim().min(1),
     message: z.string(),
     retryable: z.boolean(),
+    /** Normalized cause when a failed target recorded one. */
+    reason: LodyFailureReasonSchema.optional(),
+    /** Redacted provider text for the failed turn, bounded by the producer. */
+    detail: z.string().optional(),
+    /** Reset instant for quota failures, as an ISO timestamp. */
+    resetAt: z.string().optional(),
+    /** The failed assistant Turn when one was recorded before the failure. */
+    assistantTurnId: z.string().optional(),
   })
   .strict();
 
