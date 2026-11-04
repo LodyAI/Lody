@@ -210,7 +210,11 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   hydrates full files through the same verified cache. Ordinary remote blobs use
   bounded IndexedDB; protected/local blobs stay in memory. Opaque file generations
   invalidate individual entries even if line counts stay equal; comparison-base
-  changes and the first publication after restart invalidate changed paths.
+  changes and the first publication after restart invalidate changed paths. Opens
+  revalidate metadata even with unchanged index hints. Writer diff activity separately
+  renews index publication; Guest reads remain pure. Hunk-budget overflow falls back
+  to full blobs. Expired context loaders renew once and recompute hunk coordinates
+  when the file changed; partial loaders stay out of the immutable turn cache.
   Older machines keep the existing RPCs. See the
   [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md)
   and [protocol/privacy draft](../../specs/remote-diff-delivery.md).

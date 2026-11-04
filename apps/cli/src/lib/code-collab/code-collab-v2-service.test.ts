@@ -1,4 +1,5 @@
 import { gunzipSync } from 'node:zlib';
+import { writeFileSync } from 'node:fs';
 import { symlink, utimes } from 'node:fs/promises';
 import { encodeSessionFilePath } from '@lody/shared';
 import { createHash } from 'node:crypto';
@@ -278,10 +279,101 @@ describe('CodeCollabV2Service text RPC boundary', () => {
           })
         ).toMatchObject({
           status: 'ok',
-          entries: [{ status: 'too_large', base: null, head: null }],
+          entries: [{ status: 'ok', base: expect.any(Object), head: expect.any(Object) }],
         });
+        // A 350-line replacement also exceeds the edit budget, despite a small patch.
+        await writeFile(
+          path.join(workspaceRoot, 'large.txt'),
+          before
+            .split('\n')
+            .map((line, i) => (i < 350 ? line.replace('line', 'changed') : line))
+            .join('\n')
+        );
+        const fallback = await service.openDiffManifest(request, {
+          plane: 'remote',
+          measureResponse: async (value) => Buffer.byteLength(JSON.stringify(value)),
+        });
+        if (fallback.status !== 'ok' || !fallback.entries[0]?.head)
+          throw new Error('Expected blobs.');
+        expect(fallback.entries[0].status).toBe('ok');
+        expect(fallback.entries[0].hunks).toBeUndefined();
+        const body = await service.readBlob({
+          sessionId: SESSION_ID,
+          key: fallback.entries[0].head.key,
+          offset: 0,
+          length: 512 * 1024,
+        });
+        expect(gunzipSync(Buffer.from(body.data, 'base64')).toString()).toBe(
+          await readFile(path.join(workspaceRoot, 'large.txt'), 'utf8')
+        );
         expect(activeWorkspaceWatchCount(service)).toBe(0);
       } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('uses the same disk snapshot for remote hunk coordinates and content identity', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      const before = Array.from({ length: 2000 }, (_, i) => `line ${i} ${'x'.repeat(125)}\n`).join(
+        ''
+      );
+      const first = before.replace('line 500 ', 'first500 ');
+      const later = before.replace('line 1000 ', 'later1000 ');
+      await writeFile(path.join(workspaceRoot, 'race.txt'), before);
+      await gitCommitAll(workspaceRoot, 'base');
+      await writeFile(path.join(workspaceRoot, 'race.txt'), first);
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        readOnly: true,
+      });
+      const registry = (
+        service as unknown as {
+          diffBlobs: {
+            issue: (session: string, key: string, handle: { source: { kind: string } }) => void;
+          };
+        }
+      ).diffBlobs;
+      const issue = registry.issue.bind(registry);
+      const spy = vi.spyOn(registry, 'issue').mockImplementation((session, key, handle) => {
+        issue(session, key, handle);
+        if (handle.source.kind === 'disk')
+          writeFileSync(path.join(workspaceRoot, 'race.txt'), later);
+      });
+      try {
+        const result = await service.openDiffManifest(
+          { sessionId: SESSION_ID, path: 'race.txt' },
+          {
+            plane: 'remote',
+            measureResponse: async (value) => Buffer.byteLength(JSON.stringify(value)),
+          }
+        );
+        expect(result).toMatchObject({
+          status: 'ok',
+          entries: [
+            { head: { key: digestText(first) }, hunks: expect.stringContaining('+first500 ') },
+          ],
+        });
+        if (result.status !== 'ok') throw new Error('Expected manifest.');
+        expect(result.entries[0]?.hunks).not.toContain('+later1000 ');
+        // Wire envelope pressure also falls back to blobs without losing availability.
+        const reduced = await service.openDiffManifest(
+          { sessionId: SESSION_ID, path: 'race.txt' },
+          {
+            plane: 'remote',
+            measureResponse: async (value) =>
+              JSON.stringify(value).includes('hunks') ? 600_000 : 1000,
+          }
+        );
+        if (reduced.status !== 'ok') throw new Error('Expected manifest.');
+        expect(reduced.entries[0]).toMatchObject({
+          status: 'ok',
+          head: { key: digestText(later) },
+        });
+        expect(reduced.entries[0]?.hunks).toBeUndefined();
+      } finally {
+        spy.mockRestore();
         service.dispose();
       }
     });
@@ -1559,6 +1651,21 @@ describe('CodeCollabV2Service openAllChangesDiff', () => {
       expect(result.base.length).toBeGreaterThan(0);
       expect(result.truncated).toBe(false);
 
+      const manifest = await service.openDiffManifest({ sessionId: SESSION_ID });
+      expect(manifest.status).toBe('ok');
+      if (manifest.status !== 'ok') throw new Error('Expected manifest.');
+      expect(manifest.entries.map((entry) => entry.path).toSorted()).toEqual([
+        'gone.txt',
+        'tracked.txt',
+        'untracked.txt',
+      ]);
+      expect(manifest.entries.find((entry) => entry.path === 'gone.txt')).toMatchObject({
+        status: 'ok',
+        base: { key: expect.any(String) },
+        head: null,
+      });
+      const single = await service.openDiffManifest({ sessionId: SESSION_ID, path: 'gone.txt' });
+      expect(single).toMatchObject({ status: 'ok', entries: [{ status: 'ok', head: null }] });
       const byPath = new Map(result.entries.map((entry) => [entry.path, entry]));
 
       const modified = byPath.get('tracked.txt');

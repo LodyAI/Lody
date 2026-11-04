@@ -93,7 +93,7 @@ const isReadyFileDiffData = (
 export const isCacheableResolvedFileDiffData = (
   data: FileDiffData
 ): data is Extract<FileDiffData, { status: 'ready' | 'ready-parsed' }> =>
-  data.status === 'ready' || data.status === 'ready-parsed';
+  data.status === 'ready' || (data.status === 'ready-parsed' && !data.loadDiffFiles);
 
 const waitForDiffLoadSlot = async (): Promise<void> => {
   if (typeof window === 'undefined') {

@@ -8,6 +8,7 @@ import type { SessionId } from '@lody/shared';
 import { useSessionConversationDiffData } from '../src/components/sessions/use-session-conversation-diff-data';
 import type { SessionConversationDiffMode } from '../src/components/sessions/use-session-conversation-diff-data';
 import type { SessionFileProvider } from '../src/lib/session-file-provider';
+import { manifestEntryToDiff } from '../src/lib/diff-blob-client';
 import { useSessionAllChangesDiffData } from '../src/components/sessions/use-session-all-changes-diff-data';
 
 let root: Root | null = null;
@@ -31,6 +32,62 @@ afterEach(() => {
 });
 
 describe('useSessionConversationDiffData', () => {
+  it('rebinds a historical partial diff to the current runtime after reopening a workspace', async () => {
+    const paths = ['runtime-bound.ts'];
+    const checkpoints = [
+      {
+        filePath: paths[0],
+        add: 1,
+        del: 1,
+        cc: { v: 1 as const, fileId: 'runtime-bound', opId: '2:1', baseOpId: '1:1' },
+      },
+    ];
+    let retired = false;
+    const makeProvider = (old: boolean) =>
+      createDiffProvider(async () =>
+        manifestEntryToDiff(
+          {
+            path: paths[0],
+            status: 'ok',
+            base: { key: `sha256:${'1'.repeat(64)}`, rawBytes: 7, format: { encoding: 'utf8' } },
+            head: { key: `sha256:${'2'.repeat(64)}`, rawBytes: 6, format: { encoding: 'utf8' } },
+            hunks: '--- runtime-bound.ts\n+++ runtime-bound.ts\n@@ -1 +1 @@\n-before\n+after\n',
+          },
+          async (blob) => {
+            if (old && retired) throw new Error('Retired workspace runtime');
+            return new TextEncoder().encode(blob.key.includes('1111') ? 'before\n' : 'after\n');
+          }
+        )
+      );
+    let state: ReturnType<typeof useSessionConversationDiffData> | undefined;
+    const props = {
+      mode: 'conversation' as const,
+      filePaths: paths,
+      loadFilePaths: paths,
+      fileDiffs: checkpoints,
+      onUpdate: (next: ReturnType<typeof useSessionConversationDiffData>) => {
+        state = next;
+      },
+    };
+    render(<DiffDataHarness {...props} fileProvider={makeProvider(true)} />);
+    await flushMicrotasks();
+    const first = state?.resolvedByPath[paths[0]];
+    expect(first?.status).toBe('ready-parsed');
+    act(() => root!.unmount());
+    root = null;
+    container?.remove();
+    container = null;
+    retired = true;
+    render(<DiffDataHarness {...props} fileProvider={makeProvider(false)} />);
+    await flushMicrotasks();
+    const current = state?.resolvedByPath[paths[0]];
+    expect(current).not.toBe(first);
+    if (current?.status !== 'ready-parsed' || !current.loadDiffFiles)
+      throw new Error('Expected current loader.');
+    expect(await current.loadDiffFiles(current.fileDiff)).toMatchObject({
+      newFile: { contents: 'after\n' },
+    });
+  });
   it('cancels hidden page sequences without publishing their late result and permits reopening', async () => {
     const held = createDeferred<Awaited<ReturnType<SessionFileProvider['getDiff']>>>();
     let signal: AbortSignal | undefined;
@@ -175,7 +232,7 @@ describe('useSessionConversationDiffData', () => {
     });
   });
   it('refetches when the All Changes scope changes and renders the returned uncommitted file set', async () => {
-    const paths = ['committed.ts', 'worktree.ts'];
+    const paths = ['stale-index.ts'];
     const provider = createDiffProvider(async (path) => ({
       status: 'ready',
       path,
@@ -214,6 +271,7 @@ describe('useSessionConversationDiffData', () => {
     render(<Harness scope="branch" />);
     await flushMicrotasks();
     expect(state?.base).toBe('base');
+    expect(state?.normalizedPaths).toEqual(['committed.ts', 'worktree.ts']);
 
     rerender(<Harness scope="uncommitted" />);
     await flushMicrotasks();

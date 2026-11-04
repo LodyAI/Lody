@@ -29,8 +29,9 @@ clear those caches. A cache hit never establishes current authorization or file
 freshness; the live surface must have admission and current manifest identity.
 
 Remote responses have an encoded page budget. Large files may start as partial
-patches, with full verified files loaded when the user expands context. Oversized
-content remains an explicit unavailable/statistics entry. Older machines and
+patches, with full verified files loaded when the user expands context. A patch
+that exceeds its computation or wire budget falls back to full blob reads; only
+content exceeding the raw text cap becomes an unavailable/statistics entry. Older machines and
 clients retain their existing diff methods; support is negotiated by capability,
 never inferred from a CLI version.
 

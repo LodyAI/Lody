@@ -1401,7 +1401,7 @@ export class CodeCollabV2Service {
       ) {
         if (entries.length) break;
         if (entry.hunks !== undefined) {
-          entry = { ...entry, status: 'too_large', base: null, head: null };
+          entry = { ...entry };
           delete entry.hunks;
           if (
             (await context.measureResponse({ ...candidate, entries: [entry] })) >
@@ -1473,6 +1473,7 @@ export class CodeCollabV2Service {
       status: 'ok' | 'missing' | 'binary' | 'too_large';
       blob: CodeCollabDiffBlob | null;
       digest?: string;
+      bytes?: Buffer;
     };
     const describe = async (side: 'old' | 'new'): Promise<Side> => {
       let source: DiffBlobSource;
@@ -1549,7 +1550,11 @@ export class CodeCollabV2Service {
         try {
           bytes = Buffer.from((await stableReadFile(resolved, maxRawBytes)).bytes);
         } catch (error) {
-          if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR')
+          if (
+            errorCode(error) === 'ENOENT' ||
+            errorCode(error) === 'ENOTDIR' ||
+            (isCodeCollabV2ServiceError(error) && error.code === 'file_not_found')
+          )
             return { status: 'missing', blob: null };
           if (isCodeCollabV2ServiceError(error) && error.code === 'too_large')
             return { status: 'too_large', blob: null };
@@ -1577,6 +1582,7 @@ export class CodeCollabV2Service {
       return {
         status: 'ok',
         digest: digestBytes(bytes),
+        bytes,
         blob: { key, rawBytes: bytes.length, format },
       };
     };
@@ -1602,8 +1608,10 @@ export class CodeCollabV2Service {
       ],
     };
     if (status !== 'ok') {
-      entry.base = null;
-      entry.head = null;
+      if (status !== 'not_changed') {
+        entry.base = null;
+        entry.head = null;
+      }
       return entry;
     }
     if (
@@ -1611,26 +1619,30 @@ export class CodeCollabV2Service {
       (base.blob?.rawBytes ?? 0) + (head.blob?.rawBytes ?? 0) >
         CODE_COLLAB_DIFF_BLOB_LIMITS.remoteHunkBytes
     ) {
-      const load = async (blob: CodeCollabDiffBlob | null) =>
-        blob ? decodeUtf8(await this.readDiffBlobBytes(request.sessionId, blob.key, resolved)) : '';
+      // Hashes and hunks must describe the same read, even if disk changes now.
+      const load = async (side: Side) =>
+        side.blob
+          ? decodeUtf8(
+              side.bytes ??
+                (await this.readDiffBlobBytes(request.sessionId, side.blob.key, resolved))
+            )
+          : '';
       const patch = createTwoFilesPatch(
         resolved.workspacePath,
         resolved.workspacePath,
-        await load(base.blob),
-        await load(head.blob),
+        await load(base),
+        await load(head),
         undefined,
         undefined,
         { context: 3, maxEditLength: 600 }
       );
       // Bound computation as well as wire bytes for large wholesale rewrites.
+      // A hunk budget limits this representation, not availability of valid blobs.
       if (
-        patch === undefined ||
-        Buffer.byteLength(patch) > CODE_COLLAB_DIFF_BLOB_LIMITS.maxPatchBytes
-      ) {
-        entry.status = 'too_large';
-        entry.base = null;
-        entry.head = null;
-      } else entry.hunks = patch;
+        patch !== undefined &&
+        Buffer.byteLength(patch) <= CODE_COLLAB_DIFF_BLOB_LIMITS.maxPatchBytes
+      )
+        entry.hunks = patch;
     }
     return entry;
   }

@@ -85,9 +85,9 @@ Organization queries require matching authenticated sessions.
   readonly regardless of the index; saves stay inside the session workspace.
 - Validate file-index rows with shared Zod helpers; preserve structured lazy-directory
   entries so `@file` completion initializes directories before refreshing results.
-- Diff blobs require negotiated capability, verified bytes and bounded caches.
-  Protected/local blobs never persist. Hidden diffs cancel paging.
-- Turn diffs require the CLI-local store. Cross-render read permits release
+- Diff blobs require negotiation, current manifests, verified bytes and bounded caches.
+  Protected/local blobs never persist; hidden diffs cancel paging.
+- Turn diffs require the CLI-local store. Cross-render permits release
   only on settlement.
 
 

@@ -68,10 +68,15 @@ daemon 私有的逐路径磁盘身份、大小、mtime、ctime，以及非 Git �
 保留所有 token：如果不持久化基线指纹，就可能漏掉停机期间的基线移动或等统计修改。
 接受这一次元数据刷新，避免仅为省去它而增加新的持久化元数据约定。
 
-共享文件索引资源会发布仅 generation 变化的更新。重建 provider 时，generation 覆盖完整
-才复用有效描述并只请求变化或缺失条目，否则重读分页清单。描述缓存最多保留 128 条。
-All Changes 正文延后到文件进入视野或被展开；取消后，正在执行的 RPC 仍持有并发许可，
-直到原请求实际结束。
+共享文件索引资源会发布仅 generation 变化的更新，使实时视图刷新。主机监听过期后，
+索引 token 不能证明文件新鲜度，因此每次加载 All Changes 都重新校验分页清单；批次描述
+只供可见文件消费一次，之后重新打开时校验元数据并复用已验证的正文。待消费描述最多
+128 条。即使索引陈旧，也以机器返回的文件集合驱动列表和视野加载。这会增加元数据传输，但不重传未变正文。
+
+写入者的 diff 活动单独续用已有 `init-directory` 发布流程，每五分钟最多一次，失败后
+至少间隔五秒，以保留十分钟的监听寿命。Guest 读取跳过此动作。激活是有错误观测的后台
+工作，发布失败不阻塞正文；两个 blob RPC 仍为纯读取。provider runtime 内合并并发激活，
+owner 或根目录变化时更换 runtime。取消后，RPC 并发许可仍保留到原请求实际结束。
 
 ### 缓存与远程大文件
 
@@ -82,10 +87,15 @@ All Changes 正文延后到文件进入视野或被展开；取消后，正在�
 解析后 diff 的缓存键包含两侧内容键及路径。
 
 两侧原始大小合计超过 256 KiB 时，远程清单携带三行上下文的 unified patch，最多 256 KiB。
-计算也限制在 600 行编辑以内，更大的整段重写仅显示统计。本地清单仍返回完整描述，不应用
-远程 hunk 策略。Pierre 将 patch 解析为部分元数据，第一次展开上下文时再取得完整且校验通过
+计算也限制在 600 行编辑以内，超过计算、patch 或编码页预算时回退完整 blob；只有原始正文
+超限才不可用。本地清单仍返回完整描述，不应用远程 hunk 策略。Pierre 将 patch 解析为部分元数据，第一次展开上下文时再取得完整且校验通过
 的文件。展开操作有独立的读取 controller，文件块隐藏或卸载后不再启动后续分页；初始清单
 与正文读取也在界面隐藏时停止后续分页。本次不扩展渲染器或 worker 架构。
+
+哈希与 hunk 来自同一次捕获的字节。延后展开遇到过期 handle 时重新签发一次；若实时内容
+已变化，先从新的完整且已验证的文件重算行号，再交给 Pierre 补全上下文，绝不能把旧行号
+套到新正文。恢复原状的文件即使标为 `not_changed` 也保留可读描述。绑定 runtime 的部分
+loader 不进入跨工作区的不可变 turn 缓存；已经完整读取的 turn 快照仍可保留。
 
 ## 已核实的传输限制
 
@@ -128,7 +138,7 @@ All Changes 正文延后到文件进入视野或被展开；取消后，正在�
 
 - `apps/cli/src/lib/code-collab/code-collab-v2-service.test.ts`：真实 SHA-1/SHA-256 Git
   和磁盘字节、BOM/CRLF/Unicode、会话绑定、路径逃逸、过期、分页预算、基线移动、历史与非 Git
-  worker 读取、本地/远程 hunk 策略、等统计失效及不同文件根的基线。
+  worker 读取、本地/远程 hunk 策略、等统计失效、不同文件根的基线、文件删除、捕获时编辑及补丁预算回退。
 - `packages/turn-diff-store/tests/sqlite-store.test.ts`：只读描述与字节选择、owner 隔离、
   保留期、完整重组与 worker 消息。CLI 打包产物 `turn-diff-store-worker.js` 的独立探针也只读打开已有数据库，按描述精确还原 BOM、CRLF 和 Unicode 字节。早期未修改 store 的探针还精确还原了四个 chunk 中的
   400,020 UTF-8 字节，检查完整哈希、缺失/空文件与 GC；这是复用 store 而不新增快照表示的依据。
@@ -137,10 +147,10 @@ All Changes 正文延后到文件进入视野或被展开；取消后，正在�
 - `packages/loro-streams-rpc/tests/machine-rpc-server.test.ts` 与 `tests/e2ee-native.test.ts`：
   实际 owner envelope 计量、错误 owner 拒绝，以及真实签名 Guest 读权限和禁止保存。
 - `packages/components/tests/code-collab-session-file-provider-v2.test.ts`：清单阶段正文为零，
-  第一次打开传两侧，再次打开没有新增正文字节，单 generation 更新只请求该描述和新 head；
+  第一次打开传两侧，再次打开没有新增正文字节，索引 generation 未更新时也重新校验元数据且只传输新 head；
   还覆盖损坏、取消、加密内存策略、IndexedDB 保留与淘汰、存储不可用。
 - `packages/components/tests/e2e/diff-viewer-large-diff-performance.spec.ts`：真实 panel/Pierre
-  链路在零 blob 流量下显示部分 hunks，展开后补齐完整上下文。
+  链路在零 blob 流量下显示部分 hunks，展开后补齐完整上下文；陈旧索引不能隐藏清单文件或排除其视野加载。
 
 这些是确定性的合成数据、本地行为验证，不是生产带宽、延迟、移动设备内存或托管部署基准。
 不支持 capability 的机器仍可使用旧接口。相关决策：

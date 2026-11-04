@@ -445,6 +445,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
         oldText=""
         newText=""
         preparsedDiff={data.fileDiff}
+        responsiveSplit
         options={loadDiffFiles ? { loadDiffFiles } : undefined}
         preparsedOldTextLength={data.oldTextLength}
         preparsedNewTextLength={data.newTextLength}
@@ -659,17 +660,16 @@ function SessionConversationDiffPanelImpl({
     [focusFilePath, normalizedInputPaths]
   );
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const { loadPaths, registerPath, anchorTarget } = useDiffViewport({
-    active,
+  const isBaseMode = mode === 'base';
+  const conversationViewport = useDiffViewport({
+    active: active && !isBaseMode,
     paths: normalizedInputPaths,
     priorityPath: focusedLoadPath,
     scrollContainerRef: viewportRef,
   });
-  const visiblePaths = useMemo(() => new Set(loadPaths), [loadPaths]);
   // "All Changes" (base) mode loads every file's diff with one batched RPC; conversation/turn
   // mode keeps the per-file loader. Both hooks are called (rules of hooks) but only the active
   // one fetches — the other is gated inert via `enabled`.
-  const isBaseMode = mode === 'base';
   const conversationDiffData = useSessionConversationDiffData({
     sessionId,
     turnId,
@@ -678,7 +678,7 @@ function SessionConversationDiffPanelImpl({
     fileDiffsPending,
     mode,
     priorityFilePath: focusedLoadPath,
-    loadFilePaths: loadPaths,
+    loadFilePaths: conversationViewport.loadPaths,
     loadPaused: isUserScrolling,
     fileProvider,
     fileProviderPending,
@@ -687,13 +687,17 @@ function SessionConversationDiffPanelImpl({
   const allChangesDiffData = useSessionAllChangesDiffData({
     sessionId,
     filePaths: normalizedInputPaths,
-    loadFilePaths: loadPaths,
     focusPath: focusedLoadPath,
     fileProvider,
     fileProviderPending,
     enabled: active && isBaseMode,
     scope: allChangesScope ?? 'branch',
+    viewport: { scrollContainerRef: viewportRef, priorityPath: focusFilePath ?? null },
   });
+  const { loadPaths, registerPath, anchorTarget } = isBaseMode
+    ? allChangesDiffData.viewport
+    : conversationViewport;
+  const visiblePaths = useMemo(() => new Set(loadPaths), [loadPaths]);
   const { cacheKey, normalizedPaths, resolvedByPath, isDiffUnavailable } = isBaseMode
     ? allChangesDiffData
     : conversationDiffData;

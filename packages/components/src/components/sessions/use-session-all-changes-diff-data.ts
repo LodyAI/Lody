@@ -8,6 +8,7 @@ import {
   useSessionConversationDiffData,
 } from './use-session-conversation-diff-data';
 import { getSessionDiffErrorMessage } from '@/lib/session-diff-diagnostics';
+import { useDiffViewport } from './use-diff-viewport';
 
 const RETRY_DELAY_MS = 800;
 const EMPTY_PATHS: string[] = [];
@@ -42,6 +43,7 @@ export function useSessionAllChangesDiffData({
   fileProviderPending = false,
   enabled = true,
   scope = 'branch',
+  viewport,
 }: {
   sessionId: SessionId;
   filePaths: string[];
@@ -51,6 +53,7 @@ export function useSessionAllChangesDiffData({
   fileProviderPending?: boolean;
   enabled?: boolean;
   scope?: CodeCollabAllChangesScope;
+  viewport?: Omit<Parameters<typeof useDiffViewport>[0], 'active' | 'paths'>;
 }): {
   cacheKey: string | null;
   normalizedPaths: string[];
@@ -62,6 +65,7 @@ export function useSessionAllChangesDiffData({
   base: string | null;
   unavailableScopeReason: 'not_a_git_worktree' | 'no_commits' | null;
   unavailableMessage: string | null;
+  viewport: ReturnType<typeof useDiffViewport>;
 } {
   const normalizedInputPaths = useMemo(
     () => Array.from(new Set(filePaths.filter(Boolean))).toSorted((a, b) => a.localeCompare(b)),
@@ -91,17 +95,21 @@ export function useSessionAllChangesDiffData({
       ? batch
       : null;
   const normalizedPaths = useMemo(
-    () =>
-      scope === 'uncommitted' && currentBatch !== null
-        ? currentBatch.entryPaths
-        : normalizedInputPaths,
-    [currentBatch, normalizedInputPaths, scope]
+    () => (currentBatch !== null ? currentBatch.entryPaths : normalizedInputPaths),
+    [currentBatch, normalizedInputPaths]
   );
+  const unusedViewportRef = useRef<HTMLDivElement | null>(null);
+  const batchViewport = useDiffViewport({
+    active: enabled && viewport !== undefined,
+    paths: normalizedPaths,
+    priorityPath: viewport?.priorityPath ?? focusPath ?? null,
+    scrollContainerRef: viewport?.scrollContainerRef ?? unusedViewportRef,
+  });
   const deferredData = useSessionConversationDiffData({
     sessionId,
     mode: 'base',
     filePaths: currentBatch?.deferred ?? EMPTY_PATHS,
-    loadFilePaths,
+    loadFilePaths: viewport ? batchViewport.loadPaths : loadFilePaths,
     priorityFilePath: focusPath,
     fileProvider,
     fileProviderPending,
@@ -208,7 +216,6 @@ export function useSessionAllChangesDiffData({
         return;
       }
 
-      const entryPathSet = new Set(result.entries.map((entry) => entry.path));
       const deferredPaths: string[] = [];
       const next: Record<string, FileDiffData> = {};
       for (const entry of result.entries) {
@@ -218,21 +225,7 @@ export function useSessionAllChangesDiffData({
         }
         next[entry.path] = sessionFileProviderDiffResultToFileDiffData(entry.diff);
       }
-      // Branch mode reconciles expected paths the batch did not mention so `hasAllResolved`
-      // can complete (the list can briefly disagree with git). Uncommitted mode renders the
-      // batch's own file set, so committed-only paths must not be added.
-      if (scope === 'branch') {
-        for (const path of normalizedInputPaths) {
-          if (next[path] !== undefined || entryPathSet.has(path)) {
-            continue;
-          }
-          next[path] = sessionFileProviderDiffResultToFileDiffData({
-            status: 'unavailable',
-            path,
-            reason: 'metadata-only',
-          });
-        }
-      }
+      // The machine's current file set is authoritative; the synced index is a hint.
       if (cancelled) return;
       publish(next, deferredPaths, { base: result.base });
     };
@@ -280,5 +273,6 @@ export function useSessionAllChangesDiffData({
     base: currentBatch?.base ?? null,
     unavailableScopeReason: currentBatch?.unavailableScopeReason ?? null,
     unavailableMessage,
+    viewport: batchViewport,
   };
 }

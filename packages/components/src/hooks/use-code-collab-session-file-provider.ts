@@ -411,16 +411,12 @@ export function useCodeCollabSessionFileProvider(
   useEffect(
     () => () => {
       providerTextState.diffBlobCache.clear();
-      providerTextState.diffManifests.clear();
-      providerTextState.diffManifestScopes.clear();
     },
     [providerTextState]
   );
   useEffect(() => {
     if (options.enabled === false || !indexAllowed) {
       providerTextState.diffBlobCache.clear();
-      providerTextState.diffManifests.clear();
-      providerTextState.diffManifestScopes.clear();
     }
   }, [providerTextState, options.enabled, indexAllowed]);
   const role = options.requestedRole ?? 'write';
@@ -486,9 +482,56 @@ export function useCodeCollabSessionFileProvider(
         ? { path: request.path }
         : { path: request.path, rootId: request.rootId };
     };
+    let nextIndexActivation = 0;
+    let indexActivation: Promise<void> | undefined;
+    const activateDiffIndex = async () => {
+      // Index publication is an existing writer action, separate from pure blob reads.
+      // Repeated diff activity renews its ten-minute watch without scanning per file.
+      if (role === 'read' || Date.now() < nextIndexActivation) return;
+      if (!indexActivation) {
+        nextIndexActivation = Date.now() + 5_000;
+        indexActivation = (async () => {
+          const roots = [undefined, ...mounts.map((mount) => mount.rootId)];
+          const results = await Promise.allSettled(
+            roots.map((rootId) =>
+              runtime.requestCodeCollabInitDirectory(
+                machineId,
+                { sessionId, path: '.', ...(rootId ? { rootId } : {}) },
+                { ownerSessionId }
+              )
+            )
+          );
+          if (
+            results.every(
+              (result) => result.status === 'fulfilled' && result.value?.status === 'ok'
+            )
+          )
+            nextIndexActivation = Date.now() + 5 * 60_000;
+          else
+            warnCodeCollab('diff-index-activation', {
+              sessionId,
+              message: 'Index activation failed.',
+            });
+        })().finally(() => {
+          nextIndexActivation = Math.max(nextIndexActivation, Date.now() + 5_000);
+          indexActivation = undefined;
+        });
+      }
+      await indexActivation;
+    };
     return {
       sessionId,
-      diffBlobTransportOptions: async () => await runtime.getDiffBlobTransportOptions(machineId),
+      diffBlobTransportOptions: async () => {
+        const config = await runtime.getDiffBlobTransportOptions(machineId);
+        if (config.supported)
+          void activateDiffIndex().catch((error: unknown) =>
+            warnCodeCollab('diff-index-activation', {
+              sessionId,
+              ...describeCodeCollabError(error),
+            })
+          );
+        return config;
+      },
       openDiffManifest: async (request) => {
         const selected = request.path ?? request.focusPath;
         const target = selected === undefined ? undefined : at(selected);
@@ -649,6 +692,7 @@ export function useCodeCollabSessionFileProvider(
     machineId,
     mounts,
     options.requestedByUserId,
+    role,
     ownerSessionId,
     runtime,
     sessionId,

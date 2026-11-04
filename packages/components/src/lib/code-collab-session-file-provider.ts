@@ -182,8 +182,6 @@ type SaveConflictCacheEntry = {
 
 export type CodeCollabSessionFileProviderTextState = {
   readonly diffBlobCache: DiffBlobCache;
-  readonly diffManifests: Map<string, { entry: CodeCollabDiffManifestEntry; version?: string }>;
-  readonly diffManifestScopes: Map<string, string>;
   readonly openCache: CodeCollabSessionOpenTextCache;
   readonly conflictCache: Map<string, SaveConflictCacheEntry>;
   readonly textSubscribers: Map<string, Set<(text: string) => void>>;
@@ -254,8 +252,6 @@ export function createCodeCollabSessionFileProviderTextState(
 ): CodeCollabSessionFileProviderTextState {
   return {
     diffBlobCache: new DiffBlobCache(),
-    diffManifests: new Map(),
-    diffManifestScopes: new Map(),
     openCache: new CodeCollabSessionOpenTextCache(options.maxOpenTextCacheBytes),
     conflictCache: new Map<string, SaveConflictCacheEntry>(),
     textSubscribers: new Map<string, Set<(text: string) => void>>(),
@@ -299,9 +295,6 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
   private readonly runtime?: CodeCollabSessionFileProviderRuntime;
   private readonly diffBlobCache: DiffBlobCache;
   private readonly diffCacheEpoch: number;
-  private readonly generations: Readonly<Record<string, string>>;
-  private readonly diffManifests: CodeCollabSessionFileProviderTextState['diffManifests'];
-  private readonly diffManifestScopes: Map<string, string>;
   private readonly diffManifestEntries = new Map<string, CodeCollabDiffManifestEntry>();
   private readonly role: CodeCollabRole;
   private readonly sourceState: CodeCollabFileSourceState;
@@ -326,9 +319,6 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     const textState = options.textState ?? createCodeCollabSessionFileProviderTextState();
     this.diffBlobCache = textState.diffBlobCache;
     this.diffCacheEpoch = this.diffBlobCache.epoch;
-    this.diffManifests = textState.diffManifests;
-    this.diffManifestScopes = textState.diffManifestScopes;
-    this.generations = options.generations ?? {};
     this.openCache = textState.openCache;
     this.conflictCache = textState.conflictCache;
     this.textSubscribers = textState.textSubscribers;
@@ -809,26 +799,15 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     };
   }
 
-  private rememberDiffManifest(
-    scope: string,
-    entry: CodeCollabDiffManifestEntry,
-    version?: string
-  ): void {
+  private rememberDiffManifest(scope: string, entry: CodeCollabDiffManifestEntry): void {
     if (this.diffCacheEpoch !== this.diffBlobCache.epoch) return;
     const key = JSON.stringify([scope, entry.path]);
-    this.diffManifests.delete(key);
-    this.diffManifests.set(key, { entry, version });
     this.diffManifestEntries.delete(key);
     this.diffManifestEntries.set(key, entry);
     while (this.diffManifestEntries.size > 128) {
       const oldest = this.diffManifestEntries.keys().next().value;
       if (oldest === undefined) break;
       this.diffManifestEntries.delete(oldest);
-    }
-    while (this.diffManifests.size > 128) {
-      const oldest = this.diffManifests.keys().next().value;
-      if (oldest === undefined) break;
-      this.diffManifests.delete(oldest);
     }
   }
 
@@ -846,14 +825,10 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         signal?.throwIfAborted();
-        const cached = this.diffManifests.get(entryKey);
-        let entry =
-          turnId === undefined
-            ? (this.diffManifestEntries.get(entryKey) ??
-              (cached?.version !== undefined && cached.version === this.generations[path]
-                ? cached.entry
-                : undefined))
-            : undefined;
+        // A batch descriptor is consumed once. Later opens revalidate metadata;
+        // Flock generations cannot prove freshness after a host watch expires.
+        let entry = turnId === undefined ? this.diffManifestEntries.get(entryKey) : undefined;
+        this.diffManifestEntries.delete(entryKey);
         if (!entry) {
           const manifest = await runtime.openDiffManifest({
             path,
@@ -873,8 +848,6 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
               message: manifest.message ?? manifest.reason,
             };
           entry = manifest.entries[0];
-          if (entry && turnId === undefined)
-            this.rememberDiffManifest(scope ?? 'branch', entry, this.generations[path]);
           if (!entry) return { status: 'unavailable', path, reason: 'metadata-only' };
         }
         const selected = entry;
@@ -889,11 +862,25 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
               persist: config.persist,
               read: async (key, offset, length) =>
                 (await runtime.readDiffBlob?.(key, offset, length, selected.path)) ?? null,
-            })
+            }),
+          async (hydrationSignal) => {
+            this.diffManifestEntries.delete(entryKey);
+            const renewed = await runtime.openDiffManifest!({
+              path,
+              ...(turnId === undefined ? {} : { turnId }),
+              ...(scope === undefined ? {} : { scope }),
+            });
+            hydrationSignal?.throwIfAborted();
+            if (!renewed || renewed.status !== 'ok' || !renewed.entries[0])
+              throw new DiffBlobReadError(
+                renewed?.status === 'error' ? renewed.code : 'stale',
+                'Diff manifest could not be renewed.'
+              );
+            return renewed.entries[0];
+          }
         );
       } catch (error) {
         this.diffManifestEntries.delete(entryKey);
-        this.diffManifests.delete(entryKey);
         if (
           error instanceof DiffBlobReadError &&
           ['stale', 'digest_mismatch'].includes(error.code) &&
@@ -919,56 +906,10 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     const runtime = this.runtime;
     if (!runtime?.openDiffManifest) throw new Error('Diff manifest transport is unavailable.');
     const scopeKey = scope ?? 'branch';
-    const indexedPaths = Object.keys(this.allChanges);
-    const canUpdateByPath =
-      scopeKey === 'branch' &&
-      this.diffManifestScopes.has(scopeKey) &&
-      indexedPaths.length > 0 &&
-      indexedPaths.every((path) => this.generations[path] !== undefined) &&
-      indexedPaths.some(
-        (path) =>
-          this.diffManifests.get(JSON.stringify([scopeKey, path]))?.version ===
-          this.generations[path]
-      );
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const entries: SessionFileAllChangesDiffEntry[] = [];
-        if (canUpdateByPath && attempt === 0) {
-          for (const path of indexedPaths) {
-            signal?.throwIfAborted();
-            const cached = this.diffManifests.get(JSON.stringify([scopeKey, path]));
-            let entry = cached?.version === this.generations[path] ? cached.entry : undefined;
-            if (!entry) {
-              const response = await runtime.openDiffManifest({ path });
-              signal?.throwIfAborted();
-              if (!response || response.status !== 'ok')
-                throw new DiffBlobReadError(
-                  response?.status === 'error' ? response.code : 'transient_io',
-                  'Diff manifest refresh failed.'
-                );
-              entry = response.entries[0];
-              if (!entry) throw new DiffBlobReadError('stale', 'Diff entry disappeared.');
-              this.rememberDiffManifest(scopeKey, entry, this.generations[path]);
-            }
-            entries.push({
-              path,
-              add: entry.add,
-              del: entry.del,
-              diff:
-                entry.status === 'ok'
-                  ? { status: 'deferred' }
-                  : await manifestEntryToDiff(entry, async () => {
-                      throw new Error('Unexpected body read.');
-                    }),
-            });
-          }
-          return {
-            status: 'ready',
-            base: this.diffManifestScopes.get(scopeKey) ?? 'diff-store',
-            entries,
-            truncated: false,
-          };
-        }
+        this.diffManifestEntries.clear();
         let cursor: string | undefined;
         let base: string | undefined;
         const seen = new Set<string>();
@@ -995,7 +936,7 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
             };
           base = result.base;
           for (const entry of result.entries) {
-            this.rememberDiffManifest(scopeKey, entry, this.generations[entry.path]);
+            this.rememberDiffManifest(scopeKey, entry);
             entries.push({
               path: entry.path,
               ...(entry.add === undefined ? {} : { add: entry.add }),
@@ -1015,8 +956,6 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
             seen.add(cursor);
           }
         } while (cursor);
-        if (this.diffCacheEpoch === this.diffBlobCache.epoch)
-          this.diffManifestScopes.set(scopeKey, base ?? 'diff-store');
         return { status: 'ready', entries, base: base ?? 'diff-store', truncated: false };
       } catch (error) {
         this.diffManifestEntries.clear();

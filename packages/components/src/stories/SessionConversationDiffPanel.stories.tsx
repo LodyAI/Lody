@@ -131,6 +131,9 @@ export const OpenFromChanges: Story = {
 export const ManyFiles: Story = {};
 export const FocusLastFile: Story = { args: { focusFilePath: paths.at(-1) } };
 export const AllChanges: Story = { args: { mode: 'base', turnId: 'all-changes' } };
+export const AllChangesStaleIndex: Story = {
+  args: { mode: 'base', turnId: 'all-changes', filePaths: ['stale-index.ts'] },
+};
 export const AllChangesScopeSwitch: Story = {
   args: {
     mode: 'base',

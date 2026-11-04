@@ -4,6 +4,7 @@ import { gzipSync } from 'node:zlib';
 import { IDBFactory } from 'fake-indexeddb';
 import { DiffBlobCache, DIFF_BLOB_CACHE_DB } from '../src/lib/diff-blob-cache';
 import { readDiffBlob } from '../src/lib/diff-blob-client';
+import { hydratePartialDiff } from '@pierre/diffs';
 import type { CodeCollabDiffManifestEntry, CodeCollabDiffBlobKey } from '@lody/shared';
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
@@ -169,7 +170,97 @@ function createRuntime(
 }
 
 describe('Content-addressed diff transport', () => {
-  it('loads bodies only on demand, reuses exact content, and refreshes only a changed generation', async () => {
+  it.each(['expired', 'edited', 'reverted'])(
+    'renews hydration handles with consistent context after %s',
+    async (mode) => {
+      const changed = mode === 'edited';
+      vi.stubGlobal('crypto', webcrypto);
+      vi.stubGlobal('Blob', NodeBlob);
+      try {
+        const blobs = new Map<CodeCollabDiffBlobKey, Buffer>();
+        const blob = (text: string) => {
+          const bytes = Buffer.from(text);
+          const key =
+            `sha256:${createHash('sha256').update(bytes).digest('hex')}` as CodeCollabDiffBlobKey;
+          blobs.set(key, bytes);
+          return { key, rawBytes: bytes.length, format: { encoding: 'utf8' as const } };
+        };
+        const before = Array.from({ length: 100 }, (_, i) => `line ${i}\n`).join('');
+        let after = before.replace('line 50', 'first50');
+        const base = blob(before);
+        let head = blob(after);
+        const authorized = new Set<CodeCollabDiffBlobKey>();
+        const provider = new CodeCollabSessionFileProvider({
+          runtime: createRuntime({
+            diffBlobTransportOptions: async () => ({
+              supported: true,
+              scope: 'synthetic',
+              persist: false,
+            }),
+            openDiffManifest: async () => {
+              authorized.add(base.key);
+              authorized.add(head.key);
+              return {
+                status: 'ok',
+                entries: [
+                  {
+                    path: 'a.ts',
+                    status: after === before ? 'not_changed' : 'ok',
+                    base,
+                    head,
+                    hunks: after.includes('later80')
+                      ? '--- a.ts\n+++ a.ts\n@@ -80,3 +80,3 @@\n line 79\n-line 80\n+later80\n line 81\n'
+                      : '--- a.ts\n+++ a.ts\n@@ -50,3 +50,3 @@\n line 49\n-line 50\n+first50\n line 51\n',
+                  },
+                ],
+                nextCursor: null,
+              };
+            },
+            readDiffBlob: async (key, offset) => {
+              if (!authorized.has(key)) return { status: 'error', code: 'stale' };
+              const bytes = blobs.get(key)!;
+              return {
+                offset,
+                length: bytes.length - offset,
+                totalBytes: bytes.length,
+                encoding: 'gzip-base64',
+                data: gzipSync(bytes.subarray(offset)).toString('base64'),
+              };
+            },
+          }),
+        });
+        const partial = await provider.getDiff('a.ts', changed ? undefined : 'immutable-turn');
+        if (partial.status !== 'ready-parsed' || !partial.loadDiffFiles)
+          throw new Error('Expected partial.');
+        authorized.clear(); // Same effect as handle TTL expiry or a daemon restart.
+        if (changed) {
+          after = before.replace('line 80', 'later80');
+          head = blob(after);
+        }
+        if (mode === 'reverted') {
+          after = before;
+          head = base;
+        }
+        const files = await partial.loadDiffFiles(partial.fileDiff);
+        hydratePartialDiff('merge', partial.fileDiff, files);
+        expect(files.newFile.contents).toBe(after);
+        expect(partial.fileDiff.additionLines.join('')).toBe(after);
+        const covers = (line: number) =>
+          partial.fileDiff.hunks.some(
+            (hunk) => hunk.additionStart <= line && hunk.additionStart + hunk.additionCount > line
+          );
+        if (mode === 'reverted') expect(partial.fileDiff.hunks).toHaveLength(0);
+        else expect(covers(changed ? 81 : 51)).toBe(true);
+        if (changed) expect(covers(51)).toBe(false);
+        expect(await provider.getDiff('a.ts')).toMatchObject({
+          status: mode === 'reverted' ? 'unavailable' : 'ready-parsed',
+        });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+  it('revalidates live metadata despite unchanged index generations and transfers only changed bodies', async () => {
     vi.stubGlobal('crypto', webcrypto);
     vi.stubGlobal('Blob', NodeBlob);
     try {
@@ -251,16 +342,14 @@ describe('Content-addressed diff transport', () => {
       await first.getDiff('a.ts');
       expect(sentBytes).toBe(firstBytes);
       current = blob('第二🙂\r\n');
-      const next = new CodeCollabSessionFileProvider({
-        ...options,
-        generations: { 'a.ts': '2', 'b.ts': '1' },
-      });
+      // The publisher can be offline or its watch expired; unchanged hints are not proof.
+      const next = new CodeCollabSessionFileProvider(options);
       const refreshed = await next.getAllChangesDiff();
       expect(refreshed).toMatchObject({
         status: 'ready',
         entries: [{ path: 'a.ts' }, { path: 'b.ts' }],
       });
-      expect(manifestRequests).toEqual([undefined, 'a.ts']);
+      expect(manifestRequests).toEqual([undefined, 'a.ts', undefined]);
       const changed = await next.getDiff('a.ts');
       expect(changed).toMatchObject({ status: 'ready', newSnapshot: { text: '第二🙂\r\n' } });
       expect(sentBytes).toBe(firstBytes + current.rawBytes);

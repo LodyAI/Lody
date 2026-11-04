@@ -1,4 +1,4 @@
-import { parsePatchFiles } from '@pierre/diffs';
+import { parseDiffFromFile, parsePatchFiles } from '@pierre/diffs';
 import {
   CODE_COLLAB_DIFF_BLOB_LIMITS,
   type CodeCollabDiffBlob,
@@ -111,7 +111,8 @@ export async function readDiffBlob(input: {
 
 export async function manifestEntryToDiff(
   entry: CodeCollabDiffManifestEntry,
-  read: (blob: CodeCollabDiffBlob, signal?: AbortSignal) => Promise<Uint8Array>
+  read: (blob: CodeCollabDiffBlob, signal?: AbortSignal) => Promise<Uint8Array>,
+  renew?: (signal?: AbortSignal) => Promise<CodeCollabDiffManifestEntry>
 ): Promise<SessionFileDiffResult> {
   const contentKey = JSON.stringify([entry.base?.key ?? null, entry.head?.key ?? null]);
   if (entry.status === 'not_changed' || entry.status === 'missing')
@@ -142,18 +143,46 @@ export async function manifestEntryToDiff(
       contentKey,
       oldTextLength: entry.base?.rawBytes ?? 0,
       newTextLength: entry.head?.rawBytes ?? 0,
-      loadDiffFiles: async (_diff, signal) => ({
-        oldFile: {
-          name: entry.path,
-          contents: await text(entry.base, signal),
-          cacheKey: entry.base ? `${entry.base.key}:${entry.path}` : undefined,
-        },
-        newFile: {
-          name: entry.path,
-          contents: await text(entry.head, signal),
-          cacheKey: entry.head ? `${entry.head.key}:${entry.path}` : undefined,
-        },
-      }),
+      loadDiffFiles: async (diff, signal) => {
+        let selected = entry;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const files = {
+              oldFile: {
+                name: selected.path,
+                contents: await text(selected.base, signal),
+                cacheKey: selected.base ? `${selected.base.key}:${selected.path}` : undefined,
+              },
+              newFile: {
+                name: selected.path,
+                contents: await text(selected.head, signal),
+                cacheKey: selected.head ? `${selected.head.key}:${selected.path}` : undefined,
+              },
+            };
+            signal?.throwIfAborted();
+            if (selected.base?.key !== entry.base?.key || selected.head?.key !== entry.head?.key) {
+              // Pierre hydrates in place and preserves hunk coordinates. Replace those
+              // coordinates before it hydrates a newly observed version of the file.
+              Object.assign(diff, parseDiffFromFile(files.oldFile, files.newFile), {
+                isPartial: true,
+              });
+            }
+            return files;
+          } catch (error) {
+            if (
+              attempt !== 0 ||
+              !renew ||
+              !(error instanceof DiffBlobReadError) ||
+              !['stale', 'digest_mismatch'].includes(error.code)
+            )
+              throw error;
+            signal?.throwIfAborted();
+            selected = await renew(signal);
+            if (!['ok', 'not_changed', 'missing'].includes(selected.status))
+              throw new DiffBlobReadError(selected.status, 'Diff content is no longer text.');
+          }
+        }
+      },
     };
   }
   const snapshot = async (blob: CodeCollabDiffBlob | null): Promise<SessionFileSnapshot> =>

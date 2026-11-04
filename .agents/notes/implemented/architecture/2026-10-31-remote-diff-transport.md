@@ -85,11 +85,21 @@ revises the proposal's startup-token preservation: without a durable base finger
 preserving all tokens could miss an offline base move or same-stats edit. It avoids
 adding another durable metadata contract just to eliminate that one metadata refresh.
 
-The shared file-index resource emits generation-only updates. A rebuilt provider
-reuses current descriptors, fetching only changed/missing entries when the index has
-complete generation coverage. Otherwise it reads a fresh paged manifest. Descriptor
-caches retain at most 128 entries. All Changes bodies stay deferred to visible/open
-files; body RPC permits remain held through raw request settlement after cancellation.
+The shared file-index resource emits generation-only updates to refresh live views.
+An index token does not prove freshness after a host watch expires. Each All Changes
+load therefore revalidates the paged manifest, and a batch descriptor is consumed
+once by its visible file; subsequent opens revalidate metadata while reusing verified
+bodies. At most 128 pending descriptors are retained. The machine's returned file
+set and its viewport are authoritative even when the index is stale. This trades extra metadata for
+correctness without retransmitting unchanged bodies.
+
+Writer diff activity separately renews the existing `init-directory` publication
+workflow, at most once per five minutes (five seconds after failure), to preserve
+its ten-minute watch lifetime. Guest reads skip this action. Activation is observed
+background work and cannot gate content on a failed publisher; the two blob RPCs
+remain pure reads. In-flight activation is shared within the provider runtime;
+owner/root changes retire that runtime. Body RPC permits remain held through raw
+request settlement after cancellation.
 
 ### Caches and large remote files
 
@@ -103,12 +113,20 @@ cached. The parsed viewer key includes both content keys and the path.
 
 Above 256 KiB combined raw size, remote manifests carry a unified patch with three
 context lines and at most 256 KiB. Patch work is also bounded at 600 line edits;
-a larger rewrite is statistics-only. Local manifests keep full descriptors without
-remote hunk policy. Pierre parses patches as partial metadata, then its first context
+a larger rewrite falls back to verified full blobs, as does an encoded patch that
+exceeds its page budget. Only the raw content cap makes text unavailable. Local
+manifests keep full descriptors without remote hunk policy. Pierre parses patches as partial metadata, then its first context
 expansion fetches complete verified files. A separate expansion read controller
 cancels subsequent pages when the block hides/unmounts; initial manifest/body reads
 also stop further page starts when their surface hides. No extra renderer or worker
 architecture was added.
+
+Hunks and hashes come from the same captured bytes. Deferred expansion renews expired
+handles once. If live content changed, its hunk coordinates are recomputed from the
+new verified full files before Pierre hydrates them; old coordinates must never be
+applied to new bodies. Reverted files retain readable descriptors even when marked
+`not_changed`. Runtime-bound partial loaders never enter the cross-workspace immutable
+turn cache; fully materialized turn snapshots can still be retained.
 
 ## Verified transport constraints
 
@@ -162,7 +180,8 @@ Behavioral evidence lives in:
 - `apps/cli/src/lib/code-collab/code-collab-v2-service.test.ts`: real SHA-1/SHA-256
   Git and disk bytes, BOM/CRLF/Unicode, session binding, path escape, expiry, page
   clamping, moved-base cursors, historical/non-Git worker reads, local/remote hunk
-  policy and unchanged-stats invalidation.
+  policy and unchanged-stats invalidation, deleted files, capture-time edits and
+  hunk-budget fallback.
 - `packages/turn-diff-store/tests/sqlite-store.test.ts`: read-only descriptor/byte
   selection, owner separation, retention, full reconstruction and worker messages. A separate smoke of the emitted CLI `turn-diff-store-worker.js` opens an existing database read-only and verifies descriptor-addressed BOM/CRLF/Unicode bytes.
   The earlier unchanged-store probe restored 400,020 UTF-8 bytes across four chunks
@@ -175,12 +194,16 @@ Behavioral evidence lives in:
   signed Guest read authority while saves remain forbidden.
 - `packages/components/tests/code-collab-session-file-provider-v2.test.ts`:
   initial metadata sends zero body bytes; the first open sends base plus head;
-  repeat opens send zero additional body bytes; changing one generation fetches
-  only that descriptor and its new head. It also checks corruption, cancellation,
+  repeat opens revalidate metadata but send zero additional body bytes; an edit with
+  unchanged index generations fetches only its new head. It also checks corruption,
+  cancellation,
   protected memory policy, IndexedDB retention/eviction and unavailable storage.
+  Deferred hydration covers expired handles, live edits and reverts, while runtime
+  replacement exercises the real immutable-turn hook cache.
 - `packages/components/tests/e2e/diff-viewer-large-diff-performance.spec.ts`:
   the real panel/Pierre path renders partial hunks with zero blob traffic and
-  hydrates full context on expansion.
+  hydrates full context on expansion; stale-index files remain visible and loadable
+  through the same viewport boundary.
 
 These are deterministic synthetic/local behavioral checks, not production bandwidth,
 latency, mobile device-memory or hosted deployment benchmarks. Existing diff methods
