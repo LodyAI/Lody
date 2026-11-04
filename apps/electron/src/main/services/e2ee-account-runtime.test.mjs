@@ -835,7 +835,15 @@ async function personalJoinFixture(t) {
       isDestroyed: () => false,
       send: () => {}
     })
-    const owner = { ...material, accountId, readers: new Map() }
+    let removalFence
+    const owner = {
+      ...material,
+      accountId,
+      scope,
+      readers: new Map(),
+      fenceLoss: (workspaceId, reason) =>
+        (removalFence ??= { owner, workspaceId, reason, completed: false })
+    }
     const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
       'electron-ipc-decorator': {
         IpcService: class {},
@@ -853,7 +861,11 @@ async function personalJoinFixture(t) {
       },
       '../assert-sender': { assertProductWindowSender: () => {} },
       '../../services/e2ee-account-runtime': {
-        withDesktopE2eeAccount: async (work) => {
+        withDesktopE2eeAccount: async (work, _location, _create, retiring) => {
+          if (removalFence && retiring !== removalFence)
+            throw Object.assign(new Error(`e2ee_${removalFence.reason}`), {
+              code: removalFence.reason
+            })
           lockDepth++
           try {
             return await Effect.runPromise(work(owner))
@@ -870,7 +882,11 @@ async function personalJoinFixture(t) {
           const erased = await Effect.runPromise(
             owner.bootstrap.resumeRemovedWorkspace(removedWorkspaceId)
           )
-          if (erased) owner.readers.delete(removedWorkspaceId)
+          if (erased) {
+            owner.readers.delete(removedWorkspaceId)
+            if (removalFence) removalFence.completed = true
+            removalFence = undefined
+          }
           return erased
         },
         runDesktopE2eeOperation: (_accountId, work) => Effect.runPromise(work),
@@ -2169,6 +2185,7 @@ void test('prepareDispatch confirms access loss after its reader closes through 
             ? /^Error: e2ee_(?:account_mismatch|missing-binding)$/
             : /^Error: e2ee_host_operation_failed$/
       )
+      await Promise.all([...(ipc.dispatchCleanups?.values() ?? [])].map((slot) => slot.done))
       assert.equal(dispatched, false)
       if (name.startsWith('credential-change')) assert.equal(credentialReplaced, true)
       if (code) {
@@ -2220,6 +2237,7 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
         'parse',
         'endpoint',
         'endpoint-slow-cleanup',
+        'endpoint-cleanup-failure',
         ...(hasReader
           ? ['endpoint-slow-cleanup-frame']
           : ['endpoint-after-budget', 'transport-after-budget'])
@@ -2237,6 +2255,7 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
             send: () => {}
           })
           const failure = { data: { code } }
+          const diagnostics = []
           let endpointCalls = 0
           let dispatchCalls = 0
           const cleanupEntered = Promise.withResolvers()
@@ -2244,6 +2263,7 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
           const releaseCleanup = Promise.withResolvers()
           subtest.after(() => releaseCleanup.resolve())
           const delayedCleanup = source.startsWith('endpoint-slow-cleanup')
+          if (delayedCleanup) await createAccountWorkspace(api, 'independent-workspace')
           let escapedFrames = 0
           const afterBudget = source.endsWith('-after-budget')
           const endpointEntered = Promise.withResolvers()
@@ -2293,36 +2313,42 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
               }
             }).pipe(Scope.provide(scope))
           )
-          const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
-            'electron-ipc-decorator': {
-              IpcService: class {},
-              IpcMethod: () => (_target, _name, descriptor) => descriptor,
-              getIpcContext: () => ({ event: { sender } })
-            },
-            '../../platform': { isLocalPlatform: () => false },
-            '../../services/e2ee-bootstrap.mjs': {},
-            '../assert-sender': { assertProductWindowSender: () => {} },
-            '../ipc-service-deps': {
-              getIpcServiceDeps: () => ({
-                authService: { getCachedSessionIdentity: () => ({ ...identity }) }
-              })
-            },
-            '../../services/e2ee-account-runtime': {
-              ...api,
-              cleanupRemovedDesktopWorkspace: async (input) => {
-                if (delayedCleanup) {
-                  cleanupEntered.resolve()
-                  await releaseCleanup.promise
-                }
-                try {
-                  return await api.cleanupRemovedDesktopWorkspace(input)
-                } finally {
-                  cleanupDone.resolve()
-                }
+          const { E2eeIpc } = await load(
+            '../ipc/services/e2ee-ipc.ts',
+            {
+              'electron-ipc-decorator': {
+                IpcService: class {},
+                IpcMethod: () => (_target, _name, descriptor) => descriptor,
+                getIpcContext: () => ({ event: { sender } })
               },
-              desktopE2eeCloudClient: async () => ({ accountId: 'account', client })
-            }
-          })
+              '../../platform': { isLocalPlatform: () => false },
+              '../../services/e2ee-bootstrap.mjs': {},
+              '../assert-sender': { assertProductWindowSender: () => {} },
+              '../ipc-service-deps': {
+                getIpcServiceDeps: () => ({
+                  authService: { getCachedSessionIdentity: () => ({ ...identity }) }
+                })
+              },
+              '../../services/e2ee-account-runtime': {
+                ...api,
+                cleanupRemovedDesktopWorkspace: async (input) => {
+                  if (delayedCleanup) {
+                    cleanupEntered.resolve()
+                    await releaseCleanup.promise
+                  }
+                  try {
+                    if (source === 'endpoint-cleanup-failure')
+                      throw new Error('synthetic private cleanup failure')
+                    return await api.cleanupRemovedDesktopWorkspace(input)
+                  } finally {
+                    cleanupDone.resolve()
+                  }
+                },
+                desktopE2eeCloudClient: async () => ({ accountId: 'account', client })
+              }
+            },
+            { ...console, warn: (...args) => diagnostics.push(args) }
+          )
           const ipc = new E2eeIpc()
           if (!hasReader) await ipc.close('workspace')
           const original = await readFile(join(first.directory, 'creations.sqlite'))
@@ -2368,20 +2394,52 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
             await cleanupEntered.promise
             assert.deepEqual(snapshot(), { creations: originalRows, receipts: 1 })
             await run(TestClock.adjust('50 millis'))
-            // A serial boundary flush lets the original local rejection settle if
-            // production incorrectly mistakes unfinished cleanup for no verdict.
-            await api.withDesktopE2eeAccount(() => Effect.void, 'workspace', false)
-            assert.equal(escapedFrames, 0, 'no prepared frame may escape after known loss')
-            const premature = settled ? (await outcome).message : undefined
-            releaseCleanup.resolve()
-            const finished = await outcome
-            await cleanupDone.promise
-            assert.equal(
-              premature,
-              undefined,
-              'known loss must not return the unrelated local error while cleanup is pending'
+            const bounded = settled ? (await outcome).message : undefined
+            await run(TestClock.adjust('5 minutes'))
+            const eventually = settled ? (await outcome).message : undefined
+            // No successor may enter while the original erase still owns the identity.
+            let fenceReason
+            try {
+              await api.withDesktopE2eeAccount(() => Effect.void, 'workspace', false)
+            } catch (error) {
+              fenceReason = error.message
+            }
+            const retained = snapshot()
+            const independent = await api.withDesktopE2eeAccount(
+              (owner) => owner.bootstrap.removedReason('independent-workspace'),
+              'independent-workspace',
+              false
             )
-            assert.equal(finished.message, code)
+            assert.equal(independent, null, 'a pending erase cannot fence another workspace')
+            releaseCleanup.resolve()
+            await cleanupDone.promise
+            await outcome
+            if (ipc.dispatchCleanups)
+              await Promise.all([...ipc.dispatchCleanups.values()].map((slot) => slot.done))
+            assert.equal(
+              bounded,
+              code,
+              'known loss must return its exact refusal within 50ms, not await erase'
+            )
+            assert.equal(eventually, code)
+            assert.equal(fenceReason, code, 'pending erase must keep the original identity fenced')
+            assert.deepEqual(retained, { creations: originalRows, receipts: 1 })
+            assert.equal(escapedFrames, 0)
+            assert.ok(diagnostics.some(([, fields]) => fields?.code === 'e2ee_cleanup_pending'))
+            assert.equal(
+              ipc.dispatchCleanups.size,
+              0,
+              'actual completion releases the cleanup owner'
+            )
+            assert.equal(
+              await api.withDesktopE2eeAccount(
+                (owner) => owner.bootstrap.removedReason('workspace'),
+                'workspace',
+                false
+              ),
+              code === 'e2ee_member_removed' ? 'member_removed' : 'device_revoked',
+              'actual erase releases the native fence and retains the durable refusal'
+            )
           }
           if (afterBudget) {
             // e6 live trace: reader already closed, credential request still has
@@ -2403,6 +2461,31 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
             )
           }
           const error = await outcome
+          if (source.startsWith('endpoint')) {
+            await cleanupDone.promise
+            if (ipc.dispatchCleanups)
+              await Promise.all([...ipc.dispatchCleanups.values()].map((slot) => slot.done))
+          }
+          if (source === 'endpoint-cleanup-failure') {
+            assert.equal(error.message, code)
+            assert.deepEqual(snapshot(), { creations: originalRows, receipts: 1 })
+            await assert.rejects(
+              api.withDesktopE2eeAccount(() => Effect.void, 'workspace', false),
+              new RegExp(code)
+            )
+            await assert.rejects(
+              api.resetDesktopE2eeIdentity({ workspaceId: 'workspace', resetId: randomUUID() }),
+              new RegExp(code)
+            )
+            assert.equal(
+              ipc.dispatchCleanups.size,
+              0,
+              'settled task releases no native failure fence'
+            )
+            assert.ok(diagnostics.some(([, fields]) => fields?.code === 'e2ee_cleanup_failed'))
+            assert.ok(!JSON.stringify(diagnostics).includes('synthetic private'))
+            return
+          }
           const db = new DatabaseSync(join(first.directory, 'creations.sqlite'))
           try {
             const authoritative = source.startsWith('endpoint')
@@ -2563,6 +2646,7 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
           : ipc.contentStreamsToken('workspace'),
         new RegExp(`^Error: e2ee_${reason}$`)
       )
+      await Promise.all([...ipc.dispatchCleanups.values()].map((slot) => slot.done))
       // Replayed stale arguments stay refused with the same exact, renderer-visible code.
       assert.deepEqual(
         (await stale()).map((result) => result.reason?.message),
@@ -2752,9 +2836,13 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
         // Queueing terminal cleanup proves the exact verdict was latched while
         // the final account lock still holds the binding read.
         await lossCleanupQueued.promise
+        await run(TestClock.adjust('50 millis'))
+        const refusedBeforeDrain = settled
         releaseBinding.resolve()
         const outcome = await result
+        assert.equal(refusedBeforeDrain, true, 'known loss cannot wait on a stalled final read')
         await pushed.promise
+        await Promise.all([...ipc.dispatchCleanups.values()].map((slot) => slot.done))
         assert.equal(outcome.value, undefined, 'loss learned before frame handoff must discard it')
         assert.equal(outcome.error?.message, 'e2ee_device_revoked')
         await assert.rejects(ipc.status('workspace'), /^Error: e2ee_device_revoked$/)
@@ -2772,6 +2860,7 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
             channel: 'e2ee.accessLost',
             payload: { workspaceId: 'workspace' }
           })
+          await Promise.all([...ipc.dispatchCleanups.values()].map((slot) => slot.done))
           await assert.rejects(ipc.status('workspace'), /^Error: e2ee_device_revoked$/)
         }
       } else {
@@ -2786,6 +2875,7 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
         )
       }
       answer.resolve(false)
+      await Promise.all([...ipc.dispatchCleanups.values()].map((slot) => slot.done))
     })
   }
 })

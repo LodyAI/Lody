@@ -71,6 +71,12 @@ const isAccessLossMessage = (error: unknown) =>
   error instanceof Error &&
   (error.message === 'e2ee_member_removed' || error.message === 'e2ee_device_revoked')
 type Owner = Parameters<Parameters<typeof withDesktopE2eeAccount>[0]>[0]
+type RemovalFence = ReturnType<Owner['fenceLoss']>
+type LossAccess = {
+  accountId: string
+  credential: string
+  status: import('@lody/platform').E2eeRuntimeStatus
+}
 /**
  * A sender without a reader is refused with this identity's durable removal reason
  * when one exists. That receipt is written only after a credential-confirmed loss.
@@ -264,6 +270,59 @@ export class E2eeIpc extends IpcService {
   // The decorator logs rejected errors. Retain only the latest local diagnostic
   // here, never on the cause-bearing Error passed to that logging/IPC boundary.
   private pairingFailure: unknown
+  // Retain every pending raw cleanup. After failure the native fence still
+  // owns the identity; settling this task is not proof of safe handoff.
+  private readonly dispatchCleanups = new Map<
+    RemovalFence,
+    { done: Promise<void>; diagnostic?: unknown }
+  >()
+  private cleanupDiagnostic(code: 'e2ee_cleanup_pending' | 'e2ee_cleanup_failed', cause?: unknown) {
+    const diagnostic = cause ?? Object.assign(new Error(code), { code })
+    this.pairingFailure = diagnostic
+    try {
+      console.warn('[E2EE] access-loss-cleanup', { code })
+    } catch {
+      /* diagnostic sinks cannot break custody */
+    }
+    return diagnostic
+  }
+  private retainDispatchCleanup(access: LossAccess, reason: AccessLoss, fence: RemovalFence) {
+    if (fence.completed || this.dispatchCleanups.has(fence)) return
+    const slot = { done: Promise.resolve(), diagnostic: undefined as unknown }
+    const raw = this.removeLocalWorkspace(access, reason, fence)
+    slot.done = raw.then(
+      () => undefined,
+      (error) => {
+        if (fence.completed) {
+          this.dispatchCleanups.delete(fence)
+          if (this.pairingFailure === slot.diagnostic) this.pairingFailure = undefined
+        } else {
+          slot.diagnostic = this.cleanupDiagnostic('e2ee_cleanup_failed', fence.failure ?? error)
+          this.dispatchCleanups.delete(fence)
+        }
+      }
+    )
+    this.dispatchCleanups.set(fence, slot)
+    // Diagnostic deadline only: never interrupt raw erase or release its fence.
+    void runDesktopE2eeOperation(
+      access.accountId,
+      Effect.raceFirst(
+        Effect.as(
+          Effect.promise(() => slot.done),
+          false
+        ),
+        Effect.as(Effect.sleep('5 seconds'), true)
+      )
+    )
+      .then((pending) => {
+        if (pending && this.dispatchCleanups.get(fence) === slot && !fence.completed)
+          slot.diagnostic = this.cleanupDiagnostic('e2ee_cleanup_pending')
+      })
+      .catch(() => {
+        if (this.dispatchCleanups.get(fence) === slot && !fence.completed)
+          slot.diagnostic = this.cleanupDiagnostic('e2ee_cleanup_pending')
+      })
+  }
   private readonly readerOwners = new WeakMap<object, string>()
   private readonly dispatchReaderTokens = new WeakMap<
     Map<number, number>,
@@ -2262,7 +2321,8 @@ export class E2eeIpc extends IpcService {
       credential: string
       status: import('@lody/platform').E2eeRuntimeStatus
     },
-    reason: AccessLoss
+    reason: AccessLoss,
+    retiring?: RemovalFence
   ): Promise<never> {
     const { workspaceId, genesisHash, signingPublicKey } = access.status
     // A removed workspace ends its key delivery; no later timer may reopen it.
@@ -2307,8 +2367,20 @@ export class E2eeIpc extends IpcService {
             )
           ),
         workspaceId,
-        false
+        false,
+        retiring
       )
+      // Receipt is durable. Notify now; terminal erase may be indefinitely slow.
+      for (const reader of hinted) {
+        const window = readerWindows.get(reader)
+        if (window && !window.isDestroyed()) {
+          try {
+            window.send(IPC_PUSH_CHANNELS.e2eeAccessLost, { workspaceId })
+          } catch {
+            this.cleanupDiagnostic('e2ee_cleanup_pending')
+          }
+        }
+      }
     } finally {
       await Effect.runPromise(cleanup)
     }
@@ -2318,19 +2390,13 @@ export class E2eeIpc extends IpcService {
       reason
     }).catch((cause) => {
       this.pairingFailure = cause
+      if (retiring) retiring.failure = cause
       if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== access.accountId)
         throw new Error('e2ee_account_mismatch')
       // Receipt survives a busy process lease or interrupted cleanup; the next open retries it.
       return true
     })
     if (deleted) {
-      // Windows still reading learn only that they must re-read; their refresh then
-      // refuses with the recorded reason. The hint itself carries no reason.
-      for (const reader of hinted) {
-        const window = readerWindows.get(reader)
-        if (window && !window.isDestroyed())
-          window.send(IPC_PUSH_CHANNELS.e2eeAccessLost, { workspaceId })
-      }
       throw new Error(`e2ee_${reason}`)
     }
     // A newer local incarnation superseded the old credential's late response.
@@ -2587,6 +2653,8 @@ export class E2eeIpc extends IpcService {
                     return {
                       readers,
                       hadReader: readers?.has(id) === true,
+                      fenceLoss: (reason: AccessLoss) =>
+                        owner.fenceLoss(workspaceId, reason, identity.generation),
                       readerToken,
                       accountId: owner.accountId,
                       credential,
@@ -2616,6 +2684,22 @@ export class E2eeIpc extends IpcService {
       // is loss. Any other check failure establishes nothing and changes no outcome.
       // The check runs beside the local work: the renderer's fast path has a deadline.
       let confirmedLoss: AccessLoss | undefined
+      const lossReply = Promise.withResolvers<never>()
+      lossReply.promise.catch(() => undefined)
+      const refuseLoss = (reason: AccessLoss) => {
+        if (confirmedLoss) return new Error(`e2ee_${confirmedLoss}`)
+        try {
+          const fence = access.fenceLoss(reason)
+          confirmedLoss = reason
+          this.retainDispatchCleanup(access, reason, fence)
+          const error = new Error(`e2ee_${reason}`)
+          lossReply.reject(error)
+          return error
+        } catch (lifecycle) {
+          lossReply.reject(lifecycle)
+          throw lifecycle
+        }
+      }
       const confirmed = (async () => {
         try {
           await Effect.runPromise(
@@ -2624,10 +2708,8 @@ export class E2eeIpc extends IpcService {
         } catch (checked) {
           const loss = accessLoss(checked)
           if (loss) {
-            // A verdict is known before its terminal native cleanup finishes.
-            // Expiring the network waiter cannot turn that verdict into uncertainty.
-            confirmedLoss = loss
-            await this.removeLocalWorkspace(access, loss)
+            // Refusal is a verdict, not the cleanup's completion receipt.
+            throw refuseLoss(loss)
           }
         }
       })()
@@ -2654,29 +2736,28 @@ export class E2eeIpc extends IpcService {
       confirmation.catch(() => undefined)
       const waitForConfirmation = async () => {
         await confirmation
-        // Only an unknown verdict may use the fast budget. Known loss retains
-        // cleanup ownership and its exact failure, even on a slow filesystem.
-        if (confirmedLoss) await confirmed
+        if (confirmedLoss) throw new Error(`e2ee_${confirmedLoss}`)
       }
-      const prepared = await runDesktopE2eeOperation(access.accountId, access.work).catch(
-        async (error) => {
-          if (accessLoss(error)) return this.removeLocalWorkspace(access, accessLoss(error)!)
-          if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message))) {
-            // A readerless operation is already refused and can never return a
-            // frame. Diagnose its retained credential through the existing bounded
-            // request, instead of mistaking the fast-send budget for a verdict.
-            // Live-reader sends retain the 50ms budget; this holds no account lock.
-            if (!access.hadReader) await confirmed
-            else await waitForConfirmation()
-          }
-          throw error
+      const local = runDesktopE2eeOperation(access.accountId, access.work).catch(async (error) => {
+        if (accessLoss(error)) throw refuseLoss(accessLoss(error)!)
+        if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message))) {
+          // A readerless operation is already refused and can never return a
+          // frame. Diagnose its retained credential through the existing bounded
+          // request, instead of mistaking the fast-send budget for a verdict.
+          // Live-reader sends retain the 50ms budget; this holds no account lock.
+          if (!access.hadReader) await confirmed
+          else await waitForConfirmation()
         }
-      )
+        throw error
+      })
+      // Observe raw local work even if exact loss wins; its native owner drains it.
+      local.catch(() => undefined)
+      const prepared = await Promise.race([local, lossReply.promise])
       // A definitive confirmation refuses; uncertainty alone does not cancel local work.
       await waitForConfirmation()
       // Network uncertainty is not cancellation. Revalidate the originating owner,
       // auth generation, reader incarnation and exact credential before handing out bytes.
-      return scope(
+      const handoff = scope(
         (owner) =>
           Effect.gen(function* () {
             if (yield* owner.bootstrap.removedReason(workspaceId))
@@ -2717,6 +2798,9 @@ export class E2eeIpc extends IpcService {
           }),
         false
       )
+      // The read keeps its native owner even when a verdict refuses its waiter.
+      handoff.catch(() => undefined)
+      return Promise.race([handoff, lossReply.promise])
     })
   }
   @IpcMethod()

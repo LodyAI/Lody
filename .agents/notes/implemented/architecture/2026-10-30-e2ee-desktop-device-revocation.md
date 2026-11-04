@@ -73,13 +73,21 @@ asked the server.
   unclassified failure establishes no loss and changes no local outcome. The
   original request retains its network bound; exact loss still records the
   credential-bound receipt and pushes the reader hint even after the frame returned.
-  An exact loss is latched before native cleanup starts. The 50 ms budget bounds
-  unknown-verdict waiting, not deletion after a known verdict: slow receipt/erase
-  work must not replace the exact refusal with an unrelated local error. It stays
-  owned and awaited outside the account lock. A loss arriving during final binding
-  reads also discards the frame without awaiting cleanup under that lock. The
-  original creation row can coexist with its removal receipt until terminal erase;
-  it is not a newly created identity or authorization. No retry is added.
+  An exact loss synchronously fences the original native owner and rejects the
+  dispatch waiter without awaiting receipt/erase or an admitted native read. This
+  keeps refusal bounded even when cleanup never settles. The main IPC service
+  retains each raw cleanup while it runs outside the account lock; its five-second
+  deadline only records a code-only diagnostic. Neither that deadline nor task
+  failure releases the native binding fence, including reset. Only verified
+  terminal erase marks it completed. The cleanup capability admits only that
+  original owner and auth generation; unrelated workspace directories stay usable.
+  A loss arriving during final binding reads also discards the frame while the
+  original owner keeps the read until it actually settles. Returning an exact
+  refusal is not a drain acknowledgment: the original creation row can coexist
+  with its removal receipt until terminal erase, without creating or authorizing
+  another identity. Keeping the waiter coupled to cleanup was rejected because
+  an unavailable native finalizer can otherwise hide a known refusal forever.
+  No retry is added.
   Before returning bytes, main rechecks the original account generation, owner,
   reader incarnation, genesis, signing key and credential; lifecycle cancellation
   is never treated as an inconclusive server check. A reader token is retired when

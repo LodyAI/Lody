@@ -21,7 +21,11 @@ reader owns them.
 Dispatch checks the credential beside local preparation with a 50 ms waiter
 budget for an unknown verdict. Latch an exact loss before its native cleanup:
 slow cleanup cannot turn known loss into uncertainty or replace its exact code
-with a local error. Await that cleanup outside the account lock. Exact loss
+with a local error. Return exact refusal without awaiting cleanup or an admitted
+native read. The original native owner synchronously fences its binding, including
+reset, and retains raw cleanup outside the account lock. Only verified terminal
+erase releases that fence; a five-second diagnostic deadline or failed cleanup
+never proves drain. Exact loss
 discards the frame and records the receipt; unknown-verdict timeout or an
 unclassified failure leaves the local result unchanged. The bounded network
 request continues and records exact late loss, including the reader hint. Never
