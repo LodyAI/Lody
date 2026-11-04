@@ -1612,7 +1612,7 @@ describe('MessageHandler ACP batching', () => {
           id: 'user-turn',
           role: 'user',
           userId: 'author',
-          status: 'completed',
+          status: 'handled',
           read: true,
           timestamp: '2026-10-17T00:00:00.000Z',
           items: [],
