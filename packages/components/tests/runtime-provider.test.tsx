@@ -1,17 +1,47 @@
 // @vitest-environment jsdom
-import { authorizePlaintextAttachmentUpload, installAttachmentWorkspaceAccess } from '../src/lib/attachment-workspace-access';
+import {
+  authorizePlaintextAttachmentUpload,
+  installAttachmentWorkspaceAccess,
+} from '../src/lib/attachment-workspace-access';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
-import { encryptedLocalNamespace, retainEncryptedLocalIdentity, readEncryptedLocalIdentity } from '../src/lib/e2ee-local-data';
+import {
+  encryptedLocalNamespace,
+  retainEncryptedLocalIdentity,
+  readEncryptedLocalIdentity,
+} from '../src/lib/e2ee-local-data';
 import { resumeEncryptedWorkspaceCleanup } from '../src/lib/e2ee-member-removal';
 import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
 
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { createRootRoute, createRoute, createRouter, createMemoryHistory, Outlet, RouterProvider } from '@tanstack/react-router';
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  createMemoryHistory,
+  Outlet,
+  RouterProvider,
+} from '@tanstack/react-router';
 import { atom, createStore, Provider } from 'jotai';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import { ConvexError } from 'convex/values';
-import { createStore as createPlatformStore, type MutableStore, type PlatformSessionState, type PlatformE2eeWorkspaces, type E2eeWorkspaceRuntime, type WorkspacesState } from '@lody/platform';
+import {
+  createStore as createPlatformStore,
+  type MutableStore,
+  type PlatformSessionState,
+  type PlatformE2eeWorkspaces,
+  type E2eeWorkspaceRuntime,
+  type WorkspacesState,
+} from '@lody/platform';
 
 const environment = vi.hoisted(() => ({
   warm: true,
@@ -175,12 +205,31 @@ import { WorkspaceAdmissionGate } from '../src/components/workspace-admission-ga
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
 import { currentWorkspaceSlugAtom, currentWorkspaceIdAtom, userAtom } from '../src/atoms';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
-import { readWorkspaceModeProof, repairUnreadableE2eeCaches, retainWorkspaceModeProof, saveE2eeGenesisPin, savePendingE2eeWorkspace } from '../src/lib/e2ee-workspace-storage';
-import { authTokenAtom, runtimeAtom, workspaceModeAdmissionRetryAtom, workspaceRuntimeInitFailureAtom } from '../src/atoms/runtime';
+import {
+  readWorkspaceModeProof,
+  repairUnreadableE2eeCaches,
+  retainWorkspaceModeProof,
+  saveE2eeGenesisPin,
+  savePendingE2eeWorkspace,
+} from '../src/lib/e2ee-workspace-storage';
+import {
+  authTokenAtom,
+  runtimeAtom,
+  workspaceModeAdmissionRetryAtom,
+  workspaceRuntimeInitFailureAtom,
+} from '../src/atoms/runtime';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
-import { lodyControlConnectionStateAtom, runtimeInitializingAtom } from '../src/atoms/control-connection';
+import {
+  lodyControlConnectionStateAtom,
+  runtimeInitializingAtom,
+} from '../src/atoms/control-connection';
 import * as clientLog from '../src/lib/client-log';
-import { editSessionRunConfigDraftAtom, registerSessionRunConfigDraftLeaseAtom, sessionRunConfigDraftAccountAtom, sessionRunConfigDraftsAtom } from '../src/atoms/session-run-config-drafts';
+import {
+  editSessionRunConfigDraftAtom,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftAccountAtom,
+  sessionRunConfigDraftsAtom,
+} from '../src/atoms/session-run-config-drafts';
 import { signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
 
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
@@ -438,6 +487,119 @@ describe('RuntimeProvider warm workspace preparation', () => {
       cryptoOrgId: '11'.repeat(32),
       activation: 'control-only',
     }) as const;
+
+  it('reopens the same admitted two-epoch binding only after a failed content close really drains', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    realRuntimeSelected = true;
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+    const installed = new Set([0, 1]);
+    const status = {
+      workspaceId: 'local:workspace',
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 1,
+      writeEpoch: 1,
+      hasCurrentKey: installed.has(1),
+      rotationRequired: false,
+      memberRole: 'member' as const,
+      deviceKind: 'personal' as const,
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor(status.workspaceId);
+    environment.e2eeWorkspaces!.runtime = {
+      readerLeases: 'preallocated-v1',
+      open: async (_id, _observed, _account, readerOwner) => ({ ...status, readerOwner }),
+      status: async () => status,
+      refresh: async () => status,
+      close: async () => {},
+    } as E2eeWorkspaceRuntime;
+    const created: WorkspaceRuntime[] = [];
+    const firstCreated = Promise.withResolvers<void>();
+    const secondCreated = Promise.withResolvers<void>();
+    vi.mocked(createWorkspaceRuntime).mockImplementation(async (deps) => {
+      actualRuntime = await actualRuntimeFactory.createWorkspaceRuntime(deps);
+      created.push(actualRuntime);
+      firstCreated.resolve();
+      if (created.length === 2) secondCreated.resolve();
+      return actualRuntime;
+    });
+    const failure = new Error('synthetic private data must not enter diagnostics', {
+      cause: new DOMException('private storage details', 'QuotaExceededError'),
+    });
+    const firstFailed = Promise.withResolvers<void>();
+    const retryEntered = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    const secondFailed = Promise.withResolvers<unknown>();
+    const errors = vi.spyOn(console, 'error').mockImplementation((message, error) => {
+      if (message === 'RuntimeProvider: cleanup dispose failed') firstFailed.resolve();
+      if (message === 'RuntimeProvider: runtime initialization failed') secondFailed.resolve(error);
+    });
+    const reports = vi.spyOn(clientLog, 'recordClientLog');
+    let destroy: (() => Promise<void>) | undefined;
+    try {
+      await render();
+      await act(async () => firstCreated.promise);
+      const original = actualRuntime!;
+      expect(store.get(runtimeAtom)).toBe(original);
+      const history = await original.repo.openPersistedDoc('two-epoch-history');
+      history.doc.getText('body').insert(0, 'epoch zero and epoch one history');
+      history.doc.commit();
+      await original.repo.flush();
+      destroy = original.repo.destroy.bind(original.repo);
+      vi.spyOn(original.repo, 'destroy')
+        .mockRejectedValueOnce(failure)
+        .mockImplementation(async () => {
+          retryEntered.resolve();
+          await released.promise;
+          await destroy!();
+        });
+      await act(async () => store.set(currentWorkspaceSlugAtom, null));
+      await firstFailed.promise;
+      await act(async () => store.set(currentWorkspaceSlugAtom, 'local'));
+      // Fail immediately on the old poisoned result instead of waiting for a timeout.
+      const retried = await Promise.race([
+        retryEntered.promise.then(() => true),
+        secondFailed.promise.then(() => false),
+      ]);
+      expect(retried).toBe(true);
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(created).toHaveLength(1);
+      await original.setAuthToken('must-remain-retired');
+      expect(original.repo.getTransportIds()).toEqual([]);
+      await act(async () => {
+        released.resolve();
+        await original.dispose();
+        await secondCreated.promise;
+      });
+      expect(created).toHaveLength(2);
+      expect(store.get(runtimeAtom)).toBe(created[1]);
+      const reopened = await created[1]!.repo.openPersistedDoc('two-epoch-history');
+      expect(reopened.doc.getText('body').toString()).toBe('epoch zero and epoch one history');
+      expect(installed).toEqual(new Set([0, 1]));
+      const closeReports = reports.mock.calls.filter(
+        ([, event]) => event === 'runtime.close_failed'
+      );
+      expect(closeReports).toContainEqual([
+        'error',
+        'runtime.close_failed',
+        'Workspace close failed',
+        { stage: 'repo', causeTypes: 'Error,QuotaExceededError' },
+      ]);
+      expect(JSON.stringify(closeReports)).not.toContain('synthetic private');
+      expect(JSON.stringify(closeReports)).not.toContain('private storage details');
+    } finally {
+      released.resolve();
+      errors.mockRestore();
+      reports.mockRestore();
+      for (const runtime of created) {
+        await runtime.dispose().catch(() => {});
+      }
+      await destroy?.();
+      actualRuntime = undefined;
+      realRuntimeSelected = false;
+    }
+  });
 
   it('opens a re-invited member under the new device instance while retaining exact local identity', async () => {
     ordinaryCloud();

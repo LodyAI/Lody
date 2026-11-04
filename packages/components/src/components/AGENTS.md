@@ -33,17 +33,15 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   `sidebar-surface.ts` / `sidebar.tokens.stylex.ts` on conversation, repo and nav rows.
   Tailwind wins same-property conflicts; keep it only for groups, menu-open and focus states.
 - Desktop work/wait/unread/send status belongs only in `SessionRowStatusIndicator`
-  inside `SidebarRowEndSlot`. On two-line Session rows it stays on the title line while
-  the PR control remains accessible on the metadata line when Show Branch is enabled
-  ([decision](../../../../.agents/notes/implemented/feature/2026-11-02-sidebar-pull-requests.md));
-  otherwise hide the row's PR control. On single-line rows activity replaces resting
-  `Mergeable`, worktree or mobile time. +/- totals: hover card only.
+  inside `SidebarRowEndSlot`, never the leading slot; it replaces resting `Mergeable`,
+  worktree, PR icon or mobile time with one 14px mark. +/- totals: hover card only.
   Mobile: [mobile/AGENTS.md](mobile/AGENTS.md). Folded groups: only
   `SidebarGroupActivityMark`, no counts ([why](../../../../.agents/notes/implemented/feature/2026-09-26-sidebar-folded-group-status.md)).
 - Never hide a Session through nesting: missing, cross-section, cycling, or
   deeper-than-one-level openers render top-level. In Workspace mode,
   `placeWorkspaceSessionsWithOpeners` first moves a Session whose opener renders in
-  another group into that group; Pinned and Updated keep natural membership. `MAX_VISIBLE_SESSIONS` /
+  another group into that group. Before splitting desktop sections, pinned openers bring
+  their visible opened-by descendants into Pinned without changing descendant pin flags. `MAX_VISIBLE_SESSIONS` /
   `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
   latest-activity sorting; rank an opener by its freshest opened Session.
 - Collapse state uses `sidebarCollapsedOpenedBySessionsAtom`, default expanded. Keep

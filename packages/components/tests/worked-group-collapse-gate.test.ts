@@ -3,11 +3,11 @@ import type { MessageContent } from '@lody/shared';
 import { buildAssistantTurnRenderLayout } from '../src/components/ai-gui/assistant-turn-render-blocks';
 
 // Guards the load-bearing invariant behind view.tsx `shouldUseWorkedGroup`: a finished
-// turn is folded into a "Worked for …" summary ONLY when it has a genuine visible final
-// answer, i.e. at least one render block is NOT in `workBlockKeys`. Activity groups are
-// folded unconditionally, so an interrupted/cancelled turn that ends mid-tool with no
-// final text must have NO visible tail and therefore must stay expanded. See
-// packages/components/src/components/ai-gui/AGENTS.md ("Worked for …" collapse gate).
+// turn is folded into a "Worked for …" summary ONLY when it has something visible left
+// outside `workBlockKeys`. Activity groups fold unconditionally, so an interrupted or
+// cancelled turn that ends mid-tool with no prose must have NO visible tail and must
+// stay expanded. See packages/components/src/components/ai-gui/AGENTS.md
+// ("Worked for …" collapse gate).
 const text = (value: string): MessageContent => ({ type: 'text', text: value }) as MessageContent;
 
 let toolSeq = 0;
@@ -35,9 +35,8 @@ describe('Worked for … collapse gate (buildAssistantTurnRenderLayout)', () => 
     expect(hasVisibleFinalContent([toolCall(), toolCall(), text('all done')], true)).toBe(true);
   });
 
-  it('trailing tool after the text answer (no closing text) leaves no visible tail → do not collapse', () => {
-    // Intended edge behavior: erring toward showing more, never an empty "Worked for …".
-    expect(hasVisibleFinalContent([text('working on it'), toolCall()], true)).toBe(false);
+  it('an answer followed by more tool work keeps the answer visible → collapse', () => {
+    expect(hasVisibleFinalContent([text('the answer'), toolCall()], true)).toBe(true);
   });
 
   it('streaming turn folds nothing (workBlockKeys empty), so it never collapses', () => {

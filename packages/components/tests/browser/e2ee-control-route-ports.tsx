@@ -24,10 +24,6 @@ export const createFileRoute = () => (options: { component: () => ReactNode }) =
 });
 export const useNavigate = () => noop;
 export const useSetAtom = () => noop;
-// The route reads the account-pairing and creation betas; both stay off here.
-export const useAtomValue = () => false;
-export const e2eeAccountPairingFeatureEnabledAtom = 'accountPairing';
-export const e2eeWorkspaceCreationFeatureEnabledAtom = 'creationEnabled';
 export const isElectronRenderer = () => false;
 export const isNativeAppShell = () => false;
 export const setWorkspaceContextAtom = {};
@@ -38,6 +34,9 @@ export const usePlatformSession = () => ({
   user: { id: fixture.accountId },
 });
 export const usePlatformWorkspaces = () => ({ status: 'ready', workspaces: [] });
+// No other workspace here, so "Workspaces" has no ordinary workspace to return to.
+export const getPreferredOrdinaryWorkspaceSlug = () => null;
+export const readPreferredWorkspaceSlug = () => null;
 export const useTranslation = () => ({ t: (key: string) => key });
 export const readWorkspaceModeEvidence = () => ({});
 export const readE2eeGenesisPin = () => fixture.genesisHash;

@@ -70,7 +70,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Keep one Repo view across auth refresh and unrelated mode-cache changes;
   `WorkspaceTargetRouter` owns target/transport selection.
   Never restore a second writer or proxy-authoring/write-intent mirror.
-- Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
+- Runtime close retries recoverable cleanup, retaining fencing until confirmed Repo destruction.
   Failed startup shares this close path.
 - Local-only bootstrap exchanges CRDT snapshots only from already owned documents
   in the same workspace. Merge into the receiving Repo; peer state is not authoritative,

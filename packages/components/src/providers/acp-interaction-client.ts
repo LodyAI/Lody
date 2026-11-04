@@ -132,7 +132,8 @@ export function createAcpInteraction<P, R, I>(
   let finished = false;
   let pendingSubmissions = 0;
   let started = false;
-  let cancelSent = false;
+  let cancelPromise: Promise<void> | undefined;
+  let cancelController: AbortController | undefined;
   let progressAck = 0;
   const deadline = setTimeout(() => controller.abort(), options.timeoutMs);
   const abort = () => controller.abort();
@@ -190,22 +191,36 @@ export function createAcpInteraction<P, R, I>(
       if (rejectAbort) local.signal.removeEventListener('abort', rejectAbort);
     }
   };
-  const cancel = async () => {
+  const cancel = (signal?: AbortSignal): Promise<void> => {
     controller.abort();
-    if (!started || cancelSent || finished || !device) return;
-    cancelSent = true;
-    const cancelController = new AbortController();
-    try {
-      const response = await send(
-        { action: 'cancel', interactionRequestId: id },
-        deps.newRequestId(),
-        cancelController.signal,
-        device
-      );
-      parseReply(response.response, id);
-    } catch {
-      // Cancellation is best effort; remote expiry owns eventual cleanup.
+    if (!cancelPromise && (!started || finished || !device)) return Promise.resolve();
+    if (!cancelPromise) {
+      cancelController = new AbortController();
+      const current = cancelController;
+      cancelPromise = (async () => {
+        try {
+          const response = await send(
+            { action: 'cancel', interactionRequestId: id },
+            deps.newRequestId(),
+            current.signal,
+            device
+          );
+          parseReply(response.response, id);
+        } catch {
+          // Cancellation is best effort; remote expiry owns eventual cleanup.
+        }
+      })();
     }
+    if (signal) {
+      const current = cancelController!;
+      if (signal.aborted) current.abort();
+      else {
+        const abortCancel = () => current.abort();
+        signal.addEventListener('abort', abortCancel, { once: true });
+        void cancelPromise.finally(() => signal.removeEventListener('abort', abortCancel));
+      }
+    }
+    return cancelPromise;
   };
   const delay = () =>
     new Promise<void>((resolve, reject) => {

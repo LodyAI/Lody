@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => {
   const machineRpcConstructors = vi.fn();
   const encryptedAcpTransport = {
     handler: null as null | ((request: any, options: any) => Promise<any>),
+    closeHandler: null as null | (() => Promise<void>),
   };
   const machineRpcStart = vi.fn(async () => {});
   const machineRpcStop = vi.fn();
@@ -429,7 +430,9 @@ vi.mock('../src/providers/encrypted-dispatch-legacy', async (importOriginal) => 
       return {
         requestFeature: (request: unknown, requestOptions: unknown) =>
           mocks.encryptedAcpTransport.handler!(request, requestOptions),
-        close: async () => {},
+        close: async () => {
+          await mocks.encryptedAcpTransport.closeHandler?.();
+        },
       } as ReturnType<typeof actual.createEncryptedDispatchLegacy>;
     },
   };
@@ -445,6 +448,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
     });
     mocks.encryptedAcpTransport.handler = null;
+    mocks.encryptedAcpTransport.closeHandler = null;
     mocks.repoOverride = null;
     mocks.realTokenProvider = false;
     mocks.tokenReady.mockReset().mockResolvedValue('streams-token');
@@ -572,6 +576,67 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(activeRequests).toBe(0);
     expect(window.repo).toBeUndefined();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retries a failed transport close without releasing the Repo or reviving its runtime', async () => {
+    const failure = new Error('temporary transport close failure');
+    const entered = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    let transportClosed = false,
+      repoClosed = false;
+    mocks.presenceStop.mockRejectedValueOnce(failure).mockImplementationOnce(async () => {
+      entered.resolve();
+      await released.promise;
+      transportClosed = true;
+    });
+    mocks.destroy.mockImplementationOnce(async () => {
+      if (!transportClosed) throw new Error('Repo released before transport');
+      repoClosed = true;
+    });
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    await expect(runtime.dispose()).rejects.toBe(failure);
+    expect(repoClosed).toBe(false);
+    const retry = runtime.dispose();
+    expect(runtime.dispose()).toBe(retry);
+    try {
+      await entered.promise;
+      expect(repoClosed).toBe(false);
+      await runtime.setAuthToken('cannot-reactivate');
+      expect(cloudAttachCalls()).toEqual([]);
+    } finally {
+      released.resolve();
+      await retry;
+    }
+    expect(repoClosed).toBe(true);
+    await expect(runtime.dispose()).resolves.toBeUndefined();
+  });
+
+  it('does not treat a later Repo.destroy no-op as proof after uncertain terminal destruction', async () => {
+    const failure = new Error('terminal storage close outcome unknown');
+    let terminalDestroyEntered = false;
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    Object.defineProperty(runtime.repo, 'destroyed', { get: () => terminalDestroyEntered });
+    mocks.destroy.mockImplementationOnce(async () => {
+      terminalDestroyEntered = true;
+      throw failure;
+    });
+    await expect(runtime.dispose()).rejects.toBe(failure);
+    // Matches the installed SDK: after setting destroyed, the next call can be a no-op.
+    mocks.destroy.mockResolvedValueOnce(undefined);
+    await expect(runtime.dispose()).rejects.toBe(failure);
+    expect(terminalDestroyEntered).toBe(true);
+    await runtime.setAuthToken('cannot-reactivate');
+    expect(cloudAttachCalls()).toEqual([]);
   });
 
   it('joins a late token result and never publishes its Streams client after close', async () => {
@@ -2096,6 +2161,112 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       await access.close();
     }
   });
+
+  it.each(['acknowledged', 'stalled'] as const)(
+    'cancels activated encrypted ACP before dispatch close and preserves cleanup on retry (%s)',
+    async (mode) => {
+      vi.useRealTimers();
+      const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+      const repo = await RealRepo.create({});
+      mocks.repoOverride = repo;
+      await repo.upsertDocMeta('machine-remote-machine', {
+        protocolCapabilities: { e2eeAcpInteraction: 1 },
+      });
+      const device = '22'.repeat(32);
+      const activated = Promise.withResolvers<void>();
+      const events: string[] = [];
+      let cancelSignal: AbortSignal | undefined;
+      let interactionId = '';
+      let closeAttempts = 0;
+      mocks.encryptedAcpTransport.handler = async (request, options) => {
+        const action = request.params.action;
+        events.push(action);
+        options.onPrepared?.(device);
+        if (action === 'start') interactionId = options.requestId;
+        if (action === 'activate') activated.resolve();
+        if (action === 'cancel' && mode === 'stalled') {
+          cancelSignal = options.signal;
+          return new Promise((_resolve, reject) => {
+            options.signal.addEventListener('abort', () => reject(new Error('cancel aborted')), {
+              once: true,
+            });
+          });
+        }
+        return {
+          ok: true,
+          result: {
+            type: 'machine/acp-interaction',
+            interactionRequestId: interactionId,
+            state: action === 'cancel' ? 'cancelled' : 'running',
+          },
+        };
+      };
+      mocks.encryptedAcpTransport.closeHandler = async () => {
+        events.push('close');
+        if (++closeAttempts === 1) throw new Error('synthetic close failure');
+      };
+      const host = {
+        prepareDispatch: vi.fn(),
+        acceptDispatchResponse: vi.fn(),
+        prepareFeatureRpc: vi.fn(),
+        acceptFeatureRpcResponse: vi.fn(),
+      } as unknown as E2eeWorkspaceRuntime;
+      const access = createE2eeContent({
+        runtime: host,
+        workspaceId: 'workspace-1',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => null,
+      });
+      const runtime = await createWorkspaceRuntime({
+        content: access.content,
+        e2ee: access.e2ee,
+        accountId: 'account',
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1',
+        apiBaseUrl: 'https://synthetic.invalid',
+        syncMode: 'cloud',
+        waitForContentAdmission: async (signal) => {
+          signal.throwIfAborted();
+        },
+        e2eeLocalIdentity: {
+          accountId: 'account',
+          workspaceId: 'workspace-1',
+          genesisHash: '11'.repeat(32),
+          signingPublicKey: device,
+        },
+      });
+      const machine = 'remote-machine' as MachineId;
+      const requestId = '01234567-89ab-4cde-8fab-0123456789ab';
+      try {
+        runtime.sendControl({
+          type: 'machine/acp-authenticate',
+          action: 'start',
+          workspaceId: 'workspace-1',
+          machineId: machine,
+          configId: 'config',
+          requestId,
+        } as never);
+        await activated.promise;
+        if (mode === 'stalled') vi.useFakeTimers();
+        const first = runtime.dispose();
+        const firstFailed = expect(first).rejects.toThrow('synthetic close failure');
+        if (mode === 'stalled') {
+          await vi.advanceTimersByTimeAsync(2000);
+          expect(cancelSignal?.aborted).toBe(true);
+        }
+        await firstFailed;
+        expect(events.slice(0, 4)).toEqual(['start', 'activate', 'cancel', 'close']);
+        await expect(runtime.dispose()).resolves.toBeUndefined();
+        expect(events.filter((value) => value === 'cancel')).toEqual(['cancel']);
+        expect(events.filter((value) => value === 'close')).toEqual(['close', 'close']);
+      } finally {
+        await runtime.dispose().catch(() => {});
+        await access.close();
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it('rejects protected remote ACP operations when the machine has not advertised the encrypted capability', async () => {
     const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');

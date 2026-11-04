@@ -20,6 +20,7 @@ import {
   isNodeApiVersionSupported as isWorkspaceNodeApiVersionSupported,
   isNodeSecurityVersionSupported as isWorkspaceNodeSecurityVersionSupported,
 } from '../../../scripts/check-node-runtime.mjs';
+import { childProcessEnv } from './test-child-env';
 
 const require = createRequire(import.meta.url);
 const sqliteDir = dirname(require.resolve('better-sqlite3/package.json'));
@@ -181,7 +182,10 @@ describe('SQLite runtime support guard', () => {
     const scriptPath = fileURLToPath(
       new URL('../../../scripts/check-node-runtime.mjs', import.meta.url)
     );
-    const supported = spawnSync(process.execPath, [scriptPath], { encoding: 'utf8' });
+    const supported = spawnSync(process.execPath, [scriptPath], {
+      encoding: 'utf8',
+      env: childProcessEnv(),
+    });
     expect(supported.status).toBe(0);
     expect(supported.stderr).toBe('');
 
@@ -190,6 +194,7 @@ describe('SQLite runtime support guard', () => {
     )}`;
     const unsupported = spawnSync(process.execPath, ['--import', spoofNodeApi9, scriptPath], {
       encoding: 'utf8',
+      env: childProcessEnv(),
     });
     expect(unsupported.status).toBe(1);
     expect(unsupported.stderr).toContain('Node-API 10');
@@ -199,6 +204,7 @@ describe('SQLite runtime support guard', () => {
     )}`;
     const vulnerable = spawnSync(process.execPath, ['--import', spoofVulnerableNode, scriptPath], {
       encoding: 'utf8',
+      env: childProcessEnv(),
     });
     expect(vulnerable.status).toBe(1);
     expect(vulnerable.stderr).toContain('v24.22.1+');
@@ -210,7 +216,7 @@ describe('SQLite runtime support guard', () => {
         '--eval',
         `Object.defineProperty(process.versions, 'napi', { value: '9' }); await import(${JSON.stringify(pathToFileURL(scriptPath).href)});`,
       ],
-      { encoding: 'utf8' }
+      { encoding: 'utf8', env: childProcessEnv() }
     );
     expect(importOnly.status).toBe(0);
     expect(importOnly.stderr).toBe('');

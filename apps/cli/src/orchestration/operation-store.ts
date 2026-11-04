@@ -324,6 +324,11 @@ export type AcceptOperationInput = Omit<
 
 export type AcceptOperationOptions = {
   materializationClaimToken?: string;
+  /**
+   * Request identity for retry matching when the stored command embeds text read at
+   * acceptance (quoted messages). Defaults to the canonical command itself.
+   */
+  fingerprintCommand?: unknown;
 };
 
 export class LodyOperationStore {
@@ -386,7 +391,12 @@ export class LodyOperationStore {
   ): { created: boolean; operation: StoredLodyOperation; claimedItemIndexes: number[] } {
     LodyOperationIdSchema.parse(input.operationId);
     const canonical = canonicalizeLodyCommand(input.canonicalCommand);
-    const fingerprint = fingerprintLodyCommand(input.kind, canonical);
+    const fingerprint = fingerprintLodyCommand(
+      input.kind,
+      options.fingerprintCommand === undefined
+        ? canonical
+        : canonicalizeLodyCommand(options.fingerprintCommand)
+    );
     const frozenConfig = FrozenConfigSchema.parse(input.frozenContinuationConfig);
     const items = z.array(OperationItemSchema).parse(input.items);
     const targetAttachments = input.targetInputAttachments

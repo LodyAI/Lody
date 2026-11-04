@@ -95,6 +95,7 @@ import {
   ensureWorkspaceMetaSynced,
   listAliveDocMetas,
   listAliveSessionMetas,
+  withMachineRpcClient,
   LocalDaemonAvailabilityError,
   normalizeCliValue,
   resolveWorkspaceOrThrow,
@@ -128,6 +129,7 @@ import {
   readSessionMcpIdsForAuthoring,
   sendSessionChatResult,
   type SessionChatDelivery,
+  toSessionTranscriptEntry,
   validateSessionChatTarget,
   validateSessionCreateOptions,
   type CreateOptions,
@@ -154,6 +156,7 @@ import { registerAutomationTools } from './automation-tools';
 import { LODY_SKILL_INSTRUCTIONS, registerLodySkills } from './skills/server';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
+import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
 import { createSessionBackend } from '@/session/session-backend';
 import { version as cliVersion } from '@/pkg';
 import {
@@ -617,6 +620,9 @@ const SessionCreateToolInputSchema = z
     }
   });
 
+const MAX_CHAT_QUOTES = 3;
+const MAX_QUOTE_CHARS = 2_000;
+
 const SessionChatToolInputSchema = z
   .object({
     mcpServerIds: McpServerIdsInputSchema,
@@ -635,6 +641,20 @@ const SessionChatToolInputSchema = z
       .trim()
       .default('')
       .describe('User prompt; may be omitted when attachments are provided.'),
+    quotes: z
+      .array(
+        z
+          .object({
+            sessionId: z.string().trim().min(1).optional(),
+            messageId: z.string().trim().min(1),
+          })
+          .strict()
+      )
+      .max(MAX_CHAT_QUOTES)
+      .optional()
+      .describe(
+        'Messages to quote verbatim, e.g. the human instruction you are relaying. Lody appends each original text with its recorded author; sessionId defaults to the current Session. An unreadable message is marked unverified instead of failing the chat.'
+      ),
     attachments: InputAttachmentPathsSchema,
     wait: z.boolean().optional().describe('Wait for the assistant reply and return it.'),
     timeoutSeconds: z
@@ -846,6 +866,23 @@ const SessionChatManyToolInputSchema = z
     items: z.array(SessionChatBatchItemSchema).max(1_000),
   })
   .strict();
+
+const SessionQueueToolInputSchema = z
+  .object({
+    action: z.enum(['list', 'withdraw', 'replace']),
+    sessionId: z.string().trim().min(1),
+    userTurnId: z.string().trim().min(1).optional(),
+    prompt: z.string().trim().min(1).optional(),
+    operationId: LodyOperationIdSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.action !== 'list' && !value.userTurnId)
+      ctx.addIssue({ code: 'custom', message: `${value.action} requires userTurnId` });
+    if (value.action === 'replace' && (!value.prompt || !value.operationId))
+      ctx.addIssue({ code: 'custom', message: 'replace requires prompt and operationId' });
+  });
+type SessionQueueToolInput = z.infer<typeof SessionQueueToolInputSchema>;
 
 const OperationGetToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
 const OperationCancelToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
@@ -2064,6 +2101,17 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
   });
 };
 
+const formatLiveActivity = (activity: NonNullable<SessionLiveStatusBatchItem['activity']>) => ({
+  ...(activity.turnStartedAt !== undefined
+    ? { turnStartedAt: new Date(activity.turnStartedAt).toISOString() }
+    : {}),
+  ...(activity.lastOutputAt !== undefined
+    ? { lastOutputAt: new Date(activity.lastOutputAt).toISOString() }
+    : {}),
+  ...(activity.currentAction ? { currentAction: activity.currentAction } : {}),
+  queuedInputs: activity.queuedInputs,
+});
+
 const readMcpSessionStatusTargets = async (
   ids: readonly string[],
   ctx: ReturnType<typeof getSessionContext>,
@@ -2158,6 +2206,13 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
               ...execution,
               ...(liveWorking.status ? { liveStatus: liveWorking.status } : {}),
               liveSource: liveWorking.source,
+              // Busy without a daemon answer (older daemon, offline or read failure)
+              // keeps the ordinary state and says so instead of guessing.
+              ...(live?.activity
+                ? { activity: formatLiveActivity(live.activity) }
+                : execution.executionState === 'busy'
+                  ? { activity: 'unknown' as const }
+                  : {}),
             },
             machine: { state: online ? ('online' as const) : ('offline' as const) },
             observation: {
@@ -3215,6 +3270,69 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
   });
 };
 
+/**
+ * Appends quoted messages, read from history with their recorded author, to the
+ * prompt text. The result is ordinary frozen prompt text, so retries, recovery
+ * and older daemons need nothing new. Unreadable quotes are marked, not fatal.
+ */
+const appendQuotedMessages = async (
+  manager: LoroDocumentManager,
+  prompt: string,
+  quotes: NonNullable<SessionChatToolInput['quotes']>,
+  currentSessionId: string,
+  machineId: string
+): Promise<string> => {
+  const blocks: string[] = [];
+  for (const quote of quotes) {
+    const sourceId = (quote.sessionId ?? currentSessionId) as SessionId;
+    const reference = `${sourceId}/${quote.messageId}`;
+    try {
+      const source = await readCurrentSessionMeta(manager, sourceId);
+      const turn = source
+        ? await readSessionDocForMcp(
+            manager,
+            source,
+            machineId as MachineId,
+            async (sessionDoc) => {
+              const read = await (
+                await createSessionBackend(sessionDoc, source)
+              ).history.readTurn(quote.messageId);
+              return read.state === 'ready' ? read.turn : undefined;
+            },
+            REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
+          )
+        : undefined;
+      const text = turn ? toSessionTranscriptEntry(0, turn)?.text : undefined;
+      if (!turn || !text) {
+        blocks.push(
+          `[Lody] Quoted message ${reference} could not be read; treat it as an unverified relay.`
+        );
+        continue;
+      }
+      const author = readMessageAuthor(turn.author);
+      const from =
+        author?.kind === 'human'
+          ? `human user ${author.userId}`
+          : author?.kind === 'agent'
+            ? `agent in Session ${author.sessionId}`
+            : turn.role;
+      const title = source?.title ? ` "${source.title}"` : '';
+      const body = Array.from(text).slice(0, MAX_QUOTE_CHARS).join('');
+      blocks.push(
+        [
+          `[Lody] Quoted from ${from}, Session${title} (${sourceId}), ${turn.timestamp}:`,
+          ...body.split('\n').map((line) => `> ${line}`),
+        ].join('\n')
+      );
+    } catch {
+      blocks.push(
+        `[Lody] Quoted message ${reference} could not be read; treat it as an unverified relay.`
+      );
+    }
+  }
+  return [prompt, ...blocks].filter(Boolean).join('\n\n');
+};
+
 const startSessionChatOperation = async (args: SessionChatToolInput): Promise<unknown> => {
   if (!args.operationId) {
     throw new Error('operationId is required');
@@ -3234,25 +3352,48 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       );
     }
     const invoking = await resolveInvokingTurnContext(currentSession, manager);
-    const canonicalCommand = {
+    let canonicalCommand = {
       sessionId: args.sessionId,
       prompt: args.prompt,
       ...(args.mcpServerIds !== undefined ? { mcpServerIds: args.mcpServerIds } : {}),
       ...(args.attachments?.length ? { attachments: args.attachments } : {}),
       ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
     };
+    // Quotes are identified by reference, so a retry matches even after the quoted
+    // text or Session title changes; the expansion is read once, on first acceptance.
+    const quoteRefs = args.quotes?.map((quote) => ({
+      sessionId: quote.sessionId ?? ctx.sessionId,
+      messageId: quote.messageId,
+    }));
+    const fingerprintCommand = quoteRefs?.length
+      ? { ...canonicalCommand, quotes: quoteRefs }
+      : undefined;
     const retry = await withOperationStore((store) =>
       store.findMatchingRetry(
         ctx.sessionId as SessionId,
         args.operationId!,
         'session_chat',
-        canonicalCommand,
+        fingerprintCommand ?? canonicalCommand,
         invoking.identity.userId,
         invoking.identity.sourceTurnId
       )
     );
     if (retry) {
       return await withOperationStore((store) => store.snapshot(retry));
+    }
+    if (args.quotes?.length) {
+      args = {
+        ...args,
+        prompt: await appendQuotedMessages(
+          manager,
+          args.prompt,
+          args.quotes,
+          ctx.sessionId,
+          auth.machineId
+        ),
+      };
+      // Stored for replay: recovery reads the frozen expanded prompt.
+      canonicalCommand = { ...canonicalCommand, prompt: args.prompt };
     }
     const senderSessionId = await readInvokingChatSender(manager, currentSession, invoking);
     if (args.sessionId === senderSessionId) throw reverseChatError();
@@ -3353,7 +3494,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           ...timing,
           items: [activeOperationItem(args.sessionId as SessionId, preallocatedUserTurnId)],
         },
-        { materializationClaimToken }
+        { materializationClaimToken, ...(fingerprintCommand ? { fingerprintCommand } : {}) }
       )
     );
     if (accepted.operation.state === 'finished') {
@@ -3510,6 +3651,163 @@ const renameSessionItems = async (
 };
 
 /** Cancel through the daemon's workspace replica, never a child CLI with its own. */
+const MAX_QUEUE_LIST_ROWS = 200;
+const MAX_QUEUE_LIST_ITEMS = 20;
+const QUEUE_PREVIEW_CHARS = 100;
+
+/** Inputs in the target history that no execution has started. */
+const listQueuedSessionInputs = async (
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  requesterSessionId: string,
+  machineId: string
+) =>
+  await readSessionDocForMcp(
+    manager,
+    session,
+    machineId as MachineId,
+    async (sessionDoc) => {
+      const history = (await createSessionBackend(sessionDoc, session)).history;
+      const total = await history.count();
+      const rows = await history.readDirectory(Math.max(0, total - MAX_QUEUE_LIST_ROWS), total);
+      const queued = rows
+        .map((row) => row.scalars)
+        .filter(
+          (row): row is NonNullable<typeof row> =>
+            row?.role === 'user' &&
+            (row.status === 'pending' || row.status === 'pending_apply' || row.status === 'seen')
+        )
+        .slice(0, MAX_QUEUE_LIST_ITEMS);
+      const items = [];
+      for (const row of queued) {
+        const read = await history.readTurn(row.id);
+        const turn = read.state === 'ready' ? read.turn : undefined;
+        const author = turn ? readMessageAuthor(turn.author) : undefined;
+        const text = turn ? (toSessionTranscriptEntry(0, turn)?.text ?? '') : '';
+        items.push({
+          userTurnId: row.id,
+          status: row.status,
+          queuedAt: row.timestamp,
+          sender:
+            author?.kind === 'agent'
+              ? { kind: 'agent' as const, sessionId: author.sessionId }
+              : { kind: author?.kind ?? ('unknown' as const) },
+          own: author?.kind === 'agent' && author.sessionId === requesterSessionId,
+          preview: Array.from(text).slice(0, QUEUE_PREVIEW_CHARS).join(''),
+        });
+      }
+      return { sessionId: session.id, items };
+    },
+    REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
+  );
+
+/**
+ * Routes a withdrawal to the daemon that owns the target: in process when it is
+ * this Machine, otherwise over RPC to daemons advertising the capability.
+ */
+const withdrawQueuedSessionInputForMcp = async (
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  userTurnId: string,
+  requesterSessionId: SessionId,
+  requesterUserId: string
+): Promise<SessionWithdrawInputResponse> => {
+  const auth = getCliAuthContextOrThrow('mcp');
+  const environment = getSessionCommandEnvironment();
+  const unsupported = (error: string): SessionWithdrawInputResponse => ({
+    type: 'session/withdraw-input_response',
+    sessionId: session.id,
+    userTurnId,
+    outcome: 'error',
+    error,
+  });
+  if (environment) {
+    if (session.machineId !== auth.machineId) return unsupported('Session is not on this machine');
+    return await environment.host.withdrawQueuedInput({
+      sessionId: session.id,
+      userTurnId,
+      requesterSessionId,
+    });
+  }
+  const machine = await manager.repo.getDocMeta(getMachineRoomId(session.machineId));
+  if (
+    !machineSupportsProtocolCapability(
+      machine?.meta as MachineMeta | undefined,
+      MACHINE_PROTOCOL_CAPABILITIES.sessionInputWithdraw
+    )
+  )
+    return unsupported('Update the target machine daemon to withdraw queued inputs');
+  const response = await withMachineRpcClient(
+    { auth, workspaceId: getMcpWorkspaceId(getSessionContext()), machineId: session.machineId },
+    async (client) =>
+      await client.requestSessionWithdrawInput({
+        sessionId: session.id,
+        userTurnId,
+        requesterSessionId,
+        // The invoking Turn's user, already checked locally; the target re-checks it.
+        userId: requesterUserId,
+      })
+  );
+  return response ?? unsupported('Target machine did not answer');
+};
+
+const runSessionQueueTool = async (args: SessionQueueToolInput): Promise<unknown> => {
+  const ctx = getSessionContext();
+  const auth = getCliAuthContextOrThrow('mcp');
+  const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+  const sessionId = resolveMcpSessionId(args.sessionId, ctx) as SessionId;
+  const result = await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+    const session = await readCurrentSessionMeta(manager, sessionId);
+    if (!session)
+      throw new LodyOperationStoreError(
+        'SESSION_NOT_FOUND',
+        `Session not found: ${sessionId}`,
+        false
+      );
+    if (args.action === 'list')
+      return await listQueuedSessionInputs(manager, session, ctx.sessionId, auth.machineId);
+    // Act as the invoking Turn's user, never the daemon owner: a collaborator without
+    // access to the target must not withdraw through the owner's identity.
+    const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
+    if (!currentSession)
+      throw new LodyOperationStoreError(
+        'SESSION_NOT_FOUND',
+        `Requester Session not found: ${ctx.sessionId}`,
+        false
+      );
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
+    const requester = toDelegatedSessionRequester(invoking.identity);
+    await validateSessionChatTarget({
+      auth,
+      workspace,
+      manager,
+      sessionId,
+      delegatedRequester: requester,
+    });
+    return await withdrawQueuedSessionInputForMcp(
+      manager,
+      session,
+      args.userTurnId!,
+      ctx.sessionId as SessionId,
+      requester.userId
+    );
+  });
+  if (args.action !== 'replace') return result;
+  const withdrawal = result as SessionWithdrawInputResponse;
+  // Replace sends only once the old input will not run. A retry after a failed send
+  // finds it already withdrawn and resends under the same idempotent operationId.
+  if (withdrawal.outcome !== 'withdrawn' && withdrawal.outcome !== 'already_withdrawn')
+    return { withdrawal };
+  return {
+    withdrawal,
+    chat: await startSessionChatOperation({
+      operationId: args.operationId!,
+      sessionId,
+      prompt: args.prompt!,
+    }),
+  };
+};
+
 const cancelSessionTurnForMcp = async (sessionId: SessionId, turnId?: string) => {
   const ctx = getSessionContext();
   const auth = getCliAuthContextOrThrow('mcp');
@@ -4824,6 +5122,23 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     async (args: SessionChatManyToolInput) => {
       try {
         return jsonTextResult(await startSessionChatManyOperation(args));
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    }
+  );
+
+  registerSessionTool(
+    'lody_session_queue',
+    {
+      title: 'Manage queued inputs of a Lody session',
+      description:
+        'list shows inputs a target Session has not started (sender, own, status, 100-char preview). withdraw cancels one of your own still-pending inputs; replace withdraws it and, only if that succeeded, sends prompt as a new session_chat with operationId. Withdrawal is best effort: outcome withdrawn means it was still pending, but a dispatch already under way may still run it; already_withdrawn means it was already canceled (a retried replace then sends its new chat); already_started, not_owner and not_found change nothing. You act as the invoking user and need access to the target. Targets on older daemons return an error outcome.',
+      inputSchema: SessionQueueToolInputSchema,
+    },
+    async (args: SessionQueueToolInput) => {
+      try {
+        return jsonTextResult(await runSessionQueueTool(args));
       } catch (error) {
         return mcpErrorResult(error);
       }

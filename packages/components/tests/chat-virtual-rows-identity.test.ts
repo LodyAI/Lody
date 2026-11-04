@@ -141,7 +141,8 @@ describe('DSH thought visibility', () => {
 
     const args = fixture(id, contents, true);
     const rows = buildChatVirtualRows(args);
-    expect(visibleContents(rows)).toEqual([answer]);
+    // Prose never folds: only the thought and tool steps collapse.
+    expect(visibleContents(rows)).toEqual([progress, answer]);
     const header = rows.find(
       (row) => row.type === 'assistant' && row.content.kind === 'worked_group_header'
     );
@@ -161,7 +162,7 @@ describe('DSH thought visibility', () => {
           selectionLayouts: expansion(id, {}, { [`segment:${id}:0`]: false }),
         })
       )
-    ).toEqual([answer]);
+    ).toEqual([progress, answer]);
 
     // Search opens both the outer process and a manually collapsed thought group.
     const firstThoughtKey = headers(live)[0]!.block.key;

@@ -219,8 +219,16 @@ Stop、新输入接受和实际提交使用同一个会话准入。支持 Inbox 
 steer 交接完成依据会话 `steerOperationLedger` 中已应用的记录（`coordinator-model.ts`
 中的 `findSteerSuccessor`），由 `operation-coordinator.test.ts` 的 `steer handoff` 用例覆盖。
 投递回执由 `apps/cli/src/commands/session.ts` 中的 `deliveryFromSteerResponse` 映射，
-由 `session-default-fallback.test.ts` 覆盖。“协调多个会话”一节是尚未实现的预期行为；
-状态仍只有 `idle`/`busy`。
+由 `session-default-fallback.test.ts` 覆盖。
+
+“协调多个会话”一节的工具位于 `apps/cli/src/mcp/lody-mcp-server.ts`（拉取请求过滤、
+短 id、历史分页、引用、`lody_session_queue`）。实时活动、发送方标头和排队输入撤回由
+所属机器在 `apps/cli/src/lib/message-handler.ts` 中应答，受 `sessionLiveActivity`、
+`machineDiskStatus` 和 `sessionInputWithdraw` 协议能力控制；旧机器降级为 `unknown`
+或错误结果。额度和磁盘来自 `apps/cli/src/lib/resource-discovery.ts`。两项仍未实现，
+因为它们要在严格校验的同步结果里加字段，旧客户端会拒绝：完成结果中的后续输入计数，
+以及带结构化恢复时间的类型化失败原因。失败目前以文本携带 agent 的失败原因和原始消息。
+撤回已开始的输入返回 `already_started` 结果而不是错误码。尚未进行多机器新旧版本混跑。
 
 本草稿记录将上限改为 16 的请求。依赖安装后仍需补充运行时和已发布客户端
 验收。

@@ -14,6 +14,7 @@ const meta = {
   title: 'Components/E2eePersonalPairing',
   component: E2eePersonalPairing,
   args: {
+    accountId: 'synthetic-account',
     workspaceId: offer.workspaceId,
     canApprove: true,
     onJoined: () => {},

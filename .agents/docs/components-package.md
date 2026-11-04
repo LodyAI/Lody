@@ -69,6 +69,11 @@ content readiness in RuntimeProvider. Control reads capture account and reader
 labels, fence preallocated cold opens and retain incomplete closes across route
 changes. Unknown-genesis cold readers block only the same account/workspace until
 their actual close finishes; independent workspaces remain usable.
+Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
+Recoverable renderer close failures retry only unfinished stages through the retained
+owner; retired runtimes stay fenced. A failed terminal Repo destroy is not retryable
+when the SDK only exposes a destroyed flag and a subsequent no-op, rather than a
+confirmed drain receipt. See the [close recovery decision](../notes/implemented/bug-fix/2026-11-03-workspace-close-retry.md).
 Retirement joins native acquisition and confirmed close, never the subsequent
 public describe/history refresh. Portable hosts close a preallocated label before
 and after settlement; Electron's readers are an unlabeled count per window and

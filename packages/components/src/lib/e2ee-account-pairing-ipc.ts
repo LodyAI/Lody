@@ -11,7 +11,7 @@ export function accountPairingHints(state: WorkspacesState) {
   );
 }
 
-const REFUSAL = /\be2ee_(pairing-(?:tampered|expired|used))\b/;
+const REFUSAL = /\be2ee_(pairing-(?:tampered|expired|used|unavailable|rate-limited))\b/;
 /** Electron IPC carries only the message; restore the typed refusal the UI reads
  * through `accountPairingErrorCode`. Other failures pass through unchanged. */
 export async function withAccountPairingCode<A>(call: Promise<A>): Promise<A> {

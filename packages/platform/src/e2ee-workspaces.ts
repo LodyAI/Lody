@@ -17,6 +17,15 @@ import type { PlatformSessionState } from './provider';
  * resource acquisition, its executor and retirement (including unfinished close).
  * Do not acquire custody or perform I/O during this factory call. The live session
  * supplies account routing only; the runtime must verify every operation itself. */
+/** Delivery of the current workspace key to an admitted member, tracked by its approver. */
+/** `delivering`: a round for this member is running in the approver's main process. */
+export type E2eeMemberKeyDeliveryState = 'pending' | 'delivering' | 'delivered' | 'failed';
+export type E2eeMemberKeyDelivery = {
+  requestId: string;
+  state: E2eeMemberKeyDeliveryState;
+  /** Public `e2ee_*` reason code of the last failure. */
+  code?: string;
+};
 export type E2eeRuntimeFactory = (input: {
   readonly session: ReadonlyStore<PlatformSessionState>;
 }) => E2eeWorkspaceRuntime | undefined;
@@ -187,7 +196,11 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     workspaceId: string,
     requestId: string,
     mode: 'automatic' | 'explicit'
-  ): Promise<{ admitted: boolean; keyPending: boolean }>;
+  ): Promise<{ admitted: boolean; keyPending: boolean; keyDelivery?: E2eeMemberKeyDeliveryState }>;
+  /** Main-owned key delivery after admission. Reason codes only; never key or token bytes. */
+  memberKeyDeliveries?(workspaceId: string): Promise<{ items: E2eeMemberKeyDelivery[] }>;
+  /** Retry a failed delivery now, skipping its backoff; returns the new state. */
+  retryMemberKeyDelivery?(workspaceId: string, requestId: string): Promise<E2eeMemberKeyDelivery>;
   rejectMemberJoin?(workspaceId: string, requestId: string): Promise<{ state: 'rejected' }>;
   revokeMemberInvitation?(workspaceId: string, token: string): Promise<{ revoked: true }>;
   claimMemberJoin?(

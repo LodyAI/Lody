@@ -902,7 +902,7 @@ export function ChatComposer({
 
   const actionBaseClassName = cn(
     stylex.props(isLanding ? typography.caption : typography.code).className,
-    'select-none border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
+    'select-none border font-medium transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
     isDialog
       ? 'h-10 rounded-lg px-5'
       : isLanding
@@ -1198,7 +1198,7 @@ export function ChatComposer({
                     >
                       <span
                         className={cn(
-                          'max-w-[64%] truncate font-semibold uppercase tracking-wide',
+                          'max-w-[64%] truncate font-medium uppercase tracking-wide',
                           file.status === 'failed'
                             ? 'text-destructive/80'
                             : 'text-muted-foreground',
@@ -1209,7 +1209,7 @@ export function ChatComposer({
                       </span>
                       <span
                         className={cn(
-                          'mt-1 break-words text-left font-medium text-input-foreground',
+                          'mt-1 break-words text-left font-normal text-input-foreground',
                           isMobile ? 'line-clamp-3' : 'line-clamp-2',
                           stylex.props(typography.helper).className
                         )}

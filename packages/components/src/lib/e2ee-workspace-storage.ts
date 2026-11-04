@@ -463,6 +463,18 @@ export function readObservedLedgerCheckpoint(
   return observedCheckpoints(storage, accountId, workspaceId).at(-1) ?? null;
 }
 
+/** A signed snapshot only retains the head hash it attests. A locally retained
+ * original at the observed position proves that earlier checkpoint without
+ * weakening the snapshot's own endpoint check. */
+function hasVerifiedRecordCheckpoint(
+  history: VerifiedLedgerHistory,
+  previous: ObservedLedgerCheckpoint
+): boolean {
+  return history.records.some(
+    (record) => record.index === previous.length - 1 && record.hash === previous.headHash
+  );
+}
+
 /** Retain only the locally verified prefix, never an unread server endpoint.
  * Returns false while a paged refresh has not reached the last observed record.
  */
@@ -483,16 +495,13 @@ export function retainObservedLedgerCheckpoint(
       pending = true;
       continue;
     }
-    if (
-      !Result.getOrThrow(
-        hasVerifiedCheckpoint(history.view, {
-          length: previous.length,
-          head: Result.getOrThrow(
-            Bytes.recordHash(Result.getOrThrow(Hex.decode(previous.headHash)))
-          ),
-        })
-      )
-    )
+    const viewHasCheckpoint = Result.getOrThrow(
+      hasVerifiedCheckpoint(history.view, {
+        length: previous.length,
+        head: Result.getOrThrow(Bytes.recordHash(Result.getOrThrow(Hex.decode(previous.headHash)))),
+      })
+    );
+    if (!viewHasCheckpoint && !hasVerifiedRecordCheckpoint(history, previous))
       throw conflict('Ledger history changed');
   }
   if (pending) return false;

@@ -188,6 +188,7 @@ import {
 import { buildPrompt } from './session-execution-helpers';
 import { resolveSessionLaunchConfig } from './session-launch-config-resolver';
 import type { ISession, SessionManager } from './session-manager';
+import { readLodyDataDiskInfo } from '@/lib/machine-disk';
 import type { SessionConfig } from './types';
 import { isAllocatedSessionBranchName } from './worktree/branch-name-allocation';
 import {
@@ -680,6 +681,8 @@ export type SessionExecutionServiceDeps = {
   buildAcpPromptBlocks: (args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
+    /** The input's history turn; an agent author adds a provenance header. */
+    userTurnId?: string;
     inputBlocks: SessionInputBlock[];
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
@@ -2401,6 +2404,7 @@ export class SessionExecutionService {
         this.deps.buildAcpPromptBlocks({
           workspaceId: this.deps.workspaceId,
           sessionId: options.sessionId,
+          userTurnId: options.userTurnId,
           inputBlocks,
           issuePRMentions: options.inputConfig.issuePRMentions,
         })
@@ -7004,6 +7008,7 @@ export class SessionExecutionService {
             await self.deps.buildAcpPromptBlocks({
               workspaceId: message.workspaceId,
               sessionId,
+              userTurnId: message.userTurnId,
               inputBlocks: sessionInputBlocks,
               issuePRMentions: acpSessionConfig.issuePRMentions,
               replayPromptText:
@@ -8489,16 +8494,19 @@ export class SessionExecutionService {
     }
   }
 
-  async getMachineStatus(_message: MachineStatusRequestValidated): Promise<MachineStatusResponse> {
+  async getMachineStatus(message: MachineStatusRequestValidated): Promise<MachineStatusResponse> {
     this.deps.logger.debug('Received machine status request');
 
     try {
       const resources = await this.deps.collectMachineResources();
+      // Advisory: an unreadable volume omits disk, never the status answer.
+      const disk = message.includeDisk ? await readLodyDataDiskInfo() : undefined;
       return {
         type: 'machine/status_response',
         machineId: this.deps.machineId,
         success: true,
         resources,
+        ...(disk ? { disk } : {}),
         lifecycle: this.deps.getMachineLifecycleCapability(),
       };
     } catch (error) {

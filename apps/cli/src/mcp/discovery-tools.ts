@@ -15,7 +15,7 @@ export function registerDiscoveryTools(
 ) {
   const descriptions: Record<DiscoveryResource, string> = {
     machine:
-      'List readable machines, including offline machines, with online/offline/unknown presence and protocol capabilities.',
+      'List readable machines, including offline machines, with online/offline/unknown presence, protocol capabilities and synced agent quota windows (most used first, with reset times). Pass includeResources to also ask each listed online machine for memory and disk; a machine that cannot answer reports resources unavailable.',
     project:
       'List readable local projects across machines and enabled GitHub repositories. kind and machineId restrict the catalog. Local project identity includes machineId.',
     agent_config:
