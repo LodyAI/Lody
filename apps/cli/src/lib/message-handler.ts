@@ -123,6 +123,7 @@ import {
   type ChatFailedReason,
   type ProjectRef,
   type SessionPreparationCancelSpec,
+  getProjectRefBranch,
   resolveBaseBranchPreference,
   MachineStatusRequestValidated,
   MachinePingRequestValidated,
@@ -895,7 +896,17 @@ export class MessageHandler {
     this.store.get(sessionId).lastActivityMs = Date.now();
   }
 
-  private readonly preferredBaseBranch = (process.env.LODY_BASE_BRANCH || 'main').trim() || 'main';
+  /** Operator override only; Git diff bases otherwise use the repository default. */
+  private readonly configuredBaseBranch = process.env.LODY_BASE_BRANCH?.trim() || undefined;
+
+  private readonly preferredBaseBranch = this.configuredBaseBranch ?? 'main';
+
+  /** Unlike `resolveGitHubProjectBranch`, never assumes `main` for a missing base. */
+  private resolveDiffBaseBranch(meta: SessionMeta | undefined): string | undefined {
+    return (
+      meta?.baseBranch?.trim() || getProjectRefBranch(meta?.project) || this.configuredBaseBranch
+    );
+  }
 
   private resolveGitHubProjectBranch(
     meta: SessionMeta | undefined,
@@ -3165,7 +3176,7 @@ export class MessageHandler {
       logger: this.logger,
       workspaceDocument: this.workspaceDocument,
       workspaceId: this.workspaceId,
-      preferredBaseBranch: this.preferredBaseBranch,
+      preferredBaseBranch: this.configuredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
     });
     this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
@@ -6937,13 +6948,14 @@ export class MessageHandler {
                 : 'permission_denied',
             message: 'Session file root is unavailable.',
           };
+        const allChangesBaseBranch = this.resolveDiffBaseBranch(ownerMeta);
         return {
           ok: true,
           ownerSessionId,
           workspaceRoot: selected.absolutePath,
           fileRoots,
           projectRun: rootId === 'main' ? ownerMeta?.projectRun : undefined,
-          allChangesBaseBranch: this.resolveGitHubProjectBranch(ownerMeta),
+          ...(allChangesBaseBranch === undefined ? {} : { allChangesBaseBranch }),
         };
       }
       if (resolved.error === 'session_not_found') {

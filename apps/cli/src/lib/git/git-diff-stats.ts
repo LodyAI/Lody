@@ -101,7 +101,7 @@ const hasCommitish = async (runGit: GitRunner, rev: string): Promise<boolean> =>
 
 const resolveBaseRef = async (
   runGit: GitRunner,
-  preferredBaseBranch: string
+  preferredBaseBranch: string | undefined
 ): Promise<string | null> => {
   const candidates = gitDiffBaseRefCandidates(preferredBaseBranch);
 
@@ -323,9 +323,10 @@ export const captureGitWorkingTreeDiffBaseline = async (
   }
 };
 
+/** An omitted branch means none was recorded; see `gitDiffBaseRefCandidates`. */
 export const resolveGitMergeBase = async (
   runGit: GitRunner,
-  preferredBaseBranch = 'main'
+  preferredBaseBranch?: string
 ): Promise<GitMergeBase | null> => {
   if (!(await isInsideGitWorktree(runGit))) {
     return null;
@@ -341,7 +342,7 @@ export const resolveGitMergeBase = async (
 export const getGitDiffStats = async (
   runGit: GitRunner,
   options?: {
-    preferredBaseBranch?: string;
+    preferredBaseBranch?: string | undefined;
     /**
      * If provided, calculate commitFileDiff as the diff between this commit and HEAD.
      * This is useful for calculating file changes across multiple commits in a single conversation.
@@ -351,8 +352,7 @@ export const getGitDiffStats = async (
     countWorkingTreeFileLines?: GitWorkingTreeLineCounter;
   }
 ): Promise<GitDiffStats | null> => {
-  const preferredBaseBranch = options?.preferredBaseBranch ?? 'main';
-  const mergeBaseResult = await resolveGitMergeBase(runGit, preferredBaseBranch);
+  const mergeBaseResult = await resolveGitMergeBase(runGit, options?.preferredBaseBranch);
   if (!mergeBaseResult) return null;
   const { baseRef, mergeBase } = mergeBaseResult;
 
