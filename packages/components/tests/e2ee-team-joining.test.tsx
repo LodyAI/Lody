@@ -200,6 +200,15 @@ describe('encrypted team joining', () => {
     await act(async () => vi.advanceTimersByTime(7_000));
     await settle();
     expect(claims).toBe(slow + 1);
+    // After the fast window the member is told why it is still waiting, and can retry.
+    expect(container.textContent).toContain('e2ee.team.waitingKeySlow');
+    await act(async () => button('e2ee.team.retry').click());
+    await settle();
+    expect(claims).toBe(slow + 2);
+    expect(container.textContent).not.toContain('e2ee.team.waitingKeySlow');
+    await act(async () => vi.advanceTimersByTime(3_000));
+    await settle();
+    expect(claims).toBe(slow + 3);
     installed = true;
     await act(async () => window.dispatchEvent(new Event('online')));
     await settle();

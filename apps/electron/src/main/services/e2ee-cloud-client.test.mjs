@@ -791,3 +791,88 @@ for (const [serverCode, code] of [
       )
     )
   })
+
+const jwtExpiringAt = (seconds, id) =>
+  [
+    Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url'),
+    Buffer.from(JSON.stringify({ exp: seconds, jti: id })).toString('base64url'),
+    'synthetic-signature'
+  ].join('.')
+void test('relay calls reuse one unexpired Convex token, renew it near expiry and after a failed call', async () => {
+  let now = 1_000_000
+  let minted = 0
+  const seen = []
+  let failNext = false
+  const scope = await Effect.runPromise(Scope.make())
+  const client = await Effect.runPromise(
+    build(
+      async (_url, init) => {
+        seen.push(new Headers(init.headers).get('authorization'))
+        if (failNext) {
+          failNext = false
+          return new Response('unavailable', { status: 503 })
+        }
+        return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
+      },
+      {
+        now: () => now,
+        convexToken: async () => ({
+          data: { token: jwtExpiringAt(Math.floor(now / 1000) + 600, ++minted) }
+        })
+      }
+    ).pipe(Scope.provide(scope))
+  )
+  const status = () => Effect.runPromise(Effect.result(client.mailbox(access).status(target)))
+  for (let index = 0; index < 3; index++) assert.ok(Result.isSuccess(await status()))
+  assert.equal(minted, 1)
+  assert.equal(new Set(seen).size, 1)
+  // Inside the renewal margin: a fresh token, never one about to expire in flight.
+  now += 560_000
+  await status()
+  assert.equal(minted, 2)
+  // A failed call may mean a rejected token: the next call mints again.
+  failNext = true
+  assert.ok(Result.isFailure(await status()))
+  await status()
+  assert.equal(minted, 3)
+  await Effect.runPromise(Scope.close(scope, Exit.void))
+})
+void test('a call that hits the 30 s deadline drops the reused Convex token', async () => {
+  let minted = 0
+  let stalled = false
+  const started = Promise.withResolvers()
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(
+          async (_url, init) => {
+            if (!stalled) return response({ ...target, revision: 0, status: 'NeedsEnvelope' })
+            return new Promise((_resolve, reject) => {
+              started.resolve()
+              init.signal.addEventListener('abort', () => reject(new Error('aborted')), {
+                once: true
+              })
+            })
+          },
+          {
+            now: () => 1_000_000,
+            convexToken: async () => ({ data: { token: jwtExpiringAt(1_000 + 600, ++minted) } })
+          }
+        )
+        yield* client.mailbox(access).status(target)
+        assert.equal(minted, 1)
+        stalled = true
+        const waiting = yield* Effect.forkChild(
+          Effect.result(client.mailbox(access).status(target))
+        )
+        yield* Effect.promise(() => started.promise)
+        yield* TestClock.adjust('30 seconds')
+        assert.equal((yield* Fiber.join(waiting)).failure.reason, 'unavailable')
+        // The stalled call may have been a rejected token: the next call mints anew.
+        stalled = false
+        yield* client.mailbox(access).status(target)
+        assert.equal(minted, 2)
+      })
+    ).pipe(Effect.provide(TestClock.layer()))
+  )
+})

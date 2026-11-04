@@ -77,6 +77,7 @@
   "e2ee.team.waitingApproval": "Waiting for an administrator to approve this device.",
   "e2ee.team.waitingKey": "Membership approved. Waiting for key delivery.",
   "e2ee.team.waitingKeyAdminOnline": "An administrator’s Lody desktop must be online to send the key.",
+  "e2ee.team.waitingKeySlow": "Still waiting for an administrator’s device to send the key. Keep this page open, or retry.",
   "e2ee.team.ready": "This desktop has joined and received the current key.",
   "e2ee.team.rejected": "This request was closed. Ask an administrator for a new invitation.",
   "e2ee.team.unavailable": "This invitation is unavailable or its saved identity does not match. Ask for a new invitation.",
