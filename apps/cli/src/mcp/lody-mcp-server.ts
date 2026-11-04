@@ -894,7 +894,21 @@ const OperationBatchGetToolInputSchema = z
   })
   .strict();
 
-const SessionArchiveToolInputSchema = z.object({ sessionId: z.string().trim().min(1) }).strict();
+const SessionArchiveToolInputSchema = z
+  .object({
+    sessionId: z.string().trim().min(1).optional(),
+    sessionIds: z
+      .array(z.string().trim().min(1))
+      .min(1)
+      .max(MAX_MCP_COMMAND_BATCH_SIZE)
+      .refine((ids) => new Set(ids).size === ids.length, 'sessionIds must be unique')
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (input) => (input.sessionId !== undefined) !== (input.sessionIds !== undefined),
+    'Provide exactly one of sessionId or sessionIds'
+  );
 
 const SessionTitleToolInputSchema = z
   .string()
@@ -5365,31 +5379,46 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_ARCHIVE_TOOL_NAME,
     {
-      title: 'Archive a Lody session',
+      title: 'Archive Lody sessions',
       description:
-        'Idempotently archive a Session and its contained child Tabs. Independently opened Sessions (openedBySessionId) are not archived. Pending Operation Deliveries remain pending until a human restores the Session.',
+        'Idempotently archive one Session with sessionId, or 1-20 Sessions with sessionIds; provide exactly one field. Batch ids must be unique. Batch results preserve input order and failures are isolated per item; successful archives remain applied. Each target includes its contained child Tabs. Independently opened Sessions (openedBySessionId) are not archived. Pending Operation Deliveries remain pending until a human restores the Session.',
       inputSchema: SessionArchiveToolInputSchema,
     },
     async (args: SessionArchiveToolInput) => {
-      let sessionId = args.sessionId;
       try {
         const ctx = getSessionContext();
         const auth = getCliAuthContextOrThrow('mcp');
         const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-        sessionId = resolveMcpSessionId(args.sessionId, ctx);
-        const archivedChildSessionIds = await withWorkspaceManager(
-          auth,
-          workspace,
-          'mcp',
-          (manager) =>
-            runSessionOperationWithSyncedMetadata(manager, sessionId as SessionId, 'archive')
-        );
-        return jsonTextResult({ ok: true, sessionId, archivedChildSessionIds });
+        return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+          const archive = async (rawSessionId: string) => {
+            const sessionId = resolveMcpSessionId(rawSessionId, ctx);
+            try {
+              const archivedChildSessionIds = await runSessionOperationWithSyncedMetadata(
+                manager,
+                sessionId as SessionId,
+                'archive'
+              );
+              return { ok: true as const, sessionId, archivedChildSessionIds };
+            } catch (error) {
+              if (formatMcpErrorMessage(error).includes('already archived')) {
+                return { ok: true as const, sessionId };
+              }
+              throw error;
+            }
+          };
+          if (args.sessionId !== undefined) {
+            return jsonTextResult(await archive(args.sessionId));
+          }
+          const items = await mapWithConcurrency(args.sessionIds ?? [], 1, async (sessionId) => {
+            try {
+              return await archive(sessionId);
+            } catch (error) {
+              return { ok: false as const, sessionId, error: normalizeMcpError(error) };
+            }
+          });
+          return jsonTextResult({ items });
+        });
       } catch (error) {
-        const message = formatMcpErrorMessage(error);
-        if (message.includes('already archived')) {
-          return jsonTextResult({ ok: true, sessionId });
-        }
         return mcpErrorResult(error);
       }
     }
