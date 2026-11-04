@@ -144,6 +144,15 @@ export interface E2eeAccountApprovalSession {
   invitation(record: Uint8Array): Promise<Uint8Array | null>;
   access(): Promise<{ workspaceId: string; credential: string }>;
   refresh(): Promise<void>;
+  /** Runs this session's existing key round once, so the device it just admitted
+   * receives the current epoch key. Distribution targets only verified ledger devices. */
+  keyRound(): Promise<void>;
+  /** Positive mailbox evidence for `device` at the current epoch: 'delivered', or a
+   * public retryable `e2ee_*` code. */
+  keyDeliveryEvidence(device: string): Promise<string>;
+  /** Ends this holder's use of the approval session. When it opened a reader for
+   * approval, the last release closes it so the workspace can drain. Idempotent. */
+  release(): Promise<void>;
 }
 
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */

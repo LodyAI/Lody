@@ -254,6 +254,8 @@ production upload/readback. The CLI rejects adapter/manifest version drift. See 
 The submodule owns the private-wire contract
 and minimum official version. Kimi is different: `packages/acp-extension-kimi` owns the
 Lody-maintained runtime source and implements the shared `acp-extension-core` contract.
+The [Kimi media-output fix](../../../../.agents/notes/proposed/bug-fix/2026-11-04-kimi-media-output.md)
+requires a new published and verified runtime before the manifest can advance.
 
 Corrupt caches are reported absent with a warning; launch never executes them. Installation
 publishes a verified successor in a sibling `<arch>.gen-<uuid>` directory and leaves existing

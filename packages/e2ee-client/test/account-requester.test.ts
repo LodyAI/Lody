@@ -1,11 +1,14 @@
-import { Effect, Exit } from 'effect';
+import { Effect, Exit, Fiber } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
 import {
   makeAccountE2eeRuntime,
+  makePortableAccountPairingApprover,
   makePortableAccountPairingRequester,
+  type AccountPairingApproverSession,
   type AccountPairingIdentityHost,
+  type AccountPairingKeyDeliveryEvent,
 } from '../src/account-requester';
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
@@ -135,5 +138,187 @@ describe('account-level runtime', () => {
     await expect(runtime.status!('w2')).rejects.toMatchObject({ code: 'unsupported' });
     expect('revokeDevice' in runtime).toBe(false);
     expect('requestAccountPairing' in runtime).toBe(false);
+  });
+});
+
+describe('portable account pairing approver key delivery', () => {
+  /** An approving session whose mailbox never confirms an envelope for the new device. */
+  const approverSession = (
+    rounds: { count: number; released?: number },
+    device = 1
+  ): AccountPairingApproverSession => ({
+    release: () =>
+      Effect.sync(() => {
+        rounds.released = (rounds.released ?? 0) + 1;
+      }),
+    binding: { device: { toBytes: () => new Uint8Array(32).fill(device) } },
+    accountApproval: {
+      sign: () => Effect.die('unused'),
+      settle: () => Effect.succeed('committed' as const),
+      invitation: () => Effect.succeed(null),
+      access: () => Effect.succeed({ workspaceId: 'w1', credential: 'synthetic' }),
+    },
+    refresh: () => Effect.void,
+    keyRound: () =>
+      Effect.sync(() => {
+        rounds.count += 1;
+      }),
+    keyDeliveryEvidence: () => Effect.succeed('e2ee_key_not_sent'),
+  });
+  const deliver = async (sessions: (AccountPairingApproverSession | null)[]) => {
+    const events: AccountPairingKeyDeliveryEvent[] = [];
+    const sleeps: number[] = [];
+    let ended: () => void = () => {};
+    const done = new Promise<void>((resolve) => (ended = resolve));
+    const first = sessions.shift()!;
+    const workspaces = await Effect.runPromise(
+      makePortableAccountPairingApprover({
+        workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
+        session: () => Effect.succeed(events.length === 0 ? first : (sessions.shift() ?? null)),
+        appendRecord: () => Effect.void,
+        onKeyDelivery: (event) => {
+          events.push(event);
+          if (event.state === 'ended' || event.state === 'delivered') ended();
+        },
+        keyDeliveryRetry: {
+          delays: [10, 20, 40],
+          sleep: (ms) => Effect.sync(() => sleeps.push(ms)),
+        },
+      })()
+    );
+    await Effect.runPromise(workspaces[0]!.deliverKeys!(new Uint8Array(32).fill(2), 'r1'));
+    await done;
+    return { events, sleeps };
+  };
+
+  it('stops a delivery that never reaches the mailbox after its retry bound', async () => {
+    const rounds = { count: 0, released: 0 };
+    const session = approverSession(rounds);
+    const { events, sleeps } = await deliver([session, session, session, session]);
+    expect(rounds.count).toBe(4);
+    // Every attempt released the session it held: no reader stays open in the backoff.
+    expect(rounds.released).toBe(4);
+    expect(sleeps).toEqual([10, 20, 40]);
+    expect(events.map((event) => event.state)).toEqual([
+      'running',
+      'retrying',
+      'retrying',
+      'retrying',
+      'ended',
+    ]);
+    expect(events.at(-1)!.code).toBe('e2ee_key_not_sent');
+  });
+
+  it('ends without another round once the approving session is no longer available to the account', async () => {
+    const rounds = { count: 0 };
+    const { events } = await deliver([approverSession(rounds), null]);
+    expect(rounds.count).toBe(1);
+    expect(events.map((event) => [event.state, event.code])).toEqual([
+      ['running', undefined],
+      ['retrying', 'e2ee_key_not_sent'],
+      ['ended', 'e2ee_key_delivery_closed'],
+    ]);
+  });
+
+  it("never continues on another account's session for the same workspace", async () => {
+    // Account A's first delivery fails; during the backoff account B signs in and opens
+    // the same workspace, so the lookup now returns B's session (B's own device).
+    const original = { count: 0, released: 0 };
+    const other = { count: 0, released: 0 };
+    const otherSession = approverSession(other, 9);
+    let evidenceAsked = false;
+    const { events } = await deliver([
+      approverSession(original),
+      {
+        ...otherSession,
+        keyDeliveryEvidence: (device) => {
+          evidenceAsked = true;
+          return otherSession.keyDeliveryEvidence(device);
+        },
+      },
+    ]);
+    expect(original.count).toBe(1);
+    expect(other.count).toBe(0);
+    // The foreign session is released without any other call.
+    expect([original.released, other.released]).toEqual([1, 1]);
+    expect(evidenceAsked).toBe(false);
+    expect(events.map((event) => [event.state, event.code])).toEqual([
+      ['running', undefined],
+      ['retrying', 'e2ee_key_not_sent'],
+      ['ended', 'e2ee_key_delivery_owner_changed'],
+    ]);
+  });
+
+  it('releases the sessions it already opened when a later workspace fails to list', async () => {
+    const rounds = { count: 0, released: 0 };
+    const exit = await Effect.runPromiseExit(
+      makePortableAccountPairingApprover({
+        workspaces: () => [
+          { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+          { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+        ],
+        session: (workspaceId) =>
+          workspaceId === 'w1'
+            ? Effect.succeed(approverSession(rounds))
+            : Effect.fail(new Error('synthetic approval session failure')),
+        appendRecord: () => Effect.void,
+      })()
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(rounds.released).toBe(1);
+  });
+
+  it('reports a failed release of a delivery session instead of dropping it', async () => {
+    const rounds = { count: 0 };
+    const failure = new Error('synthetic close failure');
+    const reported: [string, unknown][] = [];
+    let ended: () => void = () => {};
+    const done = new Promise<void>((resolve) => (ended = resolve));
+    const session = {
+      ...approverSession(rounds),
+      keyDeliveryEvidence: () => Effect.succeed('delivered'),
+      release: () => Effect.fail(failure),
+    };
+    const [workspace] = await Effect.runPromise(
+      makePortableAccountPairingApprover({
+        workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
+        session: () => Effect.succeed(session),
+        appendRecord: () => Effect.void,
+        onKeyDelivery: (event) => {
+          if (event.state === 'delivered' || event.state === 'ended') ended();
+        },
+        diagnostics: (scope, cause) => reported.push([scope, cause]),
+      })()
+    );
+    await Effect.runPromise(workspace!.deliverKeys!(new Uint8Array(32).fill(2), 'r1'));
+    await done;
+    expect(reported).toEqual([['account-pairing-key-delivery-release', failure]]);
+    // The workflow's own release reaches it as a failure to record, not a success.
+    expect(Exit.isFailure(await Effect.runPromiseExit(workspace!.release!()))).toBe(true);
+  });
+
+  it('releases the sessions it already opened when listing is interrupted', async () => {
+    const rounds = { count: 0, released: 0 };
+    let opened: () => void = () => {};
+    const firstOpened = new Promise<void>((resolve) => (opened = resolve));
+    const listing = makePortableAccountPairingApprover({
+      workspaces: () => [
+        { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+        { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+      ],
+      // The second lookup never settles: a page cancellation interrupts the listing.
+      session: (workspaceId) =>
+        workspaceId === 'w1'
+          ? Effect.sync(() => {
+              opened();
+              return approverSession(rounds);
+            })
+          : Effect.never,
+      appendRecord: () => Effect.void,
+    })();
+    const fiber = Effect.runFork(listing);
+    await firstOpened;
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(rounds.released).toBe(1);
   });
 });
