@@ -23,7 +23,8 @@ import {
   canUseElectronLocalFileSend,
   sendSessionFileToLocalRuntime,
 } from '../src/lib/electron-session-file-sender';
-import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
+import { currentWorkspaceIdAtom, setWorkspaceContextAtom } from '../src/atoms/workspace-context';
+import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { computeSha256Hex, uploadSessionFile } from '../src/lib/session-file-upload';
 import { uploadSessionImage } from '../src/lib/session-image-upload';
 import { createRoot, type Root } from 'react-dom/client';
@@ -153,7 +154,7 @@ import {
 import { initI18n } from '../src/i18n';
 import { PASTED_TEXT_FILE_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
 import { toast } from '@/lib/toast';
-import { formatMessageQuote } from '@lody/shared';
+import { formatMessageQuote, getSessionRoomId } from '@lody/shared';
 import { conversationQuoteDraftKey } from '../src/lib/conversation-quote-draft';
 
 (
@@ -309,6 +310,8 @@ describe('SessionChatInputArea submission feedback', () => {
     getDefaultStore().set(localProbeResultAtom, null);
     getDefaultStore().set(authTokenAtom, null);
     getDefaultStore().set(currentWorkspaceIdAtom, null);
+    getDefaultStore().set(sessionMetaCacheAtom, {});
+    getDefaultStore().set(setWorkspaceContextAtom, { slug: null, workspaceId: null });
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
     Reflect.deleteProperty(window.navigator, 'userAgent');
@@ -387,6 +390,65 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     return container!.querySelector('textarea')!;
   }
+
+  it('retires the shown prompt suggestion once a sent message is accepted', async () => {
+    const store = getDefaultStore();
+    let publish: ((text: string | null) => void) | undefined;
+    store.set(runtimeAtom, {
+      workspaceId: 'workspace-upload',
+      workspaceSlug: 'workspace-upload',
+      sendResources: resources,
+      subscribePromptSuggestion: (
+        _machineId: string,
+        _sessionId: string,
+        listener: (text: string | null) => void
+      ) => {
+        publish = listener;
+        listener('Run the tests');
+        return () => {
+          publish = undefined;
+        };
+      },
+    } as never);
+    store.set(setWorkspaceContextAtom, {
+      slug: 'workspace-upload',
+      workspaceId: 'workspace-upload' as never,
+    });
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId('suggestion-send' as never)]: { machineId: 'machine-1' } as SessionMeta,
+    });
+    const accept = deferredBoolean();
+    const submitted: unknown[] = [];
+    const textarea = await renderComposer({
+      sessionId: 'suggestion-send',
+      onSendMessage: (blocks) => {
+        submitted.push(blocks);
+        return accept.promise;
+      },
+      overrides: { initialInputText: '' },
+    });
+    const hint = () => container!.querySelector('[data-prompt-suggestion]');
+    expect(hint()?.textContent).toContain('Run the tests');
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      );
+    });
+    expect(textarea.value).toBe('Run the tests');
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(submitted).toHaveLength(1);
+    await act(async () => accept.resolve(true));
+    // The previous turn is still running: the daemon has not replaced the suggestion yet.
+    await act(async () => publish?.('Run the tests'));
+    expect(textarea.value).toBe('');
+    expect(hint()).toBeNull();
+    await act(async () => publish?.('Open a PR'));
+    expect(hint()?.textContent).toContain('Open a PR');
+  });
 
   it('restores an archived conversation from the composer without losing its draft', async () => {
     let finishRestore!: () => void;
