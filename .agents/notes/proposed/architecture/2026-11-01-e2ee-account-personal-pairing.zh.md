@@ -122,7 +122,7 @@ Translation: current
 ## 客户端界面
 
 宿主端口是 [`packages/platform`](../../../../packages/platform/src/e2ee-account-pairing.ts)
-中可选的 `E2eeAccountPairingRuntime`。页面在 [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx)，由开发者模式下的测试功能开关“账号级设备配对”控制。
+中可选的 `E2eeAccountPairingRuntime`。页面在 [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx)。按 owner 2026-11-04 的决定默认显示，不需要开发者模式，也没有客户端开关。紧急关闭由服务端返回 `e2ee_account_pairing_disabled` 实现，页面会说明原因；单台设备上的本地设置无法在全局范围关闭该流程，因此不再保留。
 
 - **职责归属。** `S`、每个标签的校验、有效期检查、终态记录和签名都由宿主负责。界面在本地校验输入的配对码，只是为了在发出任何网络请求之前指出输入错误；解码出的字节随即清零。
 - **何时显示。** 宿主没有实现这些方法时，界面什么都不显示，原有的按工作区配对仍保留在下方。桌面端已通过 IPC 实现这些方法，Web 和手机宿主还没有。

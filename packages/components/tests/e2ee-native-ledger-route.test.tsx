@@ -50,12 +50,7 @@ vi.mock('@lody/platform/react', () => ({
 }));
 vi.mock('jotai', () => ({
   useSetAtom: () => fixture.clear,
-  // The account pairing beta stays off; every other read is the cached user.
-  useAtomValue: (atom: unknown) => (atom === 'accountPairing' ? false : fixture.cachedUser),
-}));
-vi.mock('@/atoms/settings', () => ({
-  e2eeAccountPairingFeatureEnabledAtom: 'accountPairing',
-  e2eeWorkspaceCreationFeatureEnabledAtom: 'creationEnabled',
+  useAtomValue: () => fixture.cachedUser,
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('@/atoms', () => ({ setWorkspaceContextAtom: 'workspace', userAtom: 'user' }));
@@ -356,7 +351,8 @@ it.each([
 // A desktop that never joined this workspace (the phone created it) has no local
 // identity binding here. Its next step is approval from another device, never the
 // "local identity is unavailable" recovery with its archive-and-reset actions.
-it('guides a desktop that never joined this workspace to approval instead of identity recovery', async () => {
+it('guides a desktop that never joined this workspace to approval and, by default, lets it start account pairing', async () => {
+  const started: Array<{ pairingString?: string }> = [];
   fixture.port = {
     create: async () => {
       throw new Error('unused');
@@ -384,12 +380,35 @@ it('guides a desktop that never joined this workspace to approval instead of ide
       },
       close: async () => {},
       status: async () => local.status,
+      accountPairingRequest: async () => null,
+      requestAccountPairing: async (input: { pairingString?: string }) => {
+        started.push(input);
+        return {
+          direction: 'requester-shows',
+          pairingString: '50M6-HA79-55MT',
+          expiresAt: Date.now() + 600_000,
+          status: 'waiting',
+          workspaces: [{ workspaceId, name: 'Native', state: 'pending' }],
+        };
+      },
     },
   } as unknown as PlatformE2eeWorkspaces;
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
   await act(async () => root.render(createElement(Component)));
   expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
   expect(container.textContent).not.toContain('e2ee.identity.lostTitle');
+  // Account pairing needs no developer mode or beta switch: the entry is part of
+  // the default approval guide, and starting it shows this device's pairing code.
+  const request = container.querySelector('[data-testid="e2ee-account-pairing-request"]');
+  expect(request).not.toBeNull();
+  const start = [...request!.querySelectorAll('button')].find(
+    (button) => button.textContent === 'e2ee.accountPair.request.start'
+  );
+  if (start) await act(async () => start.click());
+  expect(started).toEqual([{ pairingString: undefined }]);
+  expect(
+    container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent
+  ).toBe('50M6-HA79-55MT');
 });
 
 it('opens the local ledger with an expired renderer snapshot and offline main identity, then reconnects', async () => {
