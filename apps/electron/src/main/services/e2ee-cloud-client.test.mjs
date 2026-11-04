@@ -837,3 +837,42 @@ void test('relay calls reuse one unexpired Convex token, renew it near expiry an
   assert.equal(minted, 3)
   await Effect.runPromise(Scope.close(scope, Exit.void))
 })
+void test('a call that hits the 30 s deadline drops the reused Convex token', async () => {
+  let minted = 0
+  let stalled = false
+  const started = Promise.withResolvers()
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(
+          async (_url, init) => {
+            if (!stalled) return response({ ...target, revision: 0, status: 'NeedsEnvelope' })
+            return new Promise((_resolve, reject) => {
+              started.resolve()
+              init.signal.addEventListener('abort', () => reject(new Error('aborted')), {
+                once: true
+              })
+            })
+          },
+          {
+            now: () => 1_000_000,
+            convexToken: async () => ({ data: { token: jwtExpiringAt(1_000 + 600, ++minted) } })
+          }
+        )
+        yield* client.mailbox(access).status(target)
+        assert.equal(minted, 1)
+        stalled = true
+        const waiting = yield* Effect.forkChild(
+          Effect.result(client.mailbox(access).status(target))
+        )
+        yield* Effect.promise(() => started.promise)
+        yield* TestClock.adjust('30 seconds')
+        assert.equal((yield* Fiber.join(waiting)).failure.reason, 'unavailable')
+        // The stalled call may have been a rejected token: the next call mints anew.
+        stalled = false
+        yield* client.mailbox(access).status(target)
+        assert.equal(minted, 2)
+      })
+    ).pipe(Effect.provide(TestClock.layer()))
+  )
+})

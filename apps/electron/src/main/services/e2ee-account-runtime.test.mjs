@@ -3400,9 +3400,14 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
     )
   }
   const requests = new Map()
+  // Rotation stages one envelope group per published epoch; every member reads it.
+  const groups = new Map()
   const staging = () => ({
-    stageGroup: () => Effect.die('no rotation'),
-    readGroup: () => Effect.succeed(null),
+    stageGroup: (group) =>
+      Effect.sync(() => {
+        groups.set(group.recordHash, group)
+      }),
+    readGroup: (key) => Effect.succeed(groups.get(key.recordHash) ?? null),
     deleteGroup: () => Effect.void
   })
   const offer = await owner.api.withDesktopE2eeAccount(
@@ -3439,19 +3444,34 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
           return { status: 'committed' }
         }),
       history: () => history('owner'),
+      ledgerLog: () => ({
+        read: () =>
+          Effect.andThen(
+            latency('ledgerLog.read', { device: 'owner' }),
+            Effect.sync(() => ({
+              records: [...records],
+              checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+            }))
+          ),
+        appendCas: (_anchor, expected, record) =>
+          Effect.andThen(
+            latency('ledgerLog.appendCas', { device: 'owner' }),
+            Effect.sync(() => {
+              assert.equal(expected.length, records.length)
+              records.push(Buffer.from(record))
+            })
+          )
+      }),
       contentStreamsToken: () => relayed('owner', 'contentStreamsToken', () => ({ token: 't' })),
       mailbox: () => ownerPort,
       staging
     }
   }
-  const memberCloud = {
-    accountId: 'member',
+  const memberCloudFor = (accountId, cryptoUserId, mailboxPort) => ({
+    accountId,
     client: {
       accountIdentity: () =>
-        relayed('member', 'accountIdentity', () => ({
-          accountId: 'member',
-          cryptoUserId: 'bb'.repeat(32)
-        })),
+        relayed('member', 'accountIdentity', () => ({ accountId, cryptoUserId })),
       memberSubmit: ({ keyPackageHex }) =>
         relayed('member', 'memberSubmit', () => {
           const proof = memberJoining.decodeMemberKeyPackage(keyPackageHex)
@@ -3459,7 +3479,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
           const request = {
             id: requestId,
             workspaceId: 'team',
-            accountId: 'member',
+            accountId,
             keyPackageHex,
             signingPublicKey: hexOf(proof.request.signingPublicKey.toBytes()),
             requestId,
@@ -3473,10 +3493,11 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
       memberClaim: ({ requestId }) =>
         relayed('member', 'memberClaim', () => ({ ...requests.get(requestId) })),
       history: () => history('member'),
-      mailbox: () => memberPort,
+      mailbox: () => mailboxPort(),
       staging
     }
-  }
+  })
+  const memberCloud = memberCloudFor('member', 'bb'.repeat(32), () => memberPort)
   const ipc = async (fixture, cloud, id) => {
     const sender = Object.assign(new EventEmitter(), { id })
     const { E2eeIpc } = await load(
@@ -3510,18 +3531,36 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
     offer,
     approver,
     joiner,
+    ownerApi: owner.api,
     memberApi: member.api,
     logs,
     async submit() {
       const submitted = await joiner.prepareMemberJoin(offer)
       memberPort = await port(submitted.signingPublicKey)
       return submitted
+    },
+    /** Another account's member, joining through the same relay. */
+    async addMember(accountId, cryptoUserId, senderId) {
+      const fixture = await nativeAccountFixture(t)
+      fixture.identity.userId = accountId
+      let ownPort
+      const other = await ipc(
+        fixture,
+        memberCloudFor(accountId, cryptoUserId, () => ownPort),
+        senderId
+      )
+      const submitted = await other.prepareMemberJoin(offer)
+      ownPort = await port(submitted.signingPublicKey)
+      return { ipc: other, submitted }
     }
   }
 }
-// Observed on the packaged B run (R16 clean13): ~0.4 s Convex token + ~1.9 s query per relay
-// call. The member retries claims 3 s apart while committed; acceptance waits 60 s.
-const RELAY_ROUND_TRIP_S = 2.3
+// Observed on the packaged B run (R16 clean13): ~1.9 s per Convex relay call and ~0.4 s to
+// mint a Convex token. The cloud client reuses one unexpired token (pinned by
+// e2ee-cloud-client.test.mjs), so a critical path pays at most one mint. A committed member
+// retries claims 3 s apart.
+const RELAY_CALL_S = 1.9
+const TOKEN_MINT_S = 0.4
 /** A claim's own relay calls: after ready, main starts a full round (its first call is a
  * second mailbox fetch) that runs beside the claim, not before its result. */
 const claimCalls = (calls) => {
@@ -3721,10 +3760,53 @@ void test(
       ),
       false
     )
-    const seconds = (toPut + missed + installing) * RELAY_ROUND_TRIP_S + 3
+    const seconds = (toPut + missed + installing) * RELAY_CALL_S + TOKEN_MINT_S + 3
     t.diagnostic(
       `to put ${toPut}, missed claim ${missed}, installing claim ${installing}: about ${seconds.toFixed(1)} s`
     )
     assert.ok(seconds <= 30, `about ${seconds.toFixed(1)} s from approval to ready`)
   }
 )
+void test('a member accepted before a rotation is ready only with the current epoch key, never the old one', { timeout: 30_000 }, async (t) => {
+  let held
+  const f = await twoDeviceMemberJoin(t, {
+    latency: (name, { device }) =>
+      held && device === 'owner' && name === 'mailbox.put'
+        ? Effect.promise(() => held.promise)
+        : Effect.void
+  })
+  await f.approver.open('team')
+  const submitted = await f.submit()
+  await f.approver.memberJoinRequests('team')
+  held = deferredMember()
+  await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+  // Accepted locally while the epoch 0 envelope is still on its way.
+  assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
+  const release = held
+  held = undefined
+  release.resolve()
+  await f.approver.keyDeliveryIdle('account', 'team')
+  // Before the member's next claim, another member joins and is removed, and the
+  // required rotation publishes epoch 1.
+  const other = await f.addMember('other', 'cc'.repeat(32), 3)
+  await f.approver.memberJoinRequests('team')
+  await f.approver.approveMemberJoin('team', other.submitted.requestId, 'automatic')
+  await f.approver.keyDeliveryIdle('account', 'team')
+  await f.approver.removeMember('team', other.submitted.requestId)
+  await f.approver.updateKeys('team')
+  const epoch = async (api) =>
+    (
+      await api.withDesktopE2eeAccount(
+        (account) => account.host.status('team'),
+        'team',
+        false
+      )
+    ).epoch
+  assert.equal(await epoch(f.ownerApi), 1)
+  let claimed = await f.joiner.claimMemberJoin('team', submitted.requestId)
+  for (let attempt = 0; !claimed.ready && attempt < 3; attempt++)
+    claimed = await f.joiner.claimMemberJoin('team', submitted.requestId)
+  assert.equal(claimed.ready, true)
+  await f.joiner.memberSettleIdle('member', 'team')
+  assert.equal(await epoch(f.memberApi), 1)
+})
