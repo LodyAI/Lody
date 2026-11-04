@@ -116,12 +116,13 @@ export const signOutWithoutRedirect = async (
   // network window can still authenticate Convex as the previous user.
   const pushCleanup = logoutPush();
   invalidateAuthSessionIntent(authClient);
+  // Revoke local owners synchronously; provider cleanup must not delay logout intent.
+  clearLocalAuthState();
   try {
     await pushCleanup;
   } catch {
     console.warn('Push cleanup failed during sign out');
   }
-  clearLocalAuthState();
 
   try {
     const response = await authClient.signOut();
