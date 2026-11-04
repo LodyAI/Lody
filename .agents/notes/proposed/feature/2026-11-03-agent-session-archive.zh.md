@@ -21,7 +21,7 @@ Core `sessionArchive` v1 声明 `mode: native` 或 `mode: title-marker`，归档
 
 另建 Codex app-server 客户端会重复适配器逻辑，也阻碍其他 agent 接入；声明 AIR 能力会引入另一个客户端的专属协议；直接修改 transcript 或 SQLite 会绕过提供方所有权。所选的窄 Core 扩展避免这些问题，但不宣称实现 ACP 归档 RFD #2161 的完整列表和状态保证。SDK 与适配器完整支持该标准后，应改用标准 ACP。
 
-现有会话编排和 ACP 启动仍使用 Promise，本改动复用已登记的共享进程边界，不将跨越尚未迁移依赖的包装称作 Effect 迁移。Core 和适配器提交作为配套 PR 依赖，适配器暂时锁定公开的 Core 提交，待契约发布后再切回版本依赖。
+现有会话编排和 ACP 启动仍使用 Promise，本改动复用已登记的共享进程边界，不将跨越尚未迁移依赖的包装称作 Effect 迁移。Core 和适配器提交作为配套 PR 依赖，适配器暂时锁定 LodyAI 官方仓库的 Core 提交，待契约发布后再切回版本依赖。
 
 ## 验证边界
 

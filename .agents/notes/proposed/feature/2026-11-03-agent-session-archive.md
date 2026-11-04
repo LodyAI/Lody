@@ -21,7 +21,7 @@ Core `sessionArchive` v1 declares `mode: native` or `mode: title-marker`. Both a
 
 A second Codex app-server client duplicates adapter logic and prevents other agents from participating. Declaring AIR capabilities would opt Lody into a different client's protocol. Direct transcript/SQLite edits bypass provider ownership. The selected narrow Core extension avoids these alternatives without claiming the full listing/state guarantees of ACP archive RFD #2161. Standard ACP is the replacement once both SDKs and adapters implement that complete contract.
 
-Existing session orchestration and ACP launch remain Promise-based. This change reuses their registered shared process boundary rather than claiming an Effect migration across those unfinished dependencies. Core and adapter commits are companion PR dependencies; the adapters temporarily pin the public Core commit until its release.
+Existing session orchestration and ACP launch remain Promise-based. This change reuses their registered shared process boundary rather than claiming an Effect migration across those unfinished dependencies. Core and adapter commits are companion PR dependencies; the adapters temporarily pin the upstream LodyAI Core commit until its release.
 
 ## Verification limits
 
