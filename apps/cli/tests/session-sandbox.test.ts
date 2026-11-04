@@ -6,7 +6,12 @@ import { it as effectIt } from '@effect/vitest';
 import { Cause, Deferred, Effect, Exit, Fiber, Option } from 'effect';
 import { TestClock } from 'effect/testing';
 import { ChildProcessSpawner } from 'effect/process';
-import { processLayer, ProcessReleaseFailed, TerminationFailed } from '@lody/shared/node/process';
+import {
+  isPidAliveSyncLegacy,
+  processLayer,
+  ProcessReleaseFailed,
+  TerminationFailed,
+} from '@lody/shared/node/process';
 import { makeCgroupContainer } from '../src/platform/sandbox/cgroup-container';
 import type { ChildProcess } from 'child_process';
 import realSpawn from 'cross-spawn';
@@ -536,7 +541,10 @@ describe('session sandbox', () => {
     expect(warnings[0]).toContain('only supported on Linux');
   });
 
-  const createProcessTableSandbox = async (table: FakeProcessTable) => {
+  const createProcessTableSandbox = async (
+    table: FakeProcessTable,
+    options: { ownPid?: number } = {}
+  ) => {
     const factory = createSessionSandboxFactory({
       logger: createSilentLogger(),
       deps: {
@@ -544,10 +552,127 @@ describe('session sandbox', () => {
         spawnProcess: table.api.spawn as unknown as typeof realSpawn,
         configureExecutionProcess: vi.fn(async () => {}),
         killPid: table.api.kill,
+        listProcesses: table.api.listProcesses,
+        ownPid: options.ownPid ?? table.ownPid,
       },
     });
     return await factory('session-noop-tree' as SessionId);
   };
+
+  // Claude Code starts every Bash tool shell with setsid, so the shell and the
+  // command under it lead their own group. Without cgroups, signalling the
+  // agent's group alone left such commands running forever as orphans.
+  it.each([true, false])(
+    'ends commands that left the agent group in their own session (force=%s)',
+    async (force) => {
+      const table = new FakeProcessTable('darwin');
+      const sandbox = await createProcessTableSandbox(table);
+      const handle = await sandbox.spawn('node', ['claude-acp.js'], {
+        cwd: process.cwd(),
+        env: {},
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const adapter = handle.child.pid ?? -1;
+      const claude = table.addDescendant(adapter);
+      const shell = table.addEscapedDescendant(claude, { ignores: ['SIGTERM'] });
+      const command = table.addDescendant(shell, { ignores: ['SIGTERM'] });
+      const nested = table.addEscapedDescendant(command, { ignores: ['SIGTERM'] });
+
+      await sandbox.terminate(force);
+
+      expect([adapter, claude, shell, command, nested].filter((pid) => table.isAlive(pid))).toEqual(
+        []
+      );
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'kills a real setsid grandchild on a forced noop terminate',
+    async () => {
+      const sandbox = await createSessionSandboxFactory({
+        logger: createSilentLogger(),
+        deps: { platform: process.platform, cgroupMount: '/nonexistent-cgroup-mount' },
+      })('session-real-escape' as SessionId);
+      const handle = await sandbox.spawn(
+        'perl',
+        [
+          '-MPOSIX',
+          '-e',
+          // The grandchild reports its pid only after setsid.
+          '$| = 1; if (!fork) { POSIX::setsid(); print "$$\\n"; exec "sleep", "30" } sleep 30',
+        ],
+        { cwd: process.cwd(), env: process.env, stdio: ['ignore', 'pipe', 'ignore'] }
+      );
+      const escaped = await new Promise<number>((resolve) => {
+        let buffered = '';
+        handle.child.stdout?.on('data', (chunk: Buffer) => {
+          buffered += chunk.toString('utf8');
+          if (buffered.includes('\n')) resolve(Number(buffered.split('\n')[0]));
+        });
+      });
+      expect(isPidAliveSyncLegacy(escaped)).toBe(true);
+
+      await sandbox.terminate(true);
+
+      expect(isPidAliveSyncLegacy(escaped)).toBe(false);
+      await sandbox.cleanup();
+    }
+  );
+
+  it('freezes the tree before scanning it on a forced terminate', async () => {
+    const table = new FakeProcessTable('darwin');
+    const sandbox = await createProcessTableSandbox(table);
+    const handle = await sandbox.spawn('node', ['claude-acp.js'], {
+      cwd: process.cwd(),
+      env: {},
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const adapter = handle.child.pid ?? -1;
+    const shell = table.addEscapedDescendant(table.addDescendant(adapter));
+
+    await sandbox.terminate(true);
+
+    expect(table.delivered).toEqual([
+      { target: -adapter, signal: 'SIGSTOP' },
+      { target: -shell, signal: 'SIGSTOP' },
+      { target: -adapter, signal: 'SIGKILL' },
+      { target: -shell, signal: 'SIGKILL' },
+    ]);
+  });
+
+  it('never signals the group of the process that owns the sandbox', async () => {
+    const table = new FakeProcessTable('darwin');
+    const daemon = table.api.spawn('lody', ['start'], { detached: true }).pid ?? -1;
+    const sandbox = await createProcessTableSandbox(table, { ownPid: daemon });
+    const handle = await sandbox.spawn('node', ['claude-acp.js'], {
+      cwd: process.cwd(),
+      env: {},
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const adapter = handle.child.pid ?? -1;
+    table.addEscapedDescendant(table.addDescendant(adapter), { pgid: daemon });
+
+    await sandbox.terminate(true);
+
+    expect(table.isAlive(daemon)).toBe(true);
+    expect(table.delivered.some(({ target }) => target === -daemon)).toBe(false);
+  });
+
+  it('keeps the plain group termination when the host cannot list processes', async () => {
+    const table = new FakeProcessTable('darwin');
+    table.processGroupsListable = false;
+    const sandbox = await createProcessTableSandbox(table);
+    const handle = await sandbox.spawn('node', ['claude-acp.js'], {
+      cwd: process.cwd(),
+      env: {},
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const adapter = handle.child.pid ?? -1;
+
+    await sandbox.terminate(true);
+
+    expect(table.isAlive(adapter)).toBe(false);
+  });
 
   it('terminates a noop process together with its descendants on POSIX hosts', async () => {
     const table = new FakeProcessTable('darwin');
@@ -638,7 +763,10 @@ describe('session sandbox', () => {
     await sandbox.terminate(true);
 
     expect(table.isAlive(orphan)).toBe(false);
-    expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGKILL' }]);
+    expect(table.delivered).toEqual([
+      { target: -leader, signal: 'SIGSTOP' },
+      { target: -leader, signal: 'SIGKILL' },
+    ]);
   });
 
   it('continues when execution process resource profile application fails', async () => {

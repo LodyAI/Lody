@@ -8,7 +8,7 @@ import { type SessionId } from '@lody/shared';
 import { makeProcessRunnerLegacy, type ProcessRunnerLegacy } from '@lody/shared/node/process';
 import { platformLayer } from '@/platform/process-options';
 
-import { unwrapSpawnFailure } from '@lody/shared/node/process';
+import { posixGroupTree, unwrapSpawnFailure } from '@lody/shared/node/process';
 import { nodeProcessLive, type NodeProcessApi } from '@lody/shared/node/process';
 import { makeCgroupContainer, type CgroupFs } from '@/platform/sandbox/cgroup-container';
 import { makeNoopContainer } from '@/platform/sandbox/noop-container';
@@ -111,6 +111,11 @@ export interface SessionSandbox {
   ): Promise<SessionProcessHandle>;
   /** Terminate every process the sandbox started; rejects if any tree survives. */
   terminate(force?: boolean): Promise<void>;
+  /**
+   * Reach what the sandbox's processes moved out of their groups before any
+   * of them is signalled; see `ProcessContainer.captureEscapedProcesses`.
+   */
+  captureEscapedProcesses?(force: boolean): Promise<void>;
   cleanup(): Promise<void>;
   recoverCleanup?(): Promise<void>;
 }
@@ -127,6 +132,10 @@ interface SessionSandboxDeps {
   killPid: (pid: number, signal?: NodeJS.Signals | 0) => void;
   /** Must describe the same process table as `killPid`. */
   listProcessGroup?: NodeProcessApi['listProcessGroup'];
+  /** Must describe the same process table as `killPid`. */
+  listProcesses?: NodeProcessApi['listProcesses'];
+  /** The daemon's own pid: its group is never a session's to end. */
+  ownPid: number;
 }
 
 interface CreateSessionSandboxFactoryOptions {
@@ -161,6 +170,8 @@ const defaultSandboxDeps = (): SessionSandboxDeps => ({
   killPid: (pid: number, signal?: NodeJS.Signals | 0) =>
     nodeProcessLive.kill(pid, signal ?? 'SIGTERM'),
   listProcessGroup: nodeProcessLive.listProcessGroup,
+  listProcesses: nodeProcessLive.listProcesses,
+  ownPid: process.pid,
 });
 
 const toNodeProcess = (deps: SessionSandboxDeps): NodeProcessApi => ({
@@ -169,6 +180,7 @@ const toNodeProcess = (deps: SessionSandboxDeps): NodeProcessApi => ({
   spawnSync: nodeProcessLive.spawnSync,
   kill: (pid, signal) => deps.killPid(pid, signal),
   ...(deps.listProcessGroup ? { listProcessGroup: deps.listProcessGroup } : {}),
+  ...(deps.listProcesses ? { listProcesses: deps.listProcesses } : {}),
 });
 
 const configureProcessBestEffort =
@@ -191,7 +203,7 @@ export function createSessionSandboxFactory(
   const deps: SessionSandboxDeps = {
     ...defaultSandboxDeps(),
     // A substituted process table must not be judged by the host's.
-    ...(options.deps?.killPid ? { listProcessGroup: undefined } : {}),
+    ...(options.deps?.killPid ? { listProcessGroup: undefined, listProcesses: undefined } : {}),
     ...(options.deps ?? {}),
   };
   const facade = { logger: options.logger, nodeProcess: toNodeProcess(deps) };
@@ -263,6 +275,15 @@ function createNoopSandbox(
       makeNoopContainer({
         description,
         configureProcess: configureProcessBestEffort(deps, facade.logger),
+        ...(deps.listProcesses && deps.platform !== 'win32'
+          ? {
+              escapedGroups: {
+                listProcesses: deps.listProcesses,
+                groupTree: (pgid: number) => posixGroupTree(facade.nodeProcess, pgid),
+                ownPid: deps.ownPid,
+              },
+            }
+          : {}),
       }),
       scope
     );
@@ -357,6 +378,11 @@ class ContainerSessionSandbox implements SessionSandbox {
 
   async terminate(force: boolean = false): Promise<void> {
     await this.run(this.container.terminateAll(terminationPolicy(force)));
+  }
+
+  async captureEscapedProcesses(force: boolean): Promise<void> {
+    const capture = this.container.captureEscapedProcesses;
+    if (capture) await this.run(capture(force));
   }
 
   cleanup(): Promise<void> {

@@ -87,6 +87,26 @@ absence. cgroup.events is a required initialization capability. Best-effort clea
 logs failures and retains the directory and trees for retry instead of claiming
 release. Optional accounting counters retain their existing best-effort policy.
 
+A noop container's process groups do not contain a descendant that calls
+`setsid`. Claude Code starts every Bash tool shell that way, so on macOS and on
+Linux hosts without a delegated memory controller (where the cgroup sandbox
+falls back to noop) signalling the agent's group left those shells and their
+commands running as pid 1 orphans; one host kept a hung test and a polling loop
+for eight days. SIGTERM alone lets Claude Code end its shells, but GC and memory
+pressure terminate with force. Before anything is signalled, the noop container
+therefore scans the process table (`/proc` or one `ps`) and tracks every group a
+tracked process's descendant leads or joined, transitively, like any other tree
+until proven gone. The scan must precede the first kill: once a parent exits its
+children belong to pid 1 and nothing ties them to the Session, which is why
+`Session` captures before it ends the agent handle and the sandbox concurrently.
+A forced capture first SIGSTOPs the groups and rescans newly found ones (at most
+four passes) so nothing forks past the scan; a graceful one only scans, because
+stopped processes ignore SIGTERM. The daemon's own group and pid 1 are never
+adopted. A failed scan degrades to ending the tracked groups. This matches the
+cgroup sandbox, whose `cgroup.kill` already ends every descendant. Limits: a
+descendant whose parent died before termination began is not found, and the
+macOS `ps` path was not exercised on a real host (PR pending).
+
 The shared Promise runner forwards an explicit AbortSignal to runPromiseExit.
 It still starts a separate root fiber: wrapping it in tryPromise without forwarding
 that signal cannot propagate cancellation, and even forwarding a signal does not

@@ -8,7 +8,7 @@ import { runCommand } from '../src/node/process';
 import { signalChildTreeNowLegacy } from '../src/node/process';
 import { spawnProcess as acquireProcess, type SpawnSpec } from '../src/node/process';
 import { processLayer, isPidAliveSyncLegacy } from '../src/node/process';
-import { resolveWindowsCommand } from '../src/node/process';
+import { nodeProcessLive, resolveWindowsCommand } from '../src/node/process';
 import { FakeProcessTable } from '../src/node/process-testing';
 
 const spawnProcess = (spec: SpawnSpec) => acquireProcess(spec, { graceMs: 0, killWaitMs: 0 });
@@ -102,6 +102,38 @@ describe('process tree termination (real processes)', () => {
         expect(isPidAliveSyncLegacy(childPid)).toBe(true);
         yield* managed.terminate(FORCED);
         expect(isPidAliveSyncLegacy(childPid)).toBe(false);
+      }).pipe(Effect.scoped, Effect.provide(processLayer({})))
+  );
+
+  // Session termination walks this table to reach commands that called setsid.
+  it.live.skipIf(process.platform === 'win32')(
+    'lists a real setsid child with its parent and its own group',
+    () =>
+      Effect.gen(function* () {
+        const managed = yield* spawnProcess({
+          command: 'perl',
+          args: [
+            '-MPOSIX',
+            '-e',
+            // The child reports its pid only after setsid, so the scan cannot see it mid-way.
+            '$| = 1; if (!fork) { POSIX::setsid(); print "$$\\n"; exec "sleep", "30" } sleep 30',
+          ],
+          options: { stdio: ['ignore', 'pipe', 'ignore'] },
+          processGroup: true,
+        });
+        const escaped = yield* readPidLine(managed.child.stdout);
+        const parent = managed.child.pid ?? -1;
+
+        const entries = nodeProcessLive.listProcesses?.() ?? [];
+
+        expect(entries.find((entry) => entry.pid === parent)).toMatchObject({ pgid: parent });
+        expect(entries.find((entry) => entry.pid === escaped)).toEqual({
+          pid: escaped,
+          ppid: parent,
+          pgid: escaped,
+          zombie: false,
+        });
+        nodeProcessLive.kill(escaped, 'SIGKILL');
       }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 

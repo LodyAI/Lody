@@ -6,7 +6,7 @@ import { spawnProcess } from '@lody/shared/node/process';
 
 import { FORCED_TERMINATION, type ProcessContainer } from './types';
 
-import { makeProcessTreeRegistry } from './process-tree-registry';
+import { makeProcessTreeRegistry, type EscapedGroupDiscovery } from './process-tree-registry';
 export { LINGERING_GROUP_PROBE_INTERVAL } from './process-tree-registry';
 
 /**
@@ -17,6 +17,8 @@ export { LINGERING_GROUP_PROBE_INTERVAL } from './process-tree-registry';
 export const makeNoopContainer = Effect.fnUntraced(function* (options: {
   readonly description: string;
   readonly configureProcess: (pid: number) => Effect.Effect<void>;
+  /** Without it a command that left its group (setsid) outlives the session. */
+  readonly escapedGroups?: EscapedGroupDiscovery;
 }): Effect.fn.Return<
   ProcessContainer,
   never,
@@ -24,7 +26,7 @@ export const makeNoopContainer = Effect.fnUntraced(function* (options: {
 > {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Effect.scope;
-  const registry = yield* makeProcessTreeRegistry;
+  const registry = yield* makeProcessTreeRegistry(options.escapedGroups);
 
   const container: ProcessContainer = {
     enabled: false,
@@ -62,6 +64,7 @@ export const makeNoopContainer = Effect.fnUntraced(function* (options: {
             )
       ),
     terminateAll: registry.terminateAll,
+    captureEscapedProcesses: registry.captureEscapedProcesses,
     applyLimits: () => Effect.void,
     readAccounting: Effect.map(registry.rootPids, (rootPids) => ({
       kind: 'process-tree' as const,

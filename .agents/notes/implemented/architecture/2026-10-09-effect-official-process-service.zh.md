@@ -59,6 +59,20 @@ cgroup 成员状态读取严格处理：权限或 I/O 错误、目录仍在时�
 cgroup.events 成为初始化必需能力。best-effort cleanup 记录失败，并保留目录和进程组供重试；
 可选统计计数仍维持原有的 best-effort 策略。
 
+noop container 的进程组管不到调用了 `setsid` 的后代。Claude Code 的每个 Bash 工具 shell
+都是这样启动的，所以在 macOS，以及没有委派 memory 控制器的 Linux 主机上（cgroup sandbox
+会退化为 noop），只对 agent 所在进程组发信号，会让这些 shell 及其命令变成 pid 1 下的孤儿
+继续运行；有一台主机留下了一个卡住的测试和一个轮询循环，运行了 8 天。只发 SIGTERM 时
+Claude Code 会自己结束这些 shell，但 GC 和内存压力回收都是强制终止。因此 noop container
+在发出任何信号之前先扫描进程表（`/proc` 或一次 `ps`），把被跟踪进程的后代所领导或加入的
+每个进程组（递归）都纳入跟踪，与其它进程组一样保留到确认消失为止。扫描必须先于第一次
+kill：父进程一旦退出，子进程就归 pid 1 所有，和 Session 再无关联；所以 `Session` 在并发结束
+agent 句柄和 sandbox 之前先做捕获。强制捕获会先 SIGSTOP 这些进程组，并对新发现的组再扫描
+（最多四轮），防止有进程在扫描期间派生出去；优雅捕获只扫描，因为被暂停的进程不会响应
+SIGTERM。daemon 自己的进程组和 pid 1 永远不会被纳入。扫描失败时退化为只结束已跟踪的
+进程组。这与 cgroup sandbox 一致，它的 `cgroup.kill` 本来就会结束所有后代。限制：终止开始前
+父进程就已死亡的后代无法找到；macOS 的 `ps` 路径没有在真实主机上验证（PR 待创建）。
+
 shared Promise runner 把明确的 AbortSignal 交给 runPromiseExit，但仍启动独立根 fiber。
 用 tryPromise 包装且不传递信号，无法传播取消；即使传递信号，也不会自动让外层 Promise
 包装等待内层 finalizer 完成。Effect 调用方应直接 yield 服务。同步兼容 startProcessLegacy 仍由

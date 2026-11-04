@@ -83,6 +83,8 @@ const createProcessTableSandbox = async (table: FakeProcessTable): Promise<Sessi
       spawnProcess: table.api.spawn as unknown as typeof realSpawn,
       configureExecutionProcess: vi.fn(async () => {}),
       killPid: table.api.kill,
+      listProcesses: table.api.listProcesses,
+      ownPid: table.ownPid,
     },
   })('session-1' as SessionId);
 
@@ -193,7 +195,10 @@ describe('Session terminate cleanup', () => {
     await graceful;
 
     expect(table.isAlive(leader)).toBe(false);
-    expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGKILL' }]);
+    // Frozen for the descendant scan, then killed without another SIGTERM grace.
+    expect(table.delivered.filter(({ signal }) => signal !== 'SIGSTOP')).toEqual([
+      { target: -leader, signal: 'SIGKILL' },
+    ]);
     expect(terminated).toHaveLength(1);
   });
 
@@ -222,6 +227,28 @@ describe('Session terminate cleanup', () => {
     expect(table.isAlive(agent.child.pid ?? -1)).toBe(false);
     expect(closed).toBe(false);
   });
+
+  // The agent handle is ended alongside the sandbox. If it killed the agent's
+  // group first, a Bash shell the agent started with setsid would already
+  // belong to pid 1, out of reach of the sandbox's descendant scan.
+  it.each([true, false])(
+    'ends commands that left the agent group, whatever ends first (force=%s)',
+    async (force) => {
+      const table = new FakeProcessTable('darwin');
+      const sandbox = await createProcessTableSandbox(table);
+      const session = createSession(sandbox);
+      const agent = await sandbox.spawn('agent', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const claude = table.addDescendant(agent.child.pid ?? -1);
+      const shell = table.addEscapedDescendant(claude, { ignores: ['SIGTERM'] });
+      const command = table.addDescendant(shell, { ignores: ['SIGTERM'] });
+      // @ts-expect-error - exercising private process handle wiring
+      session.agentProcess = agent;
+
+      await session.terminate(force);
+
+      expect([claude, shell, command].filter((pid) => table.isAlive(pid))).toEqual([]);
+    }
+  );
 
   it('terminates an agent started after an earlier termination finished', async () => {
     const table = new FakeProcessTable('darwin');

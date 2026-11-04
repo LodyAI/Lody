@@ -296,12 +296,27 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     this.logger.debug(`[${this.sessionId}] Escalating in-flight termination to force`);
     termination.force = true;
     termination.escalate();
+    const activeProcess = this.activeProcess;
+    const agentProcess = this.agentProcess;
     // The in-flight termination's own forced calls below report any survivor.
-    void Promise.allSettled([
-      this.activeProcess?.terminate(true),
-      this.agentProcess?.terminate(true),
-      this.sandbox.terminate(true),
-    ]);
+    void this.captureEscapedProcesses(true).then(() =>
+      Promise.allSettled([
+        activeProcess?.terminate(true),
+        agentProcess?.terminate(true),
+        this.sandbox.terminate(true),
+      ])
+    );
+  }
+
+  /** Best effort: without it termination still ends every tracked group. */
+  private async captureEscapedProcesses(force: boolean): Promise<void> {
+    try {
+      await this.sandbox.captureEscapedProcesses?.(force);
+    } catch (error) {
+      this.logger.debug(
+        `[${this.sessionId}] Failed to capture escaped processes before terminate: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   private async terminateOnce(termination: SessionTermination): Promise<void> {
@@ -343,6 +358,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     // Capture references before any async work, since onExit handlers may null them out
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
+    // Before any handle below kills the agent: then its setsid children (every
+    // Claude Bash shell) still have a parent tying them to this Session.
+    await this.captureEscapedProcesses(termination.force);
 
     // The sandbox as a whole also reaches terminal commands and groups whose
     // leader already exited. It tracks the per-process trees too, so ending

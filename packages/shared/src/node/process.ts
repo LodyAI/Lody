@@ -76,6 +76,19 @@ export interface NodeProcessApi {
    * check after a bounded wait, never for a polling loop.
    */
   readonly listProcessGroup?: (pgid: number) => readonly ProcessGroupMember[] | null;
+  /**
+   * Every process on a POSIX host with its parent and group, or `null` when the
+   * host cannot enumerate them. Also a whole-table scan: termination uses it to
+   * find descendants that left their group, never a polling loop.
+   */
+  readonly listProcesses?: () => readonly ProcessTableEntry[] | null;
+}
+
+export interface ProcessTableEntry {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly pgid: number;
+  readonly zombie: boolean;
 }
 
 export interface ProcessGroupMember {
@@ -154,14 +167,14 @@ const windowsSpawnTarget = (
 };
 
 /** Linux: `/proc/<pid>/stat` is `pid (comm) state ppid pgrp ...`; comm may contain spaces. */
-const listLinuxProcessGroup = (pgid: number): readonly ProcessGroupMember[] | null => {
+const listLinuxProcesses = (): readonly ProcessTableEntry[] | null => {
   let entries: string[];
   try {
     entries = readdirSync('/proc');
   } catch {
     return null;
   }
-  const members: ProcessGroupMember[] = [];
+  const processes: ProcessTableEntry[] = [];
   for (const entry of entries) {
     if (!/^\d+$/u.test(entry)) continue;
     let stat: string;
@@ -171,28 +184,42 @@ const listLinuxProcessGroup = (pgid: number): readonly ProcessGroupMember[] | nu
       // Exited and reaped since the directory was listed.
       continue;
     }
-    const [state, , group] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    if (Number(group) !== pgid) continue;
-    members.push({ pid: Number(entry), zombie: state === 'Z' || state === 'X' });
+    const [state, ppid, group] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    processes.push({
+      pid: Number(entry),
+      ppid: Number(ppid),
+      pgid: Number(group),
+      zombie: state === 'Z' || state === 'X',
+    });
   }
-  return members;
+  return processes;
 };
 
 /** Other POSIX hosts (macOS): one bounded `ps` over every process. */
-const listPsProcessGroup = (pgid: number): readonly ProcessGroupMember[] | null => {
-  const result = spawn.sync('ps', ['-axo', 'pid=,pgid=,stat='], {
+const listPsProcesses = (): readonly ProcessTableEntry[] | null => {
+  const result = spawn.sync('ps', ['-axo', 'pid=,ppid=,pgid=,stat='], {
     encoding: 'buffer',
     stdio: ['ignore', 'pipe', 'ignore'],
     timeout: 2_000,
   });
   if (result.error || result.status !== 0) return null;
-  const members: ProcessGroupMember[] = [];
+  const processes: ProcessTableEntry[] = [];
   for (const line of result.stdout.toString('utf8').split('\n')) {
-    const [pid, group, state] = line.trim().split(/\s+/u);
-    if (!pid || !state || Number(group) !== pgid) continue;
-    members.push({ pid: Number(pid), zombie: state.startsWith('Z') });
+    const [pid, ppid, group, state] = line.trim().split(/\s+/u);
+    if (!pid || !state) continue;
+    processes.push({
+      pid: Number(pid),
+      ppid: Number(ppid),
+      pgid: Number(group),
+      zombie: state.startsWith('Z'),
+    });
   }
-  return members;
+  return processes;
+};
+
+const listHostProcesses = (): readonly ProcessTableEntry[] | null => {
+  if (process.platform === 'win32') return null;
+  return process.platform === 'linux' ? listLinuxProcesses() : listPsProcesses();
 };
 
 export const nodeProcessLive: NodeProcessApi = {
@@ -218,9 +245,14 @@ export const nodeProcessLive: NodeProcessApi = {
     process.kill(pid, signal);
   },
   listProcessGroup: (pgid) => {
-    if (process.platform === 'win32') return null;
-    return process.platform === 'linux' ? listLinuxProcessGroup(pgid) : listPsProcessGroup(pgid);
+    const processes = listHostProcesses();
+    return processes === null
+      ? null
+      : processes
+          .filter((entry) => entry.pgid === pgid)
+          .map(({ pid, zombie }) => ({ pid, zombie }));
   },
+  listProcesses: listHostProcesses,
 };
 
 export const NodeProcessLive = Layer.succeed(NodeProcess, nodeProcessLive);

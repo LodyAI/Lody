@@ -70,7 +70,7 @@ export const makeCgroupContainer = Effect.fnUntraced(function* (options: {
   );
   const currentDir = yield* Ref.make<string | null>(cgroupDir);
   const limits = yield* Ref.make<SessionSandboxLimits>({});
-  const registry = yield* makeProcessTreeRegistry;
+  const registry = yield* makeProcessTreeRegistry();
 
   const requireDir = Effect.flatMap(Ref.get(currentDir), (dir) =>
     dir

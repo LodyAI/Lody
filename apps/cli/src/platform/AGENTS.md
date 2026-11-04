@@ -30,6 +30,12 @@ CLI-specific Effect platform pieces over the shared process layer. File map:
   or successfully read empty membership proves the cgroup gone.
 - Legacy noop sandbox generations may be replaced only after their tracked trees
   are proven gone, including when their acquisition Scope already closed.
+- A noop container must capture the groups that tracked processes' descendants
+  entered with `setsid` before any tracked tree is signalled, because a dead
+  parent leaves them to pid 1; a forced capture freezes the tree first. Never
+  adopt the daemon's own group or pid 1. Callers that end handles alongside
+  the container capture first
+  ([decision](../../../../.agents/notes/implemented/architecture/2026-10-09-effect-official-process-service.md#ownership-and-interruption)).
 
 - Effect log annotations use `logger.ts`'s explicit numeric/enum allowlist. Never
   serialize arbitrary annotations, message objects or Cause contents to the file

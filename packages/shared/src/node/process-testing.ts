@@ -10,8 +10,12 @@ import type { NodeProcessApi } from './process';
 
 type FakeProcess = {
   pid: number;
+  /** Re-parented to 1 when the parent exits, as on POSIX. */
+  ppid: number;
   pgid: number;
   alive: boolean;
+  /** SIGSTOP-ed: alive, and only SIGKILL or SIGCONT changes that. */
+  stopped?: boolean;
   /** Exited but not yet reaped by its parent. */
   zombie?: boolean;
   ignores: Set<NodeJS.Signals>;
@@ -97,11 +101,20 @@ export class FakeProcessTable {
               .filter((p) => p.pgid === pgid && (p.alive || p.zombie === true))
               .map((p) => ({ pid: p.pid, zombie: !p.alive }))
           : null,
+      listProcesses: () =>
+        this.processGroupsListable
+          ? Array.from(this.processes.values())
+              .filter((p) => p.alive || p.zombie === true)
+              .map((p) => ({ pid: p.pid, ppid: p.ppid, pgid: p.pgid, zombie: !p.alive }))
+          : null,
     };
   }
 
   /** When false, the host cannot enumerate a group's members (no `/proc`, no `ps`). */
   processGroupsListable = true;
+
+  /** The pid spawned children report as their parent: the process under test. */
+  ownPid = 1;
 
   private spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess {
     this.spawned.push({ command, args, options });
@@ -119,6 +132,7 @@ export class FakeProcessTable {
     const child = new FakeChildProcess(pid, this);
     this.processes.set(pid, {
       pid,
+      ppid: this.ownPid,
       // A Windows tree is rooted at its first process whether or not it is detached.
       pgid: options.detached || this.platform === 'win32' ? pid : 1,
       alive: true,
@@ -169,11 +183,38 @@ export class FakeProcessTable {
     const pid = this.nextPid++;
     this.processes.set(pid, {
       pid,
+      ppid: leaderPid,
       pgid: leader.pgid,
       alive: true,
       ignores: new Set(options.ignores ?? []),
     });
     return pid;
+  }
+
+  /**
+   * A child of `parentPid` that called `setsid`: it leads a new session and
+   * group, so signalling its parent's group no longer reaches it, the way
+   * Claude Code starts every Bash tool shell. `pgid` joins an existing group
+   * instead of leading a new one.
+   */
+  addEscapedDescendant(
+    parentPid: number,
+    options: { ignores?: NodeJS.Signals[]; pgid?: number } = {}
+  ): number {
+    if (!this.processes.get(parentPid)?.alive) throw new Error(`No process ${parentPid}`);
+    const pid = this.nextPid++;
+    this.processes.set(pid, {
+      pid,
+      ppid: parentPid,
+      pgid: options.pgid ?? pid,
+      alive: true,
+      ignores: new Set(options.ignores ?? []),
+    });
+    return pid;
+  }
+
+  isStopped(pid: number): boolean {
+    return this.processes.get(pid)?.stopped === true;
   }
 
   /** The leader exits on its own, leaving the rest of its group running. */
@@ -230,14 +271,20 @@ export class FakeProcessTable {
     if (signal === 0) return;
     this.delivered.push({ target, signal });
     for (const member of members) {
-      if (!member.ignores.has(signal)) {
-        this.terminate(member, signal, null);
-      }
+      if (signal === 'SIGSTOP') member.stopped = true;
+      else if (signal === 'SIGCONT') member.stopped = false;
+      // A stopped process acts on no signal but SIGKILL until it continues.
+      else if (member.stopped && signal !== 'SIGKILL') continue;
+      else if (!member.ignores.has(signal)) this.terminate(member, signal, null);
     }
   }
 
   private terminate(process: FakeProcess, signal: NodeJS.Signals | null, code: number | null) {
     process.alive = false;
+    process.stopped = false;
+    for (const other of this.processes.values()) {
+      if (other.ppid === process.pid) other.ppid = 1;
+    }
     const child = process.child;
     if (!child) return;
     child.exitCode = code;

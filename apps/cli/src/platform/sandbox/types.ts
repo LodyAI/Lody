@@ -87,6 +87,14 @@ export interface ProcessContainer {
   readonly spawn: (spec: ContainerSpawnSpec) => Effect.Effect<ContainedProcess, SpawnFailed>;
   /** Terminate every tracked process tree; fails if any could not be proven gone. */
   readonly terminateAll: (policy: TerminationPolicy) => Effect.Effect<void, TerminationFailed>;
+  /**
+   * Track the groups tracked processes' descendants moved into (setsid), so
+   * the next `terminateAll` ends them too. Call it before anything signals a
+   * tracked tree: once a parent dies its children belong to pid 1. `forced`
+   * freezes the tree first. Absent where a kernel boundary (a cgroup) already
+   * contains every descendant.
+   */
+  readonly captureEscapedProcesses?: (forced: boolean) => Effect.Effect<void>;
   readonly applyLimits: (limits: SessionSandboxLimits) => Effect.Effect<void, SandboxIoError>;
   readonly readAccounting: Effect.Effect<SessionResourceAccounting, SandboxIoError>;
   readonly cleanup: Effect.Effect<void>;
