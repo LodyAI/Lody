@@ -44,8 +44,11 @@ const initialItems: ChatStreamItem[] = Array.from({ length: 12 }, (_, index) => 
     items: [
       {
         type: 'text',
-        text: `Passage ${index}: Keep the reading position stable while selecting text and scrolling.\n\nA quote keeps a snapshot. Questions stay beside their corresponding excerpts.\n\n\`\`\`ts\nconst stable = true;\n\`\`\``,
+        text: `Passage ${index}: Keep the reading position stable while selecting text and scrolling.\n\n${index === 11 ? '**Critical** [guide](https://example.com/guide)\n\n- First item\n- Second item' : 'A quote keeps a snapshot. Questions stay beside their corresponding excerpts.'}\n\n\`\`\`ts\nconst stable = true;\n\`\`\``,
       },
+      ...(index === 11
+        ? [{ type: 'text' as const, text: 'A second rendered passage in the same response.' }]
+        : []),
     ],
   },
 }));

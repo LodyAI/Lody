@@ -142,6 +142,43 @@ test('rejected sends preserve the narrow-screen quote draft', async ({ page }) =
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test('a continuous selection across text rows in one response is quoted in full', async ({
+  page,
+}) => {
+  await page.goto(story());
+  await expect(input(page)).toBeVisible();
+  await page.evaluate(() => {
+    const rows = document.querySelectorAll(
+      '[data-conversation-turn-id="quote-source-11"] [data-message-quote-text]'
+    );
+    const start = rows[0]!.querySelector('p')!.firstChild!;
+    const end = rows[1]!.querySelector('p')!.firstChild!;
+    getSelection()!.setBaseAndExtent(start, 0, end, end.textContent!.length);
+  });
+  await page.getByRole('button', { name: 'Quote', exact: true }).click();
+  const chip = page
+    .locator('[data-mention-highlighter="true"] [data-mention-value]')
+    .filter({ hasText: 'Quote:' })
+    .first();
+  const box = (await chip.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const preview = page.getByLabel('Original quote', { exact: true });
+  const expected = await preview.inputValue();
+  expect(expected).toContain('Passage 11:');
+  expect(expected).toContain('**Critical** [guide](https://example.com/guide)');
+  expect(expected).toContain('* First item\n* Second item');
+  expect(expected).toContain('```ts\nconst stable = true;\n```');
+  expect(expected).toContain('A second rendered passage in the same response.');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  const bubble = page.locator('[data-user-message-bubble]').last();
+  await bubble.getByRole('button').filter({ hasText: 'Quote:' }).click();
+  await expect(bubble).toContainText('Passage 11:');
+  await expect(bubble).toContainText('**Critical** [guide](https://example.com/guide)');
+  await expect(bubble).toContainText('A second rendered passage in the same response.');
+});
+
 test('a selection across separate message regions explains the boundary without truncating the draft', async ({
   page,
 }) => {

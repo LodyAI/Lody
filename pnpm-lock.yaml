@@ -1330,6 +1330,12 @@ importers:
       github-slugger:
         specifier: ^2.0.0
         version: 2.0.0
+      hast-util-from-dom:
+        specifier: 5.0.1
+        version: 5.0.1
+      hast-util-to-mdast:
+        specifier: 10.1.2
+        version: 10.1.2
       i18next:
         specifier: ^25.3.1
         version: 25.8.4(typescript@5.9.3)
@@ -1378,6 +1384,12 @@ importers:
       lucide-react:
         specifier: ^0.525.0
         version: 0.525.0(react@19.2.0)
+      mdast-util-gfm:
+        specifier: 3.1.0
+        version: 3.1.0
+      mdast-util-to-markdown:
+        specifier: 2.1.2
+        version: 2.1.2
       monaco-editor:
         specifier: ^0.55.1
         version: 0.55.1
