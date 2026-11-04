@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: [LodyAI/Lody#2307](https://github.com/LodyAI/Lody/pull/2307)
 
 [English](2026-11-04-kimi-media-output.md)
 
