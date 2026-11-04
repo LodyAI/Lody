@@ -124,7 +124,7 @@ function requesterHosts() {
 }
 /** An approving device's ledgers: counts signatures and records appended bytes. */
 function approverHosts(ids = ['w1', 'w2']) {
-  const log = { signed: [], appended: [], appendFails: 0 }
+  const log = { signed: [], appended: [], appendFails: 0, delivered: [] }
   const hosts = WORKSPACES.filter((workspace) => ids.includes(workspace.workspaceId)).map(
     (workspace, index) => ({
       ...workspace,
@@ -149,7 +149,11 @@ function approverHosts(ids = ['w1', 'w2']) {
         }),
       invitation: (record) => Effect.succeed(new Uint8Array([0xee, ...record])),
       access: () =>
-        Effect.succeed({ workspaceId: workspace.workspaceId, credential: hex(fill(0x99)) })
+        Effect.succeed({ workspaceId: workspace.workspaceId, credential: hex(fill(0x99)) }),
+      deliverKeys: (device, requestId) =>
+        Effect.sync(() =>
+          log.delivered.push({ workspaceId: workspace.workspaceId, device: hex(device), requestId })
+        )
     })
   )
   return { hosts, log }
@@ -655,6 +659,8 @@ void test('an admission the ledger settled differently is retired and signed onc
     })
   )
   assert.deepEqual(first.workspaces, [{ workspaceId: 'w1', outcome: 'not-admitted' }])
+  // A record that never entered the ledger admitted nobody: no key goes anywhere.
+  assert.deepEqual(a.log.delivered, [])
   const second = await run(
     approver.pairing.approveAccountPairing({
       pairingString,
@@ -668,6 +674,10 @@ void test('an admission the ledger settled differently is retired and signed onc
     a.log.appended.map((item) => item.requestId),
     ['admit-w1-2']
   )
+  // Only the committed admission's device, under that admission's id.
+  assert.deepEqual(a.log.delivered, [
+    { workspaceId: 'w1', device: hex(fill(0x30)), requestId: 'admit-w1-2' }
+  ])
 })
 
 void test('expiry is checked again after the pre-signing refresh, before anything is signed or appended', async () => {
