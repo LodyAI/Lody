@@ -824,6 +824,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     signal?.throwIfAborted();
     const credentials = await this.prepareGitHubRepoSessionConfig(config);
     let session: Session | undefined;
+    let usageState: 'starting' | 'active' | 'failed' = 'starting';
+    const pendingUsage: Parameters<CreateAgentConfig['onUsageUpdate']>[] = [];
     try {
       const requestedResumeSessionId = agentStart?.resumeSessionId;
       const requestedForkSessionId = agentStart?.forkSessionId;
@@ -941,21 +943,26 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       publishAcpStep('spawn');
       this.logger.debug(`[${sessionId}] About to call session.createAgent`);
       try {
+        const agentConfig = this.buildCreateAgentConfig(session, config, launch, {
+          resumeSessionId: requestedResumeSessionId,
+          forkSessionId: requestedForkSessionId,
+          forkSessionTurnId: requestedForkSessionTurnId,
+          abortSignal: signal,
+          onStartupStage: (event) => {
+            if (event.type === 'initialize_start') {
+              publishAcpStep('initialize');
+            } else if (event.type === 'new_session_start') {
+              publishAcpStep('new-session');
+            }
+          },
+        });
+        const deliverUsage = agentConfig.onUsageUpdate;
+        agentConfig.onUsageUpdate = (usage, accountingId) => {
+          if (usageState === 'starting') pendingUsage.push([usage, accountingId]);
+          else if (usageState === 'active') deliverUsage(usage, accountingId);
+        };
         acpSessionId = await withSlowOperationWarning(
-          session.createAgent(
-            this.buildCreateAgentConfig(session, config, launch, {
-              resumeSessionId: requestedResumeSessionId,
-              forkSessionId: requestedForkSessionId,
-              forkSessionTurnId: requestedForkSessionTurnId,
-              onStartupStage: (event) => {
-                if (event.type === 'initialize_start') {
-                  publishAcpStep('initialize');
-                } else if (event.type === 'new_session_start') {
-                  publishAcpStep('new-session');
-                }
-              },
-            })
-          ),
+          session.createAgent(agentConfig),
           this.logger,
           `session.createAgent(resume=${requestedResumeSessionId ? 'yes' : 'no'})`,
           sessionId
@@ -1012,6 +1019,19 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       if (!agentStart?.deferAcpSessionIdPersistence) {
         await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
       }
+      signal?.throwIfAborted();
+      usageState = 'active';
+      for (const [usage, accountingId] of pendingUsage) {
+        if (usage.sessionId === acpSessionId) {
+          this.emit('onUsageUpdate', {
+            sessionId,
+            acpSessionId: acpSessionId as ACPSessionId,
+            usage,
+            accountingId,
+          });
+        }
+      }
+      pendingUsage.length = 0;
       this.logger.debug(`[${sessionId}] ACP session ID persisted to doc`);
       this.logger.debug(
         `[${sessionId}] ACP session established (acpSessionId=${acpSessionId ?? 'unknown'})`
@@ -1019,6 +1039,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(`[${sessionId}] createSessionInnerWithAgent returning session`);
       return session;
     } catch (error) {
+      usageState = 'failed';
+      pendingUsage.length = 0;
       // Cleanup runs to the end and never replaces the start failure: callers
       // classify that error (auth, resume, transient) to decide what happens next.
       if (session) {

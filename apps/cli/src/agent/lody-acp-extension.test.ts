@@ -21,6 +21,14 @@ describe('Core usage accounting boundary', () => {
         update,
       });
     }
+    expect(
+      parseLodyExtensionMessage({
+        method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
+        params: { ...update, _meta: { lody: { usageScopeId: 'result/1' } } },
+        sessionId: 'lody-session',
+        provider: 'claude',
+      })
+    ).toEqual({ type: 'usage', accountingId: 'native:scope:result%2F1', update });
     // Legacy Codex spelling maps to the same identity; other providers ignore it.
     expect(parse('codex', { codex: { usageTurnId: 'turn-b' } })).toEqual({
       type: 'usage',
