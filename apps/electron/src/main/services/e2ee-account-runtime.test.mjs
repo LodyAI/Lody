@@ -2294,6 +2294,141 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
   }
 })
 
+void test('a live reader is cut at prepareDispatch after server-side access loss; stale operations keep the exact code and reader windows get a re-read hint', async (t) => {
+  const room = { kind: 'meta' }
+  const context = {
+    protocol: 'loro-streams-crdt-payload-protection',
+    version: 2,
+    kind: 'update_batch'
+  }
+  const additionalData = new Uint8Array([4, 5, 6])
+  const dispatchInput = {
+    sessionId: 'session',
+    userTurnId: 'turn',
+    userId: 'display-only',
+    timestamp: new Date(0).toISOString(),
+    inputConfig: {}
+  }
+  for (const [reason, Loss, cut] of [
+    ['member_removed', E2eeMemberRemovedError, 'prepareDispatch'],
+    ['device_revoked', E2eeDeviceRevokedError, 'prepareDispatch'],
+    ['member_removed', E2eeMemberRemovedError, 'contentStreamsToken'],
+    ['device_revoked', E2eeDeviceRevokedError, 'contentStreamsToken'],
+    ['network', null, 'prepareDispatch']
+  ]) {
+    await t.test(`${reason}-${cut}`, async (subtest) => {
+      const { api, identity } = await nativeAccountFixture(subtest)
+      const first = await createAccountWorkspace(api, 'workspace')
+      const pushes = []
+      const sender = Object.assign(new EventEmitter(), {
+        id: 41,
+        isDestroyed: () => false,
+        send: (channel, payload) => pushes.push({ channel, payload })
+      })
+      const server = { lost: false }
+      const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+        'electron-ipc-decorator': {
+          IpcService: class {},
+          IpcMethod: () => (_target, _name, descriptor) => descriptor,
+          getIpcContext: () => ({ event: { sender } })
+        },
+        '../../platform': { isLocalPlatform: () => false },
+        '../../services/e2ee-bootstrap.mjs': {},
+        '../assert-sender': { assertProductWindowSender: () => {} },
+        '../ipc-service-deps': {
+          getIpcServiceDeps: () => ({
+            authService: { getCachedSessionIdentity: () => ({ ...identity }) }
+          })
+        },
+        '../../services/e2ee-account-runtime': {
+          ...api,
+          desktopE2eeCloudClient: async () => ({
+            accountId: 'account',
+            client: {
+              contentStreamsToken: () =>
+                !server.lost
+                  ? Effect.succeed({ token: 'synthetic-unused-token' })
+                  : Loss
+                    ? Effect.fail(new Loss())
+                    : Effect.fail(new Error('synthetic network failure')),
+              machineSharing: () => ({}),
+              history: () => Effect.fail(new Error('synthetic history unavailable'))
+            }
+          })
+        }
+      })
+      const ipc = new E2eeIpc()
+      await ipc.open('workspace')
+      // Dispatch policy needs a shared machine; only the IPC/account boundary is under test.
+      await api.withDesktopE2eeAccount(
+        (owner) =>
+          Effect.sync(() => {
+            owner.host.prepareDispatch = () =>
+              Effect.succeed({ frame: 'synthetic-prepared-dispatch' })
+          }),
+        'workspace',
+        false
+      )
+      const sealInput = {
+        epoch: 0,
+        room,
+        context,
+        plaintext: new TextEncoder().encode('synthetic live content'),
+        additionalData
+      }
+      const sealed = await ipc.seal('workspace', sealInput)
+      const openInput = { room, context, ...sealed, additionalData }
+      assert.deepEqual(await ipc.openContent('workspace', openInput), sealInput.plaintext)
+      assert.deepEqual(await ipc.prepareDispatch('workspace', 'synthetic-machine', dispatchInput), {
+        frame: 'synthetic-prepared-dispatch'
+      })
+
+      // The server accepted the removal/revocation; this live process has not learned it.
+      server.lost = true
+      const stale = () =>
+        Promise.allSettled([
+          ipc.openContent('workspace', openInput),
+          ipc.seal('workspace', sealInput),
+          ipc.prepareDispatch('workspace', 'synthetic-machine', dispatchInput)
+        ])
+      if (!Loss) {
+        // An unconfirmed check establishes nothing: the reader keeps working.
+        assert.deepEqual(
+          (await stale()).map((result) => result.status),
+          ['fulfilled', 'fulfilled', 'fulfilled']
+        )
+        assert.deepEqual(pushes, [])
+        assert.equal((await ipc.status('workspace')).signingPublicKey, first.signingPublicKey)
+        return
+      }
+      await assert.rejects(
+        cut === 'prepareDispatch'
+          ? ipc.prepareDispatch('workspace', 'synthetic-machine', dispatchInput)
+          : ipc.contentStreamsToken('workspace'),
+        new RegExp(`^Error: e2ee_${reason}$`)
+      )
+      // Replayed stale arguments stay refused with the same exact, renderer-visible code.
+      assert.deepEqual(
+        (await stale()).map((result) => result.reason?.message),
+        [`e2ee_${reason}`, `e2ee_${reason}`, `e2ee_${reason}`]
+      )
+      assert.deepEqual(pushes, [
+        { channel: 'e2ee.accessLost', payload: { workspaceId: 'workspace' } }
+      ])
+      // The window's own re-read after the hint is classified as terminal loss.
+      await assert.rejects(
+        ipc.refresh('workspace', { installKeys: false }),
+        new RegExp(`^Error: e2ee_${reason}$`)
+      )
+      assert.equal(
+        api.countDesktopE2eeReaders('account', 'workspace', sender.id),
+        0,
+        'the original reader is closed'
+      )
+    })
+  }
+})
+
 void test('credential-authenticated device revocation stops, drains and deletes only this device identity, and keeps its reason', async (t) => {
   const f = await personalJoinFixture(t)
   const owner = await f.open('revoked-ipc')
