@@ -56,12 +56,12 @@ Translation: current
 
 ### 关键路径压到 30 秒以内
 
-对应的测试从审批返回开始测关键路径，并且审批方事先已经预热过。关键路径由三段组成：审批方发出 envelope `put` 之前的调用；成员恰好错过它的那次重试，加上 3 秒间隔；以及完成安装的那次 claim。这三段原来是 6 + 3 + 10 次调用，按每次 2.3 秒约 46.7 秒；现在是 5 + 1 + 5 次，约 28.3 秒。core 协议的校验没有改。具体做法：
+对应的测试从审批返回开始测关键路径，并且审批方事先已经预热过。关键路径由三段组成：审批方发出 envelope `put` 之前的调用；成员恰好错过它的那次重试，加上 3 秒间隔；以及完成安装的那次 claim。这三段原来是 6 + 3 + 10 次调用，按每次 2.3 秒（含一次签 token）约 46.7 秒；现在是 5 + 2 + 6 次。复用 Convex token 后，每次调用约 1.9 秒，整条路径最多签一次 token（约 0.4 秒），合计约 28.1 秒；如果仍按每次 2.3 秒算，则是 32.9 秒。core 协议的校验没有改。具体做法：
 
 - 审批方派钥改为在 keyRound 单飞下跑只派发的 round。调用方遇到同一模式的 round 或完整 round 时直接合入，否则等它结束再跑自己的。
-- 如果本地已经为同一个请求 accept 过，claim 跳过 relay claim、history 和 accept，只做收钥。
+- 如果本地已经为同一个请求 accept 过，claim 跳过 relay claim、完整 history 和 accept。但收钥之前仍然会先 ingest relay 上本地 checkpoint 之后的历史后缀，所以即使发生了 epoch 轮换或本地账本落后，也不会用旧 epoch 的钥报 ready。这一步追平失败时，claim 不报 ready。
 - 只收钥的 round 不再 flush report。成员 ready 之后，主进程用自己的 reader 接管工作区，跑一整轮完整 round：flush 安装回报，完成派发和修复，然后释放 reader。
-- cloud client 在同一个 owner 内复用未过期的 Convex JWT，在 `exp` 之前 60 秒续签。owner 只属于一个账户，账户切换或登出时会关闭，token 随之丢弃；任何一次调用失败也会丢弃 token。
+- cloud client 在同一个 owner 内复用未过期的 Convex JWT，在 `exp` 之前 60 秒续签。owner 只属于一个账户，账户切换或登出时会关闭，token 随之丢弃；任何一次调用失败也会丢弃 token；调用因 30 秒超时或被取消而中断时同样丢弃。
 - 两分钟的快速重试期结束后，加入页会提示成员"仍在等待管理员设备"；点击重试会重新进入快速节奏。
 
 receiver 在安装过程中会多次重新查询远端 revision，共 4 次 `status` 调用。这是有意保留的安全复核，没有删减。

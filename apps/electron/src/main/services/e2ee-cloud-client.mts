@@ -375,7 +375,14 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
             ? terminalFailure
             : requestFailure(error)
         }
-      })
+      }).pipe(
+        // A deadline or cancellation interrupts the call before `catch`: drop the token too.
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            reusable = undefined
+          })
+        )
+      )
     }).pipe(Effect.timeoutOrElse({ duration: '30 seconds', orElse: unavailable }))
   }
 

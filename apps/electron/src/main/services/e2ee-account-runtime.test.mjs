@@ -3767,46 +3767,45 @@ void test(
     assert.ok(seconds <= 30, `about ${seconds.toFixed(1)} s from approval to ready`)
   }
 )
-void test('a member accepted before a rotation is ready only with the current epoch key, never the old one', { timeout: 30_000 }, async (t) => {
-  let held
-  const f = await twoDeviceMemberJoin(t, {
-    latency: (name, { device }) =>
-      held && device === 'owner' && name === 'mailbox.put'
-        ? Effect.promise(() => held.promise)
-        : Effect.void
-  })
-  await f.approver.open('team')
-  const submitted = await f.submit()
-  await f.approver.memberJoinRequests('team')
-  held = deferredMember()
-  await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
-  // Accepted locally while the epoch 0 envelope is still on its way.
-  assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
-  const release = held
-  held = undefined
-  release.resolve()
-  await f.approver.keyDeliveryIdle('account', 'team')
-  // Before the member's next claim, another member joins and is removed, and the
-  // required rotation publishes epoch 1.
-  const other = await f.addMember('other', 'cc'.repeat(32), 3)
-  await f.approver.memberJoinRequests('team')
-  await f.approver.approveMemberJoin('team', other.submitted.requestId, 'automatic')
-  await f.approver.keyDeliveryIdle('account', 'team')
-  await f.approver.removeMember('team', other.submitted.requestId)
-  await f.approver.updateKeys('team')
-  const epoch = async (api) =>
-    (
-      await api.withDesktopE2eeAccount(
-        (account) => account.host.status('team'),
-        'team',
-        false
-      )
-    ).epoch
-  assert.equal(await epoch(f.ownerApi), 1)
-  let claimed = await f.joiner.claimMemberJoin('team', submitted.requestId)
-  for (let attempt = 0; !claimed.ready && attempt < 3; attempt++)
-    claimed = await f.joiner.claimMemberJoin('team', submitted.requestId)
-  assert.equal(claimed.ready, true)
-  await f.joiner.memberSettleIdle('member', 'team')
-  assert.equal(await epoch(f.memberApi), 1)
-})
+void test(
+  'a member accepted before a rotation is ready only with the current epoch key, never the old one',
+  { timeout: 30_000 },
+  async (t) => {
+    let held
+    const f = await twoDeviceMemberJoin(t, {
+      latency: (name, { device }) =>
+        held && device === 'owner' && name === 'mailbox.put'
+          ? Effect.promise(() => held.promise)
+          : Effect.void
+    })
+    await f.approver.open('team')
+    const submitted = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    held = deferredMember()
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    // Accepted locally while the epoch 0 envelope is still on its way.
+    assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
+    const release = held
+    held = undefined
+    release.resolve()
+    await f.approver.keyDeliveryIdle('account', 'team')
+    // Before the member's next claim, another member joins and is removed, and the
+    // required rotation publishes epoch 1.
+    const other = await f.addMember('other', 'cc'.repeat(32), 3)
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', other.submitted.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('account', 'team')
+    await f.approver.removeMember('team', other.submitted.requestId)
+    await f.approver.updateKeys('team')
+    const epoch = async (api) =>
+      (await api.withDesktopE2eeAccount((account) => account.host.status('team'), 'team', false))
+        .epoch
+    assert.equal(await epoch(f.ownerApi), 1)
+    let claimed = await f.joiner.claimMemberJoin('team', submitted.requestId)
+    for (let attempt = 0; !claimed.ready && attempt < 3; attempt++)
+      claimed = await f.joiner.claimMemberJoin('team', submitted.requestId)
+    assert.equal(claimed.ready, true)
+    await f.joiner.memberSettleIdle('member', 'team')
+    assert.equal(await epoch(f.memberApi), 1)
+  }
+)

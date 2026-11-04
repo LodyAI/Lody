@@ -914,7 +914,7 @@ export class E2eeIpc extends IpcService {
         : Effect.fail(new Error('e2ee_account_mismatch'))
     )
     if (accepted === requestId)
-      return this.readyMemberJoin(workspaceId, requestId, reader, scope, cloud, [])
+      return this.readyMemberJoin(workspaceId, requestId, reader, scope, cloud, [], true)
     const result = await Effect.runPromise(cloud.client.memberClaim({ workspaceId, requestId }))
     if (
       result.accountId !== cloud.accountId ||
@@ -932,7 +932,7 @@ export class E2eeIpc extends IpcService {
         ? owner.bootstrap.acceptMemberJoin(workspaceId, pages)
         : Effect.fail(new Error('e2ee_account_mismatch'))
     )
-    return this.readyMemberJoin(workspaceId, requestId, reader, scope, cloud, pages)
+    return this.readyMemberJoin(workspaceId, requestId, reader, scope, cloud, pages, false)
   }
   private async readyMemberJoin(
     workspaceId: string,
@@ -940,10 +940,11 @@ export class E2eeIpc extends IpcService {
     reader: number,
     scope: ReturnType<E2eeIpc['memberScope']>,
     cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>,
-    pages: E2eeWorkspaceHistoryPage[]
+    pages: E2eeWorkspaceHistoryPage[],
+    catchUp: boolean
   ) {
     const earlier = this.pairingFailure
-    const ready = await this.installMemberJoin(workspaceId, reader, scope, cloud, pages)
+    const ready = await this.installMemberJoin(workspaceId, reader, scope, cloud, pages, catchUp)
     // Ready only reports a current epoch key the native host installed itself.
     const failed = this.pairingFailure !== earlier ? this.pairingFailure : undefined
     logMemberKeys('member-claim', requestId, {
@@ -958,7 +959,9 @@ export class E2eeIpc extends IpcService {
     reader: number,
     scope: ReturnType<E2eeIpc['memberScope']>,
     cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>,
-    pages: E2eeWorkspaceHistoryPage[]
+    pages: E2eeWorkspaceHistoryPage[],
+    /** The accepted fast path brings no verified pages and must catch up with the relay. */
+    catchUp: boolean
   ) {
     await scope((owner) =>
       Effect.gen(function* () {
@@ -971,6 +974,16 @@ export class E2eeIpc extends IpcService {
     try {
       for (const page of pages)
         await scope((owner) => owner.host.ingestLedgerRecords(workspaceId, page))
+      // Catch up with the relay first, so ready always means the key of the current
+      // epoch. Unconfirmed freshness is not ready.
+      if (catchUp)
+        try {
+          await this.ingestForKeyDelivery(cloud.accountId, workspaceId, scope, cloud)
+        } catch (cause) {
+          if (isAccessLossMessage(cause)) throw cause
+          this.pairingFailure = cause
+          return false
+        }
       try {
         const access = await this.memberAccess(workspaceId, reader, scope)
         // Receive-only: install this device's key before any distribution or repair,
