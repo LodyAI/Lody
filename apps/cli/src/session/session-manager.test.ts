@@ -1415,7 +1415,10 @@ describe('SessionManager failed agent creation', () => {
       'machine-1' as MachineId,
       'workspace-1' as WorkspaceId,
       createWorkspaceDocument(new Map([[sessionId, doc]])),
-      { sessionSandboxFactory: async () => createNoopSessionSandbox(), cloudPort: createTestCloudPort() }
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
     );
     const events: Array<{ acpSessionId: ACPSessionId; usage: { sessionId: string } }> = [];
     manager.on('onUsageUpdate', (event) => events.push(event));

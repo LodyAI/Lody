@@ -122,7 +122,7 @@ export type CreateAcpClientOptions = {
     requestId: string,
     request: RequestPermissionRequest
   ): Promise<RequestPermissionResponse>;
-  onUsageUpdate?(usage: SessionUsageUpdate): void;
+  onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
   onRateLimitUpdate?(snapshot: RateLimitsSnapshot): void;
   onPromptSuggestion?(suggestion: LodyPromptSuggestion): void;
