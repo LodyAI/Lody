@@ -121,6 +121,10 @@ let offer: PersonalPairingOffer,
   // Envelopes this device stored for other devices; refused attempts are kept too.
   putAttempts: { id: string; frame: string; stored: boolean }[] = [],
   refusePuts = false,
+  // The one recipient whose slot reflects stores made from `watchedFrom` on; every other
+  // slot keeps reporting an installed key.
+  watchedRecipient: string | undefined,
+  watchedFrom = 0,
   failKeys = false,
   foreign = false;
 let databasePrefix = 'personal';
@@ -168,6 +172,8 @@ export async function boot(
   events = [];
   putAttempts = [];
   refusePuts = false;
+  watchedRecipient = undefined;
+  watchedFrom = 0;
   session = undefined;
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -376,14 +382,14 @@ export async function boot(
           return Layer.mergeAll(
             indexedDbClientKeyStores({ databaseName: `${databasePrefix}-custody`, binding, mode }),
             Layer.succeed(KeyMailbox, {
-              // Another device's slot holds an envelope only after this device stored one.
+              // The watched device's slot holds an envelope only after this device stored one.
               status: (slot) =>
                 Effect.succeed({
                   ...slot,
                   revision: 0,
                   status:
-                    slot.recipient === toHex(binding.device.toBytes()) ||
-                    putAttempts.some((item) => item.stored)
+                    slot.recipient !== watchedRecipient ||
+                    putAttempts.slice(watchedFrom).some((item) => item.stored)
                       ? ('InstallationReported' as const)
                       : ('NeedsEnvelope' as const),
                 }),
@@ -888,6 +894,7 @@ export async function invoke(action: string) {
               signer: fresh,
             });
             const deliveries: string[] = [];
+            const sleeps: number[] = [];
             let delivered: () => void = () => {};
             const settled = new Promise<void>((resolve) => (delivered = resolve));
             const approver = makePortableAccountPairingApprover({
@@ -897,9 +904,19 @@ export async function invoke(action: string) {
               session: () => Effect.succeed(session!),
               onKeyDelivery: (event) => {
                 deliveries.push(
-                  `${event.state}:${event.device === toHex(fresh.publicKey.toBytes())}`
+                  [event.state, event.device === toHex(fresh.publicKey.toBytes()), event.code]
+                    .filter((part) => part !== undefined)
+                    .join(':')
                 );
-                if (event.state !== 'running') delivered();
+                if (event.state === 'delivered' || event.state === 'ended') delivered();
+              },
+              // Only the injected clock moves: the mailbox recovers while the retry waits.
+              keyDeliveryRetry: {
+                sleep: (ms) =>
+                  Effect.sync(() => {
+                    sleeps.push(ms);
+                    refusePuts = false;
+                  }),
               },
               // The service appends the original under the account's authentication.
               appendRecord: (request) =>
@@ -923,15 +940,18 @@ export async function invoke(action: string) {
               new Uint8Array(32).fill(0x66)
             );
             // After the admission commits the approver sends the current key to the new
-            // device in the background. The first attempt is refused; a later key round
-            // retries the journaled envelope under the same id.
+            // device in the background. The first store is refused; the approver's own due
+            // retry stores the journaled envelope under the same id, with no other call.
             refusePuts = true;
+            watchedRecipient = toHex(fresh.publicKey.toBytes());
+            watchedFrom = putAttempts.length;
             if (!workspace!.deliverKeys) return { delivery: 'not-scheduled' };
             yield* workspace!.deliverKeys(fresh.publicKey.toBytes(), signed.requestId);
             yield* Effect.promise(() => settled);
-            const refused = putAttempts.map((item) => ({ id: item.id, frame: item.frame }));
-            refusePuts = false;
-            yield* session!.keyRound();
+            const refused = putAttempts
+              .slice(watchedFrom)
+              .filter((item) => !item.stored)
+              .map((item) => ({ id: item.id, frame: item.frame }));
             const stored = putAttempts.filter((item) => item.stored);
             const retriedExactly =
               refused.length > 0 &&
@@ -954,6 +974,7 @@ export async function invoke(action: string) {
             return {
               before,
               deliveries,
+              sleeps,
               refused: refused.length > 0,
               retriedExactly,
               length: records.length,

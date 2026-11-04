@@ -2885,6 +2885,96 @@ void test(
     ])
   }
 )
+const fakeKeyDeliveryTimers = () => {
+  const pending = []
+  return {
+    pending,
+    timers: {
+      set: (run, ms) => {
+        const timer = { run, ms }
+        pending.push(timer)
+        return timer
+      },
+      clear: (timer) => {
+        const index = pending.indexOf(timer)
+        if (index >= 0) pending.splice(index, 1)
+      }
+    }
+  }
+}
+const keyDeliveryState = (f, requestId) =>
+  plain(f.ipc.keyDeliveries.get('A\nteam')?.requests.get(requestId) ?? null)
+void test(
+  'an account-pairing key delivery that fails is retried by main on its own due timer until delivered, with no page, poll or explicit retry',
+  { timeout: 5000 },
+  async () => {
+    const outcomes = [Effect.fail(new Error('e2ee_management_retry')), Effect.void]
+    const f = await memberApprovalFixture(() => outcomes.shift() ?? Effect.die('unexpected round'))
+    let now = 1_000
+    f.ipc.keyDeliveryNow = () => now
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    const requestId = `account-device-${randomUUID()}`
+    // What the account-pairing host calls once the admission commits.
+    f.ipc.trackKeyDelivery('A', 'team', requestId, approvalDevice)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(keyDeliveryState(f, requestId).state, 'failed')
+    // Main scheduled the next round at the failure's backoff.
+    assert.deepEqual(
+      clock.pending.map((timer) => timer.ms),
+      [10_000]
+    )
+    now += 10_000
+    clock.pending.shift().run()
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(keyDeliveryState(f, requestId).state, 'delivered')
+    assert.equal(outcomes.length, 0)
+    assert.deepEqual(clock.pending, [])
+  }
+)
+void test(
+  'the main-owned key delivery timer is bounded and ends when the signed-in account changes',
+  { timeout: 5000 },
+  async () => {
+    let rounds = 0
+    const f = await memberApprovalFixture(() =>
+      Effect.suspend(() => {
+        rounds += 1
+        return Effect.fail(new Error('e2ee_management_retry'))
+      })
+    )
+    let now = 1_000
+    f.ipc.keyDeliveryNow = () => now
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    const requestId = `account-device-${randomUUID()}`
+    f.ipc.trackKeyDelivery('A', 'team', requestId, approvalDevice)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    for (let retry = 0; retry < 8; retry++) {
+      assert.equal(clock.pending.length, 1)
+      now += clock.pending[0].ms
+      clock.pending.shift().run()
+      await f.ipc.keyDeliveryIdle('A', 'team')
+    }
+    assert.equal(rounds, 9)
+    // The bound stops the timer; the failure stays visible for a poll or explicit retry.
+    assert.deepEqual(clock.pending, [])
+    assert.equal(keyDeliveryState(f, requestId).state, 'failed')
+
+    // A later admission starts a fresh bound; an account change before the timer fires
+    // drops the slot without another round.
+    const next = `account-device-${randomUUID()}`
+    f.ipc.trackKeyDelivery('A', 'team', next, approvalDevice)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(clock.pending.length, 1)
+    f.identity.userId = 'B'
+    const before = rounds
+    clock.pending.shift().run()
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(rounds, before)
+    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+  }
+)
 void test(
   'a failed key delivery stays visible by code and the next due periodic poll retries it until delivered',
   { timeout: 5000 },
@@ -3308,19 +3398,15 @@ void test('the new device opens the paired workspace and asks for its keys right
   )
 })
 
-void test('the approver sends the current epoch key to exactly the admitted device, retrying the same envelope until the new device decrypts', async (t) => {
-  // The approval hands the admitted device to main's delivery; the delivery here runs
-  // the same steps as `E2eeIpc.deliverMemberKeys`: ledger target check, distribute-only
-  // round, then mailbox evidence for that device.
-  const scheduled = []
-  const deliveries = []
-  let deliver = () => assert.fail('delivery before the fixture is ready')
+void test('after a failed first delivery, main retries the account-pairing key on its own timer until the new device holds the current key', async (t) => {
+  // Real custody, ledger hosts and reference mailbox on both devices. The approval hands
+  // the admitted device to the real E2eeIpc delivery (trackKeyDelivery, distribute-only
+  // round, mailbox evidence, due timer); the test never runs a delivery itself.
+  let ipcFixture
   const { f, approver, newDevice, genesisHash, cloud, requester, approving } =
     await accountPairingFixture(t, {
-      deliverKeys: (workspaceId, requestId, device) => {
-        scheduled.push({ workspaceId, requestId, device })
-        deliveries.push(deliver(workspaceId, device))
-      }
+      deliverKeys: (workspaceId, requestId, device) =>
+        ipcFixture.ipc.trackKeyDelivery('A', workspaceId, requestId, device)
     })
   const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(genesisHash, 'hex')))
   const mailboxScope = Effect.runSync(Scope.make())
@@ -3366,15 +3452,30 @@ void test('the approver sends the current epoch key to exactly the admitted devi
         : approverPort.put(id, frame)
     }
   }
-  deliver = async (workspaceId, device) => {
-    await Effect.runPromise(approver.host.open(workspaceId))
-    if (!(await Effect.runPromise(approver.host.keyDeliveryTarget(workspaceId, device))))
-      return 'e2ee_admission_not_ingested'
-    await Effect.runPromise(approver.host.distributeKeys(workspaceId, () => sending))
-    return Effect.runPromise(
-      approver.host.keyDeliveryEvidence(workspaceId, device, () => approverPort)
-    )
-  }
+  ipcFixture = await memberIpcFixture({
+    bootstrap: {
+      deviceCredential: (workspaceId) => approver.bootstrap.deviceCredential(workspaceId)
+    },
+    host: {
+      open: (workspaceId) => approver.host.open(workspaceId),
+      status: (workspaceId) => approver.host.status(workspaceId),
+      ingestLedgerRecords: (workspaceId, page) =>
+        approver.host.ingestLedgerRecords(workspaceId, page),
+      keyDeliveryTarget: (workspaceId, device) =>
+        approver.host.keyDeliveryTarget(workspaceId, device),
+      distributeKeys: (workspaceId, port) => approver.host.distributeKeys(workspaceId, port),
+      keyDeliveryEvidence: (workspaceId, device, port) =>
+        approver.host.keyDeliveryEvidence(workspaceId, device, port),
+      // The approver's real host stays open for the rest of the test.
+      beginCloseWorkspace: () => Effect.succeed(Effect.void)
+    },
+    client: { history: (request) => cloud.history(request), mailbox: () => sending }
+  })
+  let now = 1_000
+  ipcFixture.ipc.keyDeliveryNow = () => now
+  const clock = fakeKeyDeliveryTimers()
+  ipcFixture.ipc.keyDeliveryTimers = clock.timers
+  const slot = () => ipcFixture.ipc.keyDeliveries.get(`A\n${f.workspaceId}`)
   const approverCredential = await Effect.runPromise(
     approver.bootstrap.deviceCredential(f.workspaceId)
   )
@@ -3396,9 +3497,12 @@ void test('the approver sends the current epoch key to exactly the admitted devi
     })
   )
   assert.deepEqual(result.workspaces, [{ workspaceId: f.workspaceId, outcome: 'admitted' }])
-  // A refused mailbox leaves the key unsent, but the approval already returned admitted.
-  assert.equal(deliveries.length, 1)
-  assert.equal(await deliveries[0], 'e2ee_key_not_sent')
+  await ipcFixture.ipc.keyDeliveryIdle('A', f.workspaceId)
+  // The refused store leaves the key unsent; the approval already returned admitted.
+  const [[requestId, delivery]] = [...slot().requests]
+  assert.match(requestId, /^account-device-[0-9a-f-]{36}$/)
+  assert.equal(delivery.state, 'failed')
+  assert.equal(delivery.code, 'e2ee_key_not_sent')
   assert.ok(puts.length > 0)
   const firstAttempt = puts.map((item) => ({ ...item }))
 
@@ -3406,17 +3510,19 @@ void test('the approver sends the current epoch key to exactly the admitted devi
   assert.equal((await Effect.runPromise(requester.accountPairingRequest())).status, 'joined')
   const joined = await Effect.runPromise(newDevice.host.open(f.workspaceId))
   assert.equal(joined.hasCurrentKey, false)
-  // Exactly the device the verified ledger admitted, under the journaled admission id.
-  assert.deepEqual(
-    scheduled.map((item) => [item.workspaceId, item.device]),
-    [[f.workspaceId, joined.signingPublicKey]]
-  )
-  assert.match(scheduled[0].requestId, /^account-device-[0-9a-f-]{36}$/)
+  // Exactly the device the verified ledger admitted.
+  assert.equal(delivery.device, joined.signingPublicKey)
 
-  // The retry stores the same envelope under the same id: no re-encryption.
+  // Only the injected clock moves; main's own timer runs the next round.
   refusing = false
   puts.length = 0
-  assert.equal(await deliver(f.workspaceId, joined.signingPublicKey), 'delivered')
+  assert.equal(clock.pending.length, 1)
+  now += clock.pending[0].ms
+  clock.pending.shift().run()
+  await ipcFixture.ipc.keyDeliveryIdle('A', f.workspaceId)
+  assert.equal(slot().requests.get(requestId).state, 'delivered')
+  assert.deepEqual(clock.pending, [])
+  // The retry stores the same envelope under the same id: no re-encryption.
   assert.deepEqual(puts.slice(0, firstAttempt.length), firstAttempt)
 
   await Effect.runPromise(newDevice.host.keyRound(f.workspaceId, () => desktopPort))

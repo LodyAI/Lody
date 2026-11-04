@@ -116,7 +116,7 @@ verify competing ledger bytes or a terminal server reservation before retirement
 New accounts replay genuine history from their independently retained genesis;
 server labels never establish native identity. [Decision](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md).
 Approval, including account-pairing approval, never awaits a key round: `E2eeIpc` owns later delivery and retries it from
-due polls ([delivery](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md#key-delivery-after-admission)).
+a bounded main-owned due timer and due polls ([delivery](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md#key-delivery-after-admission)).
 
 Removal erases `member_joins` and `personal_join_histories`. All three join installs
 clear the removed marker only after verifying a different retained signing key.

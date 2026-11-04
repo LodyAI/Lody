@@ -308,20 +308,35 @@ export interface AccountPairingApproverSession {
    * distributor targets only devices of the verified ledger and journals each envelope,
    * so a later round retries the same id and bytes. */
   keyRound(): Effect.Effect<unknown, unknown>;
+  /** Positive mailbox evidence for `device` at the current epoch: 'delivered', or a
+   * public retryable `e2ee_*` code. */
+  keyDeliveryEvidence(device: string): Effect.Effect<string, unknown>;
 }
 
-/** Background key delivery after an admission commits. `finished` means the round
- * completed, not that the device holds the key: the new device's own installed current
- * key stays its readiness gate, and a later round resumes anything still pending. */
+/** Background key delivery after an admission commits. `delivered` rests on mailbox
+ * evidence for the admitted device, never on a finished round. `retrying` carries the
+ * code of the attempt that will be retried; `ended` is final (terminal cause, retry
+ * bound, or the approving session is no longer available to this account). */
 export interface AccountPairingKeyDeliveryEvent {
   readonly workspaceId: string;
   readonly requestId: string;
   /** The admitted device's signing key, lowercase hex. */
   readonly device: string;
-  readonly state: 'running' | 'finished' | 'failed';
-  /** Public `e2ee_*` code of a failed round; never a cause, key or token. */
+  readonly state: 'running' | 'retrying' | 'delivered' | 'ended';
+  /** Public `e2ee_*` code; never a cause, key or token. */
   readonly code?: string;
 }
+/** The desktop's member delivery backoff: 10 s doubling to a 5 min cap, eight retries. */
+const KEY_DELIVERY_RETRY_DELAYS = [
+  10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000,
+] as const;
+/** Causes after which this device can never deliver; retrying would only repeat them. */
+const TERMINAL_KEY_DELIVERY = new Set([
+  'e2ee_member_removed',
+  'e2ee_device_revoked',
+  'e2ee_missing-binding',
+  'e2ee_restart-required',
+]);
 const keyDeliveryCode = (cause: unknown) => {
   const code =
     cause && typeof cause === 'object' && 'code' in cause
@@ -346,6 +361,11 @@ export function makePortableAccountPairingApprover(input: {
   appendRecord: (request: E2eeAppendRecordRequest) => Effect.Effect<unknown, unknown>;
   /** Observes the background key delivery started after each committed admission. */
   onKeyDelivery?: (event: AccountPairingKeyDeliveryEvent) => void;
+  /** Due-retry schedule; tests inject `sleep` instead of waiting. */
+  keyDeliveryRetry?: {
+    readonly delays?: readonly number[];
+    readonly sleep?: (ms: number) => Effect.Effect<void>;
+  };
 }): () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown> {
   return Effect.fnUntraced(function* () {
     const result: AccountPairingApproverWorkspace[] = [];
@@ -381,15 +401,22 @@ export function makePortableAccountPairingApprover(input: {
         invitation: (record) => approval.invitation(record),
         access: () => approval.access(),
         // Approval returns first; the session's own key round sends the new device the
-        // current epoch key, as on the desktop. A failure never undoes the admission.
-        deliverKeys: (device, requestId) =>
+        // current epoch key, as on the desktop. Each attempt ends with mailbox evidence;
+        // anything short of `delivered` is retried on the bounded due schedule. Every
+        // retry asks for the session again, so a signed-out or switched account ends the
+        // delivery and a closed reader is reopened by the runtime. A failure never undoes
+        // the admission.
+        deliverKeys: (deviceBytes, requestId) =>
           Effect.sync(() => {
+            const device = toHex(deviceBytes);
+            const delays = input.keyDeliveryRetry?.delays ?? KEY_DELIVERY_RETRY_DELAYS;
+            const sleep = input.keyDeliveryRetry?.sleep ?? ((ms: number) => Effect.sleep(ms));
             const report = (state: AccountPairingKeyDeliveryEvent['state'], code?: string) => {
               try {
                 input.onKeyDelivery?.({
                   workspaceId,
                   requestId,
-                  device: toHex(device),
+                  device,
                   state,
                   ...(code ? { code } : {}),
                 });
@@ -397,13 +424,33 @@ export function makePortableAccountPairingApprover(input: {
                 /* An observer never affects delivery. */
               }
             };
+            const attempt = (current: AccountPairingApproverSession) =>
+              Effect.gen(function* () {
+                const round = yield* Effect.result(current.keyRound());
+                const evidence = yield* Effect.result(current.keyDeliveryEvidence(device));
+                if (Result.isSuccess(evidence) && evidence.success === 'delivered')
+                  return 'delivered';
+                if (Result.isFailure(round)) return keyDeliveryCode(round.failure);
+                return Result.isSuccess(evidence)
+                  ? evidence.success
+                  : keyDeliveryCode(evidence.failure);
+              });
+            const deliver = Effect.gen(function* () {
+              let current: AccountPairingApproverSession | null = session;
+              for (let retry = 0; ; retry++) {
+                if (!current) return report('ended', 'e2ee_key_delivery_closed');
+                const code = yield* attempt(current);
+                if (code === 'delivered') return report('delivered');
+                if (TERMINAL_KEY_DELIVERY.has(code) || retry >= delays.length)
+                  return report('ended', code);
+                report('retrying', code);
+                yield* sleep(delays[retry]!);
+                current = yield* input.session(workspaceId).pipe(Effect.orElseSucceed(() => null));
+              }
+            });
             report('running');
-            void Effect.runPromise(Effect.result(session.keyRound())).then(
-              (result) =>
-                Result.isSuccess(result)
-                  ? report('finished')
-                  : report('failed', keyDeliveryCode(result.failure)),
-              (cause: unknown) => report('failed', keyDeliveryCode(cause))
+            void Effect.runPromise(deliver).catch((cause: unknown) =>
+              report('ended', keyDeliveryCode(cause))
             );
           }),
       });

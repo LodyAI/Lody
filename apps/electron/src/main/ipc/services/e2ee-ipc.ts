@@ -159,6 +159,9 @@ const MEMBER_SETTLE_READER = -1
 const KEY_DELIVERY_RETRY_MS = 10_000
 const KEY_DELIVERY_RETRY_MAX_MS = 5 * 60_000
 const KEY_DELIVERY_RETAINED = 32
+/** Timer-driven retries per slot after its last new request or explicit retry (about
+ * 20 min of backoff). Polls and explicit retries still work after the bound. */
+const KEY_DELIVERY_AUTO_RETRIES = 8
 /** Only permanent causes end delivery from this device: access loss, a missing binding
  * or a restart-required owner. A closed workspace reopens on the next round. */
 const TERMINAL_KEY_DELIVERY = new Set([
@@ -235,22 +238,89 @@ export class E2eeIpc extends IpcService {
   // here, never on the cause-bearing Error passed to that logging/IPC boundary.
   private pairingFailure: unknown
   private readonly readerOwners = new WeakMap<object, string>()
-  // Member key delivery after admission is owned here, not by a renderer request.
-  // One in-flight round per account/workspace; failures keep a public code and are
-  // retried by the next due poll (email admission worker or team settings).
+  // Member and account-pairing key delivery after admission is owned here, not by a
+  // renderer request. One in-flight round per account/workspace; failures keep a public
+  // code and are retried by a main-owned due timer (bounded) and by due polls (email
+  // admission worker or team settings), so no page has to stay open.
   private keyDeliveryNow = () => Date.now()
+  /** Replaceable by the owning tests; the handle never keeps the process alive. */
+  private keyDeliveryTimers = {
+    set: (run: () => void, ms: number): unknown => {
+      const timer = setTimeout(run, ms)
+      timer.unref?.()
+      return timer
+    },
+    clear: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>)
+  }
   private readonly keyDeliveries = new Map<
     string,
-    { requests: Map<string, MemberKeyDelivery>; running?: Promise<void>; again: boolean }
+    {
+      requests: Map<string, MemberKeyDelivery>
+      running?: Promise<void>
+      again: boolean
+      timer?: unknown
+      autoRetries: number
+    }
   >()
   private keyDeliverySlot(accountId: string, workspaceId: string) {
     const key = `${accountId}\n${workspaceId}`
     let slot = this.keyDeliveries.get(key)
     if (!slot) {
-      slot = { requests: new Map(), again: false }
+      slot = { requests: new Map(), again: false, autoRetries: 0 }
       this.keyDeliveries.set(key, slot)
     }
     return slot
+  }
+  /** Drops a slot and its pending due timer: terminal delivery or a changed account. */
+  private dropKeyDeliverySlot(accountId: string, workspaceId: string) {
+    const key = `${accountId}\n${workspaceId}`
+    const slot = this.keyDeliveries.get(key)
+    if (!slot) return
+    if (slot.timer !== undefined) this.keyDeliveryTimers.clear(slot.timer)
+    slot.timer = undefined
+    this.keyDeliveries.delete(key)
+  }
+  /** Schedules the next round at the earliest retryable failure's `retryAt`. Bounded per
+   * slot; the timer re-checks the signed-in account and drops the slot if it changed. */
+  private scheduleKeyDeliveryRetry(accountId: string, workspaceId: string) {
+    const key = `${accountId}\n${workspaceId}`
+    const slot = this.keyDeliveries.get(key)
+    if (!slot || slot.running) return
+    if (slot.timer !== undefined) this.keyDeliveryTimers.clear(slot.timer)
+    slot.timer = undefined
+    if (slot.autoRetries >= KEY_DELIVERY_AUTO_RETRIES) return
+    const due = [...slot.requests.values()]
+      .filter(
+        (delivery) =>
+          delivery.state === 'failed' && !TERMINAL_KEY_DELIVERY.has(delivery.code ?? '')
+      )
+      .map((delivery) => delivery.retryAt)
+    if (due.length === 0) return
+    let now = 0
+    try {
+      now = this.keyDeliveryNow()
+    } catch {
+      /* A broken clock makes the retry due at once rather than never. */
+    }
+    slot.timer = this.keyDeliveryTimers.set(
+      () => {
+        if (this.keyDeliveries.get(key) !== slot) return
+        slot.timer = undefined
+        let current: string | null | undefined
+        try {
+          current = getIpcServiceDeps().authService.getCachedSessionIdentity().userId
+        } catch {
+          current = undefined
+        }
+        if (current !== accountId) {
+          this.dropKeyDeliverySlot(accountId, workspaceId)
+          return
+        }
+        slot.autoRetries += 1
+        void this.runKeyDelivery(accountId, workspaceId)
+      },
+      Math.max(0, Math.min(...due) - now)
+    )
   }
   /** Synchronization point for the owning tests; production callers never await delivery.
    * Protected, not public: public instance methods are renderer-facing IPC. */
@@ -264,6 +334,7 @@ export class E2eeIpc extends IpcService {
     device: string
   ) {
     const slot = this.keyDeliverySlot(accountId, workspaceId)
+    slot.autoRetries = 0
     slot.requests.delete(requestId)
     slot.requests.set(requestId, { state: 'pending', device, attempts: 0, retryAt: 0 })
     logMemberKeys('key-delivery', requestId, { state: 'pending' })
@@ -339,7 +410,7 @@ export class E2eeIpc extends IpcService {
             for (const delivery of covered)
               logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'ended', code })
             if (this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot)
-              this.keyDeliveries.delete(`${accountId}\n${workspaceId}`)
+              this.dropKeyDeliverySlot(accountId, workspaceId)
             return
           }
           for (const delivery of covered) retry(delivery, code)
@@ -392,6 +463,7 @@ export class E2eeIpc extends IpcService {
             /* Diagnostics never block the reset. */
           }
         }
+        this.scheduleKeyDeliveryRetry(accountId, workspaceId)
       })
     slot.running = running
     return running
@@ -913,6 +985,8 @@ export class E2eeIpc extends IpcService {
     if (!delivery) throw new Error('e2ee_invalid-input')
     // An explicit retry skips the backoff wait, never the terminal access-loss result.
     if (delivery.state === 'failed') delivery.retryAt = 0
+    const slot = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
+    if (slot) slot.autoRetries = 0
     void this.runKeyDelivery(accountId, workspaceId)
     return keyDeliveryView(requestId, delivery)
   }

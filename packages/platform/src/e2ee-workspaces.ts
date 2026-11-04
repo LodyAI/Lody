@@ -147,6 +147,9 @@ export interface E2eeAccountApprovalSession {
   /** Runs this session's existing key round once, so the device it just admitted
    * receives the current epoch key. Distribution targets only verified ledger devices. */
   keyRound(): Promise<void>;
+  /** Positive mailbox evidence for `device` at the current epoch: 'delivered', or a
+   * public retryable `e2ee_*` code. */
+  keyDeliveryEvidence(device: string): Promise<string>;
 }
 
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
