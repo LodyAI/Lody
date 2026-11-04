@@ -69,11 +69,17 @@ asked the server.
 - **Dispatch confirmation.** The credential-bound token check starts beside local
   preparation. Its waiter has a 50 ms budget, leaving 150 ms of the renderer's
   200 ms deadline for native work, binding rechecks and IPC instead of imposing the
-  cloud client's 30-second deadline on dispatch. Expiry or an
+  cloud client's 30-second deadline on dispatch. Expiry without a verdict or an
   unclassified failure establishes no loss and changes no local outcome. The
   original request retains its network bound; exact loss still records the
   credential-bound receipt and pushes the reader hint even after the frame returned.
-  An exact loss learned before return discards the frame. No retry is added.
+  An exact loss is latched before native cleanup starts. The 50 ms budget bounds
+  unknown-verdict waiting, not deletion after a known verdict: slow receipt/erase
+  work must not replace the exact refusal with an unrelated local error. It stays
+  owned and awaited outside the account lock. A loss arriving during final binding
+  reads also discards the frame without awaiting cleanup under that lock. The
+  original creation row can coexist with its removal receipt until terminal erase;
+  it is not a newly created identity or authorization. No retry is added.
   Before returning bytes, main rechecks the original account generation, owner,
   reader incarnation, genesis, signing key and credential; lifecycle cancellation
   is never treated as an inconclusive server check. A reader token is retired when

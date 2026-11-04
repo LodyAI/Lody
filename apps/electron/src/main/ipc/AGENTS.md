@@ -19,7 +19,10 @@ reader owns them.
 [Decision](../../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).
 
 Dispatch checks the credential beside local preparation with a 50 ms waiter
-budget. Exact loss discards the frame and records the receipt; timeout or an
+budget for an unknown verdict. Latch an exact loss before its native cleanup:
+slow cleanup cannot turn known loss into uncertainty or replace its exact code
+with a local error. Await that cleanup outside the account lock. Exact loss
+discards the frame and records the receipt; unknown-verdict timeout or an
 unclassified failure leaves the local result unchanged. The bounded network
 request continues and records exact late loss, including the reader hint. Never
 retry the check or replace a refusal with a fallback. Before returning a frame,

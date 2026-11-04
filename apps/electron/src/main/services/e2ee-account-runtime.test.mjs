@@ -2214,26 +2214,42 @@ void test('prepareDispatch confirms access loss after its reader closes through 
 void test('prepareDispatch isolates JWT, transport and parse failures from credential authority through the real cloud client', async (t) => {
   for (const hasReader of [false, true]) {
     for (const code of ['e2ee_member_removed', 'e2ee_device_revoked']) {
-      for (const source of ['jwt', 'transport', 'parse', 'endpoint']) {
+      for (const source of [
+        'jwt',
+        'transport',
+        'parse',
+        'endpoint',
+        'endpoint-slow-cleanup',
+        ...(hasReader ? ['endpoint-slow-cleanup-frame'] : [])
+      ]) {
         await t.test(`${hasReader ? 'reader' : 'closed'}-${code}-${source}`, async (subtest) => {
-          const { api, identity } = await nativeAccountFixture(subtest)
+          const scope = await Effect.runPromise(Scope.make())
+          const clock = await Effect.runPromise(Layer.buildWithScope(TestClock.layer(), scope))
+          subtest.after(() => Effect.runPromise(Scope.close(scope, Exit.void)))
+          const run = (work) => Effect.runPromise(Effect.provide(work, clock))
+          const { api, identity } = await nativeAccountFixture(subtest, identityStorage, clock)
           const first = await createAccountWorkspace(api, 'workspace')
           const sender = Object.assign(new EventEmitter(), {
             id: 41,
             isDestroyed: () => false,
             send: () => {}
           })
-          const scope = await Effect.runPromise(Scope.make())
-          subtest.after(() => Effect.runPromise(Scope.close(scope, Exit.void)))
           const failure = { data: { code } }
           let endpointCalls = 0
           let dispatchCalls = 0
+          const cleanupEntered = Promise.withResolvers()
+          const cleanupDone = Promise.withResolvers()
+          const releaseCleanup = Promise.withResolvers()
+          subtest.after(() => releaseCleanup.resolve())
+          const delayedCleanup = source.startsWith('endpoint-slow-cleanup')
+          let escapedFrames = 0
           const credential = await api.withDesktopE2eeAccount(
             (owner) => {
               owner.readers.set('workspace', new Map([[sender.id, 1]]))
               owner.host.prepareDispatch = () =>
                 Effect.sync(() => {
                   dispatchCalls++
+                  if (source.endsWith('-frame')) return { frame: 'synthetic-frame-must-not-escape' }
                   throw new Error('synthetic local dispatch failure')
                 })
               return owner.bootstrap.deviceCredential('workspace')
@@ -2283,13 +2299,42 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
             },
             '../../services/e2ee-account-runtime': {
               ...api,
+              cleanupRemovedDesktopWorkspace: async (input) => {
+                if (delayedCleanup) {
+                  cleanupEntered.resolve()
+                  await releaseCleanup.promise
+                }
+                try {
+                  return await api.cleanupRemovedDesktopWorkspace(input)
+                } finally {
+                  cleanupDone.resolve()
+                }
+              },
               desktopE2eeCloudClient: async () => ({ accountId: 'account', client })
             }
           })
           const ipc = new E2eeIpc()
           if (!hasReader) await ipc.close('workspace')
           const original = await readFile(join(first.directory, 'creations.sqlite'))
-          const error = await ipc
+          const snapshot = () => {
+            const db = new DatabaseSync(join(first.directory, 'creations.sqlite'))
+            try {
+              return {
+                creations: db
+                  .prepare(
+                    'SELECT request_id,hex(record) AS record,hex(epoch_blob) AS epoch_blob FROM creations ORDER BY request_id'
+                  )
+                  .all(),
+                receipts: db.prepare('SELECT count(*) AS n FROM removed_workspaces').get().n
+              }
+            } finally {
+              db.close()
+            }
+          }
+          const originalRows = snapshot().creations
+          assert.equal(originalRows.length, 1)
+          let settled = false
+          const outcome = ipc
             .prepareDispatch('workspace', 'synthetic-machine', {
               sessionId: 'session',
               userTurnId: 'turn',
@@ -2298,12 +2343,40 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
               inputConfig: {}
             })
             .then(
-              () => assert.fail('dispatch must fail'),
+              () => {
+                escapedFrames++
+                return new Error('unexpected prepared frame')
+              },
               (cause) => cause
             )
+            .finally(() => {
+              settled = true
+            })
+          if (delayedCleanup) {
+            // The exact credential verdict and its durable receipt already exist.
+            // Hold only terminal erase; these are the ORIGINAL creation rows.
+            await cleanupEntered.promise
+            assert.deepEqual(snapshot(), { creations: originalRows, receipts: 1 })
+            await run(TestClock.adjust('50 millis'))
+            // A serial boundary flush lets the original local rejection settle if
+            // production incorrectly mistakes unfinished cleanup for no verdict.
+            await api.withDesktopE2eeAccount(() => Effect.void, 'workspace', false)
+            assert.equal(escapedFrames, 0, 'no prepared frame may escape after known loss')
+            const premature = settled ? (await outcome).message : undefined
+            releaseCleanup.resolve()
+            const finished = await outcome
+            await cleanupDone.promise
+            assert.equal(
+              premature,
+              undefined,
+              'known loss must not return the unrelated local error while cleanup is pending'
+            )
+            assert.equal(finished.message, code)
+          }
+          const error = await outcome
           const db = new DatabaseSync(join(first.directory, 'creations.sqlite'))
           try {
-            const authoritative = source === 'endpoint'
+            const authoritative = source.startsWith('endpoint')
             assert.deepEqual(
               {
                 message: error.message,
@@ -2322,7 +2395,8 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
             db.close()
           }
           assert.equal(dispatchCalls, hasReader ? 1 : 0)
-          if (source !== 'endpoint') {
+          assert.equal(escapedFrames, 0)
+          if (!source.startsWith('endpoint')) {
             assert.deepEqual(await readFile(join(first.directory, 'creations.sqlite')), original)
             const cached = await api.withDesktopE2eeAccount(
               (owner) => owner.host.inspectCachedState('workspace', 'synthetic-machine'),
@@ -2493,7 +2567,8 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
     'credential-replaced',
     'unreachable',
     'early-loss',
-    'late-loss'
+    'late-loss',
+    'loss-during-binding-read'
   ]) {
     await t.test(scenario, async (t) => {
       const scope = await Effect.runPromise(Scope.make())
@@ -2511,6 +2586,12 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
       const prepared = Promise.withResolvers()
       t.after(() => answer.resolve(false))
       const pushed = Promise.withResolvers()
+      const bindingEntered = Promise.withResolvers()
+      const releaseBinding = Promise.withResolvers()
+      const lossCleanupQueued = Promise.withResolvers()
+      let bindingHeld = false,
+        lossSent = false
+      t.after(() => releaseBinding.resolve())
       const sender = Object.assign(new EventEmitter(), {
         id: 42,
         isDestroyed: () => false,
@@ -2533,6 +2614,10 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
         },
         '../../services/e2ee-account-runtime': {
           ...api,
+          withDesktopE2eeAccount: (...args) => {
+            if (bindingHeld && lossSent) lossCleanupQueued.resolve()
+            return api.withDesktopE2eeAccount(...args)
+          },
           runDesktopE2eeOperation: async (...args) => {
             const value = await api.runDesktopE2eeOperation(...args)
             // Signal after the native boundary's post-operation account recheck.
@@ -2546,7 +2631,10 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
                 Effect.gen(function* () {
                   asked.resolve()
                   const lost = yield* Effect.promise(() => answer.promise)
-                  if (lost) return yield* Effect.fail(new E2eeDeviceRevokedError())
+                  if (lost) {
+                    lossSent = true
+                    return yield* Effect.fail(new E2eeDeviceRevokedError())
+                  }
                   return { token: 'synthetic-token' }
                 }),
               machineSharing: () => ({}),
@@ -2569,6 +2657,21 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
       await api.withDesktopE2eeAccount(
         (owner) =>
           Effect.sync(() => {
+            if (scenario === 'loss-during-binding-read') {
+              const status = owner.host.status
+              let reads = 0
+              owner.host.status = (workspace) =>
+                Effect.gen(function* () {
+                  const value = yield* status(workspace)
+                  if (++reads === 2) {
+                    bindingHeld = true
+                    bindingEntered.resolve()
+                    yield* Effect.promise(() => releaseBinding.promise)
+                    bindingHeld = false
+                  }
+                  return value
+                })
+            }
             owner.host.prepareDispatch = () =>
               Effect.sync(() => {
                 return { frame: 'synthetic-frame' }
@@ -2613,7 +2716,20 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
         publishIdentity(scenario === 'account-switch' ? 'other-account' : 'account')
         await api.closeDesktopE2eeAccount()
       }
-      if (scenario === 'unreachable' || scenario === 'late-loss') {
+      if (scenario === 'loss-during-binding-read') {
+        await run(TestClock.adjust('50 millis'))
+        await bindingEntered.promise
+        answer.resolve(true)
+        // Queueing terminal cleanup proves the exact verdict was latched while
+        // the final account lock still holds the binding read.
+        await lossCleanupQueued.promise
+        releaseBinding.resolve()
+        const outcome = await result
+        await pushed.promise
+        assert.equal(outcome.value, undefined, 'loss learned before frame handoff must discard it')
+        assert.equal(outcome.error?.message, 'e2ee_device_revoked')
+        await assert.rejects(ipc.status('workspace'), /^Error: e2ee_device_revoked$/)
+      } else if (scenario === 'unreachable' || scenario === 'late-loss') {
         // The local frame is ready; network uncertainty must not impose its 30s timeout.
         await run(TestClock.adjust('49 millis'))
         assert.equal(settled, false)

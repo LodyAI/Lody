@@ -2614,6 +2614,7 @@ export class E2eeIpc extends IpcService {
       // management, ask the server with this device's credential; only its exact answer
       // is loss. Any other check failure establishes nothing and changes no outcome.
       // The check runs beside the local work: the renderer's fast path has a deadline.
+      let confirmedLoss: AccessLoss | undefined
       const confirmed = (async () => {
         try {
           await Effect.runPromise(
@@ -2621,7 +2622,12 @@ export class E2eeIpc extends IpcService {
           )
         } catch (checked) {
           const loss = accessLoss(checked)
-          if (loss) await this.removeLocalWorkspace(access, loss)
+          if (loss) {
+            // A verdict is known before its terminal native cleanup finishes.
+            // Expiring the network waiter cannot turn that verdict into uncertainty.
+            confirmedLoss = loss
+            await this.removeLocalWorkspace(access, loss)
+          }
         }
       })()
       confirmed.catch(() => undefined)
@@ -2645,16 +2651,22 @@ export class E2eeIpc extends IpcService {
         if (error !== undefined) throw error
       })
       confirmation.catch(() => undefined)
+      const waitForConfirmation = async () => {
+        await confirmation
+        // Only an unknown verdict may use the fast budget. Known loss retains
+        // cleanup ownership and its exact failure, even on a slow filesystem.
+        if (confirmedLoss) await confirmed
+      }
       const prepared = await runDesktopE2eeOperation(access.accountId, access.work).catch(
         async (error) => {
           if (accessLoss(error)) return this.removeLocalWorkspace(access, accessLoss(error)!)
           if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message)))
-            await confirmation
+            await waitForConfirmation()
           throw error
         }
       )
       // A definitive confirmation refuses; uncertainty alone does not cancel local work.
-      await confirmation
+      await waitForConfirmation()
       // Network uncertainty is not cancellation. Revalidate the originating owner,
       // auth generation, reader incarnation and exact credential before handing out bytes.
       return scope(
@@ -2686,6 +2698,14 @@ export class E2eeIpc extends IpcService {
               status.signingPublicKey !== access.status.signingPublicKey
             )
               return yield* Effect.fail(new Error('e2ee_closed'))
+            // A late verdict can arrive during these binding reads. Never await
+            // its cleanup under the account lock, but do not hand out the frame.
+            if (confirmedLoss)
+              return yield* Effect.fail(
+                confirmedLoss === 'member_removed'
+                  ? new E2eeMemberRemovedError()
+                  : new E2eeDeviceRevokedError()
+              )
             return prepared
           }),
         false
