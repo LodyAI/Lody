@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ACPSessionId, AcpSessionNotification, SessionId } from '@lody/shared';
+import type { ACPSessionId, AcpSessionNotification, MessageContent, SessionId } from '@lody/shared';
 import type { AuthMethod, InitializeResponse, NewSessionResponse } from '@agentclientprotocol/sdk';
 
 const connectionMocks = vi.hoisted(() => ({
@@ -27,6 +27,7 @@ vi.mock('@agentclientprotocol/sdk', async (importOriginal) => {
 });
 
 import { AcpAuthenticationRequiredError, AgentClient } from '../src/agent/agent-client';
+import { applyNotificationOnHistory } from '../src/lib/acp/history';
 import type { Logger } from '../src/utils/logger';
 
 const terminalAuthMethod: AuthMethod = {
@@ -224,6 +225,67 @@ describe('AgentClient Kimi authentication and resume', () => {
       },
     });
     expect(await client.requestPermission(request)).toEqual({ outcome: { outcome: 'cancelled' } });
+  });
+
+  it('settles background tasks that were still running when the agent transport was lost', async () => {
+    const notifications: AcpSessionNotification[] = [];
+    const client = new AgentClient({
+      sessionId: 'test' as SessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'claude' },
+      onUpdateMessage: (event) => notifications.push(event),
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+    });
+    await client.startSession({} as never, '/tmp');
+    // Shapes captured from the Claude adapter for `run_in_background` shells.
+    const task = (taskId: string, status: 'in_progress' | 'completed', description?: string) => ({
+      version: 1,
+      taskId,
+      kind: 'background',
+      status,
+      ...(description ? { actor: 'local_bash', description } : {}),
+    });
+    await client.sessionUpdate({
+      sessionId: 'new-session',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'task:live',
+        title: 'local_bash: Watch CI',
+        kind: 'think',
+        status: 'in_progress',
+        _meta: { lody: { task: task('live', 'in_progress', 'Watch CI') } },
+      },
+    });
+    for (const status of ['in_progress', 'completed'] as const) {
+      await client.sessionUpdate({
+        sessionId: 'new-session',
+        update: {
+          sessionUpdate: status === 'in_progress' ? 'tool_call' : 'tool_call_update',
+          toolCallId: 'task:done',
+          title: 'local_bash: Build',
+          kind: 'think',
+          status,
+          _meta: { lody: { task: task('done', status, 'Build') } },
+        },
+      });
+    }
+
+    connectionMocks.abort.abort();
+
+    const history = applyNotificationOnHistory(
+      [{ id: 'turn', role: 'assistant', timestamp: '2026-11-04', items: [], fileDiff: [] }],
+      notifications
+    );
+    const tasks = (history[0]?.items ?? []).filter(
+      (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+        item.type === 'subagent_task'
+    );
+    expect(tasks.map((item) => [item.taskId, item.status])).toEqual([
+      ['live', 'failed'],
+      ['done', 'completed'],
+    ]);
+    expect(tasks[0]?.error).toMatch(/lost track/i);
   });
 
   it('reports native work from the Core activity level of the current ACP session', async () => {

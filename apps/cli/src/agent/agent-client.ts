@@ -51,6 +51,8 @@ import {
   getDevinSubagentContextId,
   hasOtherDevinSubagentMeta,
   parseDevinSubagentTaskMeta,
+  parseLodyTaskMeta,
+  type SubagentTaskPayload,
 } from '@lody/shared';
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
@@ -619,6 +621,15 @@ export interface AgentClientOptions {
 /** See {@link AgentClient.getNativeWork}. */
 export type NativeAgentWork = 'running' | 'background' | null;
 
+type LiveTaskRow = {
+  sessionId: string;
+  taskId: string;
+  kind: SubagentTaskPayload['taskKind'];
+};
+
+const TASK_DISCONNECTED_ERROR =
+  'Lost track of this task: the agent process stopped before reporting its result.';
+
 export type AcpWriteTextFileEvidence = {
   readonly path: string;
   readonly oldText: string | null;
@@ -640,6 +651,8 @@ export class AgentClient implements acp.Client {
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
   private readonly subagentSnapshots = new Map<string, LodySubagentSnapshot>();
+  /** Unfinished `_meta.lody.task` rows by tool call id; see {@link markTasksDisconnected}. */
+  private readonly liveTasks = new Map<string, LiveTaskRow>();
   /** Latest Core activity level, kept with the ACP session it describes. */
   private nativeActivity: LodySessionActivityUpdate | null = null;
   private readonly devinSubagentTaskIds = new Set<string>();
@@ -990,6 +1003,7 @@ export class AgentClient implements acp.Client {
       this.applyConfigOptionsState(notification.update.configOptions, true);
     }
 
+    this.trackLiveTask(notification);
     this.handleGoalSessionInfoUpdate(notification);
     this.handleCodexWarningSessionInfoUpdate(notification);
     this.handleAgentSessionTitleUpdate(notification);
@@ -1528,6 +1542,56 @@ export class AgentClient implements acp.Client {
     }
   }
 
+  private trackLiveTask(notification: AcpSessionNotification): void {
+    const { update } = notification;
+    if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
+    const task = parseLodyTaskMeta(update._meta);
+    if (!task) return;
+    if (task.status === 'pending' || task.status === 'in_progress') {
+      this.liveTasks.set(update.toolCallId, {
+        sessionId: notification.sessionId,
+        taskId: task.taskId,
+        kind: task.taskKind,
+      });
+    } else {
+      this.liveTasks.delete(update.toolCallId);
+    }
+  }
+
+  /**
+   * Only the agent process reports a task's result, so once its transport
+   * closes an unfinished task's settle update can no longer arrive and its row
+   * would read as running forever. The command itself may have been stopped
+   * with the process tree or may still be running, so the row says that Lody
+   * lost track of it rather than claiming it stopped.
+   */
+  private markTasksDisconnected(): void {
+    const endedAtEpochSeconds = Math.floor(Date.now() / 1000);
+    for (const [toolCallId, row] of this.liveTasks) {
+      this.options.onUpdateMessage({
+        sessionId: row.sessionId,
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId,
+          status: 'failed',
+          _meta: {
+            lody: {
+              task: {
+                version: 1,
+                taskId: row.taskId,
+                ...(row.kind ? { kind: row.kind } : {}),
+                status: 'failed',
+                endedAtEpochSeconds,
+                error: TASK_DISCONNECTED_ERROR,
+              },
+            },
+          },
+        },
+      });
+    }
+    this.liveTasks.clear();
+  }
+
   private markSubagentsDisconnected(): void {
     if (!this.acpSessionId) return;
     for (const [runId, previous] of this.subagentSnapshots) {
@@ -1932,13 +1996,17 @@ export class AgentClient implements acp.Client {
   ): Promise<acp.NewSessionResponse> {
     this.availableCommands = undefined;
     this.markSubagentsDisconnected();
+    this.markTasksDisconnected();
     this.subagentSnapshots.clear();
     const connection = new acp.ClientSideConnection(() => this, stream);
     this.connection = connection;
     connection.signal.addEventListener(
       'abort',
       () => {
-        if (this.connection === connection) this.markSubagentsDisconnected();
+        if (this.connection === connection) {
+          this.markSubagentsDisconnected();
+          this.markTasksDisconnected();
+        }
       },
       { once: true }
     );
