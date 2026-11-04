@@ -76,10 +76,10 @@ const failureReferenceMs = (output: readonly SessionHistoryInput[], fallbackMs: 
 
 /**
  * Explains a failed target from the durable `chat_failed` notice recorded after
- * its user turn. The reason and redacted provider text travel in the message so
- * older readers of the strict Operation result schema keep working; current
- * readers also get the normalized cause and quota reset as structured fields.
- * Without a notice the generic text stands; a cause is never guessed.
+ * its user turn. The reason and redacted provider text remain in the message for
+ * plain-text consumers; readers that validate the strict Operation schema get
+ * the normalized cause and quota reset as structured fields. Without a notice
+ * the generic text stands; a cause is never guessed.
  */
 export const targetFailureError = (
   output: readonly SessionHistoryInput[],

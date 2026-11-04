@@ -1157,7 +1157,6 @@ describe('LodyOperationCoordinator', () => {
                   retryable: true,
                   reason: 'usage_limit',
                   detail: "You've hit your usage limit. Try again at 7:20 AM.",
-                  resetAt: '2026-07-20T07:20:00.000Z',
                 },
               },
             ],

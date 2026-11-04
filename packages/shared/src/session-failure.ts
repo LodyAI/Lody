@@ -4,7 +4,8 @@ import { z } from 'zod';
  * A normalized, coordinator-facing failure reason. Provider-specific causes
  * stay available through the raw chat notice; this vocabulary answers what a
  * caller can do next (wait for quota, start a fresh Session, retry, or ask a
- * human). Keep it additive: older readers ignore the optional Operation fields.
+ * human). The Operation schema is strict, so a reader that validates it must
+ * know these optional fields; the human-readable message stays independent.
  */
 export const LodyFailureReasonSchema = z.enum([
   'usage_limit',
@@ -190,21 +191,25 @@ export function parseFailureResetAt(
   if (!message) return undefined;
   const iso = parseIsoResetAt(message);
   if (iso) return iso;
+  const hasExplicitUtcZone = (rest: string): boolean =>
+    /^\s*(?:\((?:UTC|GMT)\)|(?:UTC|GMT)\b)/i.test(rest);
   const meridiem =
-    /\b(?:resets?|reset|try again)(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b(?:\s*\(?(UTC|GMT)\)?)?/i.exec(
-      message
-    );
+    /\b(?:resets?|reset|try again)(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i.exec(message);
   if (meridiem?.[1]) {
+    const rest = message.slice((meridiem.index ?? 0) + meridiem[0].length);
+    // A wall-clock reset without a named UTC/GMT zone is the provider's local
+    // time. Treating it as UTC would schedule a retry hours too early or late.
+    if (!hasExplicitUtcZone(rest)) return undefined;
     const rawHours = Number.parseInt(meridiem[1], 10);
     const minutes = meridiem[2] ? Number.parseInt(meridiem[2], 10) : 0;
     const isPm = meridiem[3]?.toLowerCase() === 'pm';
     const hours = (rawHours % 12) + (isPm ? 12 : 0);
     return nextUtcTime(referenceMs, hours, minutes);
   }
-  const clock = /\b(?:resets?|reset)(?:\s+at)?\s+(\d{1,2}):(\d{2})\b(?:\s*\(?(UTC|GMT)\)?)?/i.exec(
-    message
-  );
+  const clock = /\b(?:resets?|reset)(?:\s+at)?\s+(\d{1,2}):(\d{2})\b/i.exec(message);
   if (clock?.[1] && clock[2]) {
+    const rest = message.slice((clock.index ?? 0) + clock[0].length);
+    if (!hasExplicitUtcZone(rest)) return undefined;
     return nextUtcTime(referenceMs, Number.parseInt(clock[1], 10), Number.parseInt(clock[2], 10));
   }
   return undefined;

@@ -1800,7 +1800,10 @@ const readLastTurnFailure = async (
     const row = directory[index];
     const scalars = row?.scalars;
     if (row?.state !== 'ready' || !scalars || scalars.role !== 'user') continue;
-    if (scalars.status !== 'failed') continue;
+    // The newest user Turn is authoritative: a queued, running, handled or
+    // canceled Turn means the Session has no current failure to report, even
+    // when an older Turn failed. Recovery clears this signal on the next call.
+    if (scalars.status !== 'failed') return undefined;
     const notices: SessionHistoryInput[] = [];
     let assistantTurnId: string | undefined;
     const end = Math.min(directory.length, index + FAILURE_NOTICE_SCAN_ROWS);

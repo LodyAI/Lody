@@ -43,10 +43,14 @@ describe('session failure normalization', () => {
     });
   });
 
-  it('parses a clock reset only when the notice names one', () => {
+  it('parses a clock reset only when the notice names UTC or GMT', () => {
     expect(parseFailureResetAt("You've hit your 5-hour limit · resets 6am (UTC)", 0)).toBe(
       '1970-01-01T06:00:00.000Z'
     );
+    expect(
+      parseFailureResetAt("You've hit your 5-hour limit · resets 3pm (Asia/Shanghai)", 0)
+    ).toBe(undefined);
+    expect(parseFailureResetAt('You can try again at 7:20 AM.', 0)).toBeUndefined();
     expect(parseFailureResetAt('The agent stopped without an explanation.', 0)).toBeUndefined();
   });
 

@@ -769,6 +769,52 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
+  it('does not report an older failure after the newest user Turn succeeds', async () => {
+    stubCreateOptionsReaders();
+    const doc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'failed-user',
+      role: 'user',
+      status: 'failed',
+      timestamp: '2026-11-03T20:15:00.000Z',
+      items: [{ type: 'text', text: 'run the delegated work' }],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'failed-notice',
+      role: 'system',
+      timestamp: '2026-11-03T20:15:01.000Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your 5-hour limit · resets 6am (UTC)",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'recovered-user',
+      role: 'user',
+      status: 'handled',
+      timestamp: '2026-11-03T21:00:00.000Z',
+      items: [{ type: 'text', text: 'retry after the quota reset' }],
+      fileDiff: [],
+    } as never);
+
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    const item = JSON.parse(status.content[0]?.text ?? '{}').items[0];
+    expect(item).toMatchObject({ ok: true, sessionId });
+    expect(item.value).not.toHaveProperty('lastTurnFailure');
+  });
+
   it('reports the latest failed turn and marks its history entry', async () => {
     stubCreateOptionsReaders();
     const doc = await manager.getOrCreateSessionDoc(sessionId);
