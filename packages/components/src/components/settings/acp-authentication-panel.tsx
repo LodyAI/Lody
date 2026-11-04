@@ -22,6 +22,7 @@ import {
 } from '@lody/shared';
 
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
+import { sorbetAuthMethodsRevisionAtom } from '@/atoms/sorbet-auth-methods';
 import { localMachineIdAtom, localProbeAttemptedAtom } from '@/atoms/local-probe';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
@@ -261,10 +262,12 @@ export function AcpAuthenticationPanel({
    * probe has not answered yet, so the cached capability entry is used instead;
    * an empty array records that the agent advertises no agent-driven method.
    */
+  const authMethodsRevision = useAtomValue(sorbetAuthMethodsRevisionAtom);
   const [discoveredAuthMethods, setDiscoveredAuthMethods] = useState<
     MachineAcpAuthMethodSummary[] | undefined
   >(undefined);
   const discoveryTargetRef = useRef<string | null>(null);
+  const discoveryRevisionRef = useRef(authMethodsRevision);
   const pendingAuthorizationWindowRef = useRef<Window | null>(null);
   const openedAuthorizationUrlRef = useRef<string | null>(null);
   const interactionIdRef = useRef<string | null>(null);
@@ -375,10 +378,18 @@ export function AcpAuthenticationPanel({
   useEffect(() => {
     if (!runtime || workspaceId == null || !machineId || !configId) return undefined;
     if (!protocolAuthProvider || !interactiveProtocolSupported) return undefined;
-    if (discoveredAuthMethods !== undefined || cachedAuthMethods !== undefined) return undefined;
+    // A Provider definition changed since the last discovery: the cached list predates it,
+    // so re-ask even though a cached list exists.
+    const revisionChanged = discoveryRevisionRef.current !== authMethodsRevision;
+    if (
+      !revisionChanged &&
+      (discoveredAuthMethods !== undefined || cachedAuthMethods !== undefined)
+    )
+      return undefined;
     const target = `${machineId}:${configId}`;
-    if (discoveryTargetRef.current === target) return undefined;
+    if (!revisionChanged && discoveryTargetRef.current === target) return undefined;
     discoveryTargetRef.current = target;
+    discoveryRevisionRef.current = authMethodsRevision;
     let cancelled = false;
     void (async () => {
       try {
@@ -387,7 +398,7 @@ export function AcpAuthenticationPanel({
           machineId,
           workspaceId,
           configId,
-          ...(cachedCapabilityPredatesAuthMethods ? { force: true } : {}),
+          ...(cachedCapabilityPredatesAuthMethods || revisionChanged ? { force: true } : {}),
         });
         if (cancelled || !response?.authMethods) return;
         setDiscoveredAuthMethods(response.authMethods);

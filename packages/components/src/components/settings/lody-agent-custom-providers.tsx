@@ -39,6 +39,13 @@ export interface LodyAgentCustomProvidersProps {
   onCreate?: (draft: LodyAgentCustomProviderDraft) => void;
 }
 
+/** The agent's protocol names are wire identifiers; a person reads the vendor and shape. */
+const PROTOCOL_LABEL: Record<LodyAgentProviderProtocol, string> = {
+  'openai-completions': 'OpenAI chat completions',
+  'openai-responses': 'OpenAI responses',
+  'anthropic-messages': 'Anthropic messages',
+};
+
 const PROTOCOLS: readonly LodyAgentProviderProtocol[] = [
   'openai-completions',
   'openai-responses',
@@ -158,7 +165,7 @@ export function LodyAgentCustomProviders({
                   <div {...stylex.props(styles.identity)}>
                     <div>{provider.name}</div>
                     <div {...stylex.props(styles.description)}>
-                      {provider.protocol} · {provider.baseUrl} ·{' '}
+                      {PROTOCOL_LABEL[provider.protocol]} · {provider.baseUrl} ·{' '}
                       {t('lodyAgentProviders.modelCount', { count: provider.models.length })}
                     </div>
                   </div>
