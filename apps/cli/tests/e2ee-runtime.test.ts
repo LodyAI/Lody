@@ -4489,6 +4489,43 @@ it('discovers device revocation from the bounded authority check without a calle
   }
 });
 
+it('keeps the J07 owner-retired member fence when the verified ledger cannot advance', () => {
+  const deviceKey = 'cd'.repeat(32);
+  const authority = {
+    membershipId: 'ef'.repeat(16),
+    ownerMembershipId: 'ef'.repeat(16),
+    devicePresent: true,
+    memberPresent: true,
+    length: 11,
+    generation: 0,
+  };
+  const observed = createDaemonLossRegistry(true);
+  const receipt = observed.register(
+    { workspaceId: 'workspace', machineId: 'machine', accountId: 'account', deviceKey },
+    () => ({
+      intakeClosed: true,
+      pending: {
+        processorActive: 0,
+        processorQueued: 0,
+        watcherChecks: 0,
+        executionTurns: 0,
+        executionBookkeeping: 0,
+      },
+    }),
+    () => authority
+  );
+  receipt!.loss('e2ee_member_removed');
+  receipt!.retired();
+  expect(observed.inspect('workspace', deviceKey)).toMatchObject({
+    code: 'e2ee_member_removed',
+    fence: 'owner-retired',
+    drained: true,
+    retired: true,
+    authorityLength: 11,
+    authorityGeneration: 0,
+  });
+});
+
 it('retries a transient history refresh without waiting for the periodic check', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-history-retry-'));
   vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
