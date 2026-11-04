@@ -60,6 +60,8 @@ import { openMachinePairingJournal, MachinePairingJournalError } from './pairing
 /** Fast enough for the 900s client-loss envelope; a successful check refreshes the
  * verified ledger through the same single-flight owner used by every other trigger. */
 const AUTHORITY_CHECK_INTERVAL_MS = 5 * 60_000;
+/** Inbound machine-control work is a hint, not a reason to check per frame. */
+const AUTHORITY_CHECK_DEBOUNCE_MS = 30_000;
 
 const Binding = z
   .object({
@@ -669,6 +671,10 @@ async function openWorkspaceOwned(
       if (hex(hashRecordBytes(bytes(binding.genesisRecordHex)).toBytes()) !== binding.genesisHash)
         throw new Error('e2ee_binding_conflict');
       // Existing workspace opens never generate an identity or a replacement credential.
+      // CLI workspace custody is machine-only: this daemon's credential is the machine
+      // device. A revoked desktop personal device therefore remains a ledger record the
+      // machine must pull (length 15); a revoked machine is refused by the credential
+      // endpoint with the exact code.
       const device = yield* custody.openDevice(genesis);
       if (activation && activation.signingPublicKey !== hex(device.publicKey.toBytes()))
         throw new Error('e2ee_binding_conflict');
@@ -787,7 +793,11 @@ async function openWorkspaceOwned(
   let pairingFailure: unknown;
   let ledgerRetryAttempts = 0;
   let ledgerRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let refreshRetryAttempts = 0;
+  let refreshRetryTimer: ReturnType<typeof setTimeout> | undefined;
   let authorityCheckTimer: ReturnType<typeof setInterval> | undefined;
+  let authorityCheckWakeTimer: ReturnType<typeof setTimeout> | undefined;
+  let authorityCheckRequested = false;
   let authorityCheckInFlight: Promise<void> | undefined;
   let closed = false;
   let refresh: Promise<void> | undefined;
@@ -1042,9 +1052,25 @@ async function openWorkspaceOwned(
     if (ledgerRetryTimer !== undefined) clearTimeout(ledgerRetryTimer);
     ledgerRetryTimer = undefined;
   };
+  const clearRefreshRetry = () => {
+    if (refreshRetryTimer !== undefined) clearTimeout(refreshRetryTimer);
+    refreshRetryTimer = undefined;
+  };
+  const scheduleRefreshRetry = () => {
+    if (closed || refreshRetryTimer !== undefined || refreshRetryAttempts >= 3) return;
+    refreshRetryTimer = setTimeout(() => {
+      refreshRetryTimer = undefined;
+      void refreshInBackground(false);
+    }, [1_000, 5_000, 30_000][refreshRetryAttempts]);
+    refreshRetryAttempts++;
+    refreshRetryTimer.unref?.();
+  };
   const clearAuthorityCheck = () => {
     if (authorityCheckTimer !== undefined) clearInterval(authorityCheckTimer);
     authorityCheckTimer = undefined;
+    if (authorityCheckWakeTimer !== undefined) clearTimeout(authorityCheckWakeTimer);
+    authorityCheckWakeTimer = undefined;
+    authorityCheckRequested = false;
   };
   const retryLedger = (): void => {
     if (closed || !ledgerBlocked || refresh || ledgerRetryAttempts >= 3) return;
@@ -1070,6 +1096,7 @@ async function openWorkspaceOwned(
     opened.sharing.stop();
     ledgerBlocked = true;
     clearLedgerRetry();
+    clearRefreshRetry();
     clearAuthorityCheck();
     removalRecorded = (async (): Promise<boolean> => {
       if (!memberRemoved && !deviceRevoked) return false;
@@ -1165,6 +1192,8 @@ async function openWorkspaceOwned(
     if (resetRetries) {
       clearLedgerRetry();
       ledgerRetryAttempts = 0;
+      clearRefreshRetry();
+      refreshRetryAttempts = 0;
     }
     pending = true;
     if (refresh) return refresh;
@@ -1230,6 +1259,8 @@ async function openWorkspaceOwned(
             await run(opened.runtime.receiveKeys());
           }
         }
+        refreshRetryAttempts = 0;
+        clearRefreshRetry();
       }
     })()
       .catch(async (error: unknown) => {
@@ -1240,6 +1271,7 @@ async function openWorkspaceOwned(
         } catch {
           /* Diagnostic sinks cannot turn a background retry into an unhandled rejection. */
         }
+        if (!ledgerBlocked) scheduleRefreshRetry();
       })
       .finally(() => {
         refresh = undefined;
@@ -1250,6 +1282,7 @@ async function openWorkspaceOwned(
   const checkAuthority = (): Promise<void> => {
     if (closed) return Promise.resolve();
     if (authorityCheckInFlight) return authorityCheckInFlight;
+    authorityCheckRequested = false;
     authorityCheckInFlight = (async () => {
       let unavailable = false;
       try {
@@ -1286,8 +1319,20 @@ async function openWorkspaceOwned(
       })
       .finally(() => {
         authorityCheckInFlight = undefined;
+        if (authorityCheckRequested && !closed) requestAuthorityCheck();
       });
     return authorityCheckInFlight;
+  };
+  const requestAuthorityCheck = () => {
+    if (closed || pairing || !requireActivation) return;
+    authorityCheckRequested = true;
+    if (authorityCheckWakeTimer !== undefined || authorityCheckInFlight) return;
+    authorityCheckWakeTimer = setTimeout(() => {
+      authorityCheckWakeTimer = undefined;
+      if (!authorityCheckRequested || closed) return;
+      void checkAuthority();
+    }, AUTHORITY_CHECK_DEBOUNCE_MS);
+    authorityCheckWakeTimer.unref?.();
   };
   const startAuthorityCheck = () => {
     if (closed || pairing || !requireActivation || authorityCheckTimer !== undefined) return;
@@ -1301,6 +1346,7 @@ async function openWorkspaceOwned(
     opened.executionAuthorization.invalidate();
     opened.sharing.stop();
     clearLedgerRetry();
+    clearRefreshRetry();
     clearAuthorityCheck();
     return (closeReceipt ??= (async () => {
       await stopRpc();
@@ -1527,6 +1573,7 @@ async function openWorkspaceOwned(
                     }).pipe(
                       Effect.tap(() =>
                         Effect.sync(() => {
+                          requestAuthorityCheck();
                           failureReported = false;
                         })
                       )

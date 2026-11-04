@@ -4489,6 +4489,107 @@ it('discovers device revocation from the bounded authority check without a calle
   }
 });
 
+it('retries a transient history refresh without waiting for the periodic check', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-history-retry-'));
+  vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+  const accountId = 'history-retry-account';
+  const root = join(
+    getLodyDataDir(),
+    'e2ee',
+    createHash('sha256').update(accountId).digest('hex'),
+    'workspace'
+  );
+  let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+  try {
+    const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+    const binding = {
+      workspaceId: 'workspace',
+      genesisHash: hex(fixture.genesis.toBytes()),
+      genesisRecordHex: hex(fixture.genesisRecord),
+    };
+    await retainCliE2eeWorkspaceBinding(accountId, binding);
+    const key = await execute(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(root, 'custody'),
+          keyring: noKeyring,
+        });
+        return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+      })
+    );
+    await fs.writeFile(
+      join(root, 'activation.json'),
+      JSON.stringify({ genesisHash: binding.genesisHash, signingPublicKey: key })
+    );
+    let historyCalls = 0;
+    let failNext = false;
+    let retryAt = 0;
+    const retried = Promise.withResolvers<void>();
+    host = await openCliE2eeWorkspaceLegacy({
+      accountId,
+      ...binding,
+      keyring: noKeyring,
+      onUnavailable: () => {},
+      cloud: {
+        getHistory: async () => {
+          historyCalls++;
+          if (retryAt !== 0 && historyCalls === retryAt) retried.resolve();
+          if (failNext) {
+            failNext = false;
+            throw new Error('temporary_network_failure');
+          }
+          return page(fixture.records);
+        },
+        getContentToken: async () => ({
+          token: 'synthetic-token',
+          bucketId: 'synthetic-bucket',
+          gatewayBaseUrl: 'https://synthetic.invalid',
+          expiresIn: 60,
+          expiresAt: 1_000_000,
+        }),
+        mailboxCall: async (method: string) => {
+          if (method === 'fetch') return { items: [], next: null };
+          throw new Error('unavailable');
+        },
+      } as unknown as CloudE2eePort,
+    });
+    await host.refresh();
+    const callsAfterOpen = historyCalls;
+    retryAt = callsAfterOpen + 2;
+    const retryCallbacks: Array<() => void> = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: Parameters<typeof setTimeout>[0],
+      delay?: number,
+      ...args: never[]
+    ) => {
+      if (delay === 1_000) {
+        retryCallbacks.push(() => {
+          if (typeof callback === 'function') callback(...args);
+        });
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }
+      return realSetTimeout(callback, delay, ...args);
+    }) as typeof setTimeout);
+    try {
+      failNext = true;
+      await host.refresh();
+      expect(historyCalls).toBe(callsAfterOpen + 1);
+      expect(retryCallbacks).toHaveLength(1);
+      retryCallbacks[0]!();
+      await retried.promise;
+      expect(historyCalls).toBe(callsAfterOpen + 2);
+      expect((await host.status()).length).toBe(fixture.records.length);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  } finally {
+    await host?.close().catch(() => undefined);
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 it('fences a credential-confirmed revoked device when the verified ledger cannot advance', () => {
   const deviceKey = 'ab'.repeat(32);
   const authority = {

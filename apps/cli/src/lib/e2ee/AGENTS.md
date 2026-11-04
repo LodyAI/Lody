@@ -99,11 +99,12 @@
   and healthy readers. Retry at most three times per failure episode; explicit refresh
   restarts that budget. Seal may request retry but never await it in the SDK save queue.
   Never skip rejected records or reset pins. Close cancels pending retry timers.
-- An idle encrypted workspace keeps one bounded background authority check: credential
+- An encrypted workspace keeps one bounded background authority check: credential
   plus verified-ledger refresh, joined to the existing single-flight owner. Exact
   member/device refusal stops that owner through the durable receipt; a generic failure
-  keeps the last verified view. Never depend on token expiry, and keep the read-only
-  client-loss probe from triggering I/O.
+  keeps the last verified view. Inbound machine-control frames request it; transient
+  history retries 1/5/30 s without fencing seals. Never depend on token expiry, and
+  keep the read-only client-loss probe from triggering I/O.
 
 ## Local machine pairing
 
