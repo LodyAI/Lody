@@ -121,9 +121,8 @@ a bounded main-owned due timer and due polls ([delivery](../../../../.agents/not
 Removal erases `member_joins` and `personal_join_histories`. All three join installs
 clear the removed marker only after verifying a different retained signing key.
 Only parsed HTTP 560 codes `e2ee_member_removed`/`e2ee_device_revoked` from explicitly
-credential-bound endpoints may produce `E2eeMemberRemovedError`/`E2eeDeviceRevokedError`;
-the content-grant action alone also accepts the same exact envelope over HTTP 200,
-because Convex streams action failures that way.
+credential-bound endpoints (content-grant action: also HTTP 200) may produce
+`E2eeMemberRemovedError`/`E2eeDeviceRevokedError`.
 JWT, transport, parsing and unrelated endpoint failures never authorize cleanup,
 even with matching codes or types. The account boundary projects typed results,
 including causes, to their exact codes with the `accessLoss` marker.
