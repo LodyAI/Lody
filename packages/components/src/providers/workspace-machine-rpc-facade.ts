@@ -17,7 +17,10 @@ import {
   type MemoryProviderResponse,
   type ProjectProbeLocalMemberResult,
 } from '@lody/shared';
-import { SorbetCredentialsResultSchema } from '@lody/shared/local-machine-rpc';
+import {
+  SorbetCredentialsResultSchema,
+  SorbetProvidersResultSchema,
+} from '@lody/shared/local-machine-rpc';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
 import { mintPreviewControlProof } from '@/lib/preview-control-api';
@@ -33,6 +36,7 @@ import {
   McpAuthenticationResultSchema,
   MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_PROTOCOL_VERSION,
   MACHINE_PROTOCOL_CAPABILITIES,
   MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
   machineSupportsProtocolCapability,
@@ -1975,8 +1979,62 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     return result;
   };
 
+  /**
+   * Custom Providers live in the agent's store, so every call runs a bounded Sorbet
+   * process on the target machine. Writes are owner-scoped like the credentials panel.
+   */
+  const requestLocalSorbetProviders = async (
+    machineId: MachineId,
+    request:
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-list' }>,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-create' }>,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-delete' }>,
+          'method' | 'params'
+        >
+  ) => {
+    const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+    const local = await canUseLocalMachineRpc(machineId);
+    if (!local && targetRouter.getPlaneForMachine(machineId) !== 'cloud') {
+      throw new Error('Local Machine RPC is not available.');
+    }
+    const capability = local
+      ? MACHINE_PROTOCOL_CAPABILITIES.sorbetProviders
+      : 'sorbetProvidersRemote';
+    if (
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities },
+        capability,
+        SORBET_PROVIDERS_PROTOCOL_VERSION
+      )
+    ) {
+      throw new Error('Sorbet custom providers are unsupported on this machine.');
+    }
+    const rpcRequest = { ...request, machineId, workspaceId, timeoutMs: 35_000 };
+    let rawResult: unknown;
+    if (local) {
+      rawResult = await sendLocalMachineRpcRequest(rpcRequest);
+    } else {
+      if (!deps.requestEncryptedFeature)
+        throw new Error('Protected Sorbet providers transport unavailable.');
+      const response = await deps.requestEncryptedFeature(rpcRequest);
+      if (!response.ok) throw new Error(response.error);
+      rawResult = response.result;
+    }
+    const result = SorbetProvidersResultSchema.parse(rawResult);
+    if (result.type !== request.method) throw new Error('Unexpected Sorbet providers response.');
+    return result;
+  };
+
   return {
     requestLocalSorbetCredentials,
+    requestLocalSorbetProviders,
     requestSessionAutomationControl,
     requestLocalMcpTools,
     requestLocalMcpAuthentication,

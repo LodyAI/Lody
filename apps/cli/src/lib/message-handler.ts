@@ -1,3 +1,7 @@
+import type {
+  SorbetCustomProvider,
+  SorbetCustomProviderInput,
+} from '@lody/shared/local-machine-rpc';
 import { AndroidEmulatorService } from '@/android-emulator/service';
 import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
 import {
@@ -144,6 +148,8 @@ import {
   E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
   type LocalMachineRpcRequestValidated,
   type LocalMachineRpcResponse,
   type LocalMachineRpcResult,
@@ -621,6 +627,20 @@ export interface MessageHandlerConfig {
       signal?: AbortSignal
     ) => Promise<Array<{ providerId: string; type: string }>>;
     logout: (configId: AgentConfigId, providerId: string, signal?: AbortSignal) => Promise<void>;
+    listProviders: (
+      configId: AgentConfigId,
+      signal?: AbortSignal
+    ) => Promise<SorbetCustomProvider[]>;
+    createProvider: (
+      configId: AgentConfigId,
+      provider: SorbetCustomProviderInput,
+      signal?: AbortSignal
+    ) => Promise<SorbetCustomProvider>;
+    deleteProvider: (
+      configId: AgentConfigId,
+      providerId: string,
+      signal?: AbortSignal
+    ) => Promise<void>;
   };
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
@@ -4016,8 +4036,12 @@ export class MessageHandler {
           ...(this.sorbetCredentials
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
+                sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
                 ...(this.encryptedAttachments
-                  ? { sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION }
+                  ? {
+                      sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+                      sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                    }
                   : {}),
               }
             : {}),
@@ -6449,8 +6473,12 @@ export class MessageHandler {
           ...(this.sorbetCredentials
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
+                sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
                 ...(this.encryptedAttachments
-                  ? { sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION }
+                  ? {
+                      sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+                      sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                    }
                   : {}),
               }
             : {}),
@@ -7488,7 +7516,10 @@ export class MessageHandler {
         return this.probeProjectLocalMember(request.params.localProjectId as LocalProjectId);
       }
       case 'sorbet/credentials-list':
-      case 'sorbet/credentials-logout': {
+      case 'sorbet/credentials-logout':
+      case 'sorbet/providers-list':
+      case 'sorbet/providers-create':
+      case 'sorbet/providers-delete': {
         if (
           request.workspaceId !== this.workspaceId ||
           request.machineId !== this.machineId ||
@@ -7506,19 +7537,38 @@ export class MessageHandler {
           throw new Error('Sorbet credentials configuration unavailable');
         if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
         try {
+          const { SorbetCredentialsResultSchema, SorbetProvidersResultSchema } =
+            await import('@lody/shared/local-machine-rpc');
           if (request.method === 'sorbet/credentials-list') {
-            const credentials = await this.sorbetCredentials.list(configId, signal);
-            const { SorbetCredentialsResultSchema } =
-              await import('@lody/shared/local-machine-rpc');
             return SorbetCredentialsResultSchema.parse({
               type: 'sorbet/credentials-list',
-              credentials,
+              credentials: await this.sorbetCredentials.list(configId, signal),
             });
           }
-          await this.sorbetCredentials.logout(configId, request.params.providerId, signal);
-          return { type: 'sorbet/credentials-logout' };
+          if (request.method === 'sorbet/credentials-logout') {
+            await this.sorbetCredentials.logout(configId, request.params.providerId, signal);
+            return { type: 'sorbet/credentials-logout' };
+          }
+          if (request.method === 'sorbet/providers-list') {
+            return SorbetProvidersResultSchema.parse({
+              type: 'sorbet/providers-list',
+              providers: await this.sorbetCredentials.listProviders(configId, signal),
+            });
+          }
+          if (request.method === 'sorbet/providers-create') {
+            return SorbetProvidersResultSchema.parse({
+              type: 'sorbet/providers-create',
+              provider: await this.sorbetCredentials.createProvider(
+                configId,
+                request.params.provider,
+                signal
+              ),
+            });
+          }
+          await this.sorbetCredentials.deleteProvider(configId, request.params.providerId, signal);
+          return { type: 'sorbet/providers-delete' };
         } catch {
-          throw new Error('Sorbet credentials operation failed');
+          throw new Error('Sorbet provider operation failed');
         }
       }
       case 'mcp/list-tools':

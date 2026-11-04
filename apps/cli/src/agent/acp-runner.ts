@@ -1,6 +1,14 @@
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
-import { listSorbetAcpCredentials, logoutSorbetAcpCredential } from './sorbet-acp-credentials';
+import {
+  createSorbetAcpCustomProvider,
+  deleteSorbetAcpCustomProvider,
+  listSorbetAcpCredentials,
+  listSorbetAcpCustomProviders,
+  logoutSorbetAcpCredential,
+  type SorbetAcpCredential,
+  type SorbetAcpCustomProvider,
+} from './sorbet-acp-credentials';
 import { platformLayer, toShared } from '@/platform/process-options';
 import { Effect } from 'effect';
 import { prepareDeepSeekNodeEnvironment } from './deepseek-system-node';
@@ -64,6 +72,7 @@ import type {
 } from '@lody/shared';
 
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
+import type { SorbetCustomProviderInput } from '@lody/shared/local-machine-rpc';
 import type {
   LodyPromptSuggestion,
   RateLimitsSnapshot,
@@ -388,19 +397,37 @@ export async function initializeAndReadAcpRateLimits(stream: Stream) {
   );
 }
 
-export async function initializeAndRunSorbetCredentials(
-  stream: Stream,
-  signal: AbortSignal,
-  operation: { type: 'list' } | { type: 'logout'; providerId: string },
-  onInitialized?: () => void
-) {
-  const connection = new ClientSideConnection(
+export type SorbetAcpOperation =
+  | { type: 'list' }
+  | { type: 'logout'; providerId: string }
+  | { type: 'providers-list' }
+  | { type: 'providers-create'; provider: SorbetCustomProviderInput }
+  | { type: 'providers-delete'; providerId: string };
+
+/** What one bounded Sorbet operation produced; the caller narrows by the operation it ran. */
+export type SorbetAcpOperationOutcome =
+  | { kind: 'credentials'; credentials: SorbetAcpCredential[] }
+  | { kind: 'providers'; providers: SorbetAcpCustomProvider[] }
+  | { kind: 'provider'; provider: SorbetAcpCustomProvider }
+  | { kind: 'none' };
+
+function openSorbetConnection(stream: Stream) {
+  return new ClientSideConnection(
     () => ({
       requestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
       sessionUpdate: async () => {},
     }),
     stream
   );
+}
+
+export async function initializeAndRunSorbetCredentials(
+  stream: Stream,
+  signal: AbortSignal,
+  operation: { type: 'list' } | { type: 'logout'; providerId: string },
+  onInitialized?: () => void
+) {
+  const connection = openSorbetConnection(stream);
   const initialized = await connection.initialize({
     protocolVersion: PROTOCOL_VERSION,
     clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
@@ -414,10 +441,57 @@ export async function initializeAndRunSorbetCredentials(
   return [];
 }
 
+/** Custom Provider operations run on their own bounded connection, like credentials. */
+export async function initializeAndRunSorbetOperation(
+  stream: Stream,
+  signal: AbortSignal,
+  operation: SorbetAcpOperation,
+  onInitialized?: () => void
+): Promise<SorbetAcpOperationOutcome> {
+  if (operation.type === 'list' || operation.type === 'logout') {
+    const credentials = await initializeAndRunSorbetCredentials(
+      stream,
+      signal,
+      operation,
+      onInitialized
+    );
+    return { kind: 'credentials', credentials };
+  }
+  const connection = openSorbetConnection(stream);
+  const initialized = await connection.initialize({
+    protocolVersion: PROTOCOL_VERSION,
+    clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
+  });
+  onInitialized?.();
+  signal.throwIfAborted();
+  if (operation.type === 'providers-list') {
+    return {
+      kind: 'providers',
+      providers: await listSorbetAcpCustomProviders(connection, initialized.agentCapabilities),
+    };
+  }
+  if (operation.type === 'providers-create') {
+    return {
+      kind: 'provider',
+      provider: await createSorbetAcpCustomProvider(
+        connection,
+        initialized.agentCapabilities,
+        operation.provider
+      ),
+    };
+  }
+  await deleteSorbetAcpCustomProvider(
+    connection,
+    initialized.agentCapabilities,
+    operation.providerId
+  );
+  return { kind: 'none' };
+}
+
 /** A dedicated, bounded Sorbet process; no session, terminal, filesystem or MCP access. */
 export async function runLocalSorbetCredentials(
   logger: Logger,
-  operation: { type: 'list' } | { type: 'logout'; providerId: string },
+  operation: SorbetAcpOperation,
   requestSignal?: AbortSignal,
   testOptions?: { spawnImpl?: NodeProcessApi['spawn'] }
 ) {
@@ -452,8 +526,8 @@ export async function runLocalSorbetCredentials(
       },
       async ({ stream, startupAbort }) => {
         return {
-          credentials: await Promise.race([
-            initializeAndRunSorbetCredentials(stream, signal, operation, () => {
+          outcome: await Promise.race([
+            initializeAndRunSorbetOperation(stream, signal, operation, () => {
               initialized = true;
             }),
             ...(startupAbort ? [startupAbort] : []),
@@ -474,7 +548,7 @@ export async function runLocalSorbetCredentials(
       throw new AcpQuotaCleanupError(started.agentProcess, cause);
     }
     signal.throwIfAborted();
-    return started.credentials;
+    return started.outcome;
   } finally {
     try {
       fs.rmSync(workdir, { recursive: true, force: true });

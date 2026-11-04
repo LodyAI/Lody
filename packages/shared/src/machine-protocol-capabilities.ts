@@ -21,6 +21,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   mcpLocalAuthentication: 'mcpLocalAuthentication',
   sorbetCredentials: 'sorbetCredentials',
   sorbetCredentialsRemote: 'sorbetCredentialsRemote',
+  sorbetProviders: 'sorbetProviders',
+  sorbetProvidersRemote: 'sorbetProvidersRemote',
   localProjectHistoryProvider: 'localProjectHistoryProvider',
   codexAuthProfiles: 'codexAuthProfiles',
   builtinPi: 'builtinPi',
@@ -74,6 +76,8 @@ export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION = 1;
+export const SORBET_PROVIDERS_PROTOCOL_VERSION = 1;
+export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
 export const E2EE_ACP_INTERACTION_PROTOCOL_VERSION = 1;

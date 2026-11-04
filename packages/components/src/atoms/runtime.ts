@@ -598,6 +598,31 @@ export type WorkspaceRuntime = {
           'method' | 'params'
         >
   ) => Promise<import('@lody/shared/local-machine-rpc').SorbetCredentialsResult>;
+  requestLocalSorbetProviders: (
+    machineId: MachineId,
+    request:
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/providers-list' }
+          >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/providers-create' }
+          >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/providers-delete' }
+          >,
+          'method' | 'params'
+        >
+  ) => Promise<import('@lody/shared/local-machine-rpc').SorbetProvidersResult>;
   requestLocalMcpAuthentication: (
     machineId: MachineId,
     params: Extract<

@@ -34,6 +34,9 @@ export const isE2eeFeatureMethod = (method: string): boolean =>
   method.startsWith('code-collab/') ||
   method === 'sorbet/credentials-list' ||
   method === 'sorbet/credentials-logout' ||
+  method === 'sorbet/providers-list' ||
+  method === 'sorbet/providers-create' ||
+  method === 'sorbet/providers-delete' ||
   method === 'file/preview' ||
   method === 'session/preview-create' ||
   method === 'session/preview-revoke' ||
@@ -81,7 +84,14 @@ export function e2eeAcpInteractionInputContext(input: {
   interactionRequestId: string;
   interactionId: string;
 }): string {
-  return JSON.stringify(['lody-e2ee-acp-input-v1', input.workspaceId, input.machineId, input.requesterDevice, input.interactionRequestId, input.interactionId]);
+  return JSON.stringify([
+    'lody-e2ee-acp-input-v1',
+    input.workspaceId,
+    input.machineId,
+    input.requesterDevice,
+    input.interactionRequestId,
+    input.interactionId,
+  ]);
 }
 
 /** Associated data for progress and results encrypted to the initiating device. */
@@ -92,5 +102,12 @@ export function e2eeAcpInteractionResponseContext(input: {
   interactionRequestId: string;
   requestId: string;
 }): string {
-  return JSON.stringify(['lody-e2ee-acp-response-v1', input.workspaceId, input.machineId, input.requesterDevice, input.interactionRequestId, input.requestId]);
+  return JSON.stringify([
+    'lody-e2ee-acp-response-v1',
+    input.workspaceId,
+    input.machineId,
+    input.requesterDevice,
+    input.interactionRequestId,
+    input.requestId,
+  ]);
 }
