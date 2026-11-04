@@ -500,7 +500,7 @@ export class CoordinatorWorkflow {
         status: 'failed',
         ...(item.label ? { label: item.label } : {}),
         target: item.target,
-        error: targetFailureError(targetOutput, failedAssistantTurn?.id),
+        error: targetFailureError(targetOutput, failedAssistantTurn?.id, this.now()),
       });
       const targetCancelled = (
         cancellationReason: SessionHistoryInput['cancellationReason']

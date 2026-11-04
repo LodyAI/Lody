@@ -60,10 +60,18 @@ export const assistantOutputPreview = (
   return text.length > 0 ? truncateTargetOutput(text) : undefined;
 };
 
-const failureReferenceMs = (output: readonly SessionHistoryInput[]): number => {
+const failureReferenceMs = (output: readonly SessionHistoryInput[], fallbackMs: number): number => {
   const notice = readChatFailureNotice(output);
-  const parsed = notice?.at ? Date.parse(notice.at) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : Date.now();
+  if (!notice) return fallbackMs;
+  const parsed = notice.at ? Date.parse(notice.at) : Number.NaN;
+  if (Number.isFinite(parsed)) return parsed;
+  // The notice normally carries its own timestamp. A malformed one degrades to
+  // the coordinator clock, never a clock read inside this native model.
+  for (let index = output.length - 1; index >= 0; index -= 1) {
+    const turnAt = Date.parse(output[index]?.timestamp ?? '');
+    if (Number.isFinite(turnAt)) return turnAt;
+  }
+  return fallbackMs;
 };
 
 /**
@@ -75,7 +83,8 @@ const failureReferenceMs = (output: readonly SessionHistoryInput[]): number => {
  */
 export const targetFailureError = (
   output: readonly SessionHistoryInput[],
-  assistantTurnId?: string
+  assistantTurnId?: string,
+  referenceMs = 0
 ): LodyError => {
   const notice = readChatFailureNotice(output);
   if (!notice)
@@ -85,7 +94,7 @@ export const targetFailureError = (
       retryable: false,
       reason: 'unknown',
     };
-  const failure = describeChatFailure(notice, failureReferenceMs(output));
+  const failure = describeChatFailure(notice, failureReferenceMs(output, referenceMs));
   const detail = failure.detail ? `: ${failure.detail}` : '';
   return {
     code: 'TARGET_FAILED',
@@ -98,8 +107,10 @@ export const targetFailureError = (
   };
 };
 
-export const targetFailureMessage = (output: readonly SessionHistoryInput[]): string =>
-  targetFailureError(output).message;
+export const targetFailureMessage = (
+  output: readonly SessionHistoryInput[],
+  referenceMs = 0
+): string => targetFailureError(output, undefined, referenceMs).message;
 
 export const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>
   entry.role === 'assistant' && (entry.finished === true || typeof entry.endedAt === 'number');
