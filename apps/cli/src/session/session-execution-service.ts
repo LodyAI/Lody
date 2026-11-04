@@ -1,3 +1,4 @@
+import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock';
 import { verifyAutomationWorktreeHeads } from './automation-worktree';
 import { classifyCapacityFailure } from './acp-error-classification';
 import {
@@ -5300,14 +5301,16 @@ export class SessionExecutionService {
               const authorized = gate && userTurnId ? yield* self.tryPromise(scope) : [];
               const result =
                 gate && userTurnId
-                  ? yield* gate.claim({
-                      workspaceId: self.deps.workspaceId,
-                      sessionId,
-                      userTurnId,
-                      localProjectIds: [...authorized],
-                      requesterUserId: options.invocation?.requesterUserId,
-                      inputConfig: options.invocation?.inputConfig,
-                    })
+                  ? yield* withE2eeTestClock(
+                      gate.claim({
+                        workspaceId: self.deps.workspaceId,
+                        sessionId,
+                        userTurnId,
+                        localProjectIds: [...authorized],
+                        requesterUserId: options.invocation?.requesterUserId,
+                        inputConfig: options.invocation?.inputConfig,
+                      })
+                    )
                   : { state: 'denied' as const };
               if (result.state === 'pending-evidence') {
                 runtime.withdrawInboxExecution = true;

@@ -1,3 +1,4 @@
+import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock';
 import { AndroidEmulatorService } from '@/android-emulator/service';
 import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
 import {
@@ -7115,7 +7116,7 @@ export class MessageHandler {
     );
     if (live?.kind === 'owner') return 'owner';
     // The signed origin decides; a live member reservation alone is not proof.
-    const verified = await Effect.runPromise(gate.classifyOrigin(origin)).catch(
+    const verified = await Effect.runPromise(withE2eeTestClock(gate.classifyOrigin(origin))).catch(
       () => 'denied' as const
     );
     return decideEncryptedDerivation({
