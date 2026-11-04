@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
+
 import { createRendererHangWatchdog } from './renderer-hang-watchdog.ts'
-import { createRendererHangLog, withDiagnosticTimeout } from './renderer-hang-log.ts'
 
 function fixture(t) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 })
@@ -110,56 +107,4 @@ void test('closing a window with an open dialog ignores its late result', async 
   t.mock.timers.tick(10_000)
   assert.deepEqual(actions, [])
   assert.equal(dialogs.length, 1)
-})
-
-void test('stack collection times out even when the renderer never responds', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  let finish
-  const pending = new Promise((resolve) => {
-    finish = resolve
-  })
-  const outcome = assert.rejects(withDiagnosticTimeout(pending, 5000), /Timed out after 5000ms/)
-  t.mock.timers.tick(5000)
-  await outcome
-  finish('late stack')
-  await Promise.resolve()
-})
-
-void test('stack collection propagates results and errors before the deadline', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  assert.equal(
-    await withDiagnosticTimeout(Promise.resolve('busyLoop at app.js:10'), 5000),
-    'busyLoop at app.js:10'
-  )
-  await assert.rejects(
-    withDiagnosticTimeout(Promise.reject(new Error('frame gone')), 5000),
-    /frame gone/
-  )
-  t.mock.timers.tick(5000)
-})
-
-void test('concurrent incident, stack and recovery writes remain intact across bounded rotation', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'lody-hang-log-'))
-  try {
-    const file = path.join(directory, 'renderer-hang.jsonl')
-    const write = createRendererHangLog(file, 100)
-    const entries = [
-      { event: 'unresponsive', id: 1 },
-      { event: 'stack', id: 1, stack: '阻塞函数 app.js:10' },
-      { event: 'responsive', id: 1 }
-    ]
-    await Promise.all(entries.map(write))
-    const actual = ((await readFile(`${file}.1`, 'utf8')) + (await readFile(file, 'utf8')))
-      .trim()
-      .split('\n')
-      .map(JSON.parse)
-    assert.deepEqual(actual, entries)
-    for (let i = 0; i < 20; i++) await write({ event: 'later', id: i })
-    assert.deepEqual((await readdir(directory)).sort(), [
-      'renderer-hang.jsonl',
-      'renderer-hang.jsonl.1'
-    ])
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
 })

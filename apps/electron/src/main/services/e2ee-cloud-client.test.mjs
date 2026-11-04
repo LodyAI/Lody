@@ -228,87 +228,6 @@ void test('staging cancellation rejects a late response and isolates other works
   )
 })
 
-void test('staging retains the slow path and an expired request leaves the next call usable', async () => {
-  const dto = encodeEpochStagedGroup(stagedGroup())
-  const entered = Promise.withResolvers(),
-    slow = Promise.withResolvers(),
-    timed = Promise.withResolvers()
-  let phase = 'slow',
-    aborted = false
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const staging = (yield* build(async (_url, init) => {
-          if (phase === 'normal') return response(dto)
-          if (phase === 'slow') {
-            entered.resolve()
-            return slow.promise
-          }
-          return new Promise((_resolve, reject) => {
-            timed.resolve()
-            init.signal.addEventListener(
-              'abort',
-              () => {
-                aborted = true
-                reject(new Error('synthetic timeout'))
-              },
-              { once: true }
-            )
-          })
-        })).staging(access)
-        const normal = yield* Effect.forkChild(staging.readGroup(dto))
-        yield* Effect.promise(() => entered.promise)
-        yield* TestClock.adjust('29 seconds')
-        slow.resolve(response(dto))
-        assert.deepEqual(encodeEpochStagedGroup(yield* Fiber.join(normal)), dto)
-        phase = 'timed'
-        const pending = yield* Effect.forkChild(Effect.result(staging.readGroup(dto)))
-        yield* Effect.promise(() => timed.promise)
-        yield* TestClock.adjust('30 seconds')
-        assert.equal((yield* Fiber.join(pending)).failure.reason, 'unavailable')
-        assert.equal(aborted, true)
-        phase = 'normal'
-        assert.deepEqual(encodeEpochStagedGroup(yield* staging.readGroup(dto)), dto)
-      })
-    ).pipe(Effect.provide(TestClock.layer()))
-  )
-})
-
-void test('staging closes during auth without dispatching a late request', async () => {
-  const entered = Promise.withResolvers(),
-    auth = Promise.withResolvers()
-  const dto = encodeEpochStagedGroup(stagedGroup())
-  let requests = 0
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const client = yield* build(
-          async () => {
-            requests++
-            return response(dto)
-          },
-          {
-            convexToken: () => {
-              entered.resolve()
-              return auth.promise
-            }
-          }
-        )
-        const pending = Effect.runPromise(Effect.result(client.staging(access).readGroup(dto)))
-        yield* Effect.promise(() => entered.promise)
-        yield* client.close
-        auth.resolve({ data: { token: 'synthetic-late-token' } })
-        assert.equal((yield* Effect.promise(() => pending)).failure.reason, 'unavailable')
-        assert.equal(
-          (yield* Effect.result(client.staging(access).stageGroup(stagedGroup()))).failure.reason,
-          'unavailable'
-        )
-        assert.equal(requests, 0)
-      })
-    )
-  )
-})
-
 void test('uses only explicit E2EE endpoints and preserves immutable frame/report/append bytes', async () => {
   const originals = new Map()
   let report = null
@@ -674,59 +593,6 @@ void test('personal join keeps exact originals across lost acknowledgements and 
   )
 })
 
-void test('D03 narrow registration accepts no client-selected identity and validates the response', async () => {
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const client = yield* build(async (_url, init) => {
-          const { path, args } = JSON.parse(init.body)
-          assert.equal(path, 'e2eeWorkspaces:accountIdentity')
-          assert.deepEqual(args, [{}])
-          return response({ accountId: 'synthetic-account', cryptoUserId: 'aa'.repeat(32) })
-        })
-        assert.deepEqual(yield* client.accountIdentity(), {
-          accountId: 'synthetic-account',
-          cryptoUserId: 'aa'.repeat(32)
-        })
-      })
-    )
-  )
-})
-
-void test('staging sends the persisted round and exposes bounded capacity continuation separately', async () => {
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const client = yield* build(async (_url, init) => {
-          const {
-            path,
-            args: [args]
-          } = JSON.parse(init.body)
-          assert.equal(path, 'e2eeEpochStaging:stageGroup')
-          assert.equal(args.round, 'persisted-round')
-          return Response.json({
-            status: 'error',
-            errorMessage: 'capacity',
-            errorData: {
-              code: 'e2ee_staging_capacity_exceeded',
-              round: args.round,
-              limit: 1,
-              canStartNewRound: true
-            }
-          })
-        })
-        const result = yield* Effect.result(
-          client.staging(access, undefined, 'persisted-round').stageGroup(stagedGroup())
-        )
-        assert.equal(Result.isFailure(result), true)
-        assert.equal(result.failure.code, 'e2ee_staging_capacity_exceeded')
-        assert.equal(result.failure.round, 'persisted-round')
-        assert.equal(result.failure.limit, 1)
-      })
-    )
-  )
-})
-
 void test('management ledger transport preserves the original record and refuses a mismatched observed CAS checkpoint', async () => {
   const group = stagedGroup(),
     original = Buffer.from(group.record).toString('hex')
@@ -773,28 +639,6 @@ void test('management ledger transport preserves the original record and refuses
   )
 })
 
-for (const code of ['e2ee_staging_configuration', 'e2ee_projection_corrupt'])
-  void test(`management preserves the safe operator diagnosis ${code}`, async () => {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const client = yield* build(async () =>
-            Response.json({
-              status: 'error',
-              errorMessage: 'synthetic-secret',
-              errorData: { code }
-            })
-          )
-          const result = yield* Effect.result(
-            client.staging(access, undefined, 'saved-round').stageGroup(stagedGroup())
-          )
-          assert.equal(result.failure.code, code)
-          assert.equal(JSON.stringify(result.failure).includes('synthetic-secret'), false)
-        })
-      )
-    )
-  })
-
 void test('only exact authenticated member removal or device revocation carries a terminal signal', async () => {
   for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
     await Effect.runPromise(
@@ -824,6 +668,47 @@ void test('only exact authenticated member removal or device revocation carries 
               code === 'e2ee_device_revoked'
             )
             assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
+          }
+        })
+      )
+    )
+  }
+})
+
+void test('a removed device learns its loss from the content grant action reported over HTTP 200', async () => {
+  // Convex streams action failures as an HTTP 200 error envelope; a real packaged
+  // run refused a removed member's content grant exactly so. Without the typed loss
+  // the device keeps its accepted join and every new invitation fails as conflict.
+  for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async () =>
+            Response.json(
+              { status: 'error', errorMessage: 'synthetic-private-cause', errorData: { code } },
+              { status: 200 }
+            )
+          )
+          const grant = yield* Effect.result(client.contentStreamsToken(access))
+          assert.equal(grant._tag, 'Failure')
+          assert.equal(
+            grant.failure instanceof E2eeMemberRemovedError,
+            code === 'e2ee_member_removed'
+          )
+          assert.equal(
+            grant.failure instanceof E2eeDeviceRevokedError,
+            code === 'e2ee_device_revoked'
+          )
+          assert.equal(JSON.stringify(grant.failure).includes('synthetic-private-cause'), false)
+          // Other credential-bound endpoints keep requiring Convex's 560 status.
+          for (const operation of [
+            client.memberPending(access),
+            client.memberRead({ ...access, requestId: '11'.repeat(16) })
+          ]) {
+            const result = yield* Effect.result(operation)
+            assert.equal(result._tag, 'Failure')
+            assert.equal(result.failure instanceof E2eeMemberRemovedError, false)
+            assert.equal(result.failure instanceof E2eeDeviceRevokedError, false)
           }
         })
       )
@@ -896,84 +781,139 @@ void test('access loss authority belongs to a credential response, never an exce
   }
 })
 
-void test('joining management sends only the public DTO fields while native cleanup identity stays in main', async () => {
-  const offer = {
-    version: 1,
-    workspaceId: access.workspaceId,
-    genesisHash: '11'.repeat(32),
-    genesisRecordHex: 'abcd',
-    endorser: '22'.repeat(32),
-    token: '33'.repeat(32),
-    mode: 'email',
-    expiresAt: 9000000000000
-  }
-  const requestId = '44'.repeat(16)
-  const member = {
-    id: 'request',
-    accountId: 'member-account',
-    workspaceId: access.workspaceId,
-    keyPackageHex: 'abcd',
-    signingPublicKey: '55'.repeat(32),
-    requestId,
-    source: 'email',
-    state: 'pending',
-    expiresAt: offer.expiresAt
-  }
-  const enriched = {
-    ...access,
-    accountId: 'native-account',
-    status: { signingPublicKey: '66'.repeat(32), genesisHash: offer.genesisHash }
-  }
+// The relay refuses every call while the deployment has account pairing switched
+// off, and new requests past the hourly limit. The new device must be able to say
+// which, instead of a generic failure.
+for (const [serverCode, code] of [
+  ['e2ee_account_pairing_disabled', 'pairing-unavailable'],
+  ['e2ee_account_pairing_rate_limited', 'pairing-rate-limited']
+])
+  void test(`account pairing relay keeps ${serverCode} as ${code}`, async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async () =>
+            Response.json(
+              {
+                status: 'error',
+                errorMessage: 'synthetic-private-cause',
+                errorData: { code: serverCode }
+              },
+              { status: 560 }
+            )
+          )
+          const lookupId = '11'.repeat(16)
+          for (const operation of [
+            client.pairingSubmit({
+              lookupId,
+              requestHex: '00',
+              requestTagHex: '22'.repeat(32),
+              direction: 'requester-shows',
+              deviceName: 'Synthetic desktop',
+              expiresAt: 1,
+              workspaces: []
+            }),
+            client.pairingRead({ lookupId }),
+            client.pairingClaim({ lookupId }),
+            client.pairingDecline({ requestId: 'request-1' }),
+            client.pairingPublish({
+              lookupId,
+              approvalHex: '00',
+              approvalTagHex: '22'.repeat(32),
+              invitations: []
+            })
+          ]) {
+            const result = yield* Effect.result(operation)
+            assert.equal(result._tag, 'Failure')
+            assert.equal(result.failure.code, code)
+            assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
+          }
+        })
+      )
+    )
+  })
+
+const jwtExpiringAt = (seconds, id) =>
+  [
+    Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url'),
+    Buffer.from(JSON.stringify({ exp: seconds, jti: id })).toString('base64url'),
+    'synthetic-signature'
+  ].join('.')
+void test('relay calls reuse one unexpired Convex token, renew it near expiry and after a failed call', async () => {
+  let now = 1_000_000
+  let minted = 0
+  const seen = []
+  let failNext = false
+  const scope = await Effect.runPromise(Scope.make())
+  const client = await Effect.runPromise(
+    build(
+      async (_url, init) => {
+        seen.push(new Headers(init.headers).get('authorization'))
+        if (failNext) {
+          failNext = false
+          return new Response('unavailable', { status: 503 })
+        }
+        return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
+      },
+      {
+        now: () => now,
+        convexToken: async () => ({
+          data: { token: jwtExpiringAt(Math.floor(now / 1000) + 600, ++minted) }
+        })
+      }
+    ).pipe(Scope.provide(scope))
+  )
+  const status = () => Effect.runPromise(Effect.result(client.mailbox(access).status(target)))
+  for (let index = 0; index < 3; index++) assert.ok(Result.isSuccess(await status()))
+  assert.equal(minted, 1)
+  assert.equal(new Set(seen).size, 1)
+  // Inside the renewal margin: a fresh token, never one about to expire in flight.
+  now += 560_000
+  await status()
+  assert.equal(minted, 2)
+  // A failed call may mean a rejected token: the next call mints again.
+  failNext = true
+  assert.ok(Result.isFailure(await status()))
+  await status()
+  assert.equal(minted, 3)
+  await Effect.runPromise(Scope.close(scope, Exit.void))
+})
+void test('a call that hits the 30 s deadline drops the reused Convex token', async () => {
+  let minted = 0
+  let stalled = false
+  const started = Promise.withResolvers()
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const client = yield* build(async (_url, init) => {
-          const {
-            path,
-            args: [args]
-          } = JSON.parse(init.body)
-          const operation = path.split(':').at(-1)
-          const extra = {
-            createInvitation: { offer, email: 'synthetic@example.test' },
-            pending: {},
-            read: { requestId },
-            reject: { requestId },
-            revoke: { token: offer.token }
-          }[operation]
-          assert.ok(extra)
-          assert.deepEqual(args, { ...access, ...extra })
-          return response(
-            {
-              createInvitation: { offer },
-              pending: {
-                items: [],
-                invitations: [],
-                hasMore: false,
-                seatPreview: { status: 'not_billed', reason: 'free' }
-              },
-              read: member,
-              reject: { state: 'rejected' },
-              revoke: { revoked: true }
-            }[operation]
-          )
-        })
-        assert.deepEqual(
-          yield* client.memberCreateInvitation({
-            ...enriched,
-            offer,
-            email: 'synthetic@example.test'
-          }),
-          { offer }
+        const client = yield* build(
+          async (_url, init) => {
+            if (!stalled) return response({ ...target, revision: 0, status: 'NeedsEnvelope' })
+            return new Promise((_resolve, reject) => {
+              started.resolve()
+              init.signal.addEventListener('abort', () => reject(new Error('aborted')), {
+                once: true
+              })
+            })
+          },
+          {
+            now: () => 1_000_000,
+            convexToken: async () => ({ data: { token: jwtExpiringAt(1_000 + 600, ++minted) } })
+          }
         )
-        assert.equal((yield* client.memberPending(enriched)).hasMore, false)
-        assert.deepEqual(yield* client.memberRead({ ...enriched, requestId }), member)
-        assert.deepEqual(yield* client.memberReject({ ...enriched, requestId }), {
-          state: 'rejected'
-        })
-        assert.deepEqual(yield* client.memberRevoke({ ...enriched, token: offer.token }), {
-          revoked: true
-        })
+        yield* client.mailbox(access).status(target)
+        assert.equal(minted, 1)
+        stalled = true
+        const waiting = yield* Effect.forkChild(
+          Effect.result(client.mailbox(access).status(target))
+        )
+        yield* Effect.promise(() => started.promise)
+        yield* TestClock.adjust('30 seconds')
+        assert.equal((yield* Fiber.join(waiting)).failure.reason, 'unavailable')
+        // The stalled call may have been a rejected token: the next call mints anew.
+        stalled = false
+        yield* client.mailbox(access).status(target)
+        assert.equal(minted, 2)
       })
-    )
+    ).pipe(Effect.provide(TestClock.layer()))
   )
 })

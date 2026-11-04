@@ -13,6 +13,7 @@ import {
 } from '@lody/shared';
 import { SessionDocument, type LoroDocumentManager } from '@/lib/loro/doc';
 import { SessionAutomationAuthority } from '@/session/session-automation-authority';
+import { shouldWatchSession } from '@/session/session-dispatch-logic';
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import type { Logger } from '@/utils/logger';
 import { composeTestSessionDoc } from '../../tests/session-doc-fixture';
@@ -136,6 +137,80 @@ const evaluateAutomationProgram = (
 const allowed = async () => ({ value: 'yes' as const, reason: 'current' });
 
 describe('Automation Session authority', () => {
+  it.each([false, true])(
+    'activates an idle unwatched session after queue signal persistence failure: %s',
+    async (failSignal) => {
+      const f = groupFixture();
+      const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+      const isWatched = () => {
+        const meta = f.meta.get(f.rootId);
+        if (!meta) throw new Error('missing session metadata');
+        return shouldWatchSession({
+          meta,
+          hasUnprocessedCancelRequest: false,
+          hasRpcTurnOffer: false,
+          hasAccessRetry: false,
+        });
+      };
+      try {
+        const wait = ledger.registerWait(
+          { program: '() => false', intervalMs: 1000 },
+          f.rootId,
+          'user',
+          1
+        );
+        ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, 2);
+        const matched = ledger.finishWait(wait, { resumeText: 'Continue the task' }, 3);
+        const receipt = matched?.invocationId ? ledger.receipt(matched.invocationId) : undefined;
+        if (!receipt) throw new Error('missing continuation receipt');
+        const adapter = new AutomationSessionActionsLegacy({
+          lody: {
+            documentManager: f.manager,
+            getAutomationSessionAuthority: () => f.authority,
+            hasAutomationSessionWork: () => false,
+          } as unknown as Lody,
+          auth: { userId: 'user', machineId: 'machine' } as AuthContext,
+          workspace: { id: 'workspace' } as WorkspaceSummary,
+          ledger,
+          condition: allowed,
+          capacity: allowed,
+        });
+        const prepared = ledger.update(
+          receipt.id,
+          receipt.state,
+          await adapter.prepare(receipt),
+          4
+        );
+        if (!prepared) throw new Error('missing prepared continuation');
+        const submitting = ledger.update(prepared.id, prepared.state, { state: 'submitting' }, 5);
+        if (!submitting) throw new Error('missing submission fence');
+        expect(isWatched()).toBe(false);
+        const backend = await createSessionBackend(await f.manager.getOrCreateSessionDoc(f.rootId));
+        if (failSignal) {
+          f.failRoot(true);
+          await expect(adapter.submit(submitting)).rejects.toThrow('root persistence failed');
+          expect(isWatched()).toBe(false);
+          expect(f.writes).toEqual([]);
+          f.failRoot(false);
+        } else {
+          expect(await adapter.submit(submitting)).toEqual({ state: 'queued' });
+        }
+        const queued = await backend.getMessageQueue();
+        expect(queued).toMatchObject([
+          { operationId: receipt.id, userTurnId: receipt.turnId, task: 'Continue the task' },
+        ]);
+        expect(queued).toHaveLength(1);
+        expect(await adapter.reconcile(submitting)).toEqual({ state: 'queued' });
+        expect(await backend.getMessageQueue()).toEqual(queued);
+        // Once the idle room is unsubscribed, only a metadata write can wake its watcher.
+        expect(f.writes).toContain(f.rootId);
+        expect(isWatched()).toBe(true);
+      } finally {
+        ledger.close();
+      }
+    }
+  );
+
   it('holds Stop at admission and queues the original continuation once after restore', async () => {
     const f = groupFixture();
     const meta = f.meta.get(f.rootId);

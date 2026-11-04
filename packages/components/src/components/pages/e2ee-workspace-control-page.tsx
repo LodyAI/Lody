@@ -25,11 +25,18 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
 const styles = stylex.create({
   page: {
-    minHeight: '100vh',
+    // The page is its own scroll container. Native shells pin html, body and
+    // #root to the viewport with `overflow: hidden`; a `min-height` box would grow
+    // with its content, never scroll, and lose everything below the fold.
+    boxSizing: 'border-box',
+    height: { default: '100vh', '@supports (height: 100dvh)': '100dvh' },
     overflowY: 'auto',
     backgroundColor: colors.background,
     color: colors.label,
-    paddingBlock: space[6],
+    // Native shells draw under the status bar (`viewport-fit=cover`); without
+    // the inset the back button sits under it in portrait and cannot be tapped.
+    paddingTop: `max(${space[6]}, env(safe-area-inset-top))`,
+    paddingBottom: `max(${space[6]}, env(safe-area-inset-bottom))`,
     paddingInline: { default: space[6], '@media (max-width: 520px)': space[4] },
     fontSize: type.bodySize,
     lineHeight: 1.45,

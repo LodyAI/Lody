@@ -29,7 +29,9 @@ context/message-flow.md "Upstream".
   selection and separately keyed note through durable permission history. Core forms
   use each property's `description` as the full question and `title` as its short
   header, including single-question forms whose request message is generic. Legacy
-  Claude single-question forms retain their request-message prompt.
+  Claude single-question forms retain their request-message prompt. The shared bridge
+  maps recognized Droid AskUser labels and custom answers back to its option IDs and
+  companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
 - `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
   updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
   Claude reports no actor, so later events preserve an earlier identity. Providers that
@@ -252,6 +254,8 @@ production upload/readback. The CLI rejects adapter/manifest version drift. See 
 The submodule owns the private-wire contract
 and minimum official version. Kimi is different: `packages/acp-extension-kimi` owns the
 Lody-maintained runtime source and implements the shared `acp-extension-core` contract.
+The [Kimi media-output fix](../../../../.agents/notes/proposed/bug-fix/2026-11-04-kimi-media-output.md)
+requires a new published and verified runtime before the manifest can advance.
 
 Corrupt caches are reported absent with a warning; launch never executes them. Installation
 publishes a verified successor in a sibling `<arch>.gen-<uuid>` directory and leaves existing

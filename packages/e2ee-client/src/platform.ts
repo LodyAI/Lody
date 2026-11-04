@@ -132,6 +132,9 @@ export class PersonalHostRemote extends Context.Service<
   {
     readonly accountId: string;
     exchange(request: PersonalExchange): Effect.Effect<PersonalExchangeResponse, unknown>;
+    /** Full signed originals for qualifying an already approved snapshot's prefix.
+     * The credential is borrowed only through settlement; pages never grant admission. */
+    history?(credential: Uint8Array): Effect.Effect<PersonalHistoryPages, unknown>;
   }
 >()('@lody/e2ee-client/Remote') {}
 

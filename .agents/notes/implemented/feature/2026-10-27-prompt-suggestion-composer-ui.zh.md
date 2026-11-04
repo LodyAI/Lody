@@ -28,8 +28,12 @@ Composer 仍只负责展示：会话级订阅 hook 与工作区传输由本次�
   `maxRows`），换行的提示不会盖住底栏；提示消失后恢复行数下限。原先截成一行，移动端用户看不全就要决定是否采用。
 - 移动端只显示“应用”按钮，不响应键盘接受。除该控件外，提示层不接收指针事件，因此点击建议文本
   或输入区其他位置仍会正常聚焦输入框。
-- 提示完全由 prop 推导，没有本地“已消费”状态。输入文字会隐藏它，清空会恢复同一段文本，
-  接受也不会删除上游最新值。
+- composer 每次渲染都由 prop 推导提示，自身没有“已消费”状态。输入文字会隐藏它，清空会恢复
+  同一段文本，接受也不会删除上游最新值。
+- 发送被接受后，发送时显示的那段文本即被视为已回答。会话 hook 会隐藏这段文本（composer
+  重新挂载后依然隐藏），直到该会话发布一条不同的非空建议。否则，已回答的预测会在整个下一轮
+  里重新出现在已清空的输入框中，因为 daemon 要等这一轮结束才会替换它。重复的相同文本和短暂的
+  空路由保持隐藏。定时保存不会回答建议。该标记只在本端 renderer 内，其他设备仍会显示，直到建议被替换。
 - 每个挂载的 `SessionChatInputArea` 都把自己的会话 ID 传给 hook，因此保活的 tab 各读各的会话，
   UI 不在对话之间共享建议状态。
 
@@ -38,6 +42,8 @@ Composer 仍只负责展示：会话级订阅 hook 与工作区传输由本次�
 - [新增 composer 测试](../../../../packages/components/tests/chat-composer-prompt-suggestion.test.tsx)
   覆盖桌面／移动展示、空值与纯空白抑制、Tab 接受与光标位置、已有文字、Shift+Tab、IME、禁用状态、
   移动端仅“应用”接受、点击穿透聚焦，以及清空后恢复建议；5 项通过。
+- [hook 测试](../../../../packages/components/tests/use-session-prompt-suggestion.test.tsx)覆盖已回答文本在重新挂载、空路由和替换时的隐藏；
+  [提交测试](../../../../packages/components/tests/session-chat-input-submission.test.tsx)覆盖 Tab、发送并被接受后，即使旧一轮的文本仍在也会隐藏。
 - 在提供的 hook 存在时，既有 `chat-composer-focus`、`chat-composer-autoresize` 和
   `session-chat-input-submission` 测试通过（65 项）。
 - Storybook 的 `SessionPromptSuggestion`、`SessionPromptSuggestionMobile` 及其 `Long` 变体覆盖桌面提示、

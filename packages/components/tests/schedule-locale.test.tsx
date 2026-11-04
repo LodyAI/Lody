@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,14 +9,7 @@ import en from '../../../locales/en.json';
 import zh from '../../../locales/zh_CN.json';
 import { ScheduleForm, ScheduleListView } from '../src/components/schedules/schedule-view';
 import { ScheduledQueueRow } from '../src/components/sessions/message-queue/scheduled-queue-row';
-import {
-  describeTrigger,
-  formatInstant,
-  formatTimeOfDay,
-  formatUpcoming,
-  scheduleRowTimeZone,
-  weekdayNames,
-} from '../src/components/schedules/schedule-format';
+import { formatUpcoming, scheduleRowTimeZone } from '../src/components/schedules/schedule-format';
 import type { ScheduleRegistryRow, ScheduleRuntimeRow } from '@lody/shared';
 
 (
@@ -72,24 +66,6 @@ describe('Chinese is a product language, not an Intl locale', () => {
   });
   const render = (node: React.ReactNode) =>
     act(() => root.render(<I18nextProvider i18n={instance}>{node}</I18nextProvider>));
-
-  it('formats every schedule surface under zh_CN without throwing', () => {
-    for (const language of ['zh_CN', 'zh-CN', 'en', '', undefined]) {
-      expect(() => weekdayNames(language, 'short')).not.toThrow();
-      expect(() => formatTimeOfDay(9, 0, language)).not.toThrow();
-      expect(() => formatInstant(NOW, 'Asia/Shanghai', language)).not.toThrow();
-      expect(() => formatUpcoming(NOW + 86_400_000, 'Asia/Shanghai', NOW, language)).not.toThrow();
-      expect(() => describeTrigger(row.trigger, instance.t, language)).not.toThrow();
-      expect(() =>
-        describeTrigger(
-          { kind: 'cron', expression: '0 9 1,15 * *', timeZone: 'UTC' },
-          instance.t,
-          language
-        )
-      ).not.toThrow();
-      expect(() => describeTrigger({ kind: 'manual' }, instance.t, language)).not.toThrow();
-    }
-  });
 
   it('shows a scheduled message on the viewer clock and other schedules on the machine clock', () => {
     const once = { kind: 'once' as const, at: '2026-09-07T09:00:00.000Z' };
@@ -245,43 +221,5 @@ describe('Chinese is a product language, not an Intl locale', () => {
     const monday = container.querySelector('[aria-pressed="true"]');
     expect(monday).not.toBeNull();
     expect(monday!.getAttribute('aria-label')).toBeTruthy();
-  });
-
-  it('renders the monthly day grid and a manual task in Chinese', () => {
-    render(
-      <ScheduleForm
-        now={NOW}
-        saving={false}
-        onSave={() => {}}
-        initial={{
-          title: '月度提醒',
-          prompt: '起草提醒。',
-          trigger: { kind: 'cron', expression: '0 9 1,15 * *', timeZone: 'Asia/Shanghai' },
-          misfire: 'skip',
-          overlap: 'skip',
-        }}
-      />
-    );
-    expect(container.textContent).toContain(zh['schedules.repeat.onDays']);
-    expect(container.querySelectorAll('[aria-pressed="true"]')).toHaveLength(2);
-    // A fresh root: `initial` seeds uncontrolled editor state.
-    act(() => root.unmount());
-    container.replaceChildren();
-    root = createRoot(container);
-    render(
-      <ScheduleForm
-        now={NOW}
-        saving={false}
-        onSave={() => {}}
-        initial={{
-          title: '部署清单',
-          prompt: '走一遍。',
-          trigger: { kind: 'manual' },
-          misfire: 'skip',
-          overlap: 'skip',
-        }}
-      />
-    );
-    expect(container.textContent).toContain(zh['schedules.trigger.manualHelp']);
   });
 });

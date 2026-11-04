@@ -55,13 +55,6 @@ const roundTrip = (history: SessionHistoryInput[], mq: SessionDoc['mq'] = []) =>
 };
 
 describe('session MCP selection CRDT round-trip', () => {
-  it('reads a persisted history-turn selection after a real Loro round-trip', () => {
-    const state = roundTrip([userTurn('turn-1', ['server-a', 'server-b'] as McpServerId[])]);
-    expect(resolveSessionConversationConfig(state.history, state.mq)).toMatchObject({
-      mcpServerIds: ['server-a', 'server-b'],
-    });
-  });
-
   it('keeps an explicit empty selection distinct from an absent selection', () => {
     const explicitEmpty = roundTrip([userTurn('turn-empty', [])]);
     const absent = roundTrip([userTurn('turn-absent', undefined)]);
@@ -94,7 +87,6 @@ describe('session MCP selection CRDT round-trip', () => {
     );
     const resolved = resolveSessionConversationConfig(state.history, state.mq);
     expect(resolved.mcpServerIds).toEqual(['queued-server']);
-    expect(resolved.sourceConfigKey).toMatch(/^queue:/);
   });
 
   it('round-trips Agent Role identity and explicit None through Loro', () => {

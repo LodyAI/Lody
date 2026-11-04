@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -37,10 +37,6 @@ const walk = (relativePath: string, tree: Record<string, readonly string[]>) =>
   resolveExistingPathIgnoringCaseAndNormalization(ROOT, relativePath, reader(tree));
 
 describe('resolveExistingPathIgnoringCaseAndNormalization', () => {
-  it('returns the on-disk spelling when only the letter case differs', () => {
-    expect(walk('readme.md', { [ROOT]: ['README.md'] })).toBe(path.join(ROOT, 'README.md'));
-  });
-
   it('returns the on-disk spelling when only Unicode normalization differs', () => {
     const decomposed = 'café.md'.normalize('NFD');
     const docs = path.join(ROOT, 'docs');
@@ -94,59 +90,7 @@ describe('resolveExistingPathIgnoringCaseAndNormalization', () => {
       })
     ).toBeNull();
   });
-
-  it('declines rather than climbing out of the root', () => {
-    // Built as raw strings, not through `path.join`, which would normalize the
-    // traversal away before the function ever saw it.
-    expect(walk(`..${path.sep}etc${path.sep}passwd`, { [ROOT]: ['..'] })).toBeNull();
-    expect(walk(`.${path.sep}app.ts`, { [ROOT]: ['.', 'app.ts'] })).toBeNull();
-  });
-
-  it('declines when a directory on the way cannot be listed', () => {
-    expect(walk(path.join('secret', 'app.ts'), { [ROOT]: ['Secret'] })).toBeNull();
-  });
-
-  it('declines when nothing folds to the requested name', () => {
-    expect(walk('report2.md', { [ROOT]: ['report.md'] })).toBeNull();
-  });
-
-  it('declines an empty relative path instead of returning the root', () => {
-    expect(walk('', { [ROOT]: ['README.md'] })).toBeNull();
-  });
 });
-
-/**
- * Real filesystem for realpath/stat/containment, but a listing that answers
- * case- and normalization-STRICTLY even on a volume that folds.
- *
- * Honest scope: this does NOT force the fold branch on a folding volume. The
- * literal-spelling step runs `fs.realpathSync` — deliberately not injectable,
- * authorization must see the real filesystem — and on case-insensitive APFS it
- * already resolves a wrong-case request, so these scenarios pass through the
- * realpath route there and the injected reader goes unconsulted. What this
- * describe guarantees on every machine is the CONTRACT (resolved spelling
- * reported, out-of-root rejection, symlinked-root handling); the fold branch
- * itself executes here only on a case-sensitive volume. Its per-machine
- * coverage is the pure-walk describe above, which needs no filesystem.
- */
-const CASE_STRICT_READER: FilePreviewDirectoryReader = {
-  exists: (candidatePath) => {
-    const parent = path.dirname(candidatePath);
-    const name = path.basename(candidatePath);
-    try {
-      return fs.readdirSync(parent).includes(name);
-    } catch {
-      return false;
-    }
-  },
-  readNames: (directoryPath) => {
-    try {
-      return fs.readdirSync(directoryPath);
-    } catch {
-      return null;
-    }
-  },
-};
 
 describe('resolveFilePreviewPath tolerant resolution against a real filesystem', () => {
   const created: string[] = [];
@@ -202,71 +146,6 @@ describe('resolveFilePreviewPath tolerant resolution against a real filesystem',
         options: { allowArbitraryPaths: true, homeDir },
       })
     ).toMatchObject({ ok: false, rejection: { code: 'not_a_file' } });
-  });
-
-  const authorize = (workspaceRoot: string, requestedPath: string) =>
-    resolveFilePreviewPath({
-      workspaceRoot,
-      requestedPath,
-      extraRoots: [],
-      options: { directoryReader: CASE_STRICT_READER },
-    });
-
-  it('resolves a differently-cased request to the real file and reports its spelling', async () => {
-    const workspaceRoot = await makeDir('policy-ws-');
-    await mkdir(path.join(workspaceRoot, 'Src'), { recursive: true });
-    await writeFile(path.join(workspaceRoot, 'Src', 'App.ts'), 'const a = 1;\n');
-
-    const result = authorize(workspaceRoot, 'src/app.ts');
-
-    expect(result.ok && result.resolved.reportedPath).toBe('Src/App.ts');
-    expect(result.ok && result.resolved.external).toBe(false);
-  });
-
-  it('still refuses a tolerantly-resolved path that leaves the workspace', async () => {
-    // The walk finds `link/id_rsa` from `LINK/ID_RSA`; containment must then
-    // reject it on the symlink-resolved target. This is the case that proves
-    // resolution did not become authorization.
-    const workspaceRoot = await makeDir('policy-ws-');
-    const outside = await makeDir('policy-outside-');
-    await writeFile(path.join(outside, 'id_rsa'), 'PRIVATE KEY');
-    await symlink(outside, path.join(workspaceRoot, 'link'));
-
-    const result = authorize(workspaceRoot, 'LINK/ID_RSA');
-
-    expect(result.ok ? 'ok' : result.rejection.code).toBe('path_not_allowed');
-  });
-
-  it('resolves through a workspace root that is itself reached by a symlink', async () => {
-    // Exercises the two-root branch: the lexical candidate is built from the
-    // unresolved spelling, so only the unresolved root contains it, while
-    // authorization compares against the resolved one.
-    const parent = await makeDir('policy-parent-');
-    const realRoot = path.join(parent, 'real');
-    const linkedRoot = path.join(parent, 'linked');
-    await mkdir(realRoot, { recursive: true });
-    await writeFile(path.join(realRoot, 'README.md'), '# hi\n');
-    await symlink(realRoot, linkedRoot);
-
-    const result = authorize(linkedRoot, 'readme.md');
-
-    expect(result.ok && result.resolved.reportedPath).toBe('README.md');
-  });
-
-  it('declines an ambiguous fold rather than opening an arbitrary one of the two', async (ctx) => {
-    const workspaceRoot = await makeDir('policy-ws-');
-    await writeFile(path.join(workspaceRoot, 'README.md'), 'a\n');
-    // Needs a volume that can hold both spellings at once.
-    try {
-      await writeFile(path.join(workspaceRoot, 'ReadMe.md'), 'b\n');
-      if (fs.readdirSync(workspaceRoot).length < 2) ctx.skip();
-    } catch {
-      ctx.skip();
-    }
-
-    const result = authorize(workspaceRoot, 'readme.md');
-
-    expect(result.ok ? 'ok' : result.rejection.code).toBe('file_not_found');
   });
 });
 

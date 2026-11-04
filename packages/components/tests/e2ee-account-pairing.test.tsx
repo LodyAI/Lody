@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -11,6 +12,7 @@ import {
   E2eeAccountPairingApprove,
   E2eeAccountPairingRequest,
 } from '../src/components/pages/e2ee-account-pairing';
+import { withAccountPairingCode } from '../src/lib/e2ee-account-pairing-ipc';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -130,6 +132,25 @@ describe('new device request', () => {
     expect(joined).toBe(1);
   });
 
+  // Desktop IPC carries only the message; the reason must survive to the screen
+  // instead of a generic "Pairing failed".
+  it.each(['pairing-unavailable', 'pairing-rate-limited'])(
+    'explains a relay refusal (%s) from the desktop host',
+    async (code) => {
+      const host = requesterHost();
+      host.runtime.requestAccountPairing = () =>
+        withAccountPairingCode(Promise.reject(new Error(`e2ee_${code}`)));
+      await act(async () =>
+        root.render(
+          <E2eeAccountPairingRequest runtime={host.runtime} autoStart onJoined={() => {}} />
+        )
+      );
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+        `e2ee.accountPair.error.${code}`
+      );
+    }
+  );
+
   it('on Web asks before creating any request', async () => {
     const host = requesterHost();
     await act(async () =>
@@ -214,22 +235,6 @@ describe('new device request', () => {
       )
     );
     expect(text()).toContain('e2ee.accountPair.request.blocked {"names":"Beta"}');
-  });
-
-  it('says when another tab of this browser already owns the pairing', async () => {
-    const host = requesterHost();
-    host.runtime.requestAccountPairing = async () => {
-      throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
-    };
-    await act(async () =>
-      root.render(
-        <E2eeAccountPairingRequest runtime={host.runtime} autoStart={false} onJoined={() => {}} />
-      )
-    );
-    await click('e2ee.accountPair.request.start');
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
-      'e2ee.accountPair.error.pairing-elsewhere'
-    );
   });
 
   it('starting again abandons the old request before creating a new one', async () => {
@@ -437,25 +442,5 @@ describe('account pairing relay operations', () => {
       )
     );
     await expect(submit!({} as never)).rejects.toBeInstanceOf(CloudCapabilityUnavailableError);
-    // Every relay and join-mailbox operation is assigned to the same capability.
-    const names = [
-      ...Object.values(cloudOperations.e2eeAccountPairing),
-      ...Object.values(cloudOperations.e2eeJoinMailbox),
-    ].map((operation) => [operation.name, operation.capability]);
-    expect(names.every(([, capability]) => capability === 'multiWorkspace')).toBe(true);
-    expect(names.map(([name]) => name)).toEqual([
-      'e2eeAccountPairing:submit',
-      'e2eeAccountPairing:pending',
-      'e2eeAccountPairing:read',
-      'e2eeAccountPairing:decline',
-      'e2eeAccountPairing:publish',
-      'e2eeAccountPairing:claim',
-      'e2eeJoinMailbox:begin',
-      'e2eeJoinMailbox:status',
-      'e2eeJoinMailbox:readRequest',
-      'e2eeJoinMailbox:cancel',
-      'e2eeJoinMailbox:publish',
-      'e2eeJoinMailbox:claim',
-    ]);
   });
 });

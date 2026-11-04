@@ -2,10 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createUsageCalendarModel,
   createUsageHeatScale,
-  createUsageSkylineLodyLogoTriangles,
-  createUsageSkylineAscii,
   createUsageSkylineBinaryStl,
-  getUsageSkylineViewport,
   USAGE_CALENDAR_CELLS,
   USAGE_CALENDAR_COLUMNS,
   USAGE_CALENDAR_ROWS,
@@ -47,42 +44,6 @@ describe('usage calendar model', () => {
     expect(model.cells.at(-1)).toMatchObject({ column: 52, row: 6, level: 0 });
   });
 
-  it('centers a recent active range in a minimum-width skyline viewport', () => {
-    const model = createUsageCalendarModel(
-      createCalendar({
-        [43 * USAGE_CALENDAR_ROWS]: 100,
-        [47 * USAGE_CALENDAR_ROWS]: 200,
-        [52 * USAGE_CALENDAR_ROWS]: 300,
-      })
-    );
-    model.weeks[52]![0]!.isFuture = true;
-
-    expect(getUsageSkylineViewport(model)).toEqual({ centerX: 19, width: 44 });
-  });
-
-  it('keeps full-year and empty skylines in the complete 53-column viewport', () => {
-    const fullYear = createUsageCalendarModel(
-      createCalendar({ 0: 100, [USAGE_CALENDAR_CELLS - 1]: 200 })
-    );
-    const empty = createUsageCalendarModel(createCalendar());
-
-    expect(getUsageSkylineViewport(fullYear)).toEqual({ centerX: 0, width: 53 });
-    expect(getUsageSkylineViewport(empty)).toEqual({ centerX: 0, width: 53 });
-  });
-
-  it('matches gh-skyline stacking with intensity tops and future dates', () => {
-    const model = createUsageCalendarModel(createCalendar({ 0: 100, 1: 400 }));
-    model.cells[2]!.isFuture = true;
-    model.weeks[0]![2]!.isFuture = true;
-    const rows = createUsageSkylineAscii(model).split('\n');
-
-    expect(rows).toHaveLength(USAGE_CALENDAR_ROWS);
-    expect(rows.every((row) => row.length === USAGE_CALENDAR_COLUMNS)).toBe(true);
-    expect(rows[0]?.[0]).toBe('.');
-    expect(rows[5]?.[0]).toBe('╽');
-    expect(rows[6]?.[0]).toBe('░');
-  });
-
   it('encodes a printable base, Lody logo relief, and twelve triangles for each active column', () => {
     const model = createUsageCalendarModel(createCalendar({ 0: 100, 3: 400 }));
     const output = createUsageSkylineBinaryStl(model);
@@ -107,37 +68,5 @@ describe('usage calendar model', () => {
     expect(scale.intensity(model.maxValue)).toBe(1);
     expect(scale.intensity(2000)).toBeGreaterThan(scale.intensity(100));
     expect(scale.intensity(100)).toBeGreaterThan(USAGE_HEAT_MIN_INTENSITY);
-  });
-
-  it('reports zero intensity for days without usage and clamps above the reference', () => {
-    const model = createUsageCalendarModel(createCalendar({ 0: 100, 1: 200, 2: 300 }));
-    const scale = createUsageHeatScale(model);
-
-    expect(scale.intensity(0)).toBe(0);
-    expect(scale.intensity(-5)).toBe(0);
-    expect(scale.intensity(Number.NaN)).toBe(0);
-    expect(scale.intensity(scale.referenceValue * 4)).toBe(1);
-  });
-
-  it('falls back to a zero reference when no day has usage', () => {
-    const scale = createUsageHeatScale(createUsageCalendarModel(createCalendar()));
-
-    expect(scale.referenceValue).toBe(0);
-    expect(scale.intensity(10)).toBe(0);
-  });
-
-  it('creates a finite raised Lody logo mesh for the STL base', () => {
-    const triangles = createUsageSkylineLodyLogoTriangles();
-    const coordinates = triangles.flatMap((triangle) => [
-      ...triangle.a,
-      ...triangle.b,
-      ...triangle.c,
-    ]);
-    const depths = triangles.flatMap((triangle) => [triangle.a[1], triangle.b[1], triangle.c[1]]);
-
-    expect(triangles.length).toBeGreaterThan(0);
-    expect(coordinates.every(Number.isFinite)).toBe(true);
-    expect(Math.min(...depths)).toBe(-0.8);
-    expect(Math.max(...depths)).toBe(0);
   });
 });

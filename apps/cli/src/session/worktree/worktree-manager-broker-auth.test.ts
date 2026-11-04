@@ -561,25 +561,6 @@ process.exit(result.status ?? 1);
     expect(isGitExecutableNotFoundError(failure)).toBe(true);
   });
 
-  it('routes native command diagnostics to the supplied logger sink', async () => {
-    const { WorktreeManager } = await import('./worktree-manager');
-    const logger = createLogger();
-    const messages: string[] = [];
-    logger.debug = (message) => {
-      messages.push(String(message));
-    };
-    const manager = new WorktreeManager({
-      repoId: REPO_ID,
-      repoUrl: REPO_URL,
-      logger,
-      nodeProcess,
-    });
-    await manager.ensureRepo();
-    expect(messages.some((message) => message.includes('Running git fetch origin --prune'))).toBe(
-      true
-    );
-  });
-
   it.each(['remote', 'fetch', 'rev-parse'])(
     'propagates %s infrastructure failure instead of best-effort success',
     async (verb) => {

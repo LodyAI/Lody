@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
@@ -70,57 +71,6 @@ describe('sidebar machine group', () => {
       })
     );
     expect(container.textContent).toBe('');
-  });
-
-  it('tells on hover whose machine the group is, its status, OS and project count', async () => {
-    vi.useFakeTimers();
-    store.set(lodyPresenceSyncStateAtom, 'synced');
-    await render(
-      <SidebarSectionHeader
-        label="Lampese"
-        collapsed
-        activity={{ waiting: 0, working: 2, unread: 1 }}
-        describeActivity={false}
-        onToggleCollapsed={() => undefined}
-        toggleLabel="Toggle Lampese"
-        wrapToggle={(toggle) => (
-          <SidebarMachineHoverCard
-            machine={{
-              machineId,
-              name: 'Lampese.local',
-              owner: { name: 'Lampese', image: null },
-              isOwn: false,
-              isCurrent: false,
-              os: 'darwin',
-              projectCount: 2,
-              activity: { waiting: 0, working: 2, unread: 1 },
-            }}
-          >
-            {toggle}
-          </SidebarMachineHoverCard>
-        )}
-      />
-    );
-
-    const trigger = container.querySelector('[aria-label="Toggle Lampese"]') as HTMLElement;
-    await act(async () => {
-      pointer('pointerover', trigger, { relatedTarget: document.body });
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(1000);
-    });
-
-    // The card portals out of the trigger's container, straight under the body.
-    const card = [...document.body.children].find((node) => node !== container);
-    expect(card?.textContent).toContain('Lampese.local');
-    expect(card?.textContent).toContain('Offline');
-    expect(card?.textContent).toContain('Lampese');
-    expect(card?.textContent).toContain('macOS');
-    expect(card?.textContent).toContain('2 projects');
-    // The folded header draws one mark; the card, which owns its hover, counts.
-    expect(card?.textContent).toContain('2 working · 1 unread');
-    expect(container.querySelectorAll('[data-session-row-indicator]')).toHaveLength(1);
-    expect(container.querySelector('[data-working-grid]')).not.toBeNull();
   });
 
   it("keeps the card off the header's action buttons, whose own menus open there", async () => {

@@ -135,3 +135,19 @@ export function readMessageAuthor(value: unknown): MessageAuthor | undefined {
   const result = MessageAuthorSchema.safeParse(value);
   return result.success ? result.data : undefined;
 }
+
+/**
+ * The header an agent receives in front of another agent's message. Derived from
+ * the recorded author at execution time, never stored, so relayed text cannot
+ * claim human authority. Human and system inputs get no header.
+ */
+export function formatAgentSenderHeader(author: AgentMessageAuthor, sourceTitle?: string): string {
+  const source = sourceTitle ? `"${sourceTitle}" (${author.sessionId})` : author.sessionId;
+  const agent = [author.name, author.role ? `Agent Role "${author.role.name}"` : undefined]
+    .filter(Boolean)
+    .join(' · ');
+  return [
+    '[Lody] This message was sent by another agent, not by a human.',
+    `Source Session: ${source}${agent ? `, ${agent}` : ''}`,
+  ].join('\n');
+}

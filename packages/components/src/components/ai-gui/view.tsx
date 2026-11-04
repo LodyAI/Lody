@@ -49,7 +49,6 @@ import {
   getTextContentFromMessageItems,
   getMessageQuoteEditDraft,
   getUserTextRenderSlice,
-  getVisibleAssistantTextContent,
   hasTextContentFromMessageItems,
 } from './message-copy';
 import { useAtomValue, useStore } from 'jotai';
@@ -1105,7 +1104,7 @@ const shouldRenderAssistantFooter = ({
   if (message.finished !== true) return false;
   const visibleContentItems = renderEntries.map((entry) => entry.content);
   return (
-    getVisibleAssistantTextContent(visibleContentItems, true).trim().length > 0 ||
+    getTextContentFromMessageItems(visibleContentItems).trim().length > 0 ||
     fileDiffs.length > 0 ||
     hasAssistantTurnConfigInfo(message) ||
     (typeof message.endedAt === 'number' && Number.isFinite(message.endedAt)) ||
@@ -1473,22 +1472,9 @@ export const buildChatVirtualRows = ({
         continue;
       }
 
-      // Collapsed is the default state, and the detail rows of a collapsed
-      // group are discarded unrendered — don't pay for building them. Initial
-      // mount of a long finished session hits this for every turn.
-      const workedRows: AssistantChatVirtualRow[] = [];
-      if (isWorkedGroupExpanded) {
-        for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
-          const block = blocks[blockIndex];
-          if (block && segment.workBlockKeys.has(block.key)) {
-            appendBlockRows(workedRows, block, blockIndex, true);
-          }
-        }
-        if (segmentSubagentTasks.length > 0 && !hasRunningSubagentTasks) {
-          appendSubagentTasksRow(workedRows, true);
-        }
-      }
-
+      // Collapsed is the default state, and a collapsed group renders no detail
+      // rows at all. Expanded details stay where they happened: hoisting them to
+      // the header would reorder them past the prose between two steps.
       const insertWorkedGroup = () => {
         assistantRows.push({
           type: 'assistant',
@@ -1505,9 +1491,6 @@ export const buildChatVirtualRows = ({
           },
           isLastRowForMessage: false,
         });
-        if (isWorkedGroupExpanded) {
-          assistantRows.push(...workedRows);
-        }
       };
 
       const insertionBlockIndex =
@@ -1520,12 +1503,17 @@ export const buildChatVirtualRows = ({
           insertWorkedGroup();
           didInsertWorkedGroup = true;
         }
-        if (!segment.workBlockKeys.has(block.key)) {
-          appendBlockRows(assistantRows, block, blockIndex, false);
+        if (segment.workBlockKeys.has(block.key)) {
+          if (isWorkedGroupExpanded) appendBlockRows(assistantRows, block, blockIndex, true);
+          continue;
         }
+        appendBlockRows(assistantRows, block, blockIndex, false);
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
+      }
+      if (isWorkedGroupExpanded && segmentSubagentTasks.length > 0 && !hasRunningSubagentTasks) {
+        appendSubagentTasksRow(assistantRows, true);
       }
       if (hasRunningSubagentTasks) {
         appendSubagentTasksRow(assistantRows, false);
@@ -5503,12 +5491,13 @@ export const AssistantTurnFooter = ({
   const isMobile = useIsMobile();
   const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   const [didCopy, setDidCopy] = useState(false);
-  const textContent = useMemo(() => {
-    const contentItems = buildAssistantMessageRenderItems(message.items).map(
-      (entry) => entry.content
-    );
-    return getVisibleAssistantTextContent(contentItems, message.finished === true);
-  }, [message.finished, message.items]);
+  const textContent = useMemo(
+    () =>
+      getTextContentFromMessageItems(
+        buildAssistantMessageRenderItems(message.items).map((entry) => entry.content)
+      ),
+    [message.items]
+  );
   const hasCopyableText = textContent.trim().length > 0;
   const copyWorkspaceId = useSessionCopyWorkspaceId();
   const fileDiffs = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;

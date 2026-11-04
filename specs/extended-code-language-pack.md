@@ -72,6 +72,6 @@ Languages without a Monaco contribution use the explicit Shiki read-only viewer.
 - Implementation: [language tiers](../packages/components/src/lib/markdown-highlighter.ts), [Markdown language resolution](../packages/components/src/components/ai-gui/markdown-code-highlight.ts), [Monaco language loading](../packages/components/src/lib/session-monaco-languages.ts), and [Appearance setting](../packages/components/src/components/settings/appearance-setting.tsx).
 - File-language boundary: [session file language mapping](../packages/components/src/lib/session-file-language.ts).
 - Coq file preview: [Shiki file viewer](../packages/components/src/components/sessions/session-shiki-text-viewer.tsx).
-- Verification: [session file language tests](../packages/components/tests/session-file-language.test.ts), [Markdown language tests](../packages/components/tests/markdown-code-highlight.test.ts), and [highlight worker client tests](../packages/components/tests/markdown-highlight-client.test.ts).
+- Verification: [session file language tests](../packages/components/tests/session-file-language.test.ts), [Markdown language tests](../packages/components/tests/markdown-code-highlight.test.ts), and highlight worker client tests (implementation-only test retired).
 - Decision record: [extended language pack note](../.agents/notes/implemented/feature/2026-10-01-extended-code-language-pack.md)
   and [Coq file preview follow-up](../.agents/notes/implemented/feature/2026-10-02-coq-file-preview-rendering.md).

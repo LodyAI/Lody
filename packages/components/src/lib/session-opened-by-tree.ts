@@ -194,6 +194,29 @@ export function placeOpenedSessionsWithOpeners<G>(
   return moved;
 }
 
+/** Section membership only: descendants follow a pinned opener without changing their own pin. */
+export function getPinnedSessionTreeIds<T>(
+  items: readonly T[],
+  options: Pick<BuildOpenedBySessionTreeOptions<T>, 'getId' | 'getOpenedBySessionId'> & {
+    isPinned: (item: T) => boolean;
+  }
+): Set<string> {
+  const { getId, getOpenedBySessionId, isPinned } = options;
+  const pinned = new Set(items.filter(isPinned).map(getId));
+  if (pinned.size === 0) return pinned;
+  // An independently pinned row starts a pinned subtree even when its opener
+  // stays in the ordinary section. Resolve only among visible sidebar rows.
+  const openerById = resolve(items, getId, (item) =>
+    isPinned(item) ? null : getOpenedBySessionId(item)
+  );
+  for (const item of items) {
+    const id = getId(item);
+    const opener = openerById?.get(id);
+    if (opener && pinned.has(opener)) pinned.add(id);
+  }
+  return pinned;
+}
+
 export function buildOpenedBySessionTree<T>(
   items: readonly T[],
   options: BuildOpenedBySessionTreeOptions<T>

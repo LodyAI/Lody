@@ -138,6 +138,24 @@ genesis. Both must admit the exact personal signing/encryption keys and member.
 The protected credential packet also authenticates immutable offer pins. Raw
 approval pages and their checksums remain evidence to replay, never authority.
 
+Compositions that supply `PersonalHostRemote.history` qualify a snapshot's earlier
+prefix from complete signed originals before claim reports success. The host retains
+those public pages in the existing identity/session-bound approval-evidence store;
+it replays signatures and checks the original snapshot's head, count and state on
+every reopen. Approval originals, snapshot bytes/offset, feed and rollback pins stay
+unchanged. An older snapshot installation needs one online qualification when this
+capability is first added; subsequent reopens use the saved proof offline. A failed
+proof is never saved or treated as permission to reset. Hosts without this optional
+capability retain their existing snapshot-only contract.
+
+Control-page continuity checks use the genuine ledger view, including its verified
+prefix hashes. Runtime exports merge retained approval originals with the local suffix;
+each absolute position is checked against the host's genuine view. When complete
+originals are available, the renderer replays them against the same exported head and
+state digest because retained-state serialization omits older hashes. Sparse exports
+do not invent a prefix. Reset history position only clears renderer
+observations; it neither supplies missing proof nor removes the host's durable pin.
+
 `personalLedgerControl({ approval })` composes a persistent `LedgerFeed` over
 injected `LedgerFeedStore`, `LedgerPinStore`, `SubmissionJournal`, `LedgerLog`,
 `LedgerFeedSource` and `WorkspaceScope`. Keep the feed/pins in a stable database;
@@ -174,6 +192,7 @@ successful sibling when another phase failed. There is no plaintext fallback.
 workflow ([foundations Spec](../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)).
 It owns the tag and expiry checks, the single-signature admission journal and local
 terminal states. Hosts supply four things:
+
 - an `AccountPairingStore` for durable state, which holds no secret and no private key;
 - the relay;
 - the per-workspace ports;
@@ -184,12 +203,51 @@ separate work. Identity protection is a per-workspace port decision, never this
 workflow's.
 
 `@lody/e2ee-client/account-pairing/browser` adds the browser pieces:
+
 - `makeIndexedDbAccountPairingStore` keeps one account database. Each mutation resolves
   only after its transaction completes, and an abort or quota error advances nothing.
 - `makeAccountPairingTabOwnership` with `withAccountPairingTabOwnership` lets only one
   tab own the account's pairing, through Web Locks, because the secret lives only in
   that tab's memory. Other tabs get `pairing-elsewhere`, and a closed tab releases the
   lock.
+
+`@lody/e2ee-client/account-requester` is the portable new-device side:
+
+- **`AccountPairingIdentityHost`** is the per-workspace host port. It prepares or reuses
+  this workspace's identity for a verified genesis record and membership, reports an
+  unfinished per-workspace join, installs a snapshot invitation for a given endorser,
+  optionally installs from verified full history (`acceptAccountHistory`, for rows a
+  Member approved without an invitation), and can optionally activate the workspace.
+- **`makePortableAccountPairingRequester`** turns such hosts into the shared workflow's
+  requester ports:
+  - It verifies the full history and finds this account's single membership.
+  - On accept, it takes the endorser from the signer of the admission record whose
+    ledger hash the approval tag authenticated.
+  - It reports an unrelated pending join as `pairing-journal-busy`, which the workflow
+    shows as `blocked`.
+- **`makePortableAccountPairingApprover`** is the approver side. A device with an
+  open, admitted session in a workspace (`session.accountApproval`) can approve there:
+  - it signs the personal `AdmitDevice` locally, with no network;
+  - it appends the journaled original with the new device's credential hash through
+    the injected account-authenticated `appendRecord`, then settles the outcome from
+    the verified ledger (committed, lost, or not yet decided);
+  - it delivers a signed snapshot invitation as Owner or Admin. A Member gets `null`,
+    so its row carries no invitation and the new device verifies the full history;
+  - after the admission commits, it starts the session's existing key round in the
+    background (`deliverKeys`) so the new device receives the current epoch key, which
+    the invitation does not carry. Approval does not wait for it. Each attempt ends
+    with mailbox evidence (`keyDeliveryEvidence`); anything short of `delivered` is
+    retried on a bounded backoff. Each attempt acquires the session, releases it when
+    done (so no reader stays open across the backoff), and ends if the session
+    belongs to another device (another account); the journal stores the same envelope
+    id and bytes. The workflow releases the sessions it listed when it finishes. `onKeyDelivery` reports `running`,
+    `retrying`, `delivered` or `ended`;
+  - its device access for the relay stays inside this composition.
+- **`makeAccountE2eeRuntime`** routes an account's `E2eeWorkspaceRuntime` calls to
+  per-workspace runtimes. Only listed methods exist, so capability-by-presence stays
+  accurate.
+
+Identity protection comes from each host's platform (`PersonalHostPlatform.protection`).
 
 ## Verification and limits
 

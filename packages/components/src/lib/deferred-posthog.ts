@@ -1,4 +1,6 @@
 import posthog from 'posthog-js';
+import { isElectronRenderer } from './electron';
+import { isNativeAppShell } from './native-platform';
 import { postHogPrivacy } from './posthog-privacy';
 
 type PostHogClient = typeof posthog;
@@ -379,6 +381,9 @@ export function createDeferredPostHogController(
       timestamp = new Date(),
       { force = false }: { force?: boolean } = {}
     ) {
+      // Native navigation already has product events; pageviews add recurring
+      // traffic for every session switch without useful page-level analysis.
+      if (isElectronRenderer() || isNativeAppShell()) return;
       const normalizedKey = normalizePageViewKey(navigationKey);
       if (disabled || (!force && pageViewActive && activePageViewKey === normalizedKey)) return;
       activePageViewKey = normalizedKey;

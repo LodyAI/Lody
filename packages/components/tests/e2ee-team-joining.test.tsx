@@ -158,8 +158,12 @@ describe('encrypted team joining', () => {
       prepareMemberJoin: async () => {
         throw new Error('must not replace saved request');
       },
-      claimMemberJoin: async () => ({ state: 'committed', ready: installed }),
+      claimMemberJoin: async () => {
+        claims++;
+        return { state: 'committed', ready: installed };
+      },
     };
+    let claims = 0;
     vi.setSystemTime(3000);
     const props = {
       offer,
@@ -176,7 +180,35 @@ describe('encrypted team joining', () => {
     await render(<E2eeMemberJoin {...props} />);
     await settle();
     expect(container.textContent).toContain('e2ee.team.waitingKey');
+    // Key delivery needs an administrator device; the joining member is told so.
+    expect(container.textContent).toContain('e2ee.team.waitingKeyAdminOnline');
     expect(button('e2ee.team.submit')).toBeUndefined();
+    // Committed but not ready: the member claims again 3 s later, not 10 s.
+    expect(claims).toBe(1);
+    await act(async () => vi.advanceTimersByTime(3_000));
+    await settle();
+    expect(claims).toBe(2);
+    // The fast cadence is bounded; after two minutes it returns to 10 s.
+    for (let elapsed = 3_000; elapsed < 120_000; elapsed += 3_000) {
+      await act(async () => vi.advanceTimersByTime(3_000));
+      await settle();
+    }
+    const slow = claims;
+    await act(async () => vi.advanceTimersByTime(3_000));
+    await settle();
+    expect(claims).toBe(slow);
+    await act(async () => vi.advanceTimersByTime(7_000));
+    await settle();
+    expect(claims).toBe(slow + 1);
+    // After the fast window the member is told why it is still waiting, and can retry.
+    expect(container.textContent).toContain('e2ee.team.waitingKeySlow');
+    await act(async () => button('e2ee.team.retry').click());
+    await settle();
+    expect(claims).toBe(slow + 2);
+    expect(container.textContent).not.toContain('e2ee.team.waitingKeySlow');
+    await act(async () => vi.advanceTimersByTime(3_000));
+    await settle();
+    expect(claims).toBe(slow + 3);
     installed = true;
     await act(async () => window.dispatchEvent(new Event('online')));
     await settle();
@@ -222,7 +254,18 @@ describe('encrypted team joining', () => {
   it('keeps a link request pending until the administrator approves the displayed request', async () => {
     const request = application('applicant', 'link');
     let state = 'pending';
-    const confirmation = deferred<{ admitted: boolean; keyPending: boolean }>();
+    let delivery: {
+      requestId: string;
+      state: 'pending' | 'delivering' | 'delivered' | 'failed';
+      code?: string;
+    }[] =
+      [];
+    const retried: string[] = [];
+    const confirmation = deferred<{
+      admitted: boolean;
+      keyPending: boolean;
+      keyDelivery?: 'pending' | 'delivered' | 'failed';
+    }>();
     await render(
       <E2eeTeamSettings
         workspaceId="team"
@@ -239,6 +282,12 @@ describe('encrypted team joining', () => {
             state = 'committed';
             return result;
           },
+          memberKeyDeliveries: async () => ({ items: delivery }),
+          retryMemberKeyDelivery: async (_workspace, id) => {
+            retried.push(id);
+            delivery = [{ requestId: id, state: 'pending' }];
+            return delivery[0]!;
+          },
           rejectMemberJoin: async () => ({ state: 'rejected' }),
           revokeMemberInvitation: async () => ({ revoked: true }),
         }}
@@ -248,12 +297,37 @@ describe('encrypted team joining', () => {
     expect(state).toBe('pending');
     await act(async () => button('e2ee.team.approve').click());
     expect(state).toBe('pending');
-    expect(button('e2ee.team.approve').disabled).toBe(true);
-    confirmation.resolve({ admitted: true, keyPending: true });
+    // The submitting admin sees progress on the request itself, not a silent disabled card.
+    const submitting = button('e2ee.team.submitting');
+    expect(submitting.disabled).toBe(true);
+    expect(submitting.getAttribute('aria-busy')).toBe('true');
+    delivery = [{ requestId: request.requestId, state: 'pending' }];
+    confirmation.resolve({ admitted: true, keyPending: true, keyDelivery: 'pending' });
     await settle();
     expect(state).toBe('committed');
     expect(container.textContent).toContain('e2ee.team.admitted');
     expect(container.textContent).toContain('e2ee.team.noRequests');
+    // Admission and key delivery are separate: the admitted applicant stays visible.
+    const row = () => container.querySelector(`[data-key-delivery-id="${request.requestId}"]`);
+    expect(row()?.textContent).toContain(request.applicantName);
+    expect(row()?.textContent).toContain('e2ee.team.keySending');
+    // A round in flight is still shown as sending.
+    delivery = [{ requestId: request.requestId, state: 'delivering' }];
+    await act(async () => vi.advanceTimersByTime(10_000));
+    await settle();
+    expect(row()?.textContent).toContain('e2ee.team.keySending');
+    delivery = [{ requestId: request.requestId, state: 'failed', code: 'e2ee_management_retry' }];
+    await act(async () => vi.advanceTimersByTime(10_000));
+    await settle();
+    expect(row()?.textContent).toContain('e2ee.team.keyFailed');
+    await act(async () => button('e2ee.team.keyRetry').click());
+    await settle();
+    expect(retried).toEqual([request.requestId]);
+    expect(row()?.textContent).toContain('e2ee.team.keySending');
+    delivery = [{ requestId: request.requestId, state: 'delivered' }];
+    await act(async () => vi.advanceTimersByTime(10_000));
+    await settle();
+    expect(row()).toBeNull();
   });
   it('recovers online manager qualification after an initial failed refresh and releases each owned background reader', async () => {
     let role = 'member',

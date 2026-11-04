@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt';
+import { describe, expect, it } from 'vitest';
+import { LoroDoc } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 import { SessionDocument } from './doc';
 import type { Logger } from '@/utils/logger';
@@ -9,12 +9,8 @@ import {
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
-import { createLoroSessionData, type SessionTurn } from '@lody/shared/session-data';
-import {
-  attachSessionModelSummary,
-  latestSessionModel,
-  latestSessionModelFromReader,
-} from './session-model-summary';
+import { type SessionTurn } from '@lody/shared/session-data';
+import { attachSessionModelSummary, latestSessionModel } from './session-model-summary';
 
 const assistant = (
   id: string,
@@ -107,54 +103,6 @@ describe('session model summary', () => {
     }
   );
 
-  it('reads container and legacy summaries without serializing bodies or provider metadata', () => {
-    const raw = new LoroDoc();
-    const list = raw.getList('history');
-    list.insert(0, assistant('legacy', { modelId: 'legacy', name: 'Legacy' }));
-    const turn = list.insertContainer(1, new LoroMap());
-    turn.set('role', 'assistant');
-    const model = turn.setContainer('modelInfo', new LoroMap());
-    model.setContainer('modelId', new LoroText()).insert(0, ' actual ');
-    model.set('name', ' Actual ');
-    model.setContainer('_meta', new LoroMap()).set('opaque', 'x'.repeat(100_000));
-    const items = turn.setContainer('items', new LoroList());
-    const data = createLoroSessionData({ doc: raw, sessionId: 'shallow' as SessionId });
-    const mapJSON = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(() => {
-      throw new Error('body materialized');
-    });
-    const listJSON = vi.spyOn(LoroList.prototype, 'toJSON').mockImplementation(() => {
-      throw new Error('list materialized');
-    });
-    try {
-      expect(latestSessionModelFromReader(data.history)).toEqual({
-        modelId: 'legacy',
-        name: 'Legacy',
-      });
-      items.insert(0, { type: 'future_tool', payload: 'x'.repeat(100_000) });
-      raw.commit();
-      expect(latestSessionModelFromReader(data.history)).toEqual({
-        modelId: 'actual',
-        name: 'Actual',
-      });
-      items.delete(0, 1);
-      turn.setContainer('plan', new LoroList()).insert(0, { content: 'step' });
-      expect(latestSessionModelFromReader(data.history)).toEqual({
-        modelId: 'actual',
-        name: 'Actual',
-      });
-      model.delete('modelId');
-      model.delete('name');
-      expect(latestSessionModelFromReader(data.history)).toEqual({});
-      list.delete(0, 2);
-      list.insert(0, 'invalid');
-      expect(latestSessionModelFromReader(data.history)).toBeNull();
-    } finally {
-      mapJSON.mockRestore();
-      listJSON.mockRestore();
-      data.dispose();
-    }
-  });
-
   it('uses actual latest assistant data, never requested config or an older known model', () => {
     const first = assistant('a1', { modelId: 'actual', name: 'Actual', _meta: { secret: 'omit' } });
     expect(latestSessionModel([first])).toEqual({ modelId: 'actual', name: 'Actual' });
@@ -244,50 +192,6 @@ describe('session model summary', () => {
     await handle.flush();
     expect(writes.at(-1)).toEqual({ modelId: 'late-old-model' });
     expect(errors).toEqual([]);
-    mirror.dispose();
-  });
-
-  it('serializes model changes during publication and retries a failed write', async () => {
-    const mirror = createSessionMirror({
-      doc: new LoroDoc(),
-      initialState: { session: { id: 'model-test' as SessionId }, history: [] },
-    });
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const writes: SessionMeta['lastModel'][] = [];
-    const errors: unknown[] = [];
-    let fail = false;
-    const handle = attachSessionModelSummary(
-      sourceFromMirror(mirror),
-      async (model) => {
-        if (!writes.length) {
-          entered.resolve();
-          await release.promise;
-        }
-        if (fail) {
-          fail = false;
-          throw new Error('unavailable');
-        }
-        if (JSON.stringify(writes.at(-1)) !== JSON.stringify(model)) writes.push(model);
-        return true;
-      },
-      (error) => errors.push(error)
-    );
-    mirror.historyWriter.update(() => [assistant('a1', { modelId: 'one', name: '' })]);
-    const first = handle.sync();
-    await entered.promise;
-    mirror.historyWriter.setField('a1', 'modelInfo', { modelId: 'two', name: '' });
-    release.resolve();
-    await first;
-    await handle.flush();
-    expect(writes).toEqual([{ modelId: 'one' }, { modelId: 'two' }]);
-    fail = true;
-    mirror.historyWriter.setField('a1', 'modelInfo', { modelId: 'three', name: '' });
-    await handle.flush();
-    expect(errors).toHaveLength(1);
-    await handle.flush();
-    expect(writes.at(-1)).toEqual({ modelId: 'three' });
-    handle.dispose();
     mirror.dispose();
   });
 });

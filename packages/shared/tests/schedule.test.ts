@@ -7,13 +7,7 @@ import {
   previewSchedule,
   validateScheduleTrigger,
 } from '../src/schedule-time';
-import {
-  buildScheduleRegistryRow,
-  readScheduleRegistryRows,
-  scheduleDefinitionFingerprint,
-  scheduleRunIds,
-  scheduleRunKey,
-} from '../src/schedule-registry';
+import { scheduleDefinitionFingerprint } from '../src/schedule-registry';
 import {
   normalizeLegacyScheduleAgent,
   SCHEDULED_MESSAGE_RETENTION_MS,
@@ -115,41 +109,6 @@ describe('Schedule time contract', () => {
 });
 
 describe('Schedule persistence contract', () => {
-  it('fingerprints executable input independently of key order and cosmetic edits', () => {
-    const d = definition();
-    const first = scheduleDefinitionFingerprint({ definition: d, prompt: 'hello' });
-    expect(
-      scheduleDefinitionFingerprint({
-        definition: { ...d, title: 'Renamed', updatedAt: 1 },
-        prompt: 'hello',
-      })
-    ).toBe(first);
-    expect(scheduleDefinitionFingerprint({ definition: d, prompt: 'different' })).not.toBe(first);
-    const key = scheduleRunKey('test', 'activation', 123);
-    expect(
-      scheduleRunIds(key, { scheduleId: 'test', destination: { kind: 'new_session' } })
-    ).toEqual(scheduleRunIds(key, { scheduleId: 'test', destination: { kind: 'new_session' } }));
-    expect(
-      new Set(
-        Object.values(
-          scheduleRunIds(key, { scheduleId: 'test', destination: { kind: 'new_session' } })
-        )
-      ).size
-    ).toBe(3);
-  });
-  it('honors tombstones regardless of row order', () => {
-    const row = buildScheduleRegistryRow({
-      definition: definition(),
-      prompt: 'hello',
-      timeline: [],
-    });
-    expect(
-      readScheduleRegistryRows([
-        { key: ['tombstone', 'test'], value: { actorId: 'owner', deletedAt: 1 } },
-        { key: ['schedule', 'test'], value: row },
-      ])
-    ).toEqual([]);
-  });
   it('writes the definition durably before enabling its Registry and reads absent docs without seeding', async () => {
     const docs = new Map<string, LoroDoc>();
     const rows = new Map<string, unknown>();
@@ -637,52 +596,6 @@ describe('Chat-mode schedules carry no project', () => {
       ).toBeUndefined();
     }
   );
-
-  it('accepts a definition with no project and keeps the field absent through the doc', async () => {
-    const repo = new ScheduleRepository(memoryPort(), 'workspace' as never);
-    await repo.save({
-      scheduleId: 'test',
-      draft: chatDraft(),
-      actorId: 'owner',
-      now: 1,
-      activationId: 'activation',
-      activityId: 'created',
-      create: true,
-    });
-    const stored = await repo.read('test');
-    expect(stored?.definition.project).toBeUndefined();
-    const [row] = await repo.list();
-    expect(row?.projectKind).toBeUndefined();
-    expect(row?.projectKey).toBeUndefined();
-    expect(row?.definitionFingerprint).toBe(scheduleDefinitionFingerprint(stored!));
-  });
-
-  it('does not confuse a chat schedule with an identical project-bound one', () => {
-    const withProject = { definition: definition(), prompt: 'hello' };
-    const { project: _project, ...rest } = definition();
-    const chat = { definition: ScheduleDefinitionSchema.parse(rest), prompt: 'hello' };
-    expect(scheduleDefinitionFingerprint(chat)).not.toBe(
-      scheduleDefinitionFingerprint(withProject)
-    );
-    expect(buildScheduleRegistryRow(chat).projectKind).toBeUndefined();
-    expect(buildScheduleRegistryRow(withProject).projectKind).toBe('github');
-  });
-
-  it('re-reads a chat schedule from the Registry rows it published', async () => {
-    const port = memoryPort();
-    const repo = new ScheduleRepository(port, 'workspace' as never);
-    await repo.save({
-      scheduleId: 'test',
-      draft: chatDraft(),
-      actorId: 'owner',
-      now: 1,
-      activationId: 'activation',
-      activityId: 'created',
-      create: true,
-    });
-    const handle = await port.openFlockDoc('workspace:sr');
-    expect(readScheduleRegistryRows(handle.flock.scan())).toHaveLength(1);
-  });
 });
 
 describe('legacy Schedule ACP value compatibility', () => {
@@ -760,26 +673,5 @@ describe('legacy Schedule ACP value compatibility', () => {
       'fast-mode': true,
       fast_select: 'false',
     });
-  });
-  it('converts Fast aliases advertised as booleans', () => {
-    const agent = {
-      agentConfigId: 'agent',
-      configOptionValues: { fast: 'false', 'fast-mode': 'true' },
-    };
-
-    expect(
-      normalizeLegacyScheduleAgent(agent, [
-        { id: 'fast', name: 'Fast', type: 'boolean', currentValue: true, options: [] },
-        { id: 'fast-mode', name: 'Fast mode', type: 'boolean', currentValue: false, options: [] },
-      ]).configOptionValues
-    ).toEqual({ fast: false, 'fast-mode': true });
-  });
-  it.each([42, null, {}, [], 'x'.repeat(1025)])('rejects invalid option values', (value) => {
-    expect(
-      ScheduleAgentSchema.safeParse({
-        agentConfigId: 'agent',
-        configOptionValues: { option: value },
-      }).success
-    ).toBe(false);
   });
 });

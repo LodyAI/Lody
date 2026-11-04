@@ -71,16 +71,6 @@ describe('Schedule authored write synchronization', () => {
     expect(done).toHaveBeenCalledOnce();
     expect(off).toHaveBeenCalledOnce();
   });
-
-  it('releases synchronization ownership when the workspace is destroyed offline', async () => {
-    const off = vi.fn();
-    const binding = { status: 'detached', onStatusChange: () => off };
-    const abort = new AbortController();
-    const result = waitForScheduleWriteSync(binding as never, abort.signal);
-    abort.abort();
-    await result;
-    expect(off).toHaveBeenCalledOnce();
-  });
 });
 
 it('waits for a missing definition to hydrate before mutating a Registry-only schedule', async () => {

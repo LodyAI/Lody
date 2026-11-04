@@ -17,6 +17,15 @@ import type { PlatformSessionState } from './provider';
  * resource acquisition, its executor and retirement (including unfinished close).
  * Do not acquire custody or perform I/O during this factory call. The live session
  * supplies account routing only; the runtime must verify every operation itself. */
+/** Delivery of the current workspace key to an admitted member, tracked by its approver. */
+/** `delivering`: a round for this member is running in the approver's main process. */
+export type E2eeMemberKeyDeliveryState = 'pending' | 'delivering' | 'delivered' | 'failed';
+export type E2eeMemberKeyDelivery = {
+  requestId: string;
+  state: E2eeMemberKeyDeliveryState;
+  /** Public `e2ee_*` reason code of the last failure. */
+  code?: string;
+};
 export type E2eeRuntimeFactory = (input: {
   readonly session: ReadonlyStore<PlatformSessionState>;
 }) => E2eeWorkspaceRuntime | undefined;
@@ -96,7 +105,8 @@ export interface E2eeRuntimeStatus {
   readonly continuityPending: boolean;
   readonly upgradeRequiredAt?: number;
 }
-/** The host's own public export, for ledger display without another replay. */
+/** The host's own public export. Complete originals can recover prefix hashes
+ * omitted by retained-state serialization at the same head and state digest. */
 export interface E2eeRuntimeLedgerView {
   readonly status: E2eeRuntimeStatus;
   readonly stateHex: string;
@@ -119,10 +129,39 @@ export interface E2eeManagementState {
     mayRevoke: boolean;
   }[];
 }
+/** Purpose-limited account-pairing admission signing. It exposes only the operations
+ * one already-open personal session needs to approve another device; no general
+ * signing, ledger write or custody capability crosses this port. */
+export interface E2eeAccountApprovalSession {
+  /** This session's admitted personal-device signing key, lowercase hex. */
+  readonly device: string;
+  sign(row: {
+    signingPublicKey: Uint8Array;
+    encryptionPublicKey: Uint8Array;
+    possessionProof: Uint8Array;
+  }): Promise<{ requestId: string; record: Uint8Array }>;
+  settle(record: Uint8Array): Promise<'committed' | 'lost' | 'unknown'>;
+  invitation(record: Uint8Array): Promise<Uint8Array | null>;
+  access(): Promise<{ workspaceId: string; credential: string }>;
+  refresh(): Promise<void>;
+  /** Runs this session's existing key round once, so the device it just admitted
+   * receives the current epoch key. Distribution targets only verified ledger devices. */
+  keyRound(): Promise<void>;
+  /** Positive mailbox evidence for `device` at the current epoch: 'delivered', or a
+   * public retryable `e2ee_*` code. */
+  keyDeliveryEvidence(device: string): Promise<string>;
+  /** Ends this holder's use of the approval session. When it opened a reader for
+   * approval, the last release closes it so the workspace can drain. Idempotent. */
+  release(): Promise<void>;
+}
+
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
 export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
   /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
   readonly readerLeases?: 'preallocated-v1';
+  /** Portable hosts that can sign an account-pairing admission from an already
+   * approved workspace session. Absence keeps the approver surface hidden. */
+  accountApproval?(workspaceId?: string): Promise<E2eeAccountApprovalSession>;
   readMachineSharing?(
     workspaceId: string,
     machineId: string
@@ -166,7 +205,11 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     workspaceId: string,
     requestId: string,
     mode: 'automatic' | 'explicit'
-  ): Promise<{ admitted: boolean; keyPending: boolean }>;
+  ): Promise<{ admitted: boolean; keyPending: boolean; keyDelivery?: E2eeMemberKeyDeliveryState }>;
+  /** Main-owned key delivery after admission. Reason codes only; never key or token bytes. */
+  memberKeyDeliveries?(workspaceId: string): Promise<{ items: E2eeMemberKeyDelivery[] }>;
+  /** Retry a failed delivery now, skipping its backoff; returns the new state. */
+  retryMemberKeyDelivery?(workspaceId: string, requestId: string): Promise<E2eeMemberKeyDelivery>;
   rejectMemberJoin?(workspaceId: string, requestId: string): Promise<{ state: 'rejected' }>;
   revokeMemberInvitation?(workspaceId: string, token: string): Promise<{ revoked: true }>;
   claimMemberJoin?(

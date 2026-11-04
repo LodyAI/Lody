@@ -13,13 +13,15 @@ export const DiscoveryQuerySchema = z
     machineId: z.string().trim().min(1).optional(),
     kind: z.enum(['local', 'github']).optional(),
     onlineStatus: z.enum(['online', 'offline', 'unknown']).optional(),
+    /** Machines only: ask each listed online Machine for memory and disk. */
+    includeResources: z.boolean().optional(),
   })
   .strict();
 export type DiscoveryQuery = z.input<typeof DiscoveryQuerySchema>;
 const pageKeys = { query: true, limit: true, cursor: true } as const;
 const machineScopedListSchema = DiscoveryQuerySchema.pick({ ...pageKeys, machineId: true });
 export const ResourceListSchemas = {
-  machine: DiscoveryQuerySchema.pick({ ...pageKeys, onlineStatus: true }),
+  machine: DiscoveryQuerySchema.pick({ ...pageKeys, onlineStatus: true, includeResources: true }),
   project: DiscoveryQuerySchema.pick({ ...pageKeys, machineId: true, kind: true }),
   agent_config: machineScopedListSchema,
   agent_role: machineScopedListSchema,

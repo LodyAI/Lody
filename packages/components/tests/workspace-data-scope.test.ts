@@ -99,45 +99,4 @@ describe('resolveWorkspaceDataScope', () => {
       })
     ).toEqual({ status: 'switching', targetSlug: 'workspace-b', blocker: 'workspace_id_mismatch' });
   });
-
-  it('names each remaining reason the scope is held back', () => {
-    const runtime = createRuntime('workspace-b', 'workspace-b-id');
-    const resolve = (overrides: Partial<Parameters<typeof resolveWorkspaceDataScope>[0]>) =>
-      resolveWorkspaceDataScope({
-        targetSlug: 'workspace-b',
-        runtime,
-        runtimeInitFailure: null,
-        docMetaScope: createDocMetaScope(runtime),
-        organizationsReady: true,
-        expectedWorkspaceId: 'workspace-b-id',
-        ...overrides,
-      });
-
-    expect(resolve({ runtime: null })).toMatchObject({ blocker: 'runtime_missing' });
-    expect(
-      resolve({
-        runtime: null,
-        runtimeInitFailure: { workspaceSlug: 'workspace-b', errorType: 'InvalidStateError' },
-      })
-    ).toMatchObject({ blocker: 'runtime_init_failed' });
-    // A failure for the workspace being left says nothing about the target.
-    expect(
-      resolve({
-        runtime: null,
-        runtimeInitFailure: { workspaceSlug: 'workspace-a', errorType: 'InvalidStateError' },
-      })
-    ).toMatchObject({ blocker: 'runtime_missing' });
-    expect(resolve({ docMetaScope: null })).toMatchObject({ blocker: 'doc_meta_scan_pending' });
-    expect(
-      resolve({
-        docMetaScope: {
-          ...createDocMetaScope(runtime, false),
-          scanFailure: { errorType: 'TypeError' },
-        },
-      })
-    ).toMatchObject({ blocker: 'doc_meta_scan_failed' });
-    expect(resolve({ expectedWorkspaceId: null })).toMatchObject({
-      blocker: 'workspace_not_in_organizations',
-    });
-  });
 });

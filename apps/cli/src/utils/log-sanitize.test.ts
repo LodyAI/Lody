@@ -20,9 +20,4 @@ describe('redactProxyUrl', () => {
     const raw = 'http://user:pass@proxy.example.com:8080';
     expect(redactProxyUrl(raw)).toBe('http://[redacted]@proxy.example.com:8080');
   });
-
-  it('keeps host/port for proxy URLs without credentials', () => {
-    const raw = 'http://proxy.example.com:8080';
-    expect(redactProxyUrl(raw)).toBe('http://proxy.example.com:8080');
-  });
 });

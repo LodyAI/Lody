@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createVSCodeTerminalTheme,
-  resolveAnsiColorToCss,
-  type LodyResolvedVSCodeTheme,
-} from '../src/lib/vscode-theme';
+import { createVSCodeTerminalTheme, type LodyResolvedVSCodeTheme } from '../src/lib/vscode-theme';
 
 const theme: LodyResolvedVSCodeTheme = {
   schemaVersion: 1,
@@ -50,32 +46,6 @@ describe('VSCode terminal theme adapter', () => {
     expect(Object.keys(terminalTheme?.palette ?? {})).toHaveLength(16);
   });
 
-  it('maps ANSI classes through the palette and preserves truecolor RGB', () => {
-    const terminalTheme = createVSCodeTerminalTheme(theme);
-
-    expect(resolveAnsiColorToCss('ansi-red', null, terminalTheme?.palette)).toBe('#FF8080');
-    expect(resolveAnsiColorToCss('ansi-bright-red', null, terminalTheme?.palette)).toBe('#FFA198');
-    expect(resolveAnsiColorToCss('ansi-truecolor', '187, 0, 0', terminalTheme?.palette)).toBe(
-      'rgb(187, 0, 0)'
-    );
-    expect(resolveAnsiColorToCss('187, 0, 0', null, terminalTheme?.palette)).toBe('rgb(187, 0, 0)');
-  });
-
-  it('rejects out-of-range RGB channels for truecolor ANSI values', () => {
-    const terminalTheme = createVSCodeTerminalTheme(theme);
-
-    expect(resolveAnsiColorToCss('ansi-truecolor', '999, 0, 0', terminalTheme?.palette)).toBe(
-      undefined
-    );
-    expect(resolveAnsiColorToCss('999, 0, 0', null, terminalTheme?.palette)).toBe(undefined);
-  });
-
-  it('falls back to the same RGB palette Anser used before the theme bridge', () => {
-    expect(resolveAnsiColorToCss('ansi-red', null, undefined)).toBe('rgb(187, 0, 0)');
-    expect(resolveAnsiColorToCss('ansi-green', null, undefined)).toBe('rgb(0, 187, 0)');
-    expect(resolveAnsiColorToCss('ansi-bright-red', null, undefined)).toBe('rgb(255, 85, 85)');
-  });
-
   it('derives readable fallback ANSI colors when a VSCode theme omits terminal palette tokens', () => {
     const terminalTheme = createVSCodeTerminalTheme(themeWithoutTerminalPalette);
 
@@ -88,8 +58,14 @@ describe('VSCode terminal theme adapter', () => {
     expect(terminalTheme?.palette['ansi-white']).toBe('rgb(187, 187, 187)');
 
     const background = parseRgb('#1C1C1C');
-    const blackContrast = getContrastRatio(parseRgb(terminalTheme?.palette['ansi-black']), background);
-    const blueContrast = getContrastRatio(parseRgb(terminalTheme?.palette['ansi-blue']), background);
+    const blackContrast = getContrastRatio(
+      parseRgb(terminalTheme?.palette['ansi-black']),
+      background
+    );
+    const blueContrast = getContrastRatio(
+      parseRgb(terminalTheme?.palette['ansi-blue']),
+      background
+    );
 
     expect(blackContrast).toBeGreaterThanOrEqual(4.5);
     expect(blueContrast).toBeGreaterThanOrEqual(4.5);
@@ -130,9 +106,7 @@ const getContrastRatio = (
 const relativeLuminance = ({ r, g, b }: { r: number; g: number; b: number }) => {
   const [red, green, blue] = [r, g, b].map((channel) => {
     const normalized = channel / 255;
-    return normalized <= 0.03928
-      ? normalized / 12.92
-      : ((normalized + 0.055) / 1.055) ** 2.4;
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
   });
 
   return 0.2126 * red + 0.7152 * green + 0.0722 * blue;

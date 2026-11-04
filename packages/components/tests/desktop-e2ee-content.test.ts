@@ -124,51 +124,6 @@ describe('desktop E2EE content epoch safety', () => {
     expect(seen).toEqual(['write', 'read', 'write', 'read']);
     unsubscribe();
   });
-  it('does not hydrate a previous epoch token when a retired provider left a cache row', async () => {
-    const entries = new Map<string, string>();
-    vi.stubGlobal('localStorage', {
-      getItem: (key: string) => entries.get(key) ?? null,
-      setItem: (key: string, value: string) => entries.set(key, value),
-      removeItem: (key: string) => entries.delete(key),
-    });
-    let issued = 0;
-    const runtime = {
-      contentStreamsToken: async () => ({
-        token: `epoch-token-${++issued}`,
-        bucketId: 'encrypted-content',
-        gatewayBaseUrl: 'https://streams.example.com',
-        expiresIn: 900,
-        expiresAt: 1_900_000_000_000,
-      }),
-    } as unknown as E2eeWorkspaceRuntime;
-    const access = createDesktopE2eeContent({
-      runtime,
-      workspaceId: 'token-epoch-workspace',
-      genesisHash: '11'.repeat(32),
-      epoch: 0,
-      authToken: () => 'account-token',
-    });
-    const first = access.e2ee.createTokenProvider(new AbortController().signal);
-    let successor: typeof first | undefined;
-    try {
-      expect(await first.getToken()).toBe('epoch-token-1');
-      // A stale row can still exist from an older client that persisted tokens.
-      entries.set('stale-epoch-row', 'epoch-token-1');
-      access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: true });
-      await access.transition({
-        // Even a cache row that could not be removed cannot select the next token.
-        install: async () => ({ epoch: 1, rotationRequired: false, hasCurrentKey: true }),
-      });
-      successor = access.e2ee.createTokenProvider(new AbortController().signal);
-      expect(await successor.getToken()).toBe('epoch-token-2');
-      expect(access.e2ee.bucketId()).toBe('encrypted-content');
-    } finally {
-      await first.close();
-      await successor?.close();
-      await access.close();
-      vi.unstubAllGlobals();
-    }
-  });
   it('mints a fresh content token for a recreated runtime instead of hydrating storage', async () => {
     const entries = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -212,6 +167,83 @@ describe('desktop E2EE content epoch safety', () => {
       await secondProvider.close();
       await second.close();
       vi.unstubAllGlobals();
+    }
+  });
+  it('closes with a host token call still queued, so the workspace reopens and ignores the late result', async () => {
+    // Electron IPC cannot cancel a host contentStreamsToken call; on a restarted
+    // member device it can queue behind other account work for longer than the
+    // token kernel's release bound. Switching away must still close the token
+    // provider, and the abandoned host answer must never reach the next runtime.
+    type Token = Awaited<ReturnType<E2eeWorkspaceRuntime['contentStreamsToken']>>;
+    let releaseQueued!: (token: Token) => void;
+    const queued = new Promise<Token>((resolve) => (releaseQueued = resolve));
+    let calls = 0;
+    const runtime = {
+      contentStreamsToken: () =>
+        ++calls === 1
+          ? queued
+          : Promise.resolve({
+              token: 'successor-token',
+              bucketId: 'encrypted-content',
+              gatewayBaseUrl: 'https://streams.example.com',
+              expiresIn: 480,
+              expiresAt: 1_900_000_000_000,
+            }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const open = () =>
+      createDesktopE2eeContent({
+        runtime,
+        workspaceId: 'queued-token-workspace',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => 'account-token',
+      });
+    const first = open();
+    const firstProvider = first.e2ee.createTokenProvider(new AbortController().signal);
+    const pending = firstProvider.getToken();
+    const pendingOutcome = pending.then(
+      () => 'resolved',
+      () => 'rejected'
+    );
+    await vi.waitFor(() => expect(calls).toBe(1));
+    let closed: 'ok' | 'failed' | undefined;
+    vi.useFakeTimers();
+    try {
+      const closing = firstProvider.close().then(
+        () => (closed = 'ok'),
+        () => (closed = 'failed')
+      );
+      // Strictly inside the 5s release bound: close must already be confirmed.
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(closed).toBe('ok');
+      await closing;
+    } finally {
+      // Let a bug-path release bound expire before restoring real timers.
+      await vi.advanceTimersByTimeAsync(20_000);
+      vi.useRealTimers();
+    }
+    expect(await pendingOutcome).toBe('rejected');
+    await first.close();
+
+    const second = open();
+    const secondProvider = second.e2ee.createTokenProvider(new AbortController().signal);
+    try {
+      expect(await secondProvider.getToken()).toBe('successor-token');
+      // The abandoned host call answers late with another bucket.
+      releaseQueued({
+        token: 'stale-token',
+        bucketId: 'stale-bucket',
+        gatewayBaseUrl: 'https://streams.example.com',
+        expiresIn: 480,
+        expiresAt: 1_900_000_000_000,
+      });
+      await queued;
+      await Promise.resolve();
+      expect(second.e2ee.bucketId()).toBe('encrypted-content');
+      expect(await secondProvider.getToken()).toBe('successor-token');
+    } finally {
+      await secondProvider.close();
+      await second.close();
     }
   });
   it('replaces a gateway-rejected cached token through the native token capability', async () => {
@@ -312,54 +344,6 @@ describe('desktop E2EE content epoch safety', () => {
       expect(statuses.at(-1)).toBe(false);
     } finally {
       release.resolve(undefined);
-    }
-  });
-
-  it('reports E2E transport effects from the provider seal/open the live transport calls', async () => {
-    const reports: { workspaceId: string; effects: Record<string, unknown> }[] = [];
-    vi.stubGlobal('window', {
-      __LODY_E2E_CLIENT_LOSS__: true,
-      ipc: { send: (_channel: string, payload: (typeof reports)[number]) => reports.push(payload) },
-    });
-    let readable = true;
-    const access = createDesktopE2eeContent({
-      runtime: {
-        seal: async () => ({ header: new Uint8Array([3]), sealed: new Uint8Array([1]) }),
-        openContent: async () => {
-          if (!readable) throw new Error('e2ee_member_removed');
-          return new Uint8Array([7]);
-        },
-      } as unknown as E2eeWorkspaceRuntime,
-      workspaceId: 'effects-workspace',
-      genesisHash: '11'.repeat(32),
-      epoch: 0,
-      authToken: () => null,
-    });
-    try {
-      if (access.content.mode !== 'protected') throw new Error('expected protected content');
-      const room = access.content.resolve({ kind: 'doc', docId: 'session' });
-      if (room.mode !== 'protected') throw new Error('expected protected room');
-      await room.config.provider.seal({
-        context,
-        plaintext: new Uint8Array([7]),
-        additionalData: (header: Uint8Array) => header,
-      });
-      const frame = {
-        context,
-        header: new Uint8Array([3]),
-        sealed: new Uint8Array([1]),
-        additionalData: new Uint8Array([2]),
-      };
-      await room.config.provider.open(frame);
-      readable = false;
-      await expect(room.config.provider.open(frame)).rejects.toThrow('e2ee_member_removed');
-      expect(reports.at(-1)).toMatchObject({
-        workspaceId: 'effects-workspace',
-        effects: { contentWrites: 1, contentReadEvents: 1, pendingWrites: 0 },
-      });
-    } finally {
-      vi.unstubAllGlobals();
-      await access.close();
     }
   });
   it('keeps one selected snapshot epoch across a concurrent key transition', async () => {

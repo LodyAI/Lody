@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+/** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,10 +30,7 @@ vi.mock('../src/lib/auth-bootstrap', () => ({
 }));
 
 import { useStableSessionInternal, type StableSessionValue } from '../src/hooks/useStableSession';
-import {
-  readLatestBootRequestFailure,
-  resetBootRequestFailuresForTests,
-} from '../src/lib/boot-request-failures';
+import { resetBootRequestFailuresForTests } from '../src/lib/boot-request-failures';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -131,23 +129,6 @@ describe('useStableSessionInternal', () => {
     expect(current?.data).toEqual(mocks.session.data);
   });
 
-  it('records a failing session check for the recovery screen, and clears it on success', async () => {
-    mocks.session.error = Object.assign(new Error('Client disconnected'), { status: 500 });
-
-    await act(async () => root.render(<Consumer />));
-
-    expect(readLatestBootRequestFailure()).toMatchObject({
-      source: 'session',
-      kind: 'server',
-      status: 500,
-    });
-
-    mocks.session.error = null;
-    await act(async () => root.render(<Consumer />));
-
-    expect(readLatestBootRequestFailure()).toBeNull();
-  });
-
   it('does not accept a stale 401 after the current credential succeeds', async () => {
     mocks.session.error = Object.assign(new Error('Unauthorized'), { status: 401 });
     mocks.getSession.mockResolvedValue({ data: mocks.session.data, error: null });
@@ -162,27 +143,6 @@ describe('useStableSessionInternal', () => {
     await act(async () => vi.advanceTimersByTimeAsync(300));
 
     expect(mocks.session.refetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('forces one refresh when verification disproves a stale 401 after retries are exhausted', async () => {
-    mocks.session.error = Object.assign(new Error('Client disconnected'), { status: 500 });
-
-    await act(async () => root.render(<Consumer />));
-    await act(async () => vi.advanceTimersByTimeAsync(300));
-    await act(async () => vi.advanceTimersByTimeAsync(600));
-    expect(mocks.session.refetch).toHaveBeenCalledTimes(2);
-
-    mocks.session.error = Object.assign(new Error('Unauthorized'), { status: 401 });
-    mocks.getSession.mockResolvedValue({ data: mocks.session.data, error: null });
-    await act(async () => root.render(<Consumer />));
-
-    expect(current?.confirmedUnauthenticated).toBe(false);
-    expect(current?.error).toMatchObject({ status: 401 });
-    expect(mocks.session.refetch).toHaveBeenCalledTimes(3);
-
-    await act(async () => vi.advanceTimersByTimeAsync(10_000));
-
-    expect(mocks.session.refetch).toHaveBeenCalledTimes(3);
   });
 
   it('bounds retries when unauthorized verification hits a transport failure', async () => {

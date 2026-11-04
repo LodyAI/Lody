@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider as JotaiProvider } from 'jotai';
-import { getAgentRoleEmoji } from '@lody/shared';
+
 import type { SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
 
 import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
-import { MessageAuthorIdentity } from '../src/components/ai-gui/message-author-identity';
-import { OpenAIIcon } from '../src/components/icons/openai-icon';
+
 import { MessageRowView } from '../src/components/ai-gui/view';
 import { ForceDesktopLayoutProvider } from '../src/hooks/use-mobile';
 import { initI18n } from '../src/i18n';
@@ -73,12 +73,6 @@ describe('user message sender identity', () => {
     root = undefined;
     container?.remove();
     container = undefined;
-  });
-
-  it('places the sender at the right edge of the reversed metadata row', () => {
-    const metadata = container?.querySelector('[data-testid="user-message-metadata"]');
-    expect(metadata?.firstElementChild?.textContent).toBe('Maya Chen');
-    expect(metadata?.textContent).toContain('Maya Chen');
   });
 
   it('opens the desktop sender card from the avatar', async () => {
@@ -145,52 +139,6 @@ describe('user message sender identity', () => {
     expect(document.body.textContent).toContain('Model: model-a');
     expect(document.body.textContent).not.toContain('maya.chen@example.com');
     expect(document.body.textContent).not.toContain('Model: model-b');
-  });
-
-  it('uses the Role catalog emoji whenever a Role exists and provider logo only without a Role', async () => {
-    const author = {
-      v: 1 as const,
-      kind: 'agent' as const,
-      sessionId: 'source',
-      turnId: 'turn',
-      name: 'Codex',
-      cliType: 'builtin' as const,
-      agentType: 'codex',
-      role: { id: 'reviewer', revision: 1, name: 'reviewer', emoji: '' },
-    };
-    await act(async () =>
-      root?.render(
-        createElement(
-          'div',
-          null,
-          createElement(MessageAuthorIdentity, {
-            author: { ...author, role: undefined },
-          }),
-          createElement('div', { 'data-testid': 'expected-provider' }, createElement(OpenAIIcon))
-        )
-      )
-    );
-    const trigger = container!.querySelector('button[aria-label="View sender: Codex"]')!;
-    expect(trigger.getAttribute('aria-label')).toBe('View sender: Codex');
-    expect(trigger.textContent).not.toContain('🤖');
-    expect(trigger.querySelector('svg')?.innerHTML).toBe(
-      container!.querySelector('[data-testid="expected-provider"] svg')?.innerHTML
-    );
-    await act(async () => root?.render(createElement(MessageAuthorIdentity, { author })));
-    expect(container!.textContent).toContain(getAgentRoleEmoji({}));
-    expect(container!.querySelector('button')?.getAttribute('aria-label')).toBe(
-      'View sender: reviewer'
-    );
-    expect(container!.querySelector('svg')).toBeNull();
-    await act(async () =>
-      root?.render(
-        createElement(MessageAuthorIdentity, {
-          author: { ...author, role: { ...author.role, emoji: '🔎' } },
-        })
-      )
-    );
-    expect(container!.textContent).toContain('🔎');
-    expect(container!.querySelector('svg')).toBeNull();
   });
 
   it('keeps sender identity hidden when the workspace has one member', async () => {

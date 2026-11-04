@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+/** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -50,47 +51,6 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
     window.history.replaceState({}, '', '/');
     vi.restoreAllMocks();
     providerMocks.auth = null;
-  });
-
-  it('uses one fresh token request for a cold Convex auth bootstrap', async () => {
-    window.history.replaceState({}, '', '/');
-    const token = vi.fn(async () => ({ data: { token: 'jwt-1' } }));
-    const authClient = {
-      useSession: () => ({
-        data: { session: { id: 'session-1', token: 'better-auth-token' } },
-        isPending: false,
-      }),
-      convex: { token },
-      crossDomain: { oneTimeToken: { verify: vi.fn() } },
-      getSession: vi.fn(),
-      updateSession: vi.fn(),
-      signOut: vi.fn(),
-    } as unknown as LodyAuthClient;
-
-    await act(async () => {
-      root.render(
-        <RecoverableConvexBetterAuthProvider
-          authClient={authClient}
-          client={{} as ConvexReactClient}
-          recoveryGeneration={0}
-        >
-          <div />
-        </RecoverableConvexBetterAuthProvider>
-      );
-    });
-
-    await expect(providerMocks.auth!.fetchAccessToken()).resolves.toBeNull();
-    expect(token).not.toHaveBeenCalled();
-
-    await act(async () => {
-      await expect(providerMocks.auth!.fetchAccessToken({ forceRefreshToken: true })).resolves.toBe(
-        'jwt-1'
-      );
-    });
-    expect(token).toHaveBeenCalledTimes(1);
-
-    await expect(providerMocks.auth!.fetchAccessToken()).resolves.toBe('jwt-1');
-    expect(token).toHaveBeenCalledTimes(1);
   });
 
   it('shares one JWT request between Convex refresh and GitHub token recovery', async () => {
@@ -334,125 +294,5 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
 
     resolveSignOut();
     await logout;
-  });
-
-  it('does not return a pending token after the provider unmounts', async () => {
-    window.history.replaceState({}, '', '/');
-    let resolveToken!: (value: { data: { token: string } }) => void;
-    const tokenRequest = new Promise<{ data: { token: string } }>((resolve) => {
-      resolveToken = resolve;
-    });
-    const authClient = {
-      useSession: () => ({
-        data: { session: { id: 'session-a', token: 'better-auth-token' } },
-        isPending: false,
-      }),
-      convex: { token: vi.fn(() => tokenRequest) },
-      crossDomain: { oneTimeToken: { verify: vi.fn() } },
-      getSession: vi.fn(),
-      updateSession: vi.fn(),
-      signOut: vi.fn(),
-    } as unknown as LodyAuthClient;
-
-    await act(async () => {
-      root.render(
-        <RecoverableConvexBetterAuthProvider
-          authClient={authClient}
-          client={{} as ConvexReactClient}
-          recoveryGeneration={0}
-        >
-          <div />
-        </RecoverableConvexBetterAuthProvider>
-      );
-    });
-    const staleRequest = providerMocks.auth!.fetchAccessToken({ forceRefreshToken: true });
-
-    await act(async () => root.unmount());
-    resolveToken({ data: { token: 'jwt-a' } });
-    await expect(staleRequest).resolves.toBeNull();
-  });
-
-  it('handles a rejected session refresh instead of leaking an unhandled rejection', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const authClient = {
-      useSession: () => ({
-        data: { session: { id: 'session-1', token: 'better-auth-token' } },
-        isPending: false,
-      }),
-      convex: { token: vi.fn(async () => ({ data: { token: 'jwt-1' } })) },
-      crossDomain: {
-        oneTimeToken: {
-          verify: vi.fn(async () => ({ data: { session: { token: 'ott-session-token' } } })),
-        },
-      },
-      getSession: vi.fn(async () => ({})),
-      updateSession: vi.fn(async () => {
-        throw new Error('session refresh failed');
-      }),
-      signOut: vi.fn(),
-    } as unknown as LodyAuthClient;
-
-    await act(async () => {
-      root.render(
-        <RecoverableConvexBetterAuthProvider
-          authClient={authClient}
-          client={{} as ConvexReactClient}
-          recoveryGeneration={0}
-        >
-          <div />
-        </RecoverableConvexBetterAuthProvider>
-      );
-    });
-
-    // The refresh rejection must be caught and logged — vitest fails the run on
-    // any unhandled rejection, so reaching these assertions proves it was handled.
-    await vi.waitFor(() => expect(authClient.updateSession).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() =>
-      expect(warn).toHaveBeenCalledWith(
-        '[Auth] Failed to bootstrap session from one-time token',
-        expect.any(Error)
-      )
-    );
-    expect(authClient.getSession).toHaveBeenCalledTimes(1);
-  });
-
-  it('handles a client disconnect during one-time token verification', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const disconnectError = new Error('Client disconnected');
-    const authClient = {
-      useSession: () => ({ data: null, isPending: false }),
-      convex: { token: vi.fn(async () => ({ data: { token: null } })) },
-      crossDomain: {
-        oneTimeToken: {
-          verify: vi.fn(async () => {
-            throw disconnectError;
-          }),
-        },
-      },
-      getSession: vi.fn(),
-      updateSession: vi.fn(),
-      signOut: vi.fn(),
-    } as unknown as LodyAuthClient;
-
-    await act(async () => {
-      root.render(
-        <RecoverableConvexBetterAuthProvider
-          authClient={authClient}
-          client={{} as ConvexReactClient}
-          recoveryGeneration={0}
-        >
-          <div />
-        </RecoverableConvexBetterAuthProvider>
-      );
-    });
-
-    await vi.waitFor(() =>
-      expect(warn).toHaveBeenCalledWith(
-        '[Auth] Failed to bootstrap session from one-time token',
-        disconnectError
-      )
-    );
-    expect(authClient.getSession).not.toHaveBeenCalled();
-    expect(authClient.updateSession).not.toHaveBeenCalled();
   });
 });

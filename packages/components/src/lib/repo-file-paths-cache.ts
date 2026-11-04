@@ -31,12 +31,7 @@ const RepoFilePathsResultSchema = z.object({
 const CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6h
 
 const memoryCache = new Map<string, RepoFilePathsCacheEntry>();
-type FetchFailureObserver = (error: unknown, durationMs: number) => void;
-type PendingFetch = {
-  promise: Promise<RepoFilePathsCacheEntry>;
-  onError?: FetchFailureObserver;
-};
-const inFlight = new Map<string, PendingFetch>();
+const inFlight = new Map<string, Promise<RepoFilePathsCacheEntry>>();
 
 const DB_NAME = 'lody:repo-file-paths';
 const DB_VERSION = 1;
@@ -114,23 +109,17 @@ export async function readCachedRepoFilePaths(
 }
 
 /**
- * Fetch now, sharing concurrent callers and the first supplied failure observer.
- * The observer runs once after token retries are exhausted, even if its UI unmounts.
+ * Fetch now, sharing concurrent callers without reporting failures to analytics.
  * Failures are not cached: a later call starts a new attempt, never a timed retry.
  */
 export function fetchRepoFilePaths(
   workspaceId: string,
   repoFullName: string,
-  branch?: string,
-  onError?: FetchFailureObserver
+  branch?: string
 ): Promise<RepoFilePathsCacheEntry> {
   const key = getRepoFilePathsCacheKey(workspaceId, repoFullName, branch);
   const pending = inFlight.get(key);
-  if (pending) {
-    pending.onError ??= onError;
-    return pending.promise;
-  }
-  const startedAt = Date.now();
+  if (pending) return pending;
   const request: Promise<RepoFilePathsCacheEntry> = withGitHubTokenRetry(
     workspaceId,
     repoFullName,
@@ -143,19 +132,10 @@ export function fetchRepoFilePaths(
       void idbSet(key, entry);
       return entry;
     })
-    .catch((error: unknown) => {
-      try {
-        attempt.onError?.(error, Date.now() - startedAt);
-      } catch {
-        // Observability must not replace the original failure for consumers.
-      }
-      throw error;
-    })
     .finally(() => {
-      if (inFlight.get(key) === attempt) inFlight.delete(key);
+      if (inFlight.get(key) === request) inFlight.delete(key);
     });
-  const attempt: PendingFetch = { promise: request, onError };
-  inFlight.set(key, attempt);
+  inFlight.set(key, request);
   return request;
 }
 

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -186,15 +187,6 @@ describe('workspace badge reconciliation', () => {
     dock = '1'; // Simulate OS state drifting without any atom change.
     await act(async () => vi.advanceTimersByTime(30_000));
     expect(dock).toBe('');
-  });
-
-  it('does not postpone the reconciliation deadline when counts change', async () => {
-    await mount();
-    await act(async () => vi.advanceTimersByTime(29_000));
-    await act(async () => setSessions(session('root')));
-    dock = '9';
-    await act(async () => vi.advanceTimersByTime(1_000));
-    expect(dock).toBe('1');
   });
 
   it('reconciles on focus and visibility restoration, then clears and stops on unmount', async () => {

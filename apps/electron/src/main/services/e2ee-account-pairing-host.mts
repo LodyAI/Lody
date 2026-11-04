@@ -122,6 +122,10 @@ export interface AccountPairingOwner {
       pairingSessionId: string
     }): Effect.Effect<unknown, unknown>
     acceptPersonalJoin(workspaceId: string, invitationHex: string): Effect.Effect<unknown, unknown>
+    acceptPersonalHistory(
+      workspaceId: string,
+      pages: readonly E2eeWorkspaceHistoryPage[]
+    ): Effect.Effect<unknown, unknown>
     pendingPersonalJoin(
       workspaceId: string
     ): Effect.Effect<{ offer: { pairingSessionId: string } } | null, unknown>
@@ -150,6 +154,10 @@ export function makeDesktopAccountPairingHost(input: {
   /** Display and routing hints for the account's encrypted workspaces. Every
    * workspace's genesis is still verified against its own ledger or request tag. */
   workspaces: () => readonly AccountPairingWorkspaceHint[]
+  /** Starts the main-owned member key delivery (distribute-only key round, per-device
+   * mailbox evidence, retry and status) for one device the verified ledger admitted.
+   * Must return at once; the approval never waits for delivery. */
+  deliverKeys?: (workspaceId: string, requestId: string, device: string) => void
   now?: () => number
 }) {
   const { cloud } = input
@@ -343,7 +351,13 @@ export function makeDesktopAccountPairingHost(input: {
               workspaceId,
               credential
             }))
-          )
+          ),
+        ...(input.deliverKeys
+          ? {
+              deliverKeys: (device: Uint8Array, requestId: string) =>
+                Effect.sync(() => input.deliverKeys!(workspaceId, requestId, hex(device)))
+            }
+          : {})
       })
     }
     return result
@@ -380,51 +394,57 @@ export function makeDesktopAccountPairingHost(input: {
               true
             )
           }),
-        accept: (invitation, admissionRecordHash) =>
-          Effect.gen(function* () {
-            // The approval tag authenticated this record hash; the endorser is the
-            // signer of exactly that record in the verified ledger.
-            const checked = yield* verified(hint)
-            const record = checked.pages
-              .flatMap((page) => page.recordsHex)
-              .map(raw)
-              .find((bytes) => hex(hashRecordBytes(bytes).toBytes()) === hex(admissionRecordHash))
-            if (!record) return yield* Effect.fail(fail('missing-binding'))
-            const decoded = decodeRecord(record)
-            if (Result.isFailure(decoded) || decoded.success.body.type !== 'ordinary')
-              return yield* Effect.fail(fail('invalid-ledger'))
-            const memberId = membershipId ?? (yield* ownMembership(checked.view))
-            const pin = {
-              version: 1 as const,
-              workspaceId,
-              genesisHash: hint.genesisHash,
-              genesisRecordHex: genesisRecordHex ?? checked.pin.genesisRecordHex,
-              endorser: hex(decoded.success.body.signer.toBytes()),
-              membershipId: memberId,
-              // A stable, request-independent session for the existing join journal.
-              pairingSessionId: hex(admissionRecordHash).slice(0, 32)
-            }
-            // An unrelated unfinished per-workspace exchange keeps its own journal
-            // row: report this workspace as blocked instead of overwriting it.
-            const pending = yield* owner(workspaceId, (current) =>
-              current.bootstrap.pendingPersonalJoin(workspaceId)
-            )
-            if (pending && pending.offer.pairingSessionId !== pin.pairingSessionId)
-              return yield* Effect.fail(fail('pairing-journal-busy'))
-            yield* owner(workspaceId, (current) => current.bootstrap.preparePersonalJoin(pin), true)
-            yield* owner(workspaceId, (current) =>
-              current.bootstrap.acceptPersonalJoin(workspaceId, hex(invitation))
-            )
-            // Like the per-workspace claim: open, refresh and install current keys
-            // now. Best effort: opening the workspace later repeats this.
-            yield* activate(workspaceId).pipe(
-              Effect.catch((error) =>
-                Effect.sync(() => rememberDesktopE2eeFailure('account-pairing-activate', error))
-              )
-            )
-            return undefined
-          })
+        accept: (invitation, admissionRecordHash) => install(admissionRecordHash, invitation),
+        // A Member approver sends no invitation: install from the verified full history.
+        acceptHistory: (admissionRecordHash) => install(admissionRecordHash, null)
       })
+      function install(admissionRecordHash: Uint8Array, invitation: Uint8Array | null) {
+        return Effect.gen(function* () {
+          // The approval tag authenticated this record hash; the endorser is the
+          // signer of exactly that record in the verified ledger.
+          const checked = yield* verified(hint)
+          const record = checked.pages
+            .flatMap((page) => page.recordsHex)
+            .map(raw)
+            .find((bytes) => hex(hashRecordBytes(bytes).toBytes()) === hex(admissionRecordHash))
+          if (!record) return yield* Effect.fail(fail('missing-binding'))
+          const decoded = decodeRecord(record)
+          if (Result.isFailure(decoded) || decoded.success.body.type !== 'ordinary')
+            return yield* Effect.fail(fail('invalid-ledger'))
+          const memberId = membershipId ?? (yield* ownMembership(checked.view))
+          const pin = {
+            version: 1 as const,
+            workspaceId,
+            genesisHash: hint.genesisHash,
+            genesisRecordHex: genesisRecordHex ?? checked.pin.genesisRecordHex,
+            endorser: hex(decoded.success.body.signer.toBytes()),
+            membershipId: memberId,
+            // A stable, request-independent session for the existing join journal.
+            pairingSessionId: hex(admissionRecordHash).slice(0, 32)
+          }
+          // An unrelated unfinished per-workspace exchange keeps its own journal
+          // row: report this workspace as blocked instead of overwriting it.
+          const pending = yield* owner(workspaceId, (current) =>
+            current.bootstrap.pendingPersonalJoin(workspaceId)
+          )
+          if (pending && pending.offer.pairingSessionId !== pin.pairingSessionId)
+            return yield* Effect.fail(fail('pairing-journal-busy'))
+          yield* owner(workspaceId, (current) => current.bootstrap.preparePersonalJoin(pin), true)
+          yield* owner(workspaceId, (current) =>
+            invitation
+              ? current.bootstrap.acceptPersonalJoin(workspaceId, hex(invitation))
+              : current.bootstrap.acceptPersonalHistory(workspaceId, checked.pages)
+          )
+          // Like the per-workspace claim: open, refresh and install current keys
+          // now. Best effort: opening the workspace later repeats this.
+          yield* activate(workspaceId).pipe(
+            Effect.catch((error) =>
+              Effect.sync(() => rememberDesktopE2eeFailure('account-pairing-activate', error))
+            )
+          )
+          return undefined
+        })
+      }
     }
     return result
   })

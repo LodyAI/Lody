@@ -38,5 +38,5 @@ Shiki 高亮器启动时只加载默认层。启用扩展后，某种可选语�
 - 实现：[语言分层](../packages/components/src/lib/markdown-highlighter.ts)、[Markdown 语言解析](../packages/components/src/components/ai-gui/markdown-code-highlight.ts)、[Monaco 语言加载](../packages/components/src/lib/session-monaco-languages.ts) 和 [外观设置](../packages/components/src/components/settings/appearance-setting.tsx)。
 - 文件语言边界：[会话文件语言映射](../packages/components/src/lib/session-file-language.ts)。
 - Coq 文件预览：[Shiki 文件查看器](../packages/components/src/components/sessions/session-shiki-text-viewer.tsx)。
-- 验证：[会话文件语言测试](../packages/components/tests/session-file-language.test.ts)、[Markdown 语言测试](../packages/components/tests/markdown-code-highlight.test.ts) 和 [高亮 Worker 客户端测试](../packages/components/tests/markdown-highlight-client.test.ts)。
+- 验证：[会话文件语言测试](../packages/components/tests/session-file-language.test.ts)、[Markdown 语言测试](../packages/components/tests/markdown-code-highlight.test.ts) 和 高亮 Worker 客户端测试（实现细节测试已退役）。
 - 决策记录：[扩展语言包记录](../.agents/notes/implemented/feature/2026-10-01-extended-code-language-pack.zh.md)和[Coq 文件预览后续记录](../.agents/notes/implemented/feature/2026-10-02-coq-file-preview-rendering.zh.md)。

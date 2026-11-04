@@ -45,7 +45,7 @@ import {
   type UploadedSessionFile,
 } from './session-attachment-transfer';
 import { handleMemoryProviderRequest } from './memory-providers';
-import { readMessageAuthor } from '@lody/shared';
+import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
 import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
@@ -123,6 +123,7 @@ import {
   type ChatFailedReason,
   type ProjectRef,
   type SessionPreparationCancelSpec,
+  getProjectRefBranch,
   resolveBaseBranchPreference,
   MachineStatusRequestValidated,
   MachinePingRequestValidated,
@@ -411,6 +412,9 @@ import {
   type LocalWorkspaceCatalogService,
 } from '@/lib/local-workspace-catalog';
 import { resolveSessionLiveStatus } from './session-live-status';
+import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
+import { truncateToolTitleForHistory } from '@lody/shared';
+import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
 import type { MemoryPressureEvictionResult } from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
@@ -749,6 +753,14 @@ export class MessageHandler {
   private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
   private readonly archiveInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
+  /**
+   * Latest output time and running tool title per Session, for on-demand live
+   * activity reads. One small entry per Session; never published.
+   */
+  private readonly liveActivityBySession = new Map<
+    SessionId,
+    { lastOutputAt: number; actionToolCallId?: string; actionTitle?: string }
+  >();
   private readonly worktreeGc: WorktreeGarbageCollector;
   private worktreeGcTimer: NodeJS.Timeout | null = null;
   private detachWorktreeGcSyncListener: (() => void) | null = null;
@@ -884,7 +896,17 @@ export class MessageHandler {
     this.store.get(sessionId).lastActivityMs = Date.now();
   }
 
-  private readonly preferredBaseBranch = (process.env.LODY_BASE_BRANCH || 'main').trim() || 'main';
+  /** Operator override only; Git diff bases otherwise use the repository default. */
+  private readonly configuredBaseBranch = process.env.LODY_BASE_BRANCH?.trim() || undefined;
+
+  private readonly preferredBaseBranch = this.configuredBaseBranch ?? 'main';
+
+  /** Unlike `resolveGitHubProjectBranch`, never assumes `main` for a missing base. */
+  private resolveDiffBaseBranch(meta: SessionMeta | undefined): string | undefined {
+    return (
+      meta?.baseBranch?.trim() || getProjectRefBranch(meta?.project) || this.configuredBaseBranch
+    );
+  }
 
   private resolveGitHubProjectBranch(
     meta: SessionMeta | undefined,
@@ -2435,9 +2457,39 @@ export class MessageHandler {
     return promptBlocks;
   }
 
+  /**
+   * Provenance header for an agent-authored input. Best effort: any read failure
+   * omits the header and the turn proceeds with its unchanged text.
+   */
+  private async readAgentSenderHeader(
+    sessionId: SessionId,
+    userTurnId: string | undefined
+  ): Promise<string | undefined> {
+    if (!userTurnId) return undefined;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      const input = await backend.history.readTurn(userTurnId);
+      if (input.state !== 'ready' || input.turn.role !== 'user') return undefined;
+      const author = readMessageAuthor(input.turn.author);
+      if (author?.kind !== 'agent') return undefined;
+      const source = await this.workspaceDocument.repo
+        .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
+        .catch(() => undefined);
+      const title = (source?.meta as SessionMeta | undefined)?.title;
+      return formatAgentSenderHeader(author, title);
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Omitting sender provenance for ${userTurnId}: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   private async buildAcpPromptBlocks(args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
+    userTurnId?: string;
     inputBlocks: SessionInputBlock[];
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
@@ -2507,7 +2559,13 @@ export class MessageHandler {
     });
 
     // Build the full text prompt: comment references first, then user text
-    const allTextParts = [...commentRefTexts, ...visualAnnotationRefTexts, ...textParts];
+    const senderHeader = await this.readAgentSenderHeader(args.sessionId, args.userTurnId);
+    const allTextParts = [
+      ...(senderHeader ? [senderHeader] : []),
+      ...commentRefTexts,
+      ...visualAnnotationRefTexts,
+      ...textParts,
+    ];
     const textPrompt = appendIssuePrMentionsToPrompt(
       allTextParts.join('\n\n'),
       args.issuePRMentions
@@ -2702,6 +2760,53 @@ export class MessageHandler {
   // Single access choke point for prompt-handoff steer: both RPC arrival paths
   // (Loro Streams deps callback and local Machine RPC switch) route through here
   // so neither can bypass machine/local-project verification.
+  /**
+   * Best-effort withdrawal of a queued Agent input. Only the requesting Session's
+   * own input that is still pending is canceled, with the same not-yet-started
+   * guard dispatch respects; a dispatch already under way may still run it.
+   */
+  private async withdrawQueuedInput(args: {
+    sessionId: SessionId;
+    userTurnId: string;
+    requesterSessionId: SessionId;
+  }): Promise<SessionWithdrawInputResponse> {
+    const response = (
+      outcome: SessionWithdrawInputResponse['outcome'],
+      error?: string
+    ): SessionWithdrawInputResponse => ({
+      type: 'session/withdraw-input_response',
+      sessionId: args.sessionId,
+      userTurnId: args.userTurnId,
+      outcome,
+      ...(error ? { error } : {}),
+    });
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      const input = await backend.history.readTurn(args.userTurnId);
+      if (input.state !== 'ready' || input.turn.role !== 'user') return response('not_found');
+      const author = readMessageAuthor(input.turn.author);
+      if (author?.kind !== 'agent' || author.sessionId !== args.requesterSessionId)
+        return response('not_owner');
+      // Idempotent for a retried withdrawal or replace: the input will not run.
+      if (input.turn.status === 'canceled') return response('already_withdrawn');
+      // Same guard as `onlyAwaitingStart`: pending or seen means no execution claimed it.
+      if (input.turn.status !== 'pending' && input.turn.status !== 'seen')
+        return response('already_started');
+      const result = await backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: args.userTurnId,
+        status: 'canceled',
+        onlyAwaitingStart: true,
+      });
+      if (!result.matched) return response('already_started');
+      this.sessionDispatchWatcher.discardRpcTurn(args.sessionId, args.userTurnId);
+      return response('withdrawn');
+    } catch (error) {
+      return response('error', formatErrorMessage(error));
+    }
+  }
+
   private async steerSessionWithAccessCheck(
     args: Parameters<SessionExecutionService['steerSession']>[0]
   ): ReturnType<SessionExecutionService['steerSession']> {
@@ -3074,7 +3179,7 @@ export class MessageHandler {
       logger: this.logger,
       workspaceDocument: this.workspaceDocument,
       workspaceId: this.workspaceId,
-      preferredBaseBranch: this.preferredBaseBranch,
+      preferredBaseBranch: this.configuredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
     });
     this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
@@ -3431,11 +3536,12 @@ export class MessageHandler {
               )
             ),
         },
-        getMachineStatus: async () =>
+        getMachineStatus: async (args) =>
           await this.executionService.getMachineStatus({
             type: 'machine/status',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
+            ...(args?.includeDisk ? { includeDisk: true as const } : {}),
           }),
         getPreviewControl: async () => ({
           type: 'machine/preview-control_response',
@@ -3583,7 +3689,20 @@ export class MessageHandler {
             error: result.error,
           };
         },
-        getSessionLiveStatus: async ({ sessionId }) => this.readSessionLiveStatus(sessionId),
+        getSessionLiveStatus: async ({ sessionId, includeActivity }) =>
+          await this.readSessionLiveStatus(sessionId, includeActivity === true),
+        withdrawSessionInput: async ({ userId, ...args }) => {
+          const access = await this.verifySessionMachineAccess(args.sessionId, userId);
+          if (access.outcome !== 'allowed')
+            return {
+              type: 'session/withdraw-input_response' as const,
+              sessionId: args.sessionId,
+              userTurnId: args.userTurnId,
+              outcome: 'error' as const,
+              error: `Withdraw access verification ${access.outcome}`,
+            };
+          return await this.withdrawQueuedInput(args);
+        },
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -4767,6 +4886,73 @@ export class MessageHandler {
     );
   }
 
+  private recordLiveActivity(sessionId: SessionId, notification: AcpSessionNotification): void {
+    const previous = this.liveActivityBySession.get(sessionId);
+    const update = notification.update as {
+      sessionUpdate: string;
+      toolCallId?: string;
+      title?: string | null;
+      status?: string | null;
+    };
+    let actionToolCallId = previous?.actionToolCallId;
+    let actionTitle = previous?.actionTitle;
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+      const finished = update.status === 'completed' || update.status === 'failed';
+      if (finished && actionToolCallId === update.toolCallId) {
+        actionToolCallId = undefined;
+        actionTitle = undefined;
+      } else if (!finished && update.toolCallId && update.title) {
+        actionToolCallId = update.toolCallId;
+        actionTitle = Array.from(truncateToolTitleForHistory(update.title)).slice(0, 200).join('');
+      }
+    }
+    this.liveActivityBySession.set(sessionId, {
+      lastOutputAt: Date.now(),
+      ...(actionTitle ? { actionToolCallId, actionTitle } : {}),
+    });
+  }
+
+  /**
+   * Best-effort activity of a busy Session from local state. Any failure omits
+   * it, so the caller keeps the ordinary live status.
+   */
+  private async readSessionLiveActivity(
+    sessionId: SessionId
+  ): Promise<SessionLiveActivity | undefined> {
+    const execution = this.executionService.getExecutionSnapshot(sessionId);
+    if (!execution.hasActiveTurn || !execution.activeTurnId) return undefined;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const history = (await this.getSessionBackend(sessionDoc)).history;
+      const total = await history.count();
+      let turnStartedAt: number | undefined;
+      let queuedInputs = 0;
+      // Shallow rows only: queued inputs follow the running turn, within a bounded tail.
+      const rows = await history.readDirectory(Math.max(0, total - 50), total);
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index]?.scalars;
+        if (!row) continue;
+        if (row.id === execution.activeTurnId) {
+          const started = Date.parse(row.timestamp);
+          if (Number.isFinite(started)) turnStartedAt = started;
+          break;
+        }
+        if (row.role === 'user' && (row.status === 'pending' || row.status === 'pending_apply'))
+          queuedInputs += 1;
+      }
+      const tracked = this.liveActivityBySession.get(sessionId);
+      return {
+        ...(turnStartedAt !== undefined ? { turnStartedAt } : {}),
+        ...(tracked ? { lastOutputAt: tracked.lastOutputAt } : {}),
+        ...(tracked?.actionTitle ? { currentAction: tracked.actionTitle } : {}),
+        queuedInputs,
+      };
+    } catch (error) {
+      this.logger.debug(`[${sessionId}] Live activity unavailable: ${formatErrorMessage(error)}`);
+      return undefined;
+    }
+  }
+
   private enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void {
     if (this.deletedSessionIds.has(sessionId)) {
       this.logger.debug(
@@ -4778,6 +4964,7 @@ export class MessageHandler {
       return;
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
+    if (target) this.recordLiveActivity(sessionId, update);
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -6764,13 +6951,14 @@ export class MessageHandler {
                 : 'permission_denied',
             message: 'Session file root is unavailable.',
           };
+        const allChangesBaseBranch = this.resolveDiffBaseBranch(ownerMeta);
         return {
           ok: true,
           ownerSessionId,
           workspaceRoot: selected.absolutePath,
           fileRoots,
           projectRun: rootId === 'main' ? ownerMeta?.projectRun : undefined,
-          allChangesBaseBranch: this.resolveGitHubProjectBranch(ownerMeta),
+          ...(allChangesBaseBranch === undefined ? {} : { allChangesBaseBranch }),
         };
       }
       if (resolved.error === 'session_not_found') {
@@ -6986,12 +7174,14 @@ export class MessageHandler {
               execution: this.executionService.getExecutionSnapshot(sessionId),
               hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
             });
+            const activity = await this.readSessionLiveActivity(sessionId);
             return {
               sessionId,
               machineOnline: true,
               fresh: true,
               state: live.state,
               observedAt: getServerNow(),
+              ...(activity ? { activity } : {}),
             };
           },
           cancelSession: async (sessionId, turnId) => {
@@ -7011,6 +7201,7 @@ export class MessageHandler {
           },
           readActiveTurnId: (sessionId) =>
             this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
+          withdrawQueuedInput: async (args) => await this.withdrawQueuedInput(args),
           steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
           dispatchSession: async (sessionId, input) => {
             if (input?.inputOrigin === 'human')
@@ -7068,9 +7259,11 @@ export class MessageHandler {
     };
   }
 
-  private readSessionLiveStatus(
-    sessionId: SessionId
-  ): import('@lody/loro-streams-rpc').LoroSessionLiveStatusRpcResponse {
+  private async readSessionLiveStatus(
+    sessionId: SessionId,
+    includeActivity = false
+  ): Promise<import('@lody/loro-streams-rpc').LoroSessionLiveStatusRpcResponse> {
+    const activity = includeActivity ? await this.readSessionLiveActivity(sessionId) : undefined;
     const liveStatus = resolveSessionLiveStatus({
       presence: this.sessionActivePresence.getStatus(sessionId),
       execution: this.executionService.getExecutionSnapshot(sessionId),
@@ -7083,6 +7276,7 @@ export class MessageHandler {
       success: true,
       ...liveStatus,
       observedAtMs: getServerNow(),
+      ...(activity ? { activity } : {}),
     };
   }
 
@@ -7109,6 +7303,7 @@ export class MessageHandler {
           type: 'machine/status',
           machineId: this.machineId,
           workspaceId: this.workspaceId,
+          ...(request.params.includeDisk ? { includeDisk: true as const } : {}),
         });
       case 'machine/ping':
         return this.executionService.pingMachine({
@@ -7125,7 +7320,10 @@ export class MessageHandler {
           ...request.params,
         });
       case 'session/live-status':
-        return this.readSessionLiveStatus(request.params.sessionId as SessionId);
+        return await this.readSessionLiveStatus(
+          request.params.sessionId as SessionId,
+          request.params.includeActivity === true
+        );
       case 'file/download-chunk':
         await assertOwner(request.params.sessionId as SessionId);
         return this.filePreviewService.downloadFileChunk(request.params);
@@ -10321,12 +10519,16 @@ export class MessageHandler {
       this.workspaceId,
       this.machineId
     );
-    return Object.fromEntries(
-      Object.entries(projects).map(([localProjectId, project]) => [
-        localProjectId as LocalProjectId,
-        project.rootPath,
-      ])
-    ) as Record<LocalProjectId, string>;
+    const rootPaths: Record<string, string> = {};
+    for (const [localProjectId, project] of Object.entries(projects)) {
+      // Legacy machine meta is not validated on read, so a row can omit rootPath.
+      const rootPath = (project as { rootPath?: unknown } | undefined)?.rootPath;
+      if (typeof rootPath !== 'string') continue;
+      const trimmed = rootPath.trim();
+      if (!trimmed) continue;
+      rootPaths[localProjectId] = trimmed;
+    }
+    return rootPaths as Record<LocalProjectId, string>;
   }
 
   private async upsertLocalProjectMetaInCurrentWorkspace(entry: {

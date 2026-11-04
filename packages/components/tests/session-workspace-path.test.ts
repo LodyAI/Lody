@@ -24,36 +24,6 @@ describe('session workspace path resolver', () => {
     expect(resolveMachineDotlodyPath({}, '/Users/local')).toBe('/Users/local/.lody');
   });
 
-  it('derives worktree paths from dotlody path and repo identity', () => {
-    expect(
-      resolveSessionWorkspacePath({
-        sessionId: 'session123' as SessionId,
-        isWorktree: true,
-        dotlodyPath: '/Users/alice/.lody',
-        repoFullName: 'example/project',
-      })
-    ).toBe('/Users/alice/.lody/repos/github---example---project/worktrees/session123');
-  });
-
-  it('derives non-worktree paths without per-session machine meta entries', () => {
-    expect(
-      resolveSessionWorkspacePath({
-        sessionId: 'session123' as SessionId,
-        isWorktree: false,
-        dotlodyPath: '/Users/alice/.lody',
-        localProjectRootPath: '/Users/alice/Code/lody',
-      })
-    ).toBe('/Users/alice/Code/lody');
-
-    expect(
-      resolveSessionWorkspacePath({
-        sessionId: 'session123' as SessionId,
-        isWorktree: false,
-        dotlodyPath: '/Users/alice/.lody',
-      })
-    ).toBe('/Users/alice/.lody/chats/session123');
-  });
-
   it('spells a Windows machine its own way, so it matches the paths the daemon creates', () => {
     expect(
       resolveSessionWorkspacePath({

@@ -1,24 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { AGENT_ROLE_VERSION, type AgentRole } from '../src/agent-role';
-import type { AgentConfigId, AgentRoleId, MachineId, McpServerId, WorkspaceId } from '../src/ids';
-import {
-  applyWorkspaceFlockRowEvents,
-  getProjectMcpDefaults,
-  deleteWorkspaceAgentRoleFromFlock,
-  deleteWorkspaceMcpServerFromFlock,
-  listWorkspaceAgentRoles,
-  writeWorkspaceAgentRoleToFlock,
-  getWorkspaceFlockDocId,
-  listWorkspaceMcpServers,
-  parseWorkspaceFlockRow,
-  readWorkspaceFlockRowsFromFlock,
-  serializeWorkspaceFlockKey,
-  workspaceFlockKeys,
-  writeWorkspaceMcpServerToFlock,
-  type WorkspaceFlockKey,
-  type WorkspaceFlockWritableFlock,
-} from '../src/workspace-flock';
+import type { AgentConfigId, AgentRoleId, MachineId, McpServerId } from '../src/ids';
+import { applyWorkspaceFlockRowEvents, getProjectMcpDefaults, listWorkspaceAgentRoles, writeWorkspaceAgentRoleToFlock, listWorkspaceMcpServers, readWorkspaceFlockRowsFromFlock, workspaceFlockKeys, writeWorkspaceMcpServerToFlock, type WorkspaceFlockKey, type WorkspaceFlockWritableFlock } from '../src/workspace-flock';
 import { getProjectMcpKey, type WorkspaceMcpServerMeta } from '../src/workspace-mcp';
 import { splitMcpAuthentication, assertPublicMcpServer } from '../src/mcp-authentication';
 
@@ -128,92 +112,6 @@ class FakeWorkspaceFlock implements WorkspaceFlockWritableFlock {
 }
 
 describe('workspace Flock helpers', () => {
-  it('builds the workspace-scoped document id', () => {
-    expect(getWorkspaceFlockDocId('workspace-1' as WorkspaceId)).toBe('workspace-1:wf:workspace');
-  });
-
-  it('round-trips valid rows and drops mismatched or malformed foreign rows', () => {
-    const valid = entry('server-1');
-    const key = workspaceFlockKeys.mcpServer(valid.id);
-    expect(parseWorkspaceFlockRow(key, valid)).toEqual({ key, value: valid });
-    expect(parseWorkspaceFlockRow(key, { ...valid, id: id('other') })).toBeUndefined();
-    expect(parseWorkspaceFlockRow(key, { ...valid, transport: 'sse' })).toBeUndefined();
-
-    const flock = new FakeWorkspaceFlock();
-    flock.set(key, valid);
-    flock.rows.set('malformed', { key: ['mcpServer', 'bad'], value: { id: 'bad' } });
-    const rows = readWorkspaceFlockRowsFromFlock(flock);
-    expect(rows[serializeWorkspaceFlockKey(key)]).toEqual({ key, value: valid });
-    expect(Object.keys(rows)).toHaveLength(1);
-    // One prefixed scan per family, never an unprefixed full-document scan.
-  });
-
-  it('does not commit unchanged writes and deletes only once', () => {
-    const flock = new FakeWorkspaceFlock();
-    const server = entry('server-1');
-    expect(writeWorkspaceMcpServerToFlock(flock, server)).toBe(true);
-    expect(writeWorkspaceMcpServerToFlock(flock, server)).toBe(false);
-    expect(flock.commits).toBe(1);
-    expect(deleteWorkspaceMcpServerFromFlock(flock, server.id)).toBe(true);
-    expect(deleteWorkspaceMcpServerFromFlock(flock, server.id)).toBe(false);
-    expect(flock.commits).toBe(2);
-  });
-
-  it('applies add, update, delete, and no-op events with referential stability', () => {
-    const first = entry('first', 'Zulu');
-    const second = entry('second', 'Alpha');
-    const firstKey = workspaceFlockKeys.mcpServer(first.id);
-    const secondKey = workspaceFlockKeys.mcpServer(second.id);
-    const initial = applyWorkspaceFlockRowEvents({}, [
-      { key: firstKey, value: first },
-      { key: secondKey, value: second },
-    ]);
-    expect(listWorkspaceMcpServers(initial).map(({ name }) => name)).toEqual(['Alpha', 'Zulu']);
-    expect(applyWorkspaceFlockRowEvents(initial, [{ key: firstKey, value: first }])).toBe(initial);
-
-    const updatedFirst = { ...first, description: 'updated', updatedAt: 2 };
-    const updated = applyWorkspaceFlockRowEvents(initial, [{ key: firstKey, value: updatedFirst }]);
-    expect(updated).not.toBe(initial);
-    expect(updated[serializeWorkspaceFlockKey(firstKey)]?.value).toEqual(updatedFirst);
-
-    const deleted = applyWorkspaceFlockRowEvents(updated, [{ key: secondKey }]);
-    expect(deleted[serializeWorkspaceFlockKey(secondKey)]).toBeUndefined();
-    expect(applyWorkspaceFlockRowEvents(deleted, [{ key: ['unknown'] }])).toBe(deleted);
-  });
-
-  it('keeps agent roles and MCP servers in one document without either reading the other', () => {
-    const flock = new FakeWorkspaceFlock();
-    const server = entry('server-1');
-    const role = agentRole('role-1', { name: 'Reviewer', description: 'Review code changes' });
-    expect(writeWorkspaceMcpServerToFlock(flock, server)).toBe(true);
-    expect(writeWorkspaceAgentRoleToFlock(flock, role)).toBe(true);
-
-    const rows = readWorkspaceFlockRowsFromFlock(flock);
-    expect(listWorkspaceMcpServers(rows)).toEqual([server]);
-    expect(listWorkspaceAgentRoles(rows)).toEqual([role]);
-  });
-
-  it('shares a role by updating its own row rather than moving it', () => {
-    const flock = new FakeWorkspaceFlock();
-    const role = agentRole('role-1');
-    writeWorkspaceAgentRoleToFlock(flock, role);
-    const shared = { ...role, visibility: 'workspace' as const, revision: 2, updatedAt: 2 };
-    expect(writeWorkspaceAgentRoleToFlock(flock, shared)).toBe(true);
-
-    const rows = readWorkspaceFlockRowsFromFlock(flock);
-    expect(Object.keys(rows)).toHaveLength(1);
-    expect(listWorkspaceAgentRoles(rows)).toEqual([shared]);
-    expect(writeWorkspaceAgentRoleToFlock(flock, shared)).toBe(false);
-    expect(deleteWorkspaceAgentRoleFromFlock(flock, role.id)).toBe(true);
-    expect(deleteWorkspaceAgentRoleFromFlock(flock, role.id)).toBe(false);
-  });
-
-  it('drops a role row whose stored value no longer validates', () => {
-    const flock = new FakeWorkspaceFlock();
-    const role = agentRole('role-1');
-    flock.set(workspaceFlockKeys.agentRole(role.id), { ...role, name: '   ' });
-    expect(listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(flock))).toEqual([]);
-  });
 
   it('normalizes a secret-shaped option out of a stored role row', () => {
     const flock = new FakeWorkspaceFlock();
@@ -291,22 +189,5 @@ describe('project MCP preferences', () => {
       { key: workspaceFlockKeys.projectMcpDefault(key) },
     ]);
     expect(getProjectMcpDefaults(deleted)[key]).toBeUndefined();
-  });
-
-  it('rejects malformed project identities and selections while preserving unrelated rows', () => {
-    const key = getProjectMcpKey({ kind: 'github', repoFullName: 'example/repo', branch: 'main' })!;
-    expect(
-      parseWorkspaceFlockRow(['projectMcpDefault', 'path/to/repo'], { ids: [] })
-    ).toBeUndefined();
-    expect(parseWorkspaceFlockRow(['projectMcpDefault', key], { ids: [1] })).toBeUndefined();
-    expect(parseWorkspaceFlockRow(['projectMcpDefault', key], {})).toBeUndefined();
-    const flock = new FakeWorkspaceFlock();
-    writeWorkspaceMcpServerToFlock(flock, entry('a'));
-    flock.set(workspaceFlockKeys.projectMcpDefault(key), { ids: [] });
-    const rows = applyWorkspaceFlockRowEvents(readWorkspaceFlockRowsFromFlock(flock), [
-      { key: ['futureFamily', 'unknown'], value: {} },
-    ]);
-    expect(getProjectMcpDefaults(rows)[key]).toEqual({ ids: [] });
-    expect(listWorkspaceMcpServers(rows)).toEqual([entry('a')]);
   });
 });

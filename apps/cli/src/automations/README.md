@@ -12,7 +12,7 @@ replace the Session as the continuation target.
 | Agent guidance      | [MCP skill](../mcp/skills/lody-automations/SKILL.md)                                                                                                | Progressive workflow, data references, runnable example and generated API schemas             |
 | Persistence         | [ledger](storage/ledger.ts)                                                                                                                         | Waits, results, fixed continuation identities, source observations and native unfinished work |
 | Scheduling          | [runtime](runtime/engine.ts)                                                                                                                        | Reevaluation, expiry, submission fencing, reconciliation and cancellation                     |
-| JavaScript          | [programs](programs/codemode.ts)                                                                                                                     | CodeMode interpreter and scoped read capability                                              |
+| JavaScript          | [programs](programs/codemode.ts)                                                                                                                    | CodeMode interpreter and scoped read capability                                               |
 | Product policy      | [Session policies](policies/session.ts)                                                                                                             | Fixed merge/archive, quota/recovery and idle/compact behavior                                 |
 | Resource effects    | [Session adapter](actions/session-actions-legacy.ts)                                                                                                | Existing queue, permissions, native continuation and compaction                               |
 | Composition         | [workspace](workspace-legacy.ts)                                                                                                                    | Fleet lifetime, local control and existing source owners                                      |
@@ -121,7 +121,9 @@ existing collaboration control; admission then rechecks permissions, the Session
 captured source evidence before submitting the same continuation. Cancel revokes that intent. The [Stop and observation decision](../../../../.agents/notes/implemented/bug-fix/2026-10-30-automation-pending-observations-and-stop.md) explains this admission boundary.
 
 A lost submission acknowledgement triggers reconciliation of the same turn, not
-another prompt. `matched` means the condition finished; the nested `continuation`
+another prompt. Automation queue admission publishes the control document frontier with its
+wake signal; reconciliation re-publishes the signal for an existing queued input after
+an interrupted handoff ([queue activation decision](../../../../.agents/notes/proposed/bug-fix/2026-11-02-automation-idle-queue.md)). `matched` means the condition finished; the nested `continuation`
 reports whether delivery is queued, running, blocked or settled. Cancel first
 revokes future admission, interrupts an active check and joins cleanup. If a result
 already created work, it cancels that exact input through its owner. Completed work

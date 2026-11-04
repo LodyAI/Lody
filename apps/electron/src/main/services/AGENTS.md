@@ -119,6 +119,7 @@ Bad keys allow ledger open; core repairs.
 Isolate verification/storage errors; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
 Conflicts refuse fallback. Failed close retains its fence; report restart-required.
+Opens join a still-closing workspace's drain once, outside the lock; never `closed`.
 Fixed cloud refs; auth/bound/abort; fence late disposed calls.
 Keep uncertain bytes; raw/SDK causes never leave main.
 Verified reads beat lost ACKs; cleanup retains admission.
@@ -138,5 +139,6 @@ Only rotate resumes candidates. Keep errors transport-free.
 Machine sharing uses the lazy native host in `packages/e2ee-machine-sharing`.
 Passive cache inspection uses existing entries only; never call openWorkspace or
 readMachineSharing from that path. Counts are diagnostic, not execution authority.
-Policy errors affect dependent execution only. Narrow read/update methods keep keys
+Policy errors affect dependent execution only. Invalidate sharing before exposing changed
+verified ledger heads/counts; unchanged ingest preserves cache freshness. Narrow read/update methods keep keys
 and device credentials in main. See the [policy decision](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).

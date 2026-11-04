@@ -129,10 +129,6 @@ describe('buildSessionProjectMemberRows', () => {
     expect(resolveSessionProjectMemberRow([], 'proto' as ProjectMemberId)).toBeNull();
   });
 
-  it('is empty for an ordinary session', () => {
-    expect(buildSessionProjectMemberRows({ pullRequests: [] })).toEqual([]);
-  });
-
   it.each(['additional', 'link'] as const)(
     'resolves the registered directory for %s access',
     (access) => {

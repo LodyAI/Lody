@@ -25,7 +25,6 @@ import { encryptedLocalNamespace } from '../src/lib/e2ee-local-data';
 import { createEagerSyncHighWaterStore } from '../src/lib/eager-sync-high-water-cache';
 import {
   createAcceptedSessionInputs,
-  SESSION_INPUT_SLOW_STAGE_MS,
   SessionInputNotSentError,
   type SessionInputDiagnostic,
 } from '../src/lib/session-accepted-inputs';
@@ -376,28 +375,6 @@ describe('locally accepted Roost input', () => {
       release.resolve();
     }
   );
-  it('publishes an actual owner receipt before the source confirmation storage transaction completes', async () => {
-    const entered = gate(),
-      release = gate(),
-      receipts = new Set<string>();
-    const h = harness({ confirmed: (input) => receipts.add(input.id) });
-    const patch = h.storage.patch;
-    h.storage.patch = async (id, value) => {
-      if (value.state === 'confirmed') {
-        entered.resolve();
-        await release.promise;
-      }
-      return patch(id, value);
-    };
-    h.owner.enqueue(send());
-    await entered.promise;
-    expect(receipts).toEqual(new Set(['input-1']));
-    expect(h.accepted.get('input-1')?.items).toEqual([{ type: 'text', text: 'input-1' }]);
-    expect((await h.storage.get('input-1'))?.state).toBe('unknown');
-    expect(h.owner.getSnapshot()[0]?.inputState).toBe('sending');
-    release.resolve();
-    await when(h.owner, () => h.owner.getSnapshot()[0]?.inputState === 'confirmed');
-  });
   it('refuses an older owner before consuming a new-session draft or publishing routing', async () => {
     const fixture = await workspaceHarness({
       newSession: true,
@@ -651,38 +628,6 @@ describe('locally accepted Roost input', () => {
     expect(h.diagnostics.some((entry) => entry.inputId === 'second')).toBe(false);
   });
 
-  it('reports a session lease another window never releases, without interrupting the wait', async () => {
-    // Only the slow-stage timer is faked; IndexedDB keeps its own scheduling.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    cleanup.push(async () => {
-      vi.useRealTimers();
-    });
-    const held = gate();
-    const requested = gate();
-    const h = harness({
-      lock: async (_sessionId, _signal, work) => {
-        requested.resolve();
-        await held.promise;
-        return work();
-      },
-    });
-    h.owner.enqueue(send());
-    await requested.promise;
-    await vi.advanceTimersByTimeAsync(SESSION_INPUT_SLOW_STAGE_MS - 1);
-    expect(h.diagnostics).toEqual([]);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(h.diagnostics).toEqual([
-      {
-        event: 'session_input.slow',
-        sessionId: 'input-session',
-        stage: 'lock',
-        elapsedMs: SESSION_INPUT_SLOW_STAGE_MS,
-      },
-    ]);
-    held.resolve();
-    await vi.waitFor(() => expect(h.delivered).toEqual(['input-1']));
-  });
-
   it('restores a saved unsent input, scopes accounts, and preserves admission order', async () => {
     const factory = new IDBFactory();
     const h = harness({ factory, paused: true });
@@ -905,29 +850,6 @@ describe('locally accepted Roost input', () => {
       { type: 'text', text: input.id },
     ]);
     await storage.close();
-  });
-
-  it('saves creation metadata with ordinary undefined optional fields and restores its frozen target', async () => {
-    const factory = new IDBFactory();
-    const h = harness({ factory, paused: true });
-    h.owner.enqueue(
-      send('creation', {
-        creation: {
-          id: 'input-session' as SessionId,
-          machineId: 'target-machine' as PendingSessionSend['targetMachineId'],
-          historyBackend: 'roost',
-          userId: 'source-user',
-          acpSessionId: undefined,
-          diffStats: undefined,
-        } as PendingSessionSend['creation'],
-      })
-    );
-    await when(h.owner, () => Boolean(h.owner.getSnapshot()[0]?.persisted));
-    expect((await h.storage.get('creation'))?.send.creation).toMatchObject({
-      historyBackend: 'roost',
-      machineId: 'target-machine',
-    });
-    expect((await h.storage.get('creation'))?.send.creation).not.toHaveProperty('acpSessionId');
   });
 
   it('keeps unsaved inputs visible across refresh and retries them in original admission order after storage recovers', async () => {

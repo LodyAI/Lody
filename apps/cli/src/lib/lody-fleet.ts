@@ -1128,6 +1128,9 @@ export class LodyFleet {
                 return automation.dispatchQuotaSchedule(run, prepared);
               },
               hasSessionTurnWork: (sessionId) => startedLody.hasAutomationTurnWork(sessionId),
+              // Without the automation owner, capacity is unknown and runs dispatch as usual.
+              capacityRetryAt: async (run) =>
+                await this.runtimes.get(workspace.id)?.automations?.capacityRetryAt(run),
             });
         stopSchedules = schedules.dispose;
         const automationsSupported = workspaceSupports(
@@ -2146,7 +2149,9 @@ export class LodyFleet {
     } = await import('./e2ee/workspace-legacy');
     if (this.e2eeResets.has(message.workspaceId)) throw new Error('e2ee_identity_busy');
     if (message.type === 'prepare') {
-      const material = await prepareCliE2eeMachineLegacy({ ...message });
+      // A machine revoked while its agent was stopped never received a revocation
+      // receipt; only this exact credential check lets it offer a fresh identity.
+      const material = await prepareCliE2eeMachineLegacy({ ...message, cloud: e2eeCloud });
       if ('superseded' in material)
         return {
           ok: true,

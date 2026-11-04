@@ -1135,6 +1135,17 @@ export const MachineStatusRequestSchema = z
     type: z.literal('machine/status'),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
+    /** Only for daemons advertising `machineDiskStatus`. */
+    includeDisk: z.literal(true).optional(),
+  })
+  .strict();
+
+/** Free space of the volume holding the Lody data directory. */
+export const MachineDiskInfoSchema = z
+  .object({
+    totalGB: z.number().nonnegative(),
+    freeGB: z.number().nonnegative(),
+    usedPercent: z.number().min(0).max(100),
   })
   .strict();
 
@@ -1166,6 +1177,7 @@ export const MachineStatusResponseSchema = z
     machineId: MachineIdSchema,
     success: z.boolean(),
     resources: MachineResourceInfoSchema.optional(),
+    disk: MachineDiskInfoSchema.optional(),
     lifecycle: MachineLifecycleCapabilitySchema.optional(),
     error: SharedOptionalStringSchema,
   })
@@ -2218,7 +2230,9 @@ export const SessionHistoryReadQuerySchema = z
       })
       .strict(),
     z.object({ kind: z.literal('readAll') }).strict(),
-    z.object({ kind: z.literal('readTurnOutput'), userTurnId: SharedTrimmedNonEmptyStringSchema }).strict(),
+    z
+      .object({ kind: z.literal('readTurnOutput'), userTurnId: SharedTrimmedNonEmptyStringSchema })
+      .strict(),
   ])
   .superRefine((value, ctx) => {
     if (value.kind === 'readQuerySnapshot') {
@@ -3694,7 +3708,51 @@ export const ChatFailedMetaSchema = z.object({
   reason: ChatFailedReasonSchema,
   code: ChatFailedCodeSchema.optional(),
   message: SharedOptionalStringSchema,
+  resetAt: SharedOptionalStringSchema,
+  resetAtEpochSeconds: z.number().int().positive().optional(),
 });
+
+/**
+ * The newest `chat_failed` notice among history entries, read leniently so notices
+ * written by older or newer clients still yield their reason and message.
+ */
+export function readChatFailureNotice(
+  entries: ReadonlyArray<{ role?: string; timestamp?: string; items?: ReadonlyArray<unknown> }>
+): { reason?: string; message?: string; at?: string; resetAt?: string } | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.role !== 'system' || !Array.isArray(entry.items)) continue;
+    for (const item of entry.items as Array<{ type?: unknown; name?: unknown; meta?: unknown }>) {
+      if (item?.type !== 'system_notice' || item.name !== 'chat_failed') continue;
+      const meta = (item.meta ?? {}) as {
+        reason?: unknown;
+        message?: unknown;
+        resetAt?: unknown;
+        resetAtEpochSeconds?: unknown;
+      };
+      const message = typeof meta.message === 'string' ? meta.message.trim() : '';
+      const explicitReset = typeof meta.resetAt === 'string' ? meta.resetAt.trim() : '';
+      const resetAtEpochSeconds =
+        typeof meta.resetAtEpochSeconds === 'number' &&
+        Number.isFinite(meta.resetAtEpochSeconds) &&
+        meta.resetAtEpochSeconds > 0
+          ? meta.resetAtEpochSeconds
+          : undefined;
+      const resetAt =
+        explicitReset ||
+        (resetAtEpochSeconds !== undefined
+          ? new Date(resetAtEpochSeconds * 1000).toISOString()
+          : '');
+      return {
+        ...(typeof meta.reason === 'string' ? { reason: meta.reason } : {}),
+        ...(message ? { message } : {}),
+        ...(typeof entry.timestamp === 'string' ? { at: entry.timestamp } : {}),
+        ...(resetAt ? { resetAt } : {}),
+      };
+    }
+  }
+  return undefined;
+}
 
 export const ToolCallMessageSchema = z.object({
   type: z.literal('tool_call'),

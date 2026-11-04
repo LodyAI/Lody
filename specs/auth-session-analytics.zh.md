@@ -14,9 +14,12 @@ Translation: current
 ## 事件约定
 
 - 认证就绪发送 `app/active`，保留 `active_context: authenticated_app`、身份、
-  工作区、操作系统、`auth_route_ready_ms` 和启动性能属性。删除 `app/auth_ready`；
-  对应漏斗步骤迁移到按 `active_context: authenticated_app` 过滤的 `app/active`。
-  CLI 的 `app/active` 保持不变。
+  工作区、操作系统、`auth_route_ready_ms` 和启动性能属性。删除 `app/auth_ready`
+  和重复的 `onboarding/account_ready`；
+  发布前，消费者迁移到历史 `onboarding/account_ready` 与固定切换时间之后、按
+  `active_context: authenticated_app` 过滤的 `app/active` 的并集。保留首次发生历史、
+  cohort 窗口、转换窗口和内部用户过滤；保存前对比历史结果。
+  CLI 的 `app/active` 和后续的 `onboarding/cli_ready` 就绪变化保持不变。
 - 删除 `session/stop_requested`；保留 `session/` 下的 `stop_blocked`、
   `stop_request_succeeded` 和 `stop_request_failed`。成功仅表示请求 helper 正常返回，
   通常发生在取消指针写入后；已删除会话可能不写入直接返回。它不确认 RPC 送达或 turn
@@ -38,4 +41,5 @@ Translation: current
 `components/sessions/session-chat-interface.tsx`、`session-detail.tsx`、
 `hooks/use-session-actions.ts` 和 `use-session-doc.ts`。
 CLI 活跃事件位于 `apps/cli/src/commands/analytics-events.ts`。
-未获得生产原始事件或仪表盘配置；宿主采用此变更时，需要迁移被删除事件的现有消费者。
+托管仪表盘与 cohort 配置在此公开仓库之外维护。客户端测试只验证事件发送与抑制，
+不能证明托管配置已迁移或客户端已发布；发布前分别验证。

@@ -14,6 +14,9 @@ import {
   Duration,
 } from 'effect';
 import { importBrowserDevice, type BrowserDevice } from '@lody/e2ee-core/adapters/browser-crypto';
+import { verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core';
+import { makePortableAccountPairingApprover } from '../../src/account-requester';
+import { decodePersonalInvitation } from '../../src/pairing';
 import {
   browserClientCustody,
   browserClientWriter,
@@ -80,6 +83,7 @@ import {
   type PersonalPairingOffer,
   type PersonalExchange,
   type PersonalExchangeResponse,
+  accountPairingOffer,
 } from '../../src';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -114,6 +118,13 @@ let offer: PersonalPairingOffer,
   records: Uint8Array[],
   mode: 'create-or-open' | 'open-existing',
   events: string[] = [],
+  // Envelopes this device stored for other devices; refused attempts are kept too.
+  putAttempts: { id: string; frame: string; stored: boolean }[] = [],
+  refusePuts = false,
+  // The one recipient whose slot reflects stores made from `watchedFrom` on; every other
+  // slot keeps reporting an installed key.
+  watchedRecipient: string | undefined,
+  watchedFrom = 0,
   failKeys = false,
   foreign = false;
 let databasePrefix = 'personal';
@@ -159,6 +170,10 @@ export async function boot(
   databasePrefix = prefix;
   mode = input;
   events = [];
+  putAttempts = [];
+  refusePuts = false;
+  watchedRecipient = undefined;
+  watchedFrom = 0;
   session = undefined;
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -367,8 +382,17 @@ export async function boot(
           return Layer.mergeAll(
             indexedDbClientKeyStores({ databaseName: `${databasePrefix}-custody`, binding, mode }),
             Layer.succeed(KeyMailbox, {
+              // The watched device's slot holds an envelope only after this device stored one.
               status: (slot) =>
-                Effect.succeed({ ...slot, revision: 0, status: 'InstallationReported' }),
+                Effect.succeed({
+                  ...slot,
+                  revision: 0,
+                  status:
+                    slot.recipient !== watchedRecipient ||
+                    putAttempts.slice(watchedFrom).some((item) => item.stored)
+                      ? ('InstallationReported' as const)
+                      : ('NeedsEnvelope' as const),
+                }),
               fetch: (epoch) =>
                 Effect.gen(function* () {
                   if (failMailbox) {
@@ -422,8 +446,26 @@ export async function boot(
                 Effect.sync(() => {
                   events.push('repair');
                 }),
-              put: () => Effect.void,
-              read: () => Effect.succeed(null),
+              put: (id, frame) =>
+                Effect.suspend(() => {
+                  putAttempts.push({ id, frame: toHex(frame), stored: !refusePuts });
+                  if (refusePuts)
+                    return Effect.fail(
+                      new BackendError({
+                        service: 'mailbox',
+                        reason: 'unavailable',
+                        cause: new Error('synthetic refused envelope storage'),
+                      })
+                    );
+                  events.push('put');
+                  return Effect.void;
+                }),
+              read: (id) =>
+                Effect.succeed(
+                  ((frame) => (frame ? fromHex(frame) : null))(
+                    putAttempts.find((item) => item.id === id && item.stored)?.frame
+                  )
+                ),
             }),
             Layer.succeed(EpochStagingStore, {
               stageGroup: () => Effect.void,
@@ -459,6 +501,32 @@ export async function boot(
       });
       const remote = PersonalHostRemote.of({
         accountId: 'account',
+        ...(localStorage.getItem('qualify-approval-history')
+          ? {
+              history: (_credential: Uint8Array) =>
+                Effect.gen(function* () {
+                  if (localStorage.getItem('synthetic-offline'))
+                    return yield* new LedgerFeedError({ code: 'native-unavailable' });
+                  const historyRecords = localStorage.getItem('truncate-approval-history')
+                    ? records.slice(0, 1)
+                    : records;
+                  return [
+                    {
+                      workspaceId: offer.workspaceId,
+                      genesisHash: offer.genesisHash,
+                      checkpoint: {
+                        length: historyRecords.length,
+                        headHash: toHex(hashRecordBytes(historyRecords.at(-1)!).toBytes()),
+                      },
+                      startIndex: 0,
+                      recordsHex: historyRecords.map(toHex),
+                      position: 'opaque/' + records.length,
+                      nextCursor: null,
+                    },
+                  ];
+                }),
+            }
+          : {}),
         exchange: (request: PersonalExchange) =>
           Effect.gen(function* () {
             const prior = localStorage.getItem('request:' + request.pairingSessionId);
@@ -716,6 +784,204 @@ export async function invoke(action: string) {
               localStorage.setItem('initial-invitation', invitation);
             return true;
           }
+          // Account-wide pairing: no per-workspace offer; the endorser arrives with the approval.
+          case 'accountPrepare':
+            return yield* host.prepareAccount({
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            });
+          case 'accountApproveAndAccept': {
+            const pin = {
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            };
+            const prepared = yield* host.prepareAccount(pin),
+              request = decodePersonalRequest(prepared.requestHex);
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'personal',
+                signingPublicKey: Result.getOrThrow(
+                  Bytes.signingPublicKey(fromHex(request.signingPublicKey))
+                ),
+                encryptionPublicKey: Result.getOrThrow(
+                  Bytes.encryptionPublicKey(fromHex(request.encryptionPublicKey))
+                ),
+                possessionSignature: Result.getOrThrow(
+                  Bytes.signature(fromHex(request.possessionSignature))
+                ),
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            const receipt = yield* signLedgerSnapshot({
+              signer: owner,
+              ledger: () => Effect.succeed(view()),
+            });
+            const invitationHex = encodePersonalInvitation({
+              ...receipt,
+              workspaceId: offer.workspaceId,
+              offset: 'opaque/' + records.length,
+            });
+            yield* host.acceptAccount({
+              ...pin,
+              invitationHex,
+              endorser: toHex(owner.publicKey.toBytes()),
+            });
+            return true;
+          }
+          // A Member approver cannot sign a snapshot: install from the full history.
+          case 'accountApproveByHistory': {
+            const pin = {
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            };
+            const prepared = yield* host.prepareAccount(pin),
+              request = decodePersonalRequest(prepared.requestHex);
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'personal',
+                signingPublicKey: Result.getOrThrow(
+                  Bytes.signingPublicKey(fromHex(request.signingPublicKey))
+                ),
+                encryptionPublicKey: Result.getOrThrow(
+                  Bytes.encryptionPublicKey(fromHex(request.encryptionPublicKey))
+                ),
+                possessionSignature: Result.getOrThrow(
+                  Bytes.signature(fromHex(request.possessionSignature))
+                ),
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            yield* host.acceptAccountHistory({
+              ...pin,
+              pages: [
+                {
+                  workspaceId: offer.workspaceId,
+                  genesisHash: offer.genesisHash,
+                  checkpoint: { length: records.length, headHash: toHex(view().head.toBytes()) },
+                  startIndex: 0,
+                  recordsHex: records.map(toHex),
+                  position: 'opaque/' + records.length,
+                  nextCursor: null,
+                },
+              ],
+            });
+            return true;
+          }
+          case 'accountOpen':
+            if (session) yield* session.close();
+            session = yield* host.open(
+              accountPairingOffer(host.scope, {
+                genesisRecordHex: offer.genesisRecordHex,
+                membershipId: offer.membershipId,
+              })
+            );
+            return true;
+          // This admitted device approves another new device of the same account.
+          case 'accountApproveNewDevice': {
+            const fresh = yield* importBrowserDevice({
+              signingPrivate: new Uint8Array(32).fill(14),
+              encryptionPrivate: new Uint8Array(32).fill(15),
+            }).pipe(Scope.provide(scope));
+            const proof = yield* prepareDeviceAdmission({
+              genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+              membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(offer.membershipId))),
+              encryptionPublicKey: fresh.enc,
+              kind: 'personal',
+              signer: fresh,
+            });
+            const deliveries: string[] = [];
+            const sleeps: number[] = [];
+            let delivered: () => void = () => {};
+            const settled = new Promise<void>((resolve) => (delivered = resolve));
+            const approver = makePortableAccountPairingApprover({
+              workspaces: () => [
+                { workspaceId: offer.workspaceId, name: 'Alpha', genesisHash: offer.genesisHash },
+              ],
+              session: () => Effect.succeed(session!),
+              onKeyDelivery: (event) => {
+                deliveries.push(
+                  [event.state, event.device === toHex(fresh.publicKey.toBytes()), event.code]
+                    .filter((part) => part !== undefined)
+                    .join(':')
+                );
+                if (event.state === 'delivered' || event.state === 'ended') delivered();
+              },
+              // Only the injected clock moves: the mailbox recovers while the retry waits.
+              keyDeliveryRetry: {
+                sleep: (ms) =>
+                  Effect.sync(() => {
+                    sleeps.push(ms);
+                    refusePuts = false;
+                  }),
+              },
+              // The service appends the original under the account's authentication.
+              appendRecord: (request) =>
+                Effect.sync(() => {
+                  records.push(fromHex(request.recordHex));
+                  retain();
+                }),
+            });
+            const [workspace] = yield* approver();
+            const signed = yield* workspace!.sign({
+              genesis: fromHex(offer.genesisHash),
+              signingPublicKey: fresh.publicKey.toBytes(),
+              encryptionPublicKey: fresh.enc.toBytes(),
+              possessionProof: proof.possessionSignature.toBytes(),
+              credentialHash: new Uint8Array(32).fill(0x66),
+            });
+            const before = yield* session!.accountApproval.settle(signed.record);
+            yield* workspace!.append(
+              signed.requestId,
+              signed.record,
+              new Uint8Array(32).fill(0x66)
+            );
+            // After the admission commits the approver sends the current key to the new
+            // device in the background. The first store is refused; the approver's own due
+            // retry stores the journaled envelope under the same id, with no other call.
+            refusePuts = true;
+            watchedRecipient = toHex(fresh.publicKey.toBytes());
+            watchedFrom = putAttempts.length;
+            if (!workspace!.deliverKeys) return { delivery: 'not-scheduled' };
+            yield* workspace!.deliverKeys(fresh.publicKey.toBytes(), signed.requestId);
+            yield* Effect.promise(() => settled);
+            const refused = putAttempts
+              .slice(watchedFrom)
+              .filter((item) => !item.stored)
+              .map((item) => ({ id: item.id, frame: item.frame }));
+            const stored = putAttempts.filter((item) => item.stored);
+            const retriedExactly =
+              refused.length > 0 &&
+              refused.every((item) =>
+                stored.some((put) => put.id === item.id && put.frame === item.frame)
+              );
+            const invitation = yield* workspace!.invitation(signed.record);
+            // The new device's own check: the snapshot verifies for this approver.
+            yield* Effect.fromResult(
+              verifyWorkspaceInvitationSnapshot(
+                {
+                  workspaceId: offer.workspaceId,
+                  genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+                  endorser: session!.binding.device,
+                },
+                decodePersonalInvitation(toHex(invitation!))
+              )
+            );
+            const access = yield* workspace!.access();
+            return {
+              before,
+              deliveries,
+              sleeps,
+              refused: refused.length > 0,
+              retriedExactly,
+              length: records.length,
+              invitation: invitation !== null,
+              access: access.workspaceId === offer.workspaceId && access.credential.length === 64,
+            };
+          }
           case 'currentRequestForToken': {
             const p = yield* host.prepare(offer);
             localStorage.setItem('last-request', p.requestHex);
@@ -804,7 +1070,10 @@ export async function invoke(action: string) {
             );
           case 'resumeForeign':
             return yield* session!.resume();
+          case 'forkBeforeApproval':
           case 'addMachine': {
+            const machineId = action === 'forkBeforeApproval' ? 'fork-machine' : 'fixture-machine';
+            if (action === 'forkBeforeApproval') records = records.slice(0, 1);
             const machine = yield* importBrowserDevice({
               signingPrivate: new Uint8Array(32).fill(12),
               encryptionPrivate: new Uint8Array(32).fill(13),
@@ -814,14 +1083,14 @@ export async function invoke(action: string) {
               membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(offer.membershipId))),
               encryptionPublicKey: machine.enc,
               kind: 'machine',
-              machineId: 'fixture-machine',
+              machineId,
               signer: machine,
             });
             const proposal = Result.getOrThrow(
               prepareLedgerCommand(view(), owner.publicKey, {
                 _tag: 'AdmitDevice',
                 kind: 'machine',
-                machineId: 'fixture-machine',
+                machineId,
                 replaces: null,
                 signingPublicKey: machine.publicKey,
                 encryptionPublicKey: machine.enc,
@@ -1127,9 +1396,11 @@ export async function bootRuntime(withSharing = false) {
           : Effect.succeed({ userId: runtimeAccount, source: 'offline' as const }),
       ledgerRecords: (checked) =>
         Effect.succeed(
-          records
-            .slice(checked.historyStart, checked.length)
-            .map((record, index) => ({ position: checked.historyStart + index, record }))
+          localStorage.getItem('empty-local-originals')
+            ? []
+            : records
+                .slice(checked.historyStart, checked.length)
+                .map((record, index) => ({ position: checked.historyStart + index, record }))
         ),
       run: async (program) => {
         if (executorOverride) return await executorOverride(program);
@@ -1147,10 +1418,30 @@ const runtimeContext = {
   version: 2,
   kind: 'update_batch',
 } as const;
+let heldApproval: Awaited<ReturnType<NonNullable<typeof runtime.accountApproval>>> | undefined;
+let approvalReleaseResult: Promise<{ state: string; code?: string }> | undefined;
 export async function runtimeInvoke(action: string) {
   try {
     let value: unknown;
     switch (action) {
+      case 'observeCheckpoint':
+        value = {
+          genesisHash: offer.genesisHash,
+          length: view().length,
+          headHash: toHex(view().head.toBytes()),
+        };
+        localStorage.setItem('pre-approval-checkpoint', JSON.stringify(value));
+        break;
+      case 'openObserved': {
+        const status = await runtime.open(
+          offer.workspaceId,
+          JSON.parse(localStorage.getItem('pre-approval-checkpoint')!),
+          'account'
+        );
+        runtimeLease = status.readerOwner;
+        value = status;
+        break;
+      }
       case 'prepare':
         value = await runtime.preparePersonalJoin!(offer);
         break;
@@ -1178,6 +1469,41 @@ export async function runtimeInvoke(action: string) {
         break;
       case 'status':
         value = await runtime.status(offer.workspaceId);
+        break;
+      // Only approval holds the workspace: the last release must close its reader.
+      case 'approvalRelease': {
+        await runtime.close(offer.workspaceId, 'account', runtimeLease);
+        const open = () =>
+          runtime.status(offer.workspaceId).then(
+            () => true,
+            () => false
+          );
+        const first = await runtime.accountApproval!();
+        const second = await runtime.accountApproval!();
+        const held = await open();
+        await first.release();
+        const afterOne = await open();
+        await second.release();
+        await second.release();
+        value = { held, afterOne, afterAll: await open() };
+        break;
+      }
+      case 'approvalHold':
+        heldApproval = await runtime.accountApproval!();
+        value = true;
+        break;
+      case 'startApprovalRelease':
+        approvalReleaseResult = heldApproval!.release().then(
+          () => ({ state: 'released' }),
+          (error) => ({ state: 'failed', code: error.code })
+        );
+        value = true;
+        break;
+      case 'approvalReleaseResult':
+        value = await approvalReleaseResult;
+        break;
+      case 'approvalSession':
+        value = (await runtime.accountApproval!()).device;
         break;
       case 'refresh':
         value = await runtime.refresh(offer.workspaceId);

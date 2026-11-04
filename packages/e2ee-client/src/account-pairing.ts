@@ -46,6 +46,13 @@ import { fromHex, toHex } from './bytes';
 const hex = toHex;
 const raw = fromHex;
 const sha256 = (value: Uint8Array): Uint8Array => nobleSha256(value);
+/** An approval row whose invitation digest is all zeros carries no snapshot: the new
+ * device installs from full verified history instead. The genesis and admission
+ * record stay covered by the approval tag. */
+const NO_INVITATION_DIGEST = new Uint8Array(32);
+/** Placeholder relay body for such a row; the new device never reads it. */
+const NO_INVITATION = new Uint8Array([0]);
+const isHistoryRow = (digest: Uint8Array) => digest.every((byte) => byte === 0);
 /** Typed refusals the UI explains (`@lody/platform` `E2eeAccountPairingErrorCode`). */
 export type AccountPairingRefusal = 'pairing-tampered' | 'pairing-expired' | 'pairing-used';
 const fail = (code: AccountPairingRefusal | 'invalid-input' | 'storage' | 'corrupt') =>
@@ -108,6 +115,12 @@ export interface AccountPairingApproverWorkspace {
   invitation(record: Uint8Array): Effect.Effect<Uint8Array | null, unknown>;
   /** Device access for the relay; it never leaves the main process. */
   access(): Effect.Effect<E2eeDeviceAccess, unknown>;
+  /** Ends the workflow's use of this workspace when the operation finishes. */
+  release?(): Effect.Effect<void, unknown>;
+  /** Starts the existing current-epoch key distribution for the device whose admission
+   * `append` just confirmed in the verified ledger. It only schedules owned background
+   * work and returns at once: delivery never holds or undoes the approval. */
+  deliverKeys?(signingPublicKey: Uint8Array, requestId: string): Effect.Effect<void, unknown>;
 }
 
 /** One encrypted workspace of the account on the new device. */
@@ -120,6 +133,9 @@ export interface AccountPairingRequesterWorkspace {
   identity(): Effect.Effect<Omit<PairingRequestRow, 'genesis'>, unknown>;
   /** Verifies the invitation against the approved admission record and installs it. */
   accept(invitation: Uint8Array, admissionRecordHash: Uint8Array): Effect.Effect<void, unknown>;
+  /** Installs from the workspace's complete verified history, for an approval row that
+   * carries no invitation (a Member approver cannot endorse a snapshot). */
+  acceptHistory?(admissionRecordHash: Uint8Array): Effect.Effect<void, unknown>;
 }
 
 type Terminal = 'approved' | 'declined' | 'expired' | 'cancelled';
@@ -487,16 +503,21 @@ export function makeAccountPairing(input: {
             )
               continue;
             if ((yield* sql(joinedSet(row.lookup_id))).has(workspace.workspaceId)) continue;
-            const invitation = published.invitations.find(
-              (item) => item.genesisHash === hex(approved.genesis)
-            );
-            if (!invitation) continue;
-            const bytes = raw(invitation.invitationHex);
-            if (hex(sha256(bytes)) !== hex(approved.invitationDigest)) continue;
+            let install: Effect.Effect<void, unknown>;
+            if (isHistoryRow(approved.invitationDigest)) {
+              if (!workspace.acceptHistory) continue;
+              install = workspace.acceptHistory(approved.admissionRecordHash);
+            } else {
+              const invitation = published.invitations.find(
+                (item) => item.genesisHash === hex(approved.genesis)
+              );
+              if (!invitation) continue;
+              const bytes = raw(invitation.invitationHex);
+              if (hex(sha256(bytes)) !== hex(approved.invitationDigest)) continue;
+              install = workspace.accept(bytes, approved.admissionRecordHash);
+            }
             // A failure here affects only this workspace; the next poll retries it.
-            const accepted = yield* Effect.result(
-              workspace.accept(bytes, approved.admissionRecordHash)
-            );
+            const accepted = yield* Effect.result(install);
             if (Result.isFailure(accepted)) {
               rememberDesktopE2eeFailure('account-pairing-accept', accepted.failure);
               const code =
@@ -595,40 +616,89 @@ export function makeAccountPairing(input: {
       }
     });
 
+  /** Holders whose release failed (for example a restart-required close). Each later
+   * operation retries them first; after three failed attempts a holder is dropped and
+   * reported. Bounded so a persistent failure cannot grow the list or spin. */
+  const failedReleases: { workspace: AccountPairingApproverWorkspace; attempts: number }[] = [];
+  const RELEASE_ATTEMPTS = 3;
+  const RETAINED_RELEASES = 16;
+  const releaseOne = (workspace: AccountPairingApproverWorkspace, attempts: number) =>
+    workspace.release
+      ? workspace.release().pipe(
+          Effect.catch((cause) =>
+            Effect.sync(() => {
+              rememberDesktopE2eeFailure('account-pairing-release', cause);
+              if (attempts + 1 < RELEASE_ATTEMPTS && failedReleases.length < RETAINED_RELEASES)
+                failedReleases.push({ workspace, attempts: attempts + 1 });
+            })
+          )
+        )
+      : Effect.void;
+  const retryFailedReleases = Effect.suspend(() =>
+    Effect.forEach(failedReleases.splice(0), (item) => releaseOne(item.workspace, item.attempts), {
+      discard: true,
+    })
+  );
+  /** Releases every listed approver workspace when the operation ends, however it ends. */
+  const releasing = <A, E, R>(
+    work: (
+      list: () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>
+    ) => Effect.Effect<A, E, R>
+  ) =>
+    Effect.suspend(() => {
+      const listed: AccountPairingApproverWorkspace[] = [];
+      const list = () =>
+        Effect.tap(input.approverWorkspaces(), (all) => Effect.sync(() => listed.push(...all)));
+      return Effect.andThen(
+        retryFailedReleases,
+        work(list).pipe(
+          Effect.ensuring(
+            Effect.suspend(() =>
+              Effect.forEach(listed, (workspace) => releaseOne(workspace, 0), { discard: true })
+            )
+          )
+        )
+      );
+    });
   const inspectAccountPairing = (pairingString: string) =>
-    usingCode(pairingString, (secret) =>
-      withKeys(secret, (keys) =>
-        Effect.gen(function* () {
-          const found = yield* authenticate(keys);
-          if (!found) return null;
-          const workspaces = yield* input.approverWorkspaces();
-          const preview: AccountPairingPreview = {
-            requestId: found.relayed?.requestId ?? found.lookupId,
-            deviceName: found.request.deviceName,
-            approximateLocation: found.relayed?.approximateLocation ?? null,
-            requestedAt:
-              found.relayed?.requestedAt ??
-              found.request.expiresAt - PAIRING_REQUEST_MAX_LIFETIME_MS,
-            expiresAt: found.request.expiresAt,
-            workspaces: [],
-            unavailable: [],
-          };
-          for (const item of found.request.rows) {
-            const workspace = workspaces.find(
-              (candidate) => hex(candidate.genesis) === hex(item.genesis)
-            );
-            if (workspace)
-              preview.workspaces.push({ workspaceId: workspace.workspaceId, name: workspace.name });
-            else {
-              const hint = found.relayed?.workspaces.find(
-                (hinted) => hinted.genesisHash === hex(item.genesis)
+    releasing((list) =>
+      usingCode(pairingString, (secret) =>
+        withKeys(secret, (keys) =>
+          Effect.gen(function* () {
+            const found = yield* authenticate(keys);
+            if (!found) return null;
+            const workspaces = yield* list();
+            const preview: AccountPairingPreview = {
+              requestId: found.relayed?.requestId ?? found.lookupId,
+              deviceName: found.request.deviceName,
+              approximateLocation: found.relayed?.approximateLocation ?? null,
+              requestedAt:
+                found.relayed?.requestedAt ??
+                found.request.expiresAt - PAIRING_REQUEST_MAX_LIFETIME_MS,
+              expiresAt: found.request.expiresAt,
+              workspaces: [],
+              unavailable: [],
+            };
+            for (const item of found.request.rows) {
+              const workspace = workspaces.find(
+                (candidate) => hex(candidate.genesis) === hex(item.genesis)
               );
-              const workspaceId = hint?.workspaceId ?? hex(item.genesis);
-              preview.unavailable.push({ workspaceId, name: workspaceId });
+              if (workspace)
+                preview.workspaces.push({
+                  workspaceId: workspace.workspaceId,
+                  name: workspace.name,
+                });
+              else {
+                const hint = found.relayed?.workspaces.find(
+                  (hinted) => hinted.genesisHash === hex(item.genesis)
+                );
+                const workspaceId = hint?.workspaceId ?? hex(item.genesis);
+                preview.unavailable.push({ workspaceId, name: workspaceId });
+              }
             }
-          }
-          return preview;
-        })
+            return preview;
+          })
+        )
       )
     );
 
@@ -646,188 +716,208 @@ export function makeAccountPairing(input: {
     requestId: string;
     workspaceIds: readonly string[];
   }) =>
-    usingCode(options.pairingString, (secret) =>
-      withKeys(secret, (keys) =>
-        Effect.gen(function* () {
-          const found = yield* authenticate(keys);
-          if (!found) return yield* Effect.fail(fail('pairing-expired'));
-          if (found.relayed && found.relayed.requestId !== options.requestId)
-            return yield* Effect.fail(fail('invalid-input'));
-          const { lookupId, request } = found;
-          const all = yield* input.approverWorkspaces();
-          const selected = options.workspaceIds.map((id) => {
-            const workspace = all.find((item) => item.workspaceId === id);
-            const row =
-              workspace &&
-              request.rows.find((item) => hex(item.genesis) === hex(workspace.genesis));
-            return workspace && row ? { workspace, row } : null;
-          });
-          if (selected.length === 0 || selected.some((item) => !item))
-            return yield* Effect.fail(fail('invalid-input'));
-          yield* sql(store.putApprovedRequest(lookupId, found.bytes, found.tag));
-          const outcomes = new Map<
-            string,
-            AccountPairingApproval['workspaces'][number]['outcome']
-          >();
-          // Sign each workspace and identity once; the original is durable before any
-          // network step. The caller's permit makes check, sign and journal atomic.
-          for (const item of selected) {
-            const { workspace, row } = item!;
-            const existing = yield* sql(admission(workspace.workspaceId, row.signingPublicKey));
-            if (existing) {
-              if (existing.genesis !== hex(workspace.genesis))
-                return yield* Effect.fail(fail('corrupt'));
-              continue;
-            }
-            // A failed refresh or signature affects only this workspace.
-            if (workspace.refresh) {
-              const refreshed = yield* Effect.result(workspace.refresh());
-              if (Result.isFailure(refreshed)) {
-                if (refusesApproval(refreshed.failure))
-                  return yield* Effect.fail(refreshed.failure);
-                rememberDesktopE2eeFailure('account-pairing-refresh', refreshed.failure);
+    releasing((list) =>
+      usingCode(options.pairingString, (secret) =>
+        withKeys(secret, (keys) =>
+          Effect.gen(function* () {
+            const found = yield* authenticate(keys);
+            if (!found) return yield* Effect.fail(fail('pairing-expired'));
+            if (found.relayed && found.relayed.requestId !== options.requestId)
+              return yield* Effect.fail(fail('invalid-input'));
+            const { lookupId, request } = found;
+            const all = yield* list();
+            const selected = options.workspaceIds.map((id) => {
+              const workspace = all.find((item) => item.workspaceId === id);
+              const row =
+                workspace &&
+                request.rows.find((item) => hex(item.genesis) === hex(workspace.genesis));
+              return workspace && row ? { workspace, row } : null;
+            });
+            if (selected.length === 0 || selected.some((item) => !item))
+              return yield* Effect.fail(fail('invalid-input'));
+            yield* sql(store.putApprovedRequest(lookupId, found.bytes, found.tag));
+            const outcomes = new Map<
+              string,
+              AccountPairingApproval['workspaces'][number]['outcome']
+            >();
+            // Sign each workspace and identity once; the original is durable before any
+            // network step. The caller's permit makes check, sign and journal atomic.
+            for (const item of selected) {
+              const { workspace, row } = item!;
+              const existing = yield* sql(admission(workspace.workspaceId, row.signingPublicKey));
+              if (existing) {
+                if (existing.genesis !== hex(workspace.genesis))
+                  return yield* Effect.fail(fail('corrupt'));
+                continue;
+              }
+              // A failed refresh or signature affects only this workspace.
+              if (workspace.refresh) {
+                const refreshed = yield* Effect.result(workspace.refresh());
+                if (Result.isFailure(refreshed)) {
+                  if (refusesApproval(refreshed.failure))
+                    return yield* Effect.fail(refreshed.failure);
+                  rememberDesktopE2eeFailure('account-pairing-refresh', refreshed.failure);
+                  outcomes.set(workspace.workspaceId, 'not-admitted');
+                  continue;
+                }
+              }
+              // Checked again after the network step, immediately before signing.
+              if (Result.isFailure(verifyPairingRequestTag(keys, request, raw(found.tag))))
+                return yield* Effect.fail(fail('pairing-tampered'));
+              const lifetime = checkPairingRequestLifetime(request, now());
+              if (Result.isFailure(lifetime)) {
+                if (lifetime.failure.code === 'expired') {
+                  yield* settle(lookupId, 'approver', 'expired');
+                  return yield* Effect.fail(fail('pairing-expired'));
+                }
+                return yield* Effect.fail(fail('pairing-tampered'));
+              }
+              const signed = yield* Effect.result(workspace.sign(row));
+              if (Result.isFailure(signed)) {
+                if (refusesApproval(signed.failure)) return yield* Effect.fail(signed.failure);
+                rememberDesktopE2eeFailure('account-pairing-sign', signed.failure);
                 outcomes.set(workspace.workspaceId, 'not-admitted');
                 continue;
               }
+              yield* sql(
+                store.insertAdmission({
+                  workspaceId: workspace.workspaceId,
+                  signingKey: hex(row.signingPublicKey),
+                  genesis: hex(workspace.genesis),
+                  lookupId,
+                  requestId: signed.success.requestId,
+                  record: signed.success.record,
+                  invitation: null,
+                })
+              );
             }
-            // Checked again after the network step, immediately before signing.
-            if (Result.isFailure(verifyPairingRequestTag(keys, request, raw(found.tag))))
-              return yield* Effect.fail(fail('pairing-tampered'));
-            const lifetime = checkPairingRequestLifetime(request, now());
-            if (Result.isFailure(lifetime)) {
-              if (lifetime.failure.code === 'expired') {
-                yield* settle(lookupId, 'approver', 'expired');
-                return yield* Effect.fail(fail('pairing-expired'));
+            const deliverable: {
+              workspace: AccountPairingApproverWorkspace;
+              journaled: AdmissionRow;
+              /** `null`: delivered through full history (Member approver). */
+              invitation: Uint8Array | null;
+            }[] = [];
+            for (const item of selected) {
+              const { workspace, row } = item!;
+              const journaled = yield* sql(admission(workspace.workspaceId, row.signingPublicKey));
+              // Not signed in this pass; its outcome is already recorded.
+              if (!journaled) continue;
+              const appended = yield* Effect.result(
+                workspace.append(
+                  journaled.request_id,
+                  new Uint8Array(journaled.record),
+                  row.credentialHash
+                )
+              );
+              if (Result.isFailure(appended)) {
+                // The host reports `admission-lost` only when the verified ledger holds
+                // a different record in this original's slot: it can never commit, so
+                // retire it and let a later approval sign once more after rechecks.
+                const code =
+                  appended.failure &&
+                  typeof appended.failure === 'object' &&
+                  'code' in appended.failure
+                    ? appended.failure.code
+                    : undefined;
+                if (code === 'admission-lost')
+                  yield* sql(
+                    store.deleteAdmission(
+                      workspace.workspaceId,
+                      journaled.signing_key,
+                      journaled.request_id
+                    )
+                  );
+                outcomes.set(workspace.workspaceId, 'not-admitted');
+                continue;
               }
-              return yield* Effect.fail(fail('pairing-tampered'));
-            }
-            const signed = yield* Effect.result(workspace.sign(row));
-            if (Result.isFailure(signed)) {
-              if (refusesApproval(signed.failure)) return yield* Effect.fail(signed.failure);
-              rememberDesktopE2eeFailure('account-pairing-sign', signed.failure);
-              outcomes.set(workspace.workspaceId, 'not-admitted');
-              continue;
-            }
-            yield* sql(
-              store.insertAdmission({
-                workspaceId: workspace.workspaceId,
-                signingKey: hex(row.signingPublicKey),
-                genesis: hex(workspace.genesis),
-                lookupId,
-                requestId: signed.success.requestId,
-                record: signed.success.record,
-                invitation: null,
-              })
-            );
-          }
-          const deliverable: {
-            workspace: AccountPairingApproverWorkspace;
-            journaled: AdmissionRow;
-            invitation: Uint8Array;
-          }[] = [];
-          for (const item of selected) {
-            const { workspace, row } = item!;
-            const journaled = yield* sql(admission(workspace.workspaceId, row.signingPublicKey));
-            // Not signed in this pass; its outcome is already recorded.
-            if (!journaled) continue;
-            const appended = yield* Effect.result(
-              workspace.append(
-                journaled.request_id,
-                new Uint8Array(journaled.record),
-                row.credentialHash
-              )
-            );
-            if (Result.isFailure(appended)) {
-              // The host reports `admission-lost` only when the verified ledger holds
-              // a different record in this original's slot: it can never commit, so
-              // retire it and let a later approval sign once more after rechecks.
-              const code =
-                appended.failure &&
-                typeof appended.failure === 'object' &&
-                'code' in appended.failure
-                  ? appended.failure.code
-                  : undefined;
-              if (code === 'admission-lost')
-                yield* sql(
-                  store.deleteAdmission(
-                    workspace.workspaceId,
-                    journaled.signing_key,
-                    journaled.request_id
-                  )
+              // The admission is now in the verified ledger: the new device needs the
+              // current epoch key from an existing device, which the invitation does
+              // not carry. Only this admitted device is named; the port schedules it.
+              if (workspace.deliverKeys) {
+                const scheduled = yield* Effect.result(
+                  workspace.deliverKeys(new Uint8Array(row.signingPublicKey), journaled.request_id)
                 );
-              outcomes.set(workspace.workspaceId, 'not-admitted');
-              continue;
+                if (Result.isFailure(scheduled))
+                  rememberDesktopE2eeFailure('account-pairing-key-delivery', scheduled.failure);
+              }
+              let invitation: Uint8Array | null = journaled.invitation
+                ? new Uint8Array(journaled.invitation)
+                : null;
+              let history = false;
+              if (!invitation) {
+                const issued = yield* Effect.result(
+                  workspace.invitation(new Uint8Array(journaled.record))
+                );
+                // A successful `null` means this signer cannot endorse a snapshot (a
+                // Member): deliver through history. A failure stays awaiting delivery.
+                invitation = Result.isSuccess(issued) ? issued.success : null;
+                history = Result.isSuccess(issued) && issued.success === null;
+                if (invitation)
+                  yield* sql(
+                    store.setAdmissionInvitation(
+                      workspace.workspaceId,
+                      journaled.signing_key,
+                      invitation
+                    )
+                  );
+              }
+              if (history) deliverable.push({ workspace, journaled, invitation: null });
+              else if (!invitation) outcomes.set(workspace.workspaceId, 'awaiting-delivery');
+              else deliverable.push({ workspace, journaled, invitation });
             }
-            let invitation: Uint8Array | null = journaled.invitation
-              ? new Uint8Array(journaled.invitation)
-              : null;
-            if (!invitation) {
-              invitation = yield* Effect.orElseSucceed(
-                workspace.invitation(new Uint8Array(journaled.record)),
-                () => null
+            if (deliverable.length > 0) {
+              deliverable.sort((a, b) => (a.journaled.genesis < b.journaled.genesis ? -1 : 1));
+              const approval = {
+                requestDigest: yield* fromResult(pairingRequestDigest(request), 'corrupt'),
+                // Each row's record hash binds that workspace's signer; this field
+                // names the first one so the approval has a single stable approver key.
+                approverSigningPublicKey: deliverable[0]!.workspace.signingPublicKey,
+                rows: deliverable.map((item) => ({
+                  genesis: item.workspace.genesis,
+                  // The ledger's own record hash, so the new device finds the record.
+                  admissionRecordHash: hashRecordBytes(
+                    new Uint8Array(item.journaled.record)
+                  ).toBytes(),
+                  invitationDigest: item.invitation
+                    ? sha256(item.invitation)
+                    : NO_INVITATION_DIGEST,
+                })),
+              };
+              const bytes = yield* fromResult(encodePairingApproval(approval), 'invalid-input');
+              const tag = yield* fromResult(pairingApprovalTag(keys, approval), 'invalid-input');
+              // Never publish an approval this device could not itself verify.
+              if (Result.isFailure(verifyPairingApprovalTag(keys, approval, tag)))
+                return yield* Effect.fail(fail('corrupt'));
+              const invitations: E2eeAccountPairingRequests['publish']['invitations'] = [];
+              for (const item of deliverable)
+                invitations.push({
+                  ...(yield* item.workspace.access()),
+                  genesisHash: item.journaled.genesis,
+                  invitationHex: hex(item.invitation ?? NO_INVITATION),
+                });
+              const published = yield* Effect.result(
+                relay.publish({
+                  lookupId,
+                  approvalHex: hex(bytes),
+                  approvalTagHex: hex(tag),
+                  invitations,
+                })
               );
-              if (invitation)
-                yield* sql(
-                  store.setAdmissionInvitation(
-                    workspace.workspaceId,
-                    journaled.signing_key,
-                    invitation
-                  )
+              for (const item of deliverable)
+                outcomes.set(
+                  item.workspace.workspaceId,
+                  Result.isSuccess(published) ? 'admitted' : 'awaiting-delivery'
                 );
             }
-            if (!invitation) outcomes.set(workspace.workspaceId, 'awaiting-delivery');
-            else deliverable.push({ workspace, journaled, invitation });
-          }
-          if (deliverable.length > 0) {
-            deliverable.sort((a, b) => (a.journaled.genesis < b.journaled.genesis ? -1 : 1));
-            const approval = {
-              requestDigest: yield* fromResult(pairingRequestDigest(request), 'corrupt'),
-              // Each row's record hash binds that workspace's signer; this field
-              // names the first one so the approval has a single stable approver key.
-              approverSigningPublicKey: deliverable[0]!.workspace.signingPublicKey,
-              rows: deliverable.map((item) => ({
-                genesis: item.workspace.genesis,
-                // The ledger's own record hash, so the new device finds the record.
-                admissionRecordHash: hashRecordBytes(
-                  new Uint8Array(item.journaled.record)
-                ).toBytes(),
-                invitationDigest: sha256(item.invitation),
-              })),
-            };
-            const bytes = yield* fromResult(encodePairingApproval(approval), 'invalid-input');
-            const tag = yield* fromResult(pairingApprovalTag(keys, approval), 'invalid-input');
-            // Never publish an approval this device could not itself verify.
-            if (Result.isFailure(verifyPairingApprovalTag(keys, approval, tag)))
-              return yield* Effect.fail(fail('corrupt'));
-            const invitations: E2eeAccountPairingRequests['publish']['invitations'] = [];
-            for (const item of deliverable)
-              invitations.push({
-                ...(yield* item.workspace.access()),
-                genesisHash: item.journaled.genesis,
-                invitationHex: hex(item.invitation),
-              });
-            const published = yield* Effect.result(
-              relay.publish({
-                lookupId,
-                approvalHex: hex(bytes),
-                approvalTagHex: hex(tag),
-                invitations,
-              })
-            );
-            for (const item of deliverable)
-              outcomes.set(
-                item.workspace.workspaceId,
-                Result.isSuccess(published) ? 'admitted' : 'awaiting-delivery'
-              );
-          }
-          const result = selected.map((item) => ({
-            workspaceId: item!.workspace.workspaceId,
-            outcome: outcomes.get(item!.workspace.workspaceId) ?? ('not-admitted' as const),
-          }));
-          if (result.every((item) => item.outcome === 'admitted'))
-            yield* settle(lookupId, 'approver', 'approved');
-          return { workspaces: result } satisfies AccountPairingApproval;
-        })
+            const result = selected.map((item) => ({
+              workspaceId: item!.workspace.workspaceId,
+              outcome: outcomes.get(item!.workspace.workspaceId) ?? ('not-admitted' as const),
+            }));
+            if (result.every((item) => item.outcome === 'admitted'))
+              yield* settle(lookupId, 'approver', 'approved');
+            return { workspaces: result } satisfies AccountPairingApproval;
+          })
+        )
       )
     );
 
