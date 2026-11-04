@@ -12,6 +12,7 @@ import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
 import { Context, Effect, Layer, Scope, Exit, Result } from 'effect'
+import { TestClock } from 'effect/testing'
 import { BackendError, KeyMailbox } from '@lody/e2ee-core/services'
 import { makeSqliteKeyMailbox, referenceKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite'
 import { WorkspaceKeyRoundFailure } from '@lody/e2ee-core'
@@ -100,6 +101,13 @@ async function account(options = {}) {
     './e2ee-account-runtime.ts',
     {
       electron: { app: { getPath: () => options.directory ?? '/synthetic-user-data' } },
+      ...(options.clock
+        ? {
+            '@lody/shared/node/e2ee-clock': {
+              withE2eeTestClock: (work) => Effect.provide(work, options.clock)
+            }
+          }
+        : {}),
       '@lody/shared/node/e2ee-identity': options.identityStorage ?? {
         leaseE2eeIdentity: () => Effect.void
       },
@@ -1606,7 +1614,7 @@ void test('a snapshot-joined approver cancels another recipient without retiring
   )
 })
 
-async function nativeAccountFixture(t, storage = identityStorage) {
+async function nativeAccountFixture(t, storage = identityStorage, clock) {
   const directory = await mkdtemp(join(tmpdir(), 'desktop-identity-reset-'))
   let locked = false
   const wrapping = Buffer.alloc(32, 121)
@@ -1630,6 +1638,7 @@ async function nativeAccountFixture(t, storage = identityStorage) {
   }
   const native = await account({
     directory,
+    clock,
     identityStorage: storage,
     custody: (path) => makeDesktopE2eeCustody({ directory: path, platform: 'linux', safeStorage }),
     bootstrap: makeDesktopE2eeBootstrap,
@@ -2464,6 +2473,169 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
         0,
         'the original reader is closed'
       )
+    })
+  }
+})
+
+// All timing is driven by TestClock; native custody and the account boundary are real.
+void test('dispatch confirmation fences its reader and bounds only the waiter', async (t) => {
+  for (const scenario of [
+    'closed-reader',
+    'account-switch',
+    'reauthenticated',
+    'reader-reopened',
+    'renderer-replaced',
+    'credential-replaced',
+    'unreachable',
+    'early-loss',
+    'late-loss'
+  ]) {
+    await t.test(scenario, async (t) => {
+      const scope = await Effect.runPromise(Scope.make())
+      const clock = await Effect.runPromise(Layer.buildWithScope(TestClock.layer(), scope))
+      t.after(() => Effect.runPromise(Scope.close(scope, Exit.void)))
+      const run = (work) => Effect.runPromise(Effect.provide(work, clock))
+      const { api, identity, publishIdentity } = await nativeAccountFixture(
+        t,
+        identityStorage,
+        clock
+      )
+      await createAccountWorkspace(api, 'workspace')
+      const asked = Promise.withResolvers()
+      const answer = Promise.withResolvers()
+      const prepared = Promise.withResolvers()
+      t.after(() => answer.resolve(false))
+      const pushed = Promise.withResolvers()
+      const sender = Object.assign(new EventEmitter(), {
+        id: 42,
+        isDestroyed: () => false,
+        send: (channel, payload) => pushed.resolve({ channel, payload: { ...payload } })
+      })
+      let activeSender = sender
+      const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+        'electron-ipc-decorator': {
+          IpcService: class {},
+          IpcMethod: () => (_t, _n, d) => d,
+          getIpcContext: () => ({ event: { sender: activeSender } })
+        },
+        '../../platform': { isLocalPlatform: () => false },
+        '../../services/e2ee-bootstrap.mjs': {},
+        '../assert-sender': { assertProductWindowSender: () => {} },
+        '../ipc-service-deps': {
+          getIpcServiceDeps: () => ({
+            authService: { getCachedSessionIdentity: () => ({ ...identity }) }
+          })
+        },
+        '../../services/e2ee-account-runtime': {
+          ...api,
+          runDesktopE2eeOperation: async (...args) => {
+            const value = await api.runDesktopE2eeOperation(...args)
+            // Signal after the native boundary's post-operation account recheck.
+            if (value?.frame === 'synthetic-frame') prepared.resolve()
+            return value
+          },
+          desktopE2eeCloudClient: async () => ({
+            accountId: 'account',
+            client: {
+              contentStreamsToken: () =>
+                Effect.gen(function* () {
+                  asked.resolve()
+                  const lost = yield* Effect.promise(() => answer.promise)
+                  if (lost) return yield* Effect.fail(new E2eeDeviceRevokedError())
+                  return { token: 'synthetic-token' }
+                }),
+              machineSharing: () => ({}),
+              history: () => Effect.fail(new Error('unused'))
+            }
+          })
+        }
+      })
+      const ipc = new E2eeIpc()
+      await ipc.open('workspace')
+      if (scenario === 'reader-reopened' || scenario === 'renderer-replaced') {
+        activeSender = Object.assign(new EventEmitter(), {
+          id: 43,
+          isDestroyed: () => false,
+          send: () => {}
+        })
+        await ipc.open('workspace')
+        activeSender = sender
+      }
+      await api.withDesktopE2eeAccount(
+        (owner) =>
+          Effect.sync(() => {
+            owner.host.prepareDispatch = () =>
+              Effect.sync(() => {
+                return { frame: 'synthetic-frame' }
+              })
+          }),
+        'workspace',
+        false
+      )
+      let settled = false
+      const dispatch = ipc.prepareDispatch('workspace', 'machine', {
+        sessionId: 'session',
+        userTurnId: 'turn',
+        userId: 'account',
+        timestamp: new Date(0).toISOString(),
+        inputConfig: {}
+      })
+      const result = dispatch
+        .then(
+          (value) => ({ value }),
+          (error) => ({ error })
+        )
+        .finally(() => {
+          settled = true
+        })
+      await asked.promise
+      await prepared.promise
+      if (scenario === 'closed-reader') await ipc.close('workspace')
+      if (scenario === 'reader-reopened') {
+        await ipc.close('workspace')
+        await ipc.open('workspace')
+      }
+      if (scenario === 'renderer-replaced') {
+        sender.emit('render-process-gone')
+        await ipc.open('workspace')
+      }
+      if (scenario === 'credential-replaced') {
+        await api.resetDesktopE2eeIdentity({ workspaceId: 'workspace', resetId: randomUUID() })
+        await createAccountWorkspace(api, 'workspace')
+        await ipc.open('workspace')
+      }
+      if (scenario === 'account-switch' || scenario === 'reauthenticated') {
+        publishIdentity(scenario === 'account-switch' ? 'other-account' : 'account')
+        await api.closeDesktopE2eeAccount()
+      }
+      if (scenario === 'unreachable' || scenario === 'late-loss') {
+        // The local frame is ready; network uncertainty must not impose its 30s timeout.
+        await run(TestClock.adjust('299 millis'))
+        assert.equal(settled, false)
+        await run(TestClock.adjust('1 millis'))
+        // Clock stays at 300ms and the credential response is still held.
+        assert.deepEqual((await result).value, { frame: 'synthetic-frame' })
+        assert.equal(settled, true)
+        answer.resolve(scenario === 'late-loss')
+        if (scenario === 'late-loss') {
+          assert.deepEqual(await pushed.promise, {
+            channel: 'e2ee.accessLost',
+            payload: { workspaceId: 'workspace' }
+          })
+          await assert.rejects(ipc.status('workspace'), /^Error: e2ee_device_revoked$/)
+        }
+      } else {
+        answer.resolve(scenario === 'early-loss')
+        const outcome = await result
+        assert.equal(outcome.value, undefined)
+        assert.match(
+          outcome.error?.message ?? '',
+          scenario === 'early-loss'
+            ? /e2ee_device_revoked/
+            : /e2ee_(account_mismatch|host_operation_failed|closed)/
+        )
+      }
+      answer.resolve(false)
     })
   }
 })

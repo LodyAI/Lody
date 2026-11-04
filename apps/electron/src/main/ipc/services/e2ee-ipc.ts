@@ -87,6 +87,7 @@ const refuseUnopened = (owner: Owner, workspaceId: string) =>
 const observedSenders = new WeakSet<Electron.WebContents>()
 /** Windows that may hold readers; they get a re-read hint when main records a loss. */
 const readerWindows = new Map<number, Electron.WebContents>()
+const readerLifetimes = new WeakMap<Electron.WebContents, object>()
 function pairingSession(value: string) {
   if (typeof value !== 'string' || !/^[0-9a-f]{32}$/.test(value))
     throw new Error('e2ee_invalid-input')
@@ -162,15 +163,20 @@ function sender() {
     observedSenders.add(event.sender)
     const id = event.sender.id
     readerWindows.set(id, event.sender)
+    const release = () => {
+      readerLifetimes.delete(event.sender)
+      releaseDesktopE2eeReader(id)
+    }
     event.sender.once('destroyed', () => {
       readerWindows.delete(id)
-      releaseDesktopE2eeReader(id)
+      release()
     })
-    event.sender.on('render-process-gone', () => releaseDesktopE2eeReader(id))
+    event.sender.on('render-process-gone', release)
     event.sender.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-      if (isMainFrame && !isInPlace) releaseDesktopE2eeReader(id)
+      if (isMainFrame && !isInPlace) release()
     })
   }
+  if (!readerLifetimes.has(event.sender)) readerLifetimes.set(event.sender, {})
   return event.sender.id
 }
 /** Main-owned reader for background member key delivery; renderer webContents ids start at 1. */
@@ -259,6 +265,10 @@ export class E2eeIpc extends IpcService {
   // here, never on the cause-bearing Error passed to that logging/IPC boundary.
   private pairingFailure: unknown
   private readonly readerOwners = new WeakMap<object, string>()
+  private readonly dispatchReaderTokens = new WeakMap<
+    Map<number, number>,
+    WeakMap<Electron.WebContents, object>
+  >()
   // Member and account-pairing key delivery after admission is owned here, not by a
   // renderer request. One in-flight round per account/workspace; failures keep a public
   // code and are retried by a main-owned due timer (bounded) and by due polls (email
@@ -2536,12 +2546,17 @@ export class E2eeIpc extends IpcService {
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ) {
     const id = sender()
+    const window = readerWindows.get(id)!
+    const lifetime = readerLifetimes.get(window)
     return observeClientLossOperation('prepareDispatch', workspaceId, id, async () => {
+      const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+      const scope = this.memberScope(workspaceId)
       const cloud = await desktopE2eeCloudClient()
+      const readerTokens = this.dispatchReaderTokens
       let cleanup: Effect.Effect<void, unknown> = Effect.void
       const access = await (async () => {
         try {
-          return await withDesktopE2eeAccount(
+          return await scope(
             (owner) =>
               owner.accountId === cloud.accountId
                 ? Effect.gen(function* () {
@@ -2561,7 +2576,17 @@ export class E2eeIpc extends IpcService {
                           (request) => cloud.client.history(request)
                         )
                       : refuseUnopened(owner, workspaceId)
+                    const readers = owner.readers.get(workspaceId)
+                    let tokens = readers && readerTokens.get(readers)
+                    if (readers && !tokens) {
+                      tokens = new WeakMap()
+                      readerTokens.set(readers, tokens)
+                    }
+                    const readerToken = tokens?.get(window) ?? {}
+                    if (readers?.has(id)) tokens!.set(window, readerToken)
                     return {
+                      readers,
+                      readerToken,
                       accountId: owner.accountId,
                       credential,
                       status,
@@ -2579,7 +2604,6 @@ export class E2eeIpc extends IpcService {
                     )
                   )
                 : Effect.fail(new Error('e2ee_not_open')),
-            workspaceId,
             false
           )
         } finally {
@@ -2601,17 +2625,70 @@ export class E2eeIpc extends IpcService {
         }
       })()
       confirmed.catch(() => undefined)
+      // Only the waiter expires. The credential request keeps its original 30s
+      // network bound and still records a definitive late loss under the old binding.
+      // 300ms allows a fast credential round trip without imposing the cloud timeout
+      // on IPC/dispatch; the renderer independently activates durably after 200ms.
+      const confirmation = runDesktopE2eeOperation(
+        access.accountId,
+        Effect.raceFirst(
+          Effect.promise(() =>
+            confirmed.then(
+              () => undefined,
+              (error: unknown) => error
+            )
+          ),
+          Effect.as(Effect.sleep('300 millis'), undefined)
+        )
+      ).then((error) => {
+        if (error !== undefined) throw error
+      })
+      confirmation.catch(() => undefined)
       const prepared = await runDesktopE2eeOperation(access.accountId, access.work).catch(
         async (error) => {
           if (accessLoss(error)) return this.removeLocalWorkspace(access, accessLoss(error)!)
           if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message)))
-            await confirmed
+            await confirmation
           throw error
         }
       )
-      // A frame prepared for a device the server no longer accepts never leaves main.
-      await confirmed
-      return prepared
+      // A definitive confirmation refuses; uncertainty alone does not cancel local work.
+      await confirmation
+      // Network uncertainty is not cancellation. Revalidate the originating owner,
+      // auth generation, reader incarnation and exact credential before handing out bytes.
+      return scope(
+        (owner) =>
+          Effect.gen(function* () {
+            if (yield* owner.bootstrap.removedReason(workspaceId))
+              return yield* refuseUnopened(owner, workspaceId)
+            if (
+              window.isDestroyed() ||
+              readerLifetimes.get(window) !== lifetime ||
+              owner.readers.get(workspaceId) !== access.readers ||
+              !access.readers?.has(id) ||
+              readerTokens.get(access.readers)?.get(window) !== access.readerToken
+            )
+              return yield* Effect.fail(new Error('e2ee_closed'))
+            const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
+            const status = yield* owner.host.status(workspaceId)
+            const latest = getIpcServiceDeps().authService.getCachedSessionIdentity()
+            if (latest.userId !== identity.userId || latest.generation !== identity.generation)
+              return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            if (
+              window.isDestroyed() ||
+              readerLifetimes.get(window) !== lifetime ||
+              owner.readers.get(workspaceId) !== access.readers ||
+              !access.readers?.has(id) ||
+              readerTokens.get(access.readers)?.get(window) !== access.readerToken ||
+              credential !== access.credential ||
+              status.genesisHash !== access.status.genesisHash ||
+              status.signingPublicKey !== access.status.signingPublicKey
+            )
+              return yield* Effect.fail(new Error('e2ee_closed'))
+            return prepared
+          }),
+        false
+      )
     })
   }
   @IpcMethod()
@@ -2840,6 +2917,8 @@ export class E2eeIpc extends IpcService {
       getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== expectedAccountId
     )
       return
+    const readerTokens = this.dispatchReaderTokens
+    const window = readerWindows.get(id)
     const ownsReader = (owner: object) =>
       readerOwner === undefined || this.readerOwner(owner) === readerOwner
     const cleanup = await withDesktopE2eeAccount(
@@ -2851,7 +2930,10 @@ export class E2eeIpc extends IpcService {
           const readers = owner.readers.get(workspaceId)
           const count = readers?.get(id) ?? 0
           if (count > 1) readers!.set(id, count - 1)
-          else readers?.delete(id)
+          else {
+            readers?.delete(id)
+            if (readers && window) readerTokens.get(readers)?.delete(window)
+          }
           if (readers?.size === 0) {
             const drain = yield* owner.host.beginCloseWorkspace(workspaceId)
             owner.readers.delete(workspaceId)

@@ -312,7 +312,12 @@ export async function dispatchUserTurn(
         error instanceof EncryptedPrepareTimeout
           ? error.late
               .then(async (prepared) => {
+                const current = await readUserTurn(runtime, sessionId, userTurnId);
+                if (!current || !isSessionHistoryStatusAwaitingStart(current.status)) return false;
                 await store(prepared);
+                // Storage may yield while cancellation or a competing execution wins.
+                const latest = await readUserTurn(runtime, sessionId, userTurnId);
+                if (!latest || !isSessionHistoryStatusAwaitingStart(latest.status)) return false;
                 return send(prepared);
               })
               .catch(unavailable)

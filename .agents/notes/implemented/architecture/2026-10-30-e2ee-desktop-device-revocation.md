@@ -66,18 +66,22 @@ asked the server.
   `e2ee_not_open` was tried and rejected, because unapproved-device status reads rely
   on that sanitized refusal and the loss oracle does not need it. Account-mismatch
   refusals keep it too: another account's receipt is not this renderer's fact.
-- **Dispatch confirmation.** A prepared frame is returned only after this device's
-  credential is confirmed with the credential-bound token endpoint. An exact loss
-  records the receipt, discards the frame and returns the exact code. Any other check
-  failure establishes nothing and returns the frame, as before; nothing is retried.
-  The cost is one credential round trip per dispatch, the same one a failed
-  preparation already made. The check starts beside the local preparation, not
-  after it: the renderer races preparation against a 200 ms deadline, local
-  preparation measured 10–60 ms, and a serial check made every live send miss the
-  deadline. The deadline only bounds activation, so a preparation that answers late
-  still stores its original and sends the dispatch for the already-activated turn.
-  Raising the deadline was rejected because it is also the bound for refusing a
-  known machine withdrawal before any write.
+- **Dispatch confirmation.** The credential-bound token check starts beside local
+  preparation. Its waiter has a 300 ms budget: enough for a fast round trip without
+  imposing the cloud client's 30-second deadline on dispatch. Expiry or an
+  unclassified failure establishes no loss and changes no local outcome. The
+  original request retains its network bound; exact loss still records the
+  credential-bound receipt and pushes the reader hint even after the frame returned.
+  An exact loss learned before return discards the frame. No retry is added.
+  Before returning bytes, main rechecks the original account generation, owner,
+  reader incarnation, genesis, signing key and credential; lifecycle cancellation
+  is never treated as an inconclusive server check. A reader token is retired when
+  its last acquisition closes, including while another window retains the owner.
+  The renderer's 200 ms deadline still bounds durable activation. A late prepared
+  dispatch accelerates only a turn whose current stored status still permits
+  starting, checked before storing the original and again before sending. Increasing
+  that deadline was rejected because it also bounds the pre-write withdrawal gate;
+  awaiting the whole cloud timeout was rejected because it delays RPC acceleration.
 - **Reader hint.** Revocation keeps workspace membership visible, so nothing made
   a revoked window refresh. After recording a loss, main sends each reader window a
   reason-free `e2ee.accessLost` push; the renderer runs its existing native refresh,

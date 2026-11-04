@@ -480,6 +480,74 @@ it('activates on time and still accelerates a turn whose encrypted preparation o
   }
 });
 
+it('drops a late encrypted preparation when the real persisted turn was canceled', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const f = fixture();
+  f.runtime.contentMode = 'e2ee';
+  const asked = Promise.withResolvers<void>();
+  const answer = Promise.withResolvers<void>();
+  const original = {
+    requestId: '07'.repeat(16),
+    targetMachineId: MACHINE,
+    frameHex: '08'.repeat(300),
+    requesterDevice: '09'.repeat(32),
+    expiresAt: 4_102_444_800_000,
+  };
+  const frames: unknown[] = [];
+  const appended = Promise.withResolvers<void>();
+  const rpc = createEncryptedDispatchLegacy({
+    workspaceId: 'workspace',
+    prepare: async () => {
+      asked.resolve();
+      await answer.promise;
+      return original;
+    },
+    accept: async () => {
+      throw new Error('unused');
+    },
+    client: async () =>
+      ({
+        ensureJsonStream: async () => undefined,
+        readJsonLive: (_s: string, _st: unknown, _b: unknown, options: { signal: AbortSignal }) =>
+          new Promise<void>((resolve) => options.signal.addEventListener('abort', () => resolve())),
+        appendJson: async (_s: string, value: unknown) => {
+          frames.push(value);
+          appended.resolve();
+        },
+      }) as unknown as LoroStreamsJsonStreamClient,
+  });
+  cleanup.push(() => rpc.close());
+  f.runtime.prepareEncryptedDispatch = (machine, input) => rpc.prepare(machine, input);
+  let dispatched: Promise<void> | undefined;
+  try {
+    await f.append(entry('canceled-late'));
+    dispatched = dispatchUserTurn(f.runtime, SESSION, 'canceled-late');
+    await asked.promise;
+    await vi.advanceTimersByTimeAsync(200);
+    await f.runtime.sendResources.withSessionStore(SESSION, async (store) => {
+      await store.sessionData.commands.applyHistoryAction({
+        kind: 'user-status',
+        turnId: 'canceled-late',
+        status: 'canceled',
+      });
+    });
+    expect(turnStatus(f, 'canceled-late')).toBe('canceled');
+    answer.resolve();
+    expect(
+      await Promise.race([dispatched.then(() => 'dropped'), appended.promise.then(() => 'sent')])
+    ).toBe('dropped');
+    expect(
+      f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get('canceled-late')
+    ).toBeUndefined();
+    expect(frames).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+    answer.resolve();
+    await rpc.close();
+    await dispatched;
+  }
+});
+
 it('appends a saved dispatch record whose turn is absent, activates it and deletes the database', async () => {
   const f = fixture();
   await seed(f.factory, [record('saved')]);

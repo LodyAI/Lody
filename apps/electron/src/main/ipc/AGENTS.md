@@ -18,12 +18,13 @@ the account lock on every exit, including failed identity rechecks, unless anoth
 reader owns them.
 [Decision](../../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).
 
-A prepared dispatch frame is returned only after this device's credential is
-confirmed with the server; an exact loss discards the frame and records the receipt,
-while any other check failure leaves the prepared frame unchanged. Never retry the
-check or replace a refusal with a fallback. Start the check beside the local
-preparation, never after it, because the renderer races preparation against its
-dispatch deadline.
+Dispatch checks the credential beside local preparation with a 300 ms waiter
+budget. Exact loss discards the frame and records the receipt; timeout or an
+unclassified failure leaves the local result unchanged. The bounded network
+request continues and records exact late loss, including the reader hint. Never
+retry the check or replace a refusal with a fallback. Before returning a frame,
+recheck the originating account generation, owner, reader incarnation and credential
+binding; lifecycle cancellation always refuses the old frame.
 A sender without a reader is refused with the identity's recorded removal reason as
 its exact public code. Without a receipt, and on account mismatch, the refusal stays
 the untagged `e2ee_not_open`, which the boundary publishes only as the sanitized
