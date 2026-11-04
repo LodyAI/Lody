@@ -520,7 +520,7 @@
   "sharing.request.deny": "不分享",
   "sharing.request.approve": "批准并分享",
   "settings.agent.dialog.lodyAgentSignInHint": "设置完成后，打开此 Provider 登录并选择可用账户。",
-  "settings.agent.dialog.option.sorbet.description": "Lody Agent 智能体运行时",
+  "settings.agent.dialog.option.sorbet.description": "为跨越多次对话的工作而设计的智能体框架，专为 Lody 打造。",
   "settings.agent.dialog.option.pi.description": "由 Lody 管理的 Pi ACP 运行时",
   "piExtensions.title": "Pi 扩展",
   "piExtensions.consent": "扫描仅列出已安装的全局扩展。勾选的扩展将在 Pi 及其子代理中以你的权限运行，不自动发现项目扩展。支持扩展注册模型，其余插件功能可能不适用于 ACP。",

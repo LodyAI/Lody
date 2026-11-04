@@ -1012,7 +1012,7 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     value: 'builtin:sorbet',
     label: 'Lody Agent',
     descriptionKey: 'settings.agent.dialog.option.sorbet.description',
-    descriptionDefault: 'Lody Agent runtime',
+    descriptionDefault: 'An agent harness for work that outlives one conversation. Built for Lody.',
     cliType: 'builtin',
     agentType: 'sorbet',
     searchKeys: 'lody agent sorbet',
