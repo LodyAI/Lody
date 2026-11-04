@@ -306,8 +306,8 @@ function ProjectAccessStatus({
   const isAction = variant === 'trigger' && Boolean(onShare);
   const sharedClassName = cn(
     'inline-flex shrink-0 select-none items-center gap-1 text-muted-foreground',
-    variant === 'trigger' && ['h-6 rounded-r-md px-2 text-[0.8em] font-medium transition-colors'],
-    variant === 'option' && 'text-[0.8em] font-medium',
+    variant === 'trigger' && ['h-6 rounded-r-md px-2 text-[0.8em] transition-colors'],
+    variant === 'option' && 'text-[0.8em]',
     'text-foreground/75',
     isAction && 'cursor-pointer hover:text-foreground',
     variant === 'trigger' &&
