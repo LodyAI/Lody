@@ -84,6 +84,14 @@ asked the server.
   reader incarnation, genesis, signing key and credential; lifecycle cancellation
   is never treated as an inconclusive server check. A reader token is retired when
   its last acquisition closes, including while another window retains the owner.
+  A dispatch captured without a reader is already refused and has no frame to
+  accelerate. Its failure waits outside the account lock for the existing
+  credential request (bounded by the cloud client's 30-second timeout), rather
+  than returning `not_open` before a slower definitive verdict. This wait is scoped
+  to readerless diagnosis: live-reader successful or locally failed preparations
+  retain the 50 ms budget, and network uncertainty still cannot invent loss. A new
+  request, retry, increased healthy-send budget or changed stale-frame policy was
+  rejected; none is necessary to diagnose an already-refused operation.
   The renderer's 200 ms deadline still bounds durable activation. A late prepared
   dispatch accelerates a still-dispatchable user turn (`pending`, `seen`, or
   `processing`), checked before storing the original and again before sending.

@@ -2220,7 +2220,9 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
         'parse',
         'endpoint',
         'endpoint-slow-cleanup',
-        ...(hasReader ? ['endpoint-slow-cleanup-frame'] : [])
+        ...(hasReader
+          ? ['endpoint-slow-cleanup-frame']
+          : ['endpoint-after-budget', 'transport-after-budget'])
       ]) {
         await t.test(`${hasReader ? 'reader' : 'closed'}-${code}-${source}`, async (subtest) => {
           const scope = await Effect.runPromise(Scope.make())
@@ -2243,6 +2245,10 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
           subtest.after(() => releaseCleanup.resolve())
           const delayedCleanup = source.startsWith('endpoint-slow-cleanup')
           let escapedFrames = 0
+          const afterBudget = source.endsWith('-after-budget')
+          const endpointEntered = Promise.withResolvers()
+          const releaseEndpoint = Promise.withResolvers()
+          subtest.after(() => releaseEndpoint.resolve())
           const credential = await api.withDesktopE2eeAccount(
             (owner) => {
               owner.readers.set('workspace', new Map([[sender.id, 1]]))
@@ -2270,7 +2276,11 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
                 assert.equal(request.path, 'e2eeContent:contentStreamsToken')
                 assert.equal(request.args[0].credential, credential)
                 endpointCalls++
-                if (source === 'transport') throw failure
+                if (afterBudget) {
+                  endpointEntered.resolve()
+                  await releaseEndpoint.promise
+                }
+                if (source === 'transport' || source === 'transport-after-budget') throw failure
                 const response = Response.json(
                   { status: 'error', errorMessage: 'synthetic rejection', errorData: { code } },
                   { status: 560 }
@@ -2372,6 +2382,25 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
               'known loss must not return the unrelated local error while cleanup is pending'
             )
             assert.equal(finished.message, code)
+          }
+          if (afterBudget) {
+            // e6 live trace: reader already closed, credential request still has
+            // no headers/body when the 300ms budget and IPC response expire.
+            await endpointEntered.promise
+            await run(TestClock.adjust('321 millis'))
+            await api.withDesktopE2eeAccount(() => Effect.void, 'workspace', false)
+            const premature = settled ? (await outcome).message : undefined
+            assert.deepEqual(snapshot(), { creations: originalRows, receipts: 0 })
+            assert.equal(escapedFrames, 0)
+            await run(TestClock.adjust('479 millis'))
+            releaseEndpoint.resolve()
+            await outcome
+            if (source.startsWith('endpoint')) await cleanupDone.promise
+            assert.equal(
+              premature,
+              undefined,
+              'readerless refusal must await credential diagnosis, not turn timeout into a verdict'
+            )
           }
           const error = await outcome
           const db = new DatabaseSync(join(first.directory, 'creations.sqlite'))

@@ -2586,6 +2586,7 @@ export class E2eeIpc extends IpcService {
                     if (readers?.has(id)) tokens!.set(window, readerToken)
                     return {
                       readers,
+                      hadReader: readers?.has(id) === true,
                       readerToken,
                       accountId: owner.accountId,
                       credential,
@@ -2660,8 +2661,14 @@ export class E2eeIpc extends IpcService {
       const prepared = await runDesktopE2eeOperation(access.accountId, access.work).catch(
         async (error) => {
           if (accessLoss(error)) return this.removeLocalWorkspace(access, accessLoss(error)!)
-          if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message)))
-            await waitForConfirmation()
+          if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message))) {
+            // A readerless operation is already refused and can never return a
+            // frame. Diagnose its retained credential through the existing bounded
+            // request, instead of mistaking the fast-send budget for a verdict.
+            // Live-reader sends retain the 50ms budget; this holds no account lock.
+            if (!access.hadReader) await confirmed
+            else await waitForConfirmation()
+          }
           throw error
         }
       )

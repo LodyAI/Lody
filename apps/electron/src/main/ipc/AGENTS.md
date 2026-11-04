@@ -28,6 +28,11 @@ request continues and records exact late loss, including the reader hint. Never
 retry the check or replace a refusal with a fallback. Before returning a frame,
 recheck the originating account generation, owner, reader incarnation and credential
 binding; lifecycle cancellation always refuses the old frame.
+A failed dispatch captured without a reader never returns a frame and awaits its
+retained credential's existing bounded network request outside the account lock.
+This diagnoses loss instead of substituting an unknown-verdict timeout; JWT or
+transport uncertainty retains the original refusal. Live-reader sends keep the
+50 ms budget. No second request or retry is added.
 A sender without a reader is refused with the identity's recorded removal reason as
 its exact public code. Without a receipt, and on account mismatch, the refusal stays
 the untagged `e2ee_not_open`, which the boundary publishes only as the sanitized
