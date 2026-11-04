@@ -23,11 +23,17 @@ export function LodyAgentAccountsController({
   configId,
   supported,
   refreshVersion,
+  onProvidersChanged,
 }: {
   machineId: MachineId;
   configId: AgentConfigId;
   supported: boolean;
   refreshVersion: number;
+  /**
+   * Re-probe the agent after a Provider definition changes. A new Provider only becomes a
+   * sign-in method once the capability probe reads it, so saving one is not enough.
+   */
+  onProvidersChanged?: () => Promise<void>;
 }) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const { t } = useTranslation();
@@ -123,6 +129,19 @@ export function LodyAgentAccountsController({
     }
   };
 
+  /** A Provider write changes the agent's advertised sign-in methods, not just the list. */
+  const reprobeSignIn = async () => {
+    if (!onProvidersChanged) return;
+    try {
+      await onProvidersChanged();
+    } catch {
+      setProviderState((previous) => ({
+        ...previous,
+        error: t('lodyAgentProviders.signInRefreshFailed'),
+      }));
+    }
+  };
+
   const createProvider = async (draft: LodyAgentCustomProviderDraft) => {
     if (!available || !runtime || providerState.creating) return;
     const current = ++providerGeneration.current;
@@ -133,7 +152,10 @@ export function LodyAgentAccountsController({
         params: { configId, provider: draft },
       });
       if (result.type !== 'sorbet/providers-create') throw new Error('Unexpected response');
-      if (providerGeneration.current === current) await refreshProviders();
+      if (providerGeneration.current === current) {
+        await refreshProviders();
+        await reprobeSignIn();
+      }
     } catch {
       if (providerGeneration.current === current) {
         setProviderState((previous) => ({
@@ -162,7 +184,10 @@ export function LodyAgentAccountsController({
         params: { configId, providerId: provider.id },
       });
       if (result.type !== 'sorbet/providers-delete') throw new Error('Unexpected response');
-      if (providerGeneration.current === current) await refreshProviders();
+      if (providerGeneration.current === current) {
+        await refreshProviders();
+        await reprobeSignIn();
+      }
     } catch {
       if (providerGeneration.current === current)
         setProviderState((previous) => ({

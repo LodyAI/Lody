@@ -6160,5 +6160,6 @@
   "lodyAgentProviders.save": "Save provider",
   "lodyAgentProviders.saving": "Saving…",
   "lodyAgentProviders.modelCount_one": "{{count}} model",
-  "lodyAgentProviders.modelCount_other": "{{count}} models"
+  "lodyAgentProviders.modelCount_other": "{{count}} models",
+  "lodyAgentProviders.signInRefreshFailed": "Provider saved, but the sign-in methods could not be refreshed. Use Refresh agent capabilities in this dialog, then try signing in."
 }

@@ -3220,6 +3220,12 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   machineSupportsProtocolCapability(machine, 'sorbetCredentialsRemote', 1)
                 }
                 refreshVersion={accountsRefreshVersion}
+                onProvidersChanged={async () => {
+                  // Saving a Provider only matters once the probe reads it, so re-probe
+                  // here and let the refreshed method list reach both panels.
+                  await onRefreshCapabilities({ machineId: machine.id, configId: agentConfigId });
+                  setAccountsRefreshVersion((version) => version + 1);
+                }}
               />
             )}
 

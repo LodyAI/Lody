@@ -6149,5 +6149,6 @@
   "lodyAgentProviders.save": "保存服务商",
   "lodyAgentProviders.saving": "保存中…",
   "lodyAgentProviders.modelCount_one": "{{count}} 个模型",
-  "lodyAgentProviders.modelCount_other": "{{count}} 个模型"
+  "lodyAgentProviders.modelCount_other": "{{count}} 个模型",
+  "lodyAgentProviders.signInRefreshFailed": "服务商已保存，但登录方式未能刷新。请使用此对话框中的“刷新智能体能力”，然后重试登录。"
 }
