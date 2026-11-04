@@ -268,6 +268,10 @@ this page is the full text of the rules summarised there.
   only once the workspace catalog can answer — before that, "not in the list"
   means "not loaded yet", so the stored id must not be overwritten with null.
   `SessionMeta.agentRoleId`/`agentRoleRevision` record provenance only.
+  Configuration-source caching retains detached tail metadata, memoized by weak
+  message identity, and lazy index rows for older user turns. This preserves array
+  reuse without retaining evicted message bodies. The [streaming-cost decision](../notes/implemented/bug-fix/2026-09-16-streaming-cost-scales-with-conversation-length.md)
+  explains the full tail configuration and lazy historical-source distinction.
   A Role also appears in **Recently used**, because a Role IS one of those whole
   combinations: the record carries `agentRoleId`, that id is part of
   `getRecentRunConfigKey` (the same knobs picked by hand are a DIFFERENT entry —
@@ -280,8 +284,10 @@ this page is the full text of the rules summarised there.
   its `inputConfig`; `resolveSessionConversationConfig` reads the latest accepted
   or queued Turn. ACP `config_option_update`/`current_mode_update` events update
   the separate shared `SessionDoc.acpRuntimeConfig` baseline, causally fenced by
-  the driving `userTurnId`. A queued Turn and a newer accepted Turn always beat
-  an older runtime event. Apply that shared baseline only to composer fields the
+  the driving `userTurnId`. The composer checks that identity against indexed
+  configuration sources, so unloaded message bodies cannot discard a valid runtime
+  baseline and revive an older Plan request. A queued Turn and a newer accepted Turn
+  always beat an older runtime event. Apply that shared baseline only to composer fields the
   local user has not edited; local unsent choices remain a private draft until
   send freezes them into a Turn. Never infer runtime config from a permission
   click or its history outcome: consent is not proof that the agent applied the

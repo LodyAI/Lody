@@ -1,5 +1,8 @@
 import type { WorkspaceAdmissionDescriptor, WorkspaceModeDescriptor } from '@lody/cloud-api';
 import type { ObservedLedgerCheckpoint, VerifiedLedgerHistory } from './e2ee-ledger-history';
+import { Result } from 'effect';
+import * as Hex from 'effect/encoding/Hex';
+import { Bytes, hasVerifiedCheckpoint } from '@lody/e2ee-core/protocol';
 
 /** Unreadable local evidence. Only optional caches may be repaired by deleting them. */
 export class E2eeLocalEvidenceCorruptError extends Error {
@@ -460,6 +463,18 @@ export function readObservedLedgerCheckpoint(
   return observedCheckpoints(storage, accountId, workspaceId).at(-1) ?? null;
 }
 
+/** A signed snapshot only retains the head hash it attests. A locally retained
+ * original at the observed position proves that earlier checkpoint without
+ * weakening the snapshot's own endpoint check. */
+function hasVerifiedRecordCheckpoint(
+  history: VerifiedLedgerHistory,
+  previous: ObservedLedgerCheckpoint
+): boolean {
+  return history.records.some(
+    (record) => record.index === previous.length - 1 && record.hash === previous.headHash
+  );
+}
+
 /** Retain only the locally verified prefix, never an unread server endpoint.
  * Returns false while a paged refresh has not reached the last observed record.
  */
@@ -480,11 +495,17 @@ export function retainObservedLedgerCheckpoint(
       pending = true;
       continue;
     }
-    if (history.records[previous.length - 1]?.hash !== previous.headHash)
+    const viewHasCheckpoint = Result.getOrThrow(
+      hasVerifiedCheckpoint(history.view, {
+        length: previous.length,
+        head: Result.getOrThrow(Bytes.recordHash(Result.getOrThrow(Hex.decode(previous.headHash)))),
+      })
+    );
+    if (!viewHasCheckpoint && !hasVerifiedRecordCheckpoint(history, previous))
       throw conflict('Ledger history changed');
   }
   if (pending) return false;
-  const head = history.records[history.view.length - 1]?.hash;
+  const head = Hex.encode(history.view.head.toBytes());
   if (!head || history.page.workspaceId !== workspaceId)
     throw new Error('Invalid verified history');
   // Immutable per-checkpoint keys keep another window's newer observation even

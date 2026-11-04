@@ -49,8 +49,32 @@ import {
 import { openPersonalSession } from './session';
 import { fail } from './errors';
 import { toHex, fromHex } from './bytes';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { qualifyPersonalLedgerOrigin } from './ledger';
 
 const encode = (v: unknown) => new TextEncoder().encode(JSON.stringify(v));
+/** Account-wide pairing has no per-workspace offer: the identity is prepared before
+ * any approver is known. Its fixed offer carries this placeholder endorser; the real
+ * one comes, tag-authenticated, with the approval and replaces it when verifying. */
+export const ACCOUNT_PAIRING_ENDORSER = '00'.repeat(32);
+/** The fixed per-workspace offer behind an account-pairing identity, so every later
+ * request and reopen finds the same identity and journal. */
+export function accountPairingOffer(
+  scope: { readonly workspaceId: string; readonly genesis: Bytes.GenesisHash },
+  pin: { readonly genesisRecordHex: string; readonly membershipId: string }
+): PersonalPairingOffer {
+  return {
+    version: 1,
+    workspaceId: scope.workspaceId,
+    genesisHash: toHex(scope.genesis.toBytes()),
+    genesisRecordHex: pin.genesisRecordHex,
+    endorser: ACCOUNT_PAIRING_ENDORSER,
+    membershipId: pin.membershipId,
+    pairingSessionId: toHex(
+      sha256(new TextEncoder().encode(`lody-e2ee/account-pairing-session/v1\0${scope.workspaceId}`))
+    ).slice(0, 32),
+  };
+}
 const parse = <A>(v: Uint8Array) =>
   Effect.try({ try: () => decode(v) as A, catch: (cause) => fail('corrupt', cause) });
 const key = (p: PreparedPersonalIdentity, purpose: 'claim' | 'approval') => ({
@@ -86,6 +110,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     return yield* fail('scope-mismatch');
   // Capture trusted factories/capabilities once. Later object mutation cannot redirect in-flight ownership.
   const exchange = remote.exchange.bind(remote),
+    history = remote.history?.bind(remote),
     drainOld = platform.drainOld?.bind(platform);
   const parent = yield* Scope.Scope;
   const owner = yield* Scope.fork(parent),
@@ -176,6 +201,8 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       kind: string;
       invitationHex?: string;
       origin?: { invitationHex: string; endorser: string };
+      /** Account pairing only: the approver named by the authenticated approval. */
+      endorser?: string;
     },
     pages?: unknown
   ) =>
@@ -187,15 +214,20 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           try: () => decodePersonalInvitation(descriptor.invitationHex!),
           catch: (cause) => fail('invalid-input', cause),
         });
-        const checked = yield* Effect.fromResult(verifyPersonalApproval(p.offer, invitation));
+        const endorser =
+          p.offer.endorser === ACCOUNT_PAIRING_ENDORSER ? descriptor.endorser : p.offer.endorser;
+        if (!endorser) return yield* fail('approval-required');
+        const pinned = { ...p.offer, endorser };
+        const checked = yield* Effect.fromResult(verifyPersonalApproval(pinned, invitation));
         approval = {
           kind: 'snapshot',
-          offer: p.offer,
+          // The ledger re-verifies this snapshot from `offer`: it carries the real endorser.
+          offer: pinned,
           invitation,
           view: checked.view,
           originalOrigin: {
             invitation,
-            endorser: Result.getOrThrow(Bytes.signingPublicKey(fromHex(p.offer.endorser))),
+            endorser: Result.getOrThrow(Bytes.signingPublicKey(fromHex(endorser))),
           },
         };
       } else if (descriptor.kind === 'history' && Array.isArray(pages)) {
@@ -212,6 +244,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
             })
           : undefined;
         approval = { kind: 'history', offer: p.offer, pages, view, originalOrigin };
+        if (originalOrigin) yield* qualifyPersonalLedgerOrigin(approval);
       } else return yield* fail('approval-required');
       yield* Effect.fromResult(assertPersonalAdmission(p.binding, request, approval.view));
       return approval;
@@ -228,6 +261,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           kind: string;
           invitationHex?: string;
           origin?: { invitationHex: string; endorser: string };
+          endorser?: string;
         }>(row.original);
         if (
           saved.version !== 1 ||
@@ -242,7 +276,37 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           if (!chunks) return yield* fail('corrupt');
           pages = yield* Effect.forEach(chunks, (chunk) => parse(chunk));
         }
-        return yield* verifyApproval(p, saved, pages);
+        const approved = yield* verifyApproval(p, saved, pages);
+        if (approved.kind !== 'snapshot' || !history) return approved;
+        // Keep the immutable approval, feed origin and pin. Only its missing
+        // signed prefix is added to the existing bound approval-evidence store.
+        const store = yield* evidence(p, identity);
+        const chunks = yield* store.load(p.offer.pairingSessionId);
+        let proof: unknown[];
+        if (chunks) proof = yield* Effect.forEach(chunks, (chunk) => parse(chunk));
+        else {
+          yield* guard;
+          const source = yield* history(identity.credential);
+          yield* guard;
+          proof = yield* Effect.fromResult(captureHistoryPages(source));
+        }
+        const qualified = yield* verifyApproval(
+          p,
+          {
+            kind: 'history',
+            origin: {
+              invitationHex: saved.invitationHex!,
+              endorser: approved.offer.endorser,
+            },
+          },
+          proof
+        );
+        if (!chunks)
+          yield* store.retain(
+            p.offer.pairingSessionId,
+            proof.map((page) => encode(page))
+          );
+        return qualified;
       })
     );
   const exchangeOriginal = (p: PreparedPersonalIdentity, action: PersonalExchange['action']) =>
@@ -450,8 +514,74 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       );
       return undefined;
     });
+  /** Account pairing: verify an invitation for the given endorser against this
+   * device's prepared identity, and retain it as the approval original. */
+  const acceptAccount = (input: {
+    genesisRecordHex: string;
+    membershipId: string;
+    invitationHex: string;
+    endorser: string;
+  }) =>
+    Effect.gen(function* () {
+      const p = yield* prepare(accountPairingOffer(platform.scope, input));
+      if (yield* pairings.load(key(p, 'approval'))) return yield* loadApproval(p);
+      const descriptor = {
+        kind: 'snapshot' as const,
+        invitationHex: input.invitationHex,
+        endorser: input.endorser,
+      };
+      const approval = yield* withIdentity(p, () => verifyApproval(p, descriptor));
+      yield* pairings.compareAndSet(key(p, 'approval'), null, {
+        revision: 1,
+        original: encode({ version: 1, offer: p.offer, requestHex: p.requestHex, ...descriptor }),
+        receipt: null,
+      });
+      return approval;
+    });
+  /** Account pairing without an invitation (Member approver): verify the complete
+   * signed history and this device's admission, then retain the pages and approval. */
+  const acceptAccountHistory = (input: {
+    genesisRecordHex: string;
+    membershipId: string;
+    pages: unknown;
+  }) =>
+    Effect.gen(function* () {
+      const p = yield* prepare(accountPairingOffer(platform.scope, input));
+      if (yield* pairings.load(key(p, 'approval'))) return yield* loadApproval(p);
+      const pages = yield* Effect.fromResult(captureHistoryPages(input.pages));
+      const descriptor = { kind: 'history' as const };
+      return yield* withIdentity(p, (identity) =>
+        Effect.gen(function* () {
+          const approval = yield* verifyApproval(p, descriptor, pages);
+          const store = yield* evidence(p, identity);
+          yield* store.retain(
+            p.offer.pairingSessionId,
+            pages.map((page) => encode(page))
+          );
+          yield* pairings.compareAndSet(key(p, 'approval'), null, {
+            revision: 1,
+            original: encode({
+              version: 1,
+              offer: p.offer,
+              requestHex: p.requestHex,
+              ...descriptor,
+            }),
+            receipt: null,
+          });
+          return approval;
+        })
+      );
+    });
   return Object.freeze({
     close: () => close,
+    /** Account pairing: create or reuse this workspace's identity for a verified
+     * genesis record and membership. Protection comes from the platform's custody. */
+    prepareAccount: (pin: { genesisRecordHex: string; membershipId: string }) =>
+      run(prepare(accountPairingOffer(platform.scope, pin)).pipe(Effect.map(publicPrepared))),
+    acceptAccount: (input: Parameters<typeof acceptAccount>[0]) =>
+      run(Effect.asVoid(acceptAccount(input))),
+    acceptAccountHistory: (input: Parameters<typeof acceptAccountHistory>[0]) =>
+      run(Effect.asVoid(acceptAccountHistory(input))),
     prepare: (offer: PersonalPairingOffer, replacement = false) =>
       run(prepare(offer, replacement).pipe(Effect.map(publicPrepared))),
     begin: (offer: PersonalPairingOffer, replacement = false) =>
@@ -461,9 +591,13 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         Effect.gen(function* () {
           const p = yield* prepare(offer, replacement);
           const existing = yield* pairings.load(key(p, 'approval'));
-          return existing
-            ? (yield* loadApproval(p), { status: 'approved' as const })
-            : yield* exchangeOriginal(p, 'claim');
+          if (existing) {
+            yield* loadApproval(p);
+            return { status: 'approved' as const };
+          }
+          const result = yield* exchangeOriginal(p, 'claim');
+          if (result.status === 'approved') yield* loadApproval(p);
+          return result;
         })
       ),
     cancel: (offer: PersonalPairingOffer, replacement = false) =>

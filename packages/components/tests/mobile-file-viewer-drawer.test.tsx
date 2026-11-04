@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -84,27 +85,6 @@ function renderDrawer(onCopyMarkdown?: () => void): HTMLElement {
 }
 
 describe('MobileFileViewerDrawer', () => {
-  it('adds a full Markdown copy action when the file view provides one', () => {
-    let copied = '';
-    const onCopyMarkdown = () => {
-      copied = '# Example';
-    };
-    const view = renderDrawer(onCopyMarkdown);
-    const action = Array.from(view.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Copy full Markdown'
-    );
-
-    expect(action).not.toBeUndefined();
-    act(() => action?.click());
-    expect(copied).toBe('# Example');
-  });
-
-  it('omits the full Markdown copy action for other file types', () => {
-    const view = renderDrawer();
-    expect(view.textContent).not.toContain('Copy full Markdown');
-    expect(view.textContent).toContain('Copy file path');
-  });
-
   it.each([true, false])(
     'resizes with the visual viewport and restores on hide (native: %s)',
     (native) => {

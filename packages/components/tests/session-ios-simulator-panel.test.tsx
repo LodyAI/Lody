@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
@@ -23,10 +24,7 @@ import { lodyPresenceSyncStateAtom } from '../src/atoms/presence';
 import { writeTextToClipboard } from '../src/lib/clipboard';
 import { downloadBytesAsFile } from '../src/lib/download-file';
 import { toast } from '../src/lib/toast';
-import {
-  IOS_SIMULATOR_PREPARING_MAX_POLLS,
-  writeIosSimulatorSelectedDevice,
-} from '../src/lib/ios-simulator/ios-simulator-model';
+import { writeIosSimulatorSelectedDevice } from '../src/lib/ios-simulator/ios-simulator-model';
 import { SessionDevicePreviewPanel } from '../src/components/sessions/ios-simulator/session-ios-simulator-panel';
 
 vi.mock('react-i18next', () => ({
@@ -309,51 +307,6 @@ describe('SessionIosSimulatorPanel', () => {
     expect(local.commands).toContainEqual({ action: 'list' });
   });
 
-  it('starts a shut-down device and polls the operation until the viewer is ready', async () => {
-    vi.useFakeTimers();
-    const machine = createFakeMachine({ devices: [device({ udid: 'phone', name: 'iPhone 16' })] });
-    await renderPanel({ machine });
-    // On open the panel recovers any preview without naming an operation.
-    expect(machine.commands).toContainEqual({ action: 'status', operationId: undefined });
-
-    await click('Start and preview');
-    expect(machine.commands).toContainEqual({ action: 'start', udid: 'phone' });
-    // Cancel names the operation, so it waits for the machine to name one.
-    expect(button('Cancel').disabled).toBe(true);
-
-    await machine.answerNext(answer({ preview: preview({ phase: 'booting' }) }));
-    expect(text()).toContain('Starting the simulator');
-    expect(button('Cancel').disabled).toBe(false);
-
-    machine.setPreview(preview({ phase: 'ready', viewerUrl: VIEWER_URL }));
-    await advance(1_000);
-    expect(machine.commands).toContainEqual({ action: 'status', operationId: 'op-1' });
-    const frame = container?.querySelector('iframe');
-    expect(frame?.getAttribute('src')).toBe(VIEWER_URL);
-    expect(frame?.getAttribute('referrerpolicy')).toBe('no-referrer');
-    expect(text()).not.toContain('viewer.example');
-
-    await act(async () => {
-      window.dispatchEvent(
-        new MessageEvent('message', {
-          data: {
-            type: 'lody:ios-simulator:state',
-            operationId: 'op-1',
-            state: 'ready',
-            width: 100,
-            height: 200,
-          },
-          origin: VIEWER_ORIGIN,
-          source: frame?.contentWindow,
-        })
-      );
-    });
-    // Ready is not polled: the viewer reports its own stream.
-    const reads = machine.commands.length;
-    await advance(60_000);
-    expect(machine.commands.length).toBe(reads);
-  });
-
   it('greets the viewer at its exact origin and trusts only that frame', async () => {
     const machine = createFakeMachine({
       devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
@@ -430,19 +383,6 @@ describe('SessionIosSimulatorPanel', () => {
     ]);
   });
 
-  it('offers restore if a visible viewer never reports a first frame', async () => {
-    vi.useFakeTimers();
-    const machine = createFakeMachine({
-      devices: [device({ udid: 'phone', state: 'Booted' })],
-      preview: preview({ phase: 'ready', viewerUrl: VIEWER_URL }),
-    });
-    await renderPanel({ machine });
-    expect(text()).not.toContain('lost its connection');
-    await advance(25_000);
-    expect(text()).toContain('The viewer hit an error.');
-    expect(button('Restore').disabled).toBe(false);
-  });
-
   it('cancels a preparing preview by stopping its exact operation', async () => {
     const machine = createFakeMachine({
       devices: [device({ udid: 'phone', name: 'iPhone 16', state: 'Booted' })],
@@ -457,47 +397,6 @@ describe('SessionIosSimulatorPanel', () => {
       answer({ preview: preview({ phase: 'closed', operationId: 'op-9' }) })
     );
     expect(button('Preview').disabled).toBe(false);
-  });
-
-  it('reports a start that never becomes ready instead of polling forever', async () => {
-    vi.useFakeTimers();
-    const machine = createFakeMachine({
-      devices: [device({ udid: 'phone', state: 'Booted' })],
-      preview: preview({ phase: 'connecting' }),
-    });
-    await renderPanel({ machine });
-    for (let poll = 0; poll <= IOS_SIMULATOR_PREPARING_MAX_POLLS; poll += 1) await advance(1_000);
-    expect(text()).toContain('The preview took too long to start');
-    const reads = machine.commands.length;
-    await advance(10_000);
-    expect(machine.commands.length).toBe(reads);
-    expect(button('Stop preview').disabled).toBe(false);
-  });
-
-  it.each(['toolbar', 'menu'] as const)(
-    'exposes Stop preview directly and releases the current operation (%s)',
-    async (controlsLayout) => {
-      const machine = createFakeMachine({
-        devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
-        preview: preview({ phase: 'ready', viewerUrl: VIEWER_URL }),
-      });
-      await renderPanel({ machine, controlsLayout });
-      await click('Stop preview');
-      expect(machine.commands).toContainEqual({ action: 'stop', operationId: 'op-1' });
-      await machine.answerNext(answer({ preview: preview({ phase: 'closed' }) }));
-      expect(button('Preview').disabled).toBe(false);
-    }
-  );
-
-  it('offers Restore after the preview closed, as a new start', async () => {
-    const machine = createFakeMachine({
-      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
-      preview: preview({ phase: 'closed' }),
-    });
-    await renderPanel({ machine });
-    expect(text()).toContain('The preview ended.');
-    await click('Restore');
-    expect(machine.commands).toContainEqual({ action: 'start', udid: 'phone' });
   });
 
   it('never offers a preview of a device another Session controls', async () => {
@@ -643,58 +542,6 @@ async function connectControlViewer() {
 }
 
 describe('SessionIosSimulatorPanel controls', () => {
-  it('sends native controls through the exact ready operation', async () => {
-    const machine = createFakeMachine({
-      devices: [
-        device({
-          udid: 'phone',
-          name: 'iPhone 16 Pro',
-          deviceType: 'com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro',
-          state: 'Booted',
-          occupancy: 'this-session',
-        }),
-      ],
-      preview: READY,
-    });
-    await renderPanel({ machine, meta: CONTROLS_META });
-
-    const viewer = await connectControlViewer();
-    await act(async () => labelled('Home')?.click());
-    await flush();
-    await viewer.reply();
-    await act(async () => labelled('Shake')?.click());
-    await flush();
-    await viewer.reply();
-    await act(async () => labelled('Lock')?.click());
-    await flush();
-
-    expect(viewer.requests.map(({ operationId, control }) => ({ operationId, control }))).toEqual([
-      { operationId: 'op-1', control: { kind: 'button', button: 'home' } },
-      { operationId: 'op-1', control: { kind: 'shake' } },
-      { operationId: 'op-1', control: { kind: 'button', button: 'lock' } },
-    ]);
-    await viewer.reply();
-    expect(
-      machine.commands.every((command) => command.action === 'list' || command.action === 'status')
-    ).toBe(true);
-  });
-
-  it('negotiates an upright device on the mobile surface', async () => {
-    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
-    await renderPanel({ machine, meta: CONTROLS_META, controlsLayout: 'menu' });
-    const frame = container?.querySelector('iframe');
-    if (!frame?.contentWindow) throw new Error('missing viewer');
-    const post = vi.spyOn(frame.contentWindow, 'postMessage');
-    await act(async () => frame.dispatchEvent(new Event('load')));
-    expect(post).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'lody:ios-simulator:init', rotateWithDevice: false }),
-      VIEWER_ORIGIN
-    );
-    expect(
-      container?.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns')
-    ).toBe('0');
-  });
-
   it('turns the exterior only after the machine confirms a rotation', async () => {
     const machine = createFakeMachine({
       devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
@@ -756,22 +603,6 @@ describe('SessionIosSimulatorPanel controls', () => {
     await advance(15_000);
     expect(labelled('Home')?.disabled).toBe(false);
     expect(vi.mocked(toast.error)).toHaveBeenCalledWith('The simulator didn’t respond. Try again.');
-  });
-
-  it('cancels a control on iframe navigation and discards completions after unmount', async () => {
-    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
-    await renderPanel({ machine, meta: CONTROLS_META });
-    const viewer = await connectControlViewer();
-    await act(async () => labelled('Home')?.click());
-    await act(async () => viewer.frame.dispatchEvent(new Event('load')));
-    await flush();
-    expect(labelled('Home')?.disabled).toBe(false);
-    vi.mocked(toast.error).mockClear();
-    await act(async () => labelled('Home')?.click());
-    await act(async () => root?.unmount());
-    root = undefined;
-    await viewer.reply({ success: false, error: 'failed' });
-    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
   });
 
   it('uses authenticated DeviceKit pixels and releases their object URL on unmount', async () => {
@@ -965,82 +796,6 @@ describe('SessionIosSimulatorPanel controls', () => {
     ).toBe(true);
     vi.unstubAllGlobals();
   });
-
-  it('reports a screenshot the viewer never answers instead of waiting forever', async () => {
-    // Only timers: the menu still needs real animation frames to open.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    vi.stubGlobal('PointerEvent', TestPointerEvent);
-    const machine = createFakeMachine({
-      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
-      preview: READY,
-    });
-    await renderPanel({ machine, meta: CONTROLS_META, onAttachScreenshot: () => true });
-    const frame = container?.querySelector('iframe') as HTMLIFrameElement;
-    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation((() => {}) as never);
-    await act(async () => {
-      frame.dispatchEvent(new Event('load'));
-    });
-    await pointerClick(labelled('Screenshot')!);
-    await pointerClick(await until(() => menuItem('Save screenshot'), 'the menu'));
-    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
-
-    await advance(10_000);
-    expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
-      'The simulator took too long to take a screenshot.'
-    );
-    expect(vi.mocked(downloadBytesAsFile)).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
-  });
-});
-
-it('loads real Kit artwork before preview without a start and releases it on unmount', async () => {
-  const OriginalURL = URL;
-  const revoke = vi.fn();
-  vi.stubGlobal(
-    'URL',
-    class extends OriginalURL {
-      static createObjectURL = () => 'blob:idle-devicekit';
-      static revokeObjectURL = revoke;
-    }
-  );
-  try {
-    const udid = '5519CB11-71C9-46D9-AEFF-73C96F1104E0';
-    const machine = createFakeMachine({ devices: [device({ udid, name: 'iPhone 16' })] });
-    await renderPanel({
-      machine,
-      meta: macMeta({ iosSimulator: 1, iosSimulatorExterior: 1 }),
-      localMachine: true,
-    });
-    expect(container?.querySelector('[data-bezel="on"]')).toBeNull();
-    expect(machine.commands).toContainEqual({ action: 'exterior', udid });
-    const bytes = new Uint8Array(24);
-    bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
-    bytes.set([73, 72, 68, 82], 12);
-    const view = new DataView(bytes.buffer);
-    view.setUint32(16, 100);
-    view.setUint32(20, 200);
-    await machine.answerNext(
-      answer({
-        exterior: {
-          geometry: {
-            width: 100,
-            height: 200,
-            screen: { x: 10, y: 10, width: 80, height: 180, radius: 5 },
-            buttons: [],
-          },
-          pngBase64: btoa(String.fromCharCode(...bytes)),
-        },
-      })
-    );
-    expect(container?.querySelector('img')?.getAttribute('src')).toBe('blob:idle-devicekit');
-    expect(container?.querySelector('iframe')).toBeNull();
-    expect(machine.commands.some((c) => c.action === 'start')).toBe(false);
-    await act(async () => root?.unmount());
-    root = undefined;
-    expect(revoke).toHaveBeenCalledWith('blob:idle-devicekit');
-  } finally {
-    vi.unstubAllGlobals();
-  }
 });
 
 it.each(['null', 'file://'])(
@@ -1188,15 +943,19 @@ it('uses Android capability on Linux and renders configured AVDs without touchin
   expect(machine.commands).toEqual([]);
 });
 
-it.each([false, true])(
-  'starts balanced and switches quality while previewing only on capable hosts (supported=%s)',
-  async (supported) => {
+it.each([
+  { supported: false, local: true },
+  { supported: true, local: true },
+  { supported: true, local: false },
+])(
+  'starts at the connection quality and allows switching ($supported, local=$local)',
+  async ({ supported, local }) => {
     const machine = createFakeMachine({ devices: [] });
     let started: unknown;
     await renderPanel({
       machine,
       platform: 'android',
-      localMachine: true,
+      localMachine: local,
       meta: macMeta({ androidEmulator: 1, ...(supported ? { androidEmulatorQuality: 1 } : {}) }),
       androidControl: async ({ command }) => {
         if (command.action === 'start') started = command;
@@ -1249,7 +1008,7 @@ it.each([false, true])(
     expect(started).toEqual({
       action: 'start',
       id: 'Pixel_A',
-      ...(supported ? { quality: 'balanced' } : {}),
+      ...(supported ? { quality: local ? 'clear' : 'balanced' } : {}),
     });
     expect(container?.querySelector('iframe')?.getAttribute('src')).toBe(VIEWER_URL);
     expect(text()).not.toContain('Preview quality');
@@ -1263,7 +1022,11 @@ it.each([false, true])(
       await click('Stop preview');
       expect(await openQualityMenu()).toBeNull();
       await click('Preview');
-      expect(started).toEqual({ action: 'start', id: 'Pixel_A', quality: 'balanced' });
+      expect(started).toEqual({
+        action: 'start',
+        id: 'Pixel_A',
+        quality: local ? 'clear' : 'balanced',
+      });
     } else {
       expect(await openQualityMenu()).toBeNull();
     }

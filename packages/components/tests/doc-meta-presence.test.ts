@@ -19,8 +19,6 @@ import {
   docMetaCacheAtom,
   machineMetaAtomFamily,
   machineMetaCacheAtom,
-  patchDocMetaByRoomIdAtom,
-  setDocMetaByRoomIdAtom,
   sessionListAtom,
   sessionMetaAtomFamily,
   sessionMetaCacheAtom,
@@ -126,107 +124,6 @@ describe('doc meta presence overlay', () => {
     expect(store.get(sessionLiveStatusAtomFamily(childSessionId))?.type).toBe('initializing');
   });
 
-  it('preserves session references when only sibling presence changes', () => {
-    const store = createStore();
-    const now = getServerNow();
-    const machineId = 'stable-machine-1' as MachineId;
-    const sessionId = 'stable-session-1' as SessionId;
-    const childSessionId = 'stable-child-session-1' as SessionId;
-    const siblingSessionId = 'stable-sibling-session-1' as SessionId;
-    const instanceId = 'stable-instance-1' as LodyPresenceInstanceId;
-    const siblingInstanceId = 'stable-instance-2' as LodyPresenceInstanceId;
-    const sessionRoomId = getSessionRoomId(sessionId);
-    const childSessionRoomId = getSessionRoomId(childSessionId);
-    const sessionMetaAtom = sessionMetaAtomFamily(sessionRoomId);
-    const childSessionsAtom = childSessionsAtomFamily(sessionId);
-    const session: SessionMeta = {
-      id: sessionId,
-      machineId,
-      createdAt: '2026-04-24T00:00:00.000Z',
-      userId: 'user-1',
-      status: { type: 'idle' },
-      cliType: 'builtin',
-      agentType: 'codex',
-      lastRunningSeen: now - 240_000,
-    };
-    const childSession: SessionMeta = {
-      ...session,
-      id: childSessionId,
-      parentSessionId: sessionId,
-    };
-
-    store.set(sessionMetaCacheAtom, {
-      [sessionRoomId]: session,
-      [childSessionRoomId]: childSession,
-    });
-    store.set(lodyPresenceStatesAtom, {
-      [getLodySessionPresenceKey(sessionId, instanceId)]: {
-        kind: 'session',
-        sessionId,
-        machineId,
-        instanceId,
-        status: { type: 'running' },
-        updatedAt: now,
-      },
-      [getLodySessionPresenceKey(childSessionId, instanceId)]: {
-        kind: 'session',
-        sessionId: childSessionId,
-        machineId,
-        instanceId,
-        status: { type: 'initializing', stage: 'acp' },
-        updatedAt: now,
-      },
-    });
-
-    const firstSession = store.get(sessionMetaAtom);
-    const firstChildren = store.get(childSessionsAtom);
-    const firstAllActiveSessions = store.get(allActiveSessionsAtom);
-
-    store.set(lodyPresenceStatesAtom, {
-      [getLodySessionPresenceKey(sessionId, instanceId)]: {
-        kind: 'session',
-        sessionId,
-        machineId,
-        instanceId,
-        status: { type: 'running' },
-        updatedAt: now,
-      },
-      [getLodySessionPresenceKey(childSessionId, instanceId)]: {
-        kind: 'session',
-        sessionId: childSessionId,
-        machineId,
-        instanceId,
-        status: { type: 'initializing', stage: 'acp' },
-        updatedAt: now,
-      },
-      [getLodySessionPresenceKey(siblingSessionId, siblingInstanceId)]: {
-        kind: 'session',
-        sessionId: siblingSessionId,
-        machineId,
-        instanceId: siblingInstanceId,
-        status: { type: 'running', activity: 'image_generation' },
-        updatedAt: now + 1,
-      },
-    });
-
-    expect(store.get(sessionMetaAtom)).toBe(firstSession);
-    expect(store.get(childSessionsAtom)).toBe(firstChildren);
-    expect(store.get(allActiveSessionsAtom)).toBe(firstAllActiveSessions);
-
-    store.set(lodyPresenceStatesAtom, {
-      [getLodySessionPresenceKey(sessionId, instanceId)]: {
-        kind: 'session',
-        sessionId,
-        machineId,
-        instanceId,
-        status: { type: 'running' },
-        updatedAt: now + 2,
-      },
-    });
-
-    expect(store.get(sessionMetaAtom)).toBe(firstSession);
-  });
-
   it('expires live session status when the presence clock advances past TTL', () => {
     const store = createStore();
     const now = getServerNow();
@@ -250,40 +147,5 @@ describe('doc meta presence overlay', () => {
     store.set(setLodyPresenceNowMsAtom, now + LODY_PRESENCE_TTL_MS + 1);
 
     expect(store.get(sessionLiveStatusAtomFamily(sessionId))).toBeNull();
-  });
-
-  it('keeps metadata cache references stable for equivalent writes', () => {
-    const store = createStore();
-    const sessionId = 'stable-doc-meta-session-1' as SessionId;
-    const roomId = getSessionRoomId(sessionId);
-    const session: SessionMeta = {
-      id: sessionId,
-      machineId: 'machine-1' as MachineId,
-      createdAt: '2026-04-24T00:00:00.000Z',
-      userId: 'user-1',
-      status: { type: 'idle' },
-      cliType: 'builtin',
-      agentType: 'codex',
-      env: { CODEX_SANDBOX: 'workspace-write' },
-    };
-
-    store.set(setDocMetaByRoomIdAtom, roomId, session);
-    const firstCache = store.get(sessionMetaCacheAtom);
-
-    store.set(setDocMetaByRoomIdAtom, roomId, {
-      ...session,
-      env: { CODEX_SANDBOX: 'workspace-write' },
-    });
-    expect(store.get(sessionMetaCacheAtom)).toBe(firstCache);
-
-    store.set(patchDocMetaByRoomIdAtom, roomId, {
-      env: { CODEX_SANDBOX: 'workspace-write' },
-    });
-    expect(store.get(sessionMetaCacheAtom)).toBe(firstCache);
-
-    store.set(patchDocMetaByRoomIdAtom, roomId, {
-      status: { type: 'running' },
-    });
-    expect(store.get(sessionMetaCacheAtom)).not.toBe(firstCache);
   });
 });

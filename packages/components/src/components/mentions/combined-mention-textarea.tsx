@@ -605,6 +605,8 @@ function AgentRoleMentionHydrator({
  * re-slugging every visible session on every session-list tick.
  */
 export type CombinedMentionTextareaHandle = {
+  /** Insert an externally owned atom through the same splice as menu/drop edits. */
+  insertExternalMention: (request: { text: string; id: string; at: number }) => boolean;
   /**
    * Append a session mention. Returns false when nothing was written: an
    * unknown/archived/own session, or one the draft already mentions.
@@ -643,6 +645,11 @@ function MentionActionsBridge({
   React.useImperativeHandle(
     actionsRef,
     () => ({
+      insertExternalMention: ({ text, id, at }) => {
+        if (context.disabled || context.readonly || !text) return false;
+        onMentionInsert({ text, value: id, kind: 'pasted_text', at });
+        return true;
+      },
       insertSessionMention: (sessionId, options) => {
         // Session mentions being disabled IS an empty list, so the lookup is
         // also the enablement check — there is nothing to mention.
@@ -672,7 +679,7 @@ function MentionActionsBridge({
         return true;
       },
     }),
-    [items, mentions, onMentionInsert]
+    [context.disabled, context.readonly, items, mentions, onMentionInsert]
   );
 
   return null;
@@ -723,6 +730,8 @@ export interface CombinedMentionTextareaProps extends Omit<
   label?: string;
   resetOnEmpty?: boolean;
   externalMentions?: MentionRange[];
+  atomicUndoHistory?: boolean;
+  onAtomicHistoryRetainValues?: (values: ReadonlySet<string>) => void;
   onExternalMentionsChange?: (mentions: MentionRange[]) => void;
   onMentionClick?: (mention: MentionRange) => void;
   /** Renders matching ranges as icon chips instead of plain highlights. */
@@ -789,6 +798,8 @@ export const CombinedMentionTextarea = React.forwardRef<
       label = 'Message',
       resetOnEmpty = true,
       externalMentions = [],
+      atomicUndoHistory = false,
+      onAtomicHistoryRetainValues,
       onExternalMentionsChange,
       onMentionClick,
       getMentionChip,
@@ -1078,6 +1089,8 @@ export const CombinedMentionTextarea = React.forwardRef<
         key={draftKey}
         disabled={props.disabled}
         readonly={props.readOnly}
+        undoHistory={atomicUndoHistory}
+        onHistoryRetainValues={onAtomicHistoryRetainValues}
         open={value !== '' && menuOpen}
         onOpenChange={setMenuOpen}
         triggers={triggers}

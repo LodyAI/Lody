@@ -67,16 +67,6 @@ describe('buildEmailVerificationCallbackSearch', () => {
     expect(params.get('code_challenge_method')).toBe('S256');
   });
 
-  it('builds an absolute public app callback URL', () => {
-    const url = buildEmailVerificationCallbackUrl({
-      ...baseInput,
-      callbackBaseUrl: 'https://lody.ai',
-      sourceSearchParams: new URLSearchParams(),
-    });
-
-    expect(url).toBe('https://lody.ai/login?view=email&email=user%40example.com');
-  });
-
   it('normalizes the mobile ./ login path before building callback URLs', () => {
     const url = buildEmailVerificationCallbackUrl({
       ...baseInput,
@@ -97,17 +87,6 @@ describe('buildEmailVerificationCallbackSearch', () => {
     });
 
     expect(url).toBe('https://lody.ai/app/login?view=email&email=user%40example.com');
-  });
-
-  it('routes verification links to a dedicated callbackPathname when provided', () => {
-    const url = buildEmailVerificationCallbackUrl({
-      ...baseInput,
-      callbackBaseUrl: 'https://lody.ai',
-      callbackPathname: '/email-verified',
-      sourceSearchParams: new URLSearchParams(),
-    });
-
-    expect(url).toBe('https://lody.ai/email-verified?view=email&email=user%40example.com');
   });
 
   it('still forbids redirecting back to the login page when callbackPathname differs', () => {

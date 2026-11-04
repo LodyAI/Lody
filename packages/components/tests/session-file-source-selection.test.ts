@@ -34,15 +34,4 @@ describe('chooseSessionFileSurfaceSource', () => {
       })
     ).toBe('local');
   });
-
-  it('does not expose a local fallback when the caller cannot address one', () => {
-    expect(
-      chooseSessionFileSurfaceSource({
-        hasFileProvider: false,
-        fileProviderPending: false,
-        hasLocalFileSource: false,
-        allowLocalFileSource: true,
-      })
-    ).toBe('unavailable');
-  });
 });

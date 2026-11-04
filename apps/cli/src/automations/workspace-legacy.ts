@@ -424,6 +424,23 @@ export async function createAutomationWorkspaceLegacy(options: {
     };
     const handle = {
       ledger,
+      capacityRetryAt: async (run: ScheduleRun<PreparedSessionInput>) => {
+        const bindingId = run.definition.agent.agentConfigId;
+        const modelId = run.definition.agent.modelId;
+        const config = await lody.documentManager.getAgentConfigForMachineLaunch(
+          bindingId as AgentConfigId,
+          auth.machineId
+        );
+        if (!config) return undefined;
+        const observed = evaluateCapacity(
+          ledger.capacity(bindingId, modelId) ?? ledger.capacity(bindingId),
+          { bindingId, fingerprint: providerBindingFingerprint(config), modelId },
+          Date.now()
+        );
+        return observed.value === 'no' && observed.reason === 'capacity_exhausted'
+          ? observed.retryAt
+          : undefined;
+      },
       dispatchQuotaSchedule: (
         run: ScheduleRun<PreparedSessionInput>,
         prepared: PreparedSessionInput

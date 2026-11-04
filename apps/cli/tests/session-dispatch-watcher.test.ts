@@ -1,3 +1,4 @@
+import { AutomationSessionActionsLegacy } from '../src/automations/actions/session-actions-legacy';
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { Effect, ManagedRuntime } from 'effect';
@@ -1919,13 +1920,14 @@ describe('SessionDispatchWatcher', () => {
   });
 
   it.each([
-    { deliveryOrder: 'content-first', versioned: false },
-    { deliveryOrder: 'metadata-first', versioned: false },
-    { deliveryOrder: 'content-first', versioned: true },
-    { deliveryOrder: 'metadata-first', versioned: true },
+    { deliveryOrder: 'content-first', versioned: false, automation: false },
+    { deliveryOrder: 'metadata-first', versioned: false, automation: false },
+    { deliveryOrder: 'content-first', versioned: true, automation: false },
+    { deliveryOrder: 'metadata-first', versioned: true, automation: false },
+    { deliveryOrder: 'content-first', versioned: true, automation: true },
   ])(
-    'automatically dispatches a queued message after turn completion with $deliveryOrder delivery (versioned=$versioned)',
-    async ({ deliveryOrder, versioned }) => {
+    'automatically dispatches a queued message after turn completion with $deliveryOrder delivery (versioned=$versioned, automation=$automation)',
+    async ({ deliveryOrder, versioned, automation }) => {
       vi.useFakeTimers();
       const sessionId = 'queue-arrival-order' as SessionId;
       const roomId = `session-${sessionId}`;
@@ -2020,6 +2022,7 @@ describe('SessionDispatchWatcher', () => {
         metadataReconcileChain: Promise<void>;
         metadataReconcileDrainScheduled: boolean;
         sessionCheckChains: Map<SessionId, Promise<void>>;
+        watchedSessions: Map<SessionId, unknown>;
       };
       const drain = async () => {
         do {
@@ -2030,6 +2033,45 @@ describe('SessionDispatchWatcher', () => {
       try {
         await watcher.start();
         await drain();
+        expect(work.watchedSessions.has(sessionId)).toBe(false);
+        expect(dispatched).toEqual([]);
+        if (automation) {
+          const adapter = new AutomationSessionActionsLegacy({
+            lody: {
+              documentManager: { repo, getOrCreateSessionDoc: async () => doc },
+              getAutomationSessionAuthority: () => ({ acceptInput: async () => true }),
+            },
+          } as unknown as ConstructorParameters<typeof AutomationSessionActionsLegacy>[0]);
+          vi.spyOn(adapter, 'authorize').mockResolvedValue({ value: 'yes' });
+          const receipt = {
+            id: 'automation-operation',
+            sessionId,
+            turnId: 'late-queued-turn',
+            createdAt: 1,
+            rule: { ownerUserId: 'user-1' },
+            intent: {
+              action: {
+                kind: 'agent.invoke',
+                parameters: {
+                  target: { kind: 'existing', sessionId, onUnavailable: 'blocked' },
+                  input: { kind: 'external_event', ref: 'event' },
+                  ifBusy: 'enqueue',
+                },
+              },
+            },
+            prepared: {
+              config: { prompt: 'queued input', cliType: 'builtin', agentType: 'codex' },
+            },
+          } as unknown as Parameters<typeof adapter.submit>[0];
+          expect(await adapter.submit(receipt)).toEqual({ state: 'queued' });
+          await drain();
+          expect(errors).toEqual([]);
+          expect({ dispatched, queued: await doc.getMessageQueue() }).toEqual({
+            dispatched: ['late-queued-turn'],
+            queued: [],
+          });
+          return;
+        }
         const sender = new SessionDocument(
           repo as never,
           sessionId,

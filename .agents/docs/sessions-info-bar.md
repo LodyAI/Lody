@@ -87,7 +87,10 @@ labelClassName`) so the stage diffstat never clips. Wired from
   content, right after the PR number, so it is only visible when the PR is
   expanded; one click toggles its check-run popover (`PrCiRun[]` is
   presentational; production maps the active PR's live GitHub check-run fetch
-  into it via `mapGitHubCheckRunToPrCiRun`). The verdict reads only the newest
+  into it via `mapGitHubCheckRunToPrCiRun`; live runs only list checks, while the
+  PR status mark, CI verdict and action gating read session metadata through the
+  same [read model](../notes/implemented/architecture/2026-11-02-session-pr-read-model.md)
+  as the sidebar). When live runs are listed, their summary reads only the newest
   attempt of each check (`selectLatestCheckRuns` keys by app + name, highest id
   wins), so a re-run that went green clears an earlier failure; cancelled/stale
   runs render as `cancelled` and never make CI "failed" nor enter the Fix CI

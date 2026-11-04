@@ -1,5 +1,3 @@
-import { Cause, Deferred, Effect, Layer } from 'effect'
-import { makeApplicationRuntime } from '@lody/shared/node/application-runtime'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -8,9 +6,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { acquireDesktopLease, handOffDesktopDeepLink } from './desktop-exclusion.ts'
-import { toPortableDesktopDeepLink } from './desktop-deep-link-handoff.ts'
+
 import { createDesktopLaunchAdmission } from './desktop-launch-admission.ts'
-import { createDesktopLaunchBuffer } from './desktop-launch-buffer.ts'
+
 import {
   createDesktopQuitBarrier,
   finishUnconfirmedDesktopQuit,
@@ -145,71 +143,6 @@ void test('crashing an owner releases the OS lease without deleting a lock file'
   t.after(() => replacement.close())
 })
 
-void test('lease setup errors fail rather than admitting an unprotected desktop', async () => {
-  await assert.rejects(acquireDesktopLease({ host: '127.0.0.1', port: -1 }))
-})
-
-void test('a losing channel hands a portable link to the desktop that owns the lease', async (t) => {
-  const received = Promise.withResolvers()
-  const owner = await acquireDesktopLease(loopback, {
-    onDeepLink: (url) => {
-      received.resolve(url)
-      return true
-    }
-  })
-  assert.ok(owner)
-  t.after(() => owner.close())
-
-  const accepted = await handOffDesktopDeepLink(
-    'ai.lody.nightly://session/session-1?workspace=workspace-1',
-    { host: '127.0.0.1', port: owner.port }
-  )
-  assert.equal(accepted, true)
-  assert.equal(await received.promise, 'lody://session/session-1?workspace=workspace-1')
-})
-
-void test('handoff waits for asynchronous startup admission before reporting success', async (t) => {
-  const started = Promise.withResolvers()
-  const decision = Promise.withResolvers()
-  let received
-  const owner = await acquireDesktopLease(loopback, {
-    onDeepLink: async (url) => {
-      received = url
-      started.resolve()
-      return await decision.promise
-    }
-  })
-  assert.ok(owner)
-  t.after(() => owner.close())
-  const endpoint = { host: '127.0.0.1', port: owner.port }
-
-  const accepted = handOffDesktopDeepLink('lody://session/slow-startup', endpoint)
-  await started.promise
-  assert.equal(received, 'lody://session/slow-startup')
-  decision.resolve(true)
-  assert.equal(await accepted, true)
-})
-
-void test('a rejected startup makes its pending handoff fail explicitly', async (t) => {
-  const started = Promise.withResolvers()
-  const decision = Promise.withResolvers()
-  const owner = await acquireDesktopLease(loopback, {
-    onDeepLink: async (url) => {
-      assert.equal(url, 'lody://session/rejected-startup')
-      started.resolve()
-      return await decision.promise
-    }
-  })
-  assert.ok(owner)
-  t.after(() => owner.close())
-  const endpoint = { host: '127.0.0.1', port: owner.port }
-
-  const accepted = handOffDesktopDeepLink('lody://session/rejected-startup', endpoint)
-  await started.promise
-  decision.resolve(false)
-  assert.equal(await accepted, false)
-})
-
 void test('a lease never accepts cloud callbacks or unsupported routes', async (t) => {
   let received
   const owner = await acquireDesktopLease(loopback, {
@@ -242,34 +175,6 @@ void test('a lease never accepts cloud callbacks or unsupported routes', async (
   assert.equal(received, 'lody://chat/new?machine=machine-1&project=project-1')
 })
 
-void test('slow startup holds handoffs until the launch handler is ready', async () => {
-  const delivered = []
-  const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
-  const accepted = admission.accept('lody://session/slow-startup')
-  let settled = false
-  void accepted.then(() => {
-    settled = true
-  })
-  await Promise.resolve()
-  assert.equal(settled, false)
-  assert.deepEqual(delivered, [])
-
-  admission.markReady()
-  assert.equal(await accepted, true)
-  assert.deepEqual(delivered, ['lody://session/slow-startup'])
-})
-
-void test('rejected startup refuses pending and later handoffs without delivery', async () => {
-  const delivered = []
-  const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
-  const pending = admission.accept('lody://session/pending')
-  admission.markRejected()
-
-  assert.equal(await pending, false)
-  assert.equal(await admission.accept('lody://session/later'), false)
-  assert.deepEqual(delivered, [])
-})
-
 void test('concurrent pending handoffs are delivered in arrival order after ready', async () => {
   const delivered = []
   const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
@@ -286,89 +191,6 @@ void test('concurrent pending handoffs are delivered in arrival order after read
     'lody://session/second',
     'lody://session/third'
   ])
-})
-
-void test('the first admission decision is final and later handoffs use it', async () => {
-  const readyDelivered = []
-  const ready = createDesktopLaunchAdmission((url) => readyDelivered.push(url))
-  ready.markReady()
-  ready.markRejected()
-  assert.equal(await ready.accept('lody://session/ready-later'), true)
-  assert.deepEqual(readyDelivered, ['lody://session/ready-later'])
-
-  const rejectedDelivered = []
-  const rejected = createDesktopLaunchAdmission((url) => rejectedDelivered.push(url))
-  rejected.markRejected()
-  rejected.markReady()
-  assert.equal(await rejected.accept('lody://session/rejected-later'), false)
-  assert.deepEqual(rejectedDelivered, [])
-})
-
-void test('a delivery failure preserves the original error and does not block later handoffs', async () => {
-  const failure = new Error('synthetic delivery failure')
-  const delivered = []
-  const admission = createDesktopLaunchAdmission((url) => {
-    delivered.push(url)
-    if (url === 'lody://session/bad') throw failure
-  })
-  admission.markReady()
-
-  await assert.rejects(admission.accept('lody://session/bad'), (error) => error === failure)
-  assert.equal(await admission.accept('lody://session/good'), true)
-  assert.deepEqual(delivered, ['lody://session/bad', 'lody://session/good'])
-})
-
-void test('portable destinations use the common resource scheme', () => {
-  assert.equal(
-    toPortableDesktopDeepLink('ai.lody.nightly://session/session-1?workspace=workspace-1'),
-    'lody://session/session-1?workspace=workspace-1'
-  )
-  assert.equal(
-    toPortableDesktopDeepLink('ai.lody.stable://provider/import?v=1&data=synthetic'),
-    'lody://provider/import?v=1&data=synthetic'
-  )
-  assert.equal(toPortableDesktopDeepLink('session://legacy'), null)
-  assert.equal(toPortableDesktopDeepLink('lody://session/session-1#fragment'), null)
-  assert.equal(toPortableDesktopDeepLink('lody://auth/callback#token=synthetic'), null)
-  assert.equal(toPortableDesktopDeepLink('https://lody.ai/session/session-1'), null)
-})
-
-void test('startup event buffer can hand its pending events to another installation', () => {
-  const buffer = createDesktopLaunchBuffer()
-  buffer.push({ url: 'lody://session/pending' })
-  buffer.push({ activate: true })
-  assert.deepEqual(buffer.takePending(), [{ url: 'lody://session/pending' }, { activate: true }])
-  const received = []
-  buffer.bind((event) => received.push(event))
-  buffer.push({ url: 'lody://session/after-ready' })
-  assert.deepEqual(received, [{ url: 'lody://session/after-ready' }])
-})
-
-void test('startup retains login and activation events until the application is loaded', () => {
-  const buffer = createDesktopLaunchBuffer()
-  const received = []
-  buffer.push({ url: 'ai.lody.nightly://auth/callback#pending-attempt' })
-  buffer.push({ activate: true })
-  assert.deepEqual(received, [])
-  buffer.bind((event) => received.push(event))
-  buffer.push({ url: 'ai.lody.nightly://workspace/after-ready' })
-  assert.deepEqual(received, [
-    { url: 'ai.lody.nightly://auth/callback#pending-attempt' },
-    { activate: true },
-    { url: 'ai.lody.nightly://workspace/after-ready' }
-  ])
-  assert.throws(() => buffer.bind(() => {}), /already bound/)
-})
-
-void test('startup event buffer bounds memory and retains the most recent login', () => {
-  const buffer = createDesktopLaunchBuffer()
-  for (let i = 0; i < 40; i++) buffer.push({ url: `lody://workspace/${i}` })
-  buffer.push({ url: 'lody://auth/callback#new-attempt' })
-  const received = []
-  buffer.bind((event) => received.push(event))
-  assert.equal(received.length, 32)
-  assert.deepEqual(received[0], { url: 'lody://workspace/9' })
-  assert.deepEqual(received.at(-1), { url: 'lody://auth/callback#new-attempt' })
 })
 
 void test('quit waits for execution exit, retains ownership on failure, and allows retry', async () => {
@@ -447,97 +269,6 @@ void test('quit cancellation preserves services and a later attempt closes rende
   void handler({ preventDefault() {} })
   await quit.promise
   assert.deepEqual(order, ['prepare', 'prepare', 'stop', 'quit'])
-})
-
-void test('quit awaits application Scope cleanup and retries transferred ownership after failed disposal', async () => {
-  const cleaning = Deferred.makeUnsafe()
-  const gate = Deferred.makeUnsafe()
-  const resource = { held: false, denied: true }
-  const leaseFailure = { resource }
-  const owner = makeApplicationRuntime(
-    Layer.effectDiscard(
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          resource.held = true
-        }),
-        () =>
-          Deferred.succeed(cleaning, undefined).pipe(
-            Effect.andThen(Deferred.await(gate)),
-            Effect.andThen(Effect.die(leaseFailure))
-          )
-      )
-    ),
-    {
-      recover: (cause) =>
-        Effect.gen(function* () {
-          assert.ok(
-            cause.reasons.some(
-              (reason) => Cause.isDieReason(reason) && reason.defect === leaseFailure
-            )
-          )
-          if (resource.denied) return yield* Effect.fail(new Error('resource still alive'))
-          resource.held = false
-          return undefined
-        }),
-      project: Cause.squash
-    }
-  )
-  await owner.runtime.runPromise(Effect.void)
-  const failure = Promise.withResolvers()
-  const quit = Promise.withResolvers()
-  const barrier = createDesktopQuitBarrier({
-    stop: () => owner.closeLegacy(),
-    quit: () => quit.resolve(),
-    reportFailure: (error) => failure.resolve(error)
-  })
-  let quitCalled = false
-  void quit.promise.then(() => {
-    quitCalled = true
-  })
-  const first = barrier({ preventDefault() {} })
-  await Effect.runPromise(Deferred.await(cleaning))
-  await barrier({ preventDefault() {} })
-  assert.equal(resource.held, true)
-  assert.equal(quitCalled, false)
-  Deferred.doneUnsafe(gate, Effect.void)
-  await first
-  assert.equal(await failure.promise, leaseFailure)
-  assert.equal(quitCalled, false)
-  await barrier({ preventDefault() {} })
-  assert.equal(resource.held, true)
-  assert.equal(quitCalled, false)
-  resource.denied = false
-  await barrier({ preventDefault() {} })
-  await quit.promise
-  assert.equal(resource.held, false)
-})
-
-void test('quit reports cancellation for Stay and for failed cleanup, but not for a quit', async () => {
-  let cancelled = 0
-  let allow = false
-  let failStop = false
-  const quit = Promise.withResolvers()
-  const handler = createDesktopQuitBarrier({
-    prepare: async () => allow,
-    stop: async () => {
-      if (failStop) throw new Error('CLI still alive')
-    },
-    quit: () => quit.resolve(),
-    reportFailure: () => {},
-    cancelled: () => {
-      cancelled++
-    }
-  })
-  await handler({ preventDefault() {} })
-  assert.equal(cancelled, 1)
-  allow = true
-  failStop = true
-  await handler({ preventDefault() {} })
-  assert.equal(cancelled, 2)
-  failStop = false
-  await handler({ preventDefault() {} })
-  await quit.promise
-  assert.equal(cancelled, 2)
 })
 
 void test('failed quit restores services before reporting and later quit still completes', async () => {

@@ -9,8 +9,10 @@ The Stop preview button is directly available in desktop and mobile headers.
 After 30 seconds with no viewer streams, capture ends through the normal joined
 cleanup and releases the device lease. A never-viewed agent start gets the same
 30-second grace after boot finishes. Multiple viewers share the grace: one remaining
-viewer keeps the operation alive. Reopening an expired preview offers Restore;
-another session may acquire the AVD once cleanup completes.
+viewer keeps the operation alive. Reopening a preview closed for viewer idleness automatically reconnects the same AVD
+and quality after cleanup. Explicit Stop and capture failures remain stopped.
+Another conversation may acquire the AVD once cleanup completes; reconnect never
+takes over its lease.
 
 Tango talks to loopback ADB on port 5037. The owned TCP connector settles reads and
 writes on abort/error/close. Every capture has an isolated scrcpy connection ID;
@@ -24,7 +26,8 @@ are disabled. APK installation and arbitrary shell commands are not exposed.
 
 H.264 has three per-operation quality presets: Data saver (300 kbps, 640-pixel
 maximum edge, 15 FPS), Balanced (default: 600 kbps, 960 pixels, 24 FPS), and Clear
-(1 Mbps, 1280 pixels, 30 FPS). New previews start Balanced. The running preview exposes a quality button;
+(1 Mbps, 1280 pixels, 30 FPS). New local previews start Clear; remote previews start Balanced. An agent-started
+preview selects its default when the first viewer attaches. The running preview exposes a quality button;
 selecting another tier replaces the capture operation while keeping the AVD running. Only hosts advertising `androidEmulatorQuality: 1` receive the option. Per-viewer credits and recovery use the common flow controller; viewers do
 not compete to configure the encoder. Annex-B SPS/PPS and frames are converted to
 avcC/AVCC at this adapter. Android requires WebCodecs H.264 and has no MJPEG fallback.

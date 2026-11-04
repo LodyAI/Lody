@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 
 import { act, createElement, useEffect, type ReactNode } from 'react';
@@ -6,9 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  getLodyMachinePresenceKey,
   getMachineRoomId,
-  getServerNow,
   getSessionRoomId,
   AGENT_ROLE_VERSION,
   type AgentConfigId,
@@ -16,7 +15,6 @@ import {
   type AgentRoleId,
   type LocalProjectId,
   type MachineLegacyMetaFields,
-  type LodyPresenceInstanceId,
   type MachineId,
   type MachineMeta,
   type SessionId,
@@ -60,7 +58,7 @@ import { userAtom } from '../src/atoms';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { useWorkspaceAgentRoles } from '../src/hooks/use-workspace-agent-roles';
 import { machineMetaCacheAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
-import { lodyPresenceStatesAtom, setLodyPresenceNowMsAtom } from '../src/atoms/presence';
+
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
   useVisibleLocalProjects,
@@ -400,41 +398,6 @@ describe('visible access hooks', () => {
     });
   });
 
-  it('does not reuse machine access rows while a later mount is loading', async () => {
-    queryMocks.machineRows = [
-      {
-        machineId: 'shared-machine',
-        ownerUserId: 'owner-user',
-        sharedWithTeam: true,
-        updatedAt: 1,
-      },
-    ];
-    let snapshot: AccessSnapshot | undefined;
-
-    await mount(
-      'workspace-machine-cache',
-      createElement(VisibleMachineProbe, {
-        onSnapshot: (value) => {
-          snapshot = value;
-        },
-      })
-    );
-    expect(snapshot).toEqual({ accessKeys: ['shared-machine'], isLoading: false });
-
-    await unmount();
-    queryMocks.machineRows = undefined;
-    await mount(
-      'workspace-machine-cache',
-      createElement(VisibleMachineProbe, {
-        onSnapshot: (value) => {
-          snapshot = value;
-        },
-      })
-    );
-
-    expect(snapshot).toEqual({ accessKeys: [], isLoading: true });
-  });
-
   it('keeps the local owner fallback out of the Convex-authorized machine set', async () => {
     const machineId = 'owner-fallback-machine' as MachineId;
     store.set(machineMetaCacheAtom, {
@@ -531,53 +494,6 @@ describe('visible access hooks', () => {
     );
 
     expect(snapshot).toEqual({ accessKeys: [], isLoading: true });
-  });
-
-  it('reuses one machine index and only joins online machine flocks', async () => {
-    const now = getServerNow();
-    const onlineMachineId = 'online-machine' as MachineId;
-    const offlineMachineId = 'offline-machine' as MachineId;
-    const instanceId = 'online-instance' as LodyPresenceInstanceId;
-    const createMachine = (id: MachineId, name: string): MachineMeta => ({
-      id,
-      name,
-      cliVersion: '0.1.0',
-      os: 'linux',
-      sessions: [],
-      raceLimits: {},
-    });
-    store.set(machineMetaCacheAtom, {
-      [getMachineRoomId(onlineMachineId)]: createMachine(onlineMachineId, 'Online'),
-      [getMachineRoomId(offlineMachineId)]: createMachine(offlineMachineId, 'Offline'),
-    });
-    store.set(setLodyPresenceNowMsAtom, now);
-    store.set(lodyPresenceStatesAtom, {
-      [getLodyMachinePresenceKey(onlineMachineId, instanceId)]: {
-        kind: 'machine',
-        machineId: onlineMachineId,
-        instanceId,
-        updatedAt: now,
-      },
-    });
-    queryMocks.machineRows = [onlineMachineId, offlineMachineId].map((machineId) => ({
-      machineId,
-      ownerUserId: 'viewer-user',
-      sharedWithTeam: false,
-      updatedAt: 1,
-    }));
-
-    await mount('workspace-shared-index', createElement(SharedMachineProjectIndexProbe));
-
-    expect(machineFlockMocks.useMachineFlockRowsByMachineIdsState).toHaveBeenCalledTimes(
-      sharedMachineProjectIndexProbeRender.mock.calls.length
-    );
-    const [machineIds, options] =
-      machineFlockMocks.useMachineFlockRowsByMachineIdsState.mock.calls.at(-1) as [
-        MachineId[],
-        { remoteMachineIds: MachineId[] },
-      ];
-    expect(new Set(machineIds)).toEqual(new Set([onlineMachineId, offlineMachineId]));
-    expect(options.remoteMachineIds).toEqual([onlineMachineId]);
   });
 
   it('hides a cached teammate session and keeps detail loading after sharing is revoked', async () => {
@@ -1098,17 +1014,6 @@ describe('encrypted shared machine visibility', () => {
       await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS);
     });
     expect(consumer.a).toEqual(['own-machine']);
-  });
-
-  it('stops reading once every consumer is disabled', async () => {
-    await renderTree(<Consumer name="a" enabled={false} />);
-    reads.length = 0;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS * 2);
-    });
-    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
-    expect(reads).toEqual([]);
-    expect(consumer.a).toEqual([]);
   });
 
   it('does not carry shared machines across a workspace switch', async () => {

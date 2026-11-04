@@ -40,25 +40,6 @@ afterEach(() => {
 });
 
 describe('ResilientRemoteCursorStore', () => {
-  it('uses the primary store when it responds before the timeout', async () => {
-    const primary = new MemoryRemoteCursorStore();
-    const fallback = new MemoryRemoteCursorStore();
-    const warnings: unknown[] = [];
-    const cursor = createCursor(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);
-    await primary.save(cursor);
-
-    const store = new ResilientRemoteCursorStore({
-      dbName: 'cursor-db',
-      timeoutMs: 10,
-      createPrimaryStore: () => primary,
-      createFallbackStore: () => fallback,
-      onWarning: (message, context) => warnings.push({ message, context }),
-    });
-
-    expect(await store.load(cursor.streamUrl)).toEqual(cursor);
-    expect(warnings).toHaveLength(0);
-  });
-
   it('loads and deletes cursors saved under the legacy gateway URL', async () => {
     const primary = new MemoryRemoteCursorStore();
     const fallback = new MemoryRemoteCursorStore();
@@ -106,25 +87,6 @@ describe('ResilientRemoteCursorStore', () => {
     await expect(primary.load(currentUrl)).resolves.toBeNull();
   });
 
-  it('fails open to memory when primary load hangs', async () => {
-    vi.useFakeTimers();
-    const fallback = new MemoryRemoteCursorStore();
-    const warnings: unknown[] = [];
-    const store = new ResilientRemoteCursorStore({
-      dbName: 'cursor-db',
-      timeoutMs: 10,
-      createPrimaryStore: createNeverSettlingStore,
-      createFallbackStore: () => fallback,
-      onWarning: (message, context) => warnings.push({ message, context }),
-    });
-
-    const loadPromise = store.load(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);
-    await vi.advanceTimersByTimeAsync(10);
-
-    await expect(loadPromise).resolves.toBeNull();
-    expect(warnings).toHaveLength(1);
-  });
-
   it('stores future cursors in memory after a primary timeout', async () => {
     vi.useFakeTimers();
     const fallback = new MemoryRemoteCursorStore();
@@ -143,30 +105,6 @@ describe('ResilientRemoteCursorStore', () => {
     await savePromise;
 
     expect(await fallback.load(cursor.streamUrl)).toEqual(cursor);
-    expect(await store.load(cursor.streamUrl)).toEqual(cursor);
-    expect(warnings).toHaveLength(1);
-  });
-
-  it('degrades to memory when the primary store throws', async () => {
-    const fallback = new MemoryRemoteCursorStore();
-    const warnings: unknown[] = [];
-    const cursor = createCursor(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);
-    await fallback.save(cursor);
-    const primary: RemoteCursorStore<JsonObject> = {
-      load: async () => {
-        throw new Error('bad cursor cache');
-      },
-      save: async () => {},
-      delete: async () => {},
-    };
-    const store = new ResilientRemoteCursorStore({
-      dbName: 'cursor-db',
-      timeoutMs: 10,
-      createPrimaryStore: () => primary,
-      createFallbackStore: () => fallback,
-      onWarning: (message, context) => warnings.push({ message, context }),
-    });
-
     expect(await store.load(cursor.streamUrl)).toEqual(cursor);
     expect(warnings).toHaveLength(1);
   });

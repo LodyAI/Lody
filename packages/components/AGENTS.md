@@ -9,6 +9,7 @@ mobile surfaces. Background for the rules below:
 
 ## General rules
 
+- Native shells do not emit `$pageview` or `$pageleave`; browser page tracking remains enabled. Mention file-fetch failures stay visible to consumers but are not analytics events. Authenticated account readiness is represented by `app/active`, not a second `onboarding/account_ready` event.
 - Regenerate TanStack routes after changing route files.
 - Use `pnpm --filter @lody/components dev` to generate and format the route tree
   with Oxfmt before CI compares it with the committed file.

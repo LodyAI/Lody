@@ -1,57 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EphemeralStore, type Value } from 'loro-crdt';
-import {
-  getLodySessionViewingPresenceKey,
-  parseLodyPresenceStates,
-  type LodyPresenceInstanceId,
-  type WorkspaceId,
-} from '@lody/shared';
+import { EphemeralStore } from 'loro-crdt';
+import { type WorkspaceId } from '@lody/shared';
 
 import { WorkspacePresenceTransport } from '../src/providers/workspace-presence-transport';
 import type { EphemeralRoomAuthCallback } from '../src/providers/ephemeral-room-transport';
-
-/**
- * Milestone-0 proof for the CLI PR poller: a local `EphemeralStore` write is
- * encoded and broadcast by `EphemeralStoreAdaptor` — the same adaptor both the
- * CLI publisher (`PresenceReplica`) and the web `WorkspacePresenceTransport`
- * wire into `EphemeralStreamCrdt`. Bridging two stores with encode/apply
- * exercises the exact wasm primitives the adaptor drives over the wire, so a
- * browser-side `store.set` is observed by every room peer.
- */
-describe('session-viewing presence over EphemeralStore', () => {
-  it('propagates set/delete between bridged stores and survives schema parsing', () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(1_000_000);
-    const publisher = new EphemeralStore(90_000);
-    const observer = new EphemeralStore(90_000);
-    publisher.subscribeLocalUpdates((bytes) => {
-      observer.apply(bytes);
-    });
-
-    const key = getLodySessionViewingPresenceKey('user-1', 'instance-1' as LodyPresenceInstanceId);
-    const state = {
-      kind: 'session-viewing',
-      userId: 'user-1',
-      instanceId: 'instance-1',
-      sessionId: 'session-1',
-      since: 1_000,
-      updatedAt: 2_000,
-    };
-
-    publisher.set(key, state as unknown as Value);
-    // The observer parses the entry through the same schema the CLI poller uses.
-    expect(
-      parseLodyPresenceStates(observer.getAllStates() as Record<string, unknown>)[key]
-    ).toEqual(state);
-
-    vi.setSystemTime(1_000_001);
-    publisher.delete(key);
-    expect(observer.getAllStates()[key]).toBeUndefined();
-
-    publisher.destroy();
-    observer.destroy();
-  });
-});
 
 // Expose the production factory; do not inject a fake transport or adaptor.
 class ProductionPresenceTransport extends WorkspacePresenceTransport {

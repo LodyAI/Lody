@@ -2,6 +2,7 @@ import {
   useLegacyWorkspaceMutation,
   useLegacyWorkspaceQuery,
 } from '@/hooks/use-legacy-workspace-query';
+import { useMachineRpcFeatureReason } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -847,6 +848,7 @@ export function MachineAgentSettings({
   const sharedWithTeam = resolvedSelectedMachine
     ? (accessByMachineId.get(resolvedSelectedMachine.id)?.sharedWithTeam ?? false)
     : false;
+  const providerUnavailableReason = useMachineRpcFeatureReason(resolvedSelectedMachine?.id);
   const isLocal = !!resolvedSelectedMachine && resolvedSelectedMachine.id === localMachineId;
   const isOwn = resolvedSelectedMachine ? isOwnMachine(resolvedSelectedMachine) : false;
   const selectedIsOnline =
@@ -1783,6 +1785,8 @@ export function MachineAgentSettings({
               onClick={() => openCreateDialog(resolvedSelectedMachine)}
               data-testid="agent-provider-add"
               data-machine-id={resolvedSelectedMachine.id}
+              disabled={!!providerUnavailableReason}
+              title={providerUnavailableReason}
             >
               <Plus {...stylex.props(styles.addGlyph)} />
               {t('settings.agent.provider.addProvider', 'Add provider')}

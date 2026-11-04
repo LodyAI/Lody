@@ -40,7 +40,8 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 - Never hide a Session through nesting: missing, cross-section, cycling, or
   deeper-than-one-level openers render top-level. In Workspace mode,
   `placeWorkspaceSessionsWithOpeners` first moves a Session whose opener renders in
-  another group into that group; Pinned and Updated keep natural membership. `MAX_VISIBLE_SESSIONS` /
+  another group into that group. Before splitting desktop sections, pinned openers bring
+  their visible opened-by descendants into Pinned without changing descendant pin flags. `MAX_VISIBLE_SESSIONS` /
   `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
   latest-activity sorting; rank an opener by its freshest opened Session.
 - Collapse state uses `sidebarCollapsedOpenedBySessionsAtom`, default expanded. Keep

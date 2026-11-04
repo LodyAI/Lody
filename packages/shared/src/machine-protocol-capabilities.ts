@@ -33,6 +33,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   sessionAutomations: 'sessionAutomations',
   remoteAutomationControl: 'remoteAutomationControl',
   preparedSessionInput: 'preparedSessionInput',
+  messageQuotes: 'messageQuotes',
   sessionInputAttachments: 'sessionInputAttachments',
   localFileResources: 'localFileResources',
   fileDownload: 'fileDownload',
@@ -51,11 +52,15 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   sessionHistory: 'sessionHistory',
   sessionHistoryIncremental: 'sessionHistoryIncremental',
   sessionHistoryWatch: 'sessionHistoryWatch',
+  sessionHistoryInspection: 'sessionHistoryInspection',
   sessionHistoryPatches: 'sessionHistoryPatches',
   sessionInputAcceptance: 'sessionInputAcceptance',
   sessionInputDispatch: 'sessionInputDispatch',
   sessionCollaborationControl: 'sessionCollaborationControl',
   bugReportClientLog: 'bugReportClientLog',
+  sessionLiveActivity: 'sessionLiveActivity',
+  machineDiskStatus: 'machineDiskStatus',
+  sessionInputWithdraw: 'sessionInputWithdraw',
 } as const;
 
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
@@ -80,6 +85,7 @@ const SCHEDULES_PROMPT_PROTOCOL_VERSION = 2;
 const SCHEDULED_MESSAGES_PROTOCOL_VERSION = 3;
 export const SCHEDULES_PROTOCOL_VERSION = SCHEDULED_MESSAGES_PROTOCOL_VERSION;
 export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
+export const MESSAGE_QUOTES_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
@@ -93,6 +99,7 @@ export const CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_PROTOCOL_VERSION = 3;
 export const SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_WATCH_PROTOCOL_VERSION = 1;
+export const SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION = 2;
 export const SESSION_HISTORY_PATCHES_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
@@ -151,6 +158,12 @@ export const PROJECT_FILE_ROOTS_PROTOCOL_VERSION = 1;
 export const PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION = 1;
 
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  // `session/live-status` accepts `includeActivity` and may answer with `activity`.
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity]: 1,
+  // `machine/status` accepts `includeDisk` and may answer with `disk`.
+  [MACHINE_PROTOCOL_CAPABILITIES.machineDiskStatus]: 1,
+  // Daemon answers `session/withdraw-input` for queued Agent inputs.
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputWithdraw]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers]:
     PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.multiRepoProject]: MULTI_REPO_PROJECT_PROTOCOL_VERSION,
@@ -181,6 +194,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.messageQuotes]: MESSAGE_QUOTES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments]:
     SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
@@ -202,6 +216,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental]:
     SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryWatch]: SESSION_HISTORY_WATCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection]:
+    SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,
@@ -240,6 +256,16 @@ export function machineSupportsSessionHistoryWatch(
       MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryWatch,
       SESSION_HISTORY_WATCH_PROTOCOL_VERSION
     ) && machineSupportsSessionHistoryIncremental(machine)
+  );
+}
+
+export function machineSupportsSessionHistoryInspection(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection,
+    SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION
   );
 }
 
@@ -405,6 +431,16 @@ export function machineSupportsPreparedSessionInputProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput,
     PREPARED_SESSION_INPUT_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsMessageQuotes(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.messageQuotes,
+    MESSAGE_QUOTES_PROTOCOL_VERSION
   );
 }
 

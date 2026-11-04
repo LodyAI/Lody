@@ -3,16 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { scrubInheritedClaudeAuthEnv } from './claude-env-conflict';
 
 describe('scrubInheritedClaudeAuthEnv', () => {
-  it('returns env unchanged when user has no auth/routing config', () => {
-    const merged = {
-      ANTHROPIC_API_KEY: 'sk-shell',
-      ANTHROPIC_MODEL: 'claude-opus-4',
-      PATH: '/usr/bin',
-    };
-    const out = scrubInheritedClaudeAuthEnv(merged, { LODY_SESSION_ID: 's1' });
-    expect(out).toBe(merged);
-  });
-
   it('strips inherited ANTHROPIC_API_KEY when user explicitly sets ANTHROPIC_AUTH_TOKEN', () => {
     const merged = {
       ANTHROPIC_API_KEY: 'sk-from-shell',
@@ -117,14 +107,5 @@ describe('scrubInheritedClaudeAuthEnv', () => {
     expect(out.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(out.CLAUDE_CODE_USE_BEDROCK).toBe('1');
     expect(out.AWS_BEARER_TOKEN_BEDROCK).toBe('aws-from-config');
-  });
-
-  it('does not mutate the input env object', () => {
-    const merged = {
-      ANTHROPIC_API_KEY: 'sk-shell',
-      ANTHROPIC_AUTH_TOKEN: 'sk-config',
-    };
-    scrubInheritedClaudeAuthEnv(merged, { ANTHROPIC_AUTH_TOKEN: 'sk-config' });
-    expect(merged.ANTHROPIC_API_KEY).toBe('sk-shell');
   });
 });

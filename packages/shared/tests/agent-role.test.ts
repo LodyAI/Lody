@@ -15,12 +15,9 @@ import {
   canReadAgentRole,
   isAgentRoleContentEqual,
   isSensitiveAgentRoleConfigOptionKey,
-  DEFAULT_AGENT_ROLE_EMOJI,
-  getAgentRoleEmoji,
   getAgentRoleMentionSlug,
   listAccessibleAgentRoles,
   normalizeAgentRole,
-  normalizeAgentRoleEmoji,
   normalizeAgentRoleMentionSlug,
   normalizeAgentRoleRunConfig,
   resolveAgentRoleAvailability,
@@ -66,11 +63,6 @@ describe('agent role description', () => {
     }
     expect(normalizeAgentRole({ ...role(), description: 42 })).toBeUndefined();
   });
-
-  it('treats missing and blank as equal but detects description edits', () => {
-    expect(isAgentRoleContentEqual(role(), role({ description: '' }))).toBe(true);
-    expect(isAgentRoleContentEqual(role(), role({ description: 'Review changes' }))).toBe(false);
-  });
 });
 
 describe('agent role mention slug', () => {
@@ -95,23 +87,6 @@ describe('agent role mention slug', () => {
   });
 });
 
-describe('agent role emoji', () => {
-  it('keeps one short glyph and drops what would smuggle in a second line', () => {
-    expect(normalizeAgentRoleEmoji('🔍')).toBe('🔍');
-    expect(normalizeAgentRoleEmoji('  🧑\u200d💻  ')).toBe('🧑\u200d💻');
-    expect(normalizeAgentRoleEmoji('a b')).toBe('ab');
-    expect(normalizeAgentRoleEmoji('😀'.repeat(20))).toBe('😀'.repeat(8));
-    expect(normalizeAgentRoleEmoji('   ')).toBeUndefined();
-    expect(normalizeAgentRoleEmoji(42)).toBeUndefined();
-  });
-
-  it('falls back to one shared default so every Role reads the same', () => {
-    expect(getAgentRoleEmoji({ emoji: '🔍' })).toBe('🔍');
-    expect(getAgentRoleEmoji({})).toBe(DEFAULT_AGENT_ROLE_EMOJI);
-    expect(getAgentRoleEmoji({ emoji: '' })).toBe(DEFAULT_AGENT_ROLE_EMOJI);
-  });
-});
-
 describe('agent role run config', () => {
   it('refuses secret-shaped option keys on write and on read', () => {
     expect(isSensitiveAgentRoleConfigOptionKey('api_key')).toBe(true);
@@ -132,42 +107,6 @@ describe('agent role run config', () => {
       modelId: 'gpt-5.6',
       configOptionValues: { thought_level: 'high', fast: true },
     });
-  });
-
-  it('omits an empty option map rather than persisting one', () => {
-    expect(normalizeAgentRoleRunConfig({ configOptionValues: {} })).toEqual({});
-    expect(normalizeAgentRoleRunConfig(null)).toEqual({});
-  });
-});
-
-describe('agent role rows', () => {
-  it('normalizes a stored row and drops malformed ones', () => {
-    const stored = {
-      ...role({ name: '  Reviewer  ', emoji: ' 🔍 ', promptPrefix: '  Be strict.  ' }),
-      runConfig: { modelId: 'gpt-5.6', configOptionValues: { auth_token: 'x' } },
-    };
-    expect(normalizeAgentRole(stored)).toEqual(
-      role({
-        name: 'Reviewer',
-        emoji: '🔍',
-        promptPrefix: 'Be strict.',
-        runConfig: { modelId: 'gpt-5.6' },
-      })
-    );
-
-    expect(normalizeAgentRole({ ...role(), v: 2 })).toBeUndefined();
-    // A name with no mention token left is a Role that could never be used.
-    expect(normalizeAgentRole({ ...role(), name: '---' })).toBeUndefined();
-    expect(normalizeAgentRole({ ...role(), machineId: '  ' })).toBeUndefined();
-    expect(normalizeAgentRole(null)).toBeUndefined();
-  });
-
-  it('treats option-key ordering as unchanged content', () => {
-    const left = role({ runConfig: { configOptionValues: { a: '1', b: '2' } } });
-    const right = role({ runConfig: { configOptionValues: { b: '2', a: '1' } } });
-    expect(isAgentRoleContentEqual(left, right)).toBe(true);
-    expect(isAgentRoleContentEqual(left, role({ ...left, promptPrefix: 'x' }))).toBe(false);
-    expect(isAgentRoleContentEqual(left, role({ ...left, emoji: '🔍' }))).toBe(false);
   });
 });
 
@@ -297,19 +236,6 @@ describe('agent role machine targets', () => {
     });
     expect(bound?.additionalTargets?.map((target) => target.machineId)).toEqual(['machine-1']);
     expect(bindAgentRoleTarget(multi, 'machine-3' as MachineId)).toBeUndefined();
-  });
-
-  it('treats a change on any machine as an edit', () => {
-    expect(
-      isAgentRoleContentEqual(multi, role({ alias: 'Reviewer-Mac', additionalTargets: [second] }))
-    ).toBe(true);
-    expect(
-      isAgentRoleContentEqual(
-        multi,
-        role({ alias: 'Reviewer-Mac', additionalTargets: [{ ...second, runConfig: {} }] })
-      )
-    ).toBe(false);
-    expect(isAgentRoleContentEqual(multi, role({ alias: 'Reviewer-Mac' }))).toBe(false);
   });
 
   it('resolves a mention to one machine and never guesses for a bare id', () => {

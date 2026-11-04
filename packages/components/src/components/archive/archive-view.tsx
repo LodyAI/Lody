@@ -1,4 +1,4 @@
-import { resolveSessionPullRequests } from '@lody/shared';
+import { getLatestPullRequestInfo } from '@/components/sessions/session-list-rows';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -57,8 +57,6 @@ import { WebArchiveScreen } from './web-archive-screen';
 import {
   getMachineFlockLocalProjects,
   getSessionLaunchConfigLegacyFields,
-  getSessionPullRequestLegacyFields,
-  parseGitHubPrNumber,
   type MachineId,
   type PrStatus,
   type SessionId,
@@ -766,20 +764,10 @@ function getArchivedSessionItemViewModel(
   const diffStats = session.diffStats ?? { allChange: { add: 0, del: 0 } };
   const hasChanges = diffStats.allChange.add !== 0 || diffStats.allChange.del !== 0;
 
-  const pullRequests = resolveSessionPullRequests(session);
-  const latestPr =
-    pullRequests.length > 0
-      ? pullRequests.some((pr) => getSessionPullRequestLegacyFields(pr).reportedAt)
-        ? [...pullRequests].sort((a, b) =>
-            (getSessionPullRequestLegacyFields(b).reportedAt ?? '').localeCompare(
-              getSessionPullRequestLegacyFields(a).reportedAt ?? ''
-            )
-          )[0]
-        : pullRequests[pullRequests.length - 1]
-      : null;
-  const prUrl = latestPr?.url?.trim() || null;
-  const prStatus = latestPr?.status ?? 'open';
-  const prNumber = prUrl ? parseGitHubPrNumber(prUrl) : null;
+  const latestPr = getLatestPullRequestInfo(session);
+  const prUrl = latestPr.url?.trim() || null;
+  const prStatus = latestPr.status ?? 'open';
+  const prNumber = latestPr.number;
   const prStatusMeta = prUrl ? PR_STATUS_META[prStatus] : null;
   const PrIcon = prStatusMeta?.icon ?? null;
   const prTooltipLabel = prNumber

@@ -19,6 +19,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
 - Preferences grammar: `CompactRow`, one answer; records: name, state, menu/detail.
   Its four switches bind translated labels and rendered helpers.
+- `SettingsLineTabs` keeps a held tab's full ID on its overflow menu item as
+  `data-settings-tab-overflow-id`; visible tabs retain `data-tab`. Labels may repeat.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
@@ -91,6 +93,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Provider automation binds `agent-provider-add` to the actual resolved machine
   and `agent-config-dialog` to its captured machine through `data-machine-id`.
   Preserve these identities when selection falls back or a dialog remains open.
+  Add actions and the dialog itself must honor the provider list's workspace RPC
+  restriction before mounting probes or persisting a draft. Signed file RPC
+  availability does not grant provider management; same-machine IPC remains available.
 
 ## Agent Roles
 

@@ -17,10 +17,17 @@ import { useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
 import type { E2eeRuntimeStatus } from '@lody/platform';
+import { getPreferredOrdinaryWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
+import {
+  E2eeAccountPairingApprove,
+  E2eeAccountPairingRequest,
+} from '@/components/pages/e2ee-account-pairing';
+import { isElectronRenderer } from '@/lib/electron';
+import { isNativeAppShell } from '@/lib/native-platform';
 import { E2eeDeviceApprovalGuide } from '@/components/pages/e2ee-device-approval-guide';
 import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
 import {
@@ -80,7 +87,7 @@ function WorkspaceControlRoute() {
   const identity = JSON.stringify([accountId, workspaceId]);
   const scope = JSON.stringify([accountId, workspaceId, generation]);
   const scopeRef = useRef(scope);
-  const readOwner = useRef<object | null>(null);
+  const readOwner = useRef<{ publish?: () => Promise<void> } | null>(null);
   scopeRef.current = scope;
   const [state, setState] = useState<{
     scope: string;
@@ -146,7 +153,7 @@ function WorkspaceControlRoute() {
           }
     );
     if (!port || !accountId) return undefined;
-    const owner = {};
+    const owner: NonNullable<typeof readOwner.current> = {};
     readOwner.current = owner;
     void (async () => {
       try {
@@ -227,10 +234,12 @@ function WorkspaceControlRoute() {
               genesisHash: status.genesisHash,
               cryptoOrgId: status.genesisHash,
             };
+            let publication = 0;
             const publish = async () => {
               if (disposed) return;
+              const revision = ++publication;
               const exported = await runtime.ledgerView(workspaceId);
-              if (disposed) return;
+              if (disposed || revision !== publication) return;
               const history = hostLedgerHistory(exported);
               if (!history.continuityPending)
                 retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
@@ -245,6 +254,7 @@ function WorkspaceControlRoute() {
                   failure: null,
                 });
             };
+            owner.publish = publish;
             await publish();
             // A saved local view is visible before the first network request.
             try {
@@ -408,6 +418,26 @@ function WorkspaceControlRoute() {
     };
   }, [scope, authenticated, port, workspaceId]);
   const current = state.identity === identity ? state : null;
+  const backToWorkspaces = () => {
+    // Same choice as the create route's back exit: never an encrypted workspace,
+    // and never this one even if its display metadata lacks the content mode.
+    const others =
+      workspaces.status === 'ready'
+        ? workspaces.workspaces.filter((item) => item.id !== workspaceId)
+        : [];
+    const slug = getPreferredOrdinaryWorkspaceSlug(
+      workspaces.status === 'ready'
+        ? others.find((item) => item.id === workspaces.activeWorkspaceId)
+        : null,
+      others,
+      readPreferredWorkspaceSlug()
+    );
+    void navigate(
+      slug
+        ? { to: '/$workspaceName/chat', params: { workspaceName: slug } }
+        : { to: '/workspace/create', search: { allowExisting: true } }
+    );
+  };
   const workspaceSlug =
     workspaces.status === 'ready'
       ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.slug
@@ -461,6 +491,27 @@ function WorkspaceControlRoute() {
     }
   };
   const refresh = () => setGeneration((value) => value + 1);
+  const manageMember = async (work: () => Promise<void>) => {
+    const owner = readOwner.current;
+    if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
+    await work();
+    if (scopeRef.current !== scope || readOwner.current !== owner) return;
+    // A management result already advanced the native ledger. Read and verify it
+    // on this reader; rebuilding the effect creates an unnecessary no-reader gap.
+    setState((previous) => ({ ...previous, loading: true, failure: null }));
+    try {
+      await owner.publish();
+    } catch (error) {
+      if (scopeRef.current === scope && readOwner.current === owner)
+        setState((previous) => ({
+          ...previous,
+          loading: false,
+          failure: classifyE2eeControlFailure(error),
+          nativeStatus: undefined,
+        }));
+      throw error;
+    }
+  };
   const diagnostics = () => {
     let localPin: string | null = null;
     let observed: { length: number; headHash: string } | null = null;
@@ -507,12 +558,18 @@ function WorkspaceControlRoute() {
         reason={current?.failure?.code === 'device-revoked' ? 'revoked' : 'new'}
         onRefresh={refresh}
         onShowDetails={() => setShowDetails(true)}
-        onBack={() => {
-          void navigate({ to: '/workspace/create', search: { allowExisting: true } });
-        }}
+        onBack={backToWorkspaces}
       >
+        <E2eeAccountPairingRequest
+          key={identity + ':account-pairing'}
+          runtime={port.runtime}
+          // Web asks first: a browser is often shared or public.
+          autoStart={isElectronRenderer() || isNativeAppShell()}
+          onJoined={refresh}
+        />
         <E2eePersonalPairing
           key={identity}
+          accountId={accountId}
           workspaceId={workspaceId}
           runtime={port.runtime}
           canApprove={false}
@@ -540,7 +597,10 @@ function WorkspaceControlRoute() {
         )}
       <E2eeWorkspaceControlPage
         memberManagement={
-          current?.nativeStatus?.deviceKind === 'personal' &&
+          current?.scope === scope &&
+          !current.loading &&
+          !current.failure &&
+          current.nativeStatus?.deviceKind === 'personal' &&
           current.nativeStatus.hasDeviceCredential === true &&
           (current.nativeStatus.memberRole === 'owner' ||
             current.nativeStatus.memberRole === 'admin') &&
@@ -548,14 +608,10 @@ function WorkspaceControlRoute() {
           port.runtime.setMemberRole
             ? {
                 actorRole: current.nativeStatus.memberRole,
-                remove: async (membershipId) => {
-                  await port.runtime!.removeMember!(workspaceId, membershipId);
-                  if (scopeRef.current === scope) refresh();
-                },
-                setRole: async (membershipId, role) => {
-                  await port.runtime!.setMemberRole!(workspaceId, membershipId, role);
-                  if (scopeRef.current === scope) refresh();
-                },
+                remove: (membershipId) =>
+                  manageMember(() => port.runtime!.removeMember!(workspaceId, membershipId)),
+                setRole: (membershipId, role) =>
+                  manageMember(() => port.runtime!.setMemberRole!(workspaceId, membershipId, role)),
               }
             : undefined
         }
@@ -596,9 +652,7 @@ function WorkspaceControlRoute() {
               }
             : undefined
         }
-        onBack={() => {
-          void navigate({ to: '/workspace/create', search: { allowExisting: true } });
-        }}
+        onBack={backToWorkspaces}
       >
         {port?.runtime && accountId && current?.history?.locallyPinned && (
           <>
@@ -611,9 +665,13 @@ function WorkspaceControlRoute() {
             />
           </>
         )}
+        {port?.runtime && accountId && current?.history?.locallyPinned && (
+          <E2eeAccountPairingApprove key={identity + ':account-pairing'} runtime={port.runtime} />
+        )}
         {port?.runtime && accountId && (
           <E2eePersonalPairing
             key={identity}
+            accountId={accountId}
             workspaceId={workspaceId}
             runtime={port.runtime}
             canApprove={Boolean(current?.history?.locallyPinned)}

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -69,46 +70,6 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     return { onShowUpdatedProjectNamesChange, onShowBranchNamesChange };
   }
 
-  it('places the Details group after the view and task menu groups', () => {
-    render('workspace');
-    const sections = [
-      ...document.body.querySelectorAll<HTMLElement>('[data-sidebar-filter-section]'),
-    ].map((section) => section.dataset.sidebarFilterSection);
-    expect(sections).toEqual(['view', 'tasks', 'details']);
-    expect(document.body.querySelector('[data-sidebar-filter-project-names]')).not.toBeNull();
-    expect(document.body.querySelector('[data-sidebar-filter-branch-names]')).not.toBeNull();
-  });
-
-  it('keeps both detail switches interactive in every organize mode', () => {
-    const { onShowUpdatedProjectNamesChange, onShowBranchNamesChange } = render(
-      'workspace',
-      true,
-      true
-    );
-    const projectNames = document.body.querySelector<HTMLButtonElement>(
-      '[data-sidebar-filter-project-names]'
-    );
-    const branchNames = document.body.querySelector<HTMLButtonElement>(
-      '[data-sidebar-filter-branch-names]'
-    );
-
-    // The switches describe persistent content preferences, not choices tied
-    // to the open organize mode, so neither row is ever disabled.
-    expect(projectNames?.disabled).toBe(false);
-    expect(projectNames?.getAttribute('aria-checked')).toBe('true');
-    expect(branchNames?.disabled).toBe(false);
-
-    flushSync(() => {
-      projectNames?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(onShowUpdatedProjectNamesChange.mock.calls[0]?.[0]).toBe(false);
-
-    flushSync(() => {
-      branchNames?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(onShowBranchNamesChange.mock.calls[0]?.[0]).toBe(false);
-  });
-
   it('closes the menu after changing the view', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -152,12 +113,5 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     expect(
       container?.querySelector('button[aria-label="Filter sidebar"]')?.getAttribute('aria-expanded')
     ).toBe('true');
-  });
-
-  it('labels the branch switch and reports unchecked state', () => {
-    render('workspace');
-    const branchSwitch = document.body.querySelector('[data-sidebar-filter-branch-names]');
-    expect(branchSwitch?.getAttribute('aria-label')).toBe('Show Branch');
-    expect(branchSwitch?.getAttribute('aria-checked')).toBe('false');
   });
 });

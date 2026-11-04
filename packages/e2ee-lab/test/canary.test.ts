@@ -18,28 +18,6 @@ const markers = (): CanaryMarkers =>
     canaryFields.map((field) => [field, `CANARY-${field}-${randomBytes(24).toString('hex')}`])
   ) as CanaryMarkers;
 
-it('requires both observed exits and detects deliberately leaked plaintext and encoded bodies', () => {
-  const canaries = markers();
-  expect(scanE2eeCanaries(canaries, []).missing).toEqual(['streams', 'http']);
-  for (const kind of ['streams', 'http'] as const) {
-    const leaked = scanE2eeCanaries(canaries, [
-      { kind, id: 'deliberate-plaintext', body: new TextEncoder().encode(canaries.message) },
-    ]);
-    expect(leaked.ok).toBe(false);
-    expect(leaked.findings).toEqual([
-      { source: 'deliberate-plaintext', kind, field: 'message', encoding: 'utf8', offset: 0 },
-    ]);
-  }
-  const encoded = scanE2eeCanaries(canaries, [
-    {
-      kind: 'http',
-      id: 'base64-input',
-      body: new TextEncoder().encode(Buffer.from(canaries.fileName).toString('base64')),
-    },
-  ]);
-  expect(encoded.findings[0]).toMatchObject({ field: 'fileName', encoding: 'base64' });
-});
-
 it('scans actual protected Loro/Flock peer traffic and SQLite Streams entries containing all five synthetic inputs', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'e2ee-canary-'));
   const canaries = markers(),

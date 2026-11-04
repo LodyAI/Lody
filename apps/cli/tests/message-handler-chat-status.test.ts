@@ -12,6 +12,7 @@ import {
 import { MessageHandler } from '../src/lib/message-handler';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { SessionManager } from '../src/session/session-manager';
+import type { SessionExecutionService } from '../src/session/session-execution-service';
 import type { Logger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
 import { fakeSessionData } from './session-data-test-double';
@@ -157,6 +158,41 @@ function createTestHarness(overrides: { sessionDoc?: Record<string, unknown> }) 
 describe('MessageHandler chat status transitions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('keeps the legacy invocation response unchanged when the runtime knows the sender', async () => {
+    const { handler, sessionId } = createTestHarness({});
+    const host = handler as unknown as { executionService: SessionExecutionService };
+    const invocation = {
+      requesterUserId: 'u-1',
+      sourceTurnId: 'goal:resume:synthetic',
+      inputConfig: {},
+      notificationOriginTurnIds: ['goal:resume:synthetic'],
+    };
+    const read = vi.spyOn(host.executionService, 'getActiveInvocationContext').mockReturnValue({
+      ...invocation,
+      sender: { kind: 'user' },
+    });
+    try {
+      expect(
+        await handler.handleLocalMachineRpc({
+          method: 'session/get-active-invocation-context',
+          machineId: 'm-1',
+          workspaceId: 'ws-1',
+          params: { sessionId },
+        })
+      ).toEqual({
+        ok: true,
+        result: {
+          type: 'session/active-invocation-context',
+          active: true,
+          sessionId,
+          ...invocation,
+        },
+      });
+    } finally {
+      read.mockRestore();
+    }
   });
 
   it('updates an existing assistant entry with the latest model info', async () => {

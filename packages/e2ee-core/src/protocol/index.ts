@@ -188,6 +188,37 @@ export {
 } from '../internal/keys/reports';
 export { epochDeliveryId } from '../internal/keys/delivery';
 
+// Account-wide personal device pairing
+export {
+  PAIRING_STRING_LENGTH,
+  PAIRING_URL_PREFIX,
+  PAIRING_REQUEST_MAX_LIFETIME_MS,
+  PAIRING_CLOCK_SKEW_MS,
+  PAIRING_MAX_WORKSPACES,
+  PairingError,
+  encodePairingSecret,
+  formatPairingString,
+  pairingQrPayload,
+  parsePairingString,
+  derivePairingKeys,
+  disposePairingKeys,
+  encodePairingRequest,
+  encodePairingApproval,
+  decodePairingRequest,
+  decodePairingApproval,
+  pairingRequestDigest,
+  pairingRequestTag,
+  verifyPairingRequestTag,
+  pairingApprovalTag,
+  verifyPairingApprovalTag,
+  checkPairingRequestLifetime,
+  type PairingKeys,
+  type PairingRequest,
+  type PairingRequestRow,
+  type PairingApproval,
+  type PairingApprovalRow,
+} from '../internal/pairing';
+
 // Recovery
 export {
   deriveRecoveryAccessCredential,

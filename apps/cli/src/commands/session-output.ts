@@ -1,4 +1,5 @@
 import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/shared';
+import { readChatFailureNotice } from '@lody/shared';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { SessionBackend } from '@/session/session-backend';
 
@@ -104,33 +105,8 @@ const findChatFailureMessage = (
   userTurnId: string
 ): string | undefined => {
   const userTurnIndex = findUserTurnIndex(history, userTurnId);
-  if (userTurnIndex < 0) {
-    return undefined;
-  }
-
-  for (let index = history.length - 1; index > userTurnIndex; index -= 1) {
-    const entry = history[index];
-    if (entry?.role !== 'system' || !Array.isArray(entry.items)) {
-      continue;
-    }
-
-    for (const item of entry.items as MessageContent[]) {
-      const noticeMeta = item.type === 'system_notice' ? item.meta : undefined;
-      if (
-        item.type === 'system_notice' &&
-        item.name === 'chat_failed' &&
-        noticeMeta &&
-        typeof noticeMeta === 'object' &&
-        'message' in noticeMeta &&
-        typeof noticeMeta.message === 'string' &&
-        noticeMeta.message.trim()
-      ) {
-        return noticeMeta.message.trim();
-      }
-    }
-  }
-
-  return undefined;
+  if (userTurnIndex < 0) return undefined;
+  return readChatFailureNotice(history.slice(userTurnIndex + 1))?.message;
 };
 
 export function calculateTurnDurationMs(

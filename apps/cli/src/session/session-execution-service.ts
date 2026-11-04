@@ -99,7 +99,7 @@ import {
   type AgentConfigId,
   type AgentConfigMeta,
   assertManagedCodexProfileConfig,
-  buildReplayPromptFromHistory,
+  createReplayPromptBuilder,
   type BuiltinRuntimeOverrides,
   type ChatFailedCode,
   type ChatFailedReason,
@@ -188,6 +188,7 @@ import {
 import { buildPrompt } from './session-execution-helpers';
 import { resolveSessionLaunchConfig } from './session-launch-config-resolver';
 import type { ISession, SessionManager } from './session-manager';
+import { readLodyDataDiskInfo } from '@/lib/machine-disk';
 import type { SessionConfig } from './types';
 import { isAllocatedSessionBranchName } from './worktree/branch-name-allocation';
 import {
@@ -680,6 +681,8 @@ export type SessionExecutionServiceDeps = {
   buildAcpPromptBlocks: (args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
+    /** The input's history turn; an agent author adds a provenance header. */
+    userTurnId?: string;
     inputBlocks: SessionInputBlock[];
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
@@ -2400,6 +2403,7 @@ export class SessionExecutionService {
         this.deps.buildAcpPromptBlocks({
           workspaceId: this.deps.workspaceId,
           sessionId: options.sessionId,
+          userTurnId: options.userTurnId,
           inputBlocks,
           issuePRMentions: options.inputConfig.issuePRMentions,
         })
@@ -5970,6 +5974,7 @@ export class SessionExecutionService {
         inputConfig: SessionTurnInputConfig;
         notificationOriginTurnIds: string[];
         notificationProvenancePending?: boolean;
+        sender?: { kind: 'user' } | { kind: 'agent'; sessionId: SessionId };
       }
     | undefined {
     const runtime = this.turnRuntimeBySession.get(sessionId);
@@ -6001,6 +6006,16 @@ export class SessionExecutionService {
       requesterUserId: invocation.requesterUserId,
       sourceTurnId: invocation.sourceTurnId,
       inputConfig: invocation.inputConfig,
+      ...(invocation.notificationAudience?.kind === 'user'
+        ? { sender: { kind: 'user' as const } }
+        : invocation.notificationAudience?.kind === 'agent'
+          ? {
+              sender: {
+                kind: 'agent' as const,
+                sessionId: invocation.notificationAudience.sessionId,
+              },
+            }
+          : {}),
       notificationOriginTurnIds: this.notificationOrigins(runtime),
       ...((!invocation.notificationAudience ||
         invocation.notificationAudience.kind === 'unknown') &&
@@ -6079,9 +6094,22 @@ export class SessionExecutionService {
     }
   }
 
-  private async getSessionHistory(sessionDoc: SessionDocument): Promise<SessionHistoryInput[]> {
+  private async getSessionHistoryQuery(sessionDoc: SessionDocument) {
     const backend = await this.getSessionBackend(sessionDoc, sessionDoc.sessionId);
-    return await backend.readHistory();
+    return await backend.readHistoryQuery();
+  }
+
+  private async buildHistoryReplay(
+    sessionDoc: SessionDocument,
+    excludeTurnId?: string
+  ): Promise<ReplayPromptResult> {
+    const backend = await this.getSessionBackend(sessionDoc, sessionDoc.sessionId);
+    if (backend.readHistoryReplay) return backend.readHistoryReplay(excludeTurnId);
+    const builder = await backend.foldHistory(
+      () => createReplayPromptBuilder({ excludeTurnId }),
+      (state, entry) => state.add(entry)
+    );
+    return builder.finish();
   }
 
   private async getSessionBackend(
@@ -6110,17 +6138,19 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument;
     excludeTurnId?: string;
     timeoutMs?: number;
-  }): Promise<SessionHistoryInput[]> {
+  }): Promise<Awaited<ReturnType<SessionExecutionService['getSessionHistoryQuery']>>> {
     // Mirrors what `buildReplayPromptFromHistory` counts: system notices are
     // skipped there, so waiting must not treat a synced failure notice as
     // proof that the conversation arrived.
-    const hasReplayableEntry = (history: SessionHistoryInput[]): boolean =>
+    const hasReplayableEntry = (
+      history: Awaited<ReturnType<SessionExecutionService['getSessionHistoryQuery']>>
+    ): boolean =>
       history.some(
         (entry) =>
           entry.id !== args.excludeTurnId && (entry.role === 'user' || entry.role === 'assistant')
       );
 
-    let latest = await this.getSessionHistory(args.sessionDoc);
+    let latest = await this.getSessionHistoryQuery(args.sessionDoc);
     if (hasReplayableEntry(latest)) {
       return latest;
     }
@@ -6130,14 +6160,18 @@ export class SessionExecutionService {
 
     const timeoutMs = args.timeoutMs ?? REPLAYABLE_HISTORY_SYNC_TIMEOUT_MS;
     const startedAtMs = Date.now();
-    return await new Promise<SessionHistoryInput[]>((resolve) => {
+    return await new Promise<
+      Awaited<ReturnType<SessionExecutionService['getSessionHistoryQuery']>>
+    >((resolve) => {
       let settled = false;
       let checking = false;
       let recheckRequested = false;
       let unsubscribe: (() => void) | undefined;
       let timer: ReturnType<typeof setTimeout> | null = null;
 
-      const finish = (history: SessionHistoryInput[]): void => {
+      const finish = (
+        history: Awaited<ReturnType<SessionExecutionService['getSessionHistoryQuery']>>
+      ): void => {
         if (settled) {
           return;
         }
@@ -6162,7 +6196,7 @@ export class SessionExecutionService {
           try {
             do {
               recheckRequested = false;
-              const next = await this.getSessionHistory(args.sessionDoc);
+              const next = await this.getSessionHistoryQuery(args.sessionDoc);
               if (settled) {
                 return;
               }
@@ -6768,13 +6802,10 @@ export class SessionExecutionService {
           // to resume, even though the user turn is durable in Loro history.
           // This freshly created ACP session has no knowledge of that turn,
           // so reconstruct its context before sending the current request.
-          const history = self.getSessionHistory(sessionDoc);
-          const historySnapshot = yield* self.tryPromise(() => history);
-          if (historySnapshot.length > 0) {
-            replayPromptResult = buildReplayPromptFromHistory({
-              history: historySnapshot,
-              excludeTurnId: message.userTurnId,
-            });
+          {
+            replayPromptResult = yield* self.tryPromise(() =>
+              self.buildHistoryReplay(sessionDoc, message.userTurnId)
+            );
             if (replayPromptResult.stats.messagesIncluded > 0) {
               usedHistoryReplay = true;
               self.deps.logger.debug(
@@ -6828,10 +6859,9 @@ export class SessionExecutionService {
               );
               const fallbackReplay =
                 replayHistory.length > 0
-                  ? buildReplayPromptFromHistory({
-                      history: replayHistory,
-                      excludeTurnId: message.userTurnId,
-                    })
+                  ? yield* self.tryPromise(() =>
+                      self.buildHistoryReplay(sessionDoc, message.userTurnId)
+                    )
                   : null;
 
               if (!fallbackReplay || fallbackReplay.stats.messagesIncluded === 0) {
@@ -6977,6 +7007,7 @@ export class SessionExecutionService {
             await self.deps.buildAcpPromptBlocks({
               workspaceId: message.workspaceId,
               sessionId,
+              userTurnId: message.userTurnId,
               inputBlocks: sessionInputBlocks,
               issuePRMentions: acpSessionConfig.issuePRMentions,
               replayPromptText:
@@ -6994,8 +7025,8 @@ export class SessionExecutionService {
         if (!usedHistoryReplay || !replayPromptResult) {
           return undefined;
         }
-        const history = yield* self.tryPromise(() => self.getSessionHistory(sessionDoc));
-        if (hasRecentResumeNotice(history)) {
+        const history = yield* self.tryPromise(() => self.getSessionHistoryQuery(sessionDoc));
+        if (hasRecentResumeNotice(history as SessionHistoryInput[])) {
           return undefined;
         }
 
@@ -8462,16 +8493,19 @@ export class SessionExecutionService {
     }
   }
 
-  async getMachineStatus(_message: MachineStatusRequestValidated): Promise<MachineStatusResponse> {
+  async getMachineStatus(message: MachineStatusRequestValidated): Promise<MachineStatusResponse> {
     this.deps.logger.debug('Received machine status request');
 
     try {
       const resources = await this.deps.collectMachineResources();
+      // Advisory: an unreadable volume omits disk, never the status answer.
+      const disk = message.includeDisk ? await readLodyDataDiskInfo() : undefined;
       return {
         type: 'machine/status_response',
         machineId: this.deps.machineId,
         success: true,
         resources,
+        ...(disk ? { disk } : {}),
         lifecycle: this.deps.getMachineLifecycleCapability(),
       };
     } catch (error) {

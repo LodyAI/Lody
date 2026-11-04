@@ -452,6 +452,7 @@ workspace its account lists. It then draws a fresh 128-bit secret S and shows a 
 and a copyable pairing string, both encoding S.
 
 **Request.** N submits one account-scoped request carrying:
+
 - N's display name and an expiry;
 - per workspace, the genesis, N's signing and encryption public keys, possession proof
   and credential hash;
@@ -478,6 +479,7 @@ scans it and submits its request under that S, and A then verifies it in the sam
 a code that is showing on another device of your own. Never enter a code someone sent
 you. Once approved, this device gets access to the selected workspaces and all their
 history." The confirmation names the specific target device and its scope:
+
 - the number and names of the workspaces to join, each deselectable;
 - the device name, labeled "provided by the requesting device";
 - the location, labeled "approximate, estimated by the server".
@@ -503,6 +505,7 @@ endorsement key. Current and historical keys use the existing mailbox and histor
 paths. Workspaces A cannot sign for stay pending for another approver.
 
 **Lifetime and refusal.**
+
 - The request's own expiry is covered by its MAC and is at most 10 minutes. A checks it
   independently before signing, and N checks it before accepting an approval; a late
   approval is refused.
@@ -517,6 +520,7 @@ paths. Workspaces A cannot sign for stay pending for another approver.
   bounds the impact of a leaked string.
 
 **Progress and failure.**
+
 - A journals each workspace's exact signed admission before any network step. It
   resumes per workspace, retries the original bytes, reconciles unknown outcomes and
   never re-signs.
@@ -528,6 +532,61 @@ paths. Workspaces A cannot sign for stay pending for another approver.
 - Manual pairing uses the same string when push is unavailable or the devices pair in
   person.
 - Ledger details move to an advanced diagnostics view.
+
+### Member approvers deliver history instead of a snapshot (approved increment)
+
+**Increment status: approved by the owner by merging [#2203](https://github.com/LodyAI/Lody/pull/2203) (2026-11-02,
+`f2e3fbae`).** It is implemented in [#2240](https://github.com/LodyAI/Lody/pull/2240).
+
+**Problem.** Any active personal device of the user may approve, whatever the user's
+role. A Member can append the personal `AdmitDevice` for its own new device, but it
+cannot endorse a manager snapshot, so it cannot produce the signed snapshot invitation
+this section requires. Without this increment, a user who is only a Member of a
+workspace cannot use account-wide pairing to add a second device there. They have to
+fall back to the per-workspace pairing exchange.
+
+**Decision.**
+
+- **Rows without an invitation.** An approval row may name the workspace's genesis and
+  admission record without a snapshot invitation. The approval HMAC still binds the
+  request digest, A's signing key and every row.
+- **Full history verification.** For such a row, N fetches the workspace's complete
+  signed ledger history and verifies it from the genesis that the row names. It then
+  checks four things:
+  - its own admission record is present, with the authenticated record hash;
+  - that record's signer is an active personal device of N's own membership;
+  - the admitted keys are N's retained keys;
+  - the history verifies with no gaps.
+
+  It then pins that genesis and that endorser, exactly as the existing per-workspace
+  history path does.
+
+- **Unchanged.** Owners and Admins keep delivering snapshot invitations, and N keeps
+  verifying them as before.
+
+**Why security is unchanged.**
+
+- **The genesis is authenticated.** The genesis in each row is covered by the approval
+  HMAC, keyed from `S`, which the service never sees. A substituted genesis fails the
+  MAC with probability about 2⁻¹²⁸. So N anchors trust on the same approver-confirmed
+  genesis that a snapshot invitation would carry.
+- **History replay cannot be forged.** Full history verification checks every
+  signature and permission from that genesis. The service can withhold or delay
+  records, but it cannot forge one, and N accepts only a history that contains its
+  own authenticated admission.
+- **Freshness is no weaker.** It is the same as the existing per-workspace history
+  path. Withholding later records only delays N, as it can with any approval.
+- **Same authority.** The approver's authority is unchanged. A Member may already admit
+  its own personal devices, and this increment adds no permission.
+
+**User impact.**
+
+- **With this increment.** A Member pairs a second device for all their workspaces at
+  once, the same as an Owner or Admin.
+- **Without it.** Workspaces where the user is only a Member stay awaiting delivery
+  after an account-wide approval, and need the per-workspace pairing exchange. Opening
+  them may take longer, because N verifies the whole history rather than one endorsed
+  snapshot.
 
 ## Retained verified state (proposed)
 

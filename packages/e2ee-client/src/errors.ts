@@ -6,6 +6,7 @@ export class PersonalHostError extends Data.TaggedError('PersonalHostError')<{
     | 'invalid-input'
     | 'scope-mismatch'
     | 'conflict'
+    | 'history-conflict'
     | 'approval-required'
     | 'identity-lost'
     | 'corrupt'

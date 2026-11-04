@@ -78,7 +78,11 @@ request-key table, a key column, or any key value cannot be read and validated,
 The control transaction rolls back partial retirement and publishes no reset intent;
 repeating reset remains safe, and repairing the key evidence permits normal retry.
 Older/unknown versions are never decoded; their archived rows are never submitted
-to execution by this module.
+to execution by this module. Schema probes treat SQLite's explicit missing-table or
+missing-column errors as unsupported structure. Busy, I/O and other operational
+failures remain storage errors with their original cause; they cannot trigger archival
+of a healthy journal. Deterministic busy and I/O injection tests preserve evidence and
+confirm a later claim still works.
 
 Reset uses a durable intent before rename because SQLite cannot atomically commit
 an OS rename with SQL. Other calls observe `reset_required` while intent remains.
@@ -108,16 +112,16 @@ or process termination bounds the retained lifetime; there is no background retr
 
 ## Failure containment and unknown outcomes
 
-| Trigger | Scope and recovery |
-| --- | --- |
-| Clock skew | Only the new claim fails; no floor write, key access, or workspace teardown. Calibrate or explicitly reset; completed evidence stays readable. |
-| No reference plus bad maximum | Only the matching genesis/workspace rejects; explicit reset provides a finite operator recovery path. |
-| Empty first creation | Initialize atomically after native recovery proves no committed schema; independent opens serialize. |
-| Incomplete current schema | Retire readable keys before archive despite unrelated schema damage; unreadable current keys refuse reset and preserve the original for repair. |
-| Unknown version | Retain archive, report path, require explicit reset; no old-version decoder. |
-| Reset interruption | Stable pending intent blocks claims; operator retry completes the same replacement. |
-| Failed close | Original owner retains main plus shared mutex; other owners can continue ordinary work, but rename waits. Bounded diagnostic and explicit cleanup retry. |
-| Crash after start | `state: uncertain`, `outcomeStatus: unknown`; only the original live permit can settle. A new request ID in that workspace remains independent. |
+| Trigger                       | Scope and recovery                                                                                                                                       |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clock skew                    | Only the new claim fails; no floor write, key access, or workspace teardown. Calibrate or explicitly reset; completed evidence stays readable.           |
+| No reference plus bad maximum | Only the matching genesis/workspace rejects; explicit reset provides a finite operator recovery path.                                                    |
+| Empty first creation          | Initialize atomically after native recovery proves no committed schema; independent opens serialize.                                                     |
+| Incomplete current schema     | Retire readable keys before archive despite unrelated schema damage; unreadable current keys refuse reset and preserve the original for repair.          |
+| Unknown version               | Retain archive, report path, require explicit reset; no old-version decoder.                                                                             |
+| Reset interruption            | Stable pending intent blocks claims; operator retry completes the same replacement.                                                                      |
+| Failed close                  | Original owner retains main plus shared mutex; other owners can continue ordinary work, but rename waits. Bounded diagnostic and explicit cleanup retry. |
+| Crash after start             | `state: uncertain`, `outcomeStatus: unknown`; only the original live permit can settle. A new request ID in that workspace remains independent.          |
 
 ## Evidence and limits
 

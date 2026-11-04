@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+/** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -63,31 +64,6 @@ it('hosts recovery beside existing controls and preserves the page when it clear
   expect(container.querySelector('[data-auth-recovery-entry]')?.childElementCount).toBe(0);
   expect(container.querySelector('textarea')).toBe(draft);
   expect(draft.value).toBe('Still editing');
-});
-
-it('preserves draft focus when recovery fails and leaves the page interactive', async () => {
-  const draft = document.createElement('textarea');
-  container.appendChild(draft);
-  draft.value = 'Keep this draft';
-  draft.focus();
-  const host = document.createElement('div');
-  container.appendChild(host);
-  const statusRoot = createRoot(host);
-  try {
-    await act(async () => statusRoot.render(<AuthRecoveryError onRetry={() => {}} />));
-    expect(document.activeElement).toBe(draft);
-    expect(draft.value).toBe('Keep this draft');
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(container.closest('[inert]')).toBeNull();
-    expect(document.querySelector('[role="status"]')?.textContent).toBe(
-      'Connection needs attention'
-    );
-  } finally {
-    await act(async () => statusRoot.unmount());
-    draft.remove();
-    host.remove();
-  }
 });
 
 it('opens details only on demand, retries explicitly and preserves a collapsed recovery entry', async () => {

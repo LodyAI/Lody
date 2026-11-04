@@ -156,6 +156,13 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
         db.prepare('DELETE FROM member_joins WHERE workspace_id=?').run(expected.offer.workspaceId)
       }),
     has: (workspaceId: string) => sql(() => Boolean(rowFor(workspaceId)?.history)),
+    /** The request id of this account's accepted (verified-history) join, else null. */
+    accepted: (workspaceId: string) =>
+      sql(() => {
+        const row = rowFor(workspaceId)
+        if (!row?.history || !row.key_package) return null
+        return hex(decodeMemberKeyPackage(row.key_package).request.requestId.toBytes())
+      }),
     prepare: Effect.fnUntraced(function* (source: E2eeMemberOffer, cryptoUserId: string) {
       const offer = yield* sql(() => MemberOfferSchema.parse(source))
       const genesis = ok(Bytes.genesisHash(raw(offer.genesisHash)))

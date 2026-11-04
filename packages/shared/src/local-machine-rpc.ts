@@ -98,6 +98,14 @@ export const SessionActiveInvocationContextResultSchema = z.discriminatedUnion('
       inputConfig: z.record(z.string(), z.unknown()),
       notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
       notificationProvenancePending: z.boolean().optional(),
+      // Daemon-hosted tools use the frozen sender without rereading input history.
+      // The legacy socket handler omits this field for older strict readers.
+      sender: z
+        .discriminatedUnion('kind', [
+          z.object({ kind: z.literal('user') }).strict(),
+          z.object({ kind: z.literal('agent'), sessionId: SessionIdSchema }).strict(),
+        ])
+        .optional(),
     })
     .strict(),
 ]);
@@ -124,7 +132,7 @@ export const SessionToolResultSchema = z
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/status'),
-    params: z.object({}).strict(),
+    params: z.object({ includeDisk: z.literal(true).optional() }).strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/ping'),
@@ -136,7 +144,12 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/live-status'),
-    params: z.object({ sessionId: z.string().trim().min(1) }).strict(),
+    params: z
+      .object({
+        sessionId: z.string().trim().min(1),
+        includeActivity: z.literal(true).optional(),
+      })
+      .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('file/download-chunk'),
@@ -422,6 +435,43 @@ export type ProjectProbeLocalMemberResult = z.infer<typeof ProjectProbeLocalMemb
 
 const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
 
+/**
+ * What a busy Session is doing, read on demand by its owning daemon and never
+ * published on presence. Sent only when the request asked with `includeActivity`.
+ */
+export const SessionLiveActivitySchema = z
+  .object({
+    turnStartedAt: z.number().finite().nonnegative().optional(),
+    lastOutputAt: z.number().finite().nonnegative().optional(),
+    currentAction: z.string().max(200).optional(),
+    queuedInputs: z.number().int().nonnegative(),
+  })
+  .strict();
+export type SessionLiveActivity = z.infer<typeof SessionLiveActivitySchema>;
+
+/**
+ * Best-effort withdrawal of a queued input that has not started. `withdrawn`
+ * means the input was still pending and is now canceled; a dispatch racing the
+ * withdrawal may still run it, which callers observe in the target history.
+ */
+export const SessionWithdrawInputResponseSchema = z
+  .object({
+    type: z.literal('session/withdraw-input_response'),
+    sessionId: z.string().trim().min(1),
+    userTurnId: z.string().trim().min(1),
+    outcome: z.enum([
+      'withdrawn',
+      'already_withdrawn',
+      'already_started',
+      'not_found',
+      'not_owner',
+      'error',
+    ]),
+    error: z.string().optional(),
+  })
+  .strict();
+export type SessionWithdrawInputResponse = z.infer<typeof SessionWithdrawInputResponseSchema>;
+
 export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
   z
     .object({
@@ -432,6 +482,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
       state: SessionLiveStateSchema,
       observedAtMs: z.number().finite().nonnegative(),
       reason: z.string().trim().min(1).optional(),
+      activity: SessionLiveActivitySchema.optional(),
     })
     .strict(),
   z

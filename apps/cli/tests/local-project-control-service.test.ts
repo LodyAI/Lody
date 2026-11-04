@@ -246,6 +246,54 @@ describe('LocalProjectControlService.listProjectDirectory', () => {
     expect(result.truncated).toBe(false);
   });
 
+  it('still lists the directory when a registered path or a child name is missing', async () => {
+    const directoryPath = await realpath(rootPath);
+    const srcRealPath = await realpath(path.join(rootPath, 'src'));
+    const realReaddir = fs.promises.readdir.bind(fs.promises);
+    const readdir = vi.spyOn(fs.promises, 'readdir').mockImplementation(async (target, options) => {
+      const entries = await realReaddir(target, options);
+      if (String(target) !== directoryPath) return entries;
+      entries.unshift({
+        name: undefined,
+        isDirectory: () => true,
+        isSymbolicLink: () => false,
+      } as unknown as fs.Dirent);
+      return entries;
+    });
+
+    try {
+      const result = await service.browseDirectory({
+        absolutePath: rootPath,
+        registeredProjects: {
+          ['missing-path' as LocalProjectId]: undefined as unknown as string,
+          ['blank-path' as LocalProjectId]: '   ',
+          ['project-src' as LocalProjectId]: srcRealPath,
+        },
+      });
+
+      expect(result.path).toBe(directoryPath);
+      expect(result.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'src',
+            absolutePath: srcRealPath,
+            registeredProjectId: 'project-src',
+          }),
+          expect.objectContaining({ name: 'ignored-dir' }),
+        ])
+      );
+      expect(result.entries.every((entry) => typeof entry.name === 'string' && entry.name)).toBe(
+        true
+      );
+      expect(result.entries.map((entry) => entry.registeredProjectId)).not.toContain(
+        'missing-path'
+      );
+      expect(result.entries.map((entry) => entry.registeredProjectId)).not.toContain('blank-path');
+    } finally {
+      readdir.mockRestore();
+    }
+  });
+
   it('supports hidden directories and cursor pagination while browsing', async () => {
     const firstPage = await service.browseDirectory({
       absolutePath: rootPath,

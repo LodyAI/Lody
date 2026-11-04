@@ -1,10 +1,14 @@
+import { selectTranscriptHistoryPositions } from '@lody/shared/session-data';
+import type { SessionBackend } from '@/session/session-backend';
 import {
   readProjectDefaultMcpIds,
   syncMcpCatalog,
   waitForMcpDefaultCatalog,
 } from '@/lib/workspace-mcp-store';
 import { getDaemonWorkspace } from '@/lib/session-command-environment';
+import type { SessionSteerResponse } from '@lody/shared';
 import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
+import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import {
   getMachineRoomId,
   machineSupportsProtocolCapability,
@@ -116,7 +120,7 @@ import {
   deriveDraftSessionTitle,
   NEW_SESSION_HISTORY_BACKEND,
 } from '@lody/shared';
-import type { SessionTurn } from '@lody/shared/session-data';
+import { readSessionHistoryMetadata, type SessionTurn } from '@lody/shared/session-data';
 import { AuthClient } from '@/lib/auth';
 import {
   dispatchLocalControl,
@@ -172,7 +176,7 @@ import {
 import { flushTelemetry } from '@/instrument';
 import { captureSessionCommandEvent } from './analytics-events';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
-import { createSessionBackend } from '@/session/session-backend';
+import { createSessionBackend, readHistoryEntry } from '@/session/session-backend';
 import { Effect } from 'effect';
 import { createSessionObserveWriter, resolveObserveSelection } from './session-observe';
 import { acquireSessionObservation } from './session-observe-runtime';
@@ -692,6 +696,46 @@ export function selectSessionTranscriptEntries(
   return selected;
 }
 
+/** Count visible rows and hydrate the requested transcript positions. */
+export async function readSessionTranscript(
+  backend: Pick<SessionBackend, 'readHistory' | 'readHistorySelection' | 'readHistoryTranscript'>,
+  options: { all?: boolean; limit?: number; reverse?: boolean }
+): Promise<{ total: number; entries: SessionTranscriptEntry[] }> {
+  if (options.all) {
+    const transcript = toSessionTranscriptEntries(await backend.readHistory());
+    return {
+      total: transcript.length,
+      entries: selectSessionTranscriptEntries(transcript, options),
+    };
+  }
+  let total = 0,
+    positions: number[] = [];
+  let selected: SessionHistoryInput[];
+  if (backend.readHistoryTranscript) {
+    const result = await backend.readHistoryTranscript(options);
+    total = result.total;
+    positions = result.positions;
+    selected = result.entries;
+  } else {
+    selected = await backend.readHistorySelection(
+      (rows) => {
+        const result = selectTranscriptHistoryPositions(rows, options);
+        total = result.total;
+        positions = result.positions;
+        return positions;
+      },
+      { transcriptVisibility: true }
+    );
+  }
+  return {
+    total,
+    entries: selected.flatMap((entry, index) => {
+      const formatted = toSessionTranscriptEntry(positions[index]!, entry);
+      return formatted ? [formatted] : [];
+    }),
+  };
+}
+
 export function renderSessionTranscript(entries: SessionTranscriptEntry[]): string {
   if (entries.length === 0) {
     return 'No visible history found.';
@@ -1065,12 +1109,15 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   workspace: WorkspaceSummary;
   sessionDoc: SessionDocument;
   userTurnId?: string;
-}): Promise<SessionHistory[] | undefined> {
+}): Promise<Awaited<ReturnType<typeof readSessionHistoryMetadata>> | undefined> {
   // Same ordering as session create: settle the plan before reading the doc.
   const entitlement = await getWorkspaceBillingEntitlementBestEffort(args.manager, args.workspace);
   if (!entitlement || isBillingQuotaExempt(entitlement)) return undefined;
   const backend = await createSessionBackend(args.sessionDoc, await args.sessionDoc.getMetaState());
-  const [history, queue] = await Promise.all([backend.readHistory(), backend.getMessageQueue()]);
+  const [history, queue] = await Promise.all([
+    readSessionHistoryMetadata(backend.history),
+    backend.getMessageQueue(),
+  ]);
   if (
     args.userTurnId &&
     (history.some((entry) => entry.id === args.userTurnId) ||
@@ -1406,7 +1453,7 @@ async function resolveRunningAssistantTurnId(
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-  const history = await backend.readHistory();
+  const history = await readSessionHistoryMetadata(backend.history);
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
@@ -1434,8 +1481,8 @@ export async function appendUserPromptHistory(args: {
   const historyId = preallocatedId?.trim() || uuidV4();
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   if (preallocatedId) {
-    const history = args.knownHistory ?? (await backend.readHistory());
-    const existing = history.find((entry) => entry.id === historyId);
+    const candidate = args.knownHistory?.find((entry) => entry.id === historyId);
+    const existing = candidate ?? (await readHistoryEntry(backend, historyId));
     if (existing) {
       if (
         existing.role !== 'user' ||
@@ -2217,7 +2264,10 @@ async function resolveSessionTurnDispatchDefaults(
 ): Promise<ResolvedTurnDispatchConfig | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-  return resolveTurnDispatchDefaultsFromHistory(await backend.readHistory(), agentConfig);
+  return resolveTurnDispatchDefaultsFromHistory(
+    await readSessionHistoryMetadata(backend.history),
+    agentConfig
+  );
 }
 
 export function resolveEffectiveSessionChatDispatchConfig(args: {
@@ -4066,6 +4116,37 @@ async function validateSessionChatTargetForRequester(args: {
   return session;
 }
 
+// Cold token/gateway lookup and subscription setup need more time than an offer.
+const REMOTE_STEER_CONNECT_TIMEOUT_MS = 15_000;
+
+/**
+ * What actually happened to an Agent chat at send time. Advisory: absent when
+ * the outcome is uncertain or was decided by an earlier attempt or replay.
+ */
+export type SessionChatDelivery = 'steered' | 'queued' | 'dispatched';
+
+const withDelivery = <T extends object>(
+  result: T,
+  delivery: SessionChatDelivery | undefined
+): T & { delivery?: SessionChatDelivery } => (delivery ? { ...result, delivery } : result);
+
+/** Maps a steer verdict to a receipt; rejected steers become ordinary input. */
+export const deliveryFromSteerResponse = (
+  response: Pick<SessionSteerResponse, 'applied' | 'disposition'>
+): SessionChatDelivery | undefined => {
+  if (response.applied) return 'steered';
+  switch (response.disposition) {
+    case 'unsupported':
+      return 'queued';
+    // stale-turn is ambiguous: promoted to the queue, or consumed after the
+    // provider accepted it too late. Report nothing rather than a false queue.
+    case 'no-active-turn':
+      return 'dispatched';
+    default:
+      return undefined;
+  }
+};
+
 export async function sendSessionChatResult(
   auth: AuthContext,
   workspace: WorkspaceSummary,
@@ -4083,7 +4164,7 @@ export async function sendSessionChatResult(
     userTurnId: string;
     chainDepth: number;
     bypassSessionQuota?: boolean;
-    /** Agent chat: steer a running turn on this daemon instead of queueing behind it. */
+    /** Agent chat: steer a running turn instead of queueing behind it. */
     steerActiveTurn?: boolean;
   },
   delegatedRequester?: DelegatedSessionRequester,
@@ -4093,6 +4174,7 @@ export async function sendSessionChatResult(
   machineId: MachineId;
   workspaceId: WorkspaceId;
   userTurnId: string;
+  delivery?: SessionChatDelivery;
   completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
 }> {
   const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
@@ -4121,7 +4203,7 @@ export async function sendSessionChatResult(
         sessionDoc,
         userTurnId: orchestration?.userTurnId,
       });
-  const historyForDefaults = quotaHistory ?? (await backend.readHistory());
+  const historyForDefaults = quotaHistory ?? (await readSessionHistoryMetadata(backend.history));
   const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
     historyForDefaults,
     session
@@ -4195,10 +4277,13 @@ export async function sendSessionChatResult(
     delegatedRequester,
     session.machineId
   );
+  const remoteMachine = session.machineId !== auth.machineId;
   // A shared member's derivation never steers another principal's running turn.
   const steerTurnId =
     orchestration?.steerActiveTurn && !derivedFrom
-      ? environment?.host.readActiveTurnId(sessionId)
+      ? remoteMachine
+        ? resolveActiveAssistantTurnId(historyForDefaults)
+        : environment?.host.readActiveTurnId(sessionId)
       : undefined;
   const userTurn = await appendUserPromptHistory({
     steer: steerTurnId !== undefined,
@@ -4227,7 +4312,6 @@ export async function sendSessionChatResult(
       }),
     },
     preallocatedId: orchestration?.userTurnId,
-    knownHistory: quotaHistory,
   });
   const userTurnId = userTurn.id;
   const result = {
@@ -4236,19 +4320,101 @@ export async function sendSessionChatResult(
     workspaceId: workspace.id as WorkspaceId,
     userTurnId,
   };
-  // A steer is never activated here: the owning daemon applies it, requeues a
-  // proven refusal as a follow-up, or records `delivery_unknown`. An existing
-  // `pending_apply` turn is a steer already offered; activating it could run it twice.
-  if (userTurn.existingStatus === 'pending_apply') return result;
+  // Local steer recovery stays execution-owned. A remote replay may instead be
+  // an orphan left by a sender crash or failed fallback write; never offer it twice.
+  if (userTurn.existingStatus === 'pending_apply') {
+    if (!remoteMachine) return result;
+    const promoted = await backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: userTurnId,
+      status: 'pending',
+      onlyPendingApply: true,
+    });
+    if (!promoted.matched) return result;
+  }
+  if (
+    remoteMachine &&
+    steerTurnId !== undefined &&
+    userTurn.existingStatus === undefined &&
+    userTurn.inputConfig
+  ) {
+    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    // Bound setup separately: cold connections must not consume the offer's
+    // five-second response budget. Late setup must never send after fallback.
+    let accepting = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const inputConfig = userTurn.inputConfig;
+    const setupTimeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        accepting = false;
+        resolve(null);
+      }, REMOTE_STEER_CONNECT_TIMEOUT_MS);
+    });
+    const request = withMachineRpcClient(
+      { auth, workspaceId: workspace.id as WorkspaceId, machineId: session.machineId },
+      async (client) => {
+        if (!accepting) return null;
+        clearTimeout(timer);
+        timer = undefined;
+        return client.requestSessionSteer({
+          sessionId,
+          expectedTurnId: steerTurnId,
+          userTurnId,
+          userId: requesterUserId,
+          timestamp: userTurn.timestamp,
+          inputConfig,
+          timeoutMs: 5_000,
+        });
+      }
+    );
+    try {
+      const response = await Promise.race([request, setupTimeout]);
+      if (response?.applied) {
+        await backend.applyHistoryAction({
+          kind: 'user-status',
+          turnId: userTurnId,
+          status: 'processing',
+          deliveredSteer: true,
+          onlyPendingApply: true,
+        });
+        return { ...result, delivery: 'steered' };
+      }
+      if (response?.recoveryOwned) {
+        return withDelivery(result, deliveryFromSteerResponse(response));
+      }
+    } catch {
+      // Setup, transport and response failures never fail the accepted chat.
+    } finally {
+      accepting = false;
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    // An RPC lost before arrival has no execution-owned recovery. pending_apply
+    // is skipped forever by dispatch, so prefer a possible duplicate follow-up
+    // over an orphan. Never retry the steer; preserve any already-settled status.
+    getLogger('session').warn(
+      `Remote steer unconfirmed; queueing follow-up ${sessionId}/${userTurnId}`
+    );
+    const promoted = await backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: userTurnId,
+      status: 'pending',
+      onlyPendingApply: true,
+    });
+    const current = await readHistoryEntry(backend, userTurnId);
+    if (!promoted.matched && current?.status !== 'pending' && current?.status !== 'seen')
+      return result;
+  }
   if (
     steerTurnId !== undefined &&
     userTurn.existingStatus === undefined &&
+    !remoteMachine &&
     environment &&
     userTurn.inputConfig
   ) {
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
-    await environment.host.steerSession({
+    const response = await environment.host.steerSession({
       sessionId,
       expectedTurnId: steerTurnId,
       userTurnId,
@@ -4256,8 +4422,16 @@ export async function sendSessionChatResult(
       timestamp: userTurn.timestamp,
       inputConfig: userTurn.inputConfig,
     });
-    return result;
+    return withDelivery(result, deliveryFromSteerResponse(response));
   }
+  // A busy target without an applied steer (including an unconfirmed remote one)
+  // runs this input after the current turn. Retries keep their earlier outcome.
+  const ordinaryDelivery: SessionChatDelivery | undefined =
+    !orchestration?.steerActiveTurn || derivedFrom || userTurn.existingStatus !== undefined
+      ? undefined
+      : steerTurnId === undefined
+        ? 'dispatched'
+        : 'queued';
   const completionAbortController = structuredOutput ? new AbortController() : undefined;
   const completionPromise = structuredOutput
     ? waitForTurnCompletion({
@@ -4300,6 +4474,7 @@ export async function sendSessionChatResult(
       machineId: session.machineId,
       workspaceId: workspace.id as WorkspaceId,
       userTurnId,
+      ...(ordinaryDelivery ? { delivery: ordinaryDelivery } : {}),
       completionPromise,
     };
   } catch (error) {
@@ -4432,6 +4607,8 @@ export type SessionLiveStatusBatchItem = {
   fresh: boolean;
   observedAt?: number;
   reason?: string;
+  /** Present only when the owning daemon supports and could read it. */
+  activity?: SessionLiveActivity;
 };
 
 /** Reuse one Machine RPC client for every Session owned by that Machine. */
@@ -4439,7 +4616,9 @@ export async function readSessionLiveStatusesMany(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   sessions: ReadonlyArray<Pick<SessionMeta, 'id' | 'machineId'>>;
-  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>;
+  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'> & {
+    repo?: Pick<LoroDocumentManager['repo'], 'getDocMeta'>;
+  };
 }): Promise<Map<SessionId, SessionLiveStatusBatchItem>> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
@@ -4484,6 +4663,16 @@ export async function readSessionLiveStatusesMany(args: {
         return;
       }
       const unknownPresence = presence === 'unknown';
+      // Older daemons reject the activity flag, so only ask machines advertising it.
+      const includeActivity = await args.manager.repo
+        ?.getDocMeta(getMachineRoomId(machineId))
+        .then((record) =>
+          machineSupportsProtocolCapability(
+            record?.meta as MachineMeta,
+            MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity
+          )
+        )
+        .catch(() => false);
       try {
         const responses = await withMachineRpcClient(
           { auth: args.auth, workspaceId: args.workspaceId, machineId },
@@ -4494,6 +4683,7 @@ export async function readSessionLiveStatusesMany(args: {
                 response: await client.requestSessionLiveStatus({
                   sessionId: session.id,
                   timeoutMs: 10_000,
+                  ...(includeActivity ? { includeActivity: true } : {}),
                 }),
               }))
             )
@@ -4508,6 +4698,9 @@ export async function readSessionLiveStatusesMany(args: {
               ? { observedAt: response.observedAtMs }
               : {}),
             ...(!response?.success && response?.error ? { reason: response.error } : {}),
+            ...(response?.success === true && response.activity
+              ? { activity: response.activity }
+              : {}),
           });
         }
       } catch (error) {
@@ -4535,7 +4728,7 @@ async function buildSessionStatusResult(
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-  const history = await backend.readHistory();
+  const history = await readSessionHistoryMetadata(backend.history);
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
@@ -5520,8 +5713,7 @@ const sessionHistoryCommand = new Command('history')
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
         const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-        const transcript = toSessionTranscriptEntries(await backend.readHistory());
-        const entries = selectSessionTranscriptEntries(transcript, {
+        const { total, entries } = await readSessionTranscript(backend, {
           all: options.all,
           limit: options.limit,
           reverse: options.reverse,
@@ -5532,7 +5724,7 @@ const sessionHistoryCommand = new Command('history')
             ok: true,
             workspaceId: workspace.id,
             sessionId,
-            total: transcript.length,
+            total,
             returned: entries.length,
             entries,
           });
@@ -5806,5 +5998,8 @@ export async function readSessionMcpIdsForAuthoring(
   await syncDocForRead(manager, getSessionRoomId(sessionId), 'session-mcp-selection');
   const doc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(doc, await doc.getMetaState());
-  return resolveSessionConversationConfig(await backend.readHistory()).mcpServerIds ?? [];
+  return (
+    resolveSessionConversationConfig(await readSessionHistoryMetadata(backend.history))
+      .mcpServerIds ?? []
+  );
 }

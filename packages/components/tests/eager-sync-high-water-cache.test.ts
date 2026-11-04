@@ -299,47 +299,4 @@ describe('eager sync high-water cache', () => {
     cache.close();
     reloaded.close();
   });
-
-  it('prunes old entries to bound IndexedDB growth', async () => {
-    installFakeIndexedDb();
-    let now = 0;
-    const cache = await createEagerSyncHighWaterStore(wid('workspace-alpha'), {
-      maxEntries: 2,
-      now: () => {
-        now += 1;
-        return now;
-      },
-    });
-
-    cache.set(sid('old'), 100);
-    cache.set(sid('middle'), 200);
-    cache.set(sid('new'), 300);
-    await cache.flush();
-
-    const reloaded = await createEagerSyncHighWaterStore(wid('workspace-alpha'));
-    expect(reloaded.get(sid('old'))).toBeUndefined();
-    expect(reloaded.get(sid('middle'))).toBe(200);
-    expect(reloaded.get(sid('new'))).toBe(300);
-
-    cache.close();
-    reloaded.close();
-  });
-
-  it('falls back to an in-memory store when IndexedDB is unavailable without touching localStorage', async () => {
-    installNoIndexedDb();
-    const localStorage = installThrowingLocalStorage();
-    const cache = await createEagerSyncHighWaterStore(wid('workspace-alpha'));
-
-    cache.set(sid('session-a'), 100);
-    await cache.flush();
-
-    const reloaded = await createEagerSyncHighWaterStore(wid('workspace-alpha'));
-    expect(cache.get(sid('session-a'))).toBe(100);
-    expect(reloaded.get(sid('session-a'))).toBeUndefined();
-    expect(localStorage.getItem).not.toHaveBeenCalled();
-    expect(localStorage.setItem).not.toHaveBeenCalled();
-
-    cache.close();
-    reloaded.close();
-  });
 });

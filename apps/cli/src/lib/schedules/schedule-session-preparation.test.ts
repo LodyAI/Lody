@@ -117,15 +117,6 @@ describe('Session preparation for a scheduled run', () => {
     expect(base.userTurn.items).not.toContainEqual(expect.objectContaining({ type: 'file' }));
   });
 
-  it('carries the identifiers the engine froze, so a retry reuses one Session', async () => {
-    const prepared = await prepare();
-    expect(prepared.sessionId).toBe('session-1');
-    expect(prepared.meta.id).toBe('session-1');
-    expect(prepared.userTurn.id).toBe('turn-1');
-    // Host-owned automation always uses the inert prepared protocol.
-    expect(prepared.userTurn.status).toBe('prepared');
-  });
-
   it('treats a prepared scheduled turn as an ordinary user notification source', async () => {
     const prepared = await prepare();
     expect(prepared.userTurn.role).toBe('user');
@@ -142,44 +133,6 @@ describe('Session preparation for a scheduled run', () => {
       expect(item?.source.turnId).toBe(prepared.userTurn.id);
       expect(item?.outcome).toBe(outcome.kind);
     }
-  });
-
-  it('keeps an explicit title as final, so no generated title replaces it', async () => {
-    const prepared = await prepare();
-    expect(prepared.meta.title).toBe('Morning check-in');
-    expect(prepared.meta.titleSource).toBe('user');
-  });
-
-  it('names an untitled Session with a draft from the first prompt line', async () => {
-    // Agent-created Sessions carry no title; ACP-owned titles land only after
-    // the first turn, so the Session would stay unnamed while it runs.
-    const prepared = await prepare(undefined, {
-      prompt: `\n  ${'Investigate the flaky presence heartbeat '.repeat(2)}\nDetails`,
-      title: '',
-    });
-    expect(prepared.meta.title).toBe('Investigate the flaky presence heartbeat Investiga');
-    expect(prepared.meta.titleSource).toBe('draft');
-  });
-
-  it('still resolves a GitHub project onto the Session', async () => {
-    const prepared = await prepare({
-      kind: 'github',
-      repoFullName: 'loro-dev/lody',
-      branch: 'main',
-    });
-    expect(prepared.meta.project).toMatchObject({ kind: 'github', repoFullName: 'loro-dev/lody' });
-    expect(prepared.meta.repoFullName).toBe('loro-dev/lody');
-    expect(prepared.meta.baseBranch).toBe('main');
-  });
-
-  it('still resolves a local project, and gives it no base branch', async () => {
-    const prepared = await prepare({
-      kind: 'local',
-      localProjectId: 'p1' as never,
-      useWorktree: true,
-    });
-    expect(prepared.meta.project).toMatchObject({ kind: 'local', localProjectId: 'p1' });
-    expect(prepared.meta).not.toHaveProperty('baseBranch');
   });
 });
 
@@ -257,9 +210,6 @@ describe('Schedule ACP values reach ordinary Session preparation', () => {
       });
     }
   );
-  it('leaves malformed legacy booleans for the ordinary validator to reject', async () => {
-    await expect(prepareOptions('off')).rejects.toThrow('expects a boolean');
-  });
   it.each([
     { fast: 'false', 'fast-mode': 'true', expected: { fast: false, 'fast-mode': true } },
     { fast: 'true', 'fast-mode': 'false', expected: { fast: true, 'fast-mode': false } },

@@ -29,7 +29,9 @@ context/message-flow.md "Upstream".
   selection and separately keyed note through durable permission history. Core forms
   use each property's `description` as the full question and `title` as its short
   header, including single-question forms whose request message is generic. Legacy
-  Claude single-question forms retain their request-message prompt.
+  Claude single-question forms retain their request-message prompt. The shared bridge
+  maps recognized Droid AskUser labels and custom answers back to its option IDs and
+  companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
 - `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
   updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
   Claude reports no actor, so later events preserve an earlier identity. Providers that
@@ -228,7 +230,7 @@ See the [Windows command-length fix](../../../../.agents/notes/implemented/bug-f
 ### Claude upstream 0.84.0 source synchronization
 
 The bundled Claude gitlink includes upstream 0.84.0 while the fork package remains
-0.79.0. Lody builds that source directly, with SDK 0.3.284 / Claude Code 2.1.284;
+0.79.0. Lody builds that source directly, with SDK 0.3.316 / Claude Code 2.1.316;
 no npm adapter release is required. Lody advertises Core extensions and standard
 ACP capabilities, without AIR, terminal-output deltas or session notices. Standard
 tool fields and text fallback remain authoritative. Consumer audit and limits:

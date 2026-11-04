@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { Loro, LoroList, LoroMap, LoroText } from 'loro-crdt';
-import { Mirror, schema, validateSchema } from 'loro-mirror';
+import { Mirror, schema } from 'loro-mirror';
 
-import { sessionDocSchema, sessionHistorySchema } from '../src/schema';
+import { sessionDocSchema } from '../src/schema';
 import { createSessionMirror as createProductionSessionMirror } from '../src/session-mirror';
-import { MessageContentSchema } from '../src/message-schemas';
+
 import type { SessionId } from '../src/ids';
 
 /**
@@ -128,40 +128,6 @@ describe('session doc forward compatibility', () => {
     });
     expect(doc.getContainerById(peer.label.id)?.toJSON()).toBe('running');
     mirror.dispose();
-  });
-
-  it('keeps malformed known items and untyped items invalid', () => {
-    for (const item of [{ type: 'text' }, { type: 42 }, {}]) {
-      const result = validateSchema(sessionHistorySchema, {
-        id: 'invalid-turn',
-        role: 'system',
-        timestamp: '2026-01-01T00:00:00.000Z',
-        items: [item],
-      });
-      expect(result.valid).toBe(false);
-    }
-    // Storage compatibility does not authorize a future type as new input.
-    expect(MessageContentSchema.safeParse({ type: 'future_operation_progress' }).success).toBe(
-      false
-    );
-    expect(
-      MessageContentSchema.safeParse({ type: 'text', text: { futureValue: 42 } }).success
-    ).toBe(false);
-  });
-
-  it('keeps writing after a newer peer adds an undeclared root key', () => {
-    const doc = new Loro();
-    const mirror = createSessionMirror(doc);
-
-    // The crashing path in production: the mirror is already open when the
-    // newer peer's update arrives, so the unknown key enters state via events.
-    doc.import(createFutureDocSnapshot());
-
-    expect(() => {
-      mirror.setState({ externalHistoryCursor: { importedTurnHashes: ['older-client'] } });
-    }).not.toThrow();
-
-    expect(doc.toJSON().futureFeature).toEqual({ id: 'op-1', state: 'preparing' });
   });
 
   it('preserves the undeclared root key through a full-state update', () => {

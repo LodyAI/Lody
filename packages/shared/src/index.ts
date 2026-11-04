@@ -32,6 +32,7 @@ export * from './message';
 export * from './ai';
 export * from './acp-model-capabilities';
 export * from './pi-provider-migration';
+export * from './message-quote';
 export * from './message-text-spans';
 export * from './deepseek-harness';
 export * from './acp-run-config';

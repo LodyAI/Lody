@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { createStore, getDefaultStore, Provider } from 'jotai';
 import { getMachineMetaByIdAtomFamily } from '../src/atoms/machines';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { describeSessionContinuation } from '../src/components/sessions/session-continuation';
+
 import { useLocalSessionContinuation } from '../src/components/sessions/use-local-session-continuation';
 
 vi.mock('../src/atoms/machines', async () => {
@@ -18,6 +18,11 @@ const machineAtom = getMachineMetaByIdAtomFamily() as import('jotai').PrimitiveA
   protocolCapabilities: Record<string, number>;
 } | null>;
 
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+vi.mock('../src/lib/toast', () => ({ toast: { error: toastError } }));
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
 const automation = vi.fn();
 vi.mock('../src/lib/electron-ipc-client', () => ({
   getIpcServices: () => ({ sessionControl: { automation } }),
@@ -42,16 +47,8 @@ describe('local Session continuation', () => {
   afterEach(() => {
     act(() => root.unmount());
     automation.mockReset();
+    toastError.mockReset();
     vi.useRealTimers();
-  });
-  it('does not access the owner when no supported local Session is selected', async () => {
-    function View() {
-      const data = useLocalSessionContinuation(null, true);
-      return <output>{JSON.stringify(data.views)}</output>;
-    }
-    await act(async () => root.render(<View />));
-    expect(container.textContent).toBe('[]');
-    expect(automation).not.toHaveBeenCalled();
   });
   it.each([false, true])(
     'hides unsupported automation without polling (remote=%s), then recovers on upgrade',
@@ -178,127 +175,76 @@ describe('local Session continuation', () => {
     expect(calls).toContain('machine:session:user:cancel');
     expect(automation).not.toHaveBeenCalled();
   });
-  it('exposes Resume only for a stopped continuation and refreshes the delivery after restore', async () => {
-    let stopped = true;
-    automation.mockImplementation(async ({ command }) =>
-      command.type === 'list'
-        ? {
+  it('retains settings on partial failures only for the same target and recovers independently', async () => {
+    vi.useFakeTimers();
+    let listFails = false;
+    let settingsFail = false;
+    automation.mockImplementation(async ({ sessionId, command }) => {
+      if (command.type === 'list') {
+        if (listFails) throw new Error('list unavailable');
+        return { type: 'list', waits: [] };
+      }
+      if (settingsFail) throw new Error('settings unavailable');
+      return { type: 'settings', settings: { recoverCapacity: sessionId === 'session' } };
+    });
+    function View({ sessionId }: { sessionId: string }) {
+      const data = useLocalSessionContinuation({ ...target, sessionId }, true);
+      return <output>{`${data.error}:${data.settingsUnavailable}:${data.recoveryEnabled}`}</output>;
+    }
+    await act(async () => root.render(<View sessionId="session" />));
+    expect(container.textContent).toBe('false:false:true');
+    settingsFail = true;
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(container.textContent).toBe('false:true:true');
+    await act(async () => root.render(<View sessionId="other" />));
+    expect(container.textContent).toBe('false:true:null');
+    settingsFail = false;
+    listFails = true;
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(container.textContent).toBe('true:false:false');
+    listFails = false;
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(container.textContent).toBe('false:false:false');
+  });
+  it.each(['cancel', 'configure'] as const)(
+    'reports a failed %s and reconciles the owner state',
+    async (operation) => {
+      let changed = false;
+      automation.mockImplementation(async ({ command }) => {
+        if (command.type === 'list')
+          return {
             type: 'list',
-            waits: [
-              {
-                id: 'stopped',
-                state: 'matched',
-                nextCheckAt: 1,
-                continuation: stopped
-                  ? { state: 'blocked', reason: 'target_stopped' }
-                  : { state: 'queued' },
-              },
-              {
-                id: 'archived',
-                state: 'matched',
-                nextCheckAt: 1,
-                continuation: { state: 'blocked', reason: 'target_archived' },
-              },
-            ],
-          }
-        : { type: 'settings', settings: {} }
-    );
-    function View() {
-      const data = useLocalSessionContinuation(target, true);
-      return (
-        <>
-          {data.views.map((view) => {
-            const descriptor = describeSessionContinuation(view, 1);
-            return descriptor.visible ? (
-              <output key={view.id} data-id={view.id}>
-                {descriptor.detail}
-                {descriptor.actions.resume && (
-                  <button
-                    onClick={() => {
-                      stopped = false;
-                      data.refresh();
-                    }}
-                  >
-                    Resume
-                  </button>
-                )}
-              </output>
-            ) : null;
-          })}
-        </>
+            waits: changed ? [] : [{ id: 'one', state: 'waiting', nextCheckAt: 1 }],
+          };
+        if (command.type === 'settings')
+          return { type: 'settings', settings: { recoverCapacity: changed } };
+        changed = true;
+        throw new Error('response lost');
+      });
+      function View() {
+        const data = useLocalSessionContinuation(target, true);
+        return (
+          <>
+            <output>{`${data.views.length}:${data.recoveryEnabled}:${data.error}:${data.settingsUnavailable}`}</output>
+            <button
+              onClick={() =>
+                operation === 'cancel' ? data.cancel('one') : data.setTweak('recoverCapacity', true)
+              }
+            >
+              Change
+            </button>
+          </>
+        );
+      }
+      await act(async () => root.render(<View />));
+      expect(container.querySelector('output')?.textContent).toBe('1:false:false:false');
+      await act(async () => container.querySelector('button')?.click());
+      expect(toastError).toHaveBeenCalledWith(
+        operation === 'cancel'
+          ? 'sessions.continuation.cancelUnknown'
+          : 'sessions.continuation.settingsUnknown'
       );
+      expect(container.querySelector('output')?.textContent).toBe('0:true:false:false');
     }
-    await act(async () =>
-      root.render(
-        <Provider store={store}>
-          <View />
-        </Provider>
-      )
-    );
-    expect(container.querySelector('[data-id="stopped"]')?.textContent).toBe(
-      'blockedStoppedResume'
-    );
-    expect(container.querySelector('[data-id="archived"]')?.textContent).toBe('blockedUnavailable');
-    await act(async () => container.querySelector('button')?.click());
-    expect(container.querySelector('[data-id="stopped"]')?.textContent).toBe('queued');
-    expect(container.querySelector('button')).toBeNull();
-  });
-  it('loads waits and settings and sends scoped changes without developer mode', async () => {
-    let settingsUnavailable = true;
-    automation.mockImplementation(async ({ command }) => {
-      if (command.type === 'list')
-        return {
-          type: 'list',
-          waits: [
-            {
-              id: 'one',
-              state: 'matched',
-              reason: 'CI',
-              nextCheckAt: 1,
-              continuation: { state: 'unknown' },
-            },
-          ],
-        };
-      if (command.type === 'settings' && settingsUnavailable) throw new Error('stopped');
-      if (command.type === 'settings')
-        return {
-          type: 'settings',
-          settings: { recoverCapacity: true, archiveAfterMerge: false, compactWhenIdle: false },
-        };
-      return { type: command.type };
-    });
-    function View() {
-      const data = useLocalSessionContinuation(target, true);
-      return (
-        <>
-          <output>{JSON.stringify(data.views)}</output>
-          <span>{String(data.recoveryEnabled)}</span>
-          <button onClick={() => data.cancel('one')}>Cancel</button>
-          <button onClick={() => data.setTweak('archiveAfterMerge', true)}>Enable</button>
-        </>
-      );
-    }
-    await act(async () => {
-      root.render(
-        <Provider store={store}>
-          <View />
-        </Provider>
-      );
-    });
-    expect(container.textContent).toContain('"continuation":"unknown"');
-    settingsUnavailable = false;
-    await act(async () => {
-      container.querySelectorAll('button')[0]!.click();
-    });
-    expect(automation).toHaveBeenCalledWith({ ...target, command: { type: 'cancel', id: 'one' } });
-    await act(async () => {
-      container.querySelectorAll('button')[1]!.click();
-    });
-    expect(automation).toHaveBeenCalledWith({
-      ...target,
-      command: { type: 'configure', settings: { archiveAfterMerge: true } },
-    });
-    expect(container.querySelector('output')!.textContent).toContain('"continuation":"unknown"');
-    expect(container.querySelector('span')!.textContent).toBe('true');
-  });
+  );
 });

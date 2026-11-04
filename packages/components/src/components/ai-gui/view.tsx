@@ -47,8 +47,8 @@ import type { ConversationView } from '@/lib/conversation-view';
 import {
   getCopyTextFromMessageItems,
   getTextContentFromMessageItems,
+  getMessageQuoteEditDraft,
   getUserTextRenderSlice,
-  getVisibleAssistantTextContent,
   hasTextContentFromMessageItems,
 } from './message-copy';
 import { useAtomValue, useStore } from 'jotai';
@@ -1104,7 +1104,7 @@ const shouldRenderAssistantFooter = ({
   if (message.finished !== true) return false;
   const visibleContentItems = renderEntries.map((entry) => entry.content);
   return (
-    getVisibleAssistantTextContent(visibleContentItems, true).trim().length > 0 ||
+    getTextContentFromMessageItems(visibleContentItems).trim().length > 0 ||
     fileDiffs.length > 0 ||
     hasAssistantTurnConfigInfo(message) ||
     (typeof message.endedAt === 'number' && Number.isFinite(message.endedAt)) ||
@@ -1472,22 +1472,9 @@ export const buildChatVirtualRows = ({
         continue;
       }
 
-      // Collapsed is the default state, and the detail rows of a collapsed
-      // group are discarded unrendered — don't pay for building them. Initial
-      // mount of a long finished session hits this for every turn.
-      const workedRows: AssistantChatVirtualRow[] = [];
-      if (isWorkedGroupExpanded) {
-        for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
-          const block = blocks[blockIndex];
-          if (block && segment.workBlockKeys.has(block.key)) {
-            appendBlockRows(workedRows, block, blockIndex, true);
-          }
-        }
-        if (segmentSubagentTasks.length > 0 && !hasRunningSubagentTasks) {
-          appendSubagentTasksRow(workedRows, true);
-        }
-      }
-
+      // Collapsed is the default state, and a collapsed group renders no detail
+      // rows at all. Expanded details stay where they happened: hoisting them to
+      // the header would reorder them past the prose between two steps.
       const insertWorkedGroup = () => {
         assistantRows.push({
           type: 'assistant',
@@ -1504,9 +1491,6 @@ export const buildChatVirtualRows = ({
           },
           isLastRowForMessage: false,
         });
-        if (isWorkedGroupExpanded) {
-          assistantRows.push(...workedRows);
-        }
       };
 
       const insertionBlockIndex =
@@ -1519,12 +1503,17 @@ export const buildChatVirtualRows = ({
           insertWorkedGroup();
           didInsertWorkedGroup = true;
         }
-        if (!segment.workBlockKeys.has(block.key)) {
-          appendBlockRows(assistantRows, block, blockIndex, false);
+        if (segment.workBlockKeys.has(block.key)) {
+          if (isWorkedGroupExpanded) appendBlockRows(assistantRows, block, blockIndex, true);
+          continue;
         }
+        appendBlockRows(assistantRows, block, blockIndex, false);
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
+      }
+      if (isWorkedGroupExpanded && segmentSubagentTasks.length > 0 && !hasRunningSubagentTasks) {
+        appendSubagentTasksRow(assistantRows, true);
       }
       if (hasRunningSubagentTasks) {
         appendSubagentTasksRow(assistantRows, false);
@@ -3922,6 +3911,9 @@ const UserMessageRowView = ({
   const [resendDialogOpen, setResendDialogOpen] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(() => getTextContentFromMessageItems(message.items));
+  const [editQuoteDrafts, setEditQuoteDrafts] = useState(
+    () => getMessageQuoteEditDraft(message.items).drafts
+  );
   const [didCopyMessageId, setDidCopyMessageId] = useState(message.id);
   if (didCopyMessageId !== message.id) {
     setDidCopyMessageId(message.id);
@@ -4086,11 +4078,14 @@ const UserMessageRowView = ({
                 <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
               )}
               <div
-                className={cn(
-                  'min-w-0 max-w-full text-foreground',
-                  isEditing ? 'w-full' : 'w-fit',
-                  hasWideContent ? 'min-w-[480px]' : '',
-                  'sm:max-w-[800px]'
+                {...withClassName(
+                  stylex.props(isEditing ? conversationSurface.userEditContent : undefined),
+                  cn(
+                    'min-w-0 max-w-full text-foreground',
+                    isEditing ? 'w-full' : 'w-fit',
+                    hasWideContent ? 'min-w-[480px]' : '',
+                    'sm:max-w-[800px]'
+                  )
                 )}
                 data-native-selection-allow
               >
@@ -4105,6 +4100,8 @@ const UserMessageRowView = ({
                     <UserMessageEditor
                       value={editText}
                       onChange={setEditText}
+                      quoteDrafts={editQuoteDrafts}
+                      onQuoteDraftsChange={setEditQuoteDrafts}
                       onCancel={() => setIsEditing(false)}
                       onSave={(submission) => void handleSaveEdit(submission)}
                       isSaving={isSavingEdit}
@@ -4166,7 +4163,9 @@ const UserMessageRowView = ({
                             'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
                         )}
                         onClick={() => {
-                          setEditText(getTextContentFromMessageItems(message.items));
+                          const draft = getMessageQuoteEditDraft(message.items);
+                          setEditText(draft.text);
+                          setEditQuoteDrafts(draft.drafts);
                           setIsEditing(true);
                         }}
                         aria-label={t('sessions.editMessage', 'Edit message')}
@@ -5492,12 +5491,13 @@ export const AssistantTurnFooter = ({
   const isMobile = useIsMobile();
   const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   const [didCopy, setDidCopy] = useState(false);
-  const textContent = useMemo(() => {
-    const contentItems = buildAssistantMessageRenderItems(message.items).map(
-      (entry) => entry.content
-    );
-    return getVisibleAssistantTextContent(contentItems, message.finished === true);
-  }, [message.finished, message.items]);
+  const textContent = useMemo(
+    () =>
+      getTextContentFromMessageItems(
+        buildAssistantMessageRenderItems(message.items).map((entry) => entry.content)
+      ),
+    [message.items]
+  );
   const hasCopyableText = textContent.trim().length > 0;
   const copyWorkspaceId = useSessionCopyWorkspaceId();
   const fileDiffs = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
@@ -6108,6 +6108,11 @@ const AssistantChatItem = memo(function AssistantChatItem({
           )}
           style={conversationTextFontSizeStyle(conversationFontSize)}
           data-native-selection-allow
+          data-message-quote-text={
+            content.kind === 'content' && content.block.entry.content.type === 'text'
+              ? ''
+              : undefined
+          }
         >
           {/* Desktop footer actions rest hidden, so they may sit inside the round
               reserve. Mobile always shows the footer: the reserve goes below it
@@ -7381,6 +7386,7 @@ const UserPlainTextBlock = ({
             ...(isLong && !isFullTextVisible ? userTextCollapsedStyle(fontSize) : {}),
           }}
           data-search-block-id={searchBlockId}
+          data-message-quote-text=""
         >
           {/* Search wins over chips: both want to split the same string, and a
               match that lands inside a chip has nowhere to paint. Chips come

@@ -94,18 +94,25 @@ export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
       return { kind: `custody-${reason}`, code: reason };
   }
   const portable = personalHostFailureCode(error);
+  if (portable === 'history-conflict') return { kind: 'progress-conflict', code: portable };
   if (portable === 'identity-lost' || portable === 'approval-required')
     return { kind: 'approval-required', code: portable };
   const message = error instanceof Error ? error.message : '';
   // Main erased only this device's identity; the member pairs a new device key.
   if (/\be2ee_device_revoked$/.test(message))
     return { kind: 'approval-required', code: 'device-revoked' };
+  // The desktop holds no identity binding for this workspace: it never joined (the
+  // workspace was created or joined on another device). Like a portable host's
+  // `approval-required`, the next step is approval from another device; there is
+  // no local original to restore or archive.
+  if (/\be2ee_missing-binding\b/.test(message))
+    return { kind: 'approval-required', code: 'missing-binding' };
   if (message.includes('e2ee_local-evidence-conflict'))
     return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
   if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict'))
     return { kind: 'identity-conflict', code: 'pin-mismatch' };
   const local =
-    /\be2ee_(permissions|identity-lost|corrupt|missing-binding|rewrap-failed|custody_unavailable|identity-busy|local-history-recovery-required|trusted-pin-unavailable|restart-required)\b/.exec(
+    /\be2ee_(permissions|identity-lost|corrupt|rewrap-failed|custody_unavailable|identity-busy|local-history-recovery-required|trusted-pin-unavailable|restart-required)\b/.exec(
       message
     );
   if (local) return { kind: 'local-identity', code: `e2ee_${local[1]}` };

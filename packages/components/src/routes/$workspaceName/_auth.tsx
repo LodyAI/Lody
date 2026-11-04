@@ -103,7 +103,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
   const [sessionSettled, setSessionSettled] = useState(!isPending);
   const postHog = usePostHog();
   const authRouteStartMsRef = useRef(getPerformanceNowMs());
-  const fireAccountReadyOnce = useFireOncePerKey();
   const fireAuthReadyOnce = useFireOncePerKey();
   const fireCliReadyOnce = useFireOncePerKey();
   const onlineMachineCount = useMemo(() => {
@@ -152,19 +151,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     identifyPostHogUser(postHog, currentUser);
     identifyPostHogWorkspace(postHog, currentWorkspaceId);
   }, [currentUser, currentWorkspaceId, postHog]);
-
-  useEffect(() => {
-    if (!currentUser || !analyticsUserWorkspaceKey) {
-      return;
-    }
-    if (!fireAccountReadyOnce(analyticsUserWorkspaceKey)) {
-      return;
-    }
-    capturePostHogEvent(postHog, 'onboarding/account_ready', {
-      user_id: currentUser.id,
-      workspace_id: currentWorkspaceId ?? null,
-    });
-  }, [analyticsUserWorkspaceKey, currentUser, currentWorkspaceId, fireAccountReadyOnce, postHog]);
 
   useEffect(() => {
     if (!currentUser || !analyticsUserWorkspaceKey) {

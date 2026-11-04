@@ -70,7 +70,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Keep one Repo view across auth refresh and unrelated mode-cache changes;
   `WorkspaceTargetRouter` owns target/transport selection.
   Never restore a second writer or proxy-authoring/write-intent mirror.
-- Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
+- Runtime close retries recoverable cleanup, retaining fencing until confirmed Repo destruction.
   Failed startup shares this close path.
 - Local-only bootstrap exchanges CRDT snapshots only from already owned documents
   in the same workspace. Merge into the receiving Repo; peer state is not authoritative,
@@ -137,4 +137,4 @@ snapshots and join leases. Unready Blobs stay in memory; uncertain steers never 
   leases fence cold opens. Begin native fencing with renderer cleanup. Retain full
   incomplete owners; only overlapping custody bindings or Repo namespaces wait.
   Independent workspaces remain usable. Device replacement shares its
-  account/workspace/genesis writer. Usable retained epochs wake existing admission.
+  account/workspace/genesis writer. First key reception keeps admission pending; usable epochs wake content.

@@ -6,6 +6,8 @@ PR: [#2014](https://github.com/LodyAI/Lody/pull/2014), [#2018](https://github.co
 
 [中文](2026-10-28-e2ee-machine-sharing.zh.md)
 
+Intent and guarantees: [machine sharing Spec](../../../../specs/e2ee/machine-sharing.md) (approved).
+
 ## Abstract
 
 Machine ownership identifies who controls a machine but cannot authorize another member to execute on it. The proposed MVP retains private defaults and machine/project switches through a complete encrypted policy signed by the machine owner's active personal device. A ledger-qualified binding generation isolates removal/readmission from atomic key replacement: removal starts a new resource at revision one, so deleted policy history cannot block recovery or resurrect an old grant. Server CAS orders versions within each generation; A1 supplies inert codecs, generation evidence, authorization and DTOs while storage, host execution and UI remain separate. Unknown revocation latency against a server withholding current heads is not bounded by a short local cache; on 2026-10-28, the owner confirmed acceptance of trusting the server not to continuously withhold newer heads.

@@ -19,7 +19,7 @@ devices, which verifies the request before showing its details. One approval cov
 encrypted workspace of the account.
 
 The protocol statement is in the [foundations increment](../../../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)
-and was approved by the owner on 2026-11-01. Nothing is implemented or measured yet.
+and was approved by the owner on 2026-11-01. Only the core primitives are implemented.
 
 ## Problem
 
@@ -65,10 +65,10 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
   `HMAC-SHA256(requestKey, canonical request)`. The canonical request covers:
   - the account, `lookupId`, direction, display name and expiry;
   - every per-workspace `(genesis, signing key, encryption key, possession proof,
-    credential hash)` row.
+credential hash)` row.
 - `approvalKey`: label `"approval-mac"`. `approvalTag` is
   `HMAC-SHA256(approvalKey, requestDigest || A's signing key || per-workspace
-  (genesis, admission record hash, invitation digest))`.
+(genesis, admission record hash, invitation digest))`.
 
 ### Flow
 
@@ -142,6 +142,9 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
 - **Manual pairing** uses the same string.
 - **Scope.** One approval covers all the account's encrypted workspaces, with
   deselection.
+- **Member approvers.** A Member cannot sign snapshot invitations. Under the
+  [history increment](../../../../specs/e2ee-foundations.md#member-approvers-deliver-history-instead-of-a-snapshot-approved-increment)
+  its row carries no invitation and the new device verifies the full history instead.
 
 ## Rejected alternatives
 
@@ -168,7 +171,113 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
 - **New-device identities.** N keeps its per-workspace identities from before submission.
   A later request reuses them, and N never generates an identity over them.
 
+## Relay contract
+
+The public relay DTOs are in [`packages/cloud-api`](../../../../packages/cloud-api/src/e2ee-account-pairing.ts)
+under `e2eeAccountPairing`: submit, pending, read by lookup ID, decline, publish and claim.
+
+- **Authoritative bytes.** Clients trust only the canonical request and approval bytes and
+  their tags. Status, device name, expiry, location and the workspace routing list are
+  advisory copies for routing, rate limiting and notifications.
+- **Several approvers.** A claim returns every published approval, because each approver
+  covers only the workspaces it can sign for.
+- **Admissions.** These go through the existing ledger append path. Each invitation row
+  carries the approver's device access for its workspace.
+
+## Client surface
+
+The host port is the optional `E2eeAccountPairingRuntime` in
+[`packages/platform`](../../../../packages/platform/src/e2ee-account-pairing.ts). The pages
+are in [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx).
+Since the owner decision of 2026-11-04 they are shown by default, with no developer
+mode or client switch. The emergency off is the service refusing with
+`e2ee_account_pairing_disabled`, which the page explains; a per-device local
+preference could not stop the flow fleet-wide, so none is kept.
+
+- **Ownership.** The host owns `S`, every tag check, the lifetime check, terminal records
+  and signing. The UI checks a typed code locally only to name a typo before any network
+  request, and wipes the decoded bytes at once.
+- **Visibility.** A host without the methods shows nothing, and the existing
+  per-workspace pairing stays below. The desktop implements the methods over IPC; Web
+  and mobile hosts do not yet.
+
 ## Verification limits
 
-- The string format has no test vectors yet.
-- No device, notification or backend work exists yet.
+- The string format, key derivation, canonical request and approval bytes and both tags
+  are pinned by `packages/e2ee-core/test/pairing-vector.json`. An independent
+  standard-library Python generator (`test/generate-pairing-vector.py`) produces it.
+- The relay backend is private and default off. Notifications and location are not done.
+- One end-to-end test runs on real desktop custody, bootstrap, ledger hosts and SQLite,
+  with an in-memory relay. No packaged, native or live-backend run exists.
+
+## Desktop host
+
+The shared workflow is [`@lody/e2ee-client/account-pairing`](../../../../packages/e2ee-client/src/account-pairing.ts),
+behind an `AccountPairingStore` port.
+[`e2ee-account-pairing.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing.mts)
+is the desktop's SQLite store and composition.
+[`e2ee-account-pairing-host.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing-host.mts)
+connects it to the per-workspace hosts, and `E2eeIpc` exposes it to the #2196 port.
+
+- **Workspace list.** The renderer passes its encrypted workspace list as routing hints.
+  The host verifies every genesis against its own ledger or the request tag.
+- **New device.** It proves possession for the membership that verified history assigns
+  to the account's crypto user. On accept it finds the admission record by its
+  tag-authenticated ledger hash, takes that record's signer as the endorser, and installs
+  the invitation through the existing per-workspace join journal.
+- **Member approvers.** A Member's invitation port returns `null`, so its row carries
+  an all-zero invitation digest (the relay body is a one-byte placeholder). The new
+  device then verifies the full signed history from the tag-authenticated genesis,
+  finds its admission by the authenticated record hash, takes its signer as endorser
+  and installs through the per-workspace history path. Rows with an invitation keep the
+  snapshot path. No wire or relay format changes.
+- **After install.** The new device opens the workspace, refreshes it and runs one key
+  round with its own credential, as the per-workspace claim does. This is best effort:
+  opening the workspace later repeats it.
+- **Runtime entries.** Every runtime entry the workflow opens is closed again unless a
+  window reads that workspace.
+- **Unfinished per-workspace pairing.** An unrelated, unfinished per-workspace pairing
+  keeps its journal row. That workspace reports `blocked` and the UI names it; finishing
+  or cancelling that pairing lets the request continue.
+- **Secret.** `S` stays in memory and never touches disk. A restart ends that request
+  locally, and the device starts a new one with the same retained identities.
+- **Terminal states.** Approved, declined, expired and cancelled are recorded per lookup
+  ID in local SQLite. The first state wins and is never revived, whatever the relay
+  reports.
+- **Approver.** The approver authenticates the request with its tag and checks the expiry
+  against its own clock. It checks both again immediately before each signature.
+  - Each workspace's exact signed admission is journaled before any network step and
+    retried as-is, including after a restart.
+  - The journal is keyed by workspace and the new device's signing key, not by request. If
+    a request expires after admission but before delivery, the next request from the same
+    retained identity reuses that original, so a workspace is never signed twice.
+  - Pairing operations run one at a time, which keeps check, sign and journal atomic.
+  - The secret and derived keys are wiped on every exit, including failure and
+    interruption.
+  - An approval is published only after this device has verified its own approval tag.
+    Its `approverSigningPublicKey` is the signer of the first row, sorted by genesis; each
+    row's record hash binds that workspace's actual signer.
+- **New device.** It installs an invitation only after the approval tag verifies, the
+  approval binds its own request digest, its own expiry still holds and the invitation
+  digest matches. Anything else from the relay is ignored.
+- **Decoding.** Relayed bytes are decoded by core's strict `decodePairingRequest` and
+  `decodePairingApproval`, which accept only canonical encodings.
+
+## Portable host
+
+[`account-requester.ts`](../../../../packages/e2ee-client/src/account-requester.ts) is the
+mobile and Web new-device side, and the personal device host implements it.
+
+- **Fixed offer.** A portable identity's credential packet is bound to an offer, but the
+  account flow prepares the identity before any approver is known. Each workspace
+  therefore uses one fixed account offer: its genesis record and membership, a
+  placeholder endorser (`00…`), and a `pairingSessionId` derived from the workspace ID.
+  Every request and reopen finds the same identity and journal, and the local credential
+  format is unchanged.
+- **Real endorser.** The real endorser is the signer of the admission record whose ledger
+  hash the approval tag authenticated. It is stored with the approval original, and
+  snapshot verification and the ledger origin use it in place of the placeholder.
+- **Protection.** Identity protection stays with each platform's custody: Keychain or
+  Keystore on mobile, web-crypto on Web.
+- **Known limit.** Portable hosts do not report an unfinished per-workspace join yet, so
+  such a workspace is not shown as blocked.

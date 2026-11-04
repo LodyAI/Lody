@@ -20,3 +20,6 @@ methods. Policy crypto remains in e2ee-core. DTOs remain in cloud-api.
 
 - `inspectCache` observes retained RAM objects only. It never initializes a lazy
   owner, reads a clock, refreshes a policy or establishes current authorization.
+
+- Preserve RAM policy freshness on unchanged verified ledger heads/counts. Invalidation
+  fences both issued grants and in-flight reads; late results never refill a retired cache.

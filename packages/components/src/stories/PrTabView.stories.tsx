@@ -418,6 +418,31 @@ export const OpenCiPassed: Story = {
   },
 };
 
+export const Stack: Story = {
+  args: {
+    repoFullName: 'loro-dev/lody',
+    prNumber: 42,
+    state: 'ready',
+    data: {
+      ...baseData,
+      pullRequest: {
+        ...basePr,
+        stack: {
+          number: 7,
+          position: 2,
+          size: 3,
+          baseRef: 'main',
+          pullRequests: [
+            { number: 41, title: 'Add the data model', state: 'closed', draft: false, merged: true },
+            { number: 42, title: 'Add the API endpoints', state: 'open', draft: false, merged: false },
+            { number: 43, title: 'Build the settings UI', state: 'open', draft: true, merged: false },
+          ],
+        },
+      },
+    },
+  },
+};
+
 export const Changes: Story = {
   args: {
     repoFullName: 'loro-dev/lody',

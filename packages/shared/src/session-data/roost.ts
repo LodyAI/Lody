@@ -200,15 +200,18 @@ const detached = <T>(value: T): T => structuredClone(value);
 
 export const createRoostDirectoryRow = (
   position: number,
-  turn: SessionEntry
+  turn: import('./domain').SessionTurn
 ): SessionDirectoryRow => {
   const scalars = pickDirectoryScalars(turn);
   if (!scalars) return { position, state: 'invalid' };
   return {
+    metadataVersion: 1,
     position,
     state: 'ready',
     turnId: turn.id,
     scalars,
+    ...(typeof turn.userId === 'string' ? { userId: turn.userId } : {}),
+    ...(turn.scheduleRun !== undefined ? { scheduleRun: turn.scheduleRun } : {}),
     ...(turn.role === 'user' ? { inputConfig: pickDirectoryInputConfig(turn.inputConfig) } : {}),
     ...(turn.items ? { itemCount: turn.items.length } : {}),
     ...(turn.plan ? { planCount: turn.plan.length } : {}),

@@ -17,6 +17,8 @@ export class ScheduleConfigurationError extends Error {
   }
 }
 
+const CAPACITY_EXHAUSTED = 'CAPACITY_EXHAUSTED';
+
 export type ScheduleEnginePorts<Prepared> = {
   workspaceId: string;
   machineId: string;
@@ -30,6 +32,11 @@ export type ScheduleEnginePorts<Prepared> = {
   list: () => Promise<ScheduleRegistryRow[]>;
   read: (scheduleId: string) => Promise<ScheduleDocument | null>;
   validateTarget: (run: ScheduleRun<Prepared>) => Promise<void>;
+  /**
+   * Quota reset time when the run's agent binding is definitively exhausted.
+   * Undefined for available, unknown or stale capacity, which dispatches as usual.
+   */
+  capacityRetryAt?: (run: ScheduleRun<Prepared>) => Promise<number | undefined>;
   prepare: (run: ScheduleRun<Prepared>) => Promise<Prepared>;
   materialize: (prepared: Prepared) => Promise<void>;
   isDispatched: (prepared: Prepared) => Promise<boolean>;
@@ -187,6 +194,7 @@ export class ScheduleEngine<Prepared> {
         });
         continue;
       }
+      if (await this.deferForCapacity(row, run, now)) continue;
       try {
         await this.authorize(run);
         let current = p.store.transition(run.runKey, [run.state], {
@@ -295,6 +303,51 @@ export class ScheduleEngine<Prepared> {
     }
     for (const row of await p.list())
       if (this.owned(row) && row.scheduledMessage) await this.project(row, {});
+  }
+
+  /**
+   * Defers a run whose agent quota is definitively exhausted until its reset,
+   * instead of dispatching it to fail. One deferred run per Schedule: later
+   * occurrences during the same exhaustion are skipped, so a reset never
+   * releases a burst. A run that could not start before its dispatch window
+   * closes is skipped. Any capacity read failure dispatches as usual.
+   */
+  private async deferForCapacity(
+    row: ScheduleRegistryRow,
+    run: ScheduleRun<Prepared>,
+    now: number
+  ): Promise<boolean> {
+    const eligible =
+      run.state === 'pending' ||
+      (run.state === 'retry_wait' && run.errorCode === CAPACITY_EXHAUSTED);
+    if (!eligible) return false;
+    const resetAt = await this.ports.capacityRetryAt?.(run).catch(() => undefined);
+    if (resetAt === undefined || resetAt <= now) return false;
+    const deferred = this.ports.store
+      .unfinished(this.ports.workspaceId)
+      .some(
+        (other) =>
+          other.runKey !== run.runKey &&
+          other.scheduleId === run.scheduleId &&
+          other.errorCode === CAPACITY_EXHAUSTED
+      );
+    if (deferred || resetAt - run.plannedAt >= run.definition.retryPolicy.dispatchMaxAgeMs) {
+      this.skip(run, CAPACITY_EXHAUSTED);
+    } else {
+      this.ports.store.transition(run.runKey, [run.state], {
+        state: 'retry_wait',
+        retryAt: resetAt,
+        errorCode: CAPACITY_EXHAUSTED,
+      });
+      this.ports.onEvent?.({
+        type: 'blocked',
+        scheduleId: run.scheduleId,
+        runKey: run.runKey,
+        code: CAPACITY_EXHAUSTED,
+      });
+    }
+    await this.project(row, { queueState: 'blocked', blockedCode: CAPACITY_EXHAUSTED });
+    return true;
   }
 
   private async authorize(run: ScheduleRun<Prepared>): Promise<void> {
