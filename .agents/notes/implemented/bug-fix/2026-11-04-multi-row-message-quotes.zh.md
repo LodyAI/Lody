@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/2304
 
 [English](2026-11-04-multi-row-message-quotes.md)
 
