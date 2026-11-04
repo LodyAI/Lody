@@ -119,7 +119,6 @@ import {
 } from '@lody/ui/tokens/scales.stylex';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { LodyAgentAccountsController } from './lody-agent-accounts-controller';
-import { sorbetAuthMethodsRevisionAtom } from '@/atoms/sorbet-auth-methods';
 import { Field } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { BubInstallGuide } from './bub-install-guide';
@@ -1574,7 +1573,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const setups = useAtomValue(getProviderSetupsByMachineAtomFamily(machine.id));
   const retrySetup = useSetAtom(cmdRetryProviderSetupAtom);
   const deleteSetup = useSetAtom(deleteProviderSetupAtom);
-  const setSorbetAuthMethodsRevision = useSetAtom(sorbetAuthMethodsRevisionAtom);
   // Creation observes the daemon-owned setup instead of launching a competing
   // capability probe. Once published, this draft edits the same provider id.
   const [testingBuiltinSetup, setTestingBuiltinSetup] = useState(false);
@@ -3233,7 +3231,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   // the expected next step, not a failure. Anything else must be visible.
                   if (!response.success && !response.authRequired)
                     throw new Error(response.error ?? 'ACP credential discovery failed');
-                  setSorbetAuthMethodsRevision((revision) => revision + 1);
                   setAccountsRefreshVersion((version) => version + 1);
                 }}
               />

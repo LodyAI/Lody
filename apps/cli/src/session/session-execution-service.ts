@@ -9171,14 +9171,36 @@ export class SessionExecutionService {
     }
   }
 
-  private buildFailedAcpRefreshResponse(
+  private async buildFailedAcpRefreshResponse(
     message: ResolvedMachineAcpCapabilitiesRefreshRequest,
     error: unknown
-  ): MachineAcpCapabilitiesRefreshResponse {
+  ): Promise<MachineAcpCapabilitiesRefreshResponse> {
     const errorMessage = formatErrorMessage(error);
     this.deps.logger.debug(
       `[acp-capabilities] Refresh failed (cliType=${message.cliType} agentType=${message.agentType}): ${errorMessage}`
     );
+    const requiredAuthMethods =
+      error instanceof AcpAuthenticationRequiredError
+        ? error.authMethods.map(summarizeAcpAuthMethod)
+        : undefined;
+    if (requiredAuthMethods) {
+      // The agent answered "authenticate first" before any capability write, yet it did
+      // publish its methods. Record them: a Provider added a moment ago becomes a visible
+      // sign-in method without a second probe.
+      await Promise.resolve()
+        .then(() =>
+          this.deps.workspaceDocument.updateAcpAuthMethods?.(
+            this.deps.machineId,
+            message.configId,
+            requiredAuthMethods
+          )
+        )
+        .catch((cause: unknown) => {
+          this.deps.logger.debug(
+            `[acp-capabilities] Could not record advertised methods: ${formatErrorMessage(cause)}`
+          );
+        });
+    }
     return {
       type: 'machine/acp-capabilities-refresh_response',
       machineId: this.deps.machineId,
@@ -9186,12 +9208,7 @@ export class SessionExecutionService {
       cliType: message.cliType,
       agentType: message.agentType,
       success: false,
-      ...(error instanceof AcpAuthenticationRequiredError
-        ? {
-            authRequired: true,
-            authMethods: error.authMethods.map(summarizeAcpAuthMethod),
-          }
-        : {}),
+      ...(requiredAuthMethods ? { authRequired: true, authMethods: requiredAuthMethods } : {}),
       error: errorMessage,
     };
   }
