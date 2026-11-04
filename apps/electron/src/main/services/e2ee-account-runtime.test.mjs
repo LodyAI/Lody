@@ -34,6 +34,14 @@ import * as memberJoining from './e2ee-member-join.mts'
 import { PersonalPairingOfferSchema } from './e2ee-personal-pairing.mts'
 import { desktopE2eeFailure, rememberDesktopE2eeFailure } from './e2ee-diagnostics.mts'
 import { createDesktopQuitBarrier, drainMainProcessQuitResources } from './desktop-shutdown.ts'
+import {
+  appendLedgerHistory,
+  hostLedgerHistory
+} from '../../../../../packages/components/src/lib/e2ee-ledger-history.ts'
+import {
+  readObservedLedgerCheckpoint,
+  retainObservedLedgerCheckpoint
+} from '../../../../../packages/components/src/lib/e2ee-workspace-storage.ts'
 const require = createRequire(import.meta.url)
 async function load(relative, dependencies, console = globalThis.console, env = {}) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8')
@@ -3320,6 +3328,139 @@ void test('an unrelated unfinished per-workspace pairing blocks only that worksp
   const pending = await Effect.runPromise(newDevice.bootstrap.pendingPersonalJoin(f.workspaceId))
   assert.equal(pending.offer.pairingSessionId, offer.pairingSessionId)
   void genesisHash
+})
+
+class ObservedLedgerStorage {
+  data = new Map()
+  get length() {
+    return this.data.size
+  }
+  getItem(key) {
+    return this.data.get(key) ?? null
+  }
+  key(index) {
+    return [...this.data.keys()][index] ?? null
+  }
+  removeItem(key) {
+    this.data.delete(key)
+  }
+  setItem(key, value) {
+    this.data.set(key, String(value))
+  }
+  clear() {
+    this.data.clear()
+  }
+}
+
+void test('account pairing keeps a control-page observation made before approval when the invitation snapshot is newer', async (t) => {
+  const { f, approver, newDevice, genesisHash, requester, approving } =
+    await accountPairingFixture(t)
+  // The desktop opened the control page before it joined and verified the
+  // server's genesis. That observation is durable local evidence.
+  const storage = new ObservedLedgerStorage()
+  const observed = appendLedgerHistory(
+    null,
+    {
+      workspaceId: f.workspaceId,
+      genesisHash,
+      startIndex: 0,
+      recordsHex: [
+        (await Effect.runPromise(approver.host.ledgerView(f.workspaceId))).recordsHex[0]
+      ],
+      checkpoint: { length: 1, headHash: genesisHash },
+      position: `p1:${f.workspaceId}:1:source:0`,
+      nextCursor: null
+    },
+    { workspaceId: f.workspaceId, genesisHash, localPin: null }
+  )
+  assert.equal(observed.view.length, 1)
+  assert.equal(
+    retainObservedLedgerCheckpoint(storage, newDevice.accountId, f.workspaceId, observed),
+    true
+  )
+  assert.equal(readObservedLedgerCheckpoint(storage, newDevice.accountId, f.workspaceId).length, 1)
+
+  // Approval admits the desktop into a later snapshot. The join installs the
+  // endorsement and its own genesis original, but not the intervening record.
+  const request = await Effect.runPromise(requester.requestAccountPairing({}))
+  const preview = await Effect.runPromise(approving.inspectAccountPairing(request.pairingString))
+  await Effect.runPromise(
+    approving.approveAccountPairing({
+      pairingString: request.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: [f.workspaceId]
+    })
+  )
+  assert.equal((await Effect.runPromise(requester.accountPairingRequest())).status, 'joined')
+  assert.equal((await Effect.runPromise(newDevice.host.open(f.workspaceId))).deviceKind, 'personal')
+
+  // The control page publishes that host view. The signed snapshot cannot name
+  // the earlier checkpoint, but the retained genesis original proves it; the
+  // page must not claim a rollback or fork.
+  const published = hostLedgerHistory(
+    await Effect.runPromise(newDevice.host.ledgerView(f.workspaceId))
+  )
+  assert.equal(published.view.length, 2)
+  assert.ok(published.records.length < published.view.length)
+  assert.equal(
+    retainObservedLedgerCheckpoint(storage, newDevice.accountId, f.workspaceId, published),
+    true
+  )
+  assert.equal(readObservedLedgerCheckpoint(storage, newDevice.accountId, f.workspaceId).length, 2)
+
+  // The approved desktop still receives the current epoch key. A later key
+  // round, not the control-page read, installs it.
+  const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(genesisHash, 'hex')))
+  const mailboxScope = Effect.runSync(Scope.make())
+  t.after(() => Effect.runPromise(Scope.close(mailboxScope, Exit.void)))
+  const mailbox = await Effect.runPromise(
+    makeSqliteKeyMailbox({
+      path: join(newDevice.path, 'reference-mailbox.sqlite'),
+      mode: 'create',
+      genesis,
+      ledger: () =>
+        Effect.promise(async () => {
+          const ledger = await Effect.runPromise(approver.host.ledgerView(f.workspaceId))
+          const records = ledger.recordsHex.map((value) => Buffer.from(value, 'hex'))
+          return Result.getOrThrow(
+            verifyLedger({
+              anchor: genesis,
+              records,
+              checkpoint: { length: records.length, head: hashRecordBytes(records.at(-1)) }
+            })
+          )
+        })
+    }).pipe(Scope.provide(mailboxScope))
+  )
+  const approverDevice = await Effect.runPromise(approver.custody.openDevice(genesis))
+  const desktopDevice = await Effect.runPromise(newDevice.custody.openDevice(genesis))
+  const approverMailbox = Context.get(
+    await Effect.runPromise(
+      Layer.buildWithScope(referenceKeyMailbox(mailbox, approverDevice.publicKey), mailboxScope)
+    ),
+    KeyMailbox
+  )
+  const desktopMailbox = Context.get(
+    await Effect.runPromise(
+      Layer.buildWithScope(referenceKeyMailbox(mailbox, desktopDevice.publicKey), mailboxScope)
+    ),
+    KeyMailbox
+  )
+  await Effect.runPromise(approver.host.keyRound(f.workspaceId, () => approverMailbox))
+  await Effect.runPromise(newDevice.host.keyRound(f.workspaceId, () => desktopMailbox))
+  assert.equal((await Effect.runPromise(newDevice.host.status(f.workspaceId))).hasCurrentKey, true)
+
+  // A conflicting earlier observation remains blocking evidence, not repair.
+  const conflicting = new ObservedLedgerStorage()
+  conflicting.setItem(
+    `lody-e2ee-observed-ledger:${encodeURIComponent(newDevice.accountId)}:${encodeURIComponent(f.workspaceId)}:1:${'00'.repeat(32)}`,
+    JSON.stringify({ genesisHash, headHash: '00'.repeat(32), length: 1 })
+  )
+  assert.throws(
+    () =>
+      retainObservedLedgerCheckpoint(conflicting, newDevice.accountId, f.workspaceId, published),
+    /Ledger history changed/
+  )
 })
 
 /** Two real accounts (custody, bootstrap, host and account lock) behind real E2eeIpc,
