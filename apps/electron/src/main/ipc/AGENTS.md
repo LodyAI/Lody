@@ -22,8 +22,9 @@ A prepared dispatch frame is returned only after this device's credential is
 confirmed with the server; an exact loss discards the frame and records the receipt,
 while any other check failure leaves the prepared frame unchanged. Never retry the
 check or replace a refusal with a fallback.
-A sender without a reader is refused with the identity's recorded removal reason,
-or `e2ee_not_open` when none exists, never a generic host failure. Account-mismatch
-refusals stay `e2ee_not_open`. After recording a loss, main sends reader windows the
+A sender without a reader is refused with the identity's recorded removal reason as
+its exact public code. Without a receipt, and on account mismatch, the refusal stays
+the untagged `e2ee_not_open`, which the boundary publishes only as the sanitized
+`e2ee_host_operation_failed`. After recording a loss, main sends reader windows the
 reason-free `e2ee.accessLost` hint; the renderer's own refresh learns the exact code.
 [Rationale](../../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md#live-reader-cut).

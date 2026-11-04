@@ -2153,9 +2153,7 @@ void test('prepareDispatch confirms access loss after its reader closes through 
           ? new RegExp(`^Error: e2ee_${code}$`)
           : name === 'account-switch'
             ? /^Error: e2ee_(?:account_mismatch|missing-binding)$/
-            : name.startsWith('credential-change') || name === 'status-failure'
-              ? /^Error: e2ee_host_operation_failed$/
-              : /^Error: e2ee_not_open$/
+            : /^Error: e2ee_host_operation_failed$/
       )
       assert.equal(dispatched, false)
       if (name.startsWith('credential-change')) assert.equal(credentialReplaced, true)
@@ -2300,11 +2298,7 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
                 receipts: db.prepare('SELECT count(*) AS n FROM removed_workspaces').get().n
               },
               {
-                message: authoritative
-                  ? code
-                  : hasReader
-                    ? 'e2ee_host_operation_failed'
-                    : 'e2ee_not_open',
+                message: authoritative ? code : 'e2ee_host_operation_failed',
                 endpointCalls: source === 'jwt' ? 0 : 1,
                 creations: authoritative ? 0 : 1,
                 receipts: authoritative ? 1 : 0

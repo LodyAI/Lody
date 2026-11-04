@@ -74,11 +74,14 @@ type Owner = Parameters<Parameters<typeof withDesktopE2eeAccount>[0]>[0]
 /**
  * A sender without a reader is refused with this identity's durable removal reason
  * when one exists. That receipt is written only after a credential-confirmed loss.
+ * Without one the refusal stays the untagged, publicly sanitized `e2ee_not_open`.
  */
 const refuseUnopened = (owner: Owner, workspaceId: string) =>
   Effect.flatMap(owner.bootstrap.removedReason(workspaceId), (reason) =>
     Effect.fail(
-      Object.assign(new Error(`e2ee_${reason ?? 'not_open'}`), { code: reason ?? 'not_open' })
+      reason
+        ? Object.assign(new Error(`e2ee_${reason}`), { code: reason })
+        : new Error('e2ee_not_open')
     )
   )
 const observedSenders = new WeakSet<Electron.WebContents>()

@@ -59,11 +59,13 @@ so it kept succeeding after the server revoked the device; only a failed prepara
 asked the server.
 
 - **Exact refusal.** A sender without a reader is refused with the durable receipt's
-  reason (`removedReason`), or `e2ee_not_open` when there is none, and `not_open` is
-  a projected public code. Dispatch checks the receipt before the binding. The
-  receipt is written only after a credential-confirmed loss, so this reveals nothing
-  the renderer could not learn from `open`. Account-mismatch refusals keep
-  `e2ee_not_open`: another account's receipt is not this renderer's fact.
+  reason (`removedReason`) as its exact public code. Dispatch checks the receipt
+  before the binding. The receipt is written only after a credential-confirmed loss,
+  so this reveals nothing the renderer could not learn from `open`. Without a
+  receipt the refusal stays the sanitized `e2ee_host_operation_failed`: publishing
+  `e2ee_not_open` was tried and rejected, because unapproved-device status reads rely
+  on that sanitized refusal and the loss oracle does not need it. Account-mismatch
+  refusals keep it too: another account's receipt is not this renderer's fact.
 - **Dispatch confirmation.** A prepared frame is returned only after this device's
   credential is confirmed with the credential-bound token endpoint. An exact loss
   records the receipt, discards the frame and returns the exact code. Any other check
