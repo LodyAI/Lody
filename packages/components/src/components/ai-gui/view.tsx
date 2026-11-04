@@ -431,6 +431,7 @@ type AssistantVirtualContent =
       kind: 'worked_group_header';
       segmentKey: string;
       expanded: boolean;
+      isLive: boolean;
       durationMs: number | null;
     }
   | { kind: 'content'; block: Extract<AssistantTurnRenderBlock, { kind: 'content' }> }
@@ -1424,15 +1425,38 @@ export const buildChatVirtualRows = ({
       let hasVisibleFinalContent = false;
       for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
         const block = blocks[blockIndex];
-        if (block && !segment.workBlockKeys.has(block.key)) {
+        if (
+          block &&
+          !segment.workBlockKeys.has(block.key) &&
+          !(
+            block.kind === 'content' &&
+            block.entry.content.type === 'text' &&
+            block.entry.content.messagePhase === 'commentary'
+          )
+        ) {
           hasVisibleFinalContent = true;
           break;
         }
       }
-      const shouldUseWorkedGroup =
+      const segmentBlocks = blocks.slice(segmentStart, segmentEnd);
+      const hasUnansweredCommentary =
         isTurnFinished &&
-        (segment.workBlockKeys.size > 0 || segmentSubagentTasks.length > 0) &&
-        hasVisibleFinalContent;
+        segmentBlocks.some(
+          (block) =>
+            block.kind === 'content' &&
+            block.entry.content.type === 'text' &&
+            block.entry.content.messagePhase === 'commentary'
+        ) &&
+        !segmentBlocks.some(
+          (block) =>
+            block.kind === 'content' &&
+            block.entry.content.type === 'text' &&
+            block.entry.content.messagePhase === 'final_answer' &&
+            block.entry.content.text.trim().length > 0
+        );
+      const shouldUseWorkedGroup =
+        (segment.workBlockKeys.size > 0 || (isTurnFinished && segmentSubagentTasks.length > 0)) &&
+        (!isTurnFinished || (hasVisibleFinalContent && !hasUnansweredCommentary));
 
       const workedSearchEntries: { itemIndex: number }[] = [];
       for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
@@ -1458,8 +1482,9 @@ export const buildChatVirtualRows = ({
       );
       const isWorkedGroupExpanded =
         shouldUseWorkedGroup &&
-        (isWorkedSearchExpanded || cachedState.expandedWorkedGroups[segment.key] === true);
-      anySegmentUsesWorkedGroup ||= shouldUseWorkedGroup;
+        (isWorkedSearchExpanded ||
+          (cachedState.expandedWorkedGroups[segment.key] ?? !isTurnFinished));
+      anySegmentUsesWorkedGroup ||= shouldUseWorkedGroup && isTurnFinished;
 
       if (!shouldUseWorkedGroup) {
         for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
@@ -1472,9 +1497,8 @@ export const buildChatVirtualRows = ({
         continue;
       }
 
-      // Collapsed is the default state, and a collapsed group renders no detail
-      // rows at all. Expanded details stay where they happened: hoisting them to
-      // the header would reorder them past the prose between two steps.
+      // A collapsed group renders no detail rows. Expanded details stay where
+      // they happened, including around visible text between work steps.
       const insertWorkedGroup = () => {
         assistantRows.push({
           type: 'assistant',
@@ -1485,6 +1509,7 @@ export const buildChatVirtualRows = ({
             kind: 'worked_group_header',
             segmentKey: segment.key,
             expanded: isWorkedGroupExpanded,
+            isLive: !isTurnFinished,
             // The turn's duration covers ALL its segments, so only the last one
             // may claim it; earlier regions fall back to "Finished working".
             durationMs: isLastSegment ? resolveSessionHistoryDurationMs(message) : null,
@@ -1512,10 +1537,15 @@ export const buildChatVirtualRows = ({
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
       }
-      if (isWorkedGroupExpanded && segmentSubagentTasks.length > 0 && !hasRunningSubagentTasks) {
+      if (
+        isTurnFinished &&
+        isWorkedGroupExpanded &&
+        segmentSubagentTasks.length > 0 &&
+        !hasRunningSubagentTasks
+      ) {
         appendSubagentTasksRow(assistantRows, true);
       }
-      if (hasRunningSubagentTasks) {
+      if ((!isTurnFinished && segmentSubagentTasks.length > 0) || hasRunningSubagentTasks) {
         appendSubagentTasksRow(assistantRows, false);
       }
     }
@@ -4982,11 +5012,13 @@ const WorkedGroupHeader = ({
   id,
   durationMs,
   expanded,
+  isLive,
   onExpandedChange,
 }: {
   id: string;
   durationMs: number | null;
   expanded: boolean;
+  isLive: boolean;
   onExpandedChange: (expanded: boolean) => void;
 }) => {
   const { t } = useTranslation();
@@ -5002,12 +5034,14 @@ const WorkedGroupHeader = ({
     effectiveDurationMs === null
       ? ''
       : formatDurationCompact(effectiveDurationMs, durationUnitLabels);
-  const label = durationLabel
-    ? t('sessions.workedFor', {
-        duration: durationLabel,
-        defaultValue: 'Worked for {{duration}}',
-      })
-    : t('sessions.finishedWorking', 'Finished working');
+  const label = isLive
+    ? t('sessions.working', 'Working')
+    : durationLabel
+      ? t('sessions.workedFor', {
+          duration: durationLabel,
+          defaultValue: 'Worked for {{duration}}',
+        })
+      : t('sessions.finishedWorking', 'Finished working');
 
   return (
     <ProcessDisclosureButton
@@ -5802,6 +5836,7 @@ const areAssistantVirtualContentsEqual = (
         b.kind === 'worked_group_header' &&
         a.segmentKey === b.segmentKey &&
         a.expanded === b.expanded &&
+        a.isLive === b.isLive &&
         a.durationMs === b.durationMs
       );
     case 'content':
@@ -5926,6 +5961,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
             id={`${message.id}:${content.segmentKey}:worked`}
             durationMs={content.durationMs}
             expanded={content.expanded}
+            isLive={content.isLive}
             onExpandedChange={(expanded) =>
               onWorkedGroupExpandedChange(message.id, content.segmentKey, expanded)
             }

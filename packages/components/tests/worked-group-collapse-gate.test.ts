@@ -39,8 +39,8 @@ describe('Worked for … collapse gate (buildAssistantTurnRenderLayout)', () => 
     expect(hasVisibleFinalContent([text('the answer'), toolCall()], true)).toBe(true);
   });
 
-  it('streaming turn folds nothing (workBlockKeys empty), so it never collapses', () => {
+  it('streaming turn keeps its work region so the reader can fold it, with no visible tail', () => {
     const { workBlockKeys } = buildAssistantTurnRenderLayout('m1', [toolCall(), toolCall()], false);
-    expect(workBlockKeys.size).toBe(0);
+    expect(workBlockKeys.size).toBe(1);
   });
 });
