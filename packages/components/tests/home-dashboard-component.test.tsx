@@ -522,7 +522,9 @@ describe('HomeDashboard', () => {
         );
       });
       expect(q('#chat-prompt')).not.toBeNull();
-      expect(q('[role="alert"]')?.textContent).toContain('reduce');
+      const alert = q('[role="alert"]');
+      expect(alert?.textContent).toContain("This part couldn't be shown.");
+      expect(alert?.querySelector('[title]')?.getAttribute('title')).toContain('reduce');
     });
   });
 });
