@@ -8,7 +8,10 @@ import { activeWorkspaceRuntimeAtom } from '../src/atoms/runtime';
 import { initI18n } from '../src/i18n';
 
 const mocks = vi.hoisted(() => ({
-  runtime: { requestLocalSorbetCredentials: vi.fn() },
+  runtime: {
+    requestLocalSorbetCredentials: vi.fn(),
+    requestLocalSorbetProviders: vi.fn(),
+  },
   local: 'machine-a',
 }));
 vi.mock('jotai', async (importOriginal) => ({
@@ -24,7 +27,17 @@ afterEach(async () => {
   await cleanup?.();
   cleanup = undefined;
   mocks.runtime.requestLocalSorbetCredentials.mockReset();
+  mocks.runtime.requestLocalSorbetProviders.mockReset();
 });
+
+/** React reads the native setter, so a plain assignment would not reach state. */
+async function typeInto(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  await act(async () => {
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
 
 describe('LodyAgentAccountsController', () => {
   it('refreshes after login and ignores a response for an unmounted target', async () => {
@@ -93,6 +106,67 @@ describe('LodyAgentAccountsController', () => {
     );
     expect(container.textContent).toContain('signed-in');
   });
+  it('re-probes the agent after a custom provider is saved', async () => {
+    await initI18n();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    cleanup = async () => {
+      await act(async () => root.unmount());
+      container.remove();
+    };
+    mocks.runtime.requestLocalSorbetCredentials.mockResolvedValue({
+      type: 'sorbet/credentials-list',
+      credentials: [],
+    });
+    mocks.runtime.requestLocalSorbetProviders.mockImplementation(async (_machine, request) =>
+      request.method === 'sorbet/providers-create'
+        ? {
+            type: 'sorbet/providers-create',
+            provider: { id: 'created-1', ...request.params.provider },
+          }
+        : { type: 'sorbet/providers-list', providers: [] }
+    );
+    const onProvidersChanged = vi.fn(async () => {});
+    await act(async () =>
+      root.render(
+        <LodyAgentAccountsController
+          machineId={machineId}
+          configId={configId}
+          supported
+          refreshVersion={0}
+          onProvidersChanged={onProvidersChanged}
+        />
+      )
+    );
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent?.trim() === 'Add provider')!
+        .click()
+    );
+    await typeInto(container.querySelector('input[placeholder="Acme Gateway"]')!, 'Acme Gateway');
+    await typeInto(
+      container.querySelector('input[placeholder="https://gateway.example.com/v1"]')!,
+      'https://gateway.acme.dev/v1'
+    );
+    await typeInto(
+      container.querySelector('input[placeholder="acme-large, acme-small"]')!,
+      'large'
+    );
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent?.trim() === 'Save provider')!
+        .click()
+    );
+
+    // The definition alone changes nothing a person can act on: the agent only
+    // advertises `<provider>:api_key` once the capability probe reads it again.
+    expect(onProvidersChanged).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.runtime.requestLocalSorbetProviders.mock.calls.map(([, request]) => request.method)
+    ).toContain('sorbet/providers-create');
+  });
+
   it('reports an uncertain remote logout without retrying', async () => {
     await initI18n();
     const container = document.createElement('div');
