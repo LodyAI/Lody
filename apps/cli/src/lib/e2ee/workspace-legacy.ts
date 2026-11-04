@@ -57,6 +57,10 @@ import { makeCliE2eeRuntime } from './runtime';
 import { makeCliE2eeExecutionAuthorization } from './execution-authorization';
 import { openMachinePairingJournal, MachinePairingJournalError } from './pairing-journal';
 
+/** Fast enough for the 900s client-loss envelope; a successful check refreshes the
+ * verified ledger through the same single-flight owner used by every other trigger. */
+const AUTHORITY_CHECK_INTERVAL_MS = 5 * 60_000;
+
 const Binding = z
   .object({
     workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
@@ -445,8 +449,9 @@ type CliE2eeWorkspaceOptions = {
   expectedSigningPublicKey?: string;
   cloud: CloudE2eePort;
   onUnavailable: () => void;
-  /** Stop and drain the document/execution owner. Invoked outside the refresh flight. */
-  onRemoved?: (reason: 'member-removed' | 'device-revoked') => Promise<void>;
+  /** Stop and drain the document/execution owner. Invoked outside the refresh flight.
+   * `recorded` is true only when the exact removal receipt was durably written. */
+  onRemoved?: (reason: 'member-removed' | 'device-revoked', recorded: boolean) => Promise<void>;
   keyring?: MachineKeyring;
 };
 const Activation = z
@@ -782,6 +787,8 @@ async function openWorkspaceOwned(
   let pairingFailure: unknown;
   let ledgerRetryAttempts = 0;
   let ledgerRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let authorityCheckTimer: ReturnType<typeof setInterval> | undefined;
+  let authorityCheckInFlight: Promise<void> | undefined;
   let closed = false;
   let refresh: Promise<void> | undefined;
   let pending = false;
@@ -1004,7 +1011,7 @@ async function openWorkspaceOwned(
   let memberRemoved = false;
   let deviceRevoked = false;
   let removalReceipt: Promise<void> | undefined;
-  let removalRecorded: Promise<void> | undefined;
+  let removalRecorded: Promise<boolean> | undefined;
   const isClosed = () => closed;
   const confirmPairing = async (intent: {
     pairingSessionId: string;
@@ -1035,6 +1042,10 @@ async function openWorkspaceOwned(
     if (ledgerRetryTimer !== undefined) clearTimeout(ledgerRetryTimer);
     ledgerRetryTimer = undefined;
   };
+  const clearAuthorityCheck = () => {
+    if (authorityCheckTimer !== undefined) clearInterval(authorityCheckTimer);
+    authorityCheckTimer = undefined;
+  };
   const retryLedger = (): void => {
     if (closed || !ledgerBlocked || refresh || ledgerRetryAttempts >= 3) return;
     clearLedgerRetry();
@@ -1059,10 +1070,11 @@ async function openWorkspaceOwned(
     opened.sharing.stop();
     ledgerBlocked = true;
     clearLedgerRetry();
-    removalRecorded = (async () => {
-      if (!memberRemoved && !deviceRevoked) return;
+    clearAuthorityCheck();
+    removalRecorded = (async (): Promise<boolean> => {
+      if (!memberRemoved && !deviceRevoked) return false;
       const removedStatus = memberRemoved ? await run(opened.runtime.status()) : undefined;
-      await Effect.runPromise(
+      return await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             yield* openMachinePairingJournal(directory);
@@ -1074,7 +1086,7 @@ async function openWorkspaceOwned(
               (yield* opened.custody.deviceCredential(genesis, current.publicKey)) !==
                 opened.credential
             )
-              return;
+              return false;
             // A revoked device keeps membership: its receipt only retires this identity
             // so the next pairing creates a new one; it never erases the workspace.
             const receipt = removedStatus
@@ -1106,20 +1118,22 @@ async function openWorkspaceOwned(
                 await unlink(temporary).catch(() => undefined);
               }
             });
+            return true;
           })
         )
       );
     })();
     removalReceipt = (async () => {
       const failures: unknown[] = [];
+      let recorded = false;
       try {
-        await removalRecorded;
+        recorded = await removalRecorded;
       } catch (cause) {
         failures.push(cause);
       }
       try {
         // Even a local persistence failure must stop the execution owner.
-        await options.onRemoved?.(reason);
+        await options.onRemoved?.(reason, recorded);
       } catch (cause) {
         if (!failures.includes(cause)) failures.push(cause);
       }
@@ -1233,11 +1247,61 @@ async function openWorkspaceOwned(
       });
     return refresh;
   };
+  const checkAuthority = (): Promise<void> => {
+    if (closed) return Promise.resolve();
+    if (authorityCheckInFlight) return authorityCheckInFlight;
+    authorityCheckInFlight = (async () => {
+      let unavailable = false;
+      try {
+        await options.cloud.getContentToken({
+          workspaceId: options.workspaceId,
+          credential: opened.credential,
+        });
+      } catch (cause) {
+        if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) {
+          credentialFailureHandler(cause);
+          return;
+        }
+        // A generic refusal, JWT failure or network error establishes no loss.
+        // Still ask the ledger path below so an ordinary transient outage can
+        // recover without waiting for the next interval.
+        unavailable = true;
+      }
+      if (closed) return;
+      if (unavailable) {
+        try {
+          options.onUnavailable();
+        } catch {
+          /* Diagnostic sinks cannot turn a background check into an unhandled rejection. */
+        }
+      }
+      await refreshInBackground(false);
+    })()
+      .catch(() => {
+        try {
+          options.onUnavailable();
+        } catch {
+          /* Diagnostic sinks cannot turn a background check into an unhandled rejection. */
+        }
+      })
+      .finally(() => {
+        authorityCheckInFlight = undefined;
+      });
+    return authorityCheckInFlight;
+  };
+  const startAuthorityCheck = () => {
+    if (closed || pairing || !requireActivation || authorityCheckTimer !== undefined) return;
+    authorityCheckTimer = setInterval(() => {
+      void checkAuthority();
+    }, AUTHORITY_CHECK_INTERVAL_MS);
+    authorityCheckTimer.unref?.();
+  };
   const close = () => {
     closed = true;
     opened.executionAuthorization.invalidate();
     opened.sharing.stop();
     clearLedgerRetry();
+    clearAuthorityCheck();
     return (closeReceipt ??= (async () => {
       await stopRpc();
       await epochTransition.close();
@@ -1264,6 +1328,10 @@ async function openWorkspaceOwned(
   };
   // Startup is one of the three refresh triggers; no network request is awaited by open.
   void refreshInBackground();
+  // A revoked credential need not reach an idle daemon through token expiry or a
+  // workspace access-list change. Keep a bounded authenticated check plus a ledger
+  // refresh so the exact refusal or the next verified record arrives on its own.
+  startAuthorityCheck();
   const authorizeScheduleExecution = (
     request: ScheduleAuthorizationRequest,
     doc: LoroDoc,

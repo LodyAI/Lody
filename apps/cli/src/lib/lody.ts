@@ -128,12 +128,14 @@ export class Lody {
         genesisHash: options.genesisHash,
         cloud: options.cloudPort.e2ee,
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
-        onRemoved: async (reason) => {
+        onRemoved: async (reason, recorded) => {
           const owner = await removalOwner;
           if (!owner) return;
           owner.encryptedRevocation =
             reason === 'device-revoked' ? 'e2ee_device_revoked' : 'e2ee_member_removed';
-          owner.clientLossReceipt?.loss(owner.encryptedRevocation);
+          // The probe may fence only a durable exact receipt. Cleanup still stops
+          // the owner when that write failed, but it is not a drain proof.
+          if (recorded) owner.clientLossReceipt?.loss(owner.encryptedRevocation);
           try {
             await owner.startReceipt?.catch(() => undefined);
             if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
@@ -277,6 +279,7 @@ export class Lody {
           machineId: options.machineId,
           accountId: options.userId,
           workspaceId: options.workspaceId,
+          deviceKey: e2ee.signingPublicKey,
         },
         () => {
           const work = lody.runtime.inspectClientLoss();
