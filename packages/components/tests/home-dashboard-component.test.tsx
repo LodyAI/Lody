@@ -5,6 +5,18 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// The composer's mention sources read the authenticated workspace; the page under test is the
+// landing view and its dashboard, not mentions.
+vi.mock('../src/components/mentions/mention-session-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useSessionMentionItems: () => [],
+}));
+vi.mock('../src/components/mentions/mention-agent-role-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useAgentRoleMentionItems: () => [],
+}));
+
+import { ChatLandingView } from '../src/components/chat/chat-landing-view';
 import { HomeDashboard } from '../src/components/chat/home/home-dashboard';
 import { LandingStageContext, type LandingStage } from '../src/components/chat/landing-stage';
 import { initI18n } from '../src/i18n';
@@ -449,6 +461,94 @@ describe('HomeDashboard', () => {
       expect(byTestId('home-now')).not.toBeNull();
       expect(boards).toEqual([null, 'week', null, 'week', 'now', null, 'now']);
       field.remove();
+    });
+  });
+
+  describe('under the composer', () => {
+    beforeEach(() => {
+      vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        dispatchEvent: () => false,
+      }));
+    });
+
+    const states: { name: string; rows: HomeNowRow[]; usage: HomeWeekUsage | null }[] = [
+      // A new account's first visit: no sessions yet, and no provider reporting usage.
+      { name: 'a new account', rows: [], usage: null },
+      { name: 'a quiet board beside the usage', rows: [], usage: usage() },
+      {
+        name: 'busy lists without usage',
+        rows: [nowRow('wait', { waiting: true }), nowRow('run', { working: true })],
+        usage: null,
+      },
+      {
+        name: 'busy lists beside the usage',
+        rows: [
+          ...Array.from({ length: 9 }, (_, index) => nowRow(`wait-${index}`, { waiting: true })),
+          ...Array.from({ length: 6 }, (_, index) => nowRow(`done-${index}`, { unread: true })),
+        ],
+        usage: usage(),
+      },
+    ];
+    const boards: (HomeBoard | null)[] = ['now', 'week', null];
+
+    it.each(states.flatMap((state) => boards.map((defaultBoard) => ({ ...state, defaultBoard }))))(
+      'keeps the prompt on the page for $name on board $defaultBoard',
+      (state) => {
+        act(() => {
+          root.render(
+            <ChatLandingView
+              tone="light"
+              title="New chat"
+              promptValue=""
+              onPromptChange={() => undefined}
+              submitLabel="Send"
+              ambient={
+                <HomeDashboard
+                  now={buildHomeNow({ rows: state.rows }, NOW_MS)}
+                  week={buildHomeWeek({ rows: [], activeDays: [] }, NOW)}
+                  agentLabel={label}
+                  nowMs={NOW_MS}
+                  animate={false}
+                  defaultBoard={state.defaultBoard}
+                  usage={state.usage}
+                />
+              }
+            />
+          );
+        });
+        expect(q('#chat-prompt')).not.toBeNull();
+        expect(byTestId('home-dashboard')).not.toBeNull();
+      }
+    );
+
+    it('keeps the prompt on the page when the dashboard fails to render', () => {
+      const BrokenDashboard = (): never => {
+        throw new TypeError("Cannot read properties of undefined (reading 'reduce')");
+      };
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      act(() => {
+        root.render(
+          <ChatLandingView
+            tone="light"
+            title="New chat"
+            promptValue=""
+            onPromptChange={() => undefined}
+            submitLabel="Send"
+            ambient={<BrokenDashboard />}
+          />
+        );
+      });
+      expect(q('#chat-prompt')).not.toBeNull();
+      const alert = q('[role="alert"]');
+      expect(alert?.textContent).toContain("This part couldn't be shown.");
+      expect(alert?.querySelector('[title]')?.getAttribute('title')).toContain('reduce');
     });
   });
 });

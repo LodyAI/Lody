@@ -230,10 +230,28 @@ describe("spending the board's height", () => {
           }
   });
 
-  it('solves an empty board without usage even though it has one column', () => {
-    expect(solveHomeNowColumn(totals(0, 0, 0, 0), false, Infinity, HOME_NOW_COLUMN)).toEqual(
-      HOME_NOW_COLUMN
-    );
+  it('solves every state in one or two columns, with or without usage', () => {
+    // A new account (nothing going on, no usage) is one quiet column; the dashboard still
+    // solves its arrangement on every render, so the solver cannot assume a second column.
+    expect(layoutHomeNow(totals(0, 0, 0, 0), false, 20).columns).toHaveLength(1);
+    expect(solveHomeNowColumn(totals(0, 0, 0, 0), false, 20)).toEqual(HOME_NOW_COLUMN);
+    const sizes = [0, 1, 9, 40];
+    for (const hasUsage of [false, true])
+      for (const maxRows of [0, 4, 20, Infinity])
+        for (const a of sizes)
+          for (const r of sizes)
+            for (const f of sizes)
+              for (const n of sizes) {
+                const given = totals(a, r, f, n);
+                const columns = hasUsage || a + r + f + n > 0 ? 2 : 1;
+                for (const previous of HOME_NOW_ARRANGEMENTS) {
+                  const solved = solveHomeNowColumn(given, hasUsage, maxRows, previous);
+                  expect(HOME_NOW_ARRANGEMENTS).toContainEqual(solved);
+                  expect(layoutHomeNow(given, hasUsage, maxRows, solved).columns).toHaveLength(
+                    columns
+                  );
+                }
+              }
   });
 
   it('says so in one card when nothing is going on', () => {
