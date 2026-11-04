@@ -497,6 +497,30 @@ export class E2eeIpc extends IpcService {
       if (!page.nextCursor) return
       cursor = page.nextCursor
     }
+    // Still paging: this ledger is not confirmed current. Not terminal; a later call resumes.
+    throw new Error('e2ee_history_not_caught_up')
+  }
+  /** Terminal access loss ends local custody: from a typed cause, or, with `confirm`,
+   * through this device's credential after another failure. Returns if access remains. */
+  private async endOnAccessLoss(
+    access: Awaited<ReturnType<E2eeIpc['memberAccess']>>,
+    cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>,
+    cause: unknown,
+    confirm: boolean
+  ) {
+    let loss = accessLoss(cause)
+    if (!loss && confirm)
+      try {
+        await Effect.runPromise(
+          cloud.client.contentStreamsToken({
+            workspaceId: access.workspaceId,
+            credential: access.credential
+          })
+        )
+      } catch (checked) {
+        loss = accessLoss(checked)
+      }
+    if (loss) await this.removeLocalWorkspace(access, loss)
   }
   private readonly settling = new Map<string, Promise<void>>()
   /** Synchronization point for the owning tests; claims never await settlement. */
@@ -976,14 +1000,19 @@ export class E2eeIpc extends IpcService {
         await scope((owner) => owner.host.ingestLedgerRecords(workspaceId, page))
       // Catch up with the relay first, so ready always means the key of the current
       // epoch. Unconfirmed freshness is not ready.
-      if (catchUp)
+      if (catchUp) {
+        let access: Awaited<ReturnType<E2eeIpc['memberAccess']>> | undefined
         try {
+          access = await this.memberAccess(workspaceId, reader, scope)
           await this.ingestForKeyDelivery(cloud.accountId, workspaceId, scope, cloud)
         } catch (cause) {
+          // A refused catch-up may be removal: confirm with this device's credential.
+          if (access) await this.endOnAccessLoss(access, cloud, cause, true)
           if (isAccessLossMessage(cause)) throw cause
           this.pairingFailure = cause
           return false
         }
+      }
       try {
         const access = await this.memberAccess(workspaceId, reader, scope)
         // Receive-only: install this device's key before any distribution or repair,
@@ -999,8 +1028,8 @@ export class E2eeIpc extends IpcService {
             )
           )
         )
-        await runDesktopE2eeOperation(cloud.accountId, work).catch((cause) => {
-          if (accessLoss(cause)) return this.removeLocalWorkspace(access, accessLoss(cause)!)
+        await runDesktopE2eeOperation(cloud.accountId, work).catch(async (cause) => {
+          await this.endOnAccessLoss(access, cloud, cause, false)
           throw cause
         })
       } catch (cause) {

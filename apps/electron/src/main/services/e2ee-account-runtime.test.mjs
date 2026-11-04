@@ -3823,54 +3823,62 @@ void test(
     assert.equal(await epoch(f.memberApi), 1)
   }
 )
-void test('a fast-path claim whose relay history is still paging after 256 pages is not ready', { timeout: 30_000 }, async () => {
-  let pages = 0
-  let ingested = 0
-  const f = await memberIpcFixture({
-    bootstrap: { acceptedMemberJoin: () => Effect.succeed(approvalRequest) },
-    client: {
-      // A 257th page always follows: the local ledger cannot be confirmed current.
-      history: () =>
-        Effect.sync(() => ({ checkpoint: {}, nextCursor: `page-${++pages}`, recordsHex: [] })),
-      mailbox: () => ({}),
-      staging: () => ({})
-    },
-    host: {
-      status: () => Effect.succeed({ hasCurrentKey: true, position: 'p1:team:1:fixture' }),
-      ingestLedgerRecords: () =>
-        Effect.sync(() => {
-          ingested++
-        }),
-      receiveKeys: () => Effect.void
-    }
-  })
-  const claimed = await f.ipc.claimMemberJoin('team', approvalRequest)
-  assert.equal(ingested, 256)
-  assert.deepEqual({ ...claimed }, { ready: false, state: 'committed' })
-})
-void test('access loss during the fast-path catch-up removes the local workspace', { timeout: 30_000 }, async (t) => {
-  let held
-  const f = await twoDeviceMemberJoin(t, {
-    latency: (name, { device }) =>
-      held && device === 'owner' && name === 'mailbox.put'
-        ? Effect.promise(() => held.promise)
-        : Effect.void
-  })
-  await f.approver.open('team')
-  const submitted = await f.submit()
-  await f.approver.memberJoinRequests('team')
-  held = deferredMember()
-  await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
-  assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
-  held.resolve()
-  held = undefined
-  await f.approver.keyDeliveryIdle('account', 'team')
-  // The member is removed before its next claim; only its credential can confirm it.
-  f.relay.memberRemoved = true
-  await assert.rejects(
-    f.joiner.claimMemberJoin('team', submitted.requestId),
-    /^Error: e2ee_member_removed$/
-  )
-  await assert.rejects(f.joiner.open('team'), (error) => error.code === 'member_removed')
-})
-
+void test(
+  'a fast-path claim whose relay history is still paging after 256 pages is not ready',
+  { timeout: 30_000 },
+  async () => {
+    let pages = 0
+    let ingested = 0
+    const f = await memberIpcFixture({
+      bootstrap: { acceptedMemberJoin: () => Effect.succeed(approvalRequest) },
+      client: {
+        // A 257th page always follows: the local ledger cannot be confirmed current.
+        history: () =>
+          Effect.sync(() => ({ checkpoint: {}, nextCursor: `page-${++pages}`, recordsHex: [] })),
+        mailbox: () => ({}),
+        staging: () => ({})
+      },
+      host: {
+        status: () => Effect.succeed({ hasCurrentKey: true, position: 'p1:team:1:fixture' }),
+        ingestLedgerRecords: () =>
+          Effect.sync(() => {
+            ingested++
+          }),
+        receiveKeys: () => Effect.void
+      }
+    })
+    const claimed = await f.ipc.claimMemberJoin('team', approvalRequest)
+    assert.equal(ingested, 256)
+    assert.deepEqual({ ...claimed }, { ready: false, state: 'committed' })
+  }
+)
+void test(
+  'access loss during the fast-path catch-up removes the local workspace',
+  { timeout: 30_000 },
+  async (t) => {
+    let held
+    const f = await twoDeviceMemberJoin(t, {
+      latency: (name, { device }) =>
+        held && device === 'owner' && name === 'mailbox.put'
+          ? Effect.promise(() => held.promise)
+          : Effect.void
+    })
+    await f.approver.open('team')
+    const submitted = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    held = deferredMember()
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
+    held.resolve()
+    held = undefined
+    await f.approver.keyDeliveryIdle('account', 'team')
+    // The member is removed before its next claim; only its credential can confirm it.
+    f.relay.memberRemoved = true
+    await assert.rejects(
+      f.joiner.claimMemberJoin('team', submitted.requestId),
+      /^Error: e2ee_member_removed$/
+    )
+    // The removal receipt fences this identity: reopening reports the removal.
+    await assert.rejects(f.joiner.open('team'), /e2ee_member_removed/)
+  }
+)
