@@ -2696,7 +2696,7 @@ export class E2eeIpc extends IpcService {
               accountId = owner.accountId
               if (!drained) {
                 const closing = yield* owner.host.pendingClose(workspaceId)
-                if (closing) return { closing } as const
+                if (closing) return { kind: 'closing', closing } as const
               }
               const status = yield* owner.host.open(workspaceId, observed, proof)
               const latest =
@@ -2719,6 +2719,7 @@ export class E2eeIpc extends IpcService {
               readers.set(id, (readers.get(id) ?? 0) + 1)
               owner.readers.set(workspaceId, readers)
               return {
+                kind: 'opened',
                 opened:
                   expectedAccountId === undefined
                     ? status
@@ -2732,7 +2733,7 @@ export class E2eeIpc extends IpcService {
     // The drain runs outside the account lock, exactly like the releasing close.
     const openLocal = async (proof?: readonly E2eeWorkspaceHistoryPage[]) => {
       const first = await acquire(proof)
-      if ('opened' in first) return first.opened
+      if (first.kind === 'opened') return first.opened
       drained = true
       await Effect.runPromise(first.closing).catch(() => {
         throw new Error(
@@ -2740,7 +2741,7 @@ export class E2eeIpc extends IpcService {
         )
       })
       const second = await acquire(proof)
-      if ('opened' in second) return second.opened
+      if (second.kind === 'opened') return second.opened
       throw new Error('e2ee_closed')
     }
     // Only a missing pre-snapshot proof requests history. A known conflict never retries.
