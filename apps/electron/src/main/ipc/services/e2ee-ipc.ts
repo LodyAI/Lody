@@ -44,6 +44,7 @@ import { observeClientLossOperation } from '../../services/e2ee-client-loss-prob
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { PersonalPairingOfferSchema } from '../../services/e2ee-personal-pairing.mjs'
 import { LocalE2eeRecoveryFailureSchema } from '@lody/shared/e2ee-local-pairing'
+import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
 import type { E2eeJoinSession, E2eePersonalPairingOffer } from '@lody/cloud-api'
 import type {
   E2eeMemberOffer,
@@ -69,7 +70,30 @@ const definitiveDispatchRefusals = new Set([
 const isAccessLossMessage = (error: unknown) =>
   error instanceof Error &&
   (error.message === 'e2ee_member_removed' || error.message === 'e2ee_device_revoked')
+type Owner = Parameters<Parameters<typeof withDesktopE2eeAccount>[0]>[0]
+type RemovalFence = ReturnType<Owner['fenceLoss']>
+type LossAccess = {
+  accountId: string
+  credential: string
+  status: import('@lody/platform').E2eeRuntimeStatus
+}
+/**
+ * A sender without a reader is refused with this identity's durable removal reason
+ * when one exists. That receipt is written only after a credential-confirmed loss.
+ * Without one the refusal stays the untagged, publicly sanitized `e2ee_not_open`.
+ */
+const refuseUnopened = (owner: Owner, workspaceId: string) =>
+  Effect.flatMap(owner.bootstrap.removedReason(workspaceId), (reason) =>
+    Effect.fail(
+      reason
+        ? Object.assign(new Error(`e2ee_${reason}`), { code: reason })
+        : new Error('e2ee_not_open')
+    )
+  )
 const observedSenders = new WeakSet<Electron.WebContents>()
+/** Windows that may hold readers; they get a re-read hint when main records a loss. */
+const readerWindows = new Map<number, Electron.WebContents>()
+const readerLifetimes = new WeakMap<Electron.WebContents, object>()
 function pairingSession(value: string) {
   if (typeof value !== 'string' || !/^[0-9a-f]{32}$/.test(value))
     throw new Error('e2ee_invalid-input')
@@ -144,12 +168,21 @@ function sender() {
   if (!observedSenders.has(event.sender)) {
     observedSenders.add(event.sender)
     const id = event.sender.id
-    event.sender.once('destroyed', () => releaseDesktopE2eeReader(id))
-    event.sender.on('render-process-gone', () => releaseDesktopE2eeReader(id))
+    readerWindows.set(id, event.sender)
+    const release = () => {
+      readerLifetimes.delete(event.sender)
+      releaseDesktopE2eeReader(id)
+    }
+    event.sender.once('destroyed', () => {
+      readerWindows.delete(id)
+      release()
+    })
+    event.sender.on('render-process-gone', release)
     event.sender.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-      if (isMainFrame && !isInPlace) releaseDesktopE2eeReader(id)
+      if (isMainFrame && !isInPlace) release()
     })
   }
+  if (!readerLifetimes.has(event.sender)) readerLifetimes.set(event.sender, {})
   return event.sender.id
 }
 /** Main-owned reader for background member key delivery; renderer webContents ids start at 1. */
@@ -237,7 +270,64 @@ export class E2eeIpc extends IpcService {
   // The decorator logs rejected errors. Retain only the latest local diagnostic
   // here, never on the cause-bearing Error passed to that logging/IPC boundary.
   private pairingFailure: unknown
+  // Retain every pending raw cleanup. After failure the native fence still
+  // owns the identity; settling this task is not proof of safe handoff.
+  private readonly dispatchCleanups = new Map<
+    RemovalFence,
+    { done: Promise<void>; diagnostic?: unknown }
+  >()
+  private cleanupDiagnostic(code: 'e2ee_cleanup_pending' | 'e2ee_cleanup_failed', cause?: unknown) {
+    const diagnostic = cause ?? Object.assign(new Error(code), { code })
+    this.pairingFailure = diagnostic
+    try {
+      console.warn('[E2EE] access-loss-cleanup', { code })
+    } catch {
+      /* diagnostic sinks cannot break custody */
+    }
+    return diagnostic
+  }
+  private retainDispatchCleanup(access: LossAccess, reason: AccessLoss, fence: RemovalFence) {
+    if (fence.completed || this.dispatchCleanups.has(fence)) return
+    const slot = { done: Promise.resolve(), diagnostic: undefined as unknown }
+    const raw = this.removeLocalWorkspace(access, reason, fence)
+    slot.done = raw.then(
+      () => undefined,
+      (error) => {
+        if (fence.completed) {
+          this.dispatchCleanups.delete(fence)
+          if (this.pairingFailure === slot.diagnostic) this.pairingFailure = undefined
+        } else {
+          slot.diagnostic = this.cleanupDiagnostic('e2ee_cleanup_failed', fence.failure ?? error)
+          this.dispatchCleanups.delete(fence)
+        }
+      }
+    )
+    this.dispatchCleanups.set(fence, slot)
+    // Diagnostic deadline only: never interrupt raw erase or release its fence.
+    void runDesktopE2eeOperation(
+      access.accountId,
+      Effect.raceFirst(
+        Effect.as(
+          Effect.promise(() => slot.done),
+          false
+        ),
+        Effect.as(Effect.sleep('5 seconds'), true)
+      )
+    )
+      .then((pending) => {
+        if (pending && this.dispatchCleanups.get(fence) === slot && !fence.completed)
+          slot.diagnostic = this.cleanupDiagnostic('e2ee_cleanup_pending')
+      })
+      .catch(() => {
+        if (this.dispatchCleanups.get(fence) === slot && !fence.completed)
+          slot.diagnostic = this.cleanupDiagnostic('e2ee_cleanup_pending')
+      })
+  }
   private readonly readerOwners = new WeakMap<object, string>()
+  private readonly dispatchReaderTokens = new WeakMap<
+    Map<number, number>,
+    WeakMap<Electron.WebContents, object>
+  >()
   // Member and account-pairing key delivery after admission is owned here, not by a
   // renderer request. One in-flight round per account/workspace; failures keep a public
   // code and are retried by a main-owned due timer (bounded) and by due polls (email
@@ -724,7 +814,7 @@ export class E2eeIpc extends IpcService {
     return this.memberScope(workspaceId)((owner) =>
       owner.readers.get(workspaceId)?.has(reader)
         ? Effect.succeed(owner.accountId)
-        : Effect.fail(new Error('e2ee_not_open'))
+        : refuseUnopened(owner, workspaceId)
     )
   }
   private readerOwner(owner: object) {
@@ -738,7 +828,6 @@ export class E2eeIpc extends IpcService {
   private memberScope(workspaceId: string) {
     const auth = getIpcServiceDeps().authService
     const identity = auth.getCachedSessionIdentity()
-    type Owner = Parameters<Parameters<typeof withDesktopE2eeAccount>[0]>[0]
     let original: Owner | undefined
     return <A>(work: (owner: Owner) => Effect.Effect<A, unknown>, create = false) =>
       withDesktopE2eeAccount(
@@ -767,7 +856,7 @@ export class E2eeIpc extends IpcService {
     return scope((owner) =>
       Effect.gen(function* () {
         if (!owner.readers.get(workspaceId)?.has(reader))
-          return yield* Effect.fail(new Error('e2ee_not_open'))
+          return yield* refuseUnopened(owner, workspaceId)
         return {
           accountId: owner.accountId,
           workspaceId,
@@ -1275,7 +1364,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         Effect.gen(function* () {
           if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
+            return yield* refuseUnopened(owner, workspaceId)
           return {
             accountId: owner.accountId,
             offer: yield* owner.host.personalPairingOffer(workspaceId)
@@ -1463,7 +1552,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         Effect.gen(function* () {
           if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
+            return yield* refuseUnopened(owner, workspaceId)
           return {
             accountId: owner.accountId,
             credential: yield* owner.bootstrap.deviceCredential(workspaceId)
@@ -1824,7 +1913,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         Effect.gen(function* () {
           if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
+            return yield* refuseUnopened(owner, workspaceId)
           return {
             accountId: owner.accountId,
             credential: yield* owner.bootstrap.deviceCredential(workspaceId),
@@ -1897,7 +1986,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         Effect.gen(function* () {
           if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
+            return yield* refuseUnopened(owner, workspaceId)
           const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
           const offer = yield* owner.host.remoteMachineOffer(workspaceId, {
             accountId: owner.accountId,
@@ -1927,7 +2016,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         Effect.gen(function* () {
           if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
+            return yield* refuseUnopened(owner, workspaceId)
           return {
             credential: yield* owner.bootstrap.deviceCredential(workspaceId),
             accountId: owner.accountId
@@ -1976,7 +2065,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         Effect.gen(function* () {
           if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
+            return yield* refuseUnopened(owner, workspaceId)
           return {
             accountId: owner.accountId,
             request: yield* owner.host.approveRemoteMachine(workspaceId, pairingSessionId, summary)
@@ -2030,7 +2119,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         Effect.gen(function* () {
           if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
+            return yield* refuseUnopened(owner, workspaceId)
           return {
             credential: yield* owner.bootstrap.deviceCredential(workspaceId),
             accountId: owner.accountId
@@ -2070,7 +2159,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         Effect.gen(function* () {
           if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
+            return yield* refuseUnopened(owner, workspaceId)
           yield* owner.bootstrap.deviceCredential(workspaceId)
           return {
             accountId: owner.accountId,
@@ -2152,7 +2241,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         Effect.gen(function* () {
           if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
+            return yield* refuseUnopened(owner, workspaceId)
           return {
             accountId: owner.accountId,
             request: yield* owner.host.approveLocalPairing(workspaceId, pairingSessionId)
@@ -2232,13 +2321,15 @@ export class E2eeIpc extends IpcService {
       credential: string
       status: import('@lody/platform').E2eeRuntimeStatus
     },
-    reason: AccessLoss
+    reason: AccessLoss,
+    retiring?: RemovalFence
   ): Promise<never> {
     const { workspaceId, genesisHash, signingPublicKey } = access.status
     // A removed workspace ends its key delivery; no later timer may reopen it.
     this.dropKeyDeliveryWorkspace(workspaceId, access.accountId)
     if (!signingPublicKey) throw new Error('e2ee_local_cleanup_pending')
     let cleanup: Effect.Effect<void, unknown> = Effect.void
+    const hinted = new Set<number>()
     try {
       await withDesktopE2eeAccount(
         (owner) =>
@@ -2263,6 +2354,8 @@ export class E2eeIpc extends IpcService {
               }))
             )
               return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            for (const reader of owner.readers.get(workspaceId)?.keys() ?? [])
+              if (reader > 0) hinted.add(reader)
             return undefined
           }).pipe(
             Effect.onExit((exit) =>
@@ -2274,8 +2367,20 @@ export class E2eeIpc extends IpcService {
             )
           ),
         workspaceId,
-        false
+        false,
+        retiring
       )
+      // Receipt is durable. Notify now; terminal erase may be indefinitely slow.
+      for (const reader of hinted) {
+        const window = readerWindows.get(reader)
+        if (window && !window.isDestroyed()) {
+          try {
+            window.send(IPC_PUSH_CHANNELS.e2eeAccessLost, { workspaceId })
+          } catch {
+            this.cleanupDiagnostic('e2ee_cleanup_pending')
+          }
+        }
+      }
     } finally {
       await Effect.runPromise(cleanup)
     }
@@ -2285,12 +2390,15 @@ export class E2eeIpc extends IpcService {
       reason
     }).catch((cause) => {
       this.pairingFailure = cause
+      if (retiring) retiring.failure = cause
       if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== access.accountId)
         throw new Error('e2ee_account_mismatch')
       // Receipt survives a busy process lease or interrupted cleanup; the next open retries it.
       return true
     })
-    if (deleted) throw new Error(`e2ee_${reason}`)
+    if (deleted) {
+      throw new Error(`e2ee_${reason}`)
+    }
     // A newer local incarnation superseded the old credential's late response.
     throw new Error('e2ee_account_mismatch')
   }
@@ -2339,7 +2447,7 @@ export class E2eeIpc extends IpcService {
                 status: yield* owner.host.status(workspaceId)
               }
             })
-          : Effect.fail(new Error('e2ee_not_open')),
+          : refuseUnopened(owner, workspaceId),
       workspaceId,
       false
     )
@@ -2369,7 +2477,7 @@ export class E2eeIpc extends IpcService {
         (owner) =>
           owner.readers.get(workspaceId)?.has(id)
             ? owner.host.seal(workspaceId, input)
-            : Effect.fail(new Error('e2ee_not_open')),
+            : refuseUnopened(owner, workspaceId),
         workspaceId,
         false
       )
@@ -2386,7 +2494,7 @@ export class E2eeIpc extends IpcService {
         (owner) =>
           owner.readers.get(workspaceId)?.has(id)
             ? owner.host.openContent(workspaceId, input)
-            : Effect.fail(new Error('e2ee_not_open')),
+            : refuseUnopened(owner, workspaceId),
         workspaceId,
         false
       )
@@ -2476,7 +2584,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
           ? owner.host.prepareFeatureRpc(workspaceId, input)
-          : Effect.fail(new Error('e2ee_not_open')),
+          : refuseUnopened(owner, workspaceId),
       workspaceId,
       false
     )
@@ -2492,7 +2600,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
           ? owner.host.acceptFeatureRpcResponse(workspaceId, input, frame)
-          : Effect.fail(new Error('e2ee_not_open')),
+          : refuseUnopened(owner, workspaceId),
       workspaceId,
       false
     )
@@ -2504,15 +2612,23 @@ export class E2eeIpc extends IpcService {
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ) {
     const id = sender()
+    const window = readerWindows.get(id)!
+    const lifetime = readerLifetimes.get(window)
     return observeClientLossOperation('prepareDispatch', workspaceId, id, async () => {
+      const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+      const scope = this.memberScope(workspaceId)
       const cloud = await desktopE2eeCloudClient()
+      const readerTokens = this.dispatchReaderTokens
       let cleanup: Effect.Effect<void, unknown> = Effect.void
       const access = await (async () => {
         try {
-          return await withDesktopE2eeAccount(
+          return await scope(
             (owner) =>
               owner.accountId === cloud.accountId
                 ? Effect.gen(function* () {
+                    // Cleanup erases the binding but keeps this receipt; refuse with it.
+                    if (yield* owner.bootstrap.removedReason(workspaceId))
+                      return yield* refuseUnopened(owner, workspaceId)
                     const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
                     const status = yield* owner.host.status(workspaceId)
                     // A renderer may already have closed after learning ledger loss.
@@ -2525,8 +2641,21 @@ export class E2eeIpc extends IpcService {
                           cloud.client.machineSharing(),
                           (request) => cloud.client.history(request)
                         )
-                      : Effect.fail(new Error('e2ee_not_open'))
+                      : refuseUnopened(owner, workspaceId)
+                    const readers = owner.readers.get(workspaceId)
+                    let tokens = readers && readerTokens.get(readers)
+                    if (readers && !tokens) {
+                      tokens = new WeakMap()
+                      readerTokens.set(readers, tokens)
+                    }
+                    const readerToken = tokens?.get(window) ?? {}
+                    if (readers?.has(id)) tokens!.set(window, readerToken)
                     return {
+                      readers,
+                      hadReader: readers?.has(id) === true,
+                      fenceLoss: (reason: AccessLoss) =>
+                        owner.fenceLoss(workspaceId, reason, identity.generation),
+                      readerToken,
                       accountId: owner.accountId,
                       credential,
                       status,
@@ -2544,28 +2673,134 @@ export class E2eeIpc extends IpcService {
                     )
                   )
                 : Effect.fail(new Error('e2ee_not_open')),
-            workspaceId,
             false
           )
         } finally {
           await Effect.runPromise(cleanup)
         }
       })()
-      return runDesktopE2eeOperation(access.accountId, access.work).catch(async (error) => {
-        if (accessLoss(error)) return this.removeLocalWorkspace(access, accessLoss(error)!)
-        // Preparation is local, so it cannot see a removal by itself. Like management,
-        // ask the server with this device's credential; only its exact answer is loss.
-        if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message))) {
-          try {
-            await Effect.runPromise(
-              cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
-            )
-          } catch (checked) {
-            if (accessLoss(checked)) return this.removeLocalWorkspace(access, accessLoss(checked)!)
+      // Preparation is local, so it cannot see a removal or revocation by itself. Like
+      // management, ask the server with this device's credential; only its exact answer
+      // is loss. Any other check failure establishes nothing and changes no outcome.
+      // The check runs beside the local work: the renderer's fast path has a deadline.
+      let confirmedLoss: AccessLoss | undefined
+      const lossReply = Promise.withResolvers<never>()
+      lossReply.promise.catch(() => undefined)
+      const refuseLoss = (reason: AccessLoss) => {
+        if (confirmedLoss) return new Error(`e2ee_${confirmedLoss}`)
+        try {
+          const fence = access.fenceLoss(reason)
+          confirmedLoss = reason
+          this.retainDispatchCleanup(access, reason, fence)
+          const error = new Error(`e2ee_${reason}`)
+          lossReply.reject(error)
+          return error
+        } catch (lifecycle) {
+          lossReply.reject(lifecycle)
+          throw lifecycle
+        }
+      }
+      const confirmed = (async () => {
+        try {
+          await Effect.runPromise(
+            cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
+          )
+        } catch (checked) {
+          const loss = accessLoss(checked)
+          if (loss) {
+            // Refusal is a verdict, not the cleanup's completion receipt.
+            throw refuseLoss(loss)
           }
+        }
+      })()
+      confirmed.catch(() => undefined)
+      // Only the waiter expires. The credential request keeps its original 30s
+      // network bound and still records a definitive late loss under the old binding.
+      // 50ms leaves 150ms of the renderer's 200ms deadline for local native work,
+      // binding rechecks and IPC. Slow confirmation must not force every healthy
+      // send into durable fallback; genuinely slow local work still has the late path.
+      const confirmation = runDesktopE2eeOperation(
+        access.accountId,
+        Effect.raceFirst(
+          Effect.promise(() =>
+            confirmed.then(
+              () => undefined,
+              (error: unknown) => error
+            )
+          ),
+          Effect.as(Effect.sleep('50 millis'), undefined)
+        )
+      ).then((error) => {
+        if (error !== undefined) throw error
+      })
+      confirmation.catch(() => undefined)
+      const waitForConfirmation = async () => {
+        await confirmation
+        if (confirmedLoss) throw new Error(`e2ee_${confirmedLoss}`)
+      }
+      const local = runDesktopE2eeOperation(access.accountId, access.work).catch(async (error) => {
+        if (accessLoss(error)) throw refuseLoss(accessLoss(error)!)
+        if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message))) {
+          // A readerless operation is already refused and can never return a
+          // frame. Diagnose its retained credential through the existing bounded
+          // request, instead of mistaking the fast-send budget for a verdict.
+          // Live-reader sends retain the 50ms budget; this holds no account lock.
+          if (!access.hadReader) await confirmed
+          else await waitForConfirmation()
         }
         throw error
       })
+      // Observe raw local work even if exact loss wins; its native owner drains it.
+      local.catch(() => undefined)
+      const prepared = await Promise.race([local, lossReply.promise])
+      // A definitive confirmation refuses; uncertainty alone does not cancel local work.
+      await waitForConfirmation()
+      // Network uncertainty is not cancellation. Revalidate the originating owner,
+      // auth generation, reader incarnation and exact credential before handing out bytes.
+      const handoff = scope(
+        (owner) =>
+          Effect.gen(function* () {
+            if (yield* owner.bootstrap.removedReason(workspaceId))
+              return yield* refuseUnopened(owner, workspaceId)
+            if (
+              window.isDestroyed() ||
+              readerLifetimes.get(window) !== lifetime ||
+              owner.readers.get(workspaceId) !== access.readers ||
+              !access.readers?.has(id) ||
+              readerTokens.get(access.readers)?.get(window) !== access.readerToken
+            )
+              return yield* Effect.fail(new Error('e2ee_closed'))
+            const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
+            const status = yield* owner.host.status(workspaceId)
+            const latest = getIpcServiceDeps().authService.getCachedSessionIdentity()
+            if (latest.userId !== identity.userId || latest.generation !== identity.generation)
+              return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            if (
+              window.isDestroyed() ||
+              readerLifetimes.get(window) !== lifetime ||
+              owner.readers.get(workspaceId) !== access.readers ||
+              !access.readers?.has(id) ||
+              readerTokens.get(access.readers)?.get(window) !== access.readerToken ||
+              credential !== access.credential ||
+              status.genesisHash !== access.status.genesisHash ||
+              status.signingPublicKey !== access.status.signingPublicKey
+            )
+              return yield* Effect.fail(new Error('e2ee_closed'))
+            // A late verdict can arrive during these binding reads. Never await
+            // its cleanup under the account lock, but do not hand out the frame.
+            if (confirmedLoss)
+              return yield* Effect.fail(
+                confirmedLoss === 'member_removed'
+                  ? new E2eeMemberRemovedError()
+                  : new E2eeDeviceRevokedError()
+              )
+            return prepared
+          }),
+        false
+      )
+      // The read keeps its native owner even when a verdict refuses its waiter.
+      handoff.catch(() => undefined)
+      return Promise.race([handoff, lossReply.promise])
     })
   }
   @IpcMethod()
@@ -2581,7 +2816,7 @@ export class E2eeIpc extends IpcService {
         (owner) =>
           owner.readers.get(workspaceId)?.has(id)
             ? owner.host.acceptDispatchResponse(workspaceId, targetMachineId, input, frameHex)
-            : Effect.fail(new Error('e2ee_not_open')),
+            : refuseUnopened(owner, workspaceId),
         workspaceId,
         false
       )
@@ -2601,7 +2836,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         owner.readers.get(input.workspaceId)?.has(id)
           ? Effect.as(owner.bootstrap.deviceCredential(input.workspaceId), owner.accountId)
-          : Effect.fail(new Error('e2ee_not_open')),
+          : refuseUnopened(owner, input.workspaceId),
       input.workspaceId,
       false
     )
@@ -2794,6 +3029,8 @@ export class E2eeIpc extends IpcService {
       getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== expectedAccountId
     )
       return
+    const readerTokens = this.dispatchReaderTokens
+    const window = readerWindows.get(id)
     const ownsReader = (owner: object) =>
       readerOwner === undefined || this.readerOwner(owner) === readerOwner
     const cleanup = await withDesktopE2eeAccount(
@@ -2805,7 +3042,10 @@ export class E2eeIpc extends IpcService {
           const readers = owner.readers.get(workspaceId)
           const count = readers?.get(id) ?? 0
           if (count > 1) readers!.set(id, count - 1)
-          else readers?.delete(id)
+          else {
+            readers?.delete(id)
+            if (readers && window) readerTokens.get(readers)?.delete(window)
+          }
           if (readers?.size === 0) {
             const drain = yield* owner.host.beginCloseWorkspace(workspaceId)
             owner.readers.delete(workspaceId)
@@ -2860,7 +3100,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
           ? owner.host.managementState(workspaceId)
-          : Effect.fail(new Error('e2ee_not_open')),
+          : refuseUnopened(owner, workspaceId),
       workspaceId,
       false
     )
@@ -2931,7 +3171,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
           ? owner.host.status(workspaceId)
-          : Effect.fail(new Error('e2ee_not_open')),
+          : refuseUnopened(owner, workspaceId),
       workspaceId,
       false
     )
@@ -2949,7 +3189,7 @@ export class E2eeIpc extends IpcService {
               accountId: owner.accountId,
               work: owner.host.ingestLedgerRecords(workspaceId, page)
             })
-          : Effect.fail(new Error('e2ee_not_open')),
+          : refuseUnopened(owner, workspaceId),
       workspaceId,
       false
     )
@@ -2962,7 +3202,7 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
           ? owner.host.ledgerView(workspaceId)
-          : Effect.fail(new Error('e2ee_not_open')),
+          : refuseUnopened(owner, workspaceId),
       workspaceId,
       false
     )

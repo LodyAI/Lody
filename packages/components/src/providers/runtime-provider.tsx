@@ -1,5 +1,6 @@
 import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
+import { onIpcEvent } from '@/lib/electron-ipc-client';
 import { useTranslation } from 'react-i18next';
 import { desktopWindowId } from '@/lib/desktop-window';
 import {
@@ -756,6 +757,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             });
         })
       : () => {};
+    // Main recorded a credential-confirmed loss for this workspace. Revocation keeps
+    // membership visible, so only this native refresh can surface the exact reason.
+    const unsubscribeAccessLost = onIpcEvent('e2ee.accessLost', ({ workspaceId }) => {
+      if (workspaceId === effectiveWorkspaceId) refreshNative();
+    });
     let encryptedAccess: ReturnType<typeof createE2eeContent> | null = null;
     const disposeRuntime = (): Promise<void> => {
       if (disposal) return disposal;
@@ -1217,6 +1223,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('online', retryContentAdmission);
       window.removeEventListener('online', refreshNative);
       unsubscribeLedgerChange();
+      unsubscribeAccessLost();
       initializationAbort.abort();
       setRuntime(null);
       setControlConnectionState('idle');
