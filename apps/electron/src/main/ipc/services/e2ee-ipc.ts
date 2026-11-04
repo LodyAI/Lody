@@ -4,7 +4,7 @@ import {
   requestId as sharingRequestId,
   sharingChangeSchema
 } from '@lody/e2ee-machine-sharing/schemas'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { dirname } from 'node:path'
@@ -168,8 +168,10 @@ const TERMINAL_KEY_DELIVERY = new Set([
 const TERMINAL_KEY_DELIVERY_CODES = new Set(['missing-binding', 'restart-required'])
 /** The admission is not in this device's verified ledger yet, so no round targets it. */
 const KEY_DELIVERY_NOT_INGESTED = 'e2ee_admission_not_ingested'
+/** The delivery round ended by an unexpected exception before recording an outcome. */
+const KEY_DELIVERY_INTERRUPTED = 'e2ee_key_delivery_interrupted'
 type MemberKeyDelivery = {
-  state: 'pending' | 'delivered' | 'failed'
+  state: 'pending' | 'delivering' | 'delivered' | 'failed'
   /** Signing key from the verified KeyPackage; '' if it could not be decoded. */
   device: string
   code?: string
@@ -210,6 +212,15 @@ const keyDeliveryDevice = (keyPackageHex: string) => {
     return ''
   }
 }
+/** Log correlation only: a short hash of the request id, never the id, keys or tokens. */
+const requestTag = (requestId: string) =>
+  createHash('sha256').update(requestId).digest('hex').slice(0, 12)
+/** Allow-listed delivery/claim diagnostics for the desktop daily log. */
+const logMemberKeys = (
+  event: 'key-delivery' | 'member-claim',
+  requestId: string,
+  fields: { state?: string; phase?: string; code?: string }
+) => console.info(`[E2EE] ${event}`, { request: requestTag(requestId), ...fields })
 const keyDeliveryView = (requestId: string, delivery: MemberKeyDelivery) => ({
   requestId,
   state: delivery.state,
@@ -253,6 +264,7 @@ export class E2eeIpc extends IpcService {
     const slot = this.keyDeliverySlot(accountId, workspaceId)
     slot.requests.delete(requestId)
     slot.requests.set(requestId, { state: 'pending', device, attempts: 0, retryAt: 0 })
+    logMemberKeys('key-delivery', requestId, { state: 'pending' })
     while (slot.requests.size > KEY_DELIVERY_RETAINED) {
       const settled = [...slot.requests].find(([, delivery]) => delivery.state === 'delivered')
       slot.requests.delete(settled?.[0] ?? slot.requests.keys().next().value!)
@@ -286,19 +298,23 @@ export class E2eeIpc extends IpcService {
       // A request admitted during a round gets one follow-up pass; later ones wait for a poll.
       for (let pass = 0; pass < 2; pass++) {
         slot.again = false
-        const covered = [...slot.requests.values()].filter(
-          (delivery) =>
+        const coveredEntries = [...slot.requests].filter(
+          ([, delivery]) =>
             delivery.state !== 'delivered' && !TERMINAL_KEY_DELIVERY.has(delivery.code ?? '')
         )
+        const covered = coveredEntries.map(([, delivery]) => delivery)
+        const idOf = new Map(coveredEntries.map(([requestId, delivery]) => [delivery, requestId]))
         if (covered.length === 0) return
         for (const delivery of covered) {
-          delivery.state = 'pending'
+          delivery.state = 'delivering'
           delete delivery.code
+          logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'delivering' })
         }
         const retry = (delivery: MemberKeyDelivery, code: string) => {
           delivery.attempts += 1
           delivery.state = 'failed'
           delivery.code = code
+          logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'failed', code })
           delivery.retryAt =
             this.keyDeliveryNow() +
             Math.min(
@@ -318,6 +334,8 @@ export class E2eeIpc extends IpcService {
           const code = keyDeliveryCode(cause)
           // Terminal: this device can no longer deliver; drop the slot, never retry.
           if (TERMINAL_KEY_DELIVERY.has(code)) {
+            for (const delivery of covered)
+              logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'ended', code })
             if (this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot)
               this.keyDeliveries.delete(`${accountId}\n${workspaceId}`)
             return
@@ -334,6 +352,7 @@ export class E2eeIpc extends IpcService {
           }
           delivery.state = 'delivered'
           delivery.attempts = 0
+          logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'delivered' })
         }
         if (!slot.again) return
       }
@@ -343,6 +362,34 @@ export class E2eeIpc extends IpcService {
       })
       .finally(() => {
         slot.running = undefined
+        // An unexpected exception must not leave a request shown as sending forever:
+        // anything still delivering becomes retryable on the next due poll.
+        let now = 0
+        try {
+          now = this.keyDeliveryNow()
+        } catch {
+          /* A broken clock makes the retry due at once rather than never. */
+        }
+        for (const [requestId, delivery] of slot.requests) {
+          if (delivery.state !== 'delivering') continue
+          delivery.attempts += 1
+          delivery.state = 'failed'
+          delivery.code = KEY_DELIVERY_INTERRUPTED
+          delivery.retryAt =
+            now +
+            Math.min(
+              KEY_DELIVERY_RETRY_MS * 2 ** (delivery.attempts - 1),
+              KEY_DELIVERY_RETRY_MAX_MS
+            )
+          try {
+            logMemberKeys('key-delivery', requestId, {
+              state: 'failed',
+              code: KEY_DELIVERY_INTERRUPTED
+            })
+          } catch {
+            /* Diagnostics never block the reset. */
+          }
+        }
       })
     slot.running = running
     return running
@@ -787,14 +834,25 @@ export class E2eeIpc extends IpcService {
       result.requestId !== requestId
     )
       throw new Error('e2ee_conflict')
-    if (result.state !== 'committed') return { ready: false, state: result.state }
+    if (result.state !== 'committed') {
+      logMemberKeys('member-claim', requestId, { phase: 'relay', state: result.state })
+      return { ready: false, state: result.state }
+    }
     const pages = await this.permissionHistory(workspaceId, cloud)
     await scope((owner) =>
       owner.accountId === cloud.accountId
         ? owner.bootstrap.acceptMemberJoin(workspaceId, pages)
         : Effect.fail(new Error('e2ee_account_mismatch'))
     )
+    const earlier = this.pairingFailure
     const ready = await this.installMemberJoin(workspaceId, reader, scope, cloud, pages)
+    // Ready only reports a current epoch key the native host installed itself.
+    const failed = this.pairingFailure !== earlier ? this.pairingFailure : undefined
+    logMemberKeys('member-claim', requestId, {
+      phase: ready ? 'ready' : 'waiting-key',
+      state: 'committed',
+      ...(!ready && failed ? { code: keyDeliveryCode(failed) } : {})
+    })
     return { ready, state: 'committed' }
   }
   private async installMemberJoin(
@@ -817,15 +875,16 @@ export class E2eeIpc extends IpcService {
         await scope((owner) => owner.host.ingestLedgerRecords(workspaceId, page))
       try {
         const access = await this.memberAccess(workspaceId, reader, scope)
+        // Receive-only: install this device's key before any distribution or repair,
+        // which the full rounds of the opened workspace runtime perform afterwards.
         const work = await scope((owner) =>
           Effect.succeed(
-            owner.host.keyRound(
+            owner.host.receiveKeys(
               workspaceId,
               (signal) =>
                 cloud.client.mailbox({ workspaceId, credential: access.credential }, signal),
               (signal) =>
-                cloud.client.staging({ workspaceId, credential: access.credential }, signal),
-              (signal) => (request) => cloud.client.history(request, signal)
+                cloud.client.staging({ workspaceId, credential: access.credential }, signal)
             )
           )
         )
