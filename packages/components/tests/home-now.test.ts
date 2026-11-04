@@ -230,6 +230,12 @@ describe("spending the board's height", () => {
           }
   });
 
+  it('solves an empty board without usage even though it has one column', () => {
+    expect(solveHomeNowColumn(totals(0, 0, 0, 0), false, Infinity, HOME_NOW_COLUMN)).toEqual(
+      HOME_NOW_COLUMN
+    );
+  });
+
   it('says so in one card when nothing is going on', () => {
     // Every list empty: one statement stays beside the usage instead of four empty list tiles.
     expect(shape(layoutHomeNow(totals(0, 0, 0, 0), true))).toEqual([['quiet'], ['usage']]);
