@@ -29,7 +29,9 @@ context/message-flow.md "Upstream".
   selection and separately keyed note through durable permission history. Core forms
   use each property's `description` as the full question and `title` as its short
   header, including single-question forms whose request message is generic. Legacy
-  Claude single-question forms retain their request-message prompt.
+  Claude single-question forms retain their request-message prompt. The shared bridge
+  maps recognized Droid AskUser labels and custom answers back to its option IDs and
+  companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
 - `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
   updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
   Claude reports no actor, so later events preserve an earlier identity. Providers that
@@ -228,7 +230,7 @@ See the [Windows command-length fix](../../../../.agents/notes/implemented/bug-f
 ### Claude upstream 0.84.0 source synchronization
 
 The bundled Claude gitlink includes upstream 0.84.0 while the fork package remains
-0.79.0. Lody builds that source directly, with SDK 0.3.284 / Claude Code 2.1.284;
+0.79.0. Lody builds that source directly, with SDK 0.3.316 / Claude Code 2.1.316;
 no npm adapter release is required. Lody advertises Core extensions and standard
 ACP capabilities, without AIR, terminal-output deltas or session notices. Standard
 tool fields and text fallback remain authoritative. Consumer audit and limits:
@@ -252,6 +254,8 @@ production upload/readback. The CLI rejects adapter/manifest version drift. See 
 The submodule owns the private-wire contract
 and minimum official version. Kimi is different: `packages/acp-extension-kimi` owns the
 Lody-maintained runtime source and implements the shared `acp-extension-core` contract.
+The [Kimi media-output fix](../../../../.agents/notes/proposed/bug-fix/2026-11-04-kimi-media-output.md)
+requires a new published and verified runtime before the manifest can advance.
 
 Corrupt caches are reported absent with a warning; launch never executes them. Installation
 publishes a verified successor in a sibling `<arch>.gen-<uuid>` directory and leaves existing
@@ -303,6 +307,17 @@ that termination raises before any child exists.
 The real-process authentication test keeps method selection, versioned secret metadata, form
 submission, URL parsing, protocol stdout integrity, and process cleanup on one spawned ACP
 connection.
+
+A protocol agent publishes its sign-in methods in the `initialize` response. The capability
+probe stores that list on the Provider's capability row (`authMethods`), so the account panel
+and the in-conversation auth notice list what the agent supports before anyone starts a
+sign-in; picking a row sends its `methodId` with the `start` request. The daemon re-reads the
+advertised list on its own connection, ignores a pick the agent no longer advertises (falling
+back to the single method or its own picker), and still runs `authenticate` itself. A machine
+that predates `acpAuthenticationMethodSelection` receives no `methodId` at all, because its
+strict request schema would reject the whole start. `authRequired` now only describes stored
+credentials; it no longer decides whether the panel appears. [Decision and rejected
+alternatives](../../../../.agents/notes/implemented/architecture/2026-10-31-acp-advertised-auth-methods.md).
 
 ### Capability cache
 

@@ -1,6 +1,8 @@
 import type http from 'node:http';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@/utils/logger';
+import * as scheduleCommands from '@/lib/schedules/schedule-command-client';
+import { __lodyMcpServerInternals } from './lody-mcp-server';
 import { createMcpHttpServer } from './lody-mcp-http-host';
 import {
   MCP_HTTP_MACHINE_ID_HEADER,
@@ -66,6 +68,14 @@ const modernRequest = (id: number, method: string, params: Record<string, unknow
     },
   });
 
+function signal() {
+  let resolve = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describe('MCP HTTP host wire behavior', () => {
   let server: http.Server;
   let baseUrl: string;
@@ -91,7 +101,151 @@ describe('MCP HTTP host wire behavior', () => {
       server.closeAllConnections();
       server.close(() => resolve());
     });
+    vi.restoreAllMocks();
   });
+
+  const callTool = (
+    version: string,
+    sessionId: string,
+    name: string,
+    args: Record<string, unknown>,
+    abort?: AbortSignal
+  ) => {
+    const params = { name, arguments: args };
+    return fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        accept: ACCEPT,
+        'content-type': 'application/json',
+        authorization: `Bearer ${TOKEN}`,
+        'mcp-protocol-version': version,
+        'mcp-method': 'tools/call',
+        'mcp-name': name,
+        ...sessionContextHeaders(),
+        [MCP_HTTP_SESSION_ID_HEADER]: sessionId,
+        [MCP_HTTP_WORKSPACE_ID_HEADER]: `workspace-${sessionId}`,
+        [MCP_HTTP_MACHINE_ID_HEADER]: `machine-${sessionId}`,
+        [MCP_HTTP_WORKDIR_B64_HEADER]: Buffer.from(`/tmp/${sessionId}`).toString('base64url'),
+      },
+      body:
+        version === '2026-07-28'
+          ? modernRequest(10, 'tools/call', params)
+          : JSON.stringify({ jsonrpc: '2.0', id: 10, method: 'tools/call', params }),
+      signal: abort,
+    });
+  };
+
+  it.each(['2025-06-18', '2026-07-28'])(
+    'isolates concurrent contexts and survives an aborted %s request',
+    async (version) => {
+      const startedA = signal();
+      const startedB = signal();
+      const releaseA = signal();
+      const releaseB = signal();
+      const finishedA = signal();
+      vi.spyOn(scheduleCommands, 'sendDaemonScheduleCommand').mockImplementation(
+        async (command, target) => {
+          const before = __lodyMcpServerInternals.getSessionContext();
+          if (target.requesterSessionId === 'session-a') {
+            startedA.resolve();
+            await releaseA.promise;
+            finishedA.resolve();
+          } else if (target.requesterSessionId === 'session-b') {
+            startedB.resolve();
+            await releaseB.promise;
+          }
+          return { command, target, before, after: __lodyMcpServerInternals.getSessionContext() };
+        }
+      );
+      const abort = new AbortController();
+      const requestA = callTool(version, 'session-a', 'lody_schedule_list', {}, abort.signal);
+      // Observe rejection immediately so an abort never becomes unhandled.
+      const aborted = expect(requestA).rejects.toMatchObject({ name: 'AbortError' });
+      try {
+        await startedA.promise;
+        const requestB = callTool(version, 'session-b', 'lody_schedule_list', { query: 'second' });
+        await startedB.promise;
+        abort.abort();
+        await aborted;
+        // Request close does not establish completion of uncooperative raw work.
+        releaseA.resolve();
+        await finishedA.promise;
+        releaseB.resolve();
+        const response = await requestB;
+        expect(response.status).toBe(200);
+        const payload = await response.json();
+        expect(payload.result.isError).not.toBe(true);
+        const context = {
+          sessionId: 'session-b',
+          workspaceId: 'workspace-session-b',
+          machineId: 'machine-session-b',
+          workdir: '/tmp/session-b',
+        };
+        expect(JSON.parse(payload.result.content[0].text)).toMatchObject({
+          command: { action: 'list', query: 'second', limit: 30 },
+          target: {
+            requesterSessionId: 'session-b',
+            workspaceId: context.workspaceId,
+            machineId: context.machineId,
+          },
+          before: context,
+          after: context,
+        });
+        const next = await callTool(version, 'session-c', 'lody_schedule_propose', {
+          requestId: 'proposal-c',
+          title: '  Trimmed title  ',
+          prompt: 'Synthetic task',
+          rule: { kind: 'manual' },
+        });
+        const nextPayload = await next.json();
+        expect(nextPayload.result.isError).not.toBe(true);
+        expect(JSON.parse(nextPayload.result.content[0].text)).toMatchObject({
+          command: { action: 'propose', title: 'Trimmed title', rule: { kind: 'manual' } },
+          before: { sessionId: 'session-c' },
+          after: { sessionId: 'session-c' },
+        });
+      } finally {
+        abort.abort();
+        releaseA.resolve();
+        releaseB.resolve();
+        await aborted;
+      }
+    }
+  );
+
+  it.each(['2025-06-18', '2026-07-28'])(
+    'retains shared schema validation on the %s wire',
+    async (version) => {
+      const cases: [string, Record<string, unknown>][] = [
+        ['lody_schedule_list', { limit: 0 }],
+        ['lody_schedule_get', { scheduleId: 'bad/id' }],
+        ['lody_schedule_pause', { scheduleId: 'valid', requestId: '' }],
+        [
+          'lody_schedule_propose',
+          { requestId: 'valid', title: '   ', prompt: 'task', rule: { kind: 'manual' } },
+        ],
+        ['lody_agent_config_get', { id: '  ' }],
+        ['lody_agent_role_get', { id: 'valid', unexpected: true }],
+        ['lody_session_share', { requestId: 'valid', purpose: 'share', workspaceId: 'other' }],
+        ['lody_operation_batch_get', { batchId: 'not-a-uuid' }],
+      ];
+      for (const [name, args] of cases) {
+        const response = await callTool(version, 'validation-session', name, args);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          result: {
+            isError: true,
+            content: [
+              expect.objectContaining({
+                type: 'text',
+                text: expect.stringContaining('Input validation error'),
+              }),
+            ],
+          },
+        });
+      }
+    }
+  );
 
   it('answers a Grok-shaped initialize with a JSON-RPC result', async () => {
     const response = await fetch(`${baseUrl}/mcp`, {

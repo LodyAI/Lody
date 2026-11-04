@@ -19,6 +19,101 @@ const good = async (page: Page, action: string) => {
   return result.value;
 };
 
+it.each(
+  (['chromium', 'webkit'] as const).flatMap((engine) =>
+    (['first', 'saved-snapshot', 'fork', 'rollback'] as const).map((scenario) => ({
+      engine,
+      scenario,
+    }))
+  )
+)(
+  'claim continuity preserves pre-approval evidence: $scenario in $engine',
+  async ({ engine, scenario }) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-claim-continuity-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      const browser = engine === 'chromium' ? chromium : webkit;
+      const launch = () =>
+        browser.launchPersistentContext(join(directory, 'profile'), { headless: true });
+      context = await launch();
+      let page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(async (fixtureScenario) => {
+        localStorage.setItem('empty-local-originals', 'true');
+        if (fixtureScenario !== 'saved-snapshot')
+          localStorage.setItem('qualify-approval-history', 'true');
+        await (globalThis as Surface).HostFixture.boot();
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      }, scenario);
+      expect((await raw(page, 'addMachine')).ok).toBe(true);
+      expect(await good(page, 'observeCheckpoint')).toMatchObject({ length: 2 });
+      if (scenario === 'fork') expect((await raw(page, 'forkBeforeApproval')).ok).toBe(true);
+      await good(page, 'prepare');
+      expect((await raw(page, 'approve')).ok).toBe(true);
+      if (scenario === 'rollback') {
+        await page.evaluate(() => localStorage.setItem('truncate-approval-history', 'true'));
+        expect((await call(page, 'claim')).ok).toBe(false);
+        await page.evaluate(() => localStorage.removeItem('truncate-approval-history'));
+      }
+      await good(page, 'claim');
+      if (scenario === 'fork') {
+        expect((await call(page, 'openObserved')).reason).toBe('history-conflict');
+        return;
+      }
+      if (scenario === 'saved-snapshot') {
+        expect((await call(page, 'openObserved')).reason).toBe('history-conflict');
+        await good(page, 'close');
+        await context.close();
+        context = await launch();
+        page = await context.newPage();
+        await page.goto(pathToFileURL(file).href);
+        await page.evaluate(async () => {
+          localStorage.setItem('qualify-approval-history', 'true');
+          await (globalThis as Surface).HostFixture.boot('open-existing');
+          await (globalThis as Surface).HostFixture.bootRuntime();
+        });
+        await good(page, 'claim');
+      }
+      expect(await good(page, 'openObserved')).toMatchObject({ length: 3 });
+      expect(await good(page, 'ledger')).toMatchObject({ recordPositions: [0, 1, 2] });
+      expect((await call(page, 'wrongCheckpoint')).reason).toBe('history-conflict');
+      await good(page, 'close');
+      await context.close();
+      context = await launch();
+      page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(async () => {
+        localStorage.setItem('synthetic-offline', 'true');
+        await (globalThis as Surface).HostFixture.boot('open-existing');
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      });
+      expect(await good(page, 'openObserved')).toMatchObject({ length: 3 });
+      expect(await good(page, 'ledger')).toMatchObject({ recordPositions: [0, 1, 2] });
+      await good(page, 'close');
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
 let controlRouteBundle: Promise<string> | undefined;
 const testRequire = createRequire(import.meta.url);
 function bundleControlRoute() {
@@ -174,7 +269,7 @@ it.each(['chromium', 'webkit'] as const)(
       expect((await raw(page, 'events')).value).toEqual([]);
       expect((await raw(page, 'approve')).ok).toBe(true);
       expect(await good(page, 'claim')).toMatchObject({ ready: true, status: 'approved' });
-      expect((await call(page, 'wrongCheckpoint')).reason).toBe('conflict');
+      expect((await call(page, 'wrongCheckpoint')).reason).toBe('history-conflict');
       expect(await good(page, 'open')).toMatchObject({
         deviceKind: 'personal',
         hasCurrentKey: false,
@@ -221,12 +316,22 @@ it.each(['chromium', 'webkit'] as const)(
         hasCurrentKey: false,
         writeEpoch: 0,
       });
-      expect((await call(page, 'seal')).reason).toBe('missing-read-key');
+      expect((await raw(page, 'graceLastMillisecond')).ok).toBe(true);
+      expect(await good(page, 'sealOldHint')).toEqual({ epoch: 0 });
+      expect((await raw(page, 'graceExpired')).ok).toBe(true);
+      expect((await call(page, 'seal')).reason).toBe('key-update-required');
       expect(await good(page, 'openBody')).toEqual([72, 105]);
       expect((await raw(page, 'stageCurrent')).ok).toBe(true);
       expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });
       expect(await good(page, 'sealOldHint')).toEqual({ epoch: 1 });
       expect(await good(page, 'openBody')).toEqual([72, 105]);
+      // A key delivery's approval sessions never leak a reader: the last release
+      // closes the workspace the approval opened.
+      expect(await good(page, 'approvalRelease')).toEqual({
+        held: true,
+        afterOne: true,
+        afterAll: false,
+      });
       await good(page, 'close');
       await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
       await good(page, 'open');
@@ -246,6 +351,8 @@ it.each(['chromium', 'webkit'] as const)(
       await good(page, 'switchAccount');
       expect(await good(page, 'releaseGrant')).toEqual({ ok: false, reason: 'scope-mismatch' });
       expect((await call(page, 'seal')).reason).toBe('closed');
+      // After an account switch a delivery retry gets no approval session.
+      expect((await call(page, 'approvalSession')).ok).toBe(false);
       await good(page, 'restoreAccount');
       await good(page, 'close');
       expect((await call(page, 'open')).reason).toBe('closed');
@@ -260,6 +367,94 @@ it.each(['chromium', 'webkit'] as const)(
       ).toBeGreaterThan(2);
       await good(page, 'close');
       await page.evaluate(() => (globalThis as Surface).HostFixture.stop());
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
+  'a failed approval-reader close keeps the release retryable in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-approval-release-'));
+    let context: BrowserContext | undefined;
+    type Paused = Surface & { nativeBorrow: { entered: Promise<void>; release(): void } };
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      // Hold one native key operation so the reader's close cannot drain in budget.
+      await page.evaluate(() => {
+        const native = SubtleCrypto.prototype.encrypt;
+        let release!: () => void,
+          enter!: () => void,
+          held = false;
+        const entered = new Promise<void>((resolve) => (enter = resolve));
+        const released = new Promise<void>((resolve) => (release = resolve));
+        SubtleCrypto.prototype.encrypt = async function (algorithm, key, data) {
+          const aad = (algorithm as AesGcmParams).additionalData;
+          if (!held && aad && new TextDecoder().decode(aad).includes('installed-epoch-key')) {
+            held = true;
+            enter();
+            await released;
+          }
+          return native.call(this, algorithm, key, data);
+        };
+        (globalThis as Paused).nativeBorrow = { entered, release };
+      });
+      await page.evaluate(async () => {
+        await (globalThis as Surface).HostFixture.boot('create-or-open', true);
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      });
+      await good(page, 'prepare');
+      expect((await raw(page, 'approve')).ok).toBe(true);
+      await good(page, 'claim');
+      try {
+        // Only the approval holds the workspace.
+        await good(page, 'approvalHold');
+        await good(page, 'startReceive');
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.entered);
+        await good(page, 'startApprovalRelease');
+        expect((await raw(page, 'waitCloseBudget')).ok).toBe(true);
+        expect((await raw(page, 'advanceCloseBudget')).ok).toBe(true);
+        expect(await good(page, 'approvalReleaseResult')).toEqual({
+          state: 'failed',
+          code: 'close-incomplete',
+        });
+        // Not silently done: the workspace still has an unfinished close.
+        expect((await call(page, 'open')).reason).toBe('close-incomplete');
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.release());
+        await call(page, 'workResult');
+        // The same holder releases again; this time the close completes.
+        await good(page, 'startApprovalRelease');
+        expect(await good(page, 'approvalReleaseResult')).toEqual({ state: 'released' });
+        expect(await good(page, 'open')).toMatchObject({ deviceKind: 'personal' });
+      } finally {
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.release());
+        await raw(page, 'expireCloseWaiters');
+        await call(page, 'close');
+      }
     } finally {
       await context?.close();
       await rm(directory, { recursive: true, force: true });

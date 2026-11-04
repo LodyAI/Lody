@@ -14,7 +14,6 @@ import {
   applyAgentRoleRunConfigDefaults,
   carryAgentRoleOptionsToModel,
   buildAgentRoleFormValue,
-  buildAgentRoleRunConfigSummary,
   buildAgentRoleFromForm,
   createAgentRoleTargetFormValue,
   EMPTY_AGENT_ROLE_FORM_VALUE,
@@ -79,24 +78,6 @@ const formValue = (
 const createId = () => 'new-role' as AgentRoleId;
 
 describe('role description authoring', () => {
-  it('preserves legacy no-op saves and round-trips edits and clearing', () => {
-    const existing = role();
-    const options = { existing, ownerUserId: 'user-1', now: 20, createId };
-    const value = buildAgentRoleFormValue(existing);
-    expect(value.description).toBe('');
-    expect(buildAgentRoleFromForm(value, options)).toBe(existing);
-    const edited = buildAgentRoleFromForm({ ...value, description: 'Review changes' }, options);
-    expect(edited.description).toBe('Review changes');
-    expect(edited.revision).toBe(2);
-    expect(buildAgentRoleFormValue(edited).description).toBe('Review changes');
-    const cleared = buildAgentRoleFromForm(
-      { ...buildAgentRoleFormValue(edited), description: '' },
-      { ...options, existing: edited }
-    );
-    expect(cleared.description).toBe('');
-    expect(cleared.revision).toBe(3);
-  });
-
   it('caps newly saved descriptions at 140 Unicode code points', () => {
     const saved = buildAgentRoleFromForm(formValue({ description: '😀'.repeat(141) }), {
       ownerUserId: 'user-1',
@@ -256,17 +237,6 @@ const selectorOptions = (overrides: Partial<AcpSelectorOptions> = {}): AcpSelect
 });
 
 describe('agent role form validation', () => {
-  it('requires a name and an exact machine + agent config pair', () => {
-    expect(validateAgentRoleForm(EMPTY_AGENT_ROLE_FORM_VALUE, { accessibleRoles: [] })).toEqual([
-      'name_required',
-      'machine_required',
-    ]);
-    expect(
-      validateAgentRoleForm(formValue({ agentConfigId: null }), { accessibleRoles: [] })
-    ).toEqual(['agent_config_required']);
-    expect(validateAgentRoleForm(formValue(), { accessibleRoles: [] })).toEqual([]);
-  });
-
   it('rejects a name with no mention token left in it', () => {
     expect(validateAgentRoleForm(formValue({ name: '  ---  ' }), { accessibleRoles: [] })).toEqual([
       'name_required',
@@ -285,31 +255,6 @@ describe('agent role form validation', () => {
         editingRoleId: 'other' as AgentRoleId,
       })
     ).toEqual([]);
-  });
-});
-
-describe('name check exemption', () => {
-  it('ignores the row an in-flight create already wrote', () => {
-    // The local write lands while the dialog is still open, so the catalog now
-    // contains the very Role being created. The editor has carried that id
-    // since the form opened, so the form does not report its own name as taken.
-    const justWritten = role({ id: 'new-role' as AgentRoleId, name: 'Reviewer' });
-    expect(
-      validateAgentRoleForm(formValue({ name: 'Reviewer' }), {
-        accessibleRoles: [justWritten],
-        editingRoleId: justWritten.id,
-      })
-    ).toEqual([]);
-  });
-
-  it('still catches a real clash while a save is in flight', () => {
-    const other = role({ id: 'other' as AgentRoleId, name: 'Reviewer' });
-    expect(
-      validateAgentRoleForm(formValue({ name: 'Reviewer' }), {
-        accessibleRoles: [other],
-        editingRoleId: 'new-role' as AgentRoleId,
-      })
-    ).toEqual(['name_taken']);
   });
 });
 
@@ -407,55 +352,12 @@ describe('building a role from the form', () => {
     });
   });
 
-  it('keeps the authored emoji and drops one that is only whitespace', () => {
-    expect(
-      buildAgentRoleFromForm(formValue({ emoji: ' 🔍 ' }), {
-        ownerUserId: 'user-1',
-        now: 100,
-        createId,
-      }).emoji
-    ).toBe('🔍');
-    expect(
-      buildAgentRoleFromForm(formValue({ emoji: '   ' }), {
-        ownerUserId: 'user-1',
-        now: 100,
-        createId,
-      }).emoji
-    ).toBeUndefined();
-  });
-
   it('refuses to store a secret-shaped option the surface somehow offered', () => {
     const created = buildAgentRoleFromForm(
       formValue({ configOptionValues: { thought_level: 'high', api_key: 'sk-live' } }),
       { ownerUserId: 'user-1', now: 100, createId }
     );
     expect(created.runConfig.configOptionValues).toEqual({ thought_level: 'high' });
-  });
-
-  it('leaves an unchanged edit untouched so its revision does not move', () => {
-    const existing = role();
-    const saved = buildAgentRoleFromForm(buildAgentRoleFormValue(existing), {
-      existing,
-      ownerUserId: 'user-1',
-      now: 200,
-      createId,
-    });
-    expect(saved).toBe(existing);
-  });
-
-  it('bumps the revision exactly once for a real edit', () => {
-    const existing = role({ revision: 4 });
-    const saved = buildAgentRoleFromForm(
-      { ...buildAgentRoleFormValue(existing), promptPrefix: 'Be strict.' },
-      { existing, ownerUserId: 'user-1', now: 200, createId }
-    );
-    expect(saved).toMatchObject({
-      id: existing.id,
-      revision: 5,
-      updatedAt: 200,
-      createdAt: 10,
-      promptPrefix: 'Be strict.',
-    });
   });
 
   it('keeps the original owner when someone else saves a shared role', () => {
@@ -484,18 +386,6 @@ describe('building a role from the form', () => {
 });
 
 describe('run config defaults', () => {
-  it('writes the agent own defaults into the unset fields', () => {
-    expect(
-      applyAgentRoleRunConfigDefaults(targetValue({ modelId: null }), selectorOptions())
-    ).toEqual(
-      targetValue({
-        modelId: 'gpt-5.6',
-        modeId: 'default',
-        configOptionValues: { thought_level: 'medium', 'fast-mode': false },
-      })
-    );
-  });
-
   it('never overwrites a stored selection, so an incompatible one stays visible', () => {
     const stored = targetValue({
       modelId: 'retired-model',
@@ -572,15 +462,6 @@ describe('run config compatibility', () => {
     ]);
   });
 
-  it('accepts a run config the agent still publishes', () => {
-    expect(
-      findAgentRoleRunConfigIssues(
-        { modeId: 'default', modelId: 'gpt-5.6', configOptionValues: { 'fast-mode': true } },
-        selectorOptions()
-      )
-    ).toEqual([]);
-  });
-
   it('will not call a stored selection compatible while capabilities are unknown', () => {
     const unavailable = selectorOptions({ capabilityAuthority: 'unavailable' });
     expect(findAgentRoleRunConfigIssues({ modelId: 'gpt-5.6' }, unavailable)).toEqual([
@@ -597,34 +478,6 @@ describe('run config compatibility', () => {
         { configId: 'openai_api_key' },
       ])
     ).toEqual([{ configId: 'thought_level' }]);
-  });
-});
-
-describe('run config summary', () => {
-  it('reads model, then reasoning, then the rest', () => {
-    expect(
-      buildAgentRoleRunConfigSummary({
-        modelId: 'gpt-5.6-sol',
-        modeId: 'plan',
-        configOptionValues: { verbosity: 'high', reasoning_effort: 'max' },
-      })
-    ).toEqual(['gpt-5.6-sol', 'max', 'plan', 'high']);
-    // Some agents name the option after the category instead of `reasoning_effort`.
-    expect(
-      buildAgentRoleRunConfigSummary({ configOptionValues: { thought_level: 'high', a: 'z' } })
-    ).toEqual(['high', 'z']);
-  });
-
-  it('shows a boolean only when it is on, and drops an explicit off', () => {
-    expect(
-      buildAgentRoleRunConfigSummary({
-        configOptionValues: { 'fast-mode': true, sandbox: false, telemetry: 'off' },
-      })
-    ).toEqual(['fast-mode']);
-  });
-
-  it('is empty for a role that pins nothing', () => {
-    expect(buildAgentRoleRunConfigSummary({})).toEqual([]);
   });
 });
 

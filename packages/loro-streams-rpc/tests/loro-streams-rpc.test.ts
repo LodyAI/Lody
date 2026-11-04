@@ -470,6 +470,24 @@ describe('LoroStreamsMachineRpcClient', () => {
     client.stop();
   });
 
+  it('forwards includeDisk on machine status only when asked', async () => {
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    void client.requestMachineStatus({ timeoutMs: 5000, includeDisk: true });
+    void client.requestMachineStatus({ timeoutMs: 5000 });
+    await vi.waitFor(() => expect(fake.appended).toHaveLength(2));
+    // Older daemons reject unknown params, so the default request stays empty.
+    expect(fake.appended.map((entry) => (entry.value as { params: unknown }).params)).toEqual([
+      { includeDisk: true },
+      {},
+    ]);
+    client.stop();
+  });
+
   it('sends machine status requests and resolves matching RPC responses', async () => {
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({
@@ -3547,6 +3565,46 @@ describe('pending RPC deadline', () => {
       await vi.advanceTimersByTimeAsync(1_000);
       await expect(pending).resolves.toBeNull();
 
+      dispatcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('LoroStreamsRpcResponseDispatcher response loop', () => {
+  it('keeps reading responses when recreating a missing response stream fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let ensureCalls = 0;
+      let reads = 0;
+      const streamClient: LoroStreamsJsonStreamClient = {
+        ensureJsonStream: vi.fn(async () => {
+          ensureCalls += 1;
+          if (ensureCalls === 1) throw new Error('synthetic gateway unavailable');
+        }),
+        appendJson: vi.fn(async () => 'next-offset'),
+        readJsonLive: vi.fn(async (_streamId, _state, _onBatch, options) => {
+          reads += 1;
+          if (reads <= 2) throw new LoroStreamsGatewayError('stream not found', 404);
+          await new Promise((_resolve, reject) =>
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            })
+          );
+        }),
+      };
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+
+      await dispatcher.start();
+      await vi.waitFor(() => expect(ensureCalls).toBe(1));
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(reads).toBe(3));
+      expect(ensureCalls).toBe(2);
       dispatcher.stop();
     } finally {
       vi.useRealTimers();

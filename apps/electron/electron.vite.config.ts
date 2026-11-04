@@ -85,7 +85,7 @@ export default defineConfig(({ mode }) => {
     main: {
       envDir: false,
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
-      define: viteEnvDefine,
+      define: { ...viteEnvDefine, __LODY_E2E_CLOCK_BUILD__: 'false' },
       build: {
         lib: {
           entry: {
@@ -164,14 +164,13 @@ export default defineConfig(({ mode }) => {
         cssMinify: true,
         sourcemap: false,
         rollupOptions: {
-          // Build both the main app (`index.html`) and the standalone recovery
-          // page (`recovery.html`). The recovery page is loaded by the main
-          // process when the main renderer fails (did-fail-load,
-          // render-process-gone, preload-error) so it cannot share a bundle
-          // with code paths that might themselves crash on boot.
+          // The recovery page is independent of the main renderer so it can
+          // load after a crash. PR images use a separate sandboxed document to
+          // avoid relaxing the main renderer's image policy.
           input: {
             index: resolve(__dirname, 'src/renderer/index.html'),
             devbar: resolve(__dirname, 'src/renderer/devbar.html'),
+            prImage: resolve(__dirname, 'src/renderer/pr-image.html'),
             recovery: resolve(__dirname, 'src/renderer/recovery.html')
           },
           output: {

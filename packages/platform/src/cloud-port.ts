@@ -96,6 +96,13 @@ export interface CloudE2eePort {
   ): Promise<E2eeMailboxReplies[K]>;
 }
 export interface CloudPort {
+  /** Absent until the cloud can issue and verify scoped remote Automation proofs. */
+  remoteAutomation?: {
+    verifyControl(input: {
+      intent: import('@lody/shared/automations').RemoteAutomationIntent;
+      requestToken: string;
+    }): Promise<{ requesterUserId: string; expiresAt: number }>;
+  };
   /** Absent in ordinary/local composition; does not own local key material. */
   e2ee?: CloudE2eePort | null;
   /** Explicit one-workspace machine service composition; never permits a legacy bridge. */

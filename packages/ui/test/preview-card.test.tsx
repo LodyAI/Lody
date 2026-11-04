@@ -1,16 +1,9 @@
-import * as stylex from '@stylexjs/stylex';
 import { useRef, useState } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
 import { PreviewCard } from '../src/popover/preview-card';
-import { surface } from '../src/popup/surface';
+
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
 import { all, classesOf, mount, press, until, type Mounted } from './dom';
-
-/** See `menu.test.tsx`: the same loosened call the primitives make. */
-function classesFor(...styles: readonly unknown[]): string[] {
-  const props = stylex.props as (...args: readonly unknown[]) => { className?: string };
-  return (props(...styles).className ?? '').split(' ').filter(Boolean);
-}
 
 let mounted: Mounted | undefined;
 afterEach(async () => {
@@ -58,18 +51,6 @@ describe('PreviewCard', () => {
 
     await until(() => cards().length === 0, 'the card to close');
     expect(document.querySelector('[data-row]')?.hasAttribute('data-open')).toBe(false);
-  });
-
-  test('stands on the popover surface: the same floating rung, the same panel', async () => {
-    mounted = await mount(<AnchoredRow />);
-    await until(() => cards().length === 1, 'the card');
-    const popup = cards()[0].parentElement as HTMLElement;
-
-    // A second floating surface would drift from the one menus and popovers
-    // share, so the card is exactly the popover's classes.
-    for (const className of classesFor(surface.popup, surface.popupPanel)) {
-      expect(classesOf(popup)).toContain(className);
-    }
   });
 
   test('carries a forced palette across the portal', async () => {

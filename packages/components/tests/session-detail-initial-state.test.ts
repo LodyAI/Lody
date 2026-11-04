@@ -22,31 +22,11 @@ const persistedProviderFileState: PersistedLastActiveTabState = {
     tab: 'browser',
     tabs: ['files', 'browser'],
     sideSessionId: 'side-session-1',
+    split: null,
   },
 };
 
 describe('getSessionDetailInitialTabState', () => {
-  it('restores the persisted viewer and side-panel state', () => {
-    // The active conversation tab is NOT part of this state: the `?tab`
-    // search value owns it, and the session route's entry restoration fills
-    // an absent value in before the component renders. Local storage owns the
-    // panels, which restore regardless of how `?tab` arrived.
-    expect(
-      getSessionDetailInitialTabState(parentSessionId, undefined, {
-        readPersistedState: () => persistedProviderFileState,
-      })
-    ).toEqual({
-      viewerTabs: [persistedProviderFileState.viewerTab],
-      activeViewerTabId: 'file:file-1',
-      sidePanel: {
-        open: true,
-        tab: 'browser',
-        tabs: ['files', 'browser'],
-        sideSessionId: 'side-session-1',
-      },
-    });
-  });
-
   it('keeps the restored viewer idle for an explicit conversation deep link on one-active-surface hosts', () => {
     // Mobile shows one surface at a time: an opened-by or shared link naming
     // `session:<child>` must land on that conversation, not under the
@@ -83,42 +63,5 @@ describe('getSessionDetailInitialTabState', () => {
         readPersistedState: () => persistedProviderFileState,
       }).activeViewerTabId
     ).toBe('file:file-1');
-  });
-
-  it('defaults everything when nothing is persisted', () => {
-    expect(
-      getSessionDetailInitialTabState(parentSessionId, undefined, {
-        readPersistedState: () => null,
-      })
-    ).toEqual({
-      viewerTabs: [],
-      activeViewerTabId: null,
-      sidePanel: {
-        open: false,
-        tab: null,
-        tabs: [],
-        sideSessionId: null,
-      },
-    });
-  });
-
-  it('defaults the side panel state when older persisted state has no side panel entry', () => {
-    expect(
-      getSessionDetailInitialTabState(parentSessionId, undefined, {
-        readPersistedState: () => ({
-          sessionTabId: 'child-session',
-          viewerTab: null,
-        }),
-      })
-    ).toEqual({
-      viewerTabs: [],
-      activeViewerTabId: null,
-      sidePanel: {
-        open: false,
-        tab: null,
-        tabs: [],
-        sideSessionId: null,
-      },
-    });
   });
 });

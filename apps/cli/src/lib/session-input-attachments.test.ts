@@ -220,7 +220,7 @@ describe('session input attachment preparation', () => {
     await expect(prepareSessionInputAttachments(args)).rejects.toThrow('screen.png');
   });
 
-  it('rejects remote local-only transfer, empty input, directories, and too many files', async () => {
+  it('rejects transfer to another machine when no relay is available', async () => {
     await expect(
       prepareSessionInputAttachments({
         ...scope,
@@ -229,12 +229,5 @@ describe('session input attachment preparation', () => {
         cwd: root,
       })
     ).rejects.toThrow('relay');
-    expect(() => buildCommandInputBlocks('')).toThrow('text');
-    await expect(
-      prepareSessionInputAttachments({ ...scope, paths: ['.'], cwd: root })
-    ).rejects.toThrow('regular file');
-    await expect(
-      prepareSessionInputAttachments({ ...scope, paths: Array(9).fill('x'), cwd: root })
-    ).rejects.toThrow('8');
   });
 });

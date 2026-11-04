@@ -2,14 +2,8 @@ import { useMentionFileSearch } from './file-search/use-file-search';
 import * as React from 'react';
 import { forEachAtTokenSpan, type HydratedMentions } from '@/components/mentions/mention-hydration';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
 
 import { currentWorkspaceIdAtom } from '@/atoms';
-import {
-  captureMentionFileFetchError,
-  getRepoMentionAnalyticsId,
-  normalizeGithubFetchErrorCode,
-} from '@/components/mentions/mention-analytics';
 import { buildPathSuggestions } from './file-search/engine';
 export * from './file-search/engine';
 import {
@@ -65,12 +59,6 @@ export function hydrateFileMentionsFromText(text: string, knownPaths: Set<string
 
 export function useRepoFilePaths(repoFullName?: string) {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const postHog = usePostHog();
-  const postHogRef = React.useRef(postHog);
-  React.useEffect(() => {
-    postHogRef.current = postHog;
-  }, [postHog]);
-
   const [data, setData] = React.useState<{
     entry: RepoFilePathsCacheEntry | null;
     status: 'idle' | 'loading' | 'ready' | 'refreshing' | 'error';
@@ -104,23 +92,7 @@ export function useRepoFilePaths(repoFullName?: string) {
       }
 
       try {
-        const entry = await fetchRepoFilePaths(
-          workspaceIdValue,
-          repoFullNameValue,
-          undefined,
-          (err, durationMs) => {
-            // Unknown visibility: hash the repo, and count the shared attempt once.
-            captureMentionFileFetchError(
-              postHogRef.current,
-              { workspaceId: workspaceIdValue },
-              {
-                errorCode: normalizeGithubFetchErrorCode(err),
-                repo: getRepoMentionAnalyticsId(repoFullNameValue, false),
-                durationMs,
-              }
-            );
-          }
-        );
+        const entry = await fetchRepoFilePaths(workspaceIdValue, repoFullNameValue);
         if (cancelled) return;
         setData({ entry, status: 'ready' });
       } catch (err) {

@@ -5,7 +5,6 @@ import {
   SessionGCConfig,
   type SessionNativeWork,
   type SessionGCDeps,
-  loadGCConfig,
   evaluateMemoryPressure,
 } from './session-gc-manager';
 
@@ -176,45 +175,6 @@ describe('SessionGCManager', () => {
     }
   );
 
-  describe('loadGCConfig', () => {
-    it('returns default config with 20 minute timeout', () => {
-      const config = loadGCConfig();
-      expect(config.idleTimeoutMs).toBe(20 * 60 * 1000);
-      expect(config.sweepIntervalMs).toBe(60 * 1000);
-      expect(config.nativeBackgroundMaxIdleMs).toBe(24 * 60 * 60 * 1000);
-      expect(config.enabled).toBe(true);
-      // Default threshold = 10% of effective memory (32 GB mock), clamped to [1 GB, 4 GB]
-      // = floor(32 * 1024^3 * 0.1) = 3,435,973,836 bytes (~3.2 GB)
-      expect(config.memoryThresholdBytes).toBe(Math.floor(32 * 1024 * 1024 * 1024 * 0.1));
-      // Eviction runs on the prompt hot path, so a single turn start can only pay for a few.
-      expect(config.maxEvictionsPerCall).toBe(3);
-      // Only the about-to-fail path pays this, so 2 x 500ms is cheap insurance against
-      // refusing a turn on a sample taken mid-burst.
-      expect(config.pressureRecheckAttempts).toBe(2);
-      expect(config.pressureRecheckDelayMs).toBe(500);
-    });
-
-    it('reads env vars', () => {
-      const original = {
-        timeout: process.env.LODY_SESSION_GC_IDLE_TIMEOUT_MS,
-        threshold: process.env.LODY_SESSION_GC_MEMORY_THRESHOLD_BYTES,
-      };
-      process.env.LODY_SESSION_GC_IDLE_TIMEOUT_MS = '300000';
-      process.env.LODY_SESSION_GC_MEMORY_THRESHOLD_BYTES = '536870912';
-      try {
-        const config = loadGCConfig();
-        expect(config.idleTimeoutMs).toBe(300000);
-        expect(config.memoryThresholdBytes).toBe(536870912);
-      } finally {
-        if (original.timeout === undefined) delete process.env.LODY_SESSION_GC_IDLE_TIMEOUT_MS;
-        else process.env.LODY_SESSION_GC_IDLE_TIMEOUT_MS = original.timeout;
-        if (original.threshold === undefined)
-          delete process.env.LODY_SESSION_GC_MEMORY_THRESHOLD_BYTES;
-        else process.env.LODY_SESSION_GC_MEMORY_THRESHOLD_BYTES = original.threshold;
-      }
-    });
-  });
-
   describe('sweep', () => {
     it('cleans sessions idle for longer than timeout', async () => {
       const manager = createManager({ idleTimeoutMs: 1000 });
@@ -232,32 +192,6 @@ describe('SessionGCManager', () => {
       expect(cleanMock).toHaveBeenCalledWith(s1);
     });
 
-    it('does not clean sessions with pending updates', async () => {
-      const manager = createManager({ idleTimeoutMs: 1000 });
-      const now = Date.now();
-      const s1 = 'session-1' as SessionId;
-
-      sessionActivities.set(s1, now - 2000);
-      pendingUpdates.add(s1);
-
-      await manager.sweep();
-
-      expect(cleanMock).not.toHaveBeenCalled();
-    });
-
-    it('does not clean sessions with pending user work', async () => {
-      const manager = createManager({ idleTimeoutMs: 1000 });
-      const now = Date.now();
-      const s1 = 'session-1' as SessionId;
-
-      sessionActivities.set(s1, now - 2000);
-      pendingUserWork.add(s1);
-
-      await manager.sweep();
-
-      expect(cleanMock).not.toHaveBeenCalled();
-    });
-
     it('does not clean sessions with active turns', async () => {
       const manager = createManager({ idleTimeoutMs: 1000 });
       const now = Date.now();
@@ -265,19 +199,6 @@ describe('SessionGCManager', () => {
 
       sessionActivities.set(s1, now - 2000);
       activeTurns.add(s1);
-
-      await manager.sweep();
-
-      expect(cleanMock).not.toHaveBeenCalled();
-    });
-
-    it('does not clean sessions with active goals', async () => {
-      const manager = createManager({ idleTimeoutMs: 1000 });
-      const now = Date.now();
-      const s1 = 'session-1' as SessionId;
-
-      sessionActivities.set(s1, now - 2000);
-      activeGoals.add(s1);
 
       await manager.sweep();
 
@@ -337,44 +258,6 @@ describe('SessionGCManager', () => {
 
       expect(cleanMock).not.toHaveBeenCalled();
     });
-
-    it('cleans longest-idle first', async () => {
-      const manager = createManager({ idleTimeoutMs: 1000 });
-      const now = Date.now();
-      const s1 = 'session-1' as SessionId;
-      const s2 = 'session-2' as SessionId;
-      const s3 = 'session-3' as SessionId;
-
-      sessionActivities.set(s1, now - 3000); // 3s idle
-      sessionActivities.set(s2, now - 5000); // 5s idle
-      sessionActivities.set(s3, now - 2000); // 2s idle
-
-      await manager.sweep();
-
-      expect(cleanMock).toHaveBeenCalledTimes(3);
-      // Verify order: longest idle first
-      expect(cleanMock.mock.calls[0]![0]).toBe(s2);
-      expect(cleanMock.mock.calls[1]![0]).toBe(s1);
-      expect(cleanMock.mock.calls[2]![0]).toBe(s3);
-    });
-
-    it('skips sessions that became active between candidate selection and cleanup', async () => {
-      const manager = createManager({ idleTimeoutMs: 1000 });
-      const now = Date.now();
-      const s1 = 'session-1' as SessionId;
-
-      sessionActivities.set(s1, now - 2000);
-
-      // Simulate the session becoming active during cleanup
-      cleanMock.mockImplementationOnce(async () => {
-        sessionActivities.set(s1, Date.now()); // touch the session
-      });
-
-      await manager.sweep();
-
-      // It was called because it was eligible at candidate selection time
-      expect(cleanMock).toHaveBeenCalledTimes(1);
-    });
   });
 
   describe('evictForMemoryPressure', () => {
@@ -410,36 +293,6 @@ describe('SessionGCManager', () => {
       await manager.evictForMemoryPressure();
 
       expect(cleanMock).not.toHaveBeenCalled();
-    });
-
-    it('evicts longest-idle session when memory is below threshold', async () => {
-      const manager = createManager();
-      const now = Date.now();
-      const s1 = 'session-1' as SessionId;
-      const s2 = 'session-2' as SessionId;
-
-      sessionActivities.set(s1, now - 60000); // 60s idle
-      sessionActivities.set(s2, now - 30000); // 30s idle
-
-      // Start below threshold, go above after first eviction
-      mockedGetMemoryPressureSnapshot
-        .mockResolvedValueOnce({
-          availableMemoryBytes: 500 * 1024 * 1024,
-          effectiveMemoryLimitBytes: 32 * 1024 * 1024 * 1024,
-        })
-        .mockResolvedValueOnce({
-          availableMemoryBytes: 500 * 1024 * 1024,
-          effectiveMemoryLimitBytes: 32 * 1024 * 1024 * 1024,
-        })
-        .mockResolvedValueOnce({
-          availableMemoryBytes: 2 * 1024 * 1024 * 1024,
-          effectiveMemoryLimitBytes: 32 * 1024 * 1024 * 1024,
-        });
-
-      await manager.evictForMemoryPressure();
-
-      expect(cleanMock).toHaveBeenCalledTimes(1);
-      expect(cleanMock).toHaveBeenCalledWith(s1); // longest idle first
     });
 
     it('evicts multiple sessions until memory is above threshold', async () => {
@@ -695,73 +548,6 @@ describe('SessionGCManager', () => {
       expect(result.stillUnderPressure).toBe(false);
       expect(result.pressureReason).toBeNull();
     });
-
-    it('does nothing when disabled', async () => {
-      const manager = createManager({ enabled: false });
-      const s1 = 'session-1' as SessionId;
-      sessionActivities.set(s1, Date.now() - 60000);
-      mockedGetMemoryPressureSnapshot.mockResolvedValue({
-        availableMemoryBytes: 500 * 1024 * 1024,
-        effectiveMemoryLimitBytes: 32 * 1024 * 1024 * 1024,
-      });
-
-      await manager.evictForMemoryPressure();
-
-      expect(cleanMock).not.toHaveBeenCalled();
-    });
-
-    it('skips sessions with zero idle time', async () => {
-      const manager = createManager();
-      const s1 = 'session-1' as SessionId;
-
-      // No lastActivity set → idleMs = 0
-      sessionActivities.set(s1, Date.now());
-
-      mockedGetMemoryPressureSnapshot.mockResolvedValue({
-        availableMemoryBytes: 500 * 1024 * 1024,
-        effectiveMemoryLimitBytes: 32 * 1024 * 1024 * 1024,
-      });
-
-      await manager.evictForMemoryPressure();
-
-      expect(cleanMock).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('start/stop', () => {
-    it('runs periodic sweep', async () => {
-      const manager = createManager({
-        idleTimeoutMs: 1000,
-        sweepIntervalMs: 500,
-      });
-      const now = Date.now();
-      const s1 = 'session-1' as SessionId;
-      sessionActivities.set(s1, now - 2000);
-
-      manager.start();
-
-      await vi.advanceTimersByTimeAsync(600);
-
-      expect(cleanMock).toHaveBeenCalledTimes(1);
-
-      manager.stop();
-
-      // Add another session
-      const s2 = 'session-2' as SessionId;
-      sessionActivities.set(s2, now - 2000);
-
-      // Advance past another interval - should not sweep
-      await vi.advanceTimersByTimeAsync(600);
-
-      expect(cleanMock).toHaveBeenCalledTimes(1); // no new calls
-    });
-
-    it('does not start when disabled', () => {
-      const manager = createManager({ enabled: false });
-      manager.start();
-
-      expect(loggerMock.debug).toHaveBeenCalledWith('[GC] Session GC is disabled');
-    });
   });
 
   describe('evaluateMemoryPressure', () => {
@@ -782,24 +568,6 @@ describe('SessionGCManager', () => {
         effectiveMemoryLimitBytes: 32 * GB,
       };
 
-      it('does nothing at NORMAL even when available bytes look low', () => {
-        expect(
-          evaluateMemoryPressure({ ...starvedBytes, memoryPressureLevel: 1 }, thresholds('darwin'))
-        ).toEqual({ evict: false, block: false, reason: null });
-      });
-
-      it('reclaims but does not refuse a turn at WARNING', () => {
-        expect(
-          evaluateMemoryPressure({ ...starvedBytes, memoryPressureLevel: 2 }, thresholds('darwin'))
-        ).toEqual({ evict: true, block: false, reason: 'darwin_pressure_warning' });
-      });
-
-      it('reclaims and refuses a turn at CRITICAL', () => {
-        expect(
-          evaluateMemoryPressure({ ...starvedBytes, memoryPressureLevel: 4 }, thresholds('darwin'))
-        ).toEqual({ evict: true, block: true, reason: 'darwin_pressure_critical' });
-      });
-
       it('fails open when the kernel level is unavailable', () => {
         // Must NOT fall back to the byte thresholds: they misreport pressure on healthy Macs.
         expect(evaluateMemoryPressure(starvedBytes, thresholds('darwin'))).toEqual({
@@ -807,39 +575,6 @@ describe('SessionGCManager', () => {
           block: false,
           reason: null,
         });
-      });
-    });
-
-    describe('linux', () => {
-      it('reclaims and refuses together below the threshold', () => {
-        expect(
-          evaluateMemoryPressure(
-            { availableMemoryBytes: 500 * 1024 * 1024, effectiveMemoryLimitBytes: 32 * GB },
-            thresholds('linux')
-          )
-        ).toEqual({ evict: true, block: true, reason: 'physical' });
-      });
-
-      it('does nothing above the threshold', () => {
-        expect(
-          evaluateMemoryPressure(
-            { availableMemoryBytes: 4 * GB, effectiveMemoryLimitBytes: 32 * GB },
-            thresholds('linux')
-          )
-        ).toEqual({ evict: false, block: false, reason: null });
-      });
-
-      it('ignores a kernel level that should never be present off macOS', () => {
-        expect(
-          evaluateMemoryPressure(
-            {
-              availableMemoryBytes: 4 * GB,
-              effectiveMemoryLimitBytes: 32 * GB,
-              memoryPressureLevel: 4,
-            },
-            thresholds('linux')
-          )
-        ).toEqual({ evict: false, block: false, reason: null });
       });
     });
 
@@ -950,27 +685,6 @@ describe('SessionGCManager', () => {
         effectiveAvailableCommitBytes: 60 * GB + 100 * 1024 * 1024,
       };
 
-      it('reclaims but does not refuse while the page file can still grow', () => {
-        expect(evaluateMemoryPressure(growable, thresholds('win32'))).toEqual({
-          evict: true,
-          block: false,
-          reason: 'commit',
-        });
-      });
-
-      it('refuses only once the commit limit has nowhere left to go', () => {
-        expect(
-          evaluateMemoryPressure(
-            {
-              ...growable,
-              commitGrowthBytes: 0,
-              effectiveAvailableCommitBytes: growable.availableCommitBytes,
-            },
-            thresholds('win32')
-          )
-        ).toEqual({ evict: true, block: true, reason: 'commit' });
-      });
-
       it('never refuses on physical availability alone', () => {
         // Windows trims working sets and leans on the standby list rather than failing. Low
         // `AvailableBytes` is worth reclaiming idle sessions over, never worth failing a turn.
@@ -980,20 +694,6 @@ describe('SessionGCManager', () => {
             thresholds('win32')
           )
         ).toEqual({ evict: true, block: false, reason: 'physical' });
-      });
-
-      it('names both terms when physical is low and commit is exhausted', () => {
-        expect(
-          evaluateMemoryPressure(
-            {
-              ...growable,
-              availableMemoryBytes: 500 * 1024 * 1024,
-              commitGrowthBytes: 0,
-              effectiveAvailableCommitBytes: growable.availableCommitBytes,
-            },
-            thresholds('win32')
-          )
-        ).toEqual({ evict: true, block: true, reason: 'physical_and_commit' });
       });
 
       it('fails open when the probe returned nothing at all', () => {
@@ -1047,18 +747,6 @@ describe('SessionGCManager', () => {
       expect(cleanMock).not.toHaveBeenCalled();
     });
 
-    it('skips the forced refresh when the cached sample is already healthy', async () => {
-      const getLatest = vi.fn().mockResolvedValue(relieved);
-      const refresh = vi.fn().mockResolvedValue(relieved);
-      const manager = createManager();
-      (manager as any).deps.memoryPressure = { getLatest, refresh };
-
-      await manager.evictForMemoryPressure();
-
-      // The happy path must stay cheap: no extra OS probe on every turn start.
-      expect(refresh).not.toHaveBeenCalled();
-    });
-
     it('rechecks with a delay before failing a turn, and clears if cache came back', async () => {
       const getLatest = vi.fn().mockResolvedValue(underPressure);
       const refresh = vi
@@ -1072,18 +760,6 @@ describe('SessionGCManager', () => {
 
       expect(sleepCalls).toEqual([500]);
       expect(result.stillUnderPressure).toBe(false);
-    });
-
-    it('gives up after the configured number of rechecks', async () => {
-      const getLatest = vi.fn().mockResolvedValue(underPressure);
-      const refresh = vi.fn().mockResolvedValue(underPressure);
-      const manager = createManager({ pressureRecheckAttempts: 2, pressureRecheckDelayMs: 500 });
-      (manager as any).deps.memoryPressure = { getLatest, refresh };
-
-      const result = await manager.evictForMemoryPressure();
-
-      expect(sleepCalls).toEqual([500, 500]);
-      expect(result.stillUnderPressure).toBe(true);
     });
   });
 

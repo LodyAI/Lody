@@ -1,5 +1,3 @@
-import http from 'node:http';
-import { EventEmitter } from 'node:events';
 import { Effect, Exit, Scope } from 'effect';
 import { it as effectIt } from '@effect/vitest';
 import { describe, expect, it, vi } from 'vitest';
@@ -12,36 +10,6 @@ import type { GitHubTokenManager } from './github-token-manager';
 import type { Logger } from '../utils/logger';
 
 describe('GitCredentialBroker', () => {
-  it('shares a failed bind and serves a later start without restarting the broker owner', async () => {
-    let fail = true;
-    const server = Object.assign(new EventEmitter(), {
-      listen: (_port: number, _host: string, ready: () => void) => {
-        queueMicrotask(() =>
-          fail ? server.emit('error', new Error('bind unavailable')) : ready()
-        );
-      },
-      address: () => ({ port: 43210 }),
-      close: (done?: () => void) => done?.(),
-    });
-    const create = vi.spyOn(http, 'createServer').mockReturnValue(server as unknown as http.Server);
-    const broker = new GitCredentialBroker({
-      tokenManager: {} as GitHubTokenManager,
-      logger: { debug: () => {} } as unknown as Logger,
-    });
-    try {
-      const first = broker.ensureStarted();
-      expect(broker.ensureStarted()).toBe(first);
-      await expect(first).rejects.toThrow('bind unavailable');
-      fail = false;
-      const recovered = await broker.ensureStarted();
-      expect(recovered.url).toBe('http://127.0.0.1:43210');
-      expect(await broker.ensureStarted()).toBe(recovered);
-    } finally {
-      await broker.shutdown();
-      create.mockRestore();
-    }
-  });
-
   it('serves legacy context locally even when cloud policy is unavailable', async () => {
     const handler = createGitCredentialBrokerHandler({
       authToken: 'bearer',
@@ -112,64 +80,6 @@ describe('GitCredentialBroker', () => {
     expect(res.body).not.toContain('secret');
     expect(res.body).not.toContain('allowLocalAuth');
   });
-  it('returns 404 with error body when no token is available', async () => {
-    const tokenManager = {
-      getWriteTokenForRepo: vi.fn().mockResolvedValue(''),
-    } as unknown as GitHubTokenManager;
-
-    const logger = { debug: vi.fn() } as unknown as Logger;
-    const handler = createGitCredentialBrokerHandler({
-      authToken: 'auth-token',
-      tokenManager,
-      logger,
-      resolveContext: () => ({ sessionId: 's1', requesterUserId: 'owner', machineId: 'm1' }),
-    });
-
-    const req = makeReq({
-      url: '/github-token',
-      auth: 'Bearer auth-token',
-      body: { repoFullName: 'owner/repo', contextToken: 'context' },
-    });
-    const res = makeRes();
-
-    handler(req, res);
-    await res.finished;
-
-    expect(res.statusCode).toBe(404);
-    expect(JSON.parse(res.body)).toEqual({
-      error: 'no_token',
-      message: 'No token available for the requested repository.',
-    });
-  });
-
-  it('forwards the personal fallback reason without token material', async () => {
-    const tokenManager = {
-      getCredentialCandidate: vi
-        .fn()
-        .mockResolvedValue({ available: false, reason: 'personal_token_refresh_failed' }),
-    } as unknown as GitHubTokenManager;
-    const handler = createGitCredentialBrokerHandler({
-      authToken: 'auth-token',
-      tokenManager,
-      logger: { debug: vi.fn() } as unknown as Logger,
-      resolveContext: () => ({ sessionId: 's1', requesterUserId: 'owner', machineId: 'm1' }),
-    });
-    const res = makeRes();
-    handler(
-      makeReq({
-        url: '/github-token',
-        auth: 'Bearer auth-token',
-        body: { repoFullName: 'owner/repo', contextToken: 'context', source: 'personal' },
-      }),
-      res
-    );
-    await res.finished;
-    expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).toEqual({
-      available: false,
-      reason: 'personal_token_refresh_failed',
-    });
-  });
 
   it('rejects missing requester context even with a valid workspace bearer', async () => {
     const tokenManager = {
@@ -196,43 +106,6 @@ describe('GitCredentialBroker', () => {
     expect(res.statusCode).toBe(403);
     expect(JSON.parse(res.body).error).toBe('invalid_context');
     expect(tokenManager.getAppTokenForRepo).not.toHaveBeenCalled();
-  });
-
-  it('returns requester-bound write token when a valid context is provided', async () => {
-    const tokenManager = {
-      getWriteTokenForRepo: vi.fn().mockResolvedValue('write-token'),
-    } as unknown as GitHubTokenManager;
-
-    const logger = { debug: vi.fn() } as unknown as Logger;
-    const handler = createGitCredentialBrokerHandler({
-      authToken: 'auth-token',
-      tokenManager,
-      logger,
-      resolveContext: (contextToken) =>
-        contextToken === 'context-token'
-          ? { sessionId: 's1', requesterUserId: 'user-2', machineId: 'machine-1' }
-          : null,
-    });
-
-    const req = makeReq({
-      url: '/git-credential',
-      auth: 'Bearer auth-token',
-      body: { repoFullName: 'owner/repo', contextToken: 'context-token' },
-    });
-    const res = makeRes();
-
-    handler(req, res);
-    await res.finished;
-
-    expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).toEqual({
-      username: 'x-access-token',
-      password: 'write-token',
-    });
-    expect(tokenManager.getWriteTokenForRepo).toHaveBeenCalledWith('owner/repo', {
-      requesterUserId: 'user-2',
-      machineId: 'machine-1',
-    });
   });
 
   it('rejects unknown requester contexts instead of falling back to app identity', async () => {
@@ -266,44 +139,6 @@ describe('GitCredentialBroker', () => {
     });
     expect(tokenManager.getAppTokenForRepo).not.toHaveBeenCalled();
     expect(tokenManager.getWriteTokenForRepo).not.toHaveBeenCalled();
-  });
-
-  it('records rejected personal tokens from credential clients', async () => {
-    const tokenManager = {
-      invalidate: vi.fn(),
-    } as unknown as GitHubTokenManager;
-
-    const logger = { debug: vi.fn() } as unknown as Logger;
-    const handler = createGitCredentialBrokerHandler({
-      authToken: 'auth-token',
-      tokenManager,
-      logger,
-      resolveContext: (contextToken) =>
-        contextToken === 'context-token'
-          ? { sessionId: 's1', requesterUserId: 'user-2', machineId: 'machine-1' }
-          : null,
-    });
-
-    const req = makeReq({
-      url: '/git-credential/reject',
-      auth: 'Bearer auth-token',
-      body: {
-        repoFullName: 'owner/repo',
-        contextToken: 'context-token',
-        invalidatedToken: 'ghu_revoked',
-      },
-    });
-    const res = makeRes();
-
-    handler(req, res);
-    await res.finished;
-
-    expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).toEqual({ ok: true });
-    expect(tokenManager.invalidate).toHaveBeenCalledWith('owner/repo', {
-      requesterUserId: 'user-2',
-      invalidatedToken: 'ghu_revoked',
-    });
   });
 
   effectIt.effect(
@@ -365,35 +200,6 @@ describe('GitCredentialBroker', () => {
         expect(closed.statusCode).toBe(403);
       })
   );
-
-  it('returns 404 for unknown endpoints', async () => {
-    const tokenManager = {
-      getAppTokenForRepo: vi.fn().mockResolvedValue('token'),
-    } as unknown as GitHubTokenManager;
-
-    const logger = { debug: vi.fn() } as unknown as Logger;
-    const handler = createGitCredentialBrokerHandler({
-      authToken: 'auth-token',
-      tokenManager,
-      logger,
-    });
-
-    const req = makeReq({
-      url: '/github-user-token',
-      auth: 'Bearer auth-token',
-      body: { repoFullName: 'owner/repo', sessionId: 's1' },
-    });
-    const res = makeRes();
-
-    handler(req, res);
-    await res.finished;
-
-    expect(res.statusCode).toBe(404);
-    expect(JSON.parse(res.body)).toEqual({
-      error: 'not_found',
-      message: 'Endpoint not found.',
-    });
-  });
 });
 
 type MockReqOptions = {

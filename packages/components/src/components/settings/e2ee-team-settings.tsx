@@ -2,11 +2,12 @@ import { hostLedgerHistory, bytesToHex } from '@/lib/e2ee-ledger-history';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import type { E2eeWorkspaceRuntime } from '@lody/platform';
+import type { E2eeMemberKeyDelivery, E2eeWorkspaceRuntime } from '@lody/platform';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Card } from '@lody/ui/card';
+import { Spinner } from '@lody/ui/spinner';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { getAppShareUrl } from '@/lib/app-location';
@@ -20,7 +21,8 @@ type Runtime = Pick<
   | 'rejectMemberJoin'
   | 'revokeMemberInvitation'
   | 'setMemberRole'
->;
+> &
+  Partial<Pick<E2eeWorkspaceRuntime, 'memberKeyDeliveries' | 'retryMemberKeyDelivery'>>;
 const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
   row: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
@@ -35,6 +37,7 @@ const styles = stylex.create({
     borderBottomStyle: 'solid',
     borderBottomColor: colors.separator,
   },
+  busy: { display: 'inline-flex', alignItems: 'center', gap: space[2] },
   code: {
     fontFamily: 'monospace',
     overflowWrap: 'anywhere',
@@ -71,6 +74,10 @@ function TeamSession({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [link, setLink] = useState<string | null>(null);
+  const [approving, setApproving] = useState<string | null>(null);
+  const [deliveries, setDeliveries] = useState<E2eeMemberKeyDelivery[]>([]);
+  // Applicants leave the request list once committed; keep their label for delivery rows.
+  const applicants = useRef(new Map<string, string>());
   const owner = useRef(runtime);
   owner.current = runtime;
   const live = useRef(true);
@@ -82,9 +89,23 @@ function TeamSession({
       live.current = false;
     };
   }, []);
+  const remember = (value: E2eeMemberReplies['pending']) => {
+    for (const item of value.items)
+      applicants.current.set(
+        item.requestId,
+        item.applicantName || item.applicantEmail || t('e2ee.team.applicant')
+      );
+  };
+  const readDeliveries = async () => {
+    if (!runtime.memberKeyDeliveries) return;
+    const value = await runtime.memberKeyDeliveries(workspaceId);
+    if (current()) setDeliveries(value.items);
+  };
   const refresh = async () => {
     const value = await runtime.memberJoinRequests!(workspaceId);
+    remember(value);
     if (current()) setData(value);
+    await readDeliveries().catch(() => {});
   };
   const perform = async (action: () => Promise<void>) => {
     if (working.current) return;
@@ -107,9 +128,16 @@ function TeamSession({
     const read = async () => {
       try {
         const value = await runtime.memberJoinRequests!(workspaceId);
+        remember(value);
         if (!disposed) setData(value);
       } catch {
         if (!disposed) setMessage(t('e2ee.team.loadFailed'));
+      }
+      try {
+        const value = await runtime.memberKeyDeliveries?.(workspaceId);
+        if (!disposed && value) setDeliveries(value.items);
+      } catch {
+        /* Delivery state is advisory; the request list keeps its own failure message. */
       } finally {
         if (!disposed) timer = setTimeout(() => void read(), 10_000);
       }
@@ -142,7 +170,7 @@ function TeamSession({
       await refresh();
     });
   return (
-    <Card.Root>
+    <Card.Root data-testid="e2ee-team-settings">
       <Card.Header>
         <Card.Title>{t('e2ee.team.title')}</Card.Title>
         <Card.Description>{t('e2ee.team.help')}</Card.Description>
@@ -166,18 +194,18 @@ function TeamSession({
             onChange={(event) => setEmail(event.target.value)}
             disabled={busy}
           />
-          <Button type="submit" disabled={busy || !data}>
+          <Button data-testid="e2ee-invite-email" type="submit" disabled={busy || !data}>
             {t('e2ee.team.invite')}
           </Button>
         </form>
         <div {...stylex.props(styles.row)}>
-          <Button variant="secondary" disabled={busy || !data} onClick={() => void create('link')}>
+          <Button data-testid="e2ee-invite-link-create" variant="secondary" disabled={busy || !data} onClick={() => void create('link')}>
             {t('e2ee.team.createLink')}
           </Button>
           <span {...stylex.props(styles.label)}>{t('e2ee.team.linkHelp')}</span>
         </div>
         {link && (
-          <Input
+          <Input data-testid="e2ee-invitation-link"
             aria-label={t('e2ee.team.invitationLink')}
             readOnly
             value={link}
@@ -189,7 +217,7 @@ function TeamSession({
           <p {...stylex.props(styles.label)}>{t('e2ee.team.noRequests')}</p>
         )}
         {data?.items.map((request) => (
-          <div key={request.requestId} {...stylex.props(styles.item)}>
+          <div data-testid="e2ee-join-request" data-request-id={request.requestId} key={request.requestId} {...stylex.props(styles.item)}>
             <div {...stylex.props(styles.row)}>
               <span {...stylex.props(styles.identity)}>
                 {request.applicantName || request.applicantEmail || t('e2ee.team.applicant')}
@@ -209,24 +237,41 @@ function TeamSession({
             </details>
             <div {...stylex.props(styles.row)}>
               <Button
+                data-testid="e2ee-join-approve"
+                data-request-id={request.requestId}
                 disabled={busy}
+                aria-busy={approving === request.requestId || undefined}
                 onClick={() =>
                   void perform(async () => {
-                    const result = await runtime.approveMemberJoin!(
-                      workspaceId,
-                      request.requestId,
-                      'explicit'
-                    );
-                    if (current())
-                      setMessage(
-                        t(result.admitted ? 'e2ee.team.admitted' : 'e2ee.team.reconciling')
+                    setApproving(request.requestId);
+                    try {
+                      const result = await runtime.approveMemberJoin!(
+                        workspaceId,
+                        request.requestId,
+                        'explicit'
                       );
+                      if (current())
+                        setMessage(
+                          t(result.admitted ? 'e2ee.team.admitted' : 'e2ee.team.reconciling')
+                        );
+                    } finally {
+                      if (current()) setApproving(null);
+                    }
                     await refresh();
                   })
                 }
               >
-                {t(
-                  request.source === 'email' ? 'e2ee.team.continueAdmission' : 'e2ee.team.approve'
+                {approving === request.requestId ? (
+                  <span {...stylex.props(styles.busy)}>
+                    <Spinner size="small" label={null} />
+                    {t('e2ee.team.submitting')}
+                  </span>
+                ) : (
+                  t(
+                    request.source === 'email'
+                      ? 'e2ee.team.continueAdmission'
+                      : 'e2ee.team.approve'
+                  )
                 )}
               </Button>
               {request.state === 'pending' && (
@@ -247,6 +292,53 @@ function TeamSession({
           </div>
         ))}
         {data?.hasMore && <p>{t('e2ee.team.moreRequests')}</p>}
+        {deliveries
+          .filter((delivery) => delivery.state !== 'delivered')
+          .map((delivery) => (
+            <div
+              data-testid="e2ee-key-delivery"
+              data-key-delivery-id={delivery.requestId}
+              key={delivery.requestId}
+              {...stylex.props(styles.row)}
+            >
+              <span {...stylex.props(styles.identity)}>
+                {applicants.current.get(delivery.requestId) ?? t('e2ee.team.applicant')}
+              </span>
+              {delivery.state === 'failed' ? (
+                <>
+                  <span role="status" {...stylex.props(styles.label)}>
+                    {t('e2ee.team.keyFailed')}
+                  </span>
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      void (async () => {
+                        try {
+                          const next = await runtime.retryMemberKeyDelivery?.(
+                            workspaceId,
+                            delivery.requestId
+                          );
+                          if (next && current())
+                            setDeliveries((items) =>
+                              items.map((item) => (item.requestId === next.requestId ? next : item))
+                            );
+                        } catch {
+                          /* The next poll shows the retained failure again. */
+                        }
+                      })()
+                    }
+                  >
+                    {t('e2ee.team.keyRetry')}
+                  </Button>
+                </>
+              ) : (
+                <span role="status" {...stylex.props(styles.busy, styles.label)}>
+                  <Spinner size="small" label={null} />
+                  {t('e2ee.team.keySending')}
+                </span>
+              )}
+            </div>
+          ))}
         {canPromote &&
           runtime.setMemberRole &&
           members?.some((member) => member.role === 'member') && (
@@ -259,7 +351,7 @@ function TeamSession({
                     <span {...stylex.props(styles.identity)}>
                       {member.name ?? t('e2ee.team.member')}
                     </span>
-                    <Button
+                    <Button data-testid="e2ee-member-promote" data-membership-id={member.membershipId}
                       variant="secondary"
                       disabled={busy}
                       onClick={() =>

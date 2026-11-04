@@ -83,6 +83,7 @@ export interface SessionChatStreamProps {
   onFilePathClick?: (filePath: string) => void;
   /** Routes HTML attachment clicks to a live file or Browser surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
+  onAnnotateImage?: SessionChatStreamViewProps['onAnnotateImage'];
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
   assistantActionsMessageId?: string | null;
@@ -185,6 +186,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onAnnotateImage,
       messageFileDiffEntriesByTurn,
       assistantActions,
       assistantActionsMessageId,
@@ -304,6 +306,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         onFileDiffClick={hasFileDiffClick ? stableOnFileDiffClick : undefined}
         onFilePathClick={hasFilePathClick ? stableOnFilePathClick : undefined}
         onOpenHtmlFile={onOpenHtmlFile}
+        onAnnotateImage={onAnnotateImage}
         lastAssistantMessageId={lastAssistantMessageId}
         lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
         messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}

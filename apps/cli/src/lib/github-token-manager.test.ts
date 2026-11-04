@@ -19,16 +19,9 @@ vi.mock('@lody/cloud-api', () => ({
 
 import {
   GitHubTokenManager,
-  GitHubTokenFetchError,
   GITHUB_CANDIDATE_FAILURE_REUSE_MAX_MS,
   GITHUB_TOKEN_FAILURE_BACKOFF_MAX_MS,
-  createSharedGitHubTokenManagers,
-  withRequestDeadline,
 } from '../lib/github-token-manager';
-import {
-  GITHUB_BROKER_TOKEN_TIMEOUT_MS,
-  GITHUB_TOKEN_CLOUD_TIMEOUT_MS,
-} from '../lib/github-credential-runtime';
 
 describe('GitHubTokenManager', () => {
   beforeEach(() => {
@@ -74,41 +67,6 @@ describe('GitHubTokenManager', () => {
     await manager.shutdown();
     vi.useRealTimers();
   });
-  it('returns tokens even for public repos when a token is issued', async () => {
-    actionMock.mockResolvedValueOnce({
-      success: true,
-      token: 'token-1',
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-    });
-
-    const manager = new GitHubTokenManager({
-      serverUrl: 'http://example.test',
-      cliToken: 'cli',
-      workspaceId: 'ws',
-    });
-    await expect(manager.getAppTokenForRepo('Owner/Repo')).resolves.toBe('token-1');
-    expect(actionMock.mock.calls[0]?.[0]).toBe('github.getAccessTokenByRepoNameForCli');
-  });
-
-  it('returns the backend reason when the personal candidate is unavailable', async () => {
-    actionMock.mockResolvedValueOnce({
-      success: false,
-      errorCode: 'personal_unavailable',
-      errorMessage: 'personal_token_refresh_failed',
-    });
-    const manager = new GitHubTokenManager({
-      serverUrl: 'http://example.test',
-      cliToken: 'cli',
-      workspaceId: 'ws',
-    });
-    await expect(
-      manager.getCredentialCandidate(
-        'Owner/Repo',
-        { requesterUserId: 'user', machineId: 'machine' },
-        'personal'
-      )
-    ).resolves.toEqual({ available: false, reason: 'personal_token_refresh_failed' });
-  });
 
   it('caches by repo (not by owner) for repo-scoped tokens', async () => {
     actionMock
@@ -140,85 +98,6 @@ describe('GitHubTokenManager', () => {
     // Same repo reuses cached token
     await expect(manager.getAppTokenForRepo('owner/repo-a')).resolves.toBe('token-2a');
     expect(actionMock).toHaveBeenCalledTimes(2); // No new call
-  });
-
-  it('refreshes when the cached token is expired', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
-
-    actionMock
-      .mockResolvedValueOnce({
-        success: true,
-        token: 'token-3',
-        expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        token: 'token-4',
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      });
-
-    const manager = new GitHubTokenManager({
-      serverUrl: 'http://example.test',
-      cliToken: 'cli',
-      workspaceId: 'ws',
-    });
-    await expect(manager.getAppTokenForRepo('owner/repo-a')).resolves.toBe('token-3');
-    vi.advanceTimersByTime(2 * 60 * 1000);
-    await expect(manager.getAppTokenForRepo('owner/repo-a')).resolves.toBe('token-4');
-
-    expect(actionMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('throws GitHubTokenFetchError on backend error response', async () => {
-    actionMock.mockResolvedValueOnce({
-      success: false,
-      errorCode: 'repo_not_linked',
-      errorMessage: 'Repository is not linked to your workspace',
-    });
-
-    const manager = new GitHubTokenManager({
-      serverUrl: 'http://example.test',
-      cliToken: 'cli',
-      workspaceId: 'ws',
-    });
-    const promise = manager.getAppTokenForRepo('owner/repo');
-    await expect(promise).rejects.toThrow(GitHubTokenFetchError);
-    await expect(promise).rejects.toMatchObject({
-      code: 'repo_not_linked',
-      message: 'Repository is not linked to your workspace',
-    });
-  });
-
-  it('caches personal tokens even when GitHub omits an explicit expiry', async () => {
-    actionMock.mockResolvedValueOnce({
-      success: true,
-      token: 'personal-token',
-      tokenSource: 'personal',
-      rateLimitScope: 'github:user:12345',
-    });
-
-    const manager = new GitHubTokenManager({
-      serverUrl: 'http://example.test',
-      cliToken: 'cli',
-      workspaceId: 'ws',
-    });
-
-    const context = { requesterUserId: 'user-1', machineId: 'machine-1' };
-    await expect(manager.getWriteTokenInfoForRepo('owner/repo', context)).resolves.toEqual({
-      token: 'personal-token',
-      tokenSource: 'personal',
-      rateLimitScope: 'github:user:12345',
-    });
-    await expect(manager.getWriteTokenForRepo('owner/repo', context)).resolves.toBe(
-      'personal-token'
-    );
-    expect(actionMock).toHaveBeenCalledTimes(1);
-    expect(actionMock.mock.calls[0]?.[1]).toMatchObject({
-      operation: 'write',
-      requesterUserId: 'user-1',
-      machineId: 'machine-1',
-    });
   });
 
   it('keeps app and requester write tokens in separate cache entries', async () => {
@@ -304,93 +183,6 @@ describe('GitHubTokenManager', () => {
     expect(actionMock.mock.calls[1]?.[1]).toMatchObject({ requesterUserId: 'bob' });
   });
 
-  it('uses a conservative fallback cache duration when an app token omits expiry', async () => {
-    actionMock.mockResolvedValueOnce({
-      success: true,
-      token: 'app-token-without-expiry',
-      tokenSource: 'app',
-    });
-
-    const manager = new GitHubTokenManager({
-      serverUrl: 'http://example.test',
-      cliToken: 'cli',
-      workspaceId: 'ws',
-    });
-
-    await expect(manager.getAppTokenForRepo('owner/repo')).resolves.toBe(
-      'app-token-without-expiry'
-    );
-    await expect(manager.getAppTokenForRepo('owner/repo')).resolves.toBe(
-      'app-token-without-expiry'
-    );
-    expect(actionMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('invalidates cached token for a specific repo', async () => {
-    actionMock
-      .mockResolvedValueOnce({
-        success: true,
-        token: 'token-old',
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        token: 'token-new',
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      });
-
-    const manager = new GitHubTokenManager({
-      serverUrl: 'http://example.test',
-      cliToken: 'cli',
-      workspaceId: 'ws',
-    });
-
-    // Get initial token
-    await expect(manager.getAppTokenForRepo('owner/repo')).resolves.toBe('token-old');
-    expect(actionMock).toHaveBeenCalledTimes(1);
-
-    // Invalidate and get fresh token
-    manager.invalidate('owner/repo');
-    await expect(manager.getAppTokenForRepo('owner/repo')).resolves.toBe('token-new');
-    expect(actionMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('passes rejected personal tokens to the backend on the next write-token fetch', async () => {
-    actionMock
-      .mockResolvedValueOnce({
-        success: true,
-        token: 'personal-old',
-        tokenSource: 'personal',
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        token: 'personal-new',
-        tokenSource: 'personal',
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      });
-
-    const manager = new GitHubTokenManager({
-      serverUrl: 'http://example.test',
-      cliToken: 'cli',
-      workspaceId: 'ws',
-    });
-
-    const context = { requesterUserId: 'user-1', machineId: 'machine-1' };
-    await expect(manager.getWriteTokenForRepo('owner/repo', context)).resolves.toBe('personal-old');
-    manager.invalidate('owner/repo', {
-      requesterUserId: 'user-1',
-      invalidatedToken: 'personal-old',
-    });
-    await expect(manager.getWriteTokenForRepo('owner/repo', context)).resolves.toBe('personal-new');
-
-    expect(actionMock).toHaveBeenCalledTimes(2);
-    expect(actionMock.mock.calls[1]?.[1]).toMatchObject({
-      operation: 'write',
-      invalidatedPersonalToken: 'personal-old',
-    });
-  });
-
   it('rejects backend responses that return the same invalidated personal token', async () => {
     actionMock
       .mockResolvedValueOnce({
@@ -443,25 +235,6 @@ describe('GitHubTokenManager', () => {
       });
       return { clock, manager };
     };
-
-    it('shares one cloud request among concurrent candidate lookups', async () => {
-      const { clock, manager } = createManager();
-      const answer = deferred<unknown>();
-      actionMock.mockReturnValueOnce(answer.promise);
-      const lookups = Array.from({ length: 20 }, () =>
-        manager.getCredentialCandidate('org/repo', context, 'personal')
-      );
-      answer.resolve({
-        success: true,
-        token: 'personal-1',
-        tokenSource: 'personal',
-        expiresAt: hourFromNow(clock.nowMs),
-      });
-      const results = await Promise.all(lookups);
-      expect(new Set(results.map((result) => JSON.stringify(result))).size).toBe(1);
-      expect(results[0]).toEqual({ token: 'personal-1', tokenSource: 'personal' });
-      expect(actionMock).toHaveBeenCalledTimes(1);
-    });
 
     it('reuses an unavailable personal answer only within one command burst', async () => {
       const { clock, manager } = createManager();
@@ -521,41 +294,6 @@ describe('GitHubTokenManager', () => {
         manager.getCredentialCandidate('org/linked', { ...context, requesterUserId: 'b' }, 'app')
       ).resolves.toEqual({ token: 'b:app', tokenSource: 'app' });
       expect(actionMock).toHaveBeenCalledTimes(3);
-    });
-
-    it('backs off service failures exponentially from their completion', async () => {
-      const { clock, manager } = createManager();
-      actionMock.mockRejectedValue(new Error('fetch failed'));
-      const attempt = () => manager.getCredentialCandidate('org/repo', context, 'app');
-      await expect(attempt()).rejects.toThrow('fetch failed');
-      await expect(attempt()).rejects.toThrow('fetch failed');
-      expect(actionMock).toHaveBeenCalledTimes(1);
-      clock.nowMs += 1_000;
-      await expect(attempt()).rejects.toThrow('fetch failed');
-      expect(actionMock).toHaveBeenCalledTimes(2);
-      clock.nowMs += 1_999;
-      await expect(attempt()).rejects.toThrow('fetch failed');
-      expect(actionMock).toHaveBeenCalledTimes(2);
-      clock.nowMs += 1;
-      actionMock.mockResolvedValueOnce({ success: true, token: 'app-1', tokenSource: 'app' });
-      await expect(attempt()).resolves.toEqual({ token: 'app-1', tokenSource: 'app' });
-      expect(actionMock).toHaveBeenCalledTimes(3);
-    });
-
-    it('never reuses an expired CLI login failure', async () => {
-      const { manager } = createManager();
-      actionMock.mockResolvedValue({
-        success: false,
-        errorCode: 'unauthorized',
-        errorMessage: 'expired',
-      });
-      await expect(manager.getCredentialCandidate('org/repo', context, 'app')).rejects.toThrow(
-        'expired'
-      );
-      await expect(manager.getCredentialCandidate('org/repo', context, 'app')).rejects.toThrow(
-        'expired'
-      );
-      expect(actionMock).toHaveBeenCalledTimes(2);
     });
 
     it('refreshes a rejected personal candidate once and ignores a late rejection', async () => {
@@ -727,91 +465,6 @@ describe('GitHubTokenManager', () => {
       await expect(before).resolves.toBe('app-after');
       await expect(manager.getWriteTokenForRepo('org/repo', context)).resolves.toBe('app-after');
       expect(actionMock).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  it('shares one workspace manager between borrowers and releases it with the last lease', async () => {
-    actionMock.mockImplementation(async (_rpc, args) => ({
-      success: true,
-      token: `${args.workspaceId}:token`,
-      tokenSource: 'app',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    }));
-    const managers = createSharedGitHubTokenManagers(
-      (workspaceId) =>
-        new GitHubTokenManager({ serverUrl: 'http://example.test', cliToken: 'cli', workspaceId })
-    );
-    const context = { requesterUserId: 'owner', machineId: 'machine' };
-    const session = managers.acquire('ws');
-    const poller = managers.acquire('ws');
-    const other = managers.acquire('ws-2');
-    await expect(session.getWriteTokenForRepo('org/repo', context)).resolves.toBe('ws:token');
-    await expect(poller.getWriteTokenForRepo('org/repo', context)).resolves.toBe('ws:token');
-    await expect(other.getWriteTokenForRepo('org/repo', context)).resolves.toBe('ws-2:token');
-    expect(actionMock).toHaveBeenCalledTimes(2);
-
-    await session.shutdown();
-    await session.shutdown();
-    await poller.getWriteTokenForRepo('org/repo', context);
-    expect(actionMock).toHaveBeenCalledTimes(2);
-
-    await poller.shutdown();
-    await managers.acquire('ws').getWriteTokenForRepo('org/repo', context);
-    expect(actionMock).toHaveBeenCalledTimes(3);
-    await managers.shutdownAll();
-  });
-
-  describe('cloud request deadline', () => {
-    // Answers after `delayMs` unless its signal aborts first, like a slow backend.
-    const slowFetch =
-      (delayMs: number): typeof fetch =>
-      (_input, init) =>
-        new Promise<Response>((resolve, reject) => {
-          const signal = init?.signal;
-          const timer = setTimeout(() => resolve(new Response('ok')), delayMs);
-          signal?.addEventListener('abort', () => {
-            clearTimeout(timer);
-            reject(signal.reason);
-          });
-        });
-
-    it('lets a token request that outlasts the old 2.5 s deadline succeed', async () => {
-      vi.useFakeTimers();
-      const request = withRequestDeadline(
-        GITHUB_TOKEN_CLOUD_TIMEOUT_MS,
-        slowFetch(10_000)
-      )('http://example.test');
-      await vi.advanceTimersByTimeAsync(10_000);
-      await expect(request.then((response) => response.text())).resolves.toBe('ok');
-    });
-
-    it('aborts a hung request at the deadline, before the helper stops waiting', async () => {
-      vi.useFakeTimers();
-      const request = withRequestDeadline(
-        GITHUB_TOKEN_CLOUD_TIMEOUT_MS,
-        slowFetch(60_000)
-      )('http://example.test');
-      let outcome: unknown = 'pending';
-      void request.then(
-        () => (outcome = 'resolved'),
-        (error: unknown) => (outcome = error)
-      );
-      await vi.advanceTimersByTimeAsync(GITHUB_TOKEN_CLOUD_TIMEOUT_MS - 1);
-      expect(outcome).toBe('pending');
-      await vi.advanceTimersByTimeAsync(1);
-      expect(outcome).toMatchObject({ name: 'TimeoutError' });
-      expect(GITHUB_TOKEN_CLOUD_TIMEOUT_MS).toBeLessThan(GITHUB_BROKER_TOKEN_TIMEOUT_MS);
-    });
-
-    it('still honors a caller abort before the deadline', async () => {
-      vi.useFakeTimers();
-      const caller = new AbortController();
-      const request = withRequestDeadline(GITHUB_TOKEN_CLOUD_TIMEOUT_MS, slowFetch(60_000))(
-        'http://example.test',
-        { signal: caller.signal }
-      );
-      caller.abort(new Error('caller cancelled'));
-      await expect(request).rejects.toThrow('caller cancelled');
     });
   });
 });

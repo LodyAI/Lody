@@ -70,7 +70,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Keep one Repo view across auth refresh and unrelated mode-cache changes;
   `WorkspaceTargetRouter` owns target/transport selection.
   Never restore a second writer or proxy-authoring/write-intent mirror.
-- Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
+- Runtime close retries recoverable cleanup, retaining fencing until confirmed Repo destruction.
   Failed startup shares this close path.
 - Local-only bootstrap exchanges CRDT snapshots only from already owned documents
   in the same workspace. Merge into the receiving Repo; peer state is not authoritative,
@@ -87,13 +87,13 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   transports before recording an encrypted or contradictory verdict.
 - Open E2EE locally; keep host keys, a dedicated bucket, Loro history and waiting-key
   leases. No plaintext bypass. Keep already sealed old-epoch sends and historical reads;
-  native hosts select the verified current epoch for each new seal and fail for retry
-  when its key is missing. Cached provider epoch hints never select an older write key. Never persist content tokens; forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.
+  hosts prefer installed current keys; genuine absence permits retained published keys within
+  the durable fifteen-minute grace, then fails for retry. Cached hints never select write keys. Never persist content tokens; forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.
   Drain before deleting that instance; retain exact receipts.
   [Sealing](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md),
   [M2](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
   [transport](../../../../specs/workspace-streams-content.md).
-- Missing-current-key save notices observe existing transitions; they never retry, gate, or discard edits.
+- Missing-key notices start thirty seconds after explicit post-grace seal failure and clear on successful saves; they never retry, gate, or discard edits.
 - Select transport per room, never merge. Use `getReadinessTransportForRoom`;
   hooks without the router use `src/lib/room-readiness.ts`. Keep rules aligned.
 - The local renderer identity comes atomically from the Electron local-platform snapshot
@@ -137,4 +137,4 @@ snapshots and join leases. Unready Blobs stay in memory; uncertain steers never 
   leases fence cold opens. Begin native fencing with renderer cleanup. Retain full
   incomplete owners; only overlapping custody bindings or Repo namespaces wait.
   Independent workspaces remain usable. Device replacement shares its
-  account/workspace/genesis writer. Usable retained epochs wake existing admission.
+  account/workspace/genesis writer. First key reception keeps admission pending; usable epochs wake content.

@@ -25,8 +25,8 @@ export function createE2eeContent(input: {
   epoch: number;
   authToken: () => string | null | undefined;
   rotationRequired?: boolean;
-  /** `seal` marks an unresolved save failure with a verified missing-current-key status. */
-  onKeyUpdateRequired?: (source?: 'seal') => void;
+  /** `seal` marks an explicit exhausted/unavailable-grace failure with verified missing-current-key status. */
+  onKeyUpdateRequired?: (source?: 'seal' | 'seal-complete') => void;
   /** Credential-authenticated member removal or revocation of this device. */
   onMemberRemoved?: (reason: E2eeAccessLoss) => void;
   onSnapshotRecoveryChange?: (pending: boolean) => void;
@@ -164,12 +164,28 @@ export function createE2eeContent(input: {
                   additionalData,
                 });
               try {
-                return await (effects ? effects.track('write', seal) : seal());
+                const value = await (effects ? effects.track('write', seal) : seal());
+                if (currentKeyMissing) {
+                  try {
+                    input.onKeyUpdateRequired?.('seal-complete');
+                  } catch {
+                    /* A notice cannot turn a completed save into a failure. */
+                  }
+                }
+                return value;
               } catch (error) {
                 if (
                   !closed &&
                   !lost &&
                   !e2eeAccessLoss(error) &&
+                  ((error instanceof Error &&
+                    /^(?:Error invoking remote method 'e2ee[.:]seal': Error: )?e2ee_key-update-required$/.test(
+                      error.message
+                    )) ||
+                    (typeof error === 'object' &&
+                      error !== null &&
+                      'code' in error &&
+                      error.code === 'key-update-required')) &&
                   currentKeyMissing &&
                   transition.needsUpdate()
                 ) {

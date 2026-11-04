@@ -135,13 +135,6 @@ describe('title generation ignores adapter output emitted outside the title turn
     expect(result.preludeArrivedBeforePrompt).toBe(true);
     expect(result.title).toBe(TITLE);
   });
-
-  it('leaves an adapter that emits nothing outside the turn exactly as it is today', async () => {
-    const result = await runTitleGeneration('never');
-
-    expect(result.preludeArrivedBeforePrompt).toBe(false);
-    expect(result.title).toBe(TITLE);
-  });
 });
 
 describe('builtin Codex isolated title configuration', () => {

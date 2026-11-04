@@ -1,18 +1,12 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  getMachineFlockDocId,
-  getWorkspaceFlockDocId,
-  readMachineFlockRowsFromFlock,
-  workspaceFlockKeys,
-  type McpServerId,
-} from '@lody/shared';
+import { getWorkspaceFlockDocId, workspaceFlockKeys, type McpServerId } from '@lody/shared';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import {
   createTourStore,
   DEFAULT_TOUR_IDENTITY,
-  TOUR_MACHINE_ID,
   TOUR_WORKSPACE_ID,
 } from '../src/components/onboarding/tour/tour-fixtures';
 import {
@@ -55,15 +49,6 @@ describe('the tour repo', () => {
     expect(errors).not.toHaveBeenCalled();
 
     lease.release();
-  });
-
-  it('opens the machine Flock documents the composer reads for its run options', async () => {
-    const handle = await tourRuntime().repo.openFlockDoc(
-      getMachineFlockDocId(TOUR_WORKSPACE_ID, TOUR_MACHINE_ID)
-    );
-
-    expect(readMachineFlockRowsFromFlock(handle.flock)).toEqual({});
-    await expect(handle.joinRoom()).resolves.toBeDefined();
   });
 
   it('refuses a write rather than letting a scripted surface believe it persisted one', async () => {

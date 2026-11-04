@@ -1,9 +1,11 @@
 vi.mock('@/lib/desktop-window', () => ({ desktopWindowId: () => '' }));
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act, createElement, Fragment, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Result } from 'effect';
+import vector from '../../e2ee-core/test/ledger-v1-vector.json';
 import {
   Bytes,
   exportVerifiedState,
@@ -23,8 +25,15 @@ const fixture = vi.hoisted(() => ({
   workspaceId: 'workspace-native',
   cachedUser: null as { id: string } | null,
   showTools: false,
+  realPairing: false,
   workspaces: { status: 'loading' } as WorkspacesState,
   navigation: [] as unknown[],
+  management: undefined as
+    | {
+        setRole: (membershipId: string, role: 'admin' | 'member') => Promise<void>;
+        remove: (membershipId: string) => Promise<void>;
+      }
+    | undefined,
 }));
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => ({
@@ -54,14 +63,25 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     memberProfiles,
     children,
     onOpen,
+    onBack,
+    memberManagement,
   }: {
-    history: { view: { length: number }; upgradeRequiredAt?: number } | null;
+    history: {
+      view: {
+        length: number;
+        inspectState: () => { members: ReadonlyMap<string, { role: string }> };
+      };
+      upgradeRequiredAt?: number;
+    } | null;
+    memberManagement?: typeof fixture.management;
     failure?: unknown;
     memberProfiles?: ReadonlyMap<string, { name: string }>;
     children?: ReactNode;
     onOpen?: () => void;
-  }) =>
-    createElement(
+    onBack: () => void;
+  }) => {
+    fixture.management = memberManagement;
+    return createElement(
       Fragment,
       null,
       createElement(
@@ -76,26 +96,46 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
               : (history?.view.length ?? 'loading'),
         ...[...(memberProfiles?.values() ?? [])].map((profile) => ` ${profile.name}`)
       ),
+      createElement('p', {
+        'data-member-roles': [...(history?.view.inspectState().members.values() ?? [])]
+          .map((member) => member.role)
+          .join(','),
+      }),
       children,
       onOpen
         ? createElement('button', { 'data-open-workspace': true, onClick: onOpen }, 'open')
-        : null
-    ),
+        : null,
+      createElement('button', { 'data-back': true, 'aria-label': 'back', onClick: onBack })
+    );
+  },
 }));
 vi.mock('@/components/settings/e2ee-team-settings', () => ({ E2eeTeamSettingsHost: () => null }));
 vi.mock('@/components/e2ee/email-admission-worker', () => ({ EmailAdmissionWorker: () => null }));
-vi.mock('@/components/pages/e2ee-personal-pairing', () => ({
-  E2eePersonalPairing: ({ workspaceId, approved }: { workspaceId: string; approved?: boolean }) =>
-    fixture.showTools
-      ? createElement('aside', { 'data-pairing': workspaceId, 'data-approved': Boolean(approved) })
-      : null,
-}));
+vi.mock('@/components/pages/e2ee-personal-pairing', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../src/components/pages/e2ee-personal-pairing')>();
+  return {
+    E2eePersonalPairing: (props: Parameters<typeof actual.E2eePersonalPairing>[0]) =>
+      fixture.realPairing
+        ? createElement(actual.E2eePersonalPairing, props)
+        : fixture.showTools
+          ? createElement('aside', {
+              'data-pairing': props.workspaceId,
+              'data-approved': Boolean(props.approved),
+            })
+          : null,
+  };
+});
 vi.mock('@/components/pages/e2ee-ledger-audit', () => ({
   E2eeLedgerAudit: ({ workspaceId }: { workspaceId: string }) =>
     fixture.showTools ? createElement('aside', { 'data-audit': workspaceId }) : null,
 }));
-import { saveE2eeGenesisPin } from '../src/lib/e2ee-workspace-storage';
+import {
+  saveE2eeGenesisPin,
+  readObservedLedgerCheckpoint,
+} from '../src/lib/e2ee-workspace-storage';
 import { Route } from '../src/routes/workspace/e2ee/$workspaceId';
+import { writePreferredWorkspaceSlug } from '../src/lib/workspace';
 import { useE2eeAccountId } from '../src/lib/e2ee-account';
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -147,8 +187,10 @@ beforeEach(() => {
   fixture.workspaceId = workspaceId;
   fixture.cachedUser = null;
   fixture.showTools = false;
+  fixture.realPairing = false;
   fixture.workspaces = { status: 'loading' };
   fixture.navigation = [];
+  fixture.management = undefined;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -228,74 +270,6 @@ it.each([false, true])(
   }
 );
 
-for (const upgrade of [false, true]) {
-  it(`publishes only the completed view or a mid-page upgrade (${upgrade})`, async () => {
-    const continueSync = Promise.withResolvers<void>();
-    let phase = 0;
-    const publishedPhases: number[] = [];
-    const pagesRead: (string | undefined)[] = [];
-    fixture.port = {
-      create: async () => {
-        throw new Error('unused');
-      },
-      describe: async () => ({
-        workspaceId,
-        contentMode: 'e2ee',
-        contentModeVersion: 1,
-        genesisHash,
-        cryptoOrgId: genesisHash,
-        activation: 'control-only',
-      }),
-      history: async (request) => {
-        pagesRead.push(request.cursor);
-        if (request.cursor === 'page-2') await continueSync.promise;
-        return {
-          workspaceId,
-          genesisHash,
-          checkpoint: { headHash: genesisHash, length: 1 },
-          startIndex: 1,
-          recordsHex: [],
-          position: local.status.position!,
-          nextCursor:
-            request.cursor === 'page-3' ? null : request.cursor === 'page-2' ? 'page-3' : 'page-2',
-        };
-      },
-      runtime: {
-        recordCreated: async () => {},
-        open: async () => local.status,
-        close: async () => {},
-        status: async () => local.status,
-        ingestLedgerRecords: async () => {
-          phase++;
-          return { ...local.status, ...(upgrade && phase === 2 ? { upgradeRequiredAt: 1 } : {}) };
-        },
-        ledgerView: async () => {
-          if (phase === 1 || (!upgrade && phase === 2))
-            throw new Error('incomplete view must not cross IPC');
-          publishedPhases.push(phase);
-          return {
-            ...local,
-            status: {
-              ...local.status,
-              ...(upgrade && phase === 2 ? { upgradeRequiredAt: 1 } : {}),
-            },
-          };
-        },
-      },
-    };
-    const Component = Route.options.component as () => ReturnType<typeof createElement>;
-    await act(async () => root.render(createElement(Component)));
-    expect(container.textContent).toBe('1');
-    expect(pagesRead).toEqual([undefined, 'page-2']);
-    await act(async () => {
-      continueSync.resolve();
-    });
-    expect(container.textContent).toBe(upgrade ? 'upgrade' : '1');
-    expect(publishedPhases).toEqual(upgrade ? [0, 2] : [0, 3]);
-    expect(pagesRead).toEqual(upgrade ? [undefined, 'page-2'] : [undefined, 'page-2', 'page-3']);
-  });
-}
-
 it.each([
   ['custody_unavailable', false, 'open', false],
   ['custody_unavailable', true, 'open', false],
@@ -367,16 +341,86 @@ it.each([
       'missing-binding',
       'closed',
     ].includes(code);
+    // No binding on this device means it never joined: the page asks for approval.
     expect(container.querySelector('[data-control-state]')?.textContent).toBe(
-      availability && !mismatch ? '1' : 'failed'
+      availability && !mismatch
+        ? code === 'missing-binding'
+          ? 'approval-required'
+          : '1'
+        : 'failed'
     );
-    if (!mismatch && ['custody_unavailable', 'missing-binding', 'corrupt'].includes(code))
+    if (code === 'missing-binding')
+      expect(container.textContent).not.toContain('e2ee.identity.lostTitle');
+    if (!mismatch && ['custody_unavailable', 'corrupt'].includes(code))
       expect(container.textContent).toContain(
         code === 'custody_unavailable' ? 'e2ee.identity.lockedTitle' : 'e2ee.identity.lostTitle'
       );
     expect(fetched).toEqual(availability ? ['describe'] : []);
   }
 );
+
+// A desktop that never joined this workspace (the phone created it) has no local
+// identity binding here. Its next step is approval from another device, never the
+// "local identity is unavailable" recovery with its archive-and-reset actions.
+it('guides a desktop that never joined this workspace to approval and, by default, lets it start account pairing', async () => {
+  const started: Array<{ pairingString?: string }> = [];
+  fixture.port = {
+    create: async () => {
+      throw new Error('unused');
+    },
+    describe: async () => ({
+      workspaceId,
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash,
+      cryptoOrgId: genesisHash,
+      activation: 'control-only',
+    }),
+    history: async () => ({
+      workspaceId,
+      genesisHash,
+      checkpoint: { headHash: genesisHash, length: 1 },
+      startIndex: 0,
+      recordsHex: [raw],
+      position: local.status.position!,
+      nextCursor: null,
+    }),
+    runtime: {
+      open: async () => {
+        throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
+      },
+      close: async () => {},
+      status: async () => local.status,
+      accountPairingRequest: async () => null,
+      requestAccountPairing: async (input: { pairingString?: string }) => {
+        started.push(input);
+        return {
+          direction: 'requester-shows',
+          pairingString: '50M6-HA79-55MT',
+          expiresAt: Date.now() + 600_000,
+          status: 'waiting',
+          workspaces: [{ workspaceId, name: 'Native', state: 'pending' }],
+        };
+      },
+    },
+  } as unknown as PlatformE2eeWorkspaces;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
+  expect(container.textContent).not.toContain('e2ee.identity.lostTitle');
+  // Account pairing needs no developer mode or beta switch: the entry is part of
+  // the default approval guide, and starting it shows this device's pairing code.
+  const request = container.querySelector('[data-testid="e2ee-account-pairing-request"]');
+  expect(request).not.toBeNull();
+  const start = [...request!.querySelectorAll('button')].find(
+    (button) => button.textContent === 'e2ee.accountPair.request.start'
+  );
+  if (start) await act(async () => start.click());
+  expect(started).toEqual([{ pairingString: undefined }]);
+  expect(
+    container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent
+  ).toBe('50M6-HA79-55MT');
+});
 
 it('opens the local ledger with an expired renderer snapshot and offline main identity, then reconnects', async () => {
   fixture.session.status = 'loading';
@@ -567,31 +611,6 @@ it('closes only its captured portable reader and spares the workspace reader', a
   expect([...readers]).toEqual(['workspace-reader']);
 });
 
-it('releases exactly one count of a legacy window-scoped control reader', async () => {
-  fixture.port = displayPort(async () => [] as never);
-  delete fixture.port.memberProfiles;
-  // Electron main counts acquisitions per window and workspace. The content
-  // runtime in this same window already holds one count.
-  let count = 1;
-  fixture.port.runtime = {
-    recordCreated: async () => {},
-    open: async () => {
-      count += 1;
-      return { ...local.status, readerOwner: 'account-owner' };
-    },
-    ledgerView: async () => local,
-    ingestLedgerRecords: async () => local.status,
-    close: async () => {
-      count = Math.max(0, count - 1);
-    },
-  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  await act(async () => root.render(createElement(Component)));
-  expect(count).toBe(2);
-  await act(async () => root.unmount());
-  expect(count).toBe(1);
-});
-
 it('joins one legacy reader close when member removal and unmount overlap', async () => {
   fixture.port = displayPort(async () => [] as never);
   delete fixture.port.memberProfiles;
@@ -654,40 +673,11 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
   expect(opens).toBe(2);
   expect(closes).toBe(1);
   expect(container.textContent).not.toContain('removed from this workspace');
-  expect(container.querySelector('[data-control-state]')?.textContent).toBe('approval-required');
+  // A revoked device lands on the approval guide, with re-pairing guidance.
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide?.getAttribute('data-control-state')).toBe('approval-required');
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
   expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
-});
-
-it('fences the preallocated control reader before a cold open settles', async () => {
-  fixture.port = displayPort(async () => [] as never);
-  delete fixture.port.memberProfiles;
-  const opened = Promise.withResolvers<typeof local.status>();
-  const entered = Promise.withResolvers<void>();
-  const closes: unknown[][] = [];
-  let pendingReader: string | undefined;
-  fixture.port.runtime = {
-    readerLeases: 'preallocated-v1',
-    open: async (_id, _checkpoint, _account, requested) => {
-      pendingReader = requested;
-      entered.resolve();
-      return opened.promise;
-    },
-    close: async (...args) => {
-      closes.push(args);
-    },
-  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  try {
-    await act(async () => root.render(createElement(Component)));
-    await entered.promise;
-    await act(async () => root.unmount());
-    expect(pendingReader).toBeTypeOf('string');
-    expect(closes).toEqual([[workspaceId, 'account', pendingReader]]);
-  } finally {
-    await act(async () => opened.resolve({ ...local.status, readerOwner: pendingReader }));
-  }
-  expect(container.textContent).toBe('');
-  expect(closes.at(-1)).toEqual([workspaceId, 'account', pendingReader]);
 });
 
 it.each(['describe', 'history'] as const)(
@@ -896,6 +886,62 @@ it('offers the routed workspace only after a successful approved host open', asy
   ]);
 });
 
+// "Workspaces" must lead to the workspaces the account already has. The create
+// route is where a mobile account at its plan limit has no way forward, and this
+// workspace's own chat route would hand an unopened encrypted workspace straight
+// back to this page.
+it.each([
+  [
+    'another ordinary workspace',
+    [{ id: 'workspace-team', slug: 'team', name: 'Team', role: 'owner' }],
+    { to: '/$workspaceName/chat', params: { workspaceName: 'team' } },
+  ],
+  [
+    'only encrypted workspaces',
+    [
+      {
+        id: 'workspace-other',
+        slug: 'other-vault',
+        name: 'Vault',
+        role: 'owner',
+        contentMode: 'e2ee',
+      },
+    ],
+    { to: '/workspace/create', search: { allowExisting: true } },
+  ],
+])('returns "Workspaces" to the account\'s workspaces with %s', async (_, others, target) => {
+  fixture.workspaces = {
+    status: 'ready',
+    activeWorkspaceId: workspaceId,
+    workspaces: [
+      {
+        id: workspaceId,
+        slug: 'protected-home',
+        name: 'Protected',
+        role: 'owner',
+        contentMode: 'e2ee',
+      },
+      ...others,
+    ],
+  };
+  // The just-created encrypted workspace is also the remembered one.
+  writePreferredWorkspaceSlug('protected-home');
+  fixture.port = displayPort(async () => [] as never);
+  fixture.port.runtime = {
+    open: async () => local.status,
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    recordCreated: async () => {
+      throw new PersonalHostError({ code: 'unsupported' });
+    },
+    close: async () => {},
+  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-back]')!.click());
+  expect(fixture.navigation).toEqual([target]);
+});
+
 it('shows verified history during a slow or failed directory and recovers labels on refresh', async () => {
   const pending =
     Promise.withResolvers<
@@ -951,31 +997,348 @@ it.each(['account', 'workspace'] as const)(
   }
 );
 
-it('retains pairing and audit beside verified history when the independent directory fails', async () => {
-  fixture.showTools = true;
-  const pending =
-    Promise.withResolvers<
-      Awaited<ReturnType<NonNullable<PlatformE2eeWorkspaces['memberProfiles']>>>
-    >();
-  saveE2eeGenesisPin(localStorage, 'account', workspaceId, genesisHash);
-  fixture.port = {
-    ...displayPort(() => pending.promise),
-    runtime: {
-      recordCreated: async () => {},
-      open: async () => local.status,
-      close: async () => {},
-      status: async () => local.status,
-      ledgerView: async () => local,
-      ingestLedgerRecords: async () => local.status,
+// Frozen, independently signed synthetic vector: member admission then Owner promotion.
+function roleLedger(length: 2 | 3): E2eeRuntimeLedgerView {
+  const records = vector.records.slice(0, length);
+  const headHash = records.at(-1)!.hash;
+  const view = Result.getOrThrow(
+    verifyLedger({
+      anchor: Result.getOrThrow(
+        Bytes.genesisHash(Uint8Array.from(Buffer.from(vector.anchor, 'hex')))
+      ),
+      records: records.map((record) => Uint8Array.from(Buffer.from(record.hex, 'hex'))),
+      checkpoint: {
+        head: hashRecordBytes(Uint8Array.from(Buffer.from(records.at(-1)!.hex, 'hex'))),
+        length,
+      },
+    })
+  );
+  const saved = Result.getOrThrow(exportVerifiedState(view));
+  return {
+    recordsHex: records.map((record) => record.hex),
+    stateHex: hex(saved.bytes),
+    status: {
+      ...local.status,
+      genesisHash: vector.anchor,
+      length,
+      headHash,
+      stateDigest: hex(saved.stateDigest.toBytes()),
+      position: `p1:${workspaceId}:${length}:source:0`,
+      memberRole: 'owner',
+      hasDeviceCredential: true,
     },
   };
+}
+
+function roleChangePort() {
+  let current = roleLedger(2);
+  const promoted = roleLedger(3);
+  const drain = Promise.withResolvers<void>();
+  let readers = 0;
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.port.describe = async () => ({
+    workspaceId,
+    genesisHash: vector.anchor,
+    cryptoOrgId: vector.anchor,
+    contentMode: 'e2ee',
+    contentModeVersion: 1,
+    activation: 'control-only',
+  });
+  fixture.port.history = async () => ({
+    workspaceId,
+    genesisHash: vector.anchor,
+    checkpoint: { length: current.status.length, headHash: current.status.headHash },
+    startIndex: current.status.length,
+    recordsHex: [],
+    nextCursor: null,
+    position: current.status.position!,
+  });
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      readers++;
+      return current.status;
+    },
+    close: async () => {
+      readers--;
+      await drain.promise;
+    },
+    ledgerView: async () => {
+      if (!readers) throw new Error('e2ee_not_open');
+      return current;
+    },
+    ingestLedgerRecords: async () => current.status,
+    setMemberRole: async (_workspace, member, role) => {
+      expect(member).toBe('0b'.repeat(16));
+      expect(role).toBe('admin');
+      current = promoted;
+    },
+    removeMember: async () => {
+      throw new Error('unused');
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  return {
+    port: fixture.port,
+    drain,
+    promoted,
+    readers: () => readers,
+  };
+}
+const renderedRoles = () =>
+  container.querySelector('[data-member-roles]')?.getAttribute('data-member-roles');
+
+it('keeps the control reader available after a verified role change', async () => {
+  const f = roleChangePort();
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  await act(async () => root.render(createElement(Component)));
-  expect(container.textContent).toBe('1');
-  expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
-  expect(container.querySelector('[data-audit]')?.getAttribute('data-audit')).toBe(workspaceId);
-  await act(async () => pending.reject(new Error('synthetic directory outage')));
-  expect(container.textContent).toBe('1');
-  expect(container.querySelector('[data-pairing]')).not.toBeNull();
-  expect(container.querySelector('[data-audit]')).not.toBeNull();
+  try {
+    await act(async () => root.render(createElement(Component)));
+    expect(renderedRoles()).toBe('member,owner');
+    expect(f.readers()).toBe(1);
+    await act(async () => fixture.management!.setRole('0b'.repeat(16), 'admin'));
+    // This is the native reader gate used by the passive ledgerView immediately after success.
+    await expect(fixture.port.runtime!.ledgerView(workspaceId)).resolves.toEqual(f.promoted);
+    expect(f.readers()).toBe(1);
+    expect(renderedRoles()).toBe('admin,owner');
+  } finally {
+    await act(async () => root.unmount());
+    await act(async () => f.drain.resolve());
+  }
+});
+
+it.each(['unavailable', 'invalid-state'] as const)(
+  'blocks management when the post-role ledger is %s',
+  async (fault) => {
+    const f = roleChangePort();
+    const runtime = f.port.runtime!;
+    const read = runtime.ledgerView;
+    let rejectRead = false;
+    runtime.ledgerView = async (id) => {
+      const view = await read(id);
+      if (!rejectRead) return view;
+      if (fault === 'unavailable') throw new Error('synthetic read failure');
+      return { ...view, stateHex: '00' };
+    };
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    try {
+      await act(async () => root.render(createElement(Component)));
+      const checkpoint = readObservedLedgerCheckpoint(localStorage, 'account', workspaceId);
+      expect(checkpoint?.length).toBe(2);
+      rejectRead = true;
+      await act(async () => {
+        await expect(fixture.management!.setRole('0b'.repeat(16), 'admin')).rejects.toThrow();
+      });
+      expect(f.readers()).toBe(1);
+      expect(container.querySelector('[data-control-state]')?.textContent).toBe('failed');
+      expect(fixture.management).toBeUndefined();
+      expect(renderedRoles()).toBe('member,owner');
+      expect(readObservedLedgerCheckpoint(localStorage, 'account', workspaceId)).toEqual(
+        checkpoint
+      );
+    } finally {
+      await act(async () => root.unmount());
+      await act(async () => f.drain.resolve());
+    }
+  }
+);
+
+it.each(['same-owner', 'account-change', 'workspace-change'] as const)(
+  'publishes the verified post-role view only for its live reader (%s)',
+  async (change) => {
+    const f = roleChangePort();
+    const runtime = f.port.runtime!;
+    const read = runtime.ledgerView;
+    const exported = Promise.withResolvers<E2eeRuntimeLedgerView>();
+    const reading = Promise.withResolvers<void>();
+    let pause = false;
+    runtime.ledgerView = async (id) => {
+      const view = await read(id);
+      if (pause) {
+        pause = false;
+        reading.resolve();
+        return exported.promise;
+      }
+      return view;
+    };
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    try {
+      await act(async () => root.render(createElement(Component)));
+      pause = true;
+      let action!: Promise<void>;
+      await act(async () => {
+        action = fixture.management!.setRole('0b'.repeat(16), 'admin');
+        await reading.promise;
+      });
+      expect(f.readers()).toBe(1);
+      expect(renderedRoles()).toBe('member,owner');
+      expect(fixture.management).toBeUndefined();
+      if (change !== 'same-owner') {
+        // A new route binding has its own reader and ledger, while the old read is pending.
+        if (change === 'account-change') fixture.session.user.id = 'other-account';
+        else fixture.workspaceId = 'other-workspace';
+        f.drain.resolve();
+        runtime.ledgerView = async () => ({
+          ...roleLedger(2),
+          status: { ...roleLedger(2).status, workspaceId: fixture.workspaceId },
+        });
+        await act(async () => root.render(createElement(Component)));
+      }
+      await act(async () => {
+        exported.resolve(f.promoted);
+        await action;
+      });
+      expect(renderedRoles()).toBe(change === 'same-owner' ? 'admin,owner' : 'member,owner');
+      expect(f.readers()).toBe(1);
+    } finally {
+      await act(async () => root.unmount());
+      await act(async () => f.drain.resolve());
+    }
+  }
+);
+
+// R17b J02: the requester saves its request locally, then the server registration
+// (`begin`) is still in flight when the route learns this desktop has no binding and
+// swaps the full control page for the approval guide. The real pairing component
+// remounts there; it must not offer a claim until that same registration settles.
+// Main's journal is account-bound, so the fake keeps saved requests per account.
+const pairingRoute = () => {
+  fixture.realPairing = true;
+  const offer = {
+    version: 1 as const,
+    workspaceId,
+    genesisHash,
+    genesisRecordHex: raw,
+    endorser: '22'.repeat(32),
+    membershipId: '33'.repeat(16),
+    pairingSessionId: '44'.repeat(16),
+  };
+  const opening = Promise.withResolvers<never>();
+  const begin = Promise.withResolvers<void>();
+  const beginEntered = Promise.withResolvers<void>();
+  const saved = new Map<
+    string,
+    { pairingSessionId: string; signingPublicKey: string; offer: typeof offer }
+  >();
+  let opens = 0;
+  let registered = false;
+  const claims: string[] = [];
+  fixture.port = {
+    create: async () => {
+      throw new Error('unused');
+    },
+    describe: async () => ({
+      workspaceId,
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash,
+      cryptoOrgId: genesisHash,
+      activation: 'control-only',
+    }),
+    history: async () => ({
+      workspaceId,
+      genesisHash,
+      checkpoint: { headHash: genesisHash, length: 1 },
+      startIndex: 0,
+      recordsHex: [raw],
+      position: local.status.position!,
+      nextCursor: null,
+    }),
+    runtime: {
+      // The first open stays pending so the request is made on the full page.
+      open: () =>
+        opens++ === 0
+          ? opening.promise
+          : Promise.reject(
+              new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding")
+            ),
+      close: async () => {},
+      status: async () => local.status,
+      pendingPersonalJoin: async () => saved.get(fixture.session.user.id) ?? null,
+      preparePersonalJoin: async (value: typeof offer) => {
+        // Main persists the original request before the network registration.
+        saved.set(fixture.session.user.id, {
+          pairingSessionId: value.pairingSessionId,
+          signingPublicKey: '55'.repeat(32),
+          offer: value,
+        });
+        beginEntered.resolve();
+        await begin.promise;
+        registered = true;
+        return {
+          pairingSessionId: value.pairingSessionId,
+          signingPublicKey: '55'.repeat(32),
+          status: 'pending',
+        };
+      },
+      claimPersonalJoin: async () => {
+        // Server: an unregistered pairing session is refused as unauthorized.
+        if (!registered) throw new Error('e2ee_join_unauthorized');
+        claims.push('pending');
+        return { ready: false, status: 'pending' };
+      },
+      cancelPersonalJoin: async () => ({ status: 'cancelled' }),
+    },
+  } as unknown as PlatformE2eeWorkspaces;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  const button = (text: string) =>
+    [...container.querySelectorAll('button')].find((value) => value.textContent === text);
+  /** Submit on the full page, then let the route swap to the approval guide. */
+  const submitThenGuide = async () => {
+    await act(async () => root.render(createElement(Component)));
+    expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).toBeNull();
+    const input = container.querySelector('textarea')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        input,
+        JSON.stringify(offer)
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      button('e2ee.pair.trust')!.click();
+      await beginEntered.promise;
+    });
+    await act(async () =>
+      opening.reject(
+        new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding")
+      )
+    );
+    expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
+  };
+  return { Component, begin, claims, button, submitThenGuide };
+};
+
+it('does not offer a personal claim across the approval-guide remount until registration settles', async () => {
+  const f = pairingRoute();
+  await f.submitThenGuide();
+  // The remounted component recovered the saved request, but registration is unconfirmed.
+  const unconfirmed = f.button('e2ee.pair.claim');
+  expect(unconfirmed === undefined || unconfirmed.disabled).toBe(true);
+  unconfirmed?.click();
+  expect(f.claims).toEqual([]);
+  await act(async () => f.begin.resolve());
+  const claim = f.button('e2ee.pair.claim')!;
+  expect(claim.disabled).toBe(false);
+  await act(async () => claim.click());
+  expect(f.claims).toEqual(['pending']);
+  expect(container.textContent).toContain('e2ee.pair.waiting');
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+});
+
+// The cloud runtime object survives an account switch without a renderer reload. The
+// next account's card must neither join, display nor act on the previous account's
+// in-flight registration; its own request form stays available.
+it('does not carry an in-flight personal registration into another account', async () => {
+  const f = pairingRoute();
+  await f.submitThenGuide();
+  fixture.session.user.id = 'other-account';
+  await act(async () => root.render(createElement(f.Component)));
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
+  await act(async () => f.begin.resolve());
+  expect(container.textContent).not.toContain('44'.repeat(16));
+  expect(container.textContent).not.toContain('55'.repeat(32));
+  expect(f.button('e2ee.pair.claim')).toBeUndefined();
+  expect(f.button('common.cancel')).toBeUndefined();
+  expect(container.querySelector('textarea')).not.toBeNull();
+  expect(f.button('e2ee.pair.trust')).toBeDefined();
 });

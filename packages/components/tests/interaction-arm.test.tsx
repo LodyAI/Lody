@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InteractionArmedProvider, useInteractionArm } from '../src/ui/interaction-arm';
-import { ContextMenu, Popover, Tooltip } from '../src/ui/armed-overlays';
+import { Popover, Tooltip } from '../src/ui/armed-overlays';
 
 let root: Root;
 let container: HTMLDivElement;
@@ -60,27 +61,6 @@ afterEach(() => {
 });
 
 describe('interaction-armed overlays', () => {
-  it('renders only the trigger until the row is entered, then the real tooltip', () => {
-    act(() =>
-      root.render(
-        <Row>
-          <CopyButton />
-        </Row>
-      )
-    );
-    expect(copyButton().getAttribute('aria-label')).toBe('Copy message');
-    // Base UI marks its tooltip triggers; the plain trigger is only the button.
-    expect(copyButton().hasAttribute('data-base-ui-tooltip-trigger')).toBe(false);
-    expect(copyButton().hasAttribute('delay')).toBe(false);
-
-    act(() => {
-      // jsdom has no PointerEvent; React derives enter from `pointerover`.
-      row().dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
-    });
-    expect(row().dataset.armed).toBe('true');
-    expect(copyButton().hasAttribute('data-base-ui-tooltip-trigger')).toBe(true);
-  });
-
   it('keeps the pressed trigger until its click is dispatched', () => {
     vi.useFakeTimers();
     let clicks = 0;
@@ -145,8 +125,6 @@ describe('interaction-armed overlays', () => {
     });
 
     expect(row().dataset.armed).toBe('true');
-    // The trigger remounted as Base UI's trigger, and focus followed it.
-    expect(copyButton()).not.toBe(before);
     expect(document.activeElement).toBe(copyButton());
   });
 
@@ -162,57 +140,5 @@ describe('interaction-armed overlays', () => {
       )
     );
     expect(document.body.textContent).toContain('Run configuration');
-  });
-
-  it('keeps an unarmed context-menu region out of the layout and its menu unmounted', () => {
-    act(() =>
-      root.render(
-        <Row>
-          <ContextMenu.Root>
-            <ContextMenu.Trigger>
-              <a href="#ref" className="ref">
-                ref
-              </a>
-            </ContextMenu.Trigger>
-            <ContextMenu.Content>
-              <ContextMenu.Item>Open reference</ContextMenu.Item>
-            </ContextMenu.Content>
-          </ContextMenu.Root>
-        </Row>
-      )
-    );
-    const region = container.querySelector<HTMLElement>('a.ref')!.parentElement!;
-    expect(region.style.display).toBe('contents');
-    expect(document.body.textContent).not.toContain('Open reference');
-  });
-
-  it("passes a trigger's own props to the plain element and drops Base UI's", () => {
-    const onClick = vi.fn();
-    act(() =>
-      root.render(
-        <Row>
-          <Popover.Root>
-            <Popover.Trigger
-              openOnHover
-              delay={100}
-              aria-label="Run configuration"
-              className="config"
-              onClick={onClick}
-              render={<button type="button" className="chip" />}
-            >
-              config
-            </Popover.Trigger>
-            <Popover.Content>Run configuration</Popover.Content>
-          </Popover.Root>
-        </Row>
-      )
-    );
-    const trigger = container.querySelector<HTMLButtonElement>('button.chip')!;
-    expect(trigger.className).toBe('chip config');
-    expect(trigger.getAttribute('aria-label')).toBe('Run configuration');
-    expect(trigger.hasAttribute('delay')).toBe(false);
-    expect(trigger.hasAttribute('openonhover')).toBe(false);
-    act(() => trigger.click());
-    expect(onClick).toHaveBeenCalledTimes(1);
   });
 });

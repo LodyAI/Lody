@@ -30,6 +30,7 @@ import { formatPasswordValidationFailure, validateNewPassword } from '@/lib/pass
 import { BootShell } from '@/components/boot-shell';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
 import { useStableSession } from '@/hooks/useStableSession';
+import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { hasUsableSessionUser } from '@/hooks/stable-session-state';
 import {
   buildElectronRedirectUrl,
@@ -626,6 +627,11 @@ export function LoginPage({
   const [lastLoginMethod] = useState(readLastLoginMethod);
   const prefersReducedMotion = useReducedMotion();
   const taglineRef = useRef<HTMLParagraphElement | null>(null);
+  // The page is outside the workspace layouts that pad for the iOS keyboard,
+  // so it lifts itself (`styles.page`) and keeps the focused field centred in
+  // the panel that is still visible.
+  const panelRef = useRef<HTMLElement | null>(null);
+  useKeyboardAwareScrollIntoView(panelRef);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const focusEmailInput = useCallback(() => {
     emailInputRef.current?.focus({ preventScroll: true });
@@ -1889,6 +1895,7 @@ export function LoginPage({
       </section>
 
       <motion.main
+        ref={panelRef}
         initial={entranceInitial}
         animate="shown"
         variants={ENTRANCE_STAGGER}
@@ -1993,7 +2000,11 @@ const NARROW = '@media (max-width: 860px)';
 // A phone on its side, or a very short window: no room for a visual above the form.
 const NARROW_SHORT = '@media (max-width: 860px) and (max-height: 600px)';
 const SAFE_TOP = 'max(12px, env(safe-area-inset-top))';
-const SAFE_BOTTOM = 'max(12px, env(safe-area-inset-bottom))';
+// The iOS shell overlays the keyboard (`resize: "none"`, viewport
+// `overlaps-content`), so `100dvh` never shrinks; reserving the keyboard height
+// shrinks the panel row instead. The keyboard already covers the home
+// indicator, so the two are not added.
+const SAFE_BOTTOM = 'max(12px, env(safe-area-inset-bottom), var(--native-keyboard-height, 0px))';
 
 const styles = stylex.create({
   // The window holds two things: an inset visual surface and the sign-in

@@ -42,6 +42,11 @@ type Props = {
   onWorkspaceRequested: (workspaceSlug: string | null, workspaceId?: string) => void;
   onHomeRequested: () => void;
 };
+const CLAIM_INTERVAL_MS = 10_000;
+/** While the request is committed and the key not yet installed. */
+const KEY_WAIT_INTERVAL_MS = 3_000;
+/** Upper bound of the faster cadence, after which claims return to 10 s. */
+const KEY_WAIT_FAST_MS = 120_000;
 export function E2eeMemberJoinSurface(
   props: Pick<
     Props,
@@ -90,6 +95,8 @@ function JoinSession({
   const [recovering, setRecovering] = useState(Boolean(accountId && runtime?.pendingMemberJoin));
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
+  // The fast claim window ended while committed: say why the member is still waiting.
+  const [slowWait, setSlowWait] = useState(false);
   const live = useRef(true);
   const owner = useRef(runtime);
   owner.current = runtime;
@@ -130,7 +137,12 @@ function JoinSession({
     if (!requestId || !runtime?.claimMemberJoin || ready || requestTerminal) return undefined;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Committed but not ready means the key is in flight: claim sooner, for a bounded time.
+    let committedSince: number | undefined;
+    let delay = CLAIM_INTERVAL_MS;
+    setSlowWait(false);
     const claim = async () => {
+      delay = CLAIM_INTERVAL_MS;
       try {
         const result = await runtime.claimMemberJoin!(offer.workspaceId, requestId);
         if (disposed) return;
@@ -140,10 +152,15 @@ function JoinSession({
         setReady(result.ready);
         setError(false);
         if (result.ready || ['rejected', 'cancelled'].includes(result.state)) return;
+        if (result.state === 'committed') {
+          committedSince ??= Date.now();
+          if (Date.now() - committedSince < KEY_WAIT_FAST_MS) delay = KEY_WAIT_INTERVAL_MS;
+          else setSlowWait(true);
+        }
       } catch {
         if (!disposed) setError(true);
       }
-      if (!disposed) timer = setTimeout(() => void claim(), 10_000);
+      if (!disposed) timer = setTimeout(() => void claim(), delay);
     };
     const reconnect = () => {
       clearTimeout(timer);
@@ -198,7 +215,7 @@ function JoinSession({
   else if (!pinMatches) message = 'e2ee.team.unavailable';
   else if (available?.matchesRecipient === false) message = 'e2ee.team.wrongEmail';
   return (
-    <main {...stylex.props(styles.page)}>
+    <main data-testid="e2ee-invitation" {...stylex.props(styles.page)}>
       <div {...stylex.props(styles.card)}>
         <Card.Root>
           <Card.Header>
@@ -208,10 +225,16 @@ function JoinSession({
                 : t('e2ee.team.join')}
             </Card.Title>
             <Card.Description>{t(message)}</Card.Description>
+            {message === 'e2ee.team.waitingKey' && (
+              <Card.Description>{t('e2ee.team.waitingKeyAdminOnline')}</Card.Description>
+            )}
           </Card.Header>
           <div {...stylex.props(styles.stack)}>
             {email && <p>{email}</p>}
             {error && <p role="status">{t('e2ee.team.retryOriginal')}</p>}
+            {slowWait && !ready && message === 'e2ee.team.waitingKey' && (
+              <p role="status">{t('e2ee.team.waitingKeySlow')}</p>
+            )}
             <div {...stylex.props(styles.actions)}>
               {!accountId && !loading && (
                 <Button onClick={onSignInRequested}>{t('e2ee.team.signIn')}</Button>
@@ -233,7 +256,7 @@ function JoinSession({
                 pinMatches &&
                 available?.matchesRecipient !== false &&
                 !request && (
-                  <Button disabled={busy} onClick={() => void accept()}>
+                  <Button data-testid="e2ee-invitation-submit" disabled={busy} onClick={() => void accept()}>
                     {t(offer.mode === 'email' ? 'e2ee.team.accept' : 'e2ee.team.submit')}
                   </Button>
                 )}

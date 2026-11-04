@@ -7,8 +7,18 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
+The hosted PR detail panel displays GitHub's explicit stack membership and ordered
+layers when available. Layer links open GitHub. A failed stack detail read leaves
+membership visible; stack merge is delegated to GitHub rather than the legacy
+synchronous merge endpoint. Local PR summary access still opens GitHub externally.
+[Decision](../notes/implemented/feature/2026-11-02-github-pr-stack-view.md).
+
 - `session-detail.tsx` — outer shell/tabs (desktop: `desktop-session-detail-layout.tsx`;
-  mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). All Changes UI lives here via
+  mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). The desktop split's resize
+  handle paints nothing at rest: hover shows one centred ink block, keyboard focus a darker and
+  taller one, drag the darkest, and the block is a `ResizableHandle` child so it never shifts
+  panel geometry ([decision](../notes/implemented/feature/2026-10-31-session-sidebar-resize-handle.md)).
+  All Changes UI lives here via
   `session-changes-sidebar.tsx` (story: `SessionChangesSidebar.stories.tsx`). Desktop file/diff
   viewers never split the conversation surface: opt-in Files, All Changes, Browser, conditional PR,
   and file/conversation-diff/turn-diff tabs all live in the right panel under
@@ -20,6 +30,15 @@ this page is the full text of the rules summarised there.
   (fixed panels → side chats → viewers) and every close handler must take its fallback neighbour from
   the derived `sidePanelTabIds`; hand-building a partial order per close path silently breaks
   "previous sibling" as soon as a new tab kind lands between the existing ones.
+  Device previews (iOS Simulator, Android Emulator) can be dragged onto each other to form a
+  split: the tab bar draws the pair as one tray-and-key group, and selecting either member shows
+  both side by side (`getFixedPanelPlacement`). A `SidePanelSplitHandle` between them resizes the
+  halves within 25–75% (arrows step, double-click resets, a swap keeps each screen's width); the
+  ratio is session-local, not persisted. Dragging a member clear of its group, or closing
+  either member, dissolves the split; it persists with the open tabs as `sidePanel.split` and is
+  dropped on restore unless both members are still open. Only device kinds pair, because a single
+  fixed-aspect screen wastes most of a wide panel and comparing platforms is the use case; the drop
+  rules are the pure `resolveSidePanelTabDropIntent`.
   Opening a viewer dedupes by viewer id and expands that panel. Every desktop viewer activation
   path goes through `selectSidePanelTab`, so fixed panels, side chats, and viewers remain mutually
   exclusive even when content opens the viewer without a tab-strip click.
@@ -89,8 +108,8 @@ this page is the full text of the rules summarised there.
   confirmation means committed `HEAD` only; never imply that uncommitted or untracked files move.
   Browser side-panel state and the mobile deep link are named `browser` / `?browser=1`; the removed
   `preview` values are not migrated. The iOS Simulator is a separate fixed panel beside it
-  (`ios-simulator` / `?simulator=1`), offered only when the tab Session's target machine is a Mac;
-  it shares no state with Browser, stays mounted once opened like Browser, polls only while a
+  (`ios-simulator` / `?simulator=1`), offered only when the main conversation's target machine is a Mac;
+  child tabs and Side Chats share that main conversation binding. It shares no state with Browser, stays mounted once opened like Browser, polls only while a
   preview is preparing and on screen, and tells its still-mounted viewer when it is hidden. Its rules live in
   [ios-simulator/AGENTS.md](../../packages/components/src/components/sessions/ios-simulator/AGENTS.md). Once opened, keep `SessionBrowserPanel` mounted while other fixed side-panel
   tabs are active so managed DOM state and Electron native-view history survive tab switches.

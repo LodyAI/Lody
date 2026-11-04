@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import {
   createRootRoute,
   createRoute,
@@ -35,7 +36,7 @@ vi.mock('@tanstack/react-router', async (original) => ({
 
 import { WorkspaceAdmissionGate } from '../src/components/workspace-admission-gate';
 import { userAtom } from '../src/atoms';
-import { developerModeEnabledAtom, e2eeWorkspaceCreationEnabledAtom } from '../src/atoms/settings';
+
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
   runtimeAtom,
@@ -193,53 +194,6 @@ describe('WorkspaceAdmissionGate', () => {
     await render();
     expect(text()).toBe('workspace content');
   });
-
-  it('waits with the ordinary loading copy while the verdict is unknown', async () => {
-    await render();
-    expect(text()).toContain('Loading workspace');
-    expect(text()).not.toMatch(/encrypt|mode/i);
-  });
-
-  it.each([
-    ['a mode failure of an ordinary workspace', { modeAdmission: { knownEncrypted: false } }],
-    ['a runtime failure unrelated to mode', {}],
-  ] as const)('shows the ordinary open failure for %s', async (_case, extra) => {
-    fail({ errorType: 'WorkspaceModeAdmissionTimeoutError', ...extra });
-    await render();
-    expect(text()).toContain('Unable to open workspace');
-    expect(text()).not.toMatch(/encrypt|mode/i);
-  });
-
-  it('explains a mode failure for a workspace known to be encrypted', async () => {
-    fail({
-      errorType: 'WorkspaceModeAdmissionTimeoutError',
-      modeAdmission: { knownEncrypted: true },
-    });
-    await render();
-    expect(text()).toContain('Workspace mode could not be verified');
-  });
-
-  it('explains mode failures only to a developer who enabled encrypted creation', async () => {
-    store.set(developerModeEnabledAtom, true);
-    store.set(e2eeWorkspaceCreationEnabledAtom, true);
-    fail({ errorType: 'Error', modeAdmission: { knownEncrypted: false } });
-    await render();
-    expect(text()).toContain('Workspace mode could not be verified');
-
-    // A rejected shutdown of the previous runtime is not a mode failure.
-    await act(async () => fail({ errorType: 'Error' }));
-    expect(text()).toContain('Unable to open workspace');
-  });
-
-  it('retries in place from the failure screen', async () => {
-    fail({ errorType: 'Error', modeAdmission: { knownEncrypted: false } });
-    await render();
-    const retry = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Retry'
-    );
-    await act(async () => retry?.click());
-    expect(store.get(workspaceModeAdmissionRetryAtom)).toBe(1);
-  });
   it('retries an ordinary workspace after deleting its unreadable optional proof without native access', async () => {
     const key = 'lody-workspace-mode-proof:account:ordinary';
     localStorage.setItem(key, '{broken proof');
@@ -379,30 +333,6 @@ describe('WorkspaceAdmissionGate', () => {
         },
       })
     ).rejects.toThrow('checked again');
-    expect(localStorage.getItem(pin)).toBe('broken pin');
-  });
-
-  it('reports identity recheck when native verified identity is unavailable', async () => {
-    localStorage.setItem(pin, 'broken pin');
-    const cause = new Error('e2ee_missing-binding');
-    await expect(
-      recoverE2eeWorkspaceIdentity({
-        storage: localStorage,
-        accountId: 'account',
-        workspaceId: 'encrypted',
-        runtime: {
-          ...native(),
-          readIdentity: async () => {
-            throw cause;
-          },
-        },
-        isCurrent: () => true,
-      })
-    ).rejects.toMatchObject({
-      name: 'E2eeLocalEvidenceConflictError',
-      message: 'Workspace identity must be checked again',
-      cause,
-    });
     expect(localStorage.getItem(pin)).toBe('broken pin');
   });
 

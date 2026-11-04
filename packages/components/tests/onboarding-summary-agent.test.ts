@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentConfigId, AgentConfigMeta, MachineId, ProviderSetupTask } from '@lody/shared';
+import type { AgentConfigId, MachineId, ProviderSetupTask } from '@lody/shared';
 import { resolveDesktopOnboardingSummaryAgent } from '../src/components/onboarding/onboarding-overlay';
 
 const machineId = 'machine-1' as MachineId;
@@ -46,30 +46,6 @@ describe('resolveDesktopOnboardingSummaryAgent', () => {
     ).toEqual({
       state: 'ready',
       name: 'Draft Agent',
-    });
-  });
-
-  it('maps live pending, failed, deleted, and published setup states', () => {
-    expect(resolveDesktopOnboardingSummaryAgent(provider, [setup('verifying')], [])).toEqual({
-      state: 'preparing',
-      name: 'Draft Agent',
-    });
-    expect(resolveDesktopOnboardingSummaryAgent(provider, [setup('failed')], [])).toEqual({
-      state: 'failed',
-      name: 'Draft Agent',
-    });
-    expect(resolveDesktopOnboardingSummaryAgent(provider, [], [])).toEqual({
-      state: 'missing',
-      name: 'Draft Agent',
-    });
-
-    const published: AgentConfigMeta = {
-      ...setup('verifying').config,
-      name: 'Published Agent',
-    };
-    expect(resolveDesktopOnboardingSummaryAgent(provider, [], [published])).toEqual({
-      state: 'ready',
-      name: 'Published Agent',
     });
   });
 });

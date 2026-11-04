@@ -25,11 +25,18 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
 const styles = stylex.create({
   page: {
-    minHeight: '100vh',
+    // The page is its own scroll container. Native shells pin html, body and
+    // #root to the viewport with `overflow: hidden`; a `min-height` box would grow
+    // with its content, never scroll, and lose everything below the fold.
+    boxSizing: 'border-box',
+    height: { default: '100vh', '@supports (height: 100dvh)': '100dvh' },
     overflowY: 'auto',
     backgroundColor: colors.background,
     color: colors.label,
-    paddingBlock: space[6],
+    // Native shells draw under the status bar (`viewport-fit=cover`); without
+    // the inset the back button sits under it in portrait and cannot be tapped.
+    paddingTop: `max(${space[6]}, env(safe-area-inset-top))`,
+    paddingBottom: `max(${space[6]}, env(safe-area-inset-bottom))`,
     paddingInline: { default: space[6], '@media (max-width: 520px)': space[4] },
     fontSize: type.bodySize,
     lineHeight: 1.45,
@@ -396,7 +403,11 @@ function MembersSection(props: {
   const { t } = useTranslation();
   const { names } = props;
   return (
-    <section aria-label={t('e2ee.control.members')} {...stylex.props(styles.section)}>
+    <section
+      data-testid="e2ee-members"
+      aria-label={t('e2ee.control.members')}
+      {...stylex.props(styles.section)}
+    >
       <h2 {...stylex.props(styles.sectionHeading)}>
         {t('e2ee.control.members')}
         <span {...stylex.props(styles.count)}>{props.overview.members.length}</span>
@@ -406,7 +417,12 @@ function MembersSection(props: {
           const profile = names.profile(member.membershipId);
           const name = names.name(member);
           return (
-            <li key={member.membershipId} {...stylex.props(styles.memberRow)}>
+            <li
+              data-testid="e2ee-member"
+              data-membership-id={member.membershipId}
+              key={member.membershipId}
+              {...stylex.props(styles.memberRow)}
+            >
               <Avatar.Root size="medium">
                 {profile?.image != null && profile.image !== '' ? (
                   <Avatar.Image src={profile.image} alt="" />
@@ -485,7 +501,9 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
         </Button>
         <header {...stylex.props(styles.header)}>
           <div {...stylex.props(styles.titleBlock)}>
-            <h1 {...stylex.props(styles.title)}>{t('e2ee.control.title')}</h1>
+            <h1 data-testid="e2ee-workspace-control" {...stylex.props(styles.title)}>
+              {t('e2ee.control.title')}
+            </h1>
             <span {...stylex.props(styles.preview)}>{t('e2ee.control.badge')}</span>
           </div>
           {props.onOpen && (
@@ -522,7 +540,6 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           <div {...stylex.props(styles.help)}>
             <p>{t('e2ee.verify.hint')}</p>
             <p>{t('e2ee.verify.hintCaveat')}</p>
-            <p>{t('e2ee.control.contentUnavailable')}</p>
             <dl {...stylex.props(styles.helpIds)}>
               <dt>{t('e2ee.control.workspace')}</dt>
               <dd {...stylex.props(styles.id)}>{props.workspaceId}</dd>

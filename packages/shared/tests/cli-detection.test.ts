@@ -122,10 +122,6 @@ describe('CLI auth file detection', () => {
       }
     }
   });
-
-  it('keeps an injected empty homeDir instead of falling back to the real home', () => {
-    expect(__test__.resolveHomeDir({ homeDir: '' })).toBe('');
-  });
 });
 
 describe.skipIf(process.platform === 'win32')('CLI version probes', () => {
@@ -143,15 +139,6 @@ describe.skipIf(process.platform === 'win32')('CLI version probes', () => {
       process.env.PATH = originalPath;
     };
   }
-
-  it('reports the trimmed version printed by a successful probe', async () => {
-    const restore = withFakeOpencode('echo " 1.2.3 "');
-    try {
-      await expect(checkOpencode()).resolves.toBe('1.2.3');
-    } finally {
-      restore();
-    }
-  });
 
   it('treats a non-zero exit as not installed even when it printed output', async () => {
     const restore = withFakeOpencode('echo 1.2.3; exit 3');

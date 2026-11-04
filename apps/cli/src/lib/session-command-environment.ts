@@ -15,10 +15,17 @@ import type { LoroDocumentManager } from './loro/doc';
 import type { MachineAccessCheckResult, WorkspaceSummary } from './workspace';
 import { readMachineLocalProjects } from './local-project-meta';
 import type { SessionLiveStatusBatchItem } from '@/commands/session';
+import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
 
 export interface SessionCommandHost {
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
   readLiveStatus(sessionId: SessionId): Promise<SessionLiveStatusBatchItem>;
+  /** Best-effort withdrawal of a queued Agent input this daemon has not started. */
+  withdrawQueuedInput(args: {
+    sessionId: SessionId;
+    userTurnId: string;
+    requesterSessionId: SessionId;
+  }): Promise<SessionWithdrawInputResponse>;
   /** The running turn an Agent chat may steer; undefined unless it runs on this daemon. */
   readActiveTurnId(sessionId: SessionId): string | undefined;
   steerSession(input: {
@@ -88,6 +95,16 @@ export interface DaemonWorkspace {
   manager: LoroDocumentManager;
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
   readAccess?(): DaemonWorkspaceAccess;
+  /**
+   * Encrypted only: classify an Agent-delegated input by its verified driving Turn.
+   * `owner` keeps today's behavior; `member` must be written with `derivedFrom` and
+   * may target only this machine. Rejects when the origin cannot be verified, is
+   * itself derived, has exhausted its derivations or targets another machine.
+   */
+  classifyEncryptedDerivation?(
+    origin: { sessionId: string; userTurnId: string },
+    target: { machineId: string }
+  ): Promise<'owner' | 'member'>;
 }
 
 const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();

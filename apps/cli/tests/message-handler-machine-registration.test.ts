@@ -186,6 +186,7 @@ describe('MessageHandler machine registration', () => {
     const hostCapabilities = getHostMachineProtocolCapabilities();
     expect(registeredMeta.protocolCapabilities).toEqual({
       multiRepoProject: 1,
+      machineDiskStatus: 1,
       projectFileRoots: 1,
       projectRepositoryMembers: 1,
       projectFolderSelection: 1,
@@ -198,6 +199,7 @@ describe('MessageHandler machine registration', () => {
       memoryProviders: 1,
       sessionHistory: 3,
       sessionHistoryIncremental: 1,
+      sessionHistoryInspection: 2,
       sessionHistoryWatch: 1,
       sessionHistoryPatches: 1,
       sessionInputAcceptance: 1,
@@ -205,10 +207,14 @@ describe('MessageHandler machine registration', () => {
       mcpToolDiscovery: 1,
       mcpLocalAuthentication: 1,
       codexAuthProfiles: 1,
+      sessionInputWithdraw: 1,
       ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),
       ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
       acpAuthenticationInteractions: 2,
+      acpAuthenticationMethodSelection: 1,
       previewControl: 1,
+      androidEmulator: 1,
+      androidEmulatorQuality: 1,
       iosSimulator: 1,
       iosSimulatorControls: 1,
       iosSimulatorExterior: 1,
@@ -224,10 +230,13 @@ describe('MessageHandler machine registration', () => {
       subagentCancellation: 1,
       subagentEvents: 1,
       schedules: 3,
+      sessionAutomations: 1,
       preparedSessionInput: 1,
+      messageQuotes: 1,
       sessionInputAttachments: 1,
       sessionCollaborationControl: 1,
       bugReportClientLog: 1,
+      sessionLiveActivity: 1,
     });
 
     await handler.cleanup();

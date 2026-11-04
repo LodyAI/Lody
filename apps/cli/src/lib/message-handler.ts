@@ -1,9 +1,12 @@
+import { AndroidEmulatorService } from '@/android-emulator/service';
+import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
 import {
   readEncryptedAttachment,
   encryptedAttachmentPath,
   type EncryptedAttachment,
 } from '@lody/shared';
 import type { EncryptedAgentExecution } from './e2ee/agent-execution';
+import { decideEncryptedDerivation } from './e2ee/derivation-limits';
 import { isScheduledMessageFile } from './schedules/scheduled-message-files';
 import {
   getWorkspaceFlockDocId,
@@ -11,6 +14,7 @@ import {
   readWorkspaceFlockRowsFromFlock,
 } from '@lody/shared';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
+import { SessionAutomationAuthority } from '@/session/session-automation-authority';
 import type { SessionFileRoot } from '@lody/shared';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
@@ -41,7 +45,7 @@ import {
   type UploadedSessionFile,
 } from './session-attachment-transfer';
 import { handleMemoryProviderRequest } from './memory-providers';
-import { readMessageAuthor } from '@lody/shared';
+import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
 import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
@@ -172,7 +176,6 @@ import {
   isSessionGoalActive,
   type SessionGoalAction,
   type SessionGoalResponse,
-  resolveLatestSessionGoalFromHistory,
   resolveProjectGitHubRepo,
   deleteMachineFlockRowFromFlock,
   getMachineFlockDeleteLocalProjectEntries,
@@ -297,7 +300,7 @@ import {
   type ImageGenerationBeginEvent,
   type ImageGenerationEndEvent,
 } from 'src/agent/agent-client';
-import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type { SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager, WorktreeManager } from '@/session/worktree/worktree-manager';
 import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
@@ -408,6 +411,9 @@ import {
   type LocalWorkspaceCatalogService,
 } from '@/lib/local-workspace-catalog';
 import { resolveSessionLiveStatus } from './session-live-status';
+import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
+import { truncateToolTitleForHistory } from '@lody/shared';
+import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
 import type { MemoryPressureEvictionResult } from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
@@ -606,6 +612,16 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  remoteAutomation?: {
+    handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
+    control: (input: {
+      sessionId: string;
+      requesterUserId: string;
+      operation: import('@lody/shared/automations').RemoteAutomationOperation;
+      proof: import('@lody/shared/automations').RemoteAutomationProof;
+      responseKey: import('@lody/shared').RpcSecretPublicKey;
+    }) => Promise<import('@lody/shared/automations').RemoteAutomationRpcResult>;
+  };
   encryptedWorkspace?: boolean;
   encryptedExecution?: EncryptedAgentExecution;
   token: string;
@@ -736,6 +752,14 @@ export class MessageHandler {
   private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
   private readonly archiveInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
+  /**
+   * Latest output time and running tool title per Session, for on-demand live
+   * activity reads. One small entry per Session; never published.
+   */
+  private readonly liveActivityBySession = new Map<
+    SessionId,
+    { lastOutputAt: number; actionToolCallId?: string; actionTitle?: string }
+  >();
   private readonly worktreeGc: WorktreeGarbageCollector;
   private worktreeGcTimer: NodeJS.Timeout | null = null;
   private detachWorktreeGcSyncListener: (() => void) | null = null;
@@ -797,9 +821,12 @@ export class MessageHandler {
     pressureReason: null,
   });
   private executionService: SessionExecutionService;
+  /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
+  private readonly encryptedExecution?: EncryptedAgentExecution;
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
+  private androidEmulatorService: AndroidEmulatorService;
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
   private sessionForkService: SessionForkService;
@@ -1157,11 +1184,11 @@ export class MessageHandler {
 
       let userId = latestAssistant?.userId;
       if (!userId) {
-        const history = await backend.readHistory();
+        const history = await backend.readHistoryQuery();
         for (let i = history.length - 1; i >= 0; i--) {
           const entry = history[i];
           if (entry?.userId) {
-            userId = entry.userId;
+            userId = entry.userId as string;
             break;
           }
         }
@@ -1552,10 +1579,7 @@ export class MessageHandler {
       const backend = await this.getSessionBackend(sessionDoc);
       const meta = await backend.getMetaState();
       const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
-      const current =
-        resolveLatestSessionGoalFromHistory(await backend.readHistory()) ??
-        legacyMeta?.latestGoal ??
-        null;
+      const current = (await backend.readLatestGoal()) ?? legacyMeta?.latestGoal ?? null;
       // Skip both the history sweep and the meta write when the snapshot is
       // already cleared — `clearThreadGoalFromHistory` would otherwise scan
       // every entry to find no work to do.
@@ -2419,9 +2443,39 @@ export class MessageHandler {
     return promptBlocks;
   }
 
+  /**
+   * Provenance header for an agent-authored input. Best effort: any read failure
+   * omits the header and the turn proceeds with its unchanged text.
+   */
+  private async readAgentSenderHeader(
+    sessionId: SessionId,
+    userTurnId: string | undefined
+  ): Promise<string | undefined> {
+    if (!userTurnId) return undefined;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      const input = await backend.history.readTurn(userTurnId);
+      if (input.state !== 'ready' || input.turn.role !== 'user') return undefined;
+      const author = readMessageAuthor(input.turn.author);
+      if (author?.kind !== 'agent') return undefined;
+      const source = await this.workspaceDocument.repo
+        .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
+        .catch(() => undefined);
+      const title = (source?.meta as SessionMeta | undefined)?.title;
+      return formatAgentSenderHeader(author, title);
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Omitting sender provenance for ${userTurnId}: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   private async buildAcpPromptBlocks(args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
+    userTurnId?: string;
     inputBlocks: SessionInputBlock[];
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
@@ -2491,7 +2545,13 @@ export class MessageHandler {
     });
 
     // Build the full text prompt: comment references first, then user text
-    const allTextParts = [...commentRefTexts, ...visualAnnotationRefTexts, ...textParts];
+    const senderHeader = await this.readAgentSenderHeader(args.sessionId, args.userTurnId);
+    const allTextParts = [
+      ...(senderHeader ? [senderHeader] : []),
+      ...commentRefTexts,
+      ...visualAnnotationRefTexts,
+      ...textParts,
+    ];
     const textPrompt = appendIssuePrMentionsToPrompt(
       allTextParts.join('\n\n'),
       args.issuePRMentions
@@ -2686,6 +2746,53 @@ export class MessageHandler {
   // Single access choke point for prompt-handoff steer: both RPC arrival paths
   // (Loro Streams deps callback and local Machine RPC switch) route through here
   // so neither can bypass machine/local-project verification.
+  /**
+   * Best-effort withdrawal of a queued Agent input. Only the requesting Session's
+   * own input that is still pending is canceled, with the same not-yet-started
+   * guard dispatch respects; a dispatch already under way may still run it.
+   */
+  private async withdrawQueuedInput(args: {
+    sessionId: SessionId;
+    userTurnId: string;
+    requesterSessionId: SessionId;
+  }): Promise<SessionWithdrawInputResponse> {
+    const response = (
+      outcome: SessionWithdrawInputResponse['outcome'],
+      error?: string
+    ): SessionWithdrawInputResponse => ({
+      type: 'session/withdraw-input_response',
+      sessionId: args.sessionId,
+      userTurnId: args.userTurnId,
+      outcome,
+      ...(error ? { error } : {}),
+    });
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      const input = await backend.history.readTurn(args.userTurnId);
+      if (input.state !== 'ready' || input.turn.role !== 'user') return response('not_found');
+      const author = readMessageAuthor(input.turn.author);
+      if (author?.kind !== 'agent' || author.sessionId !== args.requesterSessionId)
+        return response('not_owner');
+      // Idempotent for a retried withdrawal or replace: the input will not run.
+      if (input.turn.status === 'canceled') return response('already_withdrawn');
+      // Same guard as `onlyAwaitingStart`: pending or seen means no execution claimed it.
+      if (input.turn.status !== 'pending' && input.turn.status !== 'seen')
+        return response('already_started');
+      const result = await backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: args.userTurnId,
+        status: 'canceled',
+        onlyAwaitingStart: true,
+      });
+      if (!result.matched) return response('already_started');
+      this.sessionDispatchWatcher.discardRpcTurn(args.sessionId, args.userTurnId);
+      return response('withdrawn');
+    } catch (error) {
+      return response('error', formatErrorMessage(error));
+    }
+  }
+
   private async steerSessionWithAccessCheck(
     args: Parameters<SessionExecutionService['steerSession']>[0]
   ): ReturnType<SessionExecutionService['steerSession']> {
@@ -3061,8 +3168,9 @@ export class MessageHandler {
       preferredBaseBranch: this.preferredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
     });
+    this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
     this.executionService = new SessionExecutionService({
-      encryptedExecution: config.encryptedWorkspace ? config.encryptedExecution : undefined,
+      encryptedExecution: this.encryptedExecution,
       encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       sessionManager: this.sessionManager,
@@ -3279,9 +3387,9 @@ export class MessageHandler {
       runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl,
       remotePreview: this.cloudPort.remotePreview,
     });
-    this.iosSimulatorService = new IosSimulatorService({
+    const devicePreviewOptions = {
       iceServers: this.cloudPort.remotePreview?.simulatorIceServers
-        ? async (sessionId) => {
+        ? async (sessionId: string) => {
             const record = await this.workspaceDocument.repo.getDocMeta(
               getSessionRoomId(sessionId as SessionId)
             );
@@ -3307,15 +3415,10 @@ export class MessageHandler {
             });
           }
         : undefined,
-      onAgentPreviewStarted: async (sessionId, operationId) => {
-        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
-          iosSimulatorPreviewRequestId: operationId,
-        } satisfies Partial<SessionMeta>);
-      },
       workspaceId: this.workspaceId,
       logger: this.logger,
       runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl ?? '',
-      authorize: async (request) => {
+      authorize: async (request: { sessionId: string; requestedByUserId: string }) => {
         const record = await this.workspaceDocument.repo.getDocMeta(
           getSessionRoomId(request.sessionId as SessionId)
         );
@@ -3328,6 +3431,41 @@ export class MessageHandler {
         ) {
           throw new Error('Simulator session access denied.');
         }
+        const parentSessionId = record.meta.parentSessionId;
+        if (parentSessionId === undefined || parentSessionId === null) return request.sessionId;
+        if (typeof parentSessionId !== 'string' || !parentSessionId) {
+          throw new Error('Invalid simulator parent session.');
+        }
+        const parent = await this.workspaceDocument.repo.getDocMeta(
+          getSessionRoomId(parentSessionId as SessionId)
+        );
+        if (
+          !parent?.meta ||
+          isLoroRepoDocDeleted(parent) ||
+          parent.meta.isArchived ||
+          parent.meta.parentSessionId ||
+          parent.meta.machineId !== this.machineId ||
+          parent.meta.userId !== request.requestedByUserId
+        ) {
+          throw new Error('Simulator parent session access denied.');
+        }
+        return parentSessionId;
+      },
+    };
+    this.iosSimulatorService = new IosSimulatorService({
+      ...devicePreviewOptions,
+      onAgentPreviewStarted: async (sessionId, operationId) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
+          iosSimulatorPreviewRequestId: operationId,
+        } satisfies Partial<SessionMeta>);
+      },
+    });
+    this.androidEmulatorService = new AndroidEmulatorService({
+      ...devicePreviewOptions,
+      onAgentPreviewStarted: async (sessionId, operationId) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
+          androidEmulatorPreviewRequestId: operationId,
+        } satisfies Partial<SessionMeta>);
       },
     });
     const streamsTokens = config.encryptedWorkspace ? null : this.cloudPort.streamsTokens;
@@ -3384,11 +3522,12 @@ export class MessageHandler {
               )
             ),
         },
-        getMachineStatus: async () =>
+        getMachineStatus: async (args) =>
           await this.executionService.getMachineStatus({
             type: 'machine/status',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
+            ...(args?.includeDisk ? { includeDisk: true as const } : {}),
           }),
         getPreviewControl: async () => ({
           type: 'machine/preview-control_response',
@@ -3396,6 +3535,8 @@ export class MessageHandler {
           success: true,
           runtimeNonce: this.previewService.controlAuthority.runtimeNonce,
         }),
+        getAutomationControl: config.remoteAutomation?.handshake,
+        controlAutomation: config.remoteAutomation?.control,
         pingMachine: async ({ requestId }) =>
           await this.executionService.pingMachine({
             type: 'machine/ping',
@@ -3534,7 +3675,20 @@ export class MessageHandler {
             error: result.error,
           };
         },
-        getSessionLiveStatus: async ({ sessionId }) => this.readSessionLiveStatus(sessionId),
+        getSessionLiveStatus: async ({ sessionId, includeActivity }) =>
+          await this.readSessionLiveStatus(sessionId, includeActivity === true),
+        withdrawSessionInput: async ({ userId, ...args }) => {
+          const access = await this.verifySessionMachineAccess(args.sessionId, userId);
+          if (access.outcome !== 'allowed')
+            return {
+              type: 'session/withdraw-input_response' as const,
+              sessionId: args.sessionId,
+              userTurnId: args.userTurnId,
+              outcome: 'error' as const,
+              error: `Withdraw access verification ${access.outcome}`,
+            };
+          return await this.withdrawQueuedInput(args);
+        },
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -3599,6 +3753,15 @@ export class MessageHandler {
               request.sessionId as SessionId,
               request.requestedByUserId,
               { action: 'ios-simulator', command: request.command, responseKey },
+              proof
+            )
+          ),
+        controlAndroidEmulator: async ({ proof, responseKey, ...request }) =>
+          this.androidEmulatorService.control(request, true, () =>
+            this.previewService.authorizeRemoteControl(
+              request.sessionId as SessionId,
+              request.requestedByUserId,
+              { action: 'android-emulator', command: request.command, responseKey },
               proof
             )
           ),
@@ -3828,7 +3991,10 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: getHostMachineProtocolCapabilities(),
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
         timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
@@ -3930,10 +4096,13 @@ export class MessageHandler {
         machineId: MachineId,
         agentConfigId: AgentConfigId | undefined,
         cliType: string,
-        limits: RateLimit
+        snapshot: import('acp-extension-core').RateLimitsSnapshot,
+        binding: import('@/session/automation-observations').ProviderBinding | undefined
       ) => {
-        if (agentConfigId) this.executionService.noteProviderRateLimitsUpdate(agentConfigId);
-        void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
+        if (agentConfigId)
+          this.executionService.noteProviderRateLimitsUpdate(agentConfigId, binding, snapshot);
+        for (const limits of snapshot.rateLimits)
+          void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
       }
     );
 
@@ -4173,6 +4342,7 @@ export class MessageHandler {
           if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;
           // Revoke media before unrelated ACP/Browser cleanup can fail.
           void this.iosSimulatorService.closeSession(sessionId);
+          void this.androidEmulatorService.closeSession(sessionId);
           void this.handleSessionArchived(sessionId);
         },
         { kinds: ['doc-metadata'], metadataFields: ['isArchived'] }
@@ -4182,6 +4352,7 @@ export class MessageHandler {
           if (event.kind !== 'doc-metadata') return;
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (sessionId) void this.iosSimulatorService.closeSession(sessionId);
+          if (sessionId) void this.androidEmulatorService.closeSession(sessionId);
         },
         { kinds: ['doc-metadata'], metadataFields: ['userId', 'machineId'] }
       ),
@@ -4192,6 +4363,7 @@ export class MessageHandler {
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (!sessionId) return;
           void this.iosSimulatorService.closeSession(sessionId);
+          void this.androidEmulatorService.closeSession(sessionId);
           void this.handleSessionDeleted(sessionId);
         },
         { kinds: ['doc-existence-changed'] }
@@ -4335,7 +4507,10 @@ export class MessageHandler {
     this.clearSessionActivePresence(sessionId);
     this.closeSessionTerminals?.(sessionId);
 
-    await this.iosSimulatorService.closeSession(sessionId);
+    await Promise.all([
+      this.iosSimulatorService.closeSession(sessionId),
+      this.androidEmulatorService.closeSession(sessionId),
+    ]);
     await this.finalizeACPState(sessionId);
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
     await this.terminateActiveChildSessions(sessionId, 'Parent session archived');
@@ -4685,13 +4860,83 @@ export class MessageHandler {
       childSessionIds.map(async (childSessionId) => {
         this.clearSessionActivePresence(childSessionId);
         this.closeSessionTerminals?.(childSessionId);
-        await this.iosSimulatorService.closeSession(childSessionId);
+        await Promise.all([
+          this.iosSimulatorService.closeSession(childSessionId),
+          this.androidEmulatorService.closeSession(childSessionId),
+        ]);
         await this.finalizeACPState(childSessionId);
         await this.previewService.closeSessionPreviewForCleanup(childSessionId, reason);
         await this.terminateSessionForRelease(childSessionId);
         this.store.get(childSessionId).logger = null;
       })
     );
+  }
+
+  private recordLiveActivity(sessionId: SessionId, notification: AcpSessionNotification): void {
+    const previous = this.liveActivityBySession.get(sessionId);
+    const update = notification.update as {
+      sessionUpdate: string;
+      toolCallId?: string;
+      title?: string | null;
+      status?: string | null;
+    };
+    let actionToolCallId = previous?.actionToolCallId;
+    let actionTitle = previous?.actionTitle;
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+      const finished = update.status === 'completed' || update.status === 'failed';
+      if (finished && actionToolCallId === update.toolCallId) {
+        actionToolCallId = undefined;
+        actionTitle = undefined;
+      } else if (!finished && update.toolCallId && update.title) {
+        actionToolCallId = update.toolCallId;
+        actionTitle = Array.from(truncateToolTitleForHistory(update.title)).slice(0, 200).join('');
+      }
+    }
+    this.liveActivityBySession.set(sessionId, {
+      lastOutputAt: Date.now(),
+      ...(actionTitle ? { actionToolCallId, actionTitle } : {}),
+    });
+  }
+
+  /**
+   * Best-effort activity of a busy Session from local state. Any failure omits
+   * it, so the caller keeps the ordinary live status.
+   */
+  private async readSessionLiveActivity(
+    sessionId: SessionId
+  ): Promise<SessionLiveActivity | undefined> {
+    const execution = this.executionService.getExecutionSnapshot(sessionId);
+    if (!execution.hasActiveTurn || !execution.activeTurnId) return undefined;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const history = (await this.getSessionBackend(sessionDoc)).history;
+      const total = await history.count();
+      let turnStartedAt: number | undefined;
+      let queuedInputs = 0;
+      // Shallow rows only: queued inputs follow the running turn, within a bounded tail.
+      const rows = await history.readDirectory(Math.max(0, total - 50), total);
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index]?.scalars;
+        if (!row) continue;
+        if (row.id === execution.activeTurnId) {
+          const started = Date.parse(row.timestamp);
+          if (Number.isFinite(started)) turnStartedAt = started;
+          break;
+        }
+        if (row.role === 'user' && (row.status === 'pending' || row.status === 'pending_apply'))
+          queuedInputs += 1;
+      }
+      const tracked = this.liveActivityBySession.get(sessionId);
+      return {
+        ...(turnStartedAt !== undefined ? { turnStartedAt } : {}),
+        ...(tracked ? { lastOutputAt: tracked.lastOutputAt } : {}),
+        ...(tracked?.actionTitle ? { currentAction: tracked.actionTitle } : {}),
+        queuedInputs,
+      };
+    } catch (error) {
+      this.logger.debug(`[${sessionId}] Live activity unavailable: ${formatErrorMessage(error)}`);
+      return undefined;
+    }
   }
 
   private enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void {
@@ -4705,6 +4950,7 @@ export class MessageHandler {
       return;
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
+    if (target) this.recordLiveActivity(sessionId, update);
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -5034,65 +5280,6 @@ export class MessageHandler {
     return out;
   }
 
-  private summarizeSessionHistoryForDiagnostics(
-    history: SessionHistoryInput[]
-  ): Record<string, unknown> {
-    const historyItemTypes: Record<string, number> = {};
-    const systemNoticeMetaUndefinedKeys: Array<{ entryId: string; keys: string[] }> = [];
-    let historyItems = 0;
-
-    for (const entry of history) {
-      if (!entry || typeof entry !== 'object') continue;
-      const items = Array.isArray(entry.items) ? (entry.items as unknown[]) : [];
-      for (const item of items) {
-        historyItems += 1;
-        const type = (item as { type?: unknown } | undefined)?.type;
-        const typeKey = typeof type === 'string' ? type : 'unknown';
-        historyItemTypes[typeKey] = (historyItemTypes[typeKey] ?? 0) + 1;
-
-        if (typeKey === 'system_notice') {
-          const meta = (item as { meta?: unknown } | undefined)?.meta;
-          if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
-            const metaRecord = meta as Record<string, unknown>;
-            const keys = Object.keys(metaRecord);
-            const undefinedKeys = keys.filter((k) => metaRecord[k] === undefined);
-            if (undefinedKeys.length > 0 && systemNoticeMetaUndefinedKeys.length < 5) {
-              systemNoticeMetaUndefinedKeys.push({
-                entryId: entry.id,
-                keys: undefinedKeys.slice(0, 10),
-              });
-            }
-          }
-        }
-      }
-    }
-
-    const last = history.length > 0 ? history[history.length - 1] : undefined;
-    const lastItems = last && Array.isArray(last.items) ? (last.items as unknown[]) : [];
-    const lastItemTypes: Record<string, number> = {};
-    for (const item of lastItems) {
-      const type = (item as { type?: unknown } | undefined)?.type;
-      const typeKey = typeof type === 'string' ? type : 'unknown';
-      lastItemTypes[typeKey] = (lastItemTypes[typeKey] ?? 0) + 1;
-    }
-
-    return {
-      historyEntries: history.length,
-      historyItems,
-      historyItemTypes,
-      systemNoticeMetaUndefinedKeys,
-      lastEntry: last
-        ? {
-            id: last.id,
-            role: last.role,
-            timestamp: last.timestamp,
-            items: lastItems.length,
-            itemTypes: lastItemTypes,
-          }
-        : null,
-    };
-  }
-
   private async appendACPUpdatesToAssistantEntry(args: {
     sessionId: SessionId;
     sessionDoc: SessionDocument;
@@ -5359,11 +5546,11 @@ export class MessageHandler {
       );
       try {
         const history = sessionDoc
-          ? await (await this.getSessionBackend(sessionDoc)).readHistory()
+          ? await (await this.getSessionBackend(sessionDoc)).readHistoryQuery()
           : undefined;
         this.logger.error(
           `[${sessionId}] ACP history diagnostics: ${
-            history ? JSON.stringify(this.summarizeSessionHistoryForDiagnostics(history)) : 'no doc'
+            history ? JSON.stringify(summarizeHistoryQuery(history)) : 'no doc'
           }`
         );
       } catch (diagnosticError) {
@@ -6103,7 +6290,12 @@ export class MessageHandler {
       logger: this.logger,
       sessionId,
       userTurnId,
-      readHistory: async () => (await this.getSessionBackend(sessionDoc)).readHistory(),
+      hasUserTurn: async (id) => {
+        const backend = await this.getSessionBackend(sessionDoc);
+        return (await backend.readHistoryQuery()).some(
+          (row) => row.id === id && row.role === 'user'
+        );
+      },
       subscribeHistory: (listener) => subscribeSessionChanges(sessionDoc, listener),
       onBeforeOpen: async () => {
         await this.writeAssistantEntryForTurn(
@@ -6221,7 +6413,10 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: getHostMachineProtocolCapabilities(),
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
         timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],
@@ -6895,6 +7090,30 @@ export class MessageHandler {
     return requester === ownerUserId || requester === this.userId;
   }
 
+  /** See `DaemonWorkspace.classifyEncryptedDerivation`. Every failure is a refusal. */
+  private async classifyEncryptedDerivation(
+    origin: { sessionId: string; userTurnId: string },
+    target: { machineId: string }
+  ): Promise<'owner' | 'member'> {
+    const gate = this.encryptedExecution;
+    if (!gate) throw new Error('e2ee_derivation_unavailable');
+    const live = this.executionService.reserveEncryptedDerivation(
+      origin.sessionId as SessionId,
+      origin.userTurnId
+    );
+    if (live?.kind === 'owner') return 'owner';
+    // The signed origin decides; a live member reservation alone is not proof.
+    const verified = await Effect.runPromise(gate.classifyOrigin(origin)).catch(
+      () => 'denied' as const
+    );
+    return decideEncryptedDerivation({
+      live: live?.kind,
+      verified,
+      targetMachineId: target.machineId,
+      machineId: this.machineId,
+    });
+  }
+
   private readActiveInvocation(sessionId: SessionId): SessionActiveInvocationContextResult {
     const invocation = this.executionService.getActiveInvocationContext(sessionId);
     return invocation
@@ -6916,6 +7135,12 @@ export class MessageHandler {
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
           ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
+          ...(this.encryptedExecution
+            ? {
+                classifyEncryptedDerivation: (origin, target) =>
+                  this.classifyEncryptedDerivation(origin, target),
+              }
+            : {}),
         },
         run
       );
@@ -6934,12 +7159,14 @@ export class MessageHandler {
               execution: this.executionService.getExecutionSnapshot(sessionId),
               hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
             });
+            const activity = await this.readSessionLiveActivity(sessionId);
             return {
               sessionId,
               machineOnline: true,
               fresh: true,
               state: live.state,
               observedAt: getServerNow(),
+              ...(activity ? { activity } : {}),
             };
           },
           cancelSession: async (sessionId, turnId) => {
@@ -6959,6 +7186,7 @@ export class MessageHandler {
           },
           readActiveTurnId: (sessionId) =>
             this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
+          withdrawQueuedInput: async (args) => await this.withdrawQueuedInput(args),
           steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
           dispatchSession: async (sessionId, input) => {
             if (input?.inputOrigin === 'human')
@@ -7016,9 +7244,11 @@ export class MessageHandler {
     };
   }
 
-  private readSessionLiveStatus(
-    sessionId: SessionId
-  ): import('@lody/loro-streams-rpc').LoroSessionLiveStatusRpcResponse {
+  private async readSessionLiveStatus(
+    sessionId: SessionId,
+    includeActivity = false
+  ): Promise<import('@lody/loro-streams-rpc').LoroSessionLiveStatusRpcResponse> {
+    const activity = includeActivity ? await this.readSessionLiveActivity(sessionId) : undefined;
     const liveStatus = resolveSessionLiveStatus({
       presence: this.sessionActivePresence.getStatus(sessionId),
       execution: this.executionService.getExecutionSnapshot(sessionId),
@@ -7031,6 +7261,7 @@ export class MessageHandler {
       success: true,
       ...liveStatus,
       observedAtMs: getServerNow(),
+      ...(activity ? { activity } : {}),
     };
   }
 
@@ -7057,6 +7288,7 @@ export class MessageHandler {
           type: 'machine/status',
           machineId: this.machineId,
           workspaceId: this.workspaceId,
+          ...(request.params.includeDisk ? { includeDisk: true as const } : {}),
         });
       case 'machine/ping':
         return this.executionService.pingMachine({
@@ -7073,7 +7305,10 @@ export class MessageHandler {
           ...request.params,
         });
       case 'session/live-status':
-        return this.readSessionLiveStatus(request.params.sessionId as SessionId);
+        return await this.readSessionLiveStatus(
+          request.params.sessionId as SessionId,
+          request.params.includeActivity === true
+        );
       case 'file/download-chunk':
         await assertOwner(request.params.sessionId as SessionId);
         return this.filePreviewService.downloadFileChunk(request.params);
@@ -7171,18 +7406,22 @@ export class MessageHandler {
       case 'session/get-active-invocation-context': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        return invocation
-          ? {
-              type: 'session/active-invocation-context' as const,
-              sessionId,
-              active: true as const,
-              ...invocation,
-            }
-          : {
-              type: 'session/active-invocation-context' as const,
-              sessionId,
-              active: false as const,
-            };
+        if (!invocation) {
+          return {
+            type: 'session/active-invocation-context' as const,
+            sessionId,
+            active: false as const,
+          };
+        }
+        // Session tools consume sender in-process. Keep the legacy socket shape
+        // unchanged: older MCP processes parse this response with a strict schema.
+        const { sender: _sender, ...legacyInvocation } = invocation;
+        return {
+          type: 'session/active-invocation-context' as const,
+          sessionId,
+          active: true as const,
+          ...legacyInvocation,
+        };
       }
       case 'session/cancel': {
         const result = await this.executionService.cancelSession(
@@ -7246,7 +7485,22 @@ export class MessageHandler {
       case 'ios-simulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        if (!invocation?.requesterUserId) {
+        // Encrypted: act as the turn's verified principal; a shared member controls
+        // only within that member's own rights for the turn's projects.
+        const control = this.encryptedExecution
+          ? this.executionService.getEncryptedControlPrincipal(sessionId)
+          : ({ kind: 'owner' } as const);
+        const controlAllowed =
+          control?.kind === 'owner' ||
+          (control?.kind === 'member' &&
+            this.encryptedExecution !== undefined &&
+            (await Effect.runPromise(
+              this.encryptedExecution.authorizeAgentControl(
+                control.requesterDevice,
+                control.localProjectIds
+              )
+            ).catch(() => false)));
+        if (!invocation?.requesterUserId || !controlAllowed) {
           return {
             type: 'ios-simulator/control_response' as const,
             sessionId,
@@ -7262,6 +7516,25 @@ export class MessageHandler {
       }
       case 'ios-simulator/control':
         return this.iosSimulatorService.control(request.params, false);
+      case 'android-emulator/agent-control': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        if (!invocation?.requesterUserId) {
+          return {
+            type: 'android-emulator/control_response' as const,
+            sessionId,
+            success: false,
+            error: 'denied' as const,
+          };
+        }
+        return this.androidEmulatorService.controlFromAgent({
+          sessionId,
+          requestedByUserId: invocation.requesterUserId,
+          command: request.params.command,
+        });
+      }
+      case 'android-emulator/control':
+        return this.androidEmulatorService.control(request.params, false);
       case 'session/preview-endpoint-acquire':
         return await this.previewService.acquireEndpoint({
           machineId: request.machineId as MachineId,
@@ -7536,6 +7809,19 @@ export class MessageHandler {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
       const history = backend.history;
+      if (
+        query.kind === 'readMetadata' ||
+        query.kind === 'readLatestGoal' ||
+        query.kind === 'readTranscript' ||
+        query.kind === 'readQuerySnapshot' ||
+        query.kind === 'readSelection' ||
+        query.kind === 'readReplayPrompt'
+      ) {
+        if (!backend.readHistoryInspection)
+          throw new Error('Owner history inspection is unavailable');
+        await backend.flushLocalWrites();
+        return await backend.readHistoryInspection(query);
+      }
       for (let attempt = 0; attempt < 4; attempt += 1) {
         // The read and its revision must straddle no unpublished history write.
         // These are local durability barriers, never remote synchronization.
@@ -7590,7 +7876,9 @@ export class MessageHandler {
             break;
           }
           case 'count':
-            result = await history.count();
+            result = query.withCheckpoint
+              ? { count: await history.count(), checkpoint: before.checkpoint }
+              : await history.count();
             break;
           case 'readAt':
             result = await history.readAt(query.position);
@@ -7609,6 +7897,9 @@ export class MessageHandler {
             break;
           case 'readDirectory':
             result = await history.readDirectory(query.from, query.to);
+            break;
+          case 'readQuery':
+            result = await backend.readHistoryQuery(query);
             break;
           case 'readLatestPage':
             if (!history.readLatestDirectoryPage) {
@@ -7668,12 +7959,19 @@ export class MessageHandler {
           query.kind === 'readChanges' ||
           ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
             query.withCheckpoint) ||
-          ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint);
+          ((query.kind === 'readTurn' ||
+            query.kind === 'readRange' ||
+            query.kind === 'readQuery' ||
+            query.kind === 'readDirectory') &&
+            query.atCheckpoint);
         if (protectedRead) {
           if (!history.getCheckpoint) throw new Error('History checkpoints are unavailable');
           const current = await history.getCheckpoint();
           const expected =
-            query.kind === 'readTurn' || query.kind === 'readRange'
+            query.kind === 'readTurn' ||
+            query.kind === 'readRange' ||
+            query.kind === 'readQuery' ||
+            query.kind === 'readDirectory'
               ? query.atCheckpoint
               : (result as { checkpoint?: string }).checkpoint;
           if (current !== expected)
@@ -7698,8 +7996,17 @@ export class MessageHandler {
         query.kind === 'readChanges' ||
         ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
           query.withCheckpoint) ||
-        ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint);
-      if (protectedRead && error instanceof Error && 'code' in error && error.code === 'stale') {
+        ((query.kind === 'readTurn' ||
+          query.kind === 'readRange' ||
+          query.kind === 'readQuery' ||
+          query.kind === 'readDirectory') &&
+          query.atCheckpoint);
+      if (
+        (protectedRead || query.kind === 'readSelection') &&
+        error instanceof Error &&
+        'code' in error &&
+        (error.code === 'stale' || error.code === 'superseded')
+      ) {
         this.logger.trace(`[${sessionId}] History observation superseded operation=${query.kind}`);
         return {
           type: 'session/history-read_response',
@@ -7809,7 +8116,7 @@ export class MessageHandler {
           const entries = payload.history.map(
             (entry) => parseHistoryWrite(HistoryEntryWriteSchema, entry) as SessionHistoryInput
           );
-          const existingIds = new Set((await backend.readHistory()).map((entry) => entry.id));
+          const existingIds = new Set((await backend.readHistoryQuery()).map((entry) => entry.id));
           for (const entry of entries) {
             if (existingIds.has(entry.id))
               throw new Error(`History copy target already contains ${entry.id}`);
@@ -7918,8 +8225,11 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
     this.touchSession(message.sessionId);
+    // An encrypted shared member's display account is not an identity to attribute.
     const invokingUserId =
-      dispatchContext.source === 'local'
+      dispatchContext.source === 'local' &&
+      (!this.encryptedExecution ||
+        this.executionService.getEncryptedControlPrincipal(message.sessionId)?.kind === 'owner')
         ? this.executionService.getActiveInvocationContext(message.sessionId)?.requesterUserId
         : undefined;
     const response = await this.previewService.reportCandidate(message, invokingUserId);
@@ -8625,7 +8935,15 @@ export class MessageHandler {
     }
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const backend = await this.getSessionBackend(sessionDoc);
-    const history = await backend.readHistory();
+    const history = await backend.readHistorySelection((rows) =>
+      rows.flatMap((row, index) =>
+        row.items?.some(
+          (item) => item.type === 'file' && item.fileId === fileId && item.transport === 'local'
+        )
+          ? [index]
+          : []
+      )
+    );
 
     // Find the persisted block so we upload with its real metadata.
     let target: Extract<SessionInputBlock, { type: 'file' }> | null = null;
@@ -8759,11 +9077,13 @@ export class MessageHandler {
     this.remoteBackfillAbort?.abort();
     this.remoteBackfillAbort = new AbortController();
     this.iosSimulatorService.enableRemote();
+    this.androidEmulatorService.enableRemote();
     await this.scanAndBackfillLocalSessionFiles();
   }
 
   disableRemoteBackfill(): void {
     this.iosSimulatorService?.revokeRemote();
+    this.androidEmulatorService?.revokeRemote();
     // Close the window: abort in-flight uploads and supersede every started
     // task so a resumed backfill cannot commit post-revoke (S5/D10).
     this.remoteBackfillGeneration += 1;
@@ -9362,16 +9682,9 @@ export class MessageHandler {
       sessionTitle = meta?.title;
       metaUserId = meta?.userId;
 
-      const history = await backend.readHistory();
-      for (let i = history.length - 1; i >= 0; i -= 1) {
-        const entry = history[i];
-        if (!entry || entry.role !== 'user') continue;
-        const userId = entry.userId;
-        if (typeof userId === 'string' && userId.trim()) {
-          historyUserId = userId;
-          break;
-        }
-      }
+      historyUserId = backend.readLatestUserId
+        ? await backend.readLatestUserId()
+        : await readLatestUserId(backend.history);
     } catch (error) {
       this.logger.error(
         `[${sessionId}] Failed to append permission request to history: ${formatErrorMessage(
@@ -9642,7 +9955,17 @@ export class MessageHandler {
           ? await backend
               .readTurn(permissionTurnId)
               .then((read) => (read.state === 'ready' ? [read.turn as SessionHistoryInput] : []))
-          : await backend.readHistory();
+          : await backend.readHistorySelection((rows) => {
+              const first = rows.findIndex((row) =>
+                row.items?.some(
+                  (item) =>
+                    item.type === 'tool_call' &&
+                    (item.permissionRequest as { requestId?: unknown } | undefined)?.requestId ===
+                      requestId
+                )
+              );
+              return first < 0 ? [] : [first];
+            });
         return findPermissionOutcomeInHistory(history, requestId);
       };
       let checkingHistory = false;
@@ -10181,12 +10504,16 @@ export class MessageHandler {
       this.workspaceId,
       this.machineId
     );
-    return Object.fromEntries(
-      Object.entries(projects).map(([localProjectId, project]) => [
-        localProjectId as LocalProjectId,
-        project.rootPath,
-      ])
-    ) as Record<LocalProjectId, string>;
+    const rootPaths: Record<string, string> = {};
+    for (const [localProjectId, project] of Object.entries(projects)) {
+      // Legacy machine meta is not validated on read, so a row can omit rootPath.
+      const rootPath = (project as { rootPath?: unknown } | undefined)?.rootPath;
+      if (typeof rootPath !== 'string') continue;
+      const trimmed = rootPath.trim();
+      if (!trimmed) continue;
+      rootPaths[localProjectId] = trimmed;
+    }
+    return rootPaths as Record<LocalProjectId, string>;
   }
 
   private async upsertLocalProjectMetaInCurrentWorkspace(entry: {
@@ -10563,6 +10890,17 @@ export class MessageHandler {
     this.historyWatchAbort.abort();
   }
 
+  inspectClientLoss() {
+    const watcher = this.sessionDispatchWatcher.inspectClientLoss();
+    const execution = this.executionService.inspectClientLoss();
+    return {
+      watcherStopped: watcher.stopped,
+      watcherChecks: watcher.pending,
+      executionTurns: execution.turns,
+      executionBookkeeping: execution.bookkeeping,
+    };
+  }
+
   /**
    * Flush pending ACP updates and tear down session resources.
    */
@@ -10583,7 +10921,10 @@ export class MessageHandler {
     );
     this.cancelPendingHistoryWatches();
     this.historyOwnerAbort.abort();
-    await this.iosSimulatorService.closeAll();
+    await Promise.all([
+      this.iosSimulatorService.closeAll(),
+      this.androidEmulatorService.closeAll(),
+    ]);
     this.logger.debug('Cleaning up message handler resources');
     this.cleanedUp = true;
     this.sessionActivePresence.native.retire();
@@ -10898,7 +11239,7 @@ export class MessageHandler {
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const backend = await this.getSessionBackend(sessionDoc);
-    const historyGoal = resolveLatestSessionGoalFromHistory(await backend.readHistory());
+    const historyGoal = await backend.readLatestGoal();
     return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
   }
 
@@ -10976,6 +11317,26 @@ export class MessageHandler {
     );
   }
 
+  private automationSessionAuthority: SessionAutomationAuthority | undefined;
+  getAutomationSessionAuthority(): SessionAutomationAuthority {
+    return (this.automationSessionAuthority ??= new SessionAutomationAuthority({
+      manager: this.workspaceDocument,
+      execution: this.executionService,
+      machineId: this.machineId,
+      hasOtherWork: (sessionId) =>
+        this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+        this.hasSessionActivePresence(sessionId) ||
+        this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+      hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
+      nativeActivity: (sessionId) => {
+        const client = this.sessionManager.getSession(sessionId)?.agentClient;
+        return client ? client.getNativeActivityObservation() : 'idle';
+      },
+      author: (sessionId) =>
+        this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,
+    }));
+  }
+
   /**
    * Check if a session has an active turn (prompting or finalizing).
    */
@@ -11018,7 +11379,10 @@ export class MessageHandler {
     // 1. Clear active presence
     this.clearSessionActivePresence(sessionId);
 
-    await this.iosSimulatorService.closeSession(sessionId);
+    await Promise.all([
+      this.iosSimulatorService.closeSession(sessionId),
+      this.androidEmulatorService.closeSession(sessionId),
+    ]);
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session cleaned by GC');
 
     // 2. Terminate session process first — if later steps throw, the process

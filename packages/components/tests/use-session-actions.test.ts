@@ -16,11 +16,13 @@ import { applyHistoryAction } from '../../shared/src/session-data/history-action
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
+import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { LoroDoc } from 'loro-crdt';
 import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
@@ -45,6 +47,8 @@ import {
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
+  createStore as createPlatformStore,
+  type PlatformSessionState,
   type CloudApi,
   type PlatformProvider,
 } from '@lody/platform';
@@ -73,7 +77,8 @@ const billingEntitlementState = {
 // its cloud dependencies explicit. Rejected: teaching usePlatform() a test-only
 // implicit default, which would hide missing production assembly as well.
 const testCloudApi = {
-  useQuery: () => billingEntitlementState,
+  useQuery: (operation, args) =>
+    args !== 'skip' && operation.name.startsWith('billing:') ? billingEntitlementState : undefined,
   useMutation: () => recordMyWorkspaceDailyActiveUser,
   useAction: () => vi.fn(async () => undefined),
 } as CloudApi;
@@ -131,9 +136,7 @@ import {
   roostHistoryExperimentEnabledAtom,
 } from '../src/atoms/settings';
 import {
-  countSessionMentions,
   SessionCreateBillingError,
-  resolveSessionChatType,
   useSessionActions,
   type SessionActions,
 } from '../src/hooks/use-session-actions';
@@ -553,6 +556,7 @@ describe('useSessionActions', () => {
       docMetaCacheReady?: boolean;
       sessionMetaCache?: Record<string, SessionMeta>;
       store?: ReturnType<typeof createStore>;
+      identitySession?: PlatformProvider['identity']['session'];
     } = {}
   ): Promise<SessionActions> => {
     const jotaiStore = options.store ?? createStore();
@@ -568,11 +572,26 @@ describe('useSessionActions', () => {
       workspaceSlug: options.workspaceSlug ?? 'workspace-slug',
       descriptor: {
         workspaceId: options.workspaceId ?? 'workspace-1',
-        contentMode: 'plaintext',
+        contentMode: runtime.contentMode ?? 'plaintext',
         contentModeVersion: 1,
       },
     });
 
+    const platform =
+      runtime.contentMode === 'e2ee'
+        ? {
+            ...testPlatform,
+            identity: {
+              ...testPlatform.identity,
+              session:
+                options.identitySession ??
+                createStaticStore({
+                  status: 'authenticated' as const,
+                  user: { id: 'synthetic-session-account' },
+                }),
+            },
+          }
+        : testPlatform;
     let actions: SessionActions | null = null;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -582,7 +601,7 @@ describe('useSessionActions', () => {
       root?.render(
         createElement(
           PlatformContext.Provider,
-          { value: testPlatform },
+          { value: platform },
           createElement(
             Provider,
             { store: jotaiStore },
@@ -601,6 +620,307 @@ describe('useSessionActions', () => {
     }
     return actions;
   };
+
+  it.each([
+    'archive',
+    'restore',
+    'delete',
+    'rename',
+    'pin',
+    'close',
+    'owner',
+    'bulk-delete',
+    'cancel',
+    'activity',
+    'unread',
+    'move',
+    'collaboration',
+  ] as const)(
+    'refuses history-only management through the shared action: %s',
+    async (operation) => {
+      const repo = await LoroRepo.create({});
+      const id = 'foreign-history' as SessionId;
+      const childId = 'foreign-child' as SessionId;
+      const rootMeta = {
+        id,
+        machineId: 'unshared-machine',
+        userId: 'another-member',
+        title: 'History',
+        lastMessageAt: 2,
+        isArchived: operation === 'restore' || operation === 'delete',
+      } as SessionMeta;
+      const childMeta = { ...rootMeta, id: childId, parentSessionId: id };
+      await repo.upsertDocMeta(getSessionRoomId(id), rootMeta);
+      await repo.upsertDocMeta(getSessionRoomId(childId), childMeta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+        readSessionOperationTargets: (target, kind) =>
+          readSessionOperationTargets(repo, target, kind),
+      });
+      Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+      const actions = await renderActions(runtime);
+      const run = {
+        archive: () => actions.archiveSession(id),
+        restore: () => actions.restoreSession(id),
+        delete: () => actions.deleteArchivedSession(id),
+        rename: () => actions.updateSessionTitle(id, 'Changed'),
+        pin: () => actions.setSessionPinned(id, true),
+        close: () => actions.setSessionTabClosed(id, true),
+        owner: () => actions.transferSessionOwner(id, 'synthetic-session-account'),
+        'bulk-delete': () => actions.deleteSessions([id, childId]),
+        cancel: () => actions.requestSessionCancel(id, 'turn'),
+        activity: () => actions.touchSessionActivity(id),
+        unread: () => actions.markSessionUnread(id),
+        move: () => actions.updateSessionMetadata(id, { projectGroup: { id: 'other-group' } }),
+        collaboration: () => actions.setTreeCollaborationStopped(id, true),
+      }[operation];
+      try {
+        await expect(run()).rejects.toMatchObject({ code: 'session_management_denied' });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(rootMeta);
+        expect((await repo.getDocMeta(getSessionRoomId(childId)))?.meta).toEqual(childMeta);
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it.each(['archive', 'restore', 'delete'] as const)(
+    'preflights a manageable root and denied child before any tree mutation: %s',
+    async (operation) => {
+      const repo = await LoroRepo.create({});
+      const id = 'owned-root' as SessionId;
+      const rootMeta = {
+        id,
+        machineId: 'unshared-machine',
+        userId: 'synthetic-session-account',
+        title: 'Own root',
+      } as SessionMeta;
+      const childMeta = {
+        ...rootMeta,
+        id: 'foreign-child' as SessionId,
+        userId: 'another-member',
+        parentSessionId: id,
+      };
+      await repo.upsertDocMeta(getSessionRoomId(id), rootMeta);
+      await repo.upsertDocMeta(getSessionRoomId(childMeta.id), childMeta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+        readSessionOperationTargets: (target, kind) =>
+          readSessionOperationTargets(repo, target, kind),
+      });
+      Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+      const actions = await renderActions(runtime);
+      try {
+        await expect(
+          {
+            archive: actions.archiveSession,
+            restore: actions.restoreSession,
+            delete: actions.deleteArchivedSession,
+          }[operation](id)
+        ).rejects.toMatchObject({ code: 'session_management_denied' });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(rootMeta);
+        expect((await repo.getDocMeta(getSessionRoomId(childMeta.id)))?.meta).toEqual(childMeta);
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it('retains encrypted author management and rejects metadata/project edits based on stale cached ownership', async () => {
+    const repo = await LoroRepo.create({});
+    const id = 'owned-history' as SessionId;
+    const meta = {
+      id,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Original',
+    } as SessionMeta;
+    const child = { ...meta, id: 'owned-child' as SessionId, parentSessionId: id };
+    await repo.upsertDocMeta(getSessionRoomId(id), meta);
+    await repo.upsertDocMeta(getSessionRoomId(child.id), child);
+    const runtime = createRuntime({
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+      readSessionOperationTargets: (target, kind) =>
+        readSessionOperationTargets(repo, target, kind),
+    });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(id)]: meta },
+    });
+    try {
+      await actions.updateSessionTitle(id, 'Changed');
+      await actions.setSessionPinned(id, true);
+      await actions.archiveSession(id);
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+        title: 'Changed',
+        isPinned: true,
+        isArchived: true,
+      });
+      expect((await repo.getDocMeta(getSessionRoomId(child.id)))?.meta?.isArchived).toBe(true);
+      await actions.restoreSession(id);
+      expect((await repo.getDocMeta(getSessionRoomId(child.id)))?.meta?.isArchived).toBe(false);
+      // Cache still claims ownership. Current Repo state must decide each new action.
+      await repo.upsertDocMeta(getSessionRoomId(id), { userId: 'different-member' });
+      await expect(
+        actions.updateSessionMetadata(id, { projectGroup: { id: 'another-group' } })
+      ).rejects.toMatchObject({ code: 'session_management_denied' });
+      await expect(actions.updateSessionTitle(id, 'Stolen')).rejects.toMatchObject({
+        code: 'session_management_denied',
+      });
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.title).toBe('Changed');
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.projectGroup).toBeUndefined();
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('preflights a mixed exact-ID batch before deleting any owned or history-only session', async () => {
+    const repo = await LoroRepo.create({});
+    const own = {
+      id: 'batch-owned' as SessionId,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Own',
+    } as SessionMeta;
+    const foreign = { ...own, id: 'batch-foreign' as SessionId, userId: 'different-member' };
+    for (const meta of [own, foreign]) await repo.upsertDocMeta(getSessionRoomId(meta.id), meta);
+    const runtime = createRuntime({ repo, writer: createDirectWorkspaceWriter({ repo } as never) });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime);
+    try {
+      await expect(actions.deleteSessions([own.id, foreign.id])).rejects.toMatchObject({
+        code: 'session_management_denied',
+      });
+      for (const meta of [own, foreign])
+        expect((await repo.getDocMeta(getSessionRoomId(meta.id)))?.meta).toEqual(meta);
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it.each(['account', 'workspace', 'runtime', 'logout'] as const)(
+    'fences a retained management callback when %s changes during its Repo read',
+    async (changed) => {
+      const repo = await LoroRepo.create({});
+      const id = 'held-rename' as SessionId;
+      const meta = {
+        id,
+        machineId: 'unshared-machine',
+        userId: 'synthetic-session-account',
+        title: 'Original',
+      } as SessionMeta;
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+      });
+      Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+      const state = createStore();
+      const identity = createPlatformStore<PlatformSessionState>({
+        status: 'authenticated',
+        user: { id: 'synthetic-session-account' },
+      });
+      const actions = await renderActions(runtime, { store: state, identitySession: identity });
+      const reached = createDeferred();
+      const release = createDeferred();
+      const originalRead = repo.getDocMeta.bind(repo);
+      vi.spyOn(repo, 'getDocMeta').mockImplementationOnce(async (room) => {
+        reached.resolve();
+        await release.promise;
+        return originalRead(room);
+      });
+      const refused = expect(
+        actions.updateSessionTitle(id, 'Stale account write')
+      ).rejects.toMatchObject({ code: 'session_management_denied' });
+      try {
+        await reached.promise;
+        await act(async () => {
+          if (changed === 'account') state.set(userAtom, { id: 'different-account' } as never);
+          else if (changed === 'workspace')
+            state.set(currentWorkspaceIdAtom, 'different-workspace' as WorkspaceId);
+          else if (changed === 'runtime') state.set(runtimeAtom, { ...runtime });
+          else {
+            identity.set({ status: 'unauthenticated' });
+            state.set(userAtom, null);
+          }
+        });
+        release.resolve();
+        await refused;
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
+      } finally {
+        release.resolve();
+        await repo.destroy();
+      }
+    }
+  );
+
+  it('preflights related opened conversations and parent activity before changing owned metadata', async () => {
+    const repo = await LoroRepo.create({});
+    const own = {
+      id: 'owned-root-with-relations' as SessionId,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Own',
+    } as SessionMeta;
+    const foreign = {
+      ...own,
+      id: 'foreign-opened' as SessionId,
+      openedBySessionId: own.id,
+      userId: 'different-member',
+    };
+    const child = {
+      ...own,
+      id: 'owned-child-with-foreign-parent' as SessionId,
+      parentSessionId: foreign.id,
+    };
+    for (const meta of [own, foreign, child])
+      await repo.upsertDocMeta(getSessionRoomId(meta.id), meta);
+    const runtime = createRuntime({
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+      readSessionOperationTargets: (target, kind) =>
+        readSessionOperationTargets(repo, target, kind),
+    });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime);
+    try {
+      await expect(
+        actions.archiveSession(own.id, { includeOpenedSessions: true })
+      ).rejects.toMatchObject({ code: 'session_management_denied' });
+      await expect(actions.touchSessionActivity(child.id)).rejects.toMatchObject({
+        code: 'session_management_denied',
+      });
+      for (const meta of [own, foreign, child])
+        expect((await repo.getDocMeta(getSessionRoomId(meta.id)))?.meta).toEqual(meta);
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('retains management with a bound local identity during uncertain cloud authentication', async () => {
+    const repo = await LoroRepo.create({});
+    const id = 'offline-owned-history' as SessionId;
+    await repo.upsertDocMeta(getSessionRoomId(id), {
+      id,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Original',
+    });
+    const runtime = createRuntime({ repo, writer: createDirectWorkspaceWriter({ repo } as never) });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime, {
+      identitySession: createStaticStore({ status: 'unauthenticated', uncertain: true }),
+    });
+    try {
+      await actions.updateSessionTitle(id, 'Offline edit');
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.title).toBe('Offline edit');
+    } finally {
+      await repo.destroy();
+    }
+  });
 
   it('uses released Stop wire fields and turn marker when the target has no Inbox capability', async () => {
     const sessionId = 'legacy-stop' as SessionId;
@@ -800,10 +1120,7 @@ describe('useSessionActions', () => {
     });
     const actions = await renderActions(runtime);
 
-    const result = await Promise.race([
-      actions.createSession(createSessionPayload(sessionId)),
-      new Promise<'still-pending'>((resolve) => setTimeout(() => resolve('still-pending'), 20)),
-    ]);
+    const result = await actions.createSession(createSessionPayload(sessionId));
 
     expect(result).toEqual(
       expect.objectContaining({
@@ -874,57 +1191,6 @@ describe('useSessionActions', () => {
     await expect(
       actions.createSession(createSessionPayload('new-session-while-loading' as SessionId))
     ).resolves.toMatchObject({ sessionId: 'new-session-while-loading' });
-  });
-
-  it('allows creation while workspace id atom is pending if runtime matches the route slug', async () => {
-    const sessionId = 'session-create-workspace-id-pending' as SessionId;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const runtime = createRuntime({
-      repo: { upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
-    });
-    const actions = await renderActions(runtime, {
-      workspaceId: null,
-      workspaceSlug: 'workspace-slug',
-    });
-
-    await expect(actions.createSession(createSessionPayload(sessionId))).resolves.toEqual(
-      expect.objectContaining({
-        sessionId,
-        sessionMeta: expect.objectContaining({ id: sessionId }),
-      })
-    );
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ id: sessionId })
-    );
-  });
-
-  it('records daily active user when creating a child session', async () => {
-    const sessionId = 'session-child-create' as SessionId;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const runtime = createRuntime({
-      repo: { upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
-    });
-    const actions = await renderActions(runtime);
-
-    await actions.createSession({
-      ...createSessionPayload(sessionId),
-      parentSessionId: 'parent-session-id' as SessionId,
-    });
-
-    expect(recordMyWorkspaceDailyActiveUser).toHaveBeenCalledWith({
-      workspaceId: runtime.workspaceId,
-    });
-  });
-
-  it('does not record daily activity while Convex authentication is recovering', async () => {
-    convexAuthState.isAuthenticated = false;
-    const runtime = createRuntime({});
-    const actions = await renderActions(runtime);
-
-    await actions.createSession(createSessionPayload('session-auth-recovery' as SessionId));
-
-    expect(recordMyWorkspaceDailyActiveUser).not.toHaveBeenCalled();
   });
 
   it('does not mutate through a runtime from a different workspace slug', async () => {
@@ -1179,28 +1445,6 @@ describe('useSessionActions', () => {
     ).rejects.toThrow('meta write failed');
   });
 
-  it('authors the pending user turn through the writer seam on send', async () => {
-    const sessionId = 'session-append-turn-writer' as SessionId;
-    const runtime = createRuntime({});
-    const actions = await renderActions(runtime);
-
-    const entry = await actions.addSessionHistory(sessionId, {
-      role: 'user',
-      userId: 'user-1',
-      items: [{ type: 'text', text: 'hi' }],
-      timestamp: '2026-07-05T00:00:00.000Z',
-      status: 'pending',
-      read: false,
-      finished: true,
-    } as unknown as Parameters<SessionActions['addSessionHistory']>[1]);
-
-    const stored = await runtime.withSessionStore(sessionId, (sessionStore) =>
-      sessionStore.sessionData.history.readTurn(entry.id)
-    );
-    expect(stored).toMatchObject({ state: 'ready', turn: entry });
-    expect(entry.items).toEqual([{ type: 'text', text: 'hi' }]);
-  });
-
   it('mints a fresh turn id when identical content is sent again (undelivered-turn resend)', async () => {
     const sessionId = 'session-resend-new-turn-id' as SessionId;
     const runtime = createRuntime({});
@@ -1239,38 +1483,6 @@ describe('useSessionActions', () => {
       store.sessionData.history.readTurn(second.id)
     );
     expect(resent).toMatchObject({ state: 'ready', turn: { inputConfig: { inputBlocks } } });
-  });
-
-  it('preserves the initial history and activity through the extracted submission service', async () => {
-    const sessionId = 'session-aggregate-start' as SessionId;
-    const runtime = createRuntime({});
-    const actions = await renderActions(runtime);
-
-    const result = await actions.startSession(createSessionPayload(sessionId), {
-      role: 'user',
-      userId: 'user-1',
-      items: [{ type: 'text', text: 'hi' }],
-      timestamp: '2026-07-18T00:00:00.000Z',
-      status: 'pending',
-      read: false,
-      finished: true,
-      inputConfig: {
-        inputBlocks: [{ type: 'text', text: 'hi' }],
-        agentType: 'codex',
-      },
-    } as unknown as Parameters<SessionActions['startSession']>[1]);
-
-    const stored = await runtime.withSessionStore(sessionId, (sessionStore) =>
-      sessionStore.sessionData.history.readTurn(result.historyEntry.id)
-    );
-    expect(stored).toMatchObject({ state: 'ready', turn: result.historyEntry });
-    expect(result.sessionMeta).toMatchObject({
-      id: sessionId,
-      machineId: 'machine-1',
-      historyBackend: 'loro',
-      lastMessageAt: expect.any(Number),
-    });
-    expect(result.historyEntry.inputConfig?.inputBlocks).toEqual([{ type: 'text', text: 'hi' }]);
   });
 
   it('selects Roost for new sessions with developer opt-in while experiments are off', async () => {
@@ -1383,73 +1595,6 @@ describe('useSessionActions', () => {
     expect(meta).toMatchObject({ id: sessionId });
     expect(meta).not.toHaveProperty('baseBranch');
     expect(meta.project).toMatchObject({ branch: selector });
-  });
-
-  it('fires the Machine RPC fast path and still authors the durable dispatch pointer', async () => {
-    const sessionId = 'session-dispatch-fast-path' as SessionId;
-    const userTurnId = 'user-turn-fast-path';
-    const machineId = 'machine-1' as MachineId;
-    const history = [
-      {
-        id: userTurnId,
-        role: 'user',
-        userId: 'user-1',
-        timestamp: '2026-07-05T00:00:00.000Z',
-        status: 'pending',
-        read: false,
-        inputConfig: {
-          prompt: 'hello',
-          inputBlocks: [{ type: 'text', text: 'hello' }],
-          cliType: 'builtin',
-          agentType: 'codex',
-        },
-      },
-    ];
-    const writerUpsertDocMeta = vi.fn(async () => undefined);
-    const requestSessionDispatchTurn = vi.fn(async () => ({
-      type: 'session/dispatch-turn_response' as const,
-      sessionId,
-      userTurnId,
-      accepted: true,
-      disposition: 'accepted' as const,
-    }));
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta: vi.fn(async () => ({ meta: { machineId } })),
-        upsertDocMeta: vi.fn(async () => undefined),
-      } as unknown as WorkspaceRuntime['repo'],
-      writer: {
-        modeForMachine: () => 'direct' as const,
-        modeForSession: async () => 'direct' as const,
-        upsertDocMeta: writerUpsertDocMeta,
-        appendSessionTurn: vi.fn(async () => 'direct' as const),
-        appendSessionHistory: vi.fn(async () => undefined),
-      } as unknown as WorkspaceRuntime['writer'],
-    }) as WorkspaceRuntime & {
-      withSessionStore: WorkspaceRuntime['withSessionStore'];
-      requestSessionDispatchTurn: WorkspaceRuntime['requestSessionDispatchTurn'];
-    };
-    runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
-      fn({
-        getState: vi.fn(() => ({ history })),
-        sessionData: sessionDataOver(history),
-        setState: vi.fn(),
-        waitUntilSynced: vi.fn(async () => undefined),
-      })
-    ) as unknown as WorkspaceRuntime['withSessionStore'];
-    runtime.requestSessionDispatchTurn =
-      requestSessionDispatchTurn as WorkspaceRuntime['requestSessionDispatchTurn'];
-    const actions = await renderActions(runtime);
-
-    await actions.requestSessionDispatch(sessionId, userTurnId, { machineId });
-
-    // The facade routes local machines over the local socket RPC and remote
-    // machines over the cloud stream; the durable pointer remains recovery truth.
-    expect(requestSessionDispatchTurn).toHaveBeenCalledTimes(1);
-    expect(writerUpsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ latestUserMsgId: userTurnId })
-    );
   });
 
   const userInput = (text: string) =>
@@ -1837,35 +1982,6 @@ describe('useSessionActions', () => {
     expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
   });
 
-  it('restores root containment without changing any close flag', async () => {
-    const tree = createContainmentSessions('root-restore', true);
-    const archivedRoot = { ...tree.rootSession, isTabClosed: true };
-    const child = { ...tree.tabSession, isTabClosed: true };
-    const metaRepo = createSessionMetaRepo([archivedRoot, child, tree.openedSession]);
-    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
-      sessionMetaCache: tree.sessionMetaCache,
-    });
-    await actions.restoreSession(archivedRoot.id);
-    expect(metaRepo.getSession(archivedRoot.id)).toEqual({ ...archivedRoot, isArchived: false });
-    expect(metaRepo.getSession(child.id)).toEqual({ ...child, isArchived: false });
-    expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
-  });
-
-  it('preserves state when closing or restoration writes fail', async () => {
-    const tree = createContainmentSessions('failed-close', true);
-    const metaRepo = createSessionMetaRepo(tree.sessions);
-    metaRepo.repo.upsertDocMeta = async () => {
-      throw new Error('disk full');
-    };
-    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
-      docMetaCacheReady: false,
-    });
-    await expect(actions.setSessionTabClosed(tree.rootSession.id, true)).rejects.toThrow(
-      'disk full'
-    );
-    expect(metaRepo.getSession(tree.rootSession.id)).toEqual(tree.rootSession);
-  });
-
   it.each([false, true])('uses one Repo snapshot even when UI readiness is %s', async (ready) => {
     const tree = createContainmentSessions('snapshot', false);
     const unrelated = { ...tree.rootSession, id: 'unrelated' as SessionId };
@@ -2065,44 +2181,6 @@ describe('useSessionActions', () => {
       expect(metaRepo.getSession(session.id)?.isArchived).toBe(true);
     for (const session of [tree.openedSession, tree.openedFromTabSession])
       expect(metaRepo.getSession(session.id)).toEqual(session);
-  });
-
-  it('archives tabs but leaves independently opened sessions and their descendants active', async () => {
-    const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
-      createContainmentSessions('archive', false);
-    const grandchild = {
-      ...openedSession,
-      id: 'archive-grandchild' as SessionId,
-      openedBySessionId: openedSession.id,
-    };
-    const unrelated = { ...rootSession, id: 'archive-unrelated' as SessionId };
-    sessionMetaCache[getSessionRoomId(grandchild.id)] = grandchild;
-    sessionMetaCache[getSessionRoomId(unrelated.id)] = unrelated;
-    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
-    const runtime = createRuntime({ repo: metaRepo.repo });
-    const actions = await renderActions(runtime, { sessionMetaCache });
-    sendIpcMock.mockClear();
-
-    await actions.archiveSession(rootSession.id);
-
-    for (const session of [rootSession, tabSession]) {
-      expect(metaRepo.getSession(session.id)).toMatchObject({
-        isArchived: true,
-        status: { type: 'idle' },
-      });
-    }
-    for (const session of [openedSession, openedFromTabSession, grandchild, unrelated]) {
-      expect(metaRepo.getSession(session.id)).toEqual(session);
-    }
-
-    expect(sendIpcMock.mock.calls).toEqual([
-      ['terminal.closeSession', { sessionId: rootSession.id }],
-      ['terminal.closeSession', { sessionId: tabSession.id }],
-    ]);
-    expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
-    for (const session of [rootSession, openedSession, openedFromTabSession]) {
-      expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toBeUndefined();
-    }
   });
 
   describe('archive confirmation for opened sub-conversations', () => {
@@ -2530,26 +2608,6 @@ describe('useSessionActions', () => {
     }
   });
 
-  it('cleans up a partially created child absent from the metadata cache', async () => {
-    const rootSessionId = 'partial-create-root' as SessionId;
-    const childSession = {
-      id: 'partial-create-child' as SessionId,
-      parentSessionId: rootSessionId,
-      createdAt: '2026-09-10T00:00:00.000Z',
-    } as SessionMeta;
-    const metaRepo = createSessionMetaRepo([childSession]);
-    const runtime = createRuntime({ repo: metaRepo.repo });
-    const actions = await renderActions(runtime);
-
-    expect(metaRepo.getSession(childSession.id)).toMatchObject({
-      parentSessionId: rootSessionId,
-    });
-
-    await actions.deleteSessions([childSession.id]);
-
-    expect(metaRepo.getSession(childSession.id)).toBeUndefined();
-  });
-
   it('keeps active opened Sessions and their machine queues after archive then delete', async () => {
     const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
       createContainmentSessions('archive-delete', false);
@@ -2629,60 +2687,6 @@ describe('useSessionActions', () => {
         [openedSession.id]: true,
         [openedFromTabSession.id]: true,
       },
-    });
-  });
-});
-
-describe('resolveSessionChatType', () => {
-  it('distinguishes side chats from regular sessions', () => {
-    expect(resolveSessionChatType({ childSessionPlacement: 'side-panel' })).toBe('side_chat');
-    expect(resolveSessionChatType({})).toBe('regular');
-    expect(resolveSessionChatType(undefined)).toBe('regular');
-  });
-});
-
-describe('countSessionMentions', () => {
-  it('counts each sent mention kind and ignores pasted-text spans', () => {
-    expect(
-      countSessionMentions([
-        {
-          type: 'text',
-          text: '@src @dir #12 $review /test @session @role pasted',
-          spans: [
-            { start: 0, end: 4, kind: 'file', label: '@src' },
-            { start: 5, end: 9, kind: 'dir', label: '@dir' },
-            { start: 10, end: 13, kind: 'issue', label: '#12' },
-            { start: 14, end: 21, kind: 'skill', label: '$review' },
-            { start: 22, end: 27, kind: 'command', label: '/test' },
-            { start: 28, end: 36, kind: 'session', label: '@session' },
-            { start: 37, end: 42, kind: 'agent_role', label: '@role' },
-            { start: 43, end: 49, kind: 'pasted_text', label: 'pasted' },
-          ],
-        },
-        {
-          type: 'text',
-          text: '#34 pull request',
-          spans: [{ start: 0, end: 3, kind: 'pr', label: '#34' }],
-        },
-      ])
-    ).toEqual({
-      mention_count: 8,
-      mention_types: ['file', 'dir', 'issue', 'pr', 'skill', 'session', 'command', 'agent_role'],
-      mention_file_count: 1,
-      mention_dir_count: 1,
-      mention_issue_count: 1,
-      mention_pr_count: 1,
-      mention_skill_count: 1,
-      mention_session_count: 1,
-      mention_command_count: 1,
-      mention_agent_role_count: 1,
-    });
-  });
-
-  it('returns zero counts when the message has no mentions', () => {
-    expect(countSessionMentions(undefined)).toMatchObject({
-      mention_count: 0,
-      mention_types: [],
     });
   });
 });

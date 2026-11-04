@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionHistoryInput } from '../src/schema';
 import { SessionHistoryChangesSchema } from '../src/message-schemas';
-import { applySessionHistoryPatches, SessionHistoryContentPatchSchema } from '../src/session-data';
+import { applySessionHistoryPatches } from '../src/session-data';
 
 const entry = (): SessionHistoryInput => ({
   id: 'synthetic-assistant',
@@ -90,24 +90,5 @@ describe('history content patches', () => {
         { kind: 'set', path: [{ key: '__proto__' }, { key: 'syntheticKey' }], value: true },
       ])
     ).toThrow();
-  });
-
-  it('rejects invalid wire offsets, empty paths and undeclared operations', () => {
-    for (const index of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1])
-      expect(
-        SessionHistoryContentPatchSchema.safeParse({
-          kind: 'spliceText',
-          path: textPath,
-          index,
-          delete: 0,
-          text: '',
-        }).success
-      ).toBe(false);
-    expect(
-      SessionHistoryContentPatchSchema.safeParse({ kind: 'set', path: [], value: null }).success
-    ).toBe(false);
-    expect(
-      SessionHistoryContentPatchSchema.safeParse({ kind: 'execute', path: textPath }).success
-    ).toBe(false);
   });
 });

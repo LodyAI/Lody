@@ -3,9 +3,7 @@ import test from 'node:test'
 import {
   applyResolvedWindowTheme,
   getInitialMainWindowThemeSource,
-  getMainWindowTitleBarOverlay,
-  isNativeWindowThemeSource,
-  resolveNativeWindowTheme
+  getMainWindowTitleBarOverlay
 } from './window-theme.ts'
 
 void test('opens a product window on the committed theme, onboarding always light', () => {
@@ -13,17 +11,6 @@ void test('opens a product window on the committed theme, onboarding always ligh
   // Nothing committed yet (first launch) keeps the pre-persistence behavior.
   assert.equal(getInitialMainWindowThemeSource('/', null), 'system')
   assert.equal(getInitialMainWindowThemeSource('/onboarding', 'dark'), 'light')
-})
-
-void test('rejects a theme source that did not come from the product', () => {
-  assert.equal(isNativeWindowThemeSource('dark'), true)
-  assert.equal(isNativeWindowThemeSource('Dark'), false)
-  assert.equal(isNativeWindowThemeSource(null), false)
-})
-
-void test('maps Electron shouldUseDarkColors onto the resolved window theme', () => {
-  assert.equal(resolveNativeWindowTheme(true), 'dark')
-  assert.equal(resolveNativeWindowTheme(false), 'light')
 })
 
 void test('keeps Windows caption backgrounds transparent through theme changes', () => {

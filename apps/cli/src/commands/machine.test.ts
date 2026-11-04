@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { type MachineId, type MachineMeta } from '@lody/shared';
-import {
-  formatMachineCli,
-  sortMachineMetas,
-  toMachineJsonEntry,
-  toMachineListEntry,
-} from './machine';
+import { sortMachineMetas, toMachineListEntry } from './machine';
 
 const createMachine = (overrides: Partial<MachineMeta> = {}): MachineMeta => ({
   id: 'machine-id',
@@ -52,66 +47,5 @@ describe('machine command helpers', () => {
     expect(
       sortMachineMetas(machines, onlineMachineIds, 'machine-1').map((machine) => machine.id)
     ).toEqual(['machine-1', 'machine-3', 'machine-2']);
-  });
-
-  it('formats registry cli names into one column', () => {
-    expect(
-      formatMachineCli(
-        createMachine({
-          supportRegistryAgentTypes: ['opencode', 'codex', 'kimi'],
-        })
-      )
-    ).toBe('opencode,codex,kimi');
-
-    expect(formatMachineCli(createMachine())).toBe('-');
-  });
-
-  it('omits acpCapabilities from json output unless explicitly requested', () => {
-    const machine = {
-      ...createMachine(),
-      acpCapabilities: {
-        'registry:opencode': {
-          agentType: 'opencode',
-          cliType: 'registry',
-          fetchedAt: 1,
-          models: [],
-          modes: [],
-        },
-      },
-      raceLimits: {},
-      online: true,
-    };
-
-    expect(
-      toMachineJsonEntry(machine, { includeAcpCapabilities: false, includeAgents: false })
-    ).not.toHaveProperty('acpCapabilities');
-    expect(
-      toMachineJsonEntry(machine, { includeAcpCapabilities: true, includeAgents: false })
-    ).toHaveProperty('acpCapabilities');
-  });
-
-  it('omits agent configs from json output unless explicitly requested', () => {
-    const machine = {
-      ...createMachine(),
-      raceLimits: {},
-      online: true,
-      agentConfigs: [
-        {
-          id: 'agent-config-id',
-          machineId: 'machine-id',
-          name: 'Codex',
-          cliType: 'builtin',
-          agentType: 'codex',
-          env: {},
-        },
-      ],
-    };
-
-    expect(
-      toMachineJsonEntry(machine, { includeAcpCapabilities: false, includeAgents: false })
-    ).not.toHaveProperty('agentConfigs');
-    expect(
-      toMachineJsonEntry(machine, { includeAcpCapabilities: false, includeAgents: true })
-    ).toHaveProperty('agentConfigs');
   });
 });

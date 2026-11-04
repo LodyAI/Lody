@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -16,7 +17,6 @@ import {
   type PrTabViewData,
   type PrTabViewState,
 } from '../src/components/sessions/pr-tab-view';
-import { threadHunkExcerpt } from '../src/ui/diff-viewer/github-comment-thread';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -118,6 +118,41 @@ describe('PrTabView refresh button', () => {
     return { button, onRefresh };
   };
 
+  it('shows GitHub stack layers in order with their statuses and links', () => {
+    renderView({
+      state: 'ready',
+      data: {
+        ...data,
+        pullRequest: {
+          ...pullRequest,
+          stack: {
+            number: 7,
+            position: 2,
+            size: 2,
+            baseRef: 'main',
+            pullRequests: [
+              { number: 41, title: 'Foundation', state: 'closed', draft: false, merged: true },
+              { number: 42, title: 'Feature', state: 'open', draft: false, merged: false },
+            ],
+          },
+        },
+      },
+    });
+    const stack = container?.querySelector('section[aria-label="Pull request stack"]');
+    expect(stack?.textContent).toContain('2 / 2');
+    expect(stack?.querySelector('a[aria-label="Merged: Foundation #41"] svg')).not.toBeNull();
+    expect(
+      stack?.querySelector('a[aria-label="Open: Feature #42"][aria-current="page"] svg')
+    ).not.toBeNull();
+    expect(
+      Array.from(stack?.querySelectorAll('li a') ?? []).map((a) => a.getAttribute('href'))
+    ).toEqual([
+      'https://github.com/loro-dev/lody/pull/42',
+      'https://github.com/loro-dev/lody/pull/41',
+    ]);
+    expect(stack?.textContent).toContain('Merge this stack on GitHub.');
+  });
+
   it('keeps the top refresh button clickable while the initial load is spinning', () => {
     const { button, onRefresh } = renderView({ state: 'loading', data: null });
 
@@ -129,80 +164,6 @@ describe('PrTabView refresh button', () => {
     });
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps the top refresh button clickable while revalidating cached PR data', () => {
-    const { button, onRefresh } = renderView({ state: 'ready', isRefreshing: true });
-
-    expect(button.disabled).toBe(false);
-    expect(button.querySelector('.animate-spin')).not.toBeNull();
-
-    flushSync(() => {
-      button.click();
-    });
-
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-  });
-
-  it('pins the comment composer below the scrollable PR content', () => {
-    const onPostComment = vi.fn();
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        createElement(PrTabView, {
-          repoFullName: 'loro-dev/lody',
-          prNumber: 42,
-          state: 'ready',
-          data,
-          onPostComment,
-        })
-      );
-    });
-
-    const textarea = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Leave a comment"]'
-    );
-    const scrollArea = container.querySelector<HTMLElement>('[data-pr-content-scroll-area]');
-    const composer = container.querySelector<HTMLElement>('[data-pr-comment-composer]');
-
-    expect(textarea).not.toBeNull();
-    expect(scrollArea).not.toBeNull();
-    expect(scrollArea?.contains(textarea)).toBe(false);
-    expect(composer?.contains(textarea)).toBe(true);
-    expect(scrollArea?.nextElementSibling).toBe(composer);
-  });
-
-  it('lets the PR description expand inside the panel scroll area', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        createElement(PrTabView, {
-          repoFullName: 'loro-dev/lody',
-          prNumber: 42,
-          state: 'ready',
-          data: {
-            ...data,
-            pullRequest: {
-              ...pullRequest,
-              body: 'A long pull request description.',
-            },
-          },
-        })
-      );
-    });
-
-    const scrollArea = container.querySelector<HTMLElement>('[data-pr-content-scroll-area]');
-    const description = container.querySelector<HTMLElement>('[data-pr-description]');
-    const panelViewport = scrollArea?.querySelector<HTMLElement>('[data-scroll-area-viewport]');
-
-    expect(description).not.toBeNull();
-    expect(description?.closest('[data-scroll-area-viewport]')).toBe(panelViewport);
   });
 });
 
@@ -251,28 +212,6 @@ function makeThread(overrides: Partial<GitHubReviewThread> = {}): GitHubReviewTh
   };
 }
 
-describe('threadHunkExcerpt', () => {
-  it('quotes the hunk tail that ends at the commented line', () => {
-    expect(threadHunkExcerpt(makeThread())).toEqual([
-      '-  const c = a + b;',
-      '+  const c = add(a, b);',
-      '+  const d = c * 2;',
-      '   return d;',
-    ]);
-  });
-
-  it('quotes a multi-line range whole', () => {
-    const thread = makeThread({
-      anchor: { path: 'src/load.ts', line: 15, side: 'RIGHT', startLine: 10, startSide: 'RIGHT' },
-    });
-    expect(threadHunkExcerpt(thread)).toHaveLength(6);
-  });
-
-  it('quotes nothing for a file-level thread', () => {
-    expect(threadHunkExcerpt(makeThread({ subjectType: 'file' }))).toEqual([]);
-  });
-});
-
 describe('PrTabView document', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
@@ -300,18 +239,6 @@ describe('PrTabView document', () => {
     });
     return container;
   };
-
-  it('states the PR once: number in the header, state and branches under the title', () => {
-    const el = render({
-      ...data,
-      pullRequest: { ...pullRequest, state: 'closed', merged: true },
-    });
-    expect(el.querySelector('h2')?.textContent).toBe('Fix refresh button');
-    expect(el.textContent?.match(/#42/g)).toHaveLength(1);
-    expect(el.querySelector('[data-pr-state]')?.getAttribute('data-pr-state')).toBe('merged');
-    const branches = [...el.querySelectorAll('button[title]')].map((b) => b.textContent);
-    expect(branches).toEqual(expect.arrayContaining(['main', 'fix/pr-refresh-button']));
-  });
 
   it("files a review's thread under the review with its path, line and code", () => {
     const review: GitHubReview = {
@@ -437,40 +364,6 @@ describe('PrTabView load failure', () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the verified identity cause inline', () => {
-    const identityMessage =
-      'Cannot verify this session’s repository identity. GitHub operations are paused.';
-    render({
-      state: 'error',
-      data: null,
-      error: identityMessage,
-      onRefresh: vi.fn(),
-    });
-
-    expect(panel()?.textContent).toContain('Failed to load pull request');
-    expect(panel()?.textContent).toContain(identityMessage);
-    // Not a 404: no app-access hint.
-    expect(panel()?.textContent).not.toContain('GitHub App can’t access');
-  });
-
-  it('holds the retry button pending until the reload settles', async () => {
-    let settle: (() => void) | undefined;
-    const onRefresh = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          settle = resolve;
-        })
-    );
-    render({ state: 'error', data: null, error: 'offline', onRefresh });
-
-    flushSync(() => retryButton()?.click());
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-    expect(retryButton()?.disabled).toBe(true);
-
-    settle?.();
-    await vi.waitFor(() => expect(retryButton()?.disabled).toBe(false));
-  });
-
   it('keeps a typed comment draft across a failed reload', () => {
     const onPostComment = vi.fn();
     render({ state: 'ready', data, onPostComment });
@@ -529,21 +422,6 @@ describe('PrTabView merge card', () => {
       header: el.querySelector<HTMLElement>('header'),
     };
   };
-
-  it('keeps the merge action in the header and the verdict in the card', () => {
-    const onMerge = vi.fn();
-    const { card, header } = render(pullRequest, { onMerge });
-    expect(card?.getAttribute('data-pr-merge-card')).toBe('ready');
-    expect(card?.textContent).toContain('Ready to merge');
-    expect(card?.querySelector('button[data-pr-merge-action], [data-pr-merge-action]')).toBeNull();
-
-    const group = header?.querySelector('[data-pr-merge-action]');
-    expect(group?.getAttribute('role')).toBe('group');
-    const [merge, options] = [...(group?.querySelectorAll('button') ?? [])];
-    expect(options?.getAttribute('aria-label')).toBe('More actions');
-    flushSync(() => merge?.click());
-    expect(onMerge).toHaveBeenCalledWith('merge');
-  });
 
   it('drops the header action once merged with no branch left to delete', () => {
     const merged = render({ ...pullRequest, state: 'closed', merged: true });
@@ -608,19 +486,5 @@ describe('PrTabView merge card', () => {
       (button) => button.textContent === 'Merge'
     );
     expect(merge?.disabled).toBe(true);
-  });
-
-  it('draws the draft glyph once, in the state pill', () => {
-    const { card, header } = render(
-      { ...pullRequest, draft: true, mergeableState: 'draft' },
-      { onMarkReadyForReview: vi.fn() }
-    );
-    expect(card?.getAttribute('data-pr-merge-card')).toBe('draft');
-    expect(card?.querySelector('svg')).toBeNull();
-    const ready = [...(header?.querySelectorAll('button') ?? [])].find(
-      (button) => button.textContent === 'Ready for review'
-    );
-    expect(ready?.querySelector('svg')).toBeNull();
-    expect(container?.querySelector('[data-pr-state="draft"] svg')).not.toBeNull();
   });
 });

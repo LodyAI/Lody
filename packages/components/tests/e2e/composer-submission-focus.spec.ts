@@ -347,6 +347,32 @@ test('editing a sent message focuses its input with the caret at the end', async
   await expect(input).toHaveValue('Clarify this instruction with more detail');
 });
 
+test('full-width editing keeps the editor aligned with the message metadata', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 900 });
+  await page.goto(
+    '/iframe.html?id=ai-gui-usermessageeditor--full-width-from-message-edit&viewMode=story'
+  );
+  await page.getByRole('button', { name: 'Edit message', exact: true }).click();
+  await expect(page.locator('[aria-label="Edit message"]').first()).toBeVisible();
+
+  for (const width of [1800, 900]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const input = document.querySelector('[aria-label="Edit message"]');
+          const card = input?.closest('.rounded-2xl');
+          const metadata = document.querySelector('[data-testid="user-message-metadata"]');
+          if (!card || !metadata) return Number.POSITIVE_INFINITY;
+          return Math.abs(
+            card.getBoundingClientRect().right - metadata.getBoundingClientRect().right
+          );
+        })
+      )
+      .toBeLessThan(1);
+  }
+});
+
 test('editing a queued message places the caret at the end without moving it while typing', async ({
   page,
 }) => {

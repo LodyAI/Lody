@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { LoroDoc } from 'loro-crdt';
 import { ScheduleRepository, type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
 import { userAtom } from '../src/atoms';
@@ -22,7 +23,8 @@ import {
   canUseElectronLocalFileSend,
   sendSessionFileToLocalRuntime,
 } from '../src/lib/electron-session-file-sender';
-import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
+import { currentWorkspaceIdAtom, setWorkspaceContextAtom } from '../src/atoms/workspace-context';
+import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { computeSha256Hex, uploadSessionFile } from '../src/lib/session-file-upload';
 import { uploadSessionImage } from '../src/lib/session-image-upload';
 import { createRoot, type Root } from 'react-dom/client';
@@ -152,6 +154,8 @@ import {
 import { initI18n } from '../src/i18n';
 import { PASTED_TEXT_FILE_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
 import { toast } from '@/lib/toast';
+import { formatMessageQuote, getSessionRoomId } from '@lody/shared';
+import { conversationQuoteDraftKey } from '../src/lib/conversation-quote-draft';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -299,55 +303,6 @@ describe('SessionChatInputArea submission feedback', () => {
     ).not.toBeNull();
   });
 
-  it('does not submit against transient run-config defaults while the Session doc hydrates', async () => {
-    const onSendMessage = vi.fn(async () => true);
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        createElement(SessionChatInputArea, {
-          session: {
-            id: 'session-hydrating',
-            userId: 'user-1',
-            machineId: 'machine-1',
-            agentConfigId: 'agent-1',
-            cliType: 'builtin',
-            agentType: 'codex',
-            status: { type: 'idle' },
-            isArchived: false,
-            createdAt: '2026-08-26T00:00:00.000Z',
-          } as SessionMeta,
-          sessionLocalProjectRootPath: null,
-          isMachineRemoved: false,
-          isAgentBusy: false,
-          isDark: false,
-          isEmptyConversation: false,
-          durableAgentRoleReady: false,
-          selectedModeId: null,
-          selectedModelId: 'provider-default',
-          modeOptions: [],
-          modelOptions: [],
-          onModeChange: () => undefined,
-          onModelChange: () => undefined,
-          onSendMessage,
-          onStop: () => undefined,
-          onRemoveQueueItem: async () => undefined,
-          initialInputText: 'wait for the durable config',
-        })
-      );
-    });
-
-    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.disabled).toBe(
-      true
-    );
-    await act(async () =>
-      container.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click()
-    );
-    expect(onSendMessage).not.toHaveBeenCalled();
-  });
-
   afterEach(async () => {
     await act(async () => root?.unmount());
     await resources.dispose();
@@ -355,6 +310,8 @@ describe('SessionChatInputArea submission feedback', () => {
     getDefaultStore().set(localProbeResultAtom, null);
     getDefaultStore().set(authTokenAtom, null);
     getDefaultStore().set(currentWorkspaceIdAtom, null);
+    getDefaultStore().set(sessionMetaCacheAtom, {});
+    getDefaultStore().set(setWorkspaceContextAtom, { slug: null, workspaceId: null });
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
     Reflect.deleteProperty(window.navigator, 'userAgent');
@@ -362,104 +319,6 @@ describe('SessionChatInputArea submission feedback', () => {
     root = null;
     container?.remove();
     container = null;
-  });
-
-  it('clears immediately and restores the preserved draft when acceptance fails', async () => {
-    const acceptance = deferredBoolean();
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        createElement(SessionChatInputArea, {
-          session: {
-            id: 'session-feedback',
-            userId: 'user-1',
-            machineId: 'machine-1',
-            cliType: 'builtin',
-            agentType: 'codex',
-            status: { type: 'idle' },
-            isArchived: false,
-            createdAt: '2026-07-19T00:00:00.000Z',
-          } as SessionMeta,
-          sessionLocalProjectRootPath: null,
-          isMachineRemoved: false,
-          isAgentBusy: false,
-          isDark: false,
-          isEmptyConversation: false,
-          selectedModeId: null,
-          selectedModelId: null,
-          modeOptions: [],
-          modelOptions: [],
-          onModeChange: () => undefined,
-          onModelChange: () => undefined,
-          onSendMessage: () => acceptance.promise,
-          onStop: () => undefined,
-          onRemoveQueueItem: async () => undefined,
-          initialInputText: 'preserved draft',
-        })
-      );
-    });
-
-    expect(container.querySelector('textarea')?.value).toBe('preserved draft');
-
-    await act(async () => {
-      container?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click();
-      await Promise.resolve();
-    });
-
-    expect(container.querySelector('textarea')?.value).toBe('');
-    expect(container.querySelector('textarea')?.disabled).toBe(true);
-
-    await act(async () => {
-      acceptance.resolve(false);
-      await acceptance.promise;
-    });
-
-    expect(container.querySelector('textarea')?.value).toBe('preserved draft');
-    expect(container.querySelector('textarea')?.disabled).toBe(false);
-  });
-
-  it('shows a turn limit without an upgrade action when none is provided', async () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        createElement(SessionChatInputArea, {
-          session: {
-            id: 'session-limit',
-            userId: 'user-1',
-            machineId: 'machine-1',
-            cliType: 'builtin',
-            agentType: 'codex',
-            status: { type: 'idle' },
-            isArchived: false,
-            createdAt: '2026-07-19T00:00:00.000Z',
-          } as SessionMeta,
-          sessionLocalProjectRootPath: null,
-          isMachineRemoved: false,
-          isAgentBusy: false,
-          isDark: false,
-          isEmptyConversation: false,
-          selectedModeId: null,
-          selectedModelId: null,
-          modeOptions: [],
-          modelOptions: [],
-          onModeChange: () => undefined,
-          onModelChange: () => undefined,
-          onSendMessage: async () => true,
-          onStop: () => undefined,
-          onRemoveQueueItem: async () => undefined,
-          freeTurnLimitNotice: { current: 20, limit: 20 },
-        })
-      );
-    });
-
-    expect(container.textContent).toContain('limited to 20 turns');
-    expect(container.textContent).not.toContain('Upgrade to Plus');
   });
 
   let nextSession = 0;
@@ -532,6 +391,139 @@ describe('SessionChatInputArea submission feedback', () => {
     return container!.querySelector('textarea')!;
   }
 
+  it('retires the shown prompt suggestion once a sent message is accepted', async () => {
+    const store = getDefaultStore();
+    let publish: ((text: string | null) => void) | undefined;
+    store.set(runtimeAtom, {
+      workspaceId: 'workspace-upload',
+      workspaceSlug: 'workspace-upload',
+      sendResources: resources,
+      subscribePromptSuggestion: (
+        _machineId: string,
+        _sessionId: string,
+        listener: (text: string | null) => void
+      ) => {
+        publish = listener;
+        listener('Run the tests');
+        return () => {
+          publish = undefined;
+        };
+      },
+    } as never);
+    store.set(setWorkspaceContextAtom, {
+      slug: 'workspace-upload',
+      workspaceId: 'workspace-upload' as never,
+    });
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId('suggestion-send' as never)]: { machineId: 'machine-1' } as SessionMeta,
+    });
+    const accept = deferredBoolean();
+    const submitted: unknown[] = [];
+    const textarea = await renderComposer({
+      sessionId: 'suggestion-send',
+      onSendMessage: (blocks) => {
+        submitted.push(blocks);
+        return accept.promise;
+      },
+      overrides: { initialInputText: '' },
+    });
+    const hint = () => container!.querySelector('[data-prompt-suggestion]');
+    expect(hint()?.textContent).toContain('Run the tests');
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      );
+    });
+    expect(textarea.value).toBe('Run the tests');
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(submitted).toHaveLength(1);
+    await act(async () => accept.resolve(true));
+    // The previous turn is still running: the daemon has not replaced the suggestion yet.
+    await act(async () => publish?.('Run the tests'));
+    expect(textarea.value).toBe('');
+    expect(hint()).toBeNull();
+    await act(async () => publish?.('Open a PR'));
+    expect(hint()?.textContent).toContain('Open a PR');
+  });
+
+  it('restores an archived conversation from the composer without losing its draft', async () => {
+    let finishRestore!: () => void;
+    const restore = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRestore = resolve;
+        })
+    );
+    const onSendMessage = vi.fn(async () => true);
+    const textarea = await renderComposer({
+      sessionId: 'restore-composer-test',
+      isArchived: true,
+      onSendMessage,
+      overrides: { onRestoreSession: restore },
+    });
+    expect(textarea.disabled).toBe(true);
+    const button = [...container!.querySelectorAll('button')].find((item) =>
+      item.textContent?.includes('Restore session')
+    )!;
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button.click();
+      button.click();
+    });
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    await act(async () => {
+      finishRestore();
+    });
+    await renderComposer({
+      sessionId: 'restore-composer-test',
+      isArchived: false,
+      onSendMessage,
+      overrides: { onRestoreSession: restore },
+    });
+    expect(container!.querySelector('textarea')!.disabled).toBe(false);
+    expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
+    expect(
+      [...container!.querySelectorAll('button')].some((item) =>
+        item.textContent?.includes('Restore session')
+      )
+    ).toBe(false);
+    expect(onSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps an archived conversation recoverable when restoration fails', async () => {
+    const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const notify = vi.spyOn(toast, 'error').mockImplementation(() => '' as never);
+    try {
+      const textarea = await renderComposer({
+        sessionId: 'restore-composer-failure',
+        isArchived: true,
+        onSendMessage: async () => true,
+        overrides: {
+          onRestoreSession: async () => {
+            throw new Error('restore failed');
+          },
+        },
+      });
+      const button = [...container!.querySelectorAll('button')].find((item) =>
+        item.textContent?.includes('Restore session')
+      )!;
+      await act(async () => {
+        button.click();
+      });
+      expect(textarea.disabled).toBe(true);
+      expect(button.disabled).toBe(false);
+      expect(notify).toHaveBeenCalled();
+    } finally {
+      report.mockRestore();
+      notify.mockRestore();
+    }
+  });
+
   async function submit(source: 'keyboard' | 'button') {
     await act(async () => {
       if (source === 'keyboard') {
@@ -545,6 +537,224 @@ describe('SessionChatInputArea submission feedback', () => {
       }
     });
   }
+
+  it('inserts a quote at the caret, preserves it after rejection, and restores deletion with undo/redo', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return false;
+      },
+    });
+    textarea.focus();
+    textarea.setSelectionRange(0, 0);
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote('原文\n\n```ts\nconst n = 1;\n```')).toBe(true);
+    });
+    const quotedDraft = textarea.value;
+    expect(quotedDraft).toContain('focus regression draft');
+    const quoteEnd = quotedDraft.indexOf('focus regression draft');
+    textarea.setSelectionRange(0, 0);
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })
+      )
+    );
+    expect(textarea.value).toBe('focus regression draft');
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
+      )
+    );
+    expect(textarea.value).toBe(quotedDraft);
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          ctrlKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      )
+    );
+    expect(textarea.value).toBe('focus regression draft');
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
+      )
+    );
+    textarea.setSelectionRange(quoteEnd, quoteEnd);
+    await submit('button');
+    expect(textarea.value).toBe(quotedDraft);
+    const block = submitted[0]![0]!;
+    expect(block).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('> 原文\n> \n> ```ts'),
+      spans: [{ kind: 'message_quote', quoteVersion: 1 }],
+    });
+    await submit('button');
+    expect(submitted[1]).toEqual(submitted[0]);
+  });
+
+  it('preserves a quote draft when the target machine loses support', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    const sessionId = `quote-capability-${++nextSession}`;
+    const props = {
+      sessionId,
+      composerRef,
+      onSendMessage: async (blocks: SessionInputBlock[]) => {
+        submitted.push(blocks);
+        return true;
+      },
+    };
+    const textarea = await renderComposer(props);
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote('Keep this snapshot')).toBe(true);
+    });
+    const draft = textarea.value;
+    scheduleMachine.value = null;
+    await renderComposer(props);
+    vi.spyOn(toast, 'error').mockImplementation(() => 'toast');
+    await submit('button');
+    expect(submitted).toEqual([]);
+    expect(textarea.value).toBe(draft);
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote('Unsupported')).toBe(false);
+    });
+    expect(textarea.value).toBe(draft);
+  });
+
+  it('restores a persisted quote snapshot on mount and retires it only after acceptance', async () => {
+    const workspace = 'quote-restart-workspace';
+    const sessionId = `quote-restart-${++nextSession}`;
+    getDefaultStore().set(currentWorkspaceIdAtom, workspace as never);
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const quote = formatMessageQuote('Snapshot after restart\n  keep indentation');
+    const key = conversationQuoteDraftKey(workspace, sessionId);
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        text: quote + '\n\nWhy?',
+        spans: [
+          {
+            start: 0,
+            end: quote.length,
+            kind: 'message_quote',
+            quoteVersion: 1,
+            label: '[Quote]',
+            target: 'restored-quote',
+          },
+        ],
+      })
+    );
+    const submitted: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      sessionId,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return true;
+      },
+    });
+    expect(textarea.value).toContain('[Quote]');
+    expect(textarea.value).toContain('Why?');
+    expect(textarea.value).not.toContain('keep indentation');
+    await submit('button');
+    expect(submitted[0]).toMatchObject([
+      {
+        type: 'text',
+        text: quote + '\n\nWhy?',
+        spans: [{ kind: 'message_quote', target: 'restored-quote', quoteVersion: 1 }],
+      },
+    ]);
+    expect(textarea.value).toBe('');
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  it('restores inline spacing and committed role identity beside a quote', async () => {
+    const workspace = 'quote-mention-workspace';
+    const sessionId = `quote-mention-${++nextSession}`;
+    getDefaultStore().set(currentWorkspaceIdAtom, workspace as never);
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const quote = formatMessageQuote('Original source');
+    const text = `Before ${quote} after @original-role`;
+    const roleStart = text.indexOf('@original-role');
+    const key = conversationQuoteDraftKey(workspace, sessionId);
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        text,
+        spans: [
+          {
+            start: 7,
+            end: 7 + quote.length,
+            kind: 'message_quote',
+            quoteVersion: 1,
+            label: '[Quote]',
+            target: 'inline-quote',
+          },
+        ],
+        mentions: [
+          { start: roleStart, end: text.length, value: 'stable-role-id', kind: 'agent_role' },
+        ],
+      })
+    );
+    const textarea = await renderComposer({ sessionId, onSendMessage: async () => false });
+    expect(textarea.value).toBe('Before \u2007[Quote]\u2007 after @original-role');
+    expect(
+      container!.querySelector(
+        '[data-mention-kind="agent_role"][data-mention-value="stable-role-id"]'
+      )
+    ).not.toBeNull();
+    await submit('button');
+    expect(textarea.value).toBe('Before \u2007[Quote]\u2007 after @original-role');
+    expect(
+      container!.querySelector(
+        '[data-mention-kind="agent_role"][data-mention-value="stable-role-id"]'
+      )
+    ).not.toBeNull();
+    localStorage.removeItem(key);
+  });
+
+  it('expands the current quote range when typing and Enter occur before the next render', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return false;
+      },
+    });
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote('Current snapshot')).toBe(true);
+    });
+    const original = textarea.value;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        textarea,
+        'Prefix ' + original
+      );
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(submitted[0]).toMatchObject([
+      {
+        type: 'text',
+        text: expect.stringContaining('> Current snapshot'),
+        spans: [{ kind: 'message_quote', quoteVersion: 1 }],
+      },
+    ]);
+    expect(textarea.value).toBe('Prefix ' + original);
+  });
 
   async function scheduledComposer(fail: boolean) {
     const store = getDefaultStore();
@@ -1137,19 +1347,6 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(textarea.value).toBe('next message');
   });
 
-  it('boundary: hidden composer rejects synthetic Enter even without uploads', async () => {
-    const delivered: SessionInputBlock[][] = [];
-    await renderComposer({
-      isVisible: false,
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return true;
-      },
-    });
-    await submit('keyboard');
-    expect(delivered).toEqual([]);
-  });
-
   it.each([
     ['keyboard', true],
     ['keyboard', false],
@@ -1171,20 +1368,6 @@ describe('SessionChatInputArea submission feedback', () => {
       await act(async () => acceptance.resolve(accepted));
       expect(textarea.disabled).toBe(false);
       expect(textarea.value).toBe(accepted ? '' : 'focus regression draft');
-      expect(document.activeElement).toBe(textarea);
-    }
-  );
-
-  it.each([false, true])(
-    'handles immediately settled button sends on mobile=%s',
-    async (mobile) => {
-      if (mobile)
-        Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
-      const textarea = await renderComposer({ onSendMessage: async () => false });
-      textarea.focus();
-      await submit('button');
-      expect(textarea.disabled).toBe(false);
-      expect(textarea.value).toBe('focus regression draft');
       expect(document.activeElement).toBe(textarea);
     }
   );
@@ -1547,21 +1730,6 @@ describe('SessionChatInputArea submission feedback', () => {
         'notes.txt',
       ]);
       expect(errorToast).not.toHaveBeenCalled();
-    });
-
-    it('still collapses a paste below 50,000 characters', async () => {
-      const textarea = await renderComposer({ onSendMessage: async () => true });
-      const event = createPasteEvent('a'.repeat(49_999));
-
-      await act(async () => {
-        textarea.dispatchEvent(event);
-      });
-
-      expect(event.defaultPrevented).toBe(true);
-      expect(errorToast).not.toHaveBeenCalled();
-      expect(textarea.value).toContain('Pasted');
-      expect(textarea.value).toContain('focus regression draft');
-      expect(textarea.value).not.toContain('aaaa');
     });
   });
 

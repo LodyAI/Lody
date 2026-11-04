@@ -1,3 +1,4 @@
+import { daemonLossProbeEnabled } from './e2ee/client-loss-observer';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type { EncryptedFeatureContext } from './e2ee/feature-rpc';
 import {
@@ -62,6 +63,23 @@ export class MachineRuntime {
     return this.dispatchLocalMachineRpc(request);
   }
   private handler: MessageHandler | null = null;
+  private clientLossHandler: MessageHandler | null = null;
+  inspectClientLoss() {
+    const handler = this.handler ?? this.clientLossHandler;
+    if (!handler) return null;
+    const observed = handler.inspectClientLoss();
+    const processor = this.messageProcessor.inspectClientLoss();
+    return {
+      intakeClosed: processor.stopped && observed.watcherStopped,
+      pending: {
+        processorActive: processor.active,
+        processorQueued: processor.queued,
+        watcherChecks: observed.watcherChecks,
+        executionTurns: observed.executionTurns,
+        executionBookkeeping: observed.executionBookkeeping,
+      },
+    };
+  }
   private sessionManager: SessionManager | null = null;
   private readonly messageProcessor: MessageProcessor;
   private gcManager: SessionGCManager | null = null;
@@ -278,6 +296,7 @@ export class MachineRuntime {
     await this.messageProcessor.drainWithTimeout(5000);
 
     if (this.handler) {
+      if (daemonLossProbeEnabled) this.clientLossHandler = this.handler;
       await this.handler.cleanup();
       this.handler = null;
     } else {

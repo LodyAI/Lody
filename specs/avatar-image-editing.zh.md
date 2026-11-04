@@ -39,5 +39,5 @@ Translation: current
 [`avatar-editor.tsx`](../packages/components/src/components/settings/avatar-editor.tsx)、
 [`avatar-crop-dialog.tsx`](../packages/components/src/components/settings/avatar-crop-dialog.tsx)
 和 [`avatar-crop.ts`](../packages/components/src/lib/avatar-crop.ts)。导出路径由
-[`avatar-crop.test.ts`](../packages/components/tests/avatar-crop.test.ts) 覆盖，组件
+`avatar-crop.test.ts`（实现细节测试已退役） 覆盖，组件
 状态位于 [`ProfileSettings.stories.tsx`](../packages/components/src/stories/ProfileSettings.stories.tsx)。

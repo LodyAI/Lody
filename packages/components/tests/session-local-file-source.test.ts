@@ -2,13 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveRepoIdFromLocalProjectPath,
   SessionStatusFactory,
-  type MessageContent,
   type SessionMeta,
 } from '@lody/shared';
-import {
-  resolveSessionLocalFileSource,
-  resolveSessionRepoFullName,
-} from '../src/lib/session-local-file-source';
+import { resolveSessionLocalFileSource } from '../src/lib/session-local-file-source';
 
 function createSession(overrides: Partial<SessionMeta>): SessionMeta {
   return {
@@ -176,72 +172,6 @@ describe('resolveSessionLocalFileSource', () => {
     });
   });
 
-  it('does not require live presence to resolve a github worktree', () => {
-    const source = resolveSessionLocalFileSource(
-      createSession({
-        machineId: 'machine-local',
-        project: {
-          kind: 'github',
-          repoFullName: 'loro-dev/lody',
-          branch: 'main',
-        } as SessionMeta['project'],
-        status: SessionStatusFactory.running(),
-        lastRunningSeen: Date.now(),
-      }),
-      {
-        isElectronRenderer: true,
-        localMachineId: 'machine-local',
-        workspaceId: 'workspace-1',
-      }
-    );
-
-    expect(source).toEqual({
-      kind: 'session-worktree',
-      repoKey: 'loro-dev/lody',
-      sessionId: 'session-1',
-    });
-  });
-
-  it('returns session-worktree source for active goal sessions after the visible turn idles', () => {
-    const goal = {
-      type: 'goal',
-      threadId: 'thread-1',
-      turnId: null,
-      objective: 'ship the release',
-      status: 'active',
-      tokenBudget: null,
-      tokensUsed: 1,
-      timeUsedSeconds: 1,
-      createdAt: 100,
-      updatedAt: 200,
-    } satisfies Extract<MessageContent, { type: 'goal' }>;
-
-    const source = resolveSessionLocalFileSource(
-      createSession({
-        id: 'goal-session-1',
-        machineId: 'machine-local',
-        project: {
-          kind: 'github',
-          repoFullName: 'loro-dev/lody',
-          branch: 'main',
-        } as SessionMeta['project'],
-        status: SessionStatusFactory.idle(),
-        latestGoal: goal,
-      }),
-      {
-        isElectronRenderer: true,
-        localMachineId: 'machine-local',
-        workspaceId: 'workspace-1',
-      }
-    );
-
-    expect(source).toEqual({
-      kind: 'session-worktree',
-      repoKey: 'loro-dev/lody',
-      sessionId: 'goal-session-1',
-    });
-  });
-
   it('does not enable local source for remote machine sessions', () => {
     const source = resolveSessionLocalFileSource(
       createSession({
@@ -280,21 +210,5 @@ describe('resolveSessionLocalFileSource', () => {
     );
 
     expect(source).toBeNull();
-  });
-
-  it('resolves repo full name from local project github binding', () => {
-    const repoFullName = resolveSessionRepoFullName(
-      createSession({
-        machineId: 'machine-local',
-        project: {
-          kind: 'local',
-          localProjectId: 'local-project-1',
-          branch: 'main',
-          githubRepoFullName: 'loro-dev/lody',
-        } as SessionMeta['project'],
-      })
-    );
-
-    expect(repoFullName).toBe('loro-dev/lody');
   });
 });

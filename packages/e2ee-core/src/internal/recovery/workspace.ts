@@ -683,10 +683,15 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         );
       intent = { ...intent, selected: reference };
       yield* persistIntent();
-      const state = yield* load();
-      yield* save(state.raw, {
-        entryId: reference.entryId,
-        reference,
+    }
+    // The journal and progress are separate writes: a resumed request re-points
+    // progress here, or setup would run on the old reference.
+    const candidate = intent.selected!,
+      progress = yield* load();
+    if (progress.value?.reference?.entryId !== candidate.entryId)
+      yield* save(progress.raw, {
+        entryId: candidate.entryId,
+        reference: candidate,
         record: null,
         recordPosition: null,
         stage: 'indexed',
@@ -695,7 +700,6 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         envelopeEpoch: null,
         skipped: false,
       });
-    }
     const tested = yield* setup();
     if (tested.outcome !== 'Committed' || !tested.status.recoverable)
       return yield* vaultError('pending');
@@ -706,9 +710,9 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           ref.genesis === hex(genesis.toBytes()) &&
           ref.membershipId === hex(membership.toBytes())
       );
-    if (selected?.entryId !== intent.selected!.entryId) {
+    if (selected?.entryId !== candidate.entryId) {
       if (selected?.entryId !== intent.old.entryId) return yield* vaultError('conflict');
-      const changed = yield* vault.replace(intent.selected!);
+      const changed = yield* vault.replace(candidate);
       if (changed.outcome !== 'Committed') return yield* vaultError('conflict');
     }
     if (!request.compromised && (yield* revokeOld()) !== 'Committed')

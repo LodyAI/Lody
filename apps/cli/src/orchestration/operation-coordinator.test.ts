@@ -1116,6 +1116,240 @@ describe('LodyOperationCoordinator', () => {
     }
   );
 
+  it('explains a failed target with its recorded chat failure notice', async () => {
+    const harness = await makeHarness();
+    const targetHistory = harness.histories.get(harness.targetSessionId)!;
+    targetHistory[0] = { ...targetHistory[0]!, status: 'failed' };
+    targetHistory.push({
+      id: 'system-notice-1',
+      role: 'system',
+      timestamp: '2026-07-20T00:00:00.500Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your usage limit. Try again at 7:20 AM.",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as SessionHistoryInput);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    await harness.coordinator.stop();
+
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        completion: {
+          type: 'result',
+          value: {
+            items: [
+              {
+                status: 'failed',
+                error: {
+                  code: 'TARGET_FAILED',
+                  message:
+                    "Target Turn failed (acp_upstream_api_error): You've hit your usage limit. Try again at 7:20 AM.",
+                  retryable: true,
+                  reason: 'usage_limit',
+                  detail: "You've hit your usage limit. Try again at 7:20 AM.",
+                },
+              },
+            ],
+          },
+        },
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('keeps context overflow distinct from a usage limit', async () => {
+    const harness = await makeHarness();
+    const targetHistory = harness.histories.get(harness.targetSessionId)!;
+    targetHistory[0] = { ...targetHistory[0]!, status: 'failed' };
+    targetHistory.push({
+      id: 'system-notice-context',
+      role: 'system',
+      timestamp: '2026-07-20T00:00:00.500Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_internal_error',
+            message: 'API Error: 400 prompt is too long: maximum context length is 200000 tokens',
+          },
+        },
+      ],
+      fileDiff: [],
+    } as SessionHistoryInput);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    await harness.coordinator.stop();
+
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        completion: {
+          type: 'result',
+          value: {
+            items: [
+              {
+                status: 'failed',
+                error: {
+                  code: 'TARGET_FAILED',
+                  reason: 'context_overflow',
+                  retryable: false,
+                },
+              },
+            ],
+          },
+        },
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  describe('steer handoff', () => {
+    const steerHandoff = async (
+      successor: { status: SessionHistoryInput['status']; cancellationReason?: 'user_stop' },
+      successorFinished: boolean | 'absent',
+      deadlineAt?: string
+    ) => {
+      const harness = await makeHarness(deadlineAt ? { deadlineAt } : undefined);
+      const targetHistory = harness.histories.get(harness.targetSessionId)!;
+      targetHistory[0] = { ...targetHistory[0]!, status: 'handled' };
+      targetHistory.push(
+        {
+          id: 'assistant:turn-1',
+          role: 'assistant',
+          userTurnId: 'turn-1',
+          timestamp: '2026-07-20T00:00:00.500Z',
+          items: [{ type: 'text', text: 'partial output' }],
+          fileDiff: [],
+          finished: true,
+        },
+        {
+          id: 'turn-steer',
+          role: 'user',
+          timestamp: '2026-07-20T00:00:00.600Z',
+          items: [{ type: 'text', text: 'also cover the edge case' }],
+          fileDiff: [],
+          ...successor,
+        },
+        ...(successorFinished === 'absent'
+          ? []
+          : [
+              {
+                id: 'assistant:turn-steer',
+                role: 'assistant' as const,
+                userTurnId: 'turn-steer',
+                timestamp: '2026-07-20T00:00:00.700Z',
+                items: [{ type: 'text' as const, text: 'final summary' }],
+                fileDiff: [],
+                finished: successorFinished,
+              },
+            ])
+      );
+      harness.metas.set(harness.targetSessionId, {
+        ...harness.metas.get(harness.targetSessionId)!,
+        steerOperationLedger: {
+          'steer:turn-steer': {
+            operationId: 'steer:turn-steer',
+            userTurnId: 'turn-steer',
+            expectedTurnId: 'assistant:turn-1',
+            cancellationPolicy: 'promote',
+            phase: 'settled',
+            delivery: 'applied',
+            status: 'handled',
+            updatedAt: TEST_NOW_MS,
+          },
+        },
+      });
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      await harness.coordinator.stop();
+      const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        return store.get(harness.requesterSessionId, 'review-round-1');
+      } finally {
+        store.close();
+      }
+    };
+
+    it('completes a steered-away target with the successor final reply', async () => {
+      expect(await steerHandoff({ status: 'handled' }, true)).toMatchObject({
+        state: 'finished',
+        completion: {
+          type: 'result',
+          value: {
+            items: [
+              {
+                status: 'succeeded',
+                assistantTurnId: 'assistant:turn-steer',
+                output: { text: 'final summary' },
+              },
+            ],
+          },
+        },
+      });
+    });
+
+    it('keeps waiting for an unfinished successor instead of returning sealed partial output', async () => {
+      expect(
+        await steerHandoff({ status: 'processing' }, false, '2026-07-19T23:59:59.000Z')
+      ).toMatchObject({
+        state: 'finished',
+        completion: {
+          type: 'result',
+          value: { items: [{ status: 'failed', error: { code: 'TARGET_TIMEOUT' } }] },
+        },
+      });
+    });
+
+    it.each(['handled', 'failed'] as const)(
+      'keeps the original result when an applied steer settles %s without a successor turn',
+      async (status) => {
+        // stale-turn after provider acceptance, or a failure before handoff:
+        // no successor turn exists, so the original turn's reply stands.
+        expect(await steerHandoff({ status }, 'absent')).toMatchObject({
+          state: 'finished',
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                {
+                  status: 'succeeded',
+                  assistantTurnId: 'assistant:turn-1',
+                  output: { text: 'partial output' },
+                },
+              ],
+            },
+          },
+        });
+      }
+    );
+
+    it('reports a user Stop of the successor as the delegated cancellation', async () => {
+      expect(
+        await steerHandoff({ status: 'canceled', cancellationReason: 'user_stop' }, true)
+      ).toMatchObject({
+        state: 'finished',
+        completion: {
+          type: 'result',
+          value: { items: [{ status: 'cancelled', cancellationReason: 'user_stop' }] },
+        },
+      });
+    });
+  });
+
   it('uses durable local Stop before stale partial output or an expired deadline can return a receipt', async () => {
     const harness = await makeHarness({ deadlineAt: '2026-07-19T00:00:00Z' });
     const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);

@@ -903,6 +903,7 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
           return yield* memberJoins.prepare(offer, id)
         })
       ),
+    acceptedMemberJoin: (workspaceId: string) => withLock(memberJoins.accepted(workspaceId)),
     acceptMemberJoin: (workspaceId: string, pages: readonly E2eeWorkspaceHistoryPage[]) =>
       acceptJoin(
         workspaceId,
@@ -912,6 +913,12 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     retirePersonalJoin: (workspaceId: string, pairingSessionId: string) =>
       withLock(joins.retire(workspaceId, pairingSessionId)),
     preparePersonalJoin: (offer: PersonalPairingOffer) => withLock(joins.prepare(offer)),
+    /** Account-wide pairing identity for one workspace; see `accountIdentity`. */
+    accountPairingIdentity: (pin: {
+      genesisHash: string
+      genesisRecordHex: string
+      membershipId: string
+    }) => withLock(joins.accountIdentity(pin)),
     acceptPersonalJoin: (workspaceId: string, invitationHex: string) =>
       acceptJoin(workspaceId, joins.accept(workspaceId, invitationHex), joins.origin(workspaceId)),
     acceptPersonalHistory: (workspaceId: string, pages: readonly E2eeWorkspaceHistoryPage[]) =>

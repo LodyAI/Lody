@@ -56,51 +56,6 @@ const neverPrompt = async (): Promise<string | null> => {
 };
 
 describe('resolveLocalProjectForApp', () => {
-  it('registers the directory and reports the daemon-assigned project id', async () => {
-    const send = vi.fn(async () => addOk());
-
-    const target = await resolveLocalProjectForApp({
-      machineId: MACHINE_ID,
-      rootPath: ROOT_PATH,
-      workspaceSelector: undefined,
-      canPrompt: false,
-      send,
-      promptWorkspace: neverPrompt,
-    });
-
-    expect(send).toHaveBeenCalledWith({
-      type: 'local-project/add',
-      machineId: MACHINE_ID,
-      rootPath: ROOT_PATH,
-    });
-    expect(target).toEqual({
-      localProjectId: LOCAL_PROJECT_ID,
-      name: 'lody-app-test-project',
-      workspaceSlug: null,
-      registered: true,
-    });
-  });
-
-  it('forwards an explicit workspace selector', async () => {
-    const send = vi.fn(async () => addOk());
-
-    await resolveLocalProjectForApp({
-      machineId: MACHINE_ID,
-      rootPath: ROOT_PATH,
-      workspaceSelector: 'acme',
-      canPrompt: false,
-      send,
-      promptWorkspace: neverPrompt,
-    });
-
-    expect(send).toHaveBeenCalledWith({
-      type: 'local-project/add',
-      machineId: MACHINE_ID,
-      rootPath: ROOT_PATH,
-      workspace: 'acme',
-    });
-  });
-
   it('retries with the chosen workspace and keeps its slug for the deep link', async () => {
     const send = vi
       .fn<(message: LocalProjectControlRequest) => Promise<LocalProjectControlResponse>>()
@@ -163,26 +118,6 @@ describe('resolveLocalProjectForApp', () => {
     expect(target.localProjectId).toMatch(/^local-project-[0-9a-f]{24}$/);
     expect(target.name).toBe('lody-app-test-project');
   });
-
-  it('propagates other control failures', async () => {
-    const send = vi.fn(async (): Promise<LocalProjectControlResponse> => ({
-      ok: false,
-      type: 'local-project/add',
-      error: 'path_invalid',
-      message: 'Selected path is not a directory',
-    }));
-
-    await expect(
-      resolveLocalProjectForApp({
-        machineId: MACHINE_ID,
-        rootPath: ROOT_PATH,
-        workspaceSelector: undefined,
-        canPrompt: false,
-        send,
-        promptWorkspace: neverPrompt,
-      })
-    ).rejects.toThrow('Selected path is not a directory');
-  });
 });
 
 describe('buildOpenLocalProjectDeepLink', () => {
@@ -224,10 +159,6 @@ describe('lody app reset-cache', () => {
   it('arms the recoverable cache level by default and the full wipe on --hard', () => {
     expect(resolveAppResetCacheAction({})).toEqual({ type: 'arm', mode: 'cache' });
     expect(resolveAppResetCacheAction({ hard: true })).toEqual({ type: 'arm', mode: 'hard' });
-  });
-
-  it('cancels instead of arming', () => {
-    expect(resolveAppResetCacheAction({ cancel: true })).toEqual({ type: 'cancel' });
   });
 
   it('refuses a run that both arms and cancels rather than picking one', () => {

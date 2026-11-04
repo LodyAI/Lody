@@ -1,4 +1,7 @@
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { Dialog } from '@/ui/dialog';
+import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import { useTranslation } from 'react-i18next';
 import { Spinner } from '@lody/ui/spinner';
 
@@ -25,10 +28,20 @@ import {
 
 /** Grows with the text instead of reserving a fixed empty block. */
 const MAX_TEXTAREA_HEIGHT_PX = 320;
+const styles = stylex.create({
+  snapshot: {
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    maxHeight: '60vh',
+    overflowY: 'auto',
+  },
+});
 
 export type UserMessageEditorProps = {
   value: string;
   onChange: (value: string) => void;
+  quoteDrafts?: PastedTextDraft[];
+  onQuoteDraftsChange?: (drafts: PastedTextDraft[]) => void;
   onCancel: () => void;
   /** Receives trimmed, expanded text and its reanchored transcript spans. */
   onSave: (payload: {
@@ -70,12 +83,17 @@ function UserMessageEditorContent({
   availableCommands,
   skillAgent,
   currentSessionId,
+  quoteDrafts = [],
+  onQuoteDraftsChange,
 }: UserMessageEditorProps) {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // Live ranges the before-send rewrite needs; they only leave the component
   // on save, alongside the text they were measured against.
   const mentionRangesRef = useRef<MentionRange[]>([]);
+  const archive = useRef(new Map<string, PastedTextDraft>());
+  for (const draft of quoteDrafts) archive.current.set(draft.id, draft);
+  const [preview, setPreview] = useState<PastedTextDraft | null>(null);
   const canSave = value.trim().length > 0 && !isSaving;
   const { expand: expandMentions } = useMentionPromptExpansion({
     source: mentionSource,
@@ -106,14 +124,18 @@ function UserMessageEditorContent({
 
   const handleSave = useCallback(() => {
     if (!canSave) return;
-    const expanded = expandMentions({ text: value, mentions: mentionRangesRef.current });
+    const expanded = expandMentions({
+      text: value,
+      mentions: mentionRangesRef.current,
+      pastedTextDrafts: quoteDrafts,
+    });
     const text = expanded.text.trim();
     onSave({
       text,
       mentions: mentionRangesRef.current,
       spans: reanchorMessageTextSpansForTrim(expanded.text, text, expanded.spans),
     });
-  }, [canSave, expandMentions, onSave, value]);
+  }, [canSave, expandMentions, onSave, quoteDrafts, value]);
 
   return (
     <div
@@ -150,7 +172,31 @@ function UserMessageEditorContent({
         onMentionRangesChange={(ranges) => {
           mentionRangesRef.current = ranges;
         }}
-        getMentionChip={getComposerMentionChip}
+        getMentionChip={(range, text) =>
+          getComposerMentionChip(
+            archive.current.has(range.value) ? { ...range, kind: 'message_quote' } : range,
+            text
+          )
+        }
+        externalMentions={quoteDrafts.map((draft) => ({
+          start: draft.start,
+          end: draft.end,
+          value: draft.id,
+          kind: 'pasted_text',
+        }))}
+        atomicUndoHistory={archive.current.size > 0}
+        onExternalMentionsChange={(ranges) =>
+          onQuoteDraftsChange?.(
+            ranges.flatMap((range) => {
+              const draft = archive.current.get(range.value);
+              return draft ? [{ ...draft, start: range.start, end: range.end }] : [];
+            })
+          )
+        }
+        onMentionClick={(range) => {
+          const draft = archive.current.get(range.value);
+          if (draft) setPreview(draft);
+        }}
         onKeyDown={(event) => {
           if (isImeComposingKeyboardEvent(event)) return;
           if (event.key === 'Escape') {
@@ -173,6 +219,20 @@ function UserMessageEditorContent({
         style={conversationTextFontSizeStyle(conversationFontSize)}
         aria-label={t('sessions.editMessage', 'Edit message')}
       />
+      <Dialog.Root
+        open={preview !== null}
+        onOpenChange={(open) => {
+          if (!open) setPreview(null);
+        }}
+      >
+        <Dialog.Content>
+          <Dialog.Title>{t('composer.messageQuoteTitle', 'Quoted message')}</Dialog.Title>
+          <Dialog.Description>
+            {t('composer.messageQuoteOriginal', 'Original quote')}
+          </Dialog.Description>
+          <div {...stylex.props(styles.snapshot)}>{preview?.text}</div>
+        </Dialog.Content>
+      </Dialog.Root>
       <div className="mt-2 flex items-center justify-end gap-1">
         <Button
           type="button"

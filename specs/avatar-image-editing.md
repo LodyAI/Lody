@@ -48,6 +48,6 @@ The implementation lives in
 [`avatar-crop-dialog.tsx`](../packages/components/src/components/settings/avatar-crop-dialog.tsx),
 and [`avatar-crop.ts`](../packages/components/src/lib/avatar-crop.ts). The
 export path is covered by
-[`avatar-crop.test.ts`](../packages/components/tests/avatar-crop.test.ts), and
+`avatar-crop.test.ts` (implementation-only test retired), and
 the component has a Storybook state in
 [`ProfileSettings.stories.tsx`](../packages/components/src/stories/ProfileSettings.stories.tsx).

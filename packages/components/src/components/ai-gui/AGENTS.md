@@ -31,10 +31,11 @@ Ownership: [README.md](README.md).
 
 ## Turn Folding And Layout
 
-- Finished turns keep the answer/result tail visible and fold earlier work;
-  streaming turns stay expanded.
-- The final answer is the contiguous text run before trailing never-collapsed
-  items. Walk backward over adjacent text blocks to the first non-text boundary.
+- Finished turns fold thoughts and tool calls into the work region; streaming
+  turns stay expanded.
+- Prose never folds. Every `text` item renders wherever it falls in the turn: a
+  run may answer and then keep working, and folding by position buried that
+  answer inside "Worked for …".
 - Plan approval cuts a live turn by ACP kind `switch_mode`, never title.
   `plan-surface.ts` prefers nonempty `rawInput.plan` over replaceable tool content.
   Keep `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility and expansion
@@ -69,6 +70,9 @@ Ownership: [README.md](README.md).
   row shares one rail: prose, process labels/steps, live status and the mobile
   footer sit at `conversation.railInset`; thought prose aligns with its label.
   Footer bleed is trailing-only (`-mr-[7px]`). See `AssistantTurnAlignment.stories`.
+- The trailing row (`trailingContent`: pending sends, continuation notes) is
+  full-bleed like the scroller, so each item mounts its own `ConversationColumn`.
+  Stream rows never rely on the row shell for width or gutter.
 - Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
   User rows own `responseGap`; assistant tails own `roundGap` (desktop: including
   footer/metadata; mobile: below the footer).

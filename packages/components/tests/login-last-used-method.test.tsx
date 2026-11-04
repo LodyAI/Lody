@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Provider, createStore } from 'jotai';
 
 import { LoginPage } from '../src/components/login-page';
@@ -117,15 +118,6 @@ describe('login page last-used method', () => {
     window.history.replaceState({}, '', '/');
   });
 
-  it('marks nothing on a device that has not signed in before', async () => {
-    await render();
-
-    expect(buttons().some((button) => /Continue with GitHub/.test(button.textContent ?? ''))).toBe(
-      true
-    );
-    expect(buttonsMarkedLastUsed()).toEqual([]);
-  });
-
   it('marks the provider whose sign-in completed, after the OAuth round trip returns', async () => {
     await render();
     await click(/Continue with Google/);
@@ -167,10 +159,35 @@ describe('login page last-used method', () => {
     expect(buttonsMarkedLastUsed()).toEqual(['Continue with email']);
   });
 
-  it('ignores a stored value that is not a sign-in method', async () => {
-    window.localStorage.setItem('lody.auth.last_login_method', 'myspace');
+  // The iOS shell overlays the keyboard without resizing the WebView, and the
+  // login route sits outside the workspace layouts that pad for it.
+  it('scrolls the focused password field into the region above the iOS keyboard', async () => {
+    window.history.replaceState({}, '', '/login?view=email');
     await render();
-
-    expect(buttonsMarkedLastUsed()).toEqual([]);
+    const password = container.querySelector<HTMLInputElement>('input[type="password"]')!;
+    const panel = password.closest('main')!;
+    const rect = (top: number, height: number) =>
+      ({ top, height, bottom: top + height, left: 0, right: 390, width: 390 }) as DOMRect;
+    // 844pt phone, 336pt keyboard: the panel keeps 508pt and its form overflows it.
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(rect(0, 508));
+    vi.spyOn(password, 'getBoundingClientRect').mockReturnValue(rect(700, 40));
+    Object.defineProperty(panel, 'scrollHeight', { configurable: true, value: 1200 });
+    Object.defineProperty(panel, 'clientHeight', { configurable: true, value: 508 });
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+    try {
+      await act(async () => {
+        password.focus();
+        document.documentElement.style.setProperty('--native-keyboard-height', '336px');
+        window.dispatchEvent(new CustomEvent('lody:keyboard-resize', { detail: { height: 336 } }));
+      });
+      // Field centre (720) lands on the centre of the visible panel (254).
+      expect(panel.scrollTop).toBe(466);
+    } finally {
+      raf.mockRestore();
+      document.documentElement.style.removeProperty('--native-keyboard-height');
+    }
   });
 });

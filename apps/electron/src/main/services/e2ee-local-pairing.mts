@@ -53,7 +53,13 @@ export function makeDesktopLocalPairing(input: {
         typeof error === 'object' &&
         'code' in error &&
         typeof error.code === 'string' &&
-        ['conflict', 'corrupt', 'invalid-input', 'local-evidence-conflict'].includes(error.code)
+        [
+          'conflict',
+          'corrupt',
+          'invalid-input',
+          'local-evidence-conflict',
+          'pairing_key_revoked'
+        ].includes(error.code)
           ? error
           : failure('storage', error)
     })
@@ -129,7 +135,9 @@ export function makeDesktopLocalPairing(input: {
     // The CLI uses prepareDeviceAdmission; this core gate independently checks
     // its possession proof, membership and the approver's current authority.
     const proposal = prepareLedgerCommand(view, input.signer.publicKey, command)
-    if (Result.isFailure(proposal)) throw failure('invalid-input')
+    // Core never readmits a key from device history: the machine must create a new identity.
+    if (Result.isFailure(proposal))
+      throw failure(proposal.failure.code === 'replay' ? 'pairing_key_revoked' : 'invalid-input')
     return {
       value,
       admitted: false,

@@ -457,6 +457,12 @@ async function buildRegisteredProjectPathIndex(
   }
 
   for (const [localProjectId, rootPath] of Object.entries(registeredProjects)) {
+    // A legacy catalog row can omit rootPath. That is not a filesystem failure:
+    // calling trim on it threw while opening an unrelated directory, and the
+    // picker surfaced the TypeError as "can't open this folder".
+    if (typeof rootPath !== 'string') {
+      continue;
+    }
     const trimmedRootPath = rootPath.trim();
     if (!trimmedRootPath) {
       continue;
@@ -1498,7 +1504,9 @@ export class LocalProjectControlService {
       }
 
       const name = dirent.name;
-      if (!name || name === '.' || name === '..') {
+      // A directory entry with no name is not a path we can open. Skip it
+      // instead of calling string methods on a missing name.
+      if (typeof name !== 'string' || name.length === 0 || name === '.' || name === '..') {
         continue;
       }
       const hidden = name.startsWith('.');

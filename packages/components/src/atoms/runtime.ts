@@ -187,6 +187,12 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  requestSessionAutomationControl?: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requesterUserId: string,
+    operation: import('@lody/shared/automations').RemoteAutomationOperation
+  ) => Promise<import('@lody/shared/automations').RemoteAutomationResult>;
   /** Local document access is independent of permission to transmit content. */
   waitForContentAdmission?: (signal?: AbortSignal) => Promise<void>;
   /**
@@ -612,6 +618,13 @@ export type WorkspaceRuntime = {
     command: import('@lody/shared').IosSimulatorCommand;
     timeoutMs?: number;
   }) => Promise<import('@lody/shared').IosSimulatorResponse>;
+  requestAndroidEmulatorControl: (request: {
+    machineId: MachineId;
+    sessionId: SessionId;
+    requestedByUserId: string;
+    command: import('@lody/shared').AndroidEmulatorCommand;
+    timeoutMs?: number;
+  }) => Promise<import('@lody/shared').AndroidEmulatorResponse>;
   dispose: () => Promise<void>;
 };
 

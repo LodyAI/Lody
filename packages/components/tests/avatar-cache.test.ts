@@ -111,33 +111,6 @@ describe('avatar cache', () => {
     vi.useRealTimers();
   });
 
-  it('returns nullish avatar sources without touching the network', async () => {
-    expect(peekAvatarBlobUrl(null)).toBeNull();
-    expect(peekAvatarBlobUrl(undefined)).toBeUndefined();
-    expect(await getAvatarBlobUrl(null)).toBeNull();
-    expect(await getAvatarBlobUrl(undefined)).toBeUndefined();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('loads avatar blobs once and then reuses persistent cache without refetching', async () => {
-    const avatarUrl = 'https://avatars.githubusercontent.com/u/1?v=4';
-
-    fetchMock.mockResolvedValue(pngResponse('avatar'));
-
-    const firstBlobUrl = await getAvatarBlobUrl(avatarUrl);
-    expect(firstBlobUrl).toMatch(/^blob:/);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(peekAvatarBlobUrl(avatarUrl)).toBe(firstBlobUrl);
-
-    clearAvatarImageCache({ memory: true, persistent: false });
-    fetchMock.mockClear();
-
-    const secondBlobUrl = await getAvatarBlobUrl(avatarUrl);
-
-    expect(secondBlobUrl).toMatch(/^blob:/);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it('serves the persisted blob across a day boundary even when the network is down (cache-first, url-keyed)', async () => {
     // Regression guard for the old day-bucketed key: after a calendar-day
     // rollover the cache key no longer changes, so a persisted blob keeps

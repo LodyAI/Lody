@@ -7,13 +7,15 @@ import {
   type DiscoveryResource,
 } from '@/lib/resource-discovery';
 
+const resourceGetInputSchema = z.object({ id: z.string().trim().min(1) }).strict();
+
 export function registerDiscoveryTools(
   registerTool: ReturnType<typeof createSessionToolRegistrar>,
   withDiscovery: <T>(read: (discovery: ResourceDiscovery) => Promise<T>) => Promise<T>
 ) {
   const descriptions: Record<DiscoveryResource, string> = {
     machine:
-      'List readable machines, including offline machines, with online/offline/unknown presence and protocol capabilities.',
+      'List readable machines, including offline machines, with online/offline/unknown presence, protocol capabilities and synced agent quota windows (most used first, with reset times). Pass includeResources to also ask each listed online machine for memory and disk; a machine that cannot answer reports resources unavailable.',
     project:
       'List readable local projects across machines and enabled GitHub repositories. kind and machineId restrict the catalog. Local project identity includes machineId.',
     agent_config:
@@ -65,7 +67,7 @@ export function registerDiscoveryTools(
       `lody_${resource}_get`,
       {
         description: `Read one ${resource} by stable id from its list tool. CATALOG_SYNCING is retryable.`,
-        inputSchema: z.object({ id: z.string().trim().min(1) }).strict(),
+        inputSchema: resourceGetInputSchema,
         annotations: { readOnlyHint: true },
       },
       (args) => result((discovery) => discovery.get(resource, args.id))

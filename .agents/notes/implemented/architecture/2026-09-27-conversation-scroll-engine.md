@@ -32,8 +32,10 @@ covered while opening, wheel-scrolling and switching 3,000-turn conversations.
 Unverified at ship time: the desktop app, iOS devices and long-conversation
 profiling.
 
-The accepted cost applies only to the private mobile app on iOS: a layout compensation
-during a fling ends the fling, on every shipped iOS version. The open-source desktop app
+The original iOS cost was that layout compensation during a fling ends it.
+Positive-only origin shifts now avoid growth compensation writes during touch
+scrolling on iOS hosts with native `scrollend`; shrinkage and older hosts retain
+immediate compensation (see the current behavior below). The open-source desktop app
 runs on Chromium and is unaffected. Reviews were five rounds with Codex (GPT-6 Astra)
 and three rounds with Claude session `dfd4a856`, all on 2026-09-27.
 
@@ -411,7 +413,7 @@ Physical iOS touch and momentum acceptance remains open.
 - **Why an unconditional deferral was rejected.** Its final position is not
   anchor-derived, and a review counterexample leaves the viewport with no mounted rows.
 
-**A designed extension, decided in P4: defer positive shifts only.** Content growing above
+**Original extension design: defer positive shifts only.** Content growing above
 the anchor during a fling is laid out with an origin shift `D > 0`, so the leading rows
 sit at negative physical positions. There is no visible hole, and the lemma holds in
 shifted coordinates. At `scrollend`, `D` is absorbed as `scrollTop + D`, which is always
@@ -620,7 +622,7 @@ moved into the engine in P2.
   shift opens a reachable blank hole and can require an unreachable offset (review round 2).
 - **Defer every compensation during momentum:** withdrawn. The deferred position is not
   anchor-derived, and a counterexample leaves the viewport with no mounted rows (round 3).
-- **Defer positive shifts only:** not rejected; designed above and decided in P4.
+- **Defer positive shifts only:** implemented for iOS hosts with native `scrollend`; see current behavior below.
 - **TanStack Virtual:** it compensates by delta and does not anchor insertions in the
   middle of the list (#945).
 - **Normal-flow virtualization with native `overflow-anchor`:** WebKit support is not
@@ -1065,3 +1067,52 @@ establishes the delayed-input/follow overwrite fix, not a claim that every iOS
 scrolling vibration is gone.
 
 PR: [#1342](https://github.com/LodyAI/Lody/pull/1342).
+
+## Positive touch shifts (2026-10-31)
+
+This supersedes the original no-deferral trade-off and planned P4 extension above.
+iOS hosts with element `scrollend` opt in through `ScrollHost.setContentShift`.
+Growth above a confirmed touch reader leaves the physical offset unchanged and
+moves the rows container upward by that positive difference. Its negative top
+margin removes the same prefix from the scroll range, without leaving a tail gap.
+Snapshot `contentTop` carries the shift through internal anchor and range conversions.
+Consumer handle offsets, sizes and `onScroll` instead use unshifted coordinates
+(physical offset plus the pending shift); `contentOffset` exposes the unshifted
+row origin. The view subtracts that origin for hydration-window and outline
+lookups. It must not cache the shifted DOM rectangle on viewport resize. Logical
+offsets change on growth, triggering a range report without native movement,
+and stay stable on absorption. Native input qualification keeps physical offsets.
+
+At `scrollend`, touch cancellation, navigation or physical offset zero, the engine
+restores the origin and compensates from its reading anchor. Reaching zero must
+absorb the shift immediately so earlier history stays reachable. Shrinkage still
+writes immediately: a negative shift would open the rejected leading hole. Taps
+cannot opt in before actual conversation movement. Older hosts without `scrollend`
+retain immediate compensation; no idle timer guesses when a fling ended.
+A new single touch preserves an existing shift while catching a fling; confirming
+movement is required only to start a shift, not to keep one. A no-movement lift
+or cancellation absorbs it after the finger is released. Desktop hosts retain
+their existing compensation path.
+
+Model and React adapter regressions cover repeated growth without offset writes,
+anchor preservation, scroll-end absorption, top reachability, navigation,
+cancellation, hidden-tab restoration and shrinkage. A browser regression drives
+the production controller against real CSS layout: physical offsets, reading lines
+and scroll extent stay unchanged during growth, and the shifted top stays covered.
+The real React view regression reproduces an incorrect visible-turn range before
+the consumer-coordinate repair and passes afterward, including viewport resize
+while shifted and stable ranges across absorption. The 40 seeded sequences run
+both with and without the capability; enabled runs add touch, cancellation and
+scroll-end events. Anchor assertions distinguish a retained offset in a shortened
+row from the following row temporarily occupying its clamped boundary.
+These checks alone do not establish physical iPhone momentum acceptance.
+
+A temporary WKWebView shell on an iOS 26.5 iPhone 17 Pro simulator runs the bundled
+production controller and compensation helper with synthetic history and an
+XCTest native downward swipe. In the same shell with the origin-shift capability
+disabled, inserting a 536px history prefix during post-touch scrolling makes one
+compensation write and leaves 0px of subsequent native progress. With the final
+controller and the capability enabled, it makes zero compensation writes during
+momentum and continues 632px after growth. The XCTest assertion is RED with the
+capability disabled and GREEN enabled. This isolates native momentum in the
+scroll engine; it is not a full mobile product or physical-device acceptance.

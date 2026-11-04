@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-Owner Zixuan Chen（zxch3n）于 2026-10-28 批准所列 E2EE Spec 修订，并于 2026-10-29 批准下述 client custody Spec 确切修订。权限账本仅批准已确认或已实现部分；账本 v1 冻结前，未定格式细节须单独审查。桌面保管在产品启用前须完成真机验收。Client custody 批准确立意图，不代表平台验收。2026-10-31 owner 批准了下述恢复保险库 Spec 修订。
+Owner Zixuan Chen（zxch3n）于 2026-10-28 批准所列 E2EE Spec 修订，并于 2026-10-29 批准下述 client custody Spec 确切修订。权限账本仅批准已确认或已实现部分；账本 v1 冻结前，未定格式细节须单独审查。桌面保管在产品启用前须完成真机验收。Client custody 批准确立意图，不代表平台验收。2026-10-31 owner 批准了下述恢复保险库 Spec 修订，2026-11-01 批准了账号级个人设备配对增量，2026-11-02 批准了机器共享 Spec。
 
 ## 决定
 
@@ -55,3 +55,57 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 6. 恢复成功后通知该账号所有在用设备与账号邮箱；不强制更换 R，不加 owner 审批，不设冷却期。
 
 批准只确立意图，不代表已实现、已部署或真机验收。私有后端缺口仍在：没有 `e2eeRecoveryVault` 存储、Recovery 凭据登记、以 R 身份认证的邮箱访问，也没有恢复通知。恢复保险库仍不在 MVP 内。
+
+## Whitepaper 2026-10-31 修订
+
+2026-10-31，owner Zixuan Chen（zxch3n）经 E2EE 总调度转达，批准 [PR #2145](https://github.com/LodyAI/Lody/pull/2145) 中 commit `7efe3f2c05253a98bb5f8c3034c26b48f7a165a0` 的[白皮书](../../../../specs/e2ee/whitepaper.zh.md)修订。[获批英文文本](https://github.com/LodyAI/Lody/blob/7efe3f2c05253a98bb5f8c3034c26b48f7a165a0/specs/e2ee/whitepaper.md)的 Git blob 为 `4421440f723aa15171a2c6a71ee10be9b6829ccd`；[获批中文文本](https://github.com/LodyAI/Lody/blob/7efe3f2c05253a98bb5f8c3034c26b48f7a165a0/specs/e2ee/whitepaper.zh.md)的 Git blob 为 `a324c87d687adfa5a11617064eada76005f4633c`。
+
+批准范围是三路只读审计（审计 `c990a689` 加 #2143）后与 `main` 对齐的修订，以及描述当前行为的新表述：
+
+- 按已批准 client custody Spec 的 Web 个人设备保管；恢复保险库（2026-10-31 批准）与桌面保管的批准及其实现限制。
+- Streams epoch 钥 provider、快照加入与安全码 UI 现状、历史解密与执行权限分离（#2143），以及计费与禁用的旧接口。
+- 一项优先可用性与后端成本的换代 owner 决定：当前钥已安装时，新内容使用已验证的当前 epoch；新 epoch 发布后，尚未收到当前钥的设备最多 15 分钟内可继续用最新已保留的已发布 epoch 封装，超时后新写入失败并可重试。后端不强制检查内容 epoch。被移除或撤销的设备在这段时间内可能读到用旧 epoch 封装的新内容。
+
+机器共享方案 A 不在本次修订范围内。批准记录意图，不代表已实现、已部署或真机验收；15 分钟宽限另行实现。
+
+## 账号级个人设备配对
+
+2026-11-01，owner Zixuan Chen（zxch3n）经 E2EE 总调度转达，明确批准 [PR #2182](https://github.com/LodyAI/Lody/pull/2182) 中 revision `65db7d694a6979a0dc8e380815ca033eeddb958c` 的账号级个人设备配对增量。
+
+| 文件 | 获批 Git blob |
+| --- | --- |
+| [`specs/e2ee-foundations.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.md) | `e43047a7ff7c05de6b256f7fb3a5b43318bfbdde` |
+| [`specs/e2ee-foundations.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.zh.md) | `01f22d4d70465eb6604452b397eed51f97e6a2d9` |
+| [`specs/e2ee/desktop-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.md) | `2c37197221c7cdb962592c84f8e107b6f8a26840` |
+| [`specs/e2ee/desktop-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.zh.md) | `c4b74bd01d78df7b1f01a43e114c7435d20c358d` |
+| [`specs/e2ee/client-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.md) | `422a7ffd3b25e4ecc4c04849c1746526d77257d8` |
+| [`specs/e2ee/client-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.zh.md) | `7f0ce06045376377a086d821f70bfcc8625ca03b` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.md) | `3b15f26057a3b4616d22ca172853faba1e80ece8` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.zh.md) | `dddb0b50c023d3b9474d88afccbef4f94e84a83e` |
+
+获批 revision 为 `65db7d69`。之后的提交在这些文件中只改了批准元数据：增量标题和状态行、白皮书的已批准修订行、批准链接，以及随标题改名而变化的章节锚点。它们没有改变已批准的要求。
+
+批准范围包括以下几点：
+
+- **发起请求。** 桌面端和移动端打开没有身份的加密工作区时自动发起请求；网页端需要用户选择"请求访问"。
+- **配对字符串。** 一次性的 128 bit 秘密以二维码和 28 字符 Crockford base32 字符串的形式显示。由它派生的请求 HMAC 和批准 HMAC 能发现服务端替换的任何公钥。
+- **批准方。** 同一用户的任意活跃个人设备都可以批准；机器和恢复设备不可以。
+- **签名之前。**
+  - 批准方显示固定警告。
+  - 确认步骤指明目标设备，并列出要加入的工作区，每个都可以取消勾选。
+  - 设备名称标注为由请求方提供，位置标注为服务器估算的大致位置。
+- **批准之后。** 用户的各台设备和账号邮箱都会收到"新设备已加入"通知，并附带撤销入口。
+- **幽灵配对的局限。** 威胁模型写明：持有该秘密的一方无法分辨用户被诱导批准的攻击者设备与用户自己的设备。
+- **期限与一次性。**
+  - 各客户端检查受 MAC 覆盖的请求期限（最长 10 分钟），并持久保存自己已知的终态和用过的秘密。
+  - 请求按账号限频。
+  - 一次性只在本地状态加上该期限的范围内得到保证。
+- **一次批准覆盖整个账号。** 批准即签署各工作区现有的个人设备 `AdmitDevice` 记录；批次写日志、可续传，从不重新签名，不做跨工作区原子操作。
+- **手动配对**使用同一个字符串。
+- **客户端保管。** 移动端可以自动发起，网页端需要显式确认；任意个人设备都可以批准。
+
+批准只记录意图，不代表已实现、已部署或真机验收。撤销和移除的语义不变。
+
+## 机器共享
+
+2026-11-02，owner Zixuan Chen（zxch3n）通过合入 [PR #2228](https://github.com/LodyAI/Lody/pull/2228)（merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`）批准[机器共享 Spec](../../../../specs/e2ee/machine-sharing.zh.md)。获批[英文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md)的 Git blob 为 `37ce21f8e5a3db433b38ac0d2701fcacf6408080`；获批[中文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md)的 Git blob 为 `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`。之后仅记录本次批准的修改属于编辑性修改。范围包括 owner 的决定：撤回后不能启动新任务、不能做需要授权的后续动作，但不强制终止已在运行的命令；以及 2026-10-28 接受的风险：服务端持续扣住更新策略时，撤回生效没有严格上限。批准只记录意图，不代表部署或双成员产品验收。

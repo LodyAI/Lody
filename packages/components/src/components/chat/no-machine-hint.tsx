@@ -84,7 +84,7 @@ const styles = stylex.create({
     margin: 0,
     fontSize: text.bodySize,
     lineHeight: text.bodyLeading,
-    fontWeight: 550,
+    fontWeight: 500,
     color: colors.label,
   },
   message: {

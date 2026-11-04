@@ -1,4 +1,4 @@
-import type { SessionSubagentRun } from '@lody/shared/session-data';
+import type { SessionHistoryMetadata, SessionSubagentRun } from '@lody/shared/session-data';
 import type { SessionHistory, SessionId, SessionTurnInputConfig } from '@lody/shared';
 
 /** Display-only capability, attached non-enumerably to a projected task.
@@ -145,6 +145,7 @@ export interface ConversationView {
   indexOf(turnId: string): number;
   /** One authoritative, consistent full read for explicit export/replay/hash. */
   readAll(): Promise<SessionHistory[]>;
+  readMetadata(): Promise<SessionHistoryMetadata[]>;
   /** Hydrated display turn; child runs may be previews with an on-demand
    * detail capability. Never use this as export/copy/write input: use readAll
    * or the authoritative SessionData reader. Undefined until acquired. */

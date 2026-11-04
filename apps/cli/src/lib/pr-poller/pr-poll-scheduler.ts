@@ -1,3 +1,6 @@
+import { statusRefreshInterval } from './pr-poll-priority';
+import { collectStatusTargets } from './pr-poll-targets';
+import { selectWorkflowHead } from './workflow-runs';
 import { collectViewedSessionIdsFromPresence, getServerNow, type SessionId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -128,7 +131,8 @@ export type PrPollSchedulerDeps = {
   config: PrPollerConfig;
   stateStore: PrPollerStateStore;
   logger: Logger;
-  client: Pick<GitHubGraphQlClient, 'executeBatch'>;
+  client: Pick<GitHubGraphQlClient, 'executeBatch'> &
+    Partial<Pick<GitHubGraphQlClient, 'executeWorkflows'>>;
   nowMs?: () => number;
 };
 
@@ -497,14 +501,18 @@ export class PrPollScheduler {
       });
       for (const entry of runtime.entries) {
         const lane = highOwners.has(entry.ownerSessionId) ? 'high' : 'low';
-        for (const statusTarget of entry.statusTargets) {
+        const workflowDemand =
+          runtime.handle.wantsWorkflowObservations?.(entry.ownerSessionId) ?? false;
+        const ownerMeta = runtime.sessionMetas.get(entry.ownerSessionId)?.meta;
+        const statusTargets =
+          ownerMeta && workflowDemand ? collectStatusTargets(ownerMeta, true) : entry.statusTargets;
+        for (const statusTarget of statusTargets) {
           targets.push(
             this.makeTarget(runtime, entry, {
               kind: 'status',
               repoFullName: statusTarget.repoFullName,
               lane,
-              desiredIntervalMs:
-                lane === 'high' ? config.highIntervalMs : config.lowStatusIntervalMs,
+              desiredIntervalMs: statusRefreshInterval(lane, workflowDemand, config),
               qualifier: String(statusTarget.prNumber),
               status: statusTarget,
             })
@@ -791,6 +799,7 @@ export class PrPollScheduler {
     // truncated ones keep their dueness and form the next batch (no silent
     // starvation of the tail).
     this.markAttempt(this.includedTargets(batch, query), nowMs);
+    let activeCredential = credential;
     let outcome = await this.deps.client.executeBatch(query, credential.token);
     this.counters.calls += 1;
     let outcomeScope = gate.scope;
@@ -812,6 +821,7 @@ export class PrPollScheduler {
           this.counters.skips += 1;
           return true;
         }
+        activeCredential = retried;
         outcome = await this.deps.client.executeBatch(query, retried.token);
         this.counters.calls += 1;
         outcomeScope = retryGate.scope;
@@ -827,6 +837,73 @@ export class PrPollScheduler {
       outcome,
       deferredHints
     );
+    if (
+      outcome.kind === 'success' &&
+      this.deps.client.executeWorkflows &&
+      runtime.handle.recordWorkflowObservations
+    ) {
+      const observations = [
+        ...outcome.batch.pullRequests.flatMap((item) => (item.ok && item.pr ? [item.pr] : [])),
+        ...outcome.batch.discoveries.flatMap((item) => (item.ok ? item.prs : [])),
+      ];
+      const heads = new Map<string, SessionId[]>();
+      for (const ownerId of new Set(batch.targets.map((target) => target.ownerSessionId))) {
+        if (!runtime.handle.wantsWorkflowObservations?.(ownerId)) continue;
+        const meta = await runtime.handle.readOwnerMeta(ownerId);
+        if (!meta || meta.machineId !== runtime.handle.machineId || meta.isArchived) continue;
+        const head = selectWorkflowHead(meta, batch.repoFullName, observations);
+        if (head) heads.set(head, [...(heads.get(head) ?? []), ownerId]);
+      }
+      for (const [head, owners] of heads) {
+        // Actions denial must not disable ordinary PR observation; credentials still share quota.
+        const workflowsGate = this.preflightScope(
+          activeCredential,
+          `${batch.repoFullName}#actions`,
+          deferredHints
+        );
+        if (!workflowsGate) break;
+        const workflows = await this.deps.client.executeWorkflows(
+          batch.repoFullName,
+          head,
+          activeCredential.token
+        );
+        this.counters.calls += 1;
+        if (workflows.kind === 'token-invalid')
+          runtime.handle.invalidateCredential(batch.repoFullName, activeCredential);
+        await this.handleOutcome(
+          runtime,
+          { ...batch, targets: [] },
+          query,
+          workflowsGate.scope,
+          workflowsGate.cooldownKey,
+          workflows,
+          deferredHints
+        );
+        if (workflows.kind !== 'success') continue;
+        for (const ownerId of owners) {
+          try {
+            const meta = await runtime.handle.readOwnerMeta(ownerId);
+            if (
+              !meta ||
+              meta.machineId !== runtime.handle.machineId ||
+              meta.isArchived ||
+              selectWorkflowHead(meta, batch.repoFullName, observations) !== head
+            )
+              continue;
+            await runtime.handle.recordWorkflowObservations(
+              meta,
+              batch.repoFullName,
+              head,
+              workflows.batch.workflowRuns ?? [],
+              workflows.batch.workflowGap ?? true,
+              this.nowMs()
+            );
+          } catch (cause) {
+            logger.warn('[pr-poller] Workflow observation publication failed', cause);
+          }
+        }
+      }
+    }
     return true;
   }
 
@@ -1266,6 +1343,12 @@ export class PrPollScheduler {
         }
       }
 
+      await runtime.handle.recordObservations?.(
+        freshMeta,
+        repoFullName,
+        [...args.observations, ...discovered],
+        this.nowMs()
+      );
       const plan = planPullRequestMetaWrite({
         meta: freshMeta,
         ...(freshMeta.projectRun ? { repoFullName } : {}),

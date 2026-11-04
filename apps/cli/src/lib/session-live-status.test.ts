@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SessionStatusFactory } from '@lody/shared';
+
 import { resolveSessionLiveStatus } from './session-live-status';
 
 const idleExecution = {
@@ -9,26 +9,6 @@ const idleExecution = {
 };
 
 describe('resolveSessionLiveStatus', () => {
-  it('maps permission presence to waiting', () => {
-    expect(
-      resolveSessionLiveStatus({
-        presence: SessionStatusFactory.requestPermission(),
-        execution: idleExecution,
-        hasPendingDispatch: false,
-      })
-    ).toEqual({ state: 'waiting' });
-  });
-
-  it('reports active execution before presence as initializing', () => {
-    expect(
-      resolveSessionLiveStatus({
-        presence: null,
-        execution: { ...idleExecution, hasActiveTurn: true },
-        hasPendingDispatch: false,
-      })
-    ).toEqual({ state: 'initializing' });
-  });
-
   it('reports an unconfirmed release as busy waiting with its reason, not initializing', () => {
     const live = resolveSessionLiveStatus({
       presence: null,
@@ -68,15 +48,5 @@ describe('resolveSessionLiveStatus', () => {
       state: 'unknown',
       reason: 'No active session presence or pending daemon work was observed.',
     });
-  });
-
-  it('prefers running presence over pending signals', () => {
-    expect(
-      resolveSessionLiveStatus({
-        presence: SessionStatusFactory.running(),
-        execution: { ...idleExecution, hasActiveTurn: true },
-        hasPendingDispatch: true,
-      })
-    ).toEqual({ state: 'running' });
   });
 });

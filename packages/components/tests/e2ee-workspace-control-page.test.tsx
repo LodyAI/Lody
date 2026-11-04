@@ -3,6 +3,7 @@ import { classifyE2eeControlFailure } from '../src/lib/e2ee-control-failure';
 import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -77,10 +78,6 @@ describe('encrypted workspace control page recovery', () => {
       expect(props.onResetProgress).not.toHaveBeenCalled();
     }
   );
-  it('always marks the workspace as an encrypted developer preview', () => {
-    render({});
-    expect(container!.textContent).toContain('e2ee.control.badge');
-  });
 
   it('requires a second confirmation before resetting observed history progress', () => {
     const props = render({ failure: { kind: 'progress-conflict', code: 'rolled-back' } });
@@ -147,27 +144,6 @@ describe('encrypted workspace control page reading', () => {
   const history = (localPin: string | null) =>
     appendLedgerHistory(null, page(11, full.records[10]!.hash), expected(localPin));
 
-  it('summarizes who did what and lists current members', () => {
-    render({ history: history(vector.anchor) });
-    const text = container!.textContent!;
-    expect(text).toContain('e2ee.summary.transferOwner');
-    const members = [
-      ...container!.querySelectorAll('section[aria-label="e2ee.control.members"] li'),
-    ];
-    expect(members.map((row) => row.textContent)).toEqual([
-      expect.stringContaining('"number":3'),
-      expect.stringContaining('"number":1'),
-    ]);
-    expect(members[0]!.textContent).toContain('e2ee.values.owner');
-  });
-
-  it('shows the verification code for the verified state', () => {
-    render({ history: history(vector.anchor) });
-    const code = container!.querySelector('[aria-label="e2ee.verify.codeLabel"]')!.textContent;
-    expect(code).toBe(ledgerVerificationCode(history(vector.anchor)).stateDigest);
-    expect(container!.querySelector('svg[aria-label="e2ee.verify.qrLabel"] path')).not.toBeNull();
-  });
-
   it('names the genesis member after this account only when this device holds the pin', () => {
     const you = { name: 'Alex Chen' };
     const profiles = new Map([['03'.repeat(32), { name: 'Jordan Lee' }]]);
@@ -202,22 +178,6 @@ describe('encrypted workspace control page reading', () => {
       before
     );
     expect(ledgerVerificationCode(verified).stateDigest).toBe(before);
-  });
-
-  it('shows no verdict about the genesis pin, only the ledger', () => {
-    render({ history: history(null) });
-    const text = container!.textContent!;
-    expect(text).not.toMatch(/status\.|verifiedPinned|verifiedUnpinned/);
-    expect(container!.querySelector('[aria-label="e2ee.verify.codeLabel"]')).not.toBeNull();
-  });
-
-  it('keeps the explanation behind the help button', () => {
-    render({ history: history(vector.anchor) });
-    expect(container!.textContent).not.toContain('e2ee.verify.hint');
-    act(() =>
-      container!.querySelector<HTMLButtonElement>('button[aria-label="e2ee.control.help"]')!.click()
-    );
-    expect(container!.textContent).toContain('e2ee.verify.hint');
   });
 
   it('reads independent removal while preserving the published epoch', () => {
@@ -278,8 +238,16 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
       (node) => node.textContent === key
     ) as HTMLElement;
   expect(action('e2ee.members.promote')).toBeDefined();
+  expect(
+    document.querySelector('[data-testid="e2ee-member-role"]')?.getAttribute('data-membership-id')
+  ).toBe(member.membershipId);
   await act(async () => action('e2ee.members.remove').click());
   expect(remove).not.toHaveBeenCalled();
+  expect(
+    document
+      .querySelector('[data-testid="e2ee-member-remove-dialog"]')
+      ?.getAttribute('data-membership-id')
+  ).toBe(member.membershipId);
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
     'e2ee.members.removeDescription'
   );

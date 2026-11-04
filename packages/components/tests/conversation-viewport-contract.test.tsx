@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { SessionId } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
-import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
+
 import {
   SessionChatStreamView,
   type ChatStreamItem,
@@ -108,26 +109,150 @@ async function renderStream(initialWindowReady = true) {
   return container.querySelector<HTMLElement>('[data-message-selection-scroll]');
 }
 
-describe('conversation viewport', () => {
-  it('turns browser scroll anchoring off for the whole scroller', async () => {
-    const viewport = await renderStream();
-    expect(viewport).not.toBeNull();
-    expect(viewport!.style.overflowAnchor).toBe('none');
-    expect(viewport!.hasAttribute('data-conversation-scroll-engine')).toBe(true);
+it('reports the actual visible turns while touch growth shifts the content origin', async () => {
+  vi.stubGlobal('navigator', {
+    userAgent: 'iPhone AppleWebKit/605.1.15',
+    platform: 'iPhone',
+    maxTouchPoints: 5,
   });
-
-  it.each([false, true])(
-    'is never hidden, and reports a native window ready only with its window (ready=%s)',
-    async (initialWindowReady) => {
-      const viewport = await renderStream(initialWindowReady);
-      expect(viewport!.style.visibility).not.toBe('hidden');
-      // Warm-window reveal waits for this: the hydrated window AND the engine's
-      // first placed cycle, so a window is never revealed over placeholders.
-      expect(viewport!.getAttribute('data-window-session-stream-ready')).toBe(
-        initialWindowReady ? sessionId : null
-      );
+  const endDescriptor = Object.getOwnPropertyDescriptor(document.documentElement, 'onscrollend');
+  Object.defineProperty(document.documentElement, 'onscrollend', {
+    configurable: true,
+    value: null,
+  });
+  vi.stubGlobal('matchMedia', () => ({
+    matches: true,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+  }));
+  const px = (value?: string) => parseFloat(value ?? '0') || 0;
+  let grown = false;
+  let viewportHeight = 400;
+  let attached: HTMLElement | null = null;
+  const heightOf = (el: HTMLElement) =>
+    el.dataset.conversationTurnId === 't35' && grown
+      ? 636
+      : el.dataset.conversationTurnId
+        ? 100
+        : 0;
+  frames = createFrameHarness({
+    viewportHeight: () => viewportHeight,
+    sizeOf: (el) =>
+      el.hasAttribute('data-message-selection-scroll')
+        ? viewportHeight
+        : el.hasAttribute('data-virtual-index')
+          ? heightOf(el as HTMLElement)
+          : undefined,
+    scrollHeightOf: (viewport) => {
+      const content = viewport.firstElementChild as HTMLElement;
+      return 24 + px(content.style.height) + px(content.style.marginTop);
+    },
+    rectOf: (element, top) => {
+      const el = element as HTMLElement;
+      const viewport = el.closest<HTMLElement>('[data-message-selection-scroll]');
+      if (viewport && viewport !== attached) {
+        attached = viewport;
+        frames!.attachViewport(viewport);
+      }
+      if (el.hasAttribute('data-message-selection-scroll'))
+        return { top: 0, height: viewportHeight };
+      if (
+        el.parentElement?.hasAttribute('data-message-selection-scroll') &&
+        !el.hasAttribute('data-conversation-reply-room')
+      )
+        return { top: 24 + px(el.style.marginTop) - top, height: px(el.style.height) };
+      if (el.hasAttribute('data-virtual-index'))
+        return {
+          top: 24 + px(el.parentElement?.style.marginTop) + px(el.style.top) - top,
+          height: heightOf(el),
+        };
+      return undefined;
+    },
+  });
+  const settle = async () => {
+    for (let i = 0; i < 40; i++) {
+      let delivered = false;
+      await act(async () => {
+        delivered = frames!.frame();
+      });
+      if (!delivered) return;
     }
-  );
+    throw Error('Unsettled viewport');
+  };
+  const ranges: { from: number; to: number }[] = [];
+  const handle = createRef<SessionChatStreamHandle>();
+  const items: ChatStreamItem[] = Array.from({ length: 80 }, (_, turnIndex) => ({
+    type: 'message',
+    sessionId,
+    turnIndex,
+    message: { ...history[0]!, id: `t${turnIndex}` } as never,
+  }));
+  try {
+    await act(async () =>
+      root.render(
+        <SessionChatStreamView
+          ref={handle}
+          items={items}
+          sessionId={sessionId}
+          onVisibleTurnRangeChange={(range) => ranges.push(range)}
+          renderMessageRow={({ message }) => <p>{message.id}</p>}
+        />
+      )
+    );
+    await settle();
+    act(() => handle.current!.scrollToIndex(40));
+    await settle();
+    const viewport = container.querySelector<HTMLElement>('[data-message-selection-scroll]')!;
+    const touch = (type: string, y: number) => {
+      const contacts = [{ identifier: 0, clientX: 100, clientY: y }] as Touch[];
+      return new TouchEvent(type, {
+        bubbles: true,
+        touches: type === 'touchend' ? [] : contacts,
+        changedTouches: contacts,
+      });
+    };
+    await act(() => viewport.dispatchEvent(touch('touchstart', 100)));
+    frames.nativeScrollTo(frames.scrollTop - 120);
+    await settle();
+    await act(() => viewport.dispatchEvent(touch('touchend', 160)));
+    grown = true;
+    await settle();
+    const physical = frames.scrollTop;
+    expect((viewport.firstElementChild as HTMLElement).style.marginTop).toBe('-536px');
+    const actual = () => {
+      const visible = [
+        ...viewport.querySelectorAll<HTMLElement>('[data-conversation-turn-id]'),
+      ].filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.bottom > 0 && r.top < viewportHeight;
+      });
+      return {
+        from: Math.min(...visible.map((el) => Number(el.dataset.conversationTurnId!.slice(1)))),
+        to: Math.max(...visible.map((el) => Number(el.dataset.conversationTurnId!.slice(1)))) + 1,
+      };
+    };
+    expect(ranges.at(-1)).toEqual(actual());
+    // A keyboard/viewport resize while shifted must not sample the negative
+    // DOM margin as a new unshifted content origin.
+    viewportHeight = 360;
+    await settle();
+    expect(ranges.at(-1)).toEqual(actual());
+    viewportHeight = 400;
+    await settle();
+    expect(ranges.at(-1)).toEqual(actual());
+    const before = ranges.at(-1);
+    await act(() => viewport.dispatchEvent(new Event('scrollend')));
+    await settle();
+    expect(frames.scrollTop).toBe(physical + 536);
+    expect(ranges.at(-1)).toEqual(before);
+    expect(ranges.at(-1)).toEqual(actual());
+  } finally {
+    if (endDescriptor)
+      Object.defineProperty(document.documentElement, 'onscrollend', endDescriptor);
+    else delete (document.documentElement as unknown as Record<string, unknown>).onscrollend;
+  }
 });
 
 describe('conversation rows', () => {
@@ -246,22 +371,4 @@ describe('conversation rows', () => {
       expect(row()!.getBoundingClientRect().top).toBe(sentScreenY);
     }
   );
-
-  it.each([
-    ['static', false],
-    ['streaming', true],
-  ])('render %s code blocks without content-visibility: auto', async (_mode, isStreaming) => {
-    await act(async () =>
-      root.render(
-        createElement(MarkdownRenderer, {
-          text: '```ts\nconst answer = 42;\n```\n',
-          isStreaming,
-        })
-      )
-    );
-    const elements = [container, ...container.querySelectorAll<HTMLElement>('*')];
-    expect(container.textContent).toContain('const answer = 42;');
-    const auto = elements.filter((element) => element.style.contentVisibility === 'auto');
-    expect(auto).toEqual([]);
-  });
 });

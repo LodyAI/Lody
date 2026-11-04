@@ -45,7 +45,7 @@ import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
 import { LodyOperationStore, getLodyOperationStorePath } from '@/orchestration/operation-store';
 import { createSessionBackend } from '@/session/session-backend';
 import { LocalControlHandler } from '@/lib/local-control-handler';
-import { LoroDocumentManager } from '@/lib/loro/doc';
+import { LoroDocumentManager, SessionDocument, TRANSIENT_DOC_ROOM_RETAIN_MS } from '@/lib/loro/doc';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import {
   createLocalSessionCommandEnvironment,
@@ -769,6 +769,305 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
+  it('does not report an older failure after the newest user Turn succeeds', async () => {
+    stubCreateOptionsReaders();
+    const doc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'failed-user',
+      role: 'user',
+      status: 'failed',
+      timestamp: '2026-11-03T20:15:00.000Z',
+      items: [{ type: 'text', text: 'run the delegated work' }],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'failed-notice',
+      role: 'system',
+      timestamp: '2026-11-03T20:15:01.000Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your 5-hour limit · resets 6am (UTC)",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'recovered-user',
+      role: 'user',
+      status: 'handled',
+      timestamp: '2026-11-03T21:00:00.000Z',
+      items: [{ type: 'text', text: 'retry after the quota reset' }],
+      fileDiff: [],
+    } as never);
+
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    const item = JSON.parse(status.content[0]?.text ?? '{}').items[0];
+    expect(item).toMatchObject({ ok: true, sessionId });
+    expect(item.value).not.toHaveProperty('lastTurnFailure');
+  });
+
+  it('reports the latest failed turn and marks its history entry', async () => {
+    stubCreateOptionsReaders();
+    const doc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'failed-user',
+      role: 'user',
+      status: 'failed',
+      timestamp: '2026-11-03T20:15:00.000Z',
+      items: [{ type: 'text', text: 'run the delegated work' }],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'failed-notice',
+      role: 'system',
+      timestamp: '2026-11-03T20:15:01.000Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your 5-hour limit · resets 6am (UTC)",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as never);
+
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [
+        {
+          ok: true,
+          sessionId,
+          value: {
+            lastTurnFailure: {
+              reason: 'usage_limit',
+              detail: "You've hit your 5-hour limit · resets 6am (UTC)",
+              at: '2026-11-03T20:15:01.000Z',
+              resetAt: '2026-11-04T06:00:00.000Z',
+              turnId: 'failed-user',
+            },
+          },
+        },
+      ],
+    });
+
+    const history = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_history', { sessionId })
+    );
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    expect(JSON.parse(history.content[0]?.text ?? '{}').items).toContainEqual(
+      expect.objectContaining({
+        id: 'failed-user',
+        isError: true,
+        errorReason: 'usage_limit',
+      })
+    );
+  });
+
+  async function createRemoteSession() {
+    const otherMachineId = 'synthetic-other-machine' as MachineId;
+    await manager.registerMachine(otherMachineId, {
+      id: otherMachineId,
+      name: 'Other',
+      ownerUserId,
+    });
+    const remoteSessionId = await manager.createSession(otherMachineId, 'custom', 'claude');
+    await manager.repo.flush();
+    return remoteSessionId;
+  }
+
+  /** A joined Streams room whose first sync completes only when the test says so. */
+  function stubRemoteRoom(remoteSessionId: SessionId) {
+    const remoteRoomId = getSessionRoomId(remoteSessionId);
+    const joinDocRoom = manager.repo.joinDocRoom.bind(manager.repo);
+    const rooms: Array<{ released: boolean; firstSync: ReturnType<typeof testSignal> }> = [];
+    vi.spyOn(manager.repo, 'joinDocRoom').mockImplementation(async (roomId, ...rest) => {
+      if (roomId !== remoteRoomId) return await joinDocRoom(roomId, ...rest);
+      const tracked = { released: false, firstSync: testSignal() };
+      rooms.push(tracked);
+      const binding = {
+        status: 'joined' as const,
+        firstSyncedWithRemote: tracked.firstSync.promise,
+        onStatusChange: () => () => {},
+        waitUntilSynced: async () => {},
+      };
+      return {
+        subscription: () => binding,
+        unsubscribe: () => {
+          tracked.released = true;
+        },
+      } as unknown as Awaited<ReturnType<typeof joinDocRoom>>;
+    });
+    return rooms;
+  }
+
+  const callTool = (name: string, args: Record<string, unknown>) =>
+    runWithDaemonWorkspace(daemon, () => executeDaemonSessionTool(context(), name, args));
+
+  it("reads another Machine's Sessions without keeping their rooms joined", async () => {
+    // #2194: these reads joined other Machines' Session rooms for the life of
+    // the daemon, so a room that never synced kept retrying forever.
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    const cachedBefore = manager.getConnectedRoomCount();
+
+    // Status does not wait for the room, but keeps it while its first sync runs.
+    const status = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId: remoteSessionId, ok: true }],
+    });
+    expect(rooms.map((room) => room.released)).toEqual([false]);
+    rooms[0]!.firstSync.resolve();
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+
+    // History waits briefly for a synced room and releases it after the read.
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(2));
+    rooms[1]!.firstSync.resolve();
+    const history = await historyCall;
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    await vi.waitFor(() => expect(rooms[1]!.released).toBe(true));
+
+    const listed = await callTool('lody_session_list', {});
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id: remoteSessionId })]),
+    });
+    rooms[2]!.firstSync.resolve();
+    await vi.waitFor(() => expect(rooms[2]!.released).toBe(true));
+    // Only this Machine's own listed Session joined the shared cache.
+    expect(manager.getConnectedRoomCount()).toBe(cachedBefore + 1);
+  });
+
+  it('answers history from the replica when a remote first sync stalls, then releases the room', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(8_000);
+    const history = await historyCall;
+    // A stalled first sync is not a failed read.
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    expect(rooms[0]!.released).toBe(false);
+
+    // While that room is still retained, later reads answer without waiting again.
+    let settled = false;
+    const retained = callTool('lody_session_history', { sessionId: remoteSessionId }).then(
+      (result) => {
+        settled = true;
+        return result;
+      }
+    );
+    await vi.waitFor(() => expect(settled).toBe(true));
+    expect((await retained).isError).not.toBe(true);
+
+    await vi.advanceTimersByTimeAsync(TRANSIENT_DOC_ROOM_RETAIN_MS);
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+    // The next read joins again, so a recovered room can still reach the replica.
+    const again = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(3));
+    rooms[2]!.firstSync.resolve();
+    expect((await again).isError).not.toBe(true);
+  });
+
+  it('keeps a completed remote history read when its temporary wrapper cleanup fails', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    const destroy = SessionDocument.prototype.destroy;
+    vi.spyOn(SessionDocument.prototype, 'destroy').mockImplementationOnce(
+      async function (this: SessionDocument, options) {
+        await destroy.call(this, options);
+        throw new Error('Synthetic wrapper cleanup failure');
+      }
+    );
+
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(1));
+    rooms[0]!.firstSync.resolve();
+    const history = await historyCall;
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+    // The failure is not cached: the next read succeeds normally.
+    const again = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(2));
+    rooms[1]!.firstSync.resolve();
+    expect((await again).isError).not.toBe(true);
+  });
+
+  it('isolates one unreadable Session from list and status siblings', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const original = new Error('Synthetic Session doc read failure');
+    const readTransiently = manager.readSessionDocTransiently.bind(manager);
+    let failing = true;
+    vi.spyOn(manager, 'readSessionDocTransiently').mockImplementation(async (id, read, options) => {
+      if (failing && id === remoteSessionId) throw original;
+      return await readTransiently(id, read, options);
+    });
+
+    const listed = await callTool('lody_session_list', {});
+    expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: sessionId }),
+        expect.objectContaining({ id: remoteSessionId, executionState: 'idle' }),
+      ]),
+    });
+    const status = await callTool('lody_session_status_many', {
+      sessionIds: [sessionId, remoteSessionId],
+    });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [
+        { sessionId, ok: true },
+        {
+          sessionId: remoteSessionId,
+          ok: false,
+          error: { code: 'INTERNAL_ERROR', message: expect.stringContaining(original.message) },
+        },
+      ],
+    });
+
+    // The failure is not cached once the doc is readable again.
+    failing = false;
+    const recovered = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(JSON.parse(recovered.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId: remoteSessionId, ok: true }],
+    });
+  });
+
+  it('releases a retained remote room when this Machine adopts the Session doc', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(rooms.map((room) => room.released)).toEqual([false]);
+
+    // A live owner takes the doc over; the transient room must not linger.
+    await manager.getOrCreateSessionDoc(remoteSessionId);
+    expect(rooms[0]!.released).toBe(true);
+  });
+
   it('keeps standalone discovery sync failures explicit and offline reads available', async () => {
     await seedRoles();
     vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('Metadata unavailable'));
@@ -937,6 +1236,88 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     }
   );
 
+  it.each(['local', 'cloud'] as const)(
+    'isolates batch archive failures and preserves ordered outcomes in %s',
+    async (composition) => {
+      const first = await manager.createSession(machineId, 'custom', 'claude');
+      const second = await manager.createSession(machineId, 'custom', 'claude');
+      const root = (await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta as SessionMeta;
+      const tab = { ...root, id: 'batch-tab' as SessionId, parentSessionId: first };
+      const opened = { ...root, id: 'batch-opened' as SessionId, openedBySessionId: first };
+      for (const session of [tab, opened])
+        await manager.repo.upsertDocMeta(getSessionRoomId(session.id), session);
+      vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+      vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+      if (composition === 'cloud') {
+        vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+        vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+          id: workspaceId,
+          name: 'Synthetic',
+          slug: 'synthetic',
+          role: 'owner',
+        });
+      }
+      const run = (args: unknown) => {
+        const execute = () => executeDaemonSessionTool(context(), 'lody_session_archive', args);
+        return composition === 'local'
+          ? runWithSessionCommandEnvironment(createEnvironment(), execute)
+          : runWithDaemonWorkspace(daemon, execute);
+      };
+      // Invalid batches must fail before archiving any target.
+      for (const args of [
+        {},
+        { sessionIds: [] },
+        { sessionId: first, sessionIds: [second] },
+        { sessionIds: [first, ` ${first} `] },
+        { sessionIds: [first, '  '] },
+        { sessionIds: [first, ...Array.from({ length: 20 }, (_, i) => `extra-${i}`)] },
+      ]) {
+        await expect(run(args)).rejects.toThrow();
+        expect((await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta?.isArchived).not.toBe(
+          true
+        );
+      }
+      vi.mocked(manager.syncMetaOrThrow).mockRejectedValueOnce(new Error('Synthetic sync failure'));
+      const partial = await run({ sessionIds: [first, second] });
+      expect(JSON.parse(partial.content[0]?.text ?? '{}')).toMatchObject({
+        items: [
+          { ok: false, sessionId: first },
+          { ok: true, sessionId: second },
+        ],
+      });
+      expect((await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta?.isArchived).not.toBe(
+        true
+      );
+      expect((await manager.repo.getDocMeta(getSessionRoomId(second)))?.meta?.isArchived).toBe(
+        true
+      );
+      const foreignSession = `lody://session/${opened.id}?workspace=another-workspace`;
+      const sessionIds = [first, 'missing-batch-session', foreignSession, second];
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = await run({ sessionIds });
+        expect(result.isError, JSON.stringify(result)).not.toBe(true);
+        expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+          items: [
+            { ok: true, sessionId: first, archivedChildSessionIds: [tab.id] },
+            {
+              ok: false,
+              sessionId: 'missing-batch-session',
+              error: { message: expect.any(String) },
+            },
+            { ok: false, sessionId: foreignSession, error: { message: expect.any(String) } },
+            { ok: true, sessionId: second, archivedChildSessionIds: [] },
+          ],
+        });
+      }
+      for (const id of [first, second, tab.id])
+        expect((await manager.repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+          isArchived: true,
+          status: SessionStatusFactory.idle(),
+        });
+      expect((await manager.repo.getDocMeta(getSessionRoomId(opened.id)))?.meta).toEqual(opened);
+    }
+  );
+
   it('serves bound Session tools from the daemon access verdict while workspace discovery is down', async () => {
     const list = vi
       .spyOn(workspaceApi, 'listWorkspacesForToken')
@@ -983,6 +1364,159 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(undiscovered.isError).toBe(true);
     expect(text(undiscovered)).toContain('Synthetic workspace discovery outage');
     expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves short Session ids, reports ambiguous prefixes and filters by pull request', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), name, args)
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+    const base = (await manager.repo.getDocMeta(getSessionRoomId(sessionId)))!.meta as SessionMeta;
+    const seed = async (id: string, extra: Partial<SessionMeta>) => {
+      await manager.repo.upsertDocMeta(getSessionRoomId(id as SessionId), {
+        ...base,
+        id: id as SessionId,
+        ...extra,
+      });
+    };
+    await seed('prefixunique-1111', {
+      title: 'Fix sharing',
+      branchName: 'fix/sharing',
+      pullRequests: [{ url: 'https://github.com/LodyAI/Lody/pull/4094', status: 'open' }],
+    });
+    await seed('prefixdup-aaaa', { title: 'First' });
+    await seed('prefixdup-bbbb', { title: 'Second' });
+
+    const status = await call('lody_session_status_many', {
+      sessionIds: ['prefixuniq', 'prefixdup'],
+    });
+    expect(status.isError, status.text).toBe(false);
+    expect(JSON.parse(status.text).items).toEqual([
+      expect.objectContaining({ ok: true, sessionId: 'prefixunique-1111' }),
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ code: 'SESSION_ID_AMBIGUOUS' }),
+      }),
+    ]);
+    expect(JSON.stringify(JSON.parse(status.text).items[1])).toContain('prefixdup-bbbb');
+
+    const history = await call('lody_session_history', { sessionId: 'prefixdup' });
+    expect(history.isError).toBe(true);
+    expect(history.text).toContain('SESSION_ID_AMBIGUOUS');
+
+    for (const pullRequest of [
+      { number: 4094 },
+      { url: 'https://github.com/lodyai/lody/pull/4094/' },
+    ]) {
+      const listed = await call('lody_session_list', { pullRequest });
+      expect(listed.isError, listed.text).toBe(false);
+      expect(JSON.parse(listed.text).items).toEqual([
+        expect.objectContaining({ id: 'prefixunique-1111', branch: 'fix/sharing' }),
+      ]);
+    }
+    const none = await call('lody_session_list', { pullRequest: { number: 409 } });
+    expect(JSON.parse(none.text).items).toEqual([]);
+  });
+
+  it('lists queued inputs and leaves them untouched when the target daemon cannot withdraw', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const targetAccess = vi
+      .spyOn(sessionCommands, 'validateSessionChatTarget')
+      .mockImplementation(async (args) => {
+        if (args.delegatedRequester?.userId !== 'synthetic-collaborator')
+          throw new Error('Withdraw must check the invoking user');
+        return {} as never;
+      });
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), name, args)
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+    const targetId = await manager.createSession(machineId, 'custom', 'claude');
+    const doc = await manager.getOrCreateSessionDoc(targetId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'queued-1',
+      role: 'user',
+      status: 'pending',
+      author: { v: 1, kind: 'agent', sessionId, turnId: 'synthetic-turn', name: 'Codex' },
+      timestamp: '2026-11-03T01:00:00.000Z',
+      items: [{ type: 'text', text: 'Also run the edge-case suite before reporting.' }],
+      fileDiff: [],
+    } as never);
+
+    const listed = await call('lody_session_queue', { action: 'list', sessionId: targetId });
+    expect(listed.isError, listed.text).toBe(false);
+    expect(JSON.parse(listed.text).items).toEqual([
+      expect.objectContaining({
+        userTurnId: 'queued-1',
+        own: true,
+        sender: { kind: 'agent', sessionId },
+        preview: 'Also run the edge-case suite before reporting.',
+      }),
+    ]);
+
+    // The daemon fixture advertises no withdrawal capability, like an older release.
+    const withdrawn = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(JSON.parse(withdrawn.text)).toMatchObject({ outcome: 'error' });
+    const read = await backend.history.readTurn('queued-1');
+    expect(read.state === 'ready' ? read.turn.status : undefined).toBe(
+      JSON.parse(listed.text).items[0].status
+    );
+
+    // A capable remote daemon is asked as the invoking Turn's user, never the owner.
+    await manager.repo.upsertDocMeta(getMachineRoomId(machineId), {
+      protocolCapabilities: { sessionInputWithdraw: 1 },
+    } as never);
+    const asked: Array<Record<string, unknown>> = [];
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockImplementation(async (_args, run) =>
+      run({
+        requestSessionWithdrawInput: async (request: Record<string, unknown>) => {
+          asked.push(request);
+          return {
+            type: 'session/withdraw-input_response',
+            sessionId: targetId,
+            userTurnId: 'queued-1',
+            outcome: 'withdrawn',
+          };
+        },
+      } as never)
+    );
+    const remote = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(JSON.parse(remote.text)).toMatchObject({ outcome: 'withdrawn' });
+    expect(asked).toEqual([expect.objectContaining({ userId: 'synthetic-collaborator' })]);
+
+    // A user without access to the target is refused before anything is sent.
+    targetAccess.mockRejectedValue(new Error('Machine access denied for target'));
+    const denied = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(denied.isError).toBe(true);
+    expect(asked).toHaveLength(1);
   });
 
   it('binds daemon workspace resolution to the daemon identity and workspace', async () => {

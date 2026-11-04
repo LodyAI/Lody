@@ -8,9 +8,11 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 ## Composition and capabilities
 
 - Settings must represent real platform support: local hides cloud usage and
-  PR-driven auto-archive, and omits machine selection when `remoteMachines` is
+  the legacy PR-driven auto-archive setting, and omits machine selection when `remoteMachines` is
   absent. Gate entries and their background work through capabilities rather
-  than build-kind or environment checks.
+  than build-kind or environment checks. Explicitly granted local Automations may
+  request ordinary Session archive through the local Host authority; this requires
+  no product-cloud port. [Contract](../../apps/cli/src/automations/README.md).
 - Shared packages stay platform-neutral. The public Electron composition
   selects `local` explicitly; private Web/mobile entries and cloud composition
   roots may inject `cloud` without forking those shared packages.

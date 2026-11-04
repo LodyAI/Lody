@@ -3,6 +3,144 @@ import { readFileSync } from 'node:fs';
 import { measureTextareaScrollHeight } from '../../src/components/chat/textarea-measurement';
 import { compensateConversationScroll } from '../../src/components/ai-gui/conversation-list/scroll-compensation';
 
+// This checks actual CSS overflow and anchor geometry with production controller
+// transactions. Native iOS compositor momentum still needs device acceptance.
+test('positive touch shifts preserve physical offsets and leave no leading gap', async ({
+  page,
+}) => {
+  await page.goto('/iframe.html');
+  const result = await page.evaluate(async () => {
+    const modulePath = '/src/lib/conversation-scroll/controller.ts';
+    const { ScrollController } = (await import(
+      modulePath
+    )) as typeof import('../../src/lib/conversation-scroll/controller');
+    document.body.innerHTML = `<style>
+      body { margin: 0; }
+      #viewport { height: 600px; width: 390px; overflow: auto; overflow-anchor: none; }
+      #rows { position: relative; overflow-y: clip; overflow-anchor: none; }
+    </style><div id="viewport"><div id="rows"></div></div>`;
+    const viewport = document.querySelector<HTMLElement>('#viewport')!;
+    const content = document.querySelector<HTMLElement>('#rows')!;
+    const heights = Array(80).fill(100) as number[];
+    let queued = true;
+    const writes: number[] = [];
+    const controller = new ScrollController({
+      host: {
+        readScrollTop: () => viewport.scrollTop,
+        readScrollHeight: () => viewport.scrollHeight,
+        readViewportHeight: () => viewport.clientHeight,
+        readContentTop: () =>
+          content.getBoundingClientRect().top -
+          viewport.getBoundingClientRect().top +
+          viewport.scrollTop,
+        readPaddingBottom: () => 0,
+        measure: (keys) =>
+          keys.map(
+            (key) => content.querySelector<HTMLElement>(`[data-key="${key}"]`)?.offsetHeight
+          ),
+        setContentShift: (shift) => {
+          content.style.marginTop = `${-shift}px`;
+        },
+        setExtent: (height) => {
+          content.style.height = `${height}px`;
+        },
+        setReplyRoom: () => {},
+        writeScrollTop: (top) => {
+          writes.push(top);
+          viewport.scrollTop = top;
+        },
+        scrollBy: (delta) => {
+          writes.push(delta);
+          viewport.scrollBy({ top: delta, behavior: 'instant' });
+        },
+        requestCommit: () => {
+          queued = true;
+        },
+        scheduleMicrotask: (callback) => queueMicrotask(callback),
+        isSuppressed: () => false,
+        prefersReducedMotion: () => true,
+        requestFrame: (callback) => requestAnimationFrame(callback),
+        cancelFrame: (handle) => cancelAnimationFrame(handle),
+      },
+    });
+    const flush = () => {
+      let count = 0;
+      while (queued) {
+        if (++count > 24) throw new Error('Unbounded layout');
+        queued = false;
+        const plan = controller.plan();
+        content.replaceChildren(
+          ...plan.indices.map((index, position) => {
+            const row = document.createElement('div');
+            row.dataset.key = `t${index}`;
+            row.style.cssText = `position:absolute;top:${plan.offsets[position]}px;height:${heights[index]}px;width:100%`;
+            row.textContent = `Synthetic history ${index}`;
+            return row;
+          })
+        );
+        controller.afterCommit();
+      }
+    };
+    controller.syncRows(
+      heights.map((_, index) => ({
+        key: `t${index}`,
+        turnId: `t${index}`,
+        turnIndex: index,
+        itemIndex: null,
+        itemIdentity: null,
+        firstItemIndex: null,
+        placeholder: false,
+        fixed: null,
+        estimate: 100,
+      })),
+      1
+    );
+    flush();
+    controller.jumpToIndex(40);
+    flush();
+    controller.setTouchActive(true);
+    controller.release('touch-up');
+    viewport.scrollTop -= 120;
+    controller.onScrollEvent();
+    flush();
+    controller.setTouchActive(false, true);
+    writes.length = 0;
+    const top = viewport.scrollTop;
+    const line = () => content.querySelector('[data-key="t40"]')!.getBoundingClientRect().top;
+    const before = line();
+    heights[35] = 636;
+    content.querySelector<HTMLElement>('[data-key="t35"]')!.style.height = '636px';
+    controller.onRowsResized([{ key: 't35', height: 636 }]);
+    flush();
+    const during = {
+      top: viewport.scrollTop,
+      line: line(),
+      writes: [...writes],
+      height: viewport.scrollHeight,
+    };
+    // Keep the deferred prefix reachable: reaching physical zero absorbs it.
+    viewport.scrollTop = 0;
+    controller.onScrollEvent();
+    flush();
+    const boundary = {
+      top: viewport.scrollTop,
+      origin: content.style.marginTop,
+      hit: document.elementFromPoint(100, 4)?.closest('[data-key]')?.getAttribute('data-key'),
+    };
+    controller.onScrollEnd();
+    flush();
+    controller.dispose();
+    return { top, before, during, boundary };
+  });
+  expect(result.during.top).toBe(result.top);
+  expect(result.during.line).toBe(result.before);
+  expect(result.during.writes).toEqual([]);
+  expect(result.during.height).toBe(8000);
+  expect(result.boundary.top).toBe(536);
+  expect(result.boundary.origin).toBe('0px');
+  expect(result.boundary.hit).toBeTruthy();
+});
+
 for (const timing of ['before native input', 'after native input'] as const) {
   test(`native wheel input keeps reading corrections (${timing})`, async ({
     page,

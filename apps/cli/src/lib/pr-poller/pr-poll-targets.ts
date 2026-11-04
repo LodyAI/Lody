@@ -297,14 +297,17 @@ function maxNullable(a: number | null, b: number | null): number | null {
   return Math.max(a, b);
 }
 
-function collectStatusTargets(ownerMeta: SessionMeta): PrPollStatusTarget[] {
+export function collectStatusTargets(
+  ownerMeta: SessionMeta,
+  includeTerminal = false
+): PrPollStatusTarget[] {
   const targets: PrPollStatusTarget[] = [];
   const seen = new Set<string>();
   const resolved = resolveSessionPullRequests(ownerMeta);
   for (const [index, pr] of resolved.entries()) {
     // Refresh once until legacy readers receive the same lifecycle projection.
     const needsProjection = ownerMeta.pullRequests?.[index]?.status !== pr.status;
-    if (pr.status !== 'open' && pr.status !== 'draft' && !needsProjection) {
+    if (!includeTerminal && pr.status !== 'open' && pr.status !== 'draft' && !needsProjection) {
       continue;
     }
     const parsed = parseGitHubPullRequestUrl(pr.url);
@@ -318,6 +321,16 @@ function collectStatusTargets(ownerMeta: SessionMeta): PrPollStatusTarget[] {
       repoFullName: parsed.repoFullName,
       prNumber: parsed.prNumber,
       status: pr.status,
+      ...(includeTerminal && ownerMeta.projectRun
+        ? {
+            nativeCredentials: Object.entries(ownerMeta.projectRun.members).some(
+              ([memberId, member]) =>
+                projectMemberRepositoryContext(ownerMeta, memberId).repoFullName?.toLowerCase() ===
+                  parsed.repoFullName.toLowerCase() &&
+                (member.src.kind === 'local' || member.repositoryCheckout?.kind === 'local')
+            ),
+          }
+        : {}),
     });
   }
   return targets;

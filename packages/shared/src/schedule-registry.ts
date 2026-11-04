@@ -138,6 +138,28 @@ function uuidV8(payload: unknown): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/** One manual quota continuation for the exact failed Turn and quota window. */
+export function quotaReservationIdentity(
+  workspaceId: string,
+  sessionId: string,
+  resetAt: number,
+  turnId: string
+) {
+  const identity = uuidV8([
+    'lody.schedule.v1',
+    'quota-continuation',
+    workspaceId,
+    sessionId,
+    resetAt,
+    turnId,
+  ]);
+  return {
+    scheduleId: `qc3_${identity}`,
+    activationId: uuidV8(['lody.schedule.v1', 'quota-activation', identity]),
+    activityId: uuidV8(['lody.schedule.v1', 'quota-create', identity]),
+  };
+}
+
 /**
  * Identifiers for one run. The turn and source entry are unique per run; the
  * Session is unique per run only for `new_session` — the other destinations

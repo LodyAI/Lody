@@ -32,6 +32,7 @@ export * from './message';
 export * from './ai';
 export * from './acp-model-capabilities';
 export * from './pi-provider-migration';
+export * from './message-quote';
 export * from './message-text-spans';
 export * from './deepseek-harness';
 export * from './acp-run-config';
@@ -67,6 +68,7 @@ export * from './session-status-machine';
 export * from './session-archive-targets';
 export * from './session-operation-targets';
 export * from './session-orchestration';
+export * from './session-failure';
 export * from './electron-ipc';
 export * from './loro-server-auth';
 export * from './auth';
@@ -519,3 +521,7 @@ export * from './session-pull-requests';
 export * from './prompt-suggestions';
 
 export * from './encrypted-attachment';
+
+export * from './device-preview';
+
+export * from './android-emulator';

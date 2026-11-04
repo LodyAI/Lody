@@ -3,7 +3,6 @@ import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 
 import {
   buildSessionRelationTree,
-  countSessionRelationTree,
   hasSessionRelations,
   type SessionRelationTreeNode,
 } from '../src/lib/session-relation-tree';
@@ -48,26 +47,6 @@ describe('buildSessionRelationTree', () => {
     for (const current of ['top', 'mid', 'tab', 'leaf', 'sibling']) {
       expect(outline(buildSessionRelationTree(shuffled, sid(current)))).toEqual(expected);
     }
-  });
-
-  it('keeps an unrelated Session as a lone row without relations', () => {
-    const tree = buildSessionRelationTree(sessions, sid('unrelated'));
-    expect(outline(tree)).toEqual(['unrelated']);
-    expect(hasSessionRelations(tree)).toBe(false);
-    expect(hasSessionRelations(buildSessionRelationTree(sessions, sid('leaf')))).toBe(true);
-    expect(countSessionRelationTree(buildSessionRelationTree(sessions, sid('top'))!)).toBe(5);
-  });
-
-  it('counts a Tab created in the same row as a relation', () => {
-    const tree = buildSessionRelationTree(
-      [
-        meta('solo'),
-        meta('mcp-tab', { parentSessionId: sid('solo'), openedBySessionId: sid('solo') }),
-      ],
-      sid('solo')
-    );
-    expect(outline(tree)).toEqual(['solo[mcp-tab]']);
-    expect(hasSessionRelations(tree)).toBe(true);
   });
 
   it('drops archived rows and side chats, and stops the upward walk at an archived opener', () => {

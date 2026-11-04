@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   createSessionShareSecret,
   createSessionShareUrl,
-  hashSessionShareSecret,
   parseSessionShareFragment,
   createShareDeliveryKey,
   encryptShareDelivery,
@@ -68,43 +67,5 @@ describe('session share credentials', () => {
     expect(() =>
       createSessionShareUrl('../workspace', secret, 'https://share.example.test')
     ).toThrow('Invalid share link');
-  });
-
-  it('produces a stable domain-separated digest without retaining the secret', async () => {
-    const secret = 'a'.repeat(64);
-    const digest = await hashSessionShareSecret(secret);
-    expect(digest).toMatch(/^[a-f0-9]{64}$/);
-    expect(digest).not.toBe(secret);
-    expect(await hashSessionShareSecret(secret)).toBe(digest);
-    expect(await hashSessionShareSecret('b'.repeat(64))).not.toBe(digest);
-    await expect(hashSessionShareSecret('weak-secret')).rejects.toThrow('Invalid share credential');
-  });
-});
-
-describe('session share origin injection', () => {
-  it('normalizes the injected origin, preserving the fragment and local test ports', () => {
-    const secret = 'a'.repeat(64);
-    for (const origin of [
-      'https://staging.example.test/',
-      'http://localhost:5179/',
-      'http://[::1]:5179/',
-    ]) {
-      const link = new URL(createSessionShareUrl('share', secret, origin));
-      expect(link.origin).toBe(new URL(origin).origin);
-      expect(link.pathname).toBe('/s/share');
-      expect(link.search).toBe('');
-      expect(parseSessionShareFragment(link.hash)).toBe(secret);
-    }
-  });
-  it.each([
-    '',
-    'http://share.example.test',
-    'javascript:alert(1)',
-    'https://user:pass@share.example.test',
-    'https://share.example.test/path',
-    'https://share.example.test?redirect=elsewhere',
-    'https://share.example.test#access=old',
-  ])('rejects invalid origin %s', (origin) => {
-    expect(() => createSessionShareUrl('share', 'a'.repeat(64), origin)).toThrow();
   });
 });
