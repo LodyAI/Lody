@@ -278,6 +278,19 @@ export function E2eeAccountPairingRequest(props: {
   );
 }
 
+/** The key request after a join failed: says so, and asks again only when the user does. */
+export function E2eeAccountPairingKeyRetry(props: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div role="alert" className="flex items-center gap-3 px-4 py-2 text-sm">
+      <span>{t('e2ee.accountPair.request.keyFailed')}</span>
+      <Button variant="secondary" size="small" onClick={props.onRetry}>
+        {t('e2ee.accountPair.request.keyRetry')}
+      </Button>
+    </div>
+  );
+}
+
 type ApproveRuntime = Pick<
   E2eeWorkspaceRuntime,
   'accountPairingCode' | 'inspectAccountPairing' | 'approveAccountPairing' | 'declineAccountPairing'

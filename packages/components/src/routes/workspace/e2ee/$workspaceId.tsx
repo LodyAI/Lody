@@ -13,7 +13,6 @@ import {
 } from '@/lib/e2ee-member-removal';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
-import { Button } from '@lody/ui/button';
 import { useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
@@ -25,6 +24,7 @@ import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
 import {
   E2eeAccountPairingApprove,
+  E2eeAccountPairingKeyRetry,
   E2eeAccountPairingRequest,
 } from '@/components/pages/e2ee-account-pairing';
 import { isElectronRenderer } from '@/lib/electron';
@@ -654,14 +654,7 @@ function WorkspaceControlRoute() {
           {t('sessions.offline')}
         </p>
       )}
-      {accountPairingKeyFailed && (
-        <div role="alert" className="flex items-center gap-3 px-4 py-2 text-sm">
-          <span>{t('e2ee.accountPair.request.keyFailed')}</span>
-          <Button variant="secondary" size="small" onClick={retryAccountPairingKey}>
-            {t('e2ee.accountPair.request.keyRetry')}
-          </Button>
-        </div>
-      )}
+      {accountPairingKeyFailed && <E2eeAccountPairingKeyRetry onRetry={retryAccountPairingKey} />}
       {port?.runtime &&
         (current?.custodyFailure || current?.failure?.kind === 'local-identity') && (
           <E2eeIdentityRecovery
