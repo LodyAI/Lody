@@ -2627,8 +2627,9 @@ export class E2eeIpc extends IpcService {
       confirmed.catch(() => undefined)
       // Only the waiter expires. The credential request keeps its original 30s
       // network bound and still records a definitive late loss under the old binding.
-      // 300ms allows a fast credential round trip without imposing the cloud timeout
-      // on IPC/dispatch; the renderer independently activates durably after 200ms.
+      // 50ms leaves 150ms of the renderer's 200ms deadline for local native work,
+      // binding rechecks and IPC. Slow confirmation must not force every healthy
+      // send into durable fallback; genuinely slow local work still has the late path.
       const confirmation = runDesktopE2eeOperation(
         access.accountId,
         Effect.raceFirst(
@@ -2638,7 +2639,7 @@ export class E2eeIpc extends IpcService {
               (error: unknown) => error
             )
           ),
-          Effect.as(Effect.sleep('300 millis'), undefined)
+          Effect.as(Effect.sleep('50 millis'), undefined)
         )
       ).then((error) => {
         if (error !== undefined) throw error

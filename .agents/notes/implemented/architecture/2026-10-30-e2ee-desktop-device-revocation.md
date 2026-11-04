@@ -67,8 +67,9 @@ asked the server.
   on that sanitized refusal and the loss oracle does not need it. Account-mismatch
   refusals keep it too: another account's receipt is not this renderer's fact.
 - **Dispatch confirmation.** The credential-bound token check starts beside local
-  preparation. Its waiter has a 300 ms budget: enough for a fast round trip without
-  imposing the cloud client's 30-second deadline on dispatch. Expiry or an
+  preparation. Its waiter has a 50 ms budget, leaving 150 ms of the renderer's
+  200 ms deadline for native work, binding rechecks and IPC instead of imposing the
+  cloud client's 30-second deadline on dispatch. Expiry or an
   unclassified failure establishes no loss and changes no local outcome. The
   original request retains its network bound; exact loss still records the
   credential-bound receipt and pushes the reader hint even after the frame returned.
@@ -82,10 +83,13 @@ asked the server.
   `processing`), checked before storing the original and again before sending.
   `processing` is not terminal: durable activation may have claimed the same turn
   during the wait, and the receiver deduplicates its exact turn ID. Canceled or
-  terminal turns never accelerate. The 300 ms main wait deliberately keeps a short
-  credential-verdict opportunity; shrinking it to race the renderer would not
-  guarantee fast preparation across native I/O, so the late path must remain usable.
-  Increasing the renderer deadline was rejected because it also bounds the pre-write withdrawal gate;
+  terminal turns never accelerate. A 300 ms main wait was rejected because normal
+  780–800 ms credential replies forced every prepared frame past the renderer's
+  200 ms deadline. The 50 ms budget preserves a small immediate-verdict opportunity
+  while allowing a normal 30 ms preparation to use fast dispatch. The late path
+  remains necessary for genuinely slow native work; no finite budget guarantees
+  every IPC completes on time. Increasing the renderer deadline was rejected because
+  it also bounds the pre-write withdrawal gate;
   awaiting the whole cloud timeout was rejected because it delays RPC acceleration.
 - **Reader hint.** Revocation keeps workspace membership visible, so nothing made
   a revoked window refresh. After recording a loss, main sends each reader window a

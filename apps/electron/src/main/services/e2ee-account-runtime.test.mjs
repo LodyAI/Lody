@@ -11,7 +11,7 @@ import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
-import { Context, Effect, Layer, Scope, Exit, Result } from 'effect'
+import { Context, Effect, Layer, Scope, Exit, Result, Clock } from 'effect'
 import { TestClock } from 'effect/testing'
 import { BackendError, KeyMailbox } from '@lody/e2ee-core/services'
 import { makeSqliteKeyMailbox, referenceKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite'
@@ -2040,7 +2040,12 @@ void test('prepareDispatch confirms access loss after its reader closes through 
     ['status-failure', Effect.succeed({ token: 'synthetic-unused-token' }), null]
   ]) {
     await t.test(name, async (subtest) => {
-      const { api, identity } = await nativeAccountFixture(subtest)
+      // Keep credential replacement inside the confirmation budget regardless of
+      // real filesystem speed; this test controls verdict ordering, not elapsed I/O.
+      const scope = await Effect.runPromise(Scope.make())
+      const clock = await Effect.runPromise(Layer.buildWithScope(TestClock.layer(), scope))
+      subtest.after(() => Effect.runPromise(Scope.close(scope, Exit.void)))
+      const { api, identity } = await nativeAccountFixture(subtest, identityStorage, clock)
       let credentialReplaced = false
       let replacement
       let replacementBytes
@@ -2610,10 +2615,10 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
       }
       if (scenario === 'unreachable' || scenario === 'late-loss') {
         // The local frame is ready; network uncertainty must not impose its 30s timeout.
-        await run(TestClock.adjust('299 millis'))
+        await run(TestClock.adjust('49 millis'))
         assert.equal(settled, false)
         await run(TestClock.adjust('1 millis'))
-        // Clock stays at 300ms and the credential response is still held.
+        // Clock stays at 50ms and the credential response is still held.
         assert.deepEqual((await result).value, { frame: 'synthetic-frame' })
         assert.equal(settled, true)
         answer.resolve(scenario === 'late-loss')
@@ -2637,6 +2642,240 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
       }
       answer.resolve(false)
     })
+  }
+})
+
+void test('30ms local dispatch stays fast with an 800ms credential reply', async (t) => {
+  const scope = await Effect.runPromise(Scope.make())
+  const clock = await Effect.runPromise(Layer.buildWithScope(TestClock.layer(), scope))
+  t.after(() => Effect.runPromise(Scope.close(scope, Exit.void)))
+  const run = (work) => Effect.runPromise(Effect.provide(work, clock))
+  const { api, identity } = await nativeAccountFixture(t, identityStorage, clock)
+  const workspaceId = `fast-${randomUUID()}`
+  await createAccountWorkspace(api, workspaceId)
+  const asked = Promise.withResolvers(),
+    local = Promise.withResolvers(),
+    credential = Promise.withResolvers()
+  const sender = Object.assign(new EventEmitter(), {
+    id: 44,
+    isDestroyed: () => false,
+    send: () => {}
+  })
+  let waiterSettled = false
+  const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+    'electron-ipc-decorator': {
+      IpcService: class {},
+      IpcMethod: () => (_t, _n, d) => d,
+      getIpcContext: () => ({ event: { sender } })
+    },
+    '../../platform': { isLocalPlatform: () => false },
+    '../../services/e2ee-bootstrap.mjs': {},
+    '../assert-sender': { assertProductWindowSender: () => {} },
+    '../ipc-service-deps': {
+      getIpcServiceDeps: () => ({
+        authService: { getCachedSessionIdentity: () => ({ ...identity }) }
+      })
+    },
+    '../../services/e2ee-account-runtime': {
+      ...api,
+      runDesktopE2eeOperation: async (...args) => {
+        const value = await api.runDesktopE2eeOperation(...args)
+        if (value?.frameHex) local.resolve()
+        else if (value === undefined) waiterSettled = true
+        return value
+      },
+      desktopE2eeCloudClient: async () => ({
+        accountId: 'account',
+        client: {
+          contentStreamsToken: () =>
+            Effect.gen(function* () {
+              asked.resolve()
+              yield* Effect.sleep('800 millis')
+              credential.resolve()
+              return { token: 'synthetic-token' }
+            }).pipe(Effect.provide(clock)),
+          machineSharing: () => ({}),
+          history: () => Effect.fail(new Error('unused'))
+        }
+      })
+    }
+  })
+  const ipc = new E2eeIpc()
+  await ipc.open(workspaceId)
+  const original = {
+    requestId: '0a'.repeat(16),
+    frameHex: '0b'.repeat(300),
+    targetMachineId: 'machine',
+    requesterDevice: '0c'.repeat(32),
+    expiresAt: 4_102_444_800_000
+  }
+  const input = {
+    sessionId: 'session',
+    userTurnId: 'turn',
+    userId: 'account',
+    timestamp: new Date(0).toISOString(),
+    inputConfig: {}
+  }
+  const ack = {
+    type: 'session/dispatch-turn_response',
+    sessionId: input.sessionId,
+    userTurnId: input.userTurnId,
+    accepted: true,
+    disposition: 'accepted'
+  }
+  await api.withDesktopE2eeAccount(
+    (owner) =>
+      Effect.sync(() => {
+        owner.host.prepareDispatch = () => Effect.sleep('30 millis').pipe(Effect.as(original))
+        owner.host.acceptDispatchResponse = () => Effect.succeed(ack)
+      }),
+    workspaceId,
+    false
+  )
+  const [
+    { createEncryptedDispatchLegacy },
+    { dispatchUserTurn },
+    { createConversationSession },
+    { createSessionSendResources },
+    { EncryptedPrepareTimeout },
+    { LoroDoc }
+  ] = await Promise.all([
+    import('../../../../../packages/components/src/providers/encrypted-dispatch-legacy.ts'),
+    import('../../../../../packages/components/src/lib/session-send-delivery.ts'),
+    import('../../../../../packages/components/src/lib/conversation-view/create-conversation-session.ts'),
+    import('../../../../../packages/components/src/lib/session-send-resources.ts'),
+    import('../../../../../packages/components/src/lib/encrypted-dispatch-outcome.ts'),
+    Promise.resolve(
+      createRequire(new URL('../../../../../packages/components/package.json', import.meta.url))(
+        'loro-crdt'
+      )
+    )
+  ])
+  const doc = new LoroDoc()
+  const session = createConversationSession(doc, { sessionId: input.sessionId })
+  const resources = createSessionSendResources({
+    acquire: async () => ({
+      sessionData: session.sessionData,
+      getState: () => session.mirror.getState(),
+      setState: session.mirror.setState.bind(session.mirror),
+      waitUntilSynced: async () => {}
+    }),
+    releaseRef: () => {}
+  })
+  await session.sessionData.commands.appendTurn({
+    id: input.userTurnId,
+    role: 'user',
+    userId: input.userId,
+    timestamp: input.timestamp,
+    status: 'pending',
+    items: [{ type: 'text', text: 'synthetic fast dispatch' }],
+    fileDiff: [],
+    inputConfig: {
+      cliType: 'builtin',
+      agentType: 'codex',
+      inputBlocks: [{ type: 'text', text: 'synthetic fast dispatch' }]
+    }
+  })
+  const priorWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const reports = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __LODY_E2E_CLIENT_LOSS__: true,
+      ipc: { send: (_channel, payload) => reports.push(payload) }
+    }
+  })
+  let onBatch,
+    responseFulfilled = 0,
+    late = 0,
+    returnedAt
+  const frames = []
+  const readerReady = Promise.withResolvers()
+  const dispatcher = createEncryptedDispatchLegacy({
+    workspaceId,
+    prepare: async (machine, input) => {
+      const result = await ipc.prepareDispatch(workspaceId, machine, input)
+      returnedAt = await run(Clock.currentTimeMillis)
+      return result
+    },
+    accept: async (machine, input, frame) => {
+      const result = await ipc.acceptDispatchResponse(workspaceId, machine, input, frame)
+      responseFulfilled++
+      return result
+    },
+    client: async () => ({
+      ensureJsonStream: async () => {},
+      readJsonLive: (_stream, _state, batch, options) => {
+        onBatch = batch
+        readerReady.resolve()
+        return new Promise((resolve) => options.signal.addEventListener('abort', resolve))
+      },
+      appendJson: async (_stream, frame) => {
+        await readerReady.promise
+        frames.push(frame)
+        onBatch({ messages: [{ id: frame.id, frame: '0d'.repeat(300) }] })
+      }
+    })
+  })
+  let meta = { id: input.sessionId, machineId: 'machine' }
+  const activated = Promise.withResolvers()
+  const runtime = {
+    contentMode: 'e2ee',
+    sendResources: resources,
+    repo: { getDocMeta: async () => ({ meta }) },
+    writer: {
+      upsertDocMeta: async (_room, patch) => {
+        meta = { ...meta, ...patch }
+        activated.resolve()
+      }
+    },
+    prepareEncryptedDispatch: async (machine, input) => {
+      try {
+        return await dispatcher.prepare(machine, input)
+      } catch (error) {
+        if (error instanceof EncryptedPrepareTimeout) late++
+        throw error
+      }
+    }
+  }
+  // The native work uses TestClock; Node's mock timers drive the real renderer 200ms deadline.
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let sending
+  try {
+    sending = dispatchUserTurn(runtime, input.sessionId, input.userTurnId)
+    await asked.promise
+    await run(TestClock.adjust('30 millis'))
+    t.mock.timers.tick(30)
+    await local.promise
+    await run(TestClock.adjust('70 millis'))
+    t.mock.timers.tick(70)
+    // Flush the native account boundary without advancing either clock. Old 300ms
+    // code has not settled its waiter; drive its real renderer fallback to RED.
+    await api.withDesktopE2eeAccount(() => Effect.void, workspaceId, false)
+    if (!waiterSettled) {
+      await run(TestClock.adjust('100 millis'))
+      t.mock.timers.tick(100)
+      await activated.promise
+    } else await sending
+    assert.equal(late, 0, 'healthy send must not enter the renderer deadline fallback')
+    assert.ok(returnedAt < 200, 'prepared frame must arrive before the renderer deadline')
+    assert.equal(reports.at(-1)?.effects.turnStarts, 1)
+    assert.equal(responseFulfilled, 1, 'real dispatchResponse boundary fulfilled')
+    assert.equal(frames.length, 1)
+    assert.equal(meta.latestUserMsgId, input.userTurnId, 'normal durable activation is retained')
+    await run(TestClock.adjust('700 millis'))
+    await credential.promise
+    assert.equal(frames.length, 1, 'late successful confirmation never sends again')
+  } finally {
+    await run(TestClock.adjust('1 second'))
+    await dispatcher.close()
+    await sending
+    t.mock.timers.reset()
+    await resources.dispose()
+    session.dispose()
+    doc.free()
+    if (priorWindow) Object.defineProperty(globalThis, 'window', priorWindow)
+    else delete globalThis.window
   }
 })
 

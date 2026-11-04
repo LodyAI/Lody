@@ -18,7 +18,7 @@ the account lock on every exit, including failed identity rechecks, unless anoth
 reader owns them.
 [Decision](../../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).
 
-Dispatch checks the credential beside local preparation with a 300 ms waiter
+Dispatch checks the credential beside local preparation with a 50 ms waiter
 budget. Exact loss discards the frame and records the receipt; timeout or an
 unclassified failure leaves the local result unchanged. The bounded network
 request continues and records exact late loss, including the reader hint. Never
