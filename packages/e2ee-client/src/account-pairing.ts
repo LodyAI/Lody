@@ -616,6 +616,29 @@ export function makeAccountPairing(input: {
       }
     });
 
+  /** Holders whose release failed (for example a restart-required close). Each later
+   * operation retries them first; after three failed attempts a holder is dropped and
+   * reported. Bounded so a persistent failure cannot grow the list or spin. */
+  const failedReleases: { workspace: AccountPairingApproverWorkspace; attempts: number }[] = [];
+  const RELEASE_ATTEMPTS = 3;
+  const RETAINED_RELEASES = 16;
+  const releaseOne = (workspace: AccountPairingApproverWorkspace, attempts: number) =>
+    workspace.release
+      ? workspace.release().pipe(
+          Effect.catch((cause) =>
+            Effect.sync(() => {
+              rememberDesktopE2eeFailure('account-pairing-release', cause);
+              if (attempts + 1 < RELEASE_ATTEMPTS && failedReleases.length < RETAINED_RELEASES)
+                failedReleases.push({ workspace, attempts: attempts + 1 });
+            })
+          )
+        )
+      : Effect.void;
+  const retryFailedReleases = Effect.suspend(() =>
+    Effect.forEach(failedReleases.splice(0), (item) => releaseOne(item.workspace, item.attempts), {
+      discard: true,
+    })
+  );
   /** Releases every listed approver workspace when the operation ends, however it ends. */
   const releasing = <A, E, R>(
     work: (
@@ -626,23 +649,13 @@ export function makeAccountPairing(input: {
       const listed: AccountPairingApproverWorkspace[] = [];
       const list = () =>
         Effect.tap(input.approverWorkspaces(), (all) => Effect.sync(() => listed.push(...all)));
-      return work(list).pipe(
-        Effect.ensuring(
-          Effect.forEach(
-            listed,
-            (workspace) =>
-              workspace.release
-                ? workspace
-                    .release()
-                    .pipe(
-                      Effect.catch((cause) =>
-                        Effect.sync(() =>
-                          rememberDesktopE2eeFailure('account-pairing-release', cause)
-                        )
-                      )
-                    )
-                : Effect.void,
-            { discard: true }
+      return Effect.andThen(
+        retryFailedReleases,
+        work(list).pipe(
+          Effect.ensuring(
+            Effect.suspend(() =>
+              Effect.forEach(listed, (workspace) => releaseOne(workspace, 0), { discard: true })
+            )
           )
         )
       );

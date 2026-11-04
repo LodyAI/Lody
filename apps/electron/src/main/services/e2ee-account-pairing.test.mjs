@@ -460,6 +460,92 @@ void test('terminal states are local: cancel and restart end a request whatever 
   )
 })
 
+void test('a workspace session whose release failed is retried by the next operation, a bounded number of times', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts(['w1'])
+  // Every listing returns a new holder; the first holder's close fails until healed.
+  const releases = []
+  let healed = false
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  const listed = []
+  const hosts = a.hosts
+  a.hosts = undefined
+  const pairing = makeDesktopAccountPairing({
+    db: approver.db,
+    account: 'synthetic-account',
+    deviceName: 'Synthetic laptop',
+    relay,
+    requesterWorkspaces: () => Effect.succeed([]),
+    approverWorkspaces: () =>
+      Effect.sync(() => {
+        const holder = listed.length
+        listed.push(holder)
+        return hosts.map((host) => ({
+          ...host,
+          release: () =>
+            Effect.suspend(() => {
+              releases.push(holder)
+              return holder === 0 && !healed
+                ? Effect.fail(
+                    Object.assign(new Error('e2ee_restart-required'), { code: 'restart-required' })
+                  )
+                : Effect.void
+            })
+        }))
+      }),
+    now: () => clock.now,
+    random: (size) => fill(77, size)
+  })
+  await run(pairing.inspectAccountPairing(pairingString))
+  assert.deepEqual(releases, [0])
+  // The failed holder is kept and retried before the next operation lists again.
+  await run(pairing.inspectAccountPairing(pairingString))
+  assert.deepEqual(releases, [0, 0, 1])
+  healed = true
+  await run(pairing.inspectAccountPairing(pairingString))
+  assert.deepEqual(releases, [0, 0, 1, 0, 2])
+  // Released: never retried again.
+  await run(pairing.inspectAccountPairing(pairingString))
+  assert.deepEqual(releases, [0, 0, 1, 0, 2, 3])
+})
+
+void test('a release that keeps failing is retried at most three times and then reported', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const hosts = approverHosts(['w1']).hosts
+  let attempts = 0
+  let listings = 0
+  const pairing = makeDesktopAccountPairing({
+    db: new DatabaseSync(':memory:'),
+    account: 'synthetic-account',
+    deviceName: 'Synthetic laptop',
+    relay,
+    requesterWorkspaces: () => Effect.succeed([]),
+    approverWorkspaces: () =>
+      Effect.sync(() =>
+        listings++ === 0
+          ? hosts.map((host) => ({
+              ...host,
+              release: () =>
+                Effect.suspend(() => {
+                  attempts++
+                  return Effect.fail(new Error('synthetic persistent close failure'))
+                })
+            }))
+          : []
+      ),
+    now: () => clock.now,
+    random: (size) => fill(78, size)
+  })
+  for (let call = 0; call < 6; call++) await run(pairing.inspectAccountPairing(pairingString))
+  assert.equal(attempts, 3)
+})
+
 void test('declining a pairing code makes it unusable on this device', async () => {
   const relay = makeRelay()
   const clock = { now: NOW }

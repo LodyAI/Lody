@@ -1,4 +1,4 @@
-import { Effect, Exit } from 'effect';
+import { Effect, Exit, Fiber } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
@@ -295,5 +295,30 @@ describe('portable account pairing approver key delivery', () => {
     expect(reported).toEqual([['account-pairing-key-delivery-release', failure]]);
     // The workflow's own release reaches it as a failure to record, not a success.
     expect(Exit.isFailure(await Effect.runPromiseExit(workspace!.release!()))).toBe(true);
+  });
+
+  it('releases the sessions it already opened when listing is interrupted', async () => {
+    const rounds = { count: 0, released: 0 };
+    let opened: () => void = () => {};
+    const firstOpened = new Promise<void>((resolve) => (opened = resolve));
+    const listing = makePortableAccountPairingApprover({
+      workspaces: () => [
+        { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+        { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+      ],
+      // The second lookup never settles: a page cancellation interrupts the listing.
+      session: (workspaceId) =>
+        workspaceId === 'w1'
+          ? Effect.sync(() => {
+              opened();
+              return approverSession(rounds);
+            })
+          : Effect.never,
+      appendRecord: () => Effect.void,
+    })();
+    const fiber = Effect.runFork(listing);
+    await firstOpened;
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(rounds.released).toBe(1);
   });
 });
