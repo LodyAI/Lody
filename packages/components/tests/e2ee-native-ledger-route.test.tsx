@@ -25,6 +25,7 @@ const fixture = vi.hoisted(() => ({
   workspaceId: 'workspace-native',
   cachedUser: null as { id: string } | null,
   showTools: false,
+  realPairing: false,
   workspaces: { status: 'loading' } as WorkspacesState,
   navigation: [] as unknown[],
   management: undefined as
@@ -115,12 +116,21 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
 }));
 vi.mock('@/components/settings/e2ee-team-settings', () => ({ E2eeTeamSettingsHost: () => null }));
 vi.mock('@/components/e2ee/email-admission-worker', () => ({ EmailAdmissionWorker: () => null }));
-vi.mock('@/components/pages/e2ee-personal-pairing', () => ({
-  E2eePersonalPairing: ({ workspaceId, approved }: { workspaceId: string; approved?: boolean }) =>
-    fixture.showTools
-      ? createElement('aside', { 'data-pairing': workspaceId, 'data-approved': Boolean(approved) })
-      : null,
-}));
+vi.mock('@/components/pages/e2ee-personal-pairing', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../src/components/pages/e2ee-personal-pairing')>();
+  return {
+    E2eePersonalPairing: (props: Parameters<typeof actual.E2eePersonalPairing>[0]) =>
+      fixture.realPairing
+        ? createElement(actual.E2eePersonalPairing, props)
+        : fixture.showTools
+          ? createElement('aside', {
+              'data-pairing': props.workspaceId,
+              'data-approved': Boolean(props.approved),
+            })
+          : null,
+  };
+});
 vi.mock('@/components/pages/e2ee-ledger-audit', () => ({
   E2eeLedgerAudit: ({ workspaceId }: { workspaceId: string }) =>
     fixture.showTools ? createElement('aside', { 'data-audit': workspaceId }) : null,
@@ -182,6 +192,7 @@ beforeEach(() => {
   fixture.workspaceId = workspaceId;
   fixture.cachedUser = null;
   fixture.showTools = false;
+  fixture.realPairing = false;
   fixture.workspaces = { status: 'loading' };
   fixture.navigation = [];
   fixture.management = undefined;
@@ -1165,3 +1176,114 @@ it.each(['same-owner', 'account-change', 'workspace-change'] as const)(
     }
   }
 );
+
+// R17b J02: the requester saves its request locally, then the server registration
+// (`begin`) is still in flight when the route learns this desktop has no binding and
+// swaps the full control page for the approval guide. The real pairing component
+// remounts there; it must not offer a claim until that same registration settles.
+it('does not offer a personal claim across the approval-guide remount until registration settles', async () => {
+  fixture.realPairing = true;
+  const offer = {
+    version: 1 as const,
+    workspaceId,
+    genesisHash,
+    genesisRecordHex: raw,
+    endorser: '22'.repeat(32),
+    membershipId: '33'.repeat(16),
+    pairingSessionId: '44'.repeat(16),
+  };
+  const opening = Promise.withResolvers<never>();
+  const begin = Promise.withResolvers<void>();
+  const beginEntered = Promise.withResolvers<void>();
+  let saved: { pairingSessionId: string; signingPublicKey: string; offer: typeof offer } | null =
+    null;
+  let registered = false;
+  const claims: string[] = [];
+  fixture.port = {
+    create: async () => {
+      throw new Error('unused');
+    },
+    describe: async () => ({
+      workspaceId,
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash,
+      cryptoOrgId: genesisHash,
+      activation: 'control-only',
+    }),
+    history: async () => ({
+      workspaceId,
+      genesisHash,
+      checkpoint: { headHash: genesisHash, length: 1 },
+      startIndex: 0,
+      recordsHex: [raw],
+      position: local.status.position!,
+      nextCursor: null,
+    }),
+    runtime: {
+      open: () => opening.promise,
+      close: async () => {},
+      status: async () => local.status,
+      pendingPersonalJoin: async () => saved,
+      preparePersonalJoin: async (value: typeof offer) => {
+        // Main persists the original request before the network registration.
+        saved = {
+          pairingSessionId: value.pairingSessionId,
+          signingPublicKey: '55'.repeat(32),
+          offer: value,
+        };
+        beginEntered.resolve();
+        await begin.promise;
+        registered = true;
+        return {
+          pairingSessionId: value.pairingSessionId,
+          signingPublicKey: '55'.repeat(32),
+          status: 'pending',
+        };
+      },
+      claimPersonalJoin: async () => {
+        // Server: an unregistered pairing session is refused as unauthorized.
+        if (!registered) throw new Error('e2ee_join_unauthorized');
+        claims.push('pending');
+        return { ready: false, status: 'pending' };
+      },
+      cancelPersonalJoin: async () => ({ status: 'cancelled' }),
+    },
+  } as unknown as PlatformE2eeWorkspaces;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  const button = (text: string) =>
+    [...container.querySelectorAll('button')].find((value) => value.textContent === text);
+  await act(async () => root.render(createElement(Component)));
+  // Still loading: the full control page hosts the request form.
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).toBeNull();
+  const input = container.querySelector('textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+      input,
+      JSON.stringify(offer)
+    );
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => {
+    button('e2ee.pair.trust')!.click();
+    await beginEntered.promise;
+  });
+  await act(async () =>
+    opening.reject(
+      new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding")
+    )
+  );
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
+  // The remounted component recovered the saved request, but registration is unconfirmed.
+  const unconfirmed = button('e2ee.pair.claim');
+  expect(unconfirmed === undefined || unconfirmed.disabled).toBe(true);
+  unconfirmed?.click();
+  expect(claims).toEqual([]);
+  await act(async () => begin.resolve());
+  const claim = button('e2ee.pair.claim')!;
+  expect(claim.disabled).toBe(false);
+  await act(async () => claim.click());
+  expect(claims).toEqual(['pending']);
+  expect(container.textContent).toContain('e2ee.pair.waiting');
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+});

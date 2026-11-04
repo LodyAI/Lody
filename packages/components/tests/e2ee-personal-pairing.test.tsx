@@ -262,6 +262,31 @@ describe('personal desktop approval', () => {
     expect(container.textContent).toContain('55'.repeat(32));
     expect(container.textContent).toContain('e2ee.pair.waiting');
   });
+  it('a card remounted during registration shows that registration failure, never an early claim', async () => {
+    type Pending = Awaited<ReturnType<NonNullable<Runtime['pendingPersonalJoin']>>>;
+    let pending: Pending = null;
+    const begin = Promise.withResolvers<never>();
+    runtime.pendingPersonalJoin = async () => pending;
+    runtime.preparePersonalJoin = async (value) => {
+      pending = {
+        pairingSessionId: value.pairingSessionId,
+        signingPublicKey: '55'.repeat(32),
+        offer: value,
+      };
+      return begin.promise;
+    };
+    await render(false);
+    await inputOffer();
+    await click('e2ee.pair.trust');
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render(false);
+    expect(container.textContent).not.toContain('e2ee.pair.claim');
+    await act(async () => begin.reject(new Error('request_failed')));
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain('e2ee.pair.retrySubmission');
+  });
   it('retries the saved pin when preparation stopped before request creation, without inventing a key or session', async () => {
     runtime.pendingPersonalJoin = async () => ({ pairingSessionId: offer.pairingSessionId, offer });
     runtime.preparePersonalJoin = async (value) => {
