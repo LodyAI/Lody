@@ -902,10 +902,13 @@ it('opens the workspace by itself once account pairing joins this device to it, 
     open: async () => {
       if (!joined)
         throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
-      return local.status;
+      return { ...local.status, hasDeviceCredential: true };
     },
     status: async () => local.status,
-    ledgerView: async () => local,
+    ledgerView: async () => ({
+      ...local,
+      status: { ...local.status, hasDeviceCredential: true },
+    }),
     ingestLedgerRecords: async () => local.status,
     recordCreated: async () => {
       throw new PersonalHostError({ code: 'unsupported' });
@@ -927,6 +930,71 @@ it('opens the workspace by itself once account pairing joins this device to it, 
   } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
   await act(async () => root.render(createElement(Component)));
+  await act(async () => {});
+  expect(fixture.navigation).toEqual([
+    { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+  ]);
+});
+
+// The host records a join even when its best-effort key round failed, so joined
+// can precede the current epoch key. Content must not open on a joined device
+// that cannot decrypt the current epoch.
+it('waits for the current key after account pairing joins this device, and opens the workspace once the key is installed', async () => {
+  fixture.workspaces = {
+    status: 'ready',
+    activeWorkspaceId: workspaceId,
+    workspaces: [{ id: workspaceId, slug: 'protected-home', name: 'Protected', role: 'member' }],
+  };
+  fixture.port = displayPort(async () => [] as never);
+  let joined = false;
+  let keyInstalled = false;
+  const status = () => ({
+    ...local.status,
+    hasCurrentKey: keyInstalled,
+    writeEpoch: keyInstalled ? 0 : null,
+    hasDeviceCredential: true,
+  });
+  const keyRefreshes: Array<{ installKeys?: boolean } | undefined> = [];
+  let installKey!: () => void;
+  const keyInstall = new Promise<void>((resolve) => {
+    installKey = resolve;
+  });
+  fixture.port.runtime = {
+    open: async () => {
+      if (!joined)
+        throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
+      return status();
+    },
+    refresh: async (_: string, options?: { installKeys?: boolean }) => {
+      keyRefreshes.push(options);
+      await keyInstall;
+      keyInstalled = true;
+      return status();
+    },
+    status: async () => status(),
+    ledgerView: async () => ({ ...local, status: status() }),
+    ingestLedgerRecords: async () => status(),
+    recordCreated: async () => {
+      throw new PersonalHostError({ code: 'unsupported' });
+    },
+    close: async () => {},
+    accountPairingRequest: async () => {
+      joined = true;
+      return {
+        direction: 'requester-shows',
+        pairingString: '50M6-HA79-55MT',
+        expiresAt: Date.now() + 600_000,
+        status: 'joined',
+        workspaces: [{ workspaceId, name: 'Protected', state: 'joined' }],
+      };
+    },
+  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  await act(async () => {});
+  expect(fixture.navigation).toEqual([]);
+  expect(keyRefreshes).toEqual([undefined]);
+  await act(async () => installKey());
   await act(async () => {});
   expect(fixture.navigation).toEqual([
     { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },

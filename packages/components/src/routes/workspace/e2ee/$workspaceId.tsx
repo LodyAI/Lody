@@ -492,17 +492,29 @@ function WorkspaceControlRoute() {
   };
   const refresh = () => setGeneration((value) => value + 1);
   // Account-wide pairing advances by itself: once this device joined, it opens the
-  // workspace as soon as the approved host open succeeds (key installed).
+  // workspace when its credential and the current epoch key are installed. The host
+  // records a join even when its best-effort key round failed, so a join without the
+  // key asks the host to receive keys once.
   const accountPairingJoined = useRef<string | null>(null);
+  const accountPairingKeyRequested = useRef<string | null>(null);
   const onAccountPairingJoined = () => {
     accountPairingJoined.current = identity;
     refresh();
   };
+  const joinedCredential = canOpen && current?.nativeStatus?.hasDeviceCredential === true;
+  const joinedKey = joinedCredential && current?.nativeStatus?.hasCurrentKey === true;
   useEffect(() => {
-    if (accountPairingJoined.current !== identity || !canOpen || !workspaceSlug) return;
-    accountPairingJoined.current = null;
-    void navigate({ to: '/$workspaceName/chat', params: { workspaceName: workspaceSlug } });
-  }, [identity, canOpen, workspaceSlug, navigate]);
+    if (accountPairingJoined.current !== identity || !joinedCredential || !workspaceSlug) return;
+    if (joinedKey) {
+      accountPairingJoined.current = null;
+      void navigate({ to: '/$workspaceName/chat', params: { workspaceName: workspaceSlug } });
+      return;
+    }
+    const runtime = port?.runtime;
+    if (accountPairingKeyRequested.current === identity || !runtime) return;
+    accountPairingKeyRequested.current = identity;
+    void runtime.refresh(workspaceId).then(refresh, refresh);
+  }, [identity, joinedCredential, joinedKey, workspaceSlug, navigate, port, workspaceId]);
   const manageMember = async (work: () => Promise<void>) => {
     const owner = readOwner.current;
     if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
