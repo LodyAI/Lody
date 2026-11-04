@@ -5691,6 +5691,8 @@
   "home.week.usage": "Plan usage",
   "home.week.usageNamed": "Plan usage · {{name}}",
   "home.week.usageSource": "Show plan usage for",
+  "home.week.otherWindowResets": "{{name}} resets {{time}}",
+  "home.week.otherWindowResetsShort": "{{name}} in {{time}}",
   "home.week.forecastChance": "chance",
   "home.week.forecastScheduled": "Codex reset scheduled",
   "home.week.forecastSource": "Third-party forecast from codex-resets.com, loaded when this page opens. No account data is sent. For reference only.",

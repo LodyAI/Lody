@@ -5690,6 +5690,8 @@
   "home.week.usage": "套餐用量",
   "home.week.usageNamed": "套餐用量 · {{name}}",
   "home.week.usageSource": "查看谁的套餐用量",
+  "home.week.otherWindowResets": "{{name}} {{time}}重置",
+  "home.week.otherWindowResetsShort": "{{name}} {{time}}后",
   "home.week.forecastChance": "可能性",
   "home.week.forecastScheduled": "Codex 重置已排期",
   "home.week.forecastSource": "来自第三方 codex-resets.com 的预测,打开本页时加载,不发送任何账户数据,仅供参考。",
