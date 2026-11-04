@@ -1564,6 +1564,24 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           })
         })
       )
+    // An opener arriving while a released reader's entry still drains joins that
+    // actual close (memoized by the entry) instead of failing `closed`; a failed
+    // close keeps its restart-required fence and is never awaited again.
+    const pendingClose = (workspaceId: string) =>
+      run(
+        Effect.sync(() => {
+          const entry = entries.get(workspaceId)
+          if (!entry || !entry.isClosing() || entry.restartRequired()) return undefined
+          return Effect.gen(function* () {
+            yield* entry.close
+            yield* serial.withPermit(
+              Effect.sync(() => {
+                if (entries.get(workspaceId) === entry) entries.delete(workspaceId)
+              })
+            )
+          })
+        })
+      )
     const closeWorkspace = (workspaceId: string) =>
       Effect.flatMap(beginCloseWorkspace(workspaceId), (work) => work)
     const close = Effect.gen(function* () {
@@ -2024,6 +2042,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
         ),
       beginCloseWorkspace,
+      pendingClose,
       closeWorkspace,
       close
     }

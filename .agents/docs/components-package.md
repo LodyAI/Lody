@@ -4,6 +4,11 @@ Scope: `packages/components`. The binding rules live in
 [that package's AGENTS.md](../../packages/components/AGENTS.md) and its child scopes;
 this page keeps the reasoning that would otherwise crowd them out.
 
+Native and opted-in browser notifications use the authenticated host operations
+in `lib/push-notifications.ts`; local Electron notifications remain host-owned.
+The [direct push client decision](../notes/implemented/architecture/2026-10-16-direct-push-client.md)
+explains registration ownership, logout fencing and the provider boundary.
+
 Workspace durable synchronization is composed by `providers/workspace-streams-transport.ts`.
 Its [content boundary](../../specs/workspace-streams-content.md) keeps ordinary SDK bytes
 and persistence intact while exposing protection and snapshot handling to future callers.

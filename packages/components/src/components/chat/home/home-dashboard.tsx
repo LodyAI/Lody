@@ -16,7 +16,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { DEFAULT_HOME_BOARD, type HomeBoard } from '@/lib/home-board';
 import type { HomeNowModel } from '@/lib/home-now';
-import { layoutHomeNow } from '@/lib/home-now-layout';
+import { HOME_NOW_COLUMN, layoutHomeNow, solveHomeNowColumn } from '@/lib/home-now-layout';
 import type { HomeWeekAgent, HomeWeekModel } from '@/lib/home-week';
 import { LANDING_STAGE_BREATHING_PX, useLandingRoom } from '../landing-stage';
 import { morph, type MorphKind } from './morph';
@@ -284,7 +284,22 @@ export function HomeDashboard({
   // same natural row budget because the board itself tops out before the available room does.
   const preferredRows = rowsRoom == null ? null : compactNowRows(rowsRoom);
   const maxRows = preferredRows == null ? undefined : Math.max(0, preferredRows - slackRows);
-  const nowFits = layoutHomeNow(homeNowTotals(now), usage.usage != null, maxRows).fits;
+  // Which arrangement the board speaks with: the one it showed last, unless another leaves the
+  // columns level by `HOME_NOW_SWITCH_MARGIN` rows or more. Remembered here rather than in the
+  // board so the fold's fit check and the board's own layout never disagree, and so a tile that
+  // moves moves once, for a reason the person could see.
+  const nowTotals = homeNowTotals(now);
+  const previousColumn = useRef(HOME_NOW_COLUMN);
+  const nowColumn = solveHomeNowColumn(
+    nowTotals,
+    usage.usage != null,
+    maxRows,
+    previousColumn.current
+  );
+  useLayoutEffect(() => {
+    previousColumn.current = nowColumn;
+  }, [nowColumn]);
+  const nowFits = layoutHomeNow(nowTotals, usage.usage != null, maxRows, nowColumn).fits;
   // Opened from the line although it does not fit: shown anyway until it fits again.
   const [forced, setForced] = useState(false);
   if (forced && nowFits) setForced(false);
@@ -493,6 +508,7 @@ export function HomeDashboard({
                 agentIcon={agentIcon}
                 nowMs={nowMs}
                 maxRows={forced ? undefined : maxRows}
+                column={nowColumn}
                 onOpenSession={onOpenSession}
                 {...usage}
               />

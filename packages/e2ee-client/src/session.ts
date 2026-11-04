@@ -215,7 +215,11 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       EpochPublisher.layer,
       InstalledEpochHistory.layer
     ).pipe(Layer.provideMerge(KeyReceiver.layer), Layer.provideMerge(InstalledEpochKeys.layer));
-    type Keys = Layer.Success<typeof keyLayer> | EpochStagingStore | EpochCandidateStore;
+    type Keys =
+      | Layer.Success<typeof keyLayer>
+      | EpochStagingStore
+      | EpochCandidateStore
+      | KeyMailbox;
     let keyServices: Context.Context<Keys> | undefined;
     let maintenance: Effect.Success<ReturnType<typeof makePersonalKeyMaintenance>> | undefined;
     const keySerial = yield* Semaphore.make(1);
@@ -315,6 +319,43 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             return { refreshRequired: yield* maintenance!(epoch, beforeReceive) };
           })
         )
+      );
+    /** Positive evidence only, as on the desktop: 'delivered' when the mailbox holds an
+     * envelope for `recipient` at the current epoch, else a public retryable code. A
+     * finished key round is not evidence: a refused store or a blocked target also ends. */
+    const keyDeliveryEvidence = (recipient: string) =>
+      withKeys((ctx) =>
+        Effect.gen(function* () {
+          const view = yield* admitted(),
+            state = view.inspectState();
+          const target = state.devices.get(recipient);
+          if (!target || !state.members.has(toHex(target.membershipId.toBytes())))
+            return 'e2ee_admission_not_ingested';
+          // KeyDistributor's sender eligibility: a non-recovery device of an active member.
+          const own = state.devices.get(toHex(device.publicKey.toBytes()));
+          if (
+            !own ||
+            own.kind === 'recovery' ||
+            !state.members.has(toHex(own.membershipId.toBytes()))
+          )
+            return 'e2ee_key_sender_ineligible';
+          const epoch = state.epoch.number;
+          const installed = yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch));
+          if (Result.isFailure(installed)) return 'e2ee_key_unavailable';
+          const genesis = toHex(prepared.binding.genesis.toBytes());
+          const remote = yield* Effect.result(
+            Context.get(ctx, KeyMailbox).status({ genesis, epoch, recipient })
+          );
+          if (Result.isFailure(remote)) return 'e2ee_key_status_unavailable';
+          const slot = remote.success;
+          if (slot.genesis !== genesis || slot.epoch !== epoch || slot.recipient !== recipient)
+            return 'e2ee_key_recipient_ineligible';
+          if (slot.status === 'EnvelopeStored' || slot.status === 'InstallationReported')
+            return 'delivered';
+          if (slot.status === 'NeedsEnvelope') return 'e2ee_key_not_sent';
+          if (slot.status === 'Obsolete') return 'e2ee_key_epoch_changed';
+          return 'e2ee_key_recipient_ineligible';
+        })
       );
     const readKey = (epoch: number) =>
       Effect.gen(function* () {
@@ -697,6 +738,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         ),
       refresh: () => run(serial.withPermit(control.refresh().pipe(Effect.andThen(ledger())))),
       keyRound: () => run(keyRound()),
+      keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
       status: () => run(status()),
       document: (
         resource: string,

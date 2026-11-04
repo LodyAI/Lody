@@ -932,6 +932,71 @@ describe('CodeCollabV2Service text RPC boundary', () => {
     });
   });
 
+  it('compares an unrecorded base against the remote default branch, not an abandoned main', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const git = async (...args: string[]) =>
+        (
+          await execFileAsync('git', ['-c', 'commit.gpgsign=false', ...args], {
+            cwd: workspaceRoot,
+          })
+        ).stdout.trim();
+      await git('-c', 'init.defaultBranch=main', 'init');
+      await git('config', 'user.email', 'test@example.com');
+      await git('config', 'user.name', 'Test User');
+      await writeFile(path.join(workspaceRoot, 'history.txt'), 'abandoned main\n');
+      await git('add', '.');
+      await git('commit', '-m', 'abandoned main');
+      const abandonedMain = await git('rev-parse', 'HEAD');
+      await git('update-ref', 'refs/remotes/origin/main', abandonedMain);
+      await git('checkout', '-b', 'develop');
+      await writeFile(path.join(workspaceRoot, 'history.txt'), 'years of develop\n');
+      await git('add', '.');
+      await git('commit', '-m', 'develop history');
+      const develop = await git('rev-parse', 'HEAD');
+      await git('update-ref', 'refs/remotes/origin/develop', develop);
+      await git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/develop');
+      await writeFile(path.join(workspaceRoot, 'session.txt'), 'session work\n');
+      const { published, publishFileIndex } = collectPublishedSharedStates();
+      // A direct local checkout records no base branch for its Session.
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: async () => ({ ok: true, ownerSessionId: SESSION_ID, workspaceRoot }),
+        publishFileIndex,
+      });
+      try {
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        expect(published.at(-1)?.allChanges).toEqual({ 'session.txt': { diff: [1, 0] } });
+        expect(published.at(-1)?.allChangesDiffStats).toEqual({ allChange: { add: 1, del: 0 } });
+        expect(await service.openAllChangesDiff({ sessionId: SESSION_ID })).toMatchObject({
+          status: 'ok',
+          base: develop,
+        });
+        expect(await getGitDiffStats((args) => git(...args))).toMatchObject({
+          baseRef: 'origin/HEAD',
+          mergeBase: develop,
+          baseDiffStats: { allChange: { add: 0, del: 0 } },
+        });
+
+        // A recorded base stays authoritative, even when it names the abandoned branch.
+        expect(
+          await getGitDiffStats((args) => git(...args), { preferredBaseBranch: 'main' })
+        ).toMatchObject({
+          mergeBase: abandonedMain,
+          baseDiffStats: { allChange: { add: 1, del: 1 } },
+        });
+
+        // Without a remote default, the conventional names remain the fallback.
+        await git('symbolic-ref', '--delete', 'refs/remotes/origin/HEAD');
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        expect(published.at(-1)?.allChanges).toEqual({
+          'history.txt': { diff: [1, 1] },
+          'session.txt': { diff: [1, 0] },
+        });
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
   it('returns a local snapshot before asynchronously reconciling Flock state', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await mkdir(path.join(workspaceRoot, 'src'));

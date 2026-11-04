@@ -2857,6 +2857,7 @@
   "sessions.browser.copied": "已复制 URL",
   "sessions.browser.copyFailed": "复制 URL 失败",
   "sessions.browser.copyShareUrl": "复制分享 URL",
+  "sessions.browser.connectingNetwork": "正在建立网络连接",
   "sessions.browser.creatingTunnel": "正在建立安全预览连接…",
   "sessions.browser.tunnelDisclosure": "页面内容以明文经过隧道服务；此预览不是端到端加密。",
   "sessions.browser.emptyNoCandidate": "还没有上报预览地址。可以在上面直接输入 URL，或让 agent 上报正在运行的开发服务器。",

@@ -28,7 +28,7 @@ import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { cn } from '@/lib/utils';
 import { Switch } from '@lody/ui/switch';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import { withOneSignal } from '@/lib/onesignal';
+import { withPush } from '@/lib/push-notifications';
 import { useTheme, type Theme } from '../../theme-provider';
 
 export function MobileAppearanceSettings() {
@@ -92,10 +92,10 @@ export function MobileAppearanceSettings() {
       if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) {
         return;
       }
-      void withOneSignal((oneSignal) => {
-        void oneSignal.User.setLanguage(next === 'en' ? 'en' : 'zh');
+      void withPush((pushClient) => {
+        void pushClient.User.setLanguage(next === 'en' ? 'en' : 'zh');
       }).catch((error: unknown) => {
-        console.error('Failed to sync OneSignal language', error);
+        console.error('Failed to sync Push language', error);
       });
     },
     [i18n, setLanguage]

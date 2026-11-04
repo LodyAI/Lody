@@ -1413,6 +1413,10 @@ export type ChatFailedMeta = {
   code?: ChatFailedCode;
   /** Human-readable error message */
   message?: string;
+  /** Quota reset instant named by the provider or its capacity observation. */
+  resetAt?: string;
+  /** Epoch-seconds form used by provider capacity observations. */
+  resetAtEpochSeconds?: number;
 };
 
 /**

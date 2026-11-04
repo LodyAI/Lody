@@ -1154,6 +1154,58 @@ describe('LodyOperationCoordinator', () => {
                   code: 'TARGET_FAILED',
                   message:
                     "Target Turn failed (acp_upstream_api_error): You've hit your usage limit. Try again at 7:20 AM.",
+                  retryable: true,
+                  reason: 'usage_limit',
+                  detail: "You've hit your usage limit. Try again at 7:20 AM.",
+                },
+              },
+            ],
+          },
+        },
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('keeps context overflow distinct from a usage limit', async () => {
+    const harness = await makeHarness();
+    const targetHistory = harness.histories.get(harness.targetSessionId)!;
+    targetHistory[0] = { ...targetHistory[0]!, status: 'failed' };
+    targetHistory.push({
+      id: 'system-notice-context',
+      role: 'system',
+      timestamp: '2026-07-20T00:00:00.500Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_internal_error',
+            message: 'API Error: 400 prompt is too long: maximum context length is 200000 tokens',
+          },
+        },
+      ],
+      fileDiff: [],
+    } as SessionHistoryInput);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    await harness.coordinator.stop();
+
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        completion: {
+          type: 'result',
+          value: {
+            items: [
+              {
+                status: 'failed',
+                error: {
+                  code: 'TARGET_FAILED',
+                  reason: 'context_overflow',
+                  retryable: false,
                 },
               },
             ],

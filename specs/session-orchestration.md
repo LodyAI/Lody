@@ -101,10 +101,15 @@ lock tasks or reject sends as duplicates.
   original message. Lody appends the original text with its recorded author,
   checked against history. An unresolvable citation is delivered marked as an
   unverified relay rather than rejected. No delegation token exists.
-- **Failure causes.** A failed target keeps its top-level code and adds a typed
-  cause: quota exhausted with its reset time from the existing capacity
-  observation, Machine offline, user stopped, or agent error with the original
-  message. An unclassifiable failure is an agent error, never a guessed cause.
+- **Failure causes.** A failed target keeps its top-level code and adds a
+  normalized `reason` (`usage_limit`, `context_overflow`, `model_error`,
+  `permission_denied`, `cancelled`, `agent_crash`, or `unknown`), a redacted and
+  bounded `detail`, and the failed assistant Turn when recorded. `usage_limit`
+  carries `resetAt` when the notice names one, and `retryable` follows the
+  reason. An unclassifiable failure is `unknown`, never a guessed cause.
+  `lody_session_status_many` exposes the latest failure as `lastTurnFailure`
+  (`reason`, `detail`, `at`, `resetAt`), and failed `lody_session_history`
+  entries carry `isError` and `errorReason`.
 - **Result timing.** Completion results carry when the input was sent and how
   many later inputs the target received meanwhile. Lody does not mark results
   as superseded; the coordinating Agent judges staleness.
@@ -119,8 +124,12 @@ lock tasks or reject sends as duplicates.
 - **Queued inputs.** A requester may list, withdraw or replace its own queued
   inputs that have not started. A started input returns `ALREADY_STARTED` and is
   never cancelled by this path.
-- **Machine resources.** `lody_machine_list` reports agent quota with reset times
-  and disk usage. Lody does not manage or report agent-held locks.
+- **Machine resources.** `lody_machine_list` reports agent quota with reset
+  times and disk usage. `lody_agent_config_list` and
+  `lody_session_create_options` report an exhausted scoped quota as
+  `quota_exhausted` with `availableAt`, so a coordinator stops dispatching to
+  that config until the window resets. Lody does not manage or report agent-held
+  locks.
 
 These additions avoid errors by design rather than adding gates. Uncertain
 observations degrade to `unknown` or an informational field; only an impossible

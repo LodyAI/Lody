@@ -233,6 +233,15 @@ workflow's.
     the verified ledger (committed, lost, or not yet decided);
   - it delivers a signed snapshot invitation as Owner or Admin. A Member gets `null`,
     so its row carries no invitation and the new device verifies the full history;
+  - after the admission commits, it starts the session's existing key round in the
+    background (`deliverKeys`) so the new device receives the current epoch key, which
+    the invitation does not carry. Approval does not wait for it. Each attempt ends
+    with mailbox evidence (`keyDeliveryEvidence`); anything short of `delivered` is
+    retried on a bounded backoff. Each attempt acquires the session, releases it when
+    done (so no reader stays open across the backoff), and ends if the session
+    belongs to another device (another account); the journal stores the same envelope
+    id and bytes. The workflow releases the sessions it listed when it finishes. `onKeyDelivery` reports `running`,
+    `retrying`, `delivered` or `ended`;
   - its device access for the relay stays inside this composition.
 - **`makeAccountE2eeRuntime`** routes an account's `E2eeWorkspaceRuntime` calls to
   per-workspace runtimes. Only listed methods exist, so capability-by-presence stays
