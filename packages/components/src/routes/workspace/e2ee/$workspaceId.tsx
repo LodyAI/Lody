@@ -569,6 +569,7 @@ function WorkspaceControlRoute() {
         />
         <E2eePersonalPairing
           key={identity}
+          accountId={accountId}
           workspaceId={workspaceId}
           runtime={port.runtime}
           canApprove={false}
@@ -670,6 +671,7 @@ function WorkspaceControlRoute() {
         {port?.runtime && accountId && (
           <E2eePersonalPairing
             key={identity}
+            accountId={accountId}
             workspaceId={workspaceId}
             runtime={port.runtime}
             canApprove={Boolean(current?.history?.locallyPinned)}
