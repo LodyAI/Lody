@@ -236,10 +236,15 @@ void test('cancelled quit reopens admission only after actual in-flight work and
   await api.closeDesktopE2eeAccount()
 })
 void test('in-place and subframe navigation retain the ledger lease; document navigation releases it', async () => {
-  const sender = Object.assign(new EventEmitter(), { id: 7 })
+  const sender = Object.assign(new EventEmitter(), {
+    id: 7,
+    isDestroyed: () => false,
+    send: () => {}
+  })
   const readers = new Map()
   const owner = {
     readers,
+    bootstrap: { removedReason: () => Effect.succeed(null) },
     host: {
       pendingClose: () => Effect.succeed(undefined),
       open: () => Effect.succeed('open'),
@@ -271,7 +276,11 @@ void test('in-place and subframe navigation retain the ledger lease; document na
 })
 
 void test('uncertain admission preserves append and reconciliation failures, then accepts verified retry', async () => {
-  const sender = Object.assign(new EventEmitter(), { id: 17 })
+  const sender = Object.assign(new EventEmitter(), {
+    id: 17,
+    isDestroyed: () => false,
+    send: () => {}
+  })
   const appendFailure = new Error('synthetic sanitized append failure')
   const reconciliationFailure = new Error('e2ee_invalid-input')
   const request = { workspaceId: 'workspace', requestId: 'stable-request', recordHex: 'aabb' }
@@ -813,7 +822,11 @@ async function personalJoinFixture(t) {
         return { custody, bootstrap, host }
       }).pipe(Effect.provideService(Scope.Scope, scope))
     )
-    const sender = Object.assign(new EventEmitter(), { id: 23 })
+    const sender = Object.assign(new EventEmitter(), {
+      id: 23,
+      isDestroyed: () => false,
+      send: () => {}
+    })
     const owner = { ...material, accountId, readers: new Map() }
     const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
       'electron-ipc-decorator': {
@@ -1819,7 +1832,11 @@ void test('workspace-scoped cold identity IPC composes with isolated custody wit
   const first = await createAccountWorkspace(api, 'workspace')
   const sibling = await createAccountWorkspace(api, 'sibling')
   await api.closeDesktopE2eeAccount()
-  const sender = Object.assign(new EventEmitter(), { id: 17 })
+  const sender = Object.assign(new EventEmitter(), {
+    id: 17,
+    isDestroyed: () => false,
+    send: () => {}
+  })
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
     '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
     'electron-ipc-decorator': {
@@ -1905,7 +1922,11 @@ void test('workspace-scoped cold identity IPC composes with isolated custody wit
 void test('real preload bridge admits only confirmed trusted reset IPC and archives native originals', async (t) => {
   const { api } = await nativeAccountFixture(t)
   const first = await createAccountWorkspace(api, 'workspace')
-  const sender = Object.assign(new EventEmitter(), { id: 18 })
+  const sender = Object.assign(new EventEmitter(), {
+    id: 18,
+    isDestroyed: () => false,
+    send: () => {}
+  })
   let trusted = true
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
     '../ipc-service-deps': {
@@ -1983,7 +2004,7 @@ void test('credential-authenticated member removal drains and deletes through th
     owner.ipc.refresh(f.workspaceId, { installKeys: false }),
     /^Error: e2ee_member_removed$/
   )
-  await assert.rejects(owner.ipc.status(f.workspaceId), /e2ee_not_open/)
+  await assert.rejects(owner.ipc.status(f.workspaceId), /^Error: e2ee_member_removed$/)
   assert.equal(owner.readers.has(f.workspaceId), false)
   assert.equal(
     f.db(
@@ -2015,7 +2036,11 @@ void test('prepareDispatch confirms access loss after its reader closes through 
       let replacement
       let replacementBytes
       const first = await createAccountWorkspace(api, 'workspace')
-      const sender = Object.assign(new EventEmitter(), { id: 41 })
+      const sender = Object.assign(new EventEmitter(), {
+        id: 41,
+        isDestroyed: () => false,
+        send: () => {}
+      })
       const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
         'electron-ipc-decorator': {
           IpcService: class {},
@@ -2128,7 +2153,9 @@ void test('prepareDispatch confirms access loss after its reader closes through 
           ? new RegExp(`^Error: e2ee_${code}$`)
           : name === 'account-switch'
             ? /^Error: e2ee_(?:account_mismatch|missing-binding)$/
-            : /^Error: e2ee_host_operation_failed$/
+            : name.startsWith('credential-change') || name === 'status-failure'
+              ? /^Error: e2ee_host_operation_failed$/
+              : /^Error: e2ee_not_open$/
       )
       assert.equal(dispatched, false)
       if (name.startsWith('credential-change')) assert.equal(credentialReplaced, true)
@@ -2179,7 +2206,11 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
         await t.test(`${hasReader ? 'reader' : 'closed'}-${code}-${source}`, async (subtest) => {
           const { api, identity } = await nativeAccountFixture(subtest)
           const first = await createAccountWorkspace(api, 'workspace')
-          const sender = Object.assign(new EventEmitter(), { id: 41 })
+          const sender = Object.assign(new EventEmitter(), {
+            id: 41,
+            isDestroyed: () => false,
+            send: () => {}
+          })
           const scope = await Effect.runPromise(Scope.make())
           subtest.after(() => Effect.runPromise(Scope.close(scope, Exit.void)))
           const failure = { data: { code } }
@@ -2269,7 +2300,11 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
                 receipts: db.prepare('SELECT count(*) AS n FROM removed_workspaces').get().n
               },
               {
-                message: authoritative ? code : 'e2ee_host_operation_failed',
+                message: authoritative
+                  ? code
+                  : hasReader
+                    ? 'e2ee_host_operation_failed'
+                    : 'e2ee_not_open',
                 endpointCalls: source === 'jwt' ? 0 : 1,
                 creations: authoritative ? 0 : 1,
                 receipts: authoritative ? 1 : 0
@@ -2323,7 +2358,7 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
       const sender = Object.assign(new EventEmitter(), {
         id: 41,
         isDestroyed: () => false,
-        send: (channel, payload) => pushes.push({ channel, payload })
+        send: (channel, payload) => pushes.push({ channel, payload: { ...payload } })
       })
       const server = { lost: false }
       const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
@@ -2437,7 +2472,7 @@ void test('credential-authenticated device revocation stops, drains and deletes 
   f.relay.deviceRevoked = true
   await assert.rejects(owner.ipc.contentStreamsToken(f.workspaceId), /^Error: e2ee_device_revoked$/)
   assert.equal(owner.readers.has(f.workspaceId), false)
-  await assert.rejects(owner.ipc.status(f.workspaceId), /e2ee_not_open/)
+  await assert.rejects(owner.ipc.status(f.workspaceId), /^Error: e2ee_device_revoked$/)
   await assert.rejects(
     owner.ipc.seal(f.workspaceId, {
       epoch: 0,
@@ -2450,7 +2485,7 @@ void test('credential-authenticated device revocation stops, drains and deletes 
       plaintext: new Uint8Array([1]),
       additionalData: new Uint8Array([2])
     }),
-    /e2ee_not_open|e2ee_device_revoked/
+    /^Error: e2ee_device_revoked$/
   )
   assert.equal(
     f.db(
@@ -2615,7 +2650,11 @@ void test('remote commands use workspace custody and never create an account con
   const { api, directory } = await nativeAccountFixture(t)
   const first = await createAccountWorkspace(api, 'first')
   const second = await createAccountWorkspace(api, 'second')
-  const sender = Object.assign(new EventEmitter(), { id: 19 })
+  const sender = Object.assign(new EventEmitter(), {
+    id: 19,
+    isDestroyed: () => false,
+    send: () => {}
+  })
   const sessions = new Map()
   const { E2eeIpc } = await load(
     '../ipc/services/e2ee-ipc.ts',
@@ -2796,7 +2835,11 @@ async function memberIpcFixture(options = {}) {
     return owner
   }
   let current = withDistribution(makeOwner('A', 'original-A'))
-  const sender = Object.assign(new EventEmitter(), { id: 1 })
+  const sender = Object.assign(new EventEmitter(), {
+    id: 1,
+    isDestroyed: () => false,
+    send: () => {}
+  })
   const cloud = {
     accountId: 'A',
     client: {
@@ -4205,7 +4248,11 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
   })
   const memberCloud = memberCloudFor('member', 'bb'.repeat(32), () => memberPort)
   const ipc = async (fixture, cloud, id) => {
-    const sender = Object.assign(new EventEmitter(), { id })
+    const sender = Object.assign(new EventEmitter(), {
+      id,
+      isDestroyed: () => false,
+      send: () => {}
+    })
     const { E2eeIpc } = await load(
       '../ipc/services/e2ee-ipc.ts',
       {
@@ -4358,7 +4405,11 @@ async function newDesktopAccountPairing(t, pairingSubmit) {
     pairingSubmit,
     pairingClaim: () => Effect.succeed({ status: 'pending', approvals: [] })
   }
-  const sender = Object.assign(new EventEmitter(), { id: 31 })
+  const sender = Object.assign(new EventEmitter(), {
+    id: 31,
+    isDestroyed: () => false,
+    send: () => {}
+  })
   const { E2eeIpc } = await load(
     '../ipc/services/e2ee-ipc.ts',
     e2eeIpcDependencies(

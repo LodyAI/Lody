@@ -700,6 +700,7 @@ function publicE2eeFailure(error: unknown): Error {
     'pairing-used',
     'member_removed',
     'device_revoked',
+    'not_open',
     'conflict',
     'local-evidence-conflict',
     'snapshot-history-required',

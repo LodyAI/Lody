@@ -48,6 +48,39 @@ unaffected, and the user can pair the device again.
   revocation arrives while the page holds a reader, it cleans up and reopens
   instead of showing terminal removal.
 
+## Live reader cut
+
+Live J07/client and J08/client runs (2026-11-04) found two gaps after a
+credential-confirmed loss in a still-running process. Stale read, seal and dispatch
+calls lost their exact code: cleanup had removed the reader and the binding, so they
+failed as an unprojected `e2ee_not_open` or `e2ee_missing-binding` and reached the
+renderer as `e2ee_host_operation_failed`. And dispatch preparation is purely local,
+so it kept succeeding after the server revoked the device; only a failed preparation
+asked the server.
+
+- **Exact refusal.** A sender without a reader is refused with the durable receipt's
+  reason (`removedReason`), or `e2ee_not_open` when there is none, and `not_open` is
+  a projected public code. Dispatch checks the receipt before the binding. The
+  receipt is written only after a credential-confirmed loss, so this reveals nothing
+  the renderer could not learn from `open`. Account-mismatch refusals keep
+  `e2ee_not_open`: another account's receipt is not this renderer's fact.
+- **Dispatch confirmation.** A prepared frame is returned only after this device's
+  credential is confirmed with the credential-bound token endpoint. An exact loss
+  records the receipt, discards the frame and returns the exact code. Any other check
+  failure establishes nothing and returns the frame, as before; nothing is retried.
+  The cost is one credential round trip per dispatch, the same one a failed
+  preparation already made.
+- **Reader hint.** Revocation keeps workspace membership visible, so nothing made
+  a revoked window refresh. After recording a loss, main sends each reader window a
+  reason-free `e2ee.accessLost` push; the renderer runs its existing native refresh,
+  which returns the exact code and retires the runtime through the existing path.
+  Carrying the reason in the push was rejected because it would create a second
+  renderer loss path beside the refresh one. Periodic renderer polling was rejected
+  because it costs a request per interval per window and still leaves a window.
+
+Read and seal stay local and are cut at the next token, refresh or dispatch request,
+not at the server's decision. Feature RPC preparation is not confirmed separately.
+
 ## Limits
 
 This is honest-client cleanup, not secure erasure of copies made earlier. Issued
