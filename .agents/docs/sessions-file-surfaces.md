@@ -199,6 +199,10 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   `data-native-selection-allow`.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
   turn diff RPC: `specs/code-collab-v2.md`.
+- Diff RPCs return full old and new texts per file today. A content-addressed
+  replacement for remote clients (manifest plus cached blobs, per-file
+  invalidation, remote hunk mode) is proposed, not implemented: see the
+  [remote diff transport proposal](../notes/proposed/architecture/2026-10-31-remote-diff-transport.md).
 - DOCX, XLSX, and PPTX enter through the static `SessionFileOfficePreview` shell.
   An active preview schedules a bounded read at idle and then imports only that
   format's renderer and worker-backed engine. The local resource URL is read
