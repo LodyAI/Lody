@@ -18,7 +18,7 @@ export type RecordSessionUsageInput = {
   acpSessionId: string;
   userId: string;
   machineId: string;
-  cliType: BuiltinAgentType;
+  cliType: BuiltinAgentType | 'custom';
   update: SessionUsageUpdate;
 };
 
@@ -216,7 +216,7 @@ export class UsageTrackingService {
 
   private calculatePrice(
     update: SessionUsageUpdate,
-    cliType: BuiltinAgentType
+    cliType: RecordSessionUsageInput['cliType']
   ): SessionUsageUpdate {
     switch (cliType) {
       case 'claude':

@@ -1187,10 +1187,13 @@ export class MessageHandler {
       const backend = await this.getSessionBackend(sessionDoc);
       const meta = await backend.getMetaState();
       if (!meta) return;
-      if (meta.cliType !== 'builtin' || !isBuiltinAgentType(meta.agentType)) {
-        return;
-      }
-      const cliType = meta.agentType;
+      const cliType =
+        meta.cliType === 'custom'
+          ? 'custom'
+          : meta.cliType === 'builtin' && isBuiltinAgentType(meta.agentType)
+            ? meta.agentType
+            : null;
+      if (!cliType) return;
       const latestAssistant = await backend.readLatestTurn('assistant');
 
       let userId = latestAssistant?.userId;
