@@ -1405,6 +1405,52 @@ describe('SessionManager failed agent creation', () => {
     rmSync(tempHome, { recursive: true, force: true });
   });
 
+  it('delivers startup usage in order only after a successful session creation', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const sessionId = 'startup-usage' as SessionId;
+    const doc = { ...createSessionDoc(), setACPSessionId: vi.fn(async () => undefined) };
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map([[sessionId, doc]])),
+      { sessionSandboxFactory: async () => createNoopSessionSandbox(), cloudPort: createTestCloudPort() }
+    );
+    const events: Array<{ acpSessionId: ACPSessionId; usage: { sessionId: string } }> = [];
+    manager.on('onUsageUpdate', (event) => events.push(event));
+    const row = (n: number) => ({
+      sessionId: 'native',
+      usage: { inputTokens: n, outputTokens: 0, cacheReadInputTokens: 0 },
+    });
+    const start = vi.spyOn(Session.prototype, 'createAgent');
+    start.mockImplementationOnce(async (callbacks) => {
+      callbacks.onUsageUpdate(row(1));
+      throw new Error('startup failed');
+    });
+    start.mockImplementationOnce(async (callbacks) => {
+      callbacks.onUsageUpdate(row(2), 'native:scope:one');
+      callbacks.onUsageUpdate(row(3));
+      expect(events).toEqual([]);
+      return 'native';
+    });
+    const config = createSessionConfig({
+      sessionId,
+      agentCliType: 'custom',
+      agentType: 'synthetic',
+      customAcp: { command: 'never-started', args: [] },
+      workdir: sourceDir,
+    });
+    await expect(manager.createSession(config)).rejects.toThrow('startup failed');
+    expect(events).toEqual([]);
+    await manager.createSession(config);
+    expect(events).toEqual([
+      { sessionId, acpSessionId: 'native', usage: row(2), accountingId: 'native:scope:one' },
+      { sessionId, acpSessionId: 'native', usage: row(3), accountingId: undefined },
+    ]);
+    await manager.terminateSession(sessionId, true);
+  });
+
   it('rejects a replacement native conversation before changing the durable resume pointer', async () => {
     const sourceDir = createLocalRepo(tempHome);
     const sessionId = 'strict-native-resume' as SessionId;

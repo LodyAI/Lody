@@ -268,7 +268,7 @@ export function parseLodyExtensionMessage(args: {
       type: 'usage',
       update,
       ...(scopeId
-        ? { accountingId: `${args.sessionId}:scope:${encodeURIComponent(scopeId)}` }
+        ? { accountingId: `${update.sessionId}:scope:${encodeURIComponent(scopeId)}` }
         : {}),
     };
   }
