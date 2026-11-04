@@ -26,6 +26,11 @@ import {
  *   the semantic tokens they resolve to): 28px, 8px in, 10px corners, the
  *   highlight mixed 6% from the surface toward the ink, the tick at the end.
  * - A search field on that surface is typed into, so it is still the well.
+ * - Weight is 400 for every label, and 500 only for a value being typed or
+ *   chosen (a field, a search box). 550 would be a nicer optical step where
+ *   the face is variable, but the fallback resolves through static Inter,
+ *   where CSS font matching rounds 550 up to 600 and makes the input the
+ *   heaviest text in the composer.
  *
  * StyleX has no attribute or descendant selector: open, highlighted and
  * compact are read from state or a container query and applied as classes.
@@ -243,7 +248,7 @@ export const composerSurface = stylex.create({
     color: colors.label,
     fontFamily: 'inherit',
     fontSize: text.subheadlineSize,
-    fontWeight: 550,
+    fontWeight: 500,
     fontVariationSettings: "'opsz' 18",
     lineHeight: text.subheadlineLeading,
     whiteSpace: 'nowrap',
@@ -414,7 +419,7 @@ export const composerSurface = stylex.create({
     color: colors.label,
     fontFamily: 'inherit',
     fontSize: text.subheadlineSize,
-    fontWeight: 550,
+    fontWeight: 500,
     fontVariationSettings: "'opsz' 18",
     '::placeholder': { color: colors.tertiaryLabel, opacity: 1 },
   },

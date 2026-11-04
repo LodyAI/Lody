@@ -16,6 +16,7 @@ import {
   resolveDeepSeekHarnessSpawn,
   resolveDeepSeekHarnessSessionCompression,
 } from './deepseek-harness-runtime';
+import { childProcessEnv } from '../../tests/test-child-env';
 
 import { Effect } from 'effect';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
@@ -396,7 +397,7 @@ child.on('exit', code => { process.exitCode = code ?? 1; });
         });
       }
       await promisify(execFile)(executable.command, executable.args, {
-        env: {
+        env: childProcessEnv({
           ...process.env,
           ...nodeEnv,
           PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
@@ -405,7 +406,7 @@ child.on('exit', code => { process.exitCode = code ?? 1; });
           SPAWN_TRACE_PATH: spawnTracePath,
           NODE_OPTIONS: `--require ${JSON.stringify(observerPath)}`,
           npm_config_cache: join(rootDir, 'owned-cache'),
-        },
+        }),
       });
 
       if (platform === 'windows') {

@@ -193,6 +193,20 @@ export class E2eeCloudDiagnosticError extends BackendError {
   }
 }
 
+/** Account pairing relay refusals the new device explains (see `PAIRING_REFUSALS`):
+ * the deployment has account pairing switched off, or the account submitted too
+ * many new requests this hour. Only the mapped code leaves; the server text does not. */
+type AccountPairingRelayRefusal = 'pairing-unavailable' | 'pairing-rate-limited'
+const accountPairingRefusals = new Map<string, AccountPairingRelayRefusal>([
+  ['e2ee_account_pairing_disabled', 'pairing-unavailable'],
+  ['e2ee_account_pairing_rate_limited', 'pairing-rate-limited']
+])
+export class E2eeAccountPairingRefusedError extends BackendError {
+  constructor(readonly code: AccountPairingRelayRefusal) {
+    super({ service: 'E2eeCloud', reason: 'unavailable' })
+  }
+}
+
 function requestFailure(error: unknown): BackendError {
   // Terminal types from authentication, transport or decoding are not authority.
   if (error instanceof E2eeMemberRemovedError || error instanceof E2eeDeviceRevokedError)
@@ -214,6 +228,8 @@ function requestFailure(error: unknown): BackendError {
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
+  const refusal = accountPairingRefusals.get(code)
+  if (refusal) return new E2eeAccountPairingRefusedError(refusal)
   const reason =
     code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
       ? 'invalid-response'
@@ -231,6 +247,20 @@ function decode<T>(schema: z.ZodType<T>, value: unknown): T {
   return parsed.data
 }
 
+/** Renew a JWT this long before its `exp`, so no reused token expires in flight. */
+const TOKEN_RENEWAL_MARGIN_MS = 60_000
+/** When to stop reusing `token`: its `exp` minus the margin, or 0 (never) if unreadable. */
+function tokenRenewAt(token: string): number {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString())
+    return typeof payload?.exp === 'number' && Number.isFinite(payload.exp)
+      ? payload.exp * 1000 - TOKEN_RENEWAL_MARGIN_MS
+      : 0
+  } catch {
+    return 0
+  }
+}
+
 /** Only optional cloud E2EE workflows construct this owner. No generic Convex
  * invocation escapes it. All methods run outside the account's custody lock.
  * Timeouts leave write outcomes unknown: callers reconcile the original bytes. */
@@ -239,11 +269,20 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
   deploymentUrl: string
   convexToken: (signal: AbortSignal) => Promise<unknown>
   fetch?: typeof globalThis.fetch
+  /** Wall clock for token reuse; injected by tests. */
+  now?: () => number
 }) {
   if (input.platformKind !== 'cloud')
     return yield* new BackendError({ service: 'E2eeCloud', reason: 'unauthorized' })
   const owner = new AbortController()
-  const close = Effect.sync(() => owner.abort())
+  const now = input.now ?? Date.now
+  // One unexpired Convex JWT serves later calls of this owner. The owner belongs to one
+  // account and closes on account change and sign-out, which drops the token with it.
+  let reusable: { token: string; renewAt: number } | undefined
+  const close = Effect.sync(() => {
+    reusable = undefined
+    owner.abort()
+  })
   yield* Effect.addFinalizer(() => close)
   const fetch = input.fetch ?? globalThis.fetch
 
@@ -264,19 +303,27 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
             ...(requestSignal ? [requestSignal] : [])
           ])
           combined.throwIfAborted()
-          const response = await input.convexToken(combined).catch(() => {
-            throw unavailable()
-          })
-          combined.throwIfAborted()
-          const tokenResponse = z
-            .union([
-              z.object({ data: z.object({ token: z.string().min(1) }) }),
-              z.object({ token: z.string().min(1) })
-            ])
-            .safeParse(response)
-          if (!tokenResponse.success) throw unavailable()
-          const token =
-            'data' in tokenResponse.data ? tokenResponse.data.data.token : tokenResponse.data.token
+          let token: string
+          if (reusable && now() < reusable.renewAt) token = reusable.token
+          else {
+            const response = await input.convexToken(combined).catch(() => {
+              throw unavailable()
+            })
+            combined.throwIfAborted()
+            const tokenResponse = z
+              .union([
+                z.object({ data: z.object({ token: z.string().min(1) }) }),
+                z.object({ token: z.string().min(1) })
+              ])
+              .safeParse(response)
+            if (!tokenResponse.success) throw unavailable()
+            token =
+              'data' in tokenResponse.data
+                ? tokenResponse.data.data.token
+                : tokenResponse.data.token
+            const renewAt = tokenRenewAt(token)
+            reusable = renewAt > now() ? { token, renewAt } : undefined
+          }
           // A request owns its auth and abort signal. Concurrent work cannot change
           // another request's credentials through a shared mutable SDK client.
           const client = new ConvexHttpClient(input.deploymentUrl, {
@@ -321,11 +368,21 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
           combined.throwIfAborted()
           return decode(schema, value)
         },
-        catch: (error) =>
-          terminalFailure !== undefined && error === terminalFailure
+        catch: (error) => {
+          // Any failure may be a rejected token: the next call mints a fresh one.
+          reusable = undefined
+          return terminalFailure !== undefined && error === terminalFailure
             ? terminalFailure
             : requestFailure(error)
-      })
+        }
+      }).pipe(
+        // A deadline or cancellation interrupts the call before `catch`: drop the token too.
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            reusable = undefined
+          })
+        )
+      )
     }).pipe(Effect.timeoutOrElse({ duration: '30 seconds', orElse: unavailable }))
   }
 

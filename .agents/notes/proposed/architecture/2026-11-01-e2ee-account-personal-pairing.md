@@ -188,8 +188,11 @@ under `e2eeAccountPairing`: submit, pending, read by lookup ID, decline, publish
 
 The host port is the optional `E2eeAccountPairingRuntime` in
 [`packages/platform`](../../../../packages/platform/src/e2ee-account-pairing.ts). The pages
-are in [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx),
-behind the developer-mode beta switch "Account-wide device pairing".
+are in [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx).
+Since the owner decision of 2026-11-04 they are shown by default, with no developer
+mode or client switch. The emergency off is the service refusing with
+`e2ee_account_pairing_disabled`, which the page explains; a per-device local
+preference could not stop the flow fleet-wide, so none is kept.
 
 - **Ownership.** The host owns `S`, every tag check, the lifetime check, terminal records
   and signing. The UI checks a typed code locally only to name a typo before any network

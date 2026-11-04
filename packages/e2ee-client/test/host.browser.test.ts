@@ -89,6 +89,13 @@ it.each(['chromium', 'webkit'] as const)(
       expect(approved.ok, JSON.stringify(approved)).toBe(true);
       expect(approved.value).toEqual({
         before: 'unknown',
+        // Approved is not keyed: the approver must send the new device an envelope.
+        // The refused first store is retried on the due schedule without any other call,
+        // and only mailbox evidence counts as delivered.
+        deliveries: ['running:true', 'retrying:true:e2ee_key_not_sent', 'delivered:true'],
+        sleeps: [10_000],
+        refused: true,
+        retriedExactly: true,
         length: 3,
         invitation: true,
         access: true,

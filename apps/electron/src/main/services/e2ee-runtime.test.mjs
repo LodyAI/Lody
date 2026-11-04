@@ -16,6 +16,7 @@ import {
   LedgerPinStore
 } from '@lody/e2ee-core/services'
 import { InstalledEpochKeys, VerifiedLedger } from '@lody/e2ee-core'
+import { BackendError } from '@lody/e2ee-core/services'
 import { disposeEpochKey } from '@lody/e2ee-core/internal'
 import {
   makeSqliteKeyMailbox,
@@ -455,7 +456,30 @@ void test('a different account retains its KeyPackage, joins as Member, exchange
         yield* Layer.build(referenceKeyMailbox(mailbox, memberKey)),
         KeyMailbox
       )
-      yield* owner.host.keyRound(workspaceId, () => ownerPort)
+      // A blocked target is not delivered: the round still succeeds, so only the
+      // mailbox's envelope for that recipient is positive evidence.
+      const memberDevice = hex(memberKey.toBytes())
+      // The host builds its delivery layer from the first round's port, so one port
+      // refuses envelope storage only while `refusing` is set.
+      let refusing = true
+      const sending = {
+        ...ownerPort,
+        put: (id, frame) =>
+          refusing
+            ? Effect.fail(new BackendError({ service: 'KeyMailbox', reason: 'unavailable' }))
+            : ownerPort.put(id, frame)
+      }
+      yield* owner.host.keyRound(workspaceId, () => sending)
+      assert.equal(
+        yield* owner.host.keyDeliveryEvidence(workspaceId, memberDevice, () => ownerPort),
+        'e2ee_key_not_sent'
+      )
+      refusing = false
+      yield* owner.host.keyRound(workspaceId, () => sending)
+      assert.equal(
+        yield* owner.host.keyDeliveryEvidence(workspaceId, memberDevice, () => ownerPort),
+        'delivered'
+      )
       yield* member.host.keyRound(workspaceId, () => memberPort)
       assert.equal((yield* member.host.status(workspaceId)).hasCurrentKey, true)
       encrypted = yield* owner.host.seal(workspaceId, {

@@ -167,8 +167,7 @@ export function buildSidebarNavigationItems({
 
   if (!pinnedSectionCollapsed) {
     // The Pinned section renders through the same list component, so it gets the
-    // same opened-by tree — resolved inside the pinned items ONLY, which is what
-    // keeps a pinned opener from swallowing an unpinned row (and vice versa).
+    // same opened-by tree, including descendants placed here with a pinned opener.
     const pinnedNodes = buildOpenedBySessionTree(sortUpdatedItems(pinnedItems), {
       ...SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
       isCollapsed: (openerId) => collapsedOpenedBySessions[openerId] === true,

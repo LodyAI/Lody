@@ -30,8 +30,13 @@ import { usePostHog } from '@posthog/react';
 import { CreateWorkspacePage } from '@/components/pages/create-workspace-page';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
-import { getPreferredWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
+import {
+  getPreferredOrdinaryWorkspaceSlug,
+  getPreferredWorkspaceSlug,
+  readPreferredWorkspaceSlug,
+} from '@/lib/workspace';
 import { RouteMessage } from '@/components/route-message';
+import { useAuthSignOut } from '../../providers/convex-provider';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -154,6 +159,7 @@ function CreateWorkspaceAuthed({
     if (!organizationsLoading) setOrgSettled(true);
   }, [organizationsLoading]);
   const navigate = useNavigate();
+  const signOut = useAuthSignOut();
   const followRedirect = useCallback(
     (target: string) => {
       const appOrigin = getAppOriginForUrlParsing();
@@ -306,10 +312,11 @@ function CreateWorkspaceAuthed({
     'organization.unableToResolveWorkspace',
     'Unable to find a workspace to open. Please try again or contact support.'
   );
-  const workspaceReturnSlug =
-    organizations && organizations.length > 0
-      ? getPreferredWorkspaceSlug(activeOrganization, organizations, readPreferredWorkspaceSlug())
-      : null;
+  const workspaceReturnSlug = getPreferredOrdinaryWorkspaceSlug(
+    activeOrganization,
+    organizations,
+    readPreferredWorkspaceSlug()
+  );
 
   // 检查用户是否已有组织，如果有则重定向
   useEffect(() => {
@@ -381,11 +388,31 @@ function CreateWorkspaceAuthed({
   }
 
   if (hidesBillingUi && paidRequired && !currentPending) {
+    // This replaces the whole form, including its way back, so it carries both
+    // exits itself: the previous workspace when there is one, and the account.
     return (
       <RouteMessage
         gate={null}
         title={t('organization.mobileWorkspaceLimitReachedTitle')}
         description={t('organization.mobileWorkspaceLimitReachedDescription')}
+        actionLabel={t('organization.backToPreviousWorkspace')}
+        onRetry={
+          workspaceReturnSlug
+            ? () => {
+                void navigate({
+                  to: '/$workspaceName/chat',
+                  params: { workspaceName: workspaceReturnSlug },
+                  replace: true,
+                });
+              }
+            : undefined
+        }
+        secondaryAction={{
+          label: t('organization.signOut'),
+          onClick: () => {
+            void signOut();
+          },
+        }}
       />
     );
   }

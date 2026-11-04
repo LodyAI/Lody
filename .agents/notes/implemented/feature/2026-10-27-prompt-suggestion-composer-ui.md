@@ -46,9 +46,16 @@ remains unverified here.
 - Mobile renders an Apply button and no keyboard acceptance. The overlay ignores
   pointer events except for that control, so pressing the suggestion text or any
   other composer area focuses the input normally.
-- The hint derives from the prop on every render; there is no local "consumed"
-  state. Typing hides it, clearing restores the same text, and accepting does not
-  delete the upstream latest value.
+- The composer derives the hint from the prop on every render and keeps no
+  "consumed" state. Typing hides it, clearing restores the same text, and
+  accepting does not delete the upstream latest value.
+- An accepted send retires the text that was shown when the user sent. The
+  session hook hides that text, across composer remounts, until the session
+  publishes a different non-empty suggestion. Without this, the answered
+  prediction returned to the emptied composer for the whole next turn, because
+  the daemon only replaces it when that turn ends. Repeated identical text and
+  transient empty routes stay hidden. Scheduled saves do not retire it. The mark
+  is renderer-local, so other devices keep showing the hint until it is replaced.
 - Each mounted `SessionChatInputArea` passes its own session id to the hook, so
   retained tabs read their own session and the UI shares no suggestion state
   across conversations.
@@ -69,6 +76,10 @@ remains unverified here.
   succeeds. Playwright against the built stories at 900×600 and 420×700 confirmed
   the desktop Tab draft/caret and hidden hint, mobile click-through focus,
   unchanged Tab, Apply-only draft/caret and hidden hint, with no console errors.
+- [The hook suite](../../../../packages/components/tests/use-session-prompt-suggestion.test.tsx)
+  pins answered-text hiding across remounts, empty routes and replacement;
+  [the submission suite](../../../../packages/components/tests/session-chat-input-submission.test.tsx)
+  pins Tab, send and acceptance hiding it while the old turn's text persists.
 - The multi-line layout adds an auto-resize case (grow to the hint, cap at
   `maxRows`, shrink back when hidden). Playwright at 900×420 and 390×520 measured
   hint and textarea at the same 24px line and equal heights for one, two and
