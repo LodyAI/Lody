@@ -1,5 +1,3 @@
-import { SidebarPullRequests } from './sidebar-pull-requests';
-import { resolveSessionPullRequests } from '@lody/shared';
 import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
@@ -206,6 +204,7 @@ import { useStableNow } from '@/hooks/use-stable-now';
 import { useSidebarWorkspaceNavigation } from './sidebar-workspaces';
 import {
   SessionOpenedByTreeRow,
+  SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
   SessionRowWorktreeIndicator,
@@ -638,27 +637,18 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         {/* ④ Fixed end slot: the PR status sits here at rest when the session
             has one, with a faint worktree glyph just to its left; the Archive
             button replaces it on desktop hover. */}
-        <div
-          className={
-            showMetaLine && showBranchNames && showPr ? 'flex self-stretch' : lineBoxClassName
-          }
-        >
+        <div className={lineBoxClassName}>
           <SidebarRowEndSlot
             sessionId={session.id}
             isWaitingPermission={isWaitingPermission}
             isWorking={isWorking}
             hasUnreadMessages={hasUnreadMessages}
-            restOnSecondLine={showMetaLine && showBranchNames && showPr}
-            interactiveRest={showBranchNames && showPr}
             restIcon={
-              (showPr && showBranchNames) || showWorktreeIcon ? (
+              showPr || showWorktreeIcon ? (
                 <span className="flex items-center gap-1.5">
                   <SessionRowWorktreeIndicator isWorktree={showWorktreeIcon} />
-                  {showPr && showBranchNames ? (
-                    <SidebarPullRequests
-                      alignWithBranch={showMetaLine && showBranchNames}
-                      pullRequests={resolveSessionPullRequests(session)}
-                    />
+                  {showPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={prInfo.ciState} />
                   ) : null}
                 </span>
               ) : undefined
@@ -2592,12 +2582,6 @@ export function LoroAppSidebar({
         hasUnreadMessages: task.hasUnreadMessages,
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
-        pullRequests: task.pullRequests,
-        prUrl: task.prUrl,
-        prStatus: task.prStatus,
-        prCiState: task.prCiState,
-        prReadiness: task.prReadiness,
-        prNumber: task.prNumber,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
         openedBySessionId: task.openedBySessionId ?? null,
@@ -2629,7 +2613,6 @@ export function LoroAppSidebar({
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
         prNumber: task.prNumber,
-        pullRequests: task.pullRequests,
         prUrl: task.prUrl ?? null,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
@@ -2668,7 +2651,6 @@ export function LoroAppSidebar({
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
         prNumber: task.prNumber,
-        pullRequests: task.pullRequests,
         prUrl: task.prUrl ?? null,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
@@ -2721,10 +2703,7 @@ export function LoroAppSidebar({
             prCiState: prInfo.ciState,
             prReadiness: prInfo.readiness,
             prNumber: prInfo.number,
-            pullRequests: resolveSessionPullRequests(session),
             prUrl: prInfo.url,
-            addedLines: session.diffStats?.allChange?.add,
-            deletedLines: session.diffStats?.allChange?.del,
             openedBySessionId: session.openedBySessionId ?? null,
             openedByRowSessionId:
               session.openedByRootSessionId ?? resolveOpenerRowId(session.openedBySessionId),
