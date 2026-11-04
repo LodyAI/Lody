@@ -3708,6 +3708,8 @@ export const ChatFailedMetaSchema = z.object({
   reason: ChatFailedReasonSchema,
   code: ChatFailedCodeSchema.optional(),
   message: SharedOptionalStringSchema,
+  resetAt: SharedOptionalStringSchema,
+  resetAtEpochSeconds: z.number().int().positive().optional(),
 });
 
 /**
@@ -3715,18 +3717,37 @@ export const ChatFailedMetaSchema = z.object({
  * written by older or newer clients still yield their reason and message.
  */
 export function readChatFailureNotice(
-  entries: ReadonlyArray<{ role?: string; items?: ReadonlyArray<unknown> }>
-): { reason?: string; message?: string } | undefined {
+  entries: ReadonlyArray<{ role?: string; timestamp?: string; items?: ReadonlyArray<unknown> }>
+): { reason?: string; message?: string; at?: string; resetAt?: string } | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
     if (entry?.role !== 'system' || !Array.isArray(entry.items)) continue;
     for (const item of entry.items as Array<{ type?: unknown; name?: unknown; meta?: unknown }>) {
       if (item?.type !== 'system_notice' || item.name !== 'chat_failed') continue;
-      const meta = (item.meta ?? {}) as { reason?: unknown; message?: unknown };
+      const meta = (item.meta ?? {}) as {
+        reason?: unknown;
+        message?: unknown;
+        resetAt?: unknown;
+        resetAtEpochSeconds?: unknown;
+      };
       const message = typeof meta.message === 'string' ? meta.message.trim() : '';
+      const explicitReset = typeof meta.resetAt === 'string' ? meta.resetAt.trim() : '';
+      const resetAtEpochSeconds =
+        typeof meta.resetAtEpochSeconds === 'number' &&
+        Number.isFinite(meta.resetAtEpochSeconds) &&
+        meta.resetAtEpochSeconds > 0
+          ? meta.resetAtEpochSeconds
+          : undefined;
+      const resetAt =
+        explicitReset ||
+        (resetAtEpochSeconds !== undefined
+          ? new Date(resetAtEpochSeconds * 1000).toISOString()
+          : '');
       return {
         ...(typeof meta.reason === 'string' ? { reason: meta.reason } : {}),
         ...(message ? { message } : {}),
+        ...(typeof entry.timestamp === 'string' ? { at: entry.timestamp } : {}),
+        ...(resetAt ? { resetAt } : {}),
       };
     }
   }
@@ -3778,6 +3799,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
   z.object({
     type: z.literal('text'),
     text: SharedStringSchema,
+    messagePhase: z.enum(['commentary', 'final_answer']).optional(),
     spans: z.array(MessageTextSpanSchema).optional(),
   }),
   SubagentTaskPayloadSchema.extend({
@@ -3793,6 +3815,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
               ...SubagentItemIdentityShape,
               type: z.literal('text'),
               text: SharedStringSchema,
+              messagePhase: z.enum(['commentary', 'final_answer']).optional(),
               spans: z.array(MessageTextSpanSchema).optional(),
             }),
             z.object({

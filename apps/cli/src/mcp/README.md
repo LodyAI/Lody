@@ -247,6 +247,16 @@ choice as `--mcp-server-ids '<JSON array>'`. See the
   every workspace of the login; only confirmed revocation or token rejection denies.
   See the [resolution decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-daemon-command-workspace-access.md).
 
+## Session archive
+
+`lody_session_archive` accepts either `{"sessionId":"SESSION_ID"}` or
+`{"sessionIds":["SESSION_A","SESSION_B"]}`. Batch input contains 1-20 unique ids.
+Single input retains its existing response; batch input returns `items` in input
+order, each with `sessionId`, `ok`, and either `archivedChildSessionIds` or `error`.
+Each item uses the same daemon archive path, including contained child Tabs and
+excluding independently opened Sessions. Item failures do not undo successful
+archives or prevent later items from running. Repeating an archive is safe.
+
 ## Bounded collaboration
 
 If A sends an Agent-authored input to B, B cannot issue a new `session_chat` back to

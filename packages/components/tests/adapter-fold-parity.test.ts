@@ -54,14 +54,14 @@ describe('assistant text folding across adapter shapes', () => {
     expect(visibleTexts(items)).toEqual(['The bug is in the parser.', 'Done.']);
   });
 
-  it('keeps commentary and the answer visible when the adapter streams phases (Codex)', () => {
+  it('folds explicit commentary while keeping the answer visible (Codex)', () => {
     const items = ingest([
       text('Checking the parser.', 'commentary'),
       toolCall('call-1'),
       text('The bug is in the parser.', 'final_answer'),
     ]);
 
-    expect(visibleTexts(items)).toEqual(['Checking the parser.', 'The bug is in the parser.']);
+    expect(visibleTexts(items)).toEqual(['The bug is in the parser.']);
   });
 
   it('still folds the tool work of a finished turn', () => {

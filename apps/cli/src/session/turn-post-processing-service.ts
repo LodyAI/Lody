@@ -5,7 +5,6 @@ import { WorkspaceGitService } from './workspace-git-service';
 import {
   getSessionRoomId,
   resolveSessionFilePath,
-  resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   type ProjectRef,
   type SessionHistoryInput,
@@ -34,7 +33,8 @@ export type TurnPostProcessingServiceDeps = {
   logger: Logger;
   workspaceDocument: LoroDocumentManager;
   workspaceId: WorkspaceId;
-  preferredBaseBranch: string;
+  /** Operator override (`LODY_BASE_BRANCH`); `undefined` lets Git choose the repository default. */
+  preferredBaseBranch: string | undefined;
   prAssociation: CloudPrAssociationPort | null;
 };
 
@@ -233,12 +233,8 @@ export class TurnPostProcessingService {
     const workspaceGitState = this.probeWorkspaceGitState(sessionId, runGit);
 
     try {
-      const preferredBaseBranch = resolveBaseBranchPreference({
-        preferredBranch: options.preferredBaseBranch,
-        fallbackBranch: this.deps.preferredBaseBranch,
-      });
       const stats = await getGitDiffStats(runGit, {
-        preferredBaseBranch,
+        preferredBaseBranch: options.preferredBaseBranch?.trim() || this.deps.preferredBaseBranch,
         baseCommitHash: options.baseCommitHash,
         turnStartWorkingTreeDiff: options.turnStartWorkingTreeDiff,
         countWorkingTreeFileLines: (filePath) => countWorkingTreeTextFileLines(workdir, filePath),

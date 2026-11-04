@@ -89,6 +89,30 @@ const ACP_NOTIFICATION_FIXTURES = [
 ] as const;
 
 describe('acp history apply', () => {
+  it('preserves phase boundaries across batches, tags, and legacy metadata', () => {
+    const chunk = (text: string, meta?: object) =>
+      makeNotification({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text },
+        ...(meta ? { _meta: meta } : {}),
+      });
+    const notifications = [
+      chunk('Checking ', { lody: { messagePhase: 'commentary' } }),
+      chunk('now', { lody: { messagePhase: 'commentary' } }),
+      chunk('<thinking>reason</thinking>\nDone', { codex: { phase: 'final_answer' } }),
+      chunk(' unphased'),
+      chunk(' invalid', { lody: { messagePhase: 'unknown' } }),
+    ];
+    for (const sizes of [[1], [5], [2, 3]]) {
+      expect(replayInChunks(notifications, sizes)[0]?.items).toEqual([
+        { type: 'text', text: 'Checking now', messagePhase: 'commentary' },
+        { type: 'thought', text: 'reason' },
+        { type: 'text', text: '\nDone', messagePhase: 'final_answer' },
+        { type: 'text', text: ' unphased invalid' },
+      ]);
+    }
+  });
+
   it('replaces sparse ACP tool lists, preserves omitted fields, and clears explicit empty lists', () => {
     const text = (value: string) => ({ type: 'content', content: { type: 'text', text: value } });
     const updates = [

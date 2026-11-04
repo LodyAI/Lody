@@ -769,6 +769,116 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
+  it('does not report an older failure after the newest user Turn succeeds', async () => {
+    stubCreateOptionsReaders();
+    const doc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'failed-user',
+      role: 'user',
+      status: 'failed',
+      timestamp: '2026-11-03T20:15:00.000Z',
+      items: [{ type: 'text', text: 'run the delegated work' }],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'failed-notice',
+      role: 'system',
+      timestamp: '2026-11-03T20:15:01.000Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your 5-hour limit · resets 6am (UTC)",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'recovered-user',
+      role: 'user',
+      status: 'handled',
+      timestamp: '2026-11-03T21:00:00.000Z',
+      items: [{ type: 'text', text: 'retry after the quota reset' }],
+      fileDiff: [],
+    } as never);
+
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    const item = JSON.parse(status.content[0]?.text ?? '{}').items[0];
+    expect(item).toMatchObject({ ok: true, sessionId });
+    expect(item.value).not.toHaveProperty('lastTurnFailure');
+  });
+
+  it('reports the latest failed turn and marks its history entry', async () => {
+    stubCreateOptionsReaders();
+    const doc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'failed-user',
+      role: 'user',
+      status: 'failed',
+      timestamp: '2026-11-03T20:15:00.000Z',
+      items: [{ type: 'text', text: 'run the delegated work' }],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'failed-notice',
+      role: 'system',
+      timestamp: '2026-11-03T20:15:01.000Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your 5-hour limit · resets 6am (UTC)",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as never);
+
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [
+        {
+          ok: true,
+          sessionId,
+          value: {
+            lastTurnFailure: {
+              reason: 'usage_limit',
+              detail: "You've hit your 5-hour limit · resets 6am (UTC)",
+              at: '2026-11-03T20:15:01.000Z',
+              resetAt: '2026-11-04T06:00:00.000Z',
+              turnId: 'failed-user',
+            },
+          },
+        },
+      ],
+    });
+
+    const history = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_history', { sessionId })
+    );
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    expect(JSON.parse(history.content[0]?.text ?? '{}').items).toContainEqual(
+      expect.objectContaining({
+        id: 'failed-user',
+        isError: true,
+        errorReason: 'usage_limit',
+      })
+    );
+  });
+
   async function createRemoteSession() {
     const otherMachineId = 'synthetic-other-machine' as MachineId;
     await manager.registerMachine(otherMachineId, {
@@ -1123,6 +1233,88 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         expect((await manager.repo.getDocMeta(getSessionRoomId(session.id)))?.meta).toEqual(
           session
         );
+    }
+  );
+
+  it.each(['local', 'cloud'] as const)(
+    'isolates batch archive failures and preserves ordered outcomes in %s',
+    async (composition) => {
+      const first = await manager.createSession(machineId, 'custom', 'claude');
+      const second = await manager.createSession(machineId, 'custom', 'claude');
+      const root = (await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta as SessionMeta;
+      const tab = { ...root, id: 'batch-tab' as SessionId, parentSessionId: first };
+      const opened = { ...root, id: 'batch-opened' as SessionId, openedBySessionId: first };
+      for (const session of [tab, opened])
+        await manager.repo.upsertDocMeta(getSessionRoomId(session.id), session);
+      vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+      vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+      if (composition === 'cloud') {
+        vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+        vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+          id: workspaceId,
+          name: 'Synthetic',
+          slug: 'synthetic',
+          role: 'owner',
+        });
+      }
+      const run = (args: unknown) => {
+        const execute = () => executeDaemonSessionTool(context(), 'lody_session_archive', args);
+        return composition === 'local'
+          ? runWithSessionCommandEnvironment(createEnvironment(), execute)
+          : runWithDaemonWorkspace(daemon, execute);
+      };
+      // Invalid batches must fail before archiving any target.
+      for (const args of [
+        {},
+        { sessionIds: [] },
+        { sessionId: first, sessionIds: [second] },
+        { sessionIds: [first, ` ${first} `] },
+        { sessionIds: [first, '  '] },
+        { sessionIds: [first, ...Array.from({ length: 20 }, (_, i) => `extra-${i}`)] },
+      ]) {
+        await expect(run(args)).rejects.toThrow();
+        expect((await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta?.isArchived).not.toBe(
+          true
+        );
+      }
+      vi.mocked(manager.syncMetaOrThrow).mockRejectedValueOnce(new Error('Synthetic sync failure'));
+      const partial = await run({ sessionIds: [first, second] });
+      expect(JSON.parse(partial.content[0]?.text ?? '{}')).toMatchObject({
+        items: [
+          { ok: false, sessionId: first },
+          { ok: true, sessionId: second },
+        ],
+      });
+      expect((await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta?.isArchived).not.toBe(
+        true
+      );
+      expect((await manager.repo.getDocMeta(getSessionRoomId(second)))?.meta?.isArchived).toBe(
+        true
+      );
+      const foreignSession = `lody://session/${opened.id}?workspace=another-workspace`;
+      const sessionIds = [first, 'missing-batch-session', foreignSession, second];
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = await run({ sessionIds });
+        expect(result.isError, JSON.stringify(result)).not.toBe(true);
+        expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+          items: [
+            { ok: true, sessionId: first, archivedChildSessionIds: [tab.id] },
+            {
+              ok: false,
+              sessionId: 'missing-batch-session',
+              error: { message: expect.any(String) },
+            },
+            { ok: false, sessionId: foreignSession, error: { message: expect.any(String) } },
+            { ok: true, sessionId: second, archivedChildSessionIds: [] },
+          ],
+        });
+      }
+      for (const id of [first, second, tab.id])
+        expect((await manager.repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+          isArchived: true,
+          status: SessionStatusFactory.idle(),
+        });
+      expect((await manager.repo.getDocMeta(getSessionRoomId(opened.id)))?.meta).toEqual(opened);
     }
   );
 

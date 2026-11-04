@@ -29,6 +29,43 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
+  it('persists ACP phases in Loro history across reopening', () => {
+    const doc = new Loro();
+    const mirror = open(doc);
+    const writer = mirror.historyWriter;
+    writer.append({ ...entry('phase-turn'), role: 'assistant', items: [] });
+    for (const [text, messagePhase] of [
+      ['Working', 'commentary'],
+      ['Done', 'final_answer'],
+    ] as const) {
+      const notification = parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text },
+          _meta: { lody: { messagePhase } },
+        },
+      });
+      writer.updateEntry(
+        'phase-turn',
+        (turn) =>
+          applyNotificationOnHistory([turn], [notification], undefined, {
+            targetAssistantEntryId: 'phase-turn',
+          })[0]!
+      );
+    }
+    const bytes = doc.export({ mode: 'snapshot' });
+    mirror.dispose();
+    const restarted = new Loro();
+    restarted.import(bytes);
+    const reopened = open(restarted);
+    expect(reopened.historyWriter.read('phase-turn')?.items).toEqual([
+      { type: 'text', text: 'Working', messagePhase: 'commentary' },
+      { type: 'text', text: 'Done', messagePhase: 'final_answer' },
+    ]);
+    reopened.dispose();
+  });
+
   it('retains quoted snapshots through the writer, a restart and execution projection', () => {
     const snapshot = '  Unicode 引文 👩🏽‍💻\n\n> nested\nEnd of quoted message.\n';
     const quote = formatMessageQuote(snapshot);
@@ -142,6 +179,59 @@ describe('single history writer', () => {
       expect(writer.readStored()).toEqual(restored);
     }
   );
+  it('preserves Kimi media result text without persisting the image payload', () => {
+    const doc = new Loro();
+    const mirror = open(doc);
+    const writer = mirror.historyWriter;
+    writer.append({ ...entry('first'), role: 'assistant', items: [] });
+    const data = 'c3ludGhldGljLWltYWdl';
+    const text = [
+      { type: 'content', content: { type: 'text', text: '<image path="/tmp/example.png">' } },
+      { type: 'content', content: { type: 'text', text: '</image>' } },
+    ];
+    const emit = (update: Record<string, unknown>) =>
+      writer.updateEntry(
+        'first',
+        (turn) =>
+          applyNotificationOnHistory(
+            [turn],
+            [parseSessionNotification({ sessionId: 'root', update })],
+            undefined,
+            { targetAssistantEntryId: 'first' }
+          )[0]!
+      );
+    try {
+      emit({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'media',
+        title: 'Reading media',
+        kind: 'other',
+        status: 'in_progress',
+      });
+      emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'media',
+        status: 'completed',
+        content: [
+          text[0],
+          { type: 'content', content: { type: 'image', mimeType: 'image/png', data } },
+          text[1],
+        ],
+        rawOutput: [
+          { type: 'text', text: '<image path="/tmp/example.png">' },
+          { type: 'image_url', imageUrl: { url: `data:image/png;base64,${data}` } },
+          { type: 'text', text: '</image>' },
+        ],
+      });
+      expect(writer.read('first')?.items).toMatchObject([
+        { type: 'tool_call', toolCallId: 'media', status: 'completed', content: text },
+      ]);
+      expect(JSON.stringify(doc.toJSON())).not.toContain(data);
+    } finally {
+      mirror.dispose();
+    }
+  });
+
   it.each(['other', 'execute', 'search', 'fetch', undefined] as const)(
     'drops unused tool bytes for kind %s while preserving audio and download references',
     (kind) => {

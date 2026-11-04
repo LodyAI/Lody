@@ -154,6 +154,10 @@ export function makeDesktopAccountPairingHost(input: {
   /** Display and routing hints for the account's encrypted workspaces. Every
    * workspace's genesis is still verified against its own ledger or request tag. */
   workspaces: () => readonly AccountPairingWorkspaceHint[]
+  /** Starts the main-owned member key delivery (distribute-only key round, per-device
+   * mailbox evidence, retry and status) for one device the verified ledger admitted.
+   * Must return at once; the approval never waits for delivery. */
+  deliverKeys?: (workspaceId: string, requestId: string, device: string) => void
   now?: () => number
 }) {
   const { cloud } = input
@@ -347,7 +351,13 @@ export function makeDesktopAccountPairingHost(input: {
               workspaceId,
               credential
             }))
-          )
+          ),
+        ...(input.deliverKeys
+          ? {
+              deliverKeys: (device: Uint8Array, requestId: string) =>
+                Effect.sync(() => input.deliverKeys!(workspaceId, requestId, hex(device)))
+            }
+          : {})
       })
     }
     return result

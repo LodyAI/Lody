@@ -20,6 +20,10 @@ export type SessionHistoryPageEntry = {
   role: string;
   timestamp: string;
   text: string;
+  /** This entry belongs to a failed turn; cheap programs need not match text. */
+  isError?: true;
+  /** Normalized cause for a failed turn, when a chat_failed notice recorded one. */
+  errorReason?: import('@lody/shared').LodyFailureReason;
   /** Set when a caller's per-entry `maxChars` cut the text. */
   truncated?: true;
   originalChars?: number;

@@ -23,7 +23,7 @@ import {
   isTerminalAssistantEntry,
   MAX_STEER_HANDOFF_HOPS,
   progressIsSettled,
-  targetFailureMessage,
+  targetFailureError,
 } from './coordinator-model';
 import { CoordinatorPorts, type CoordinatorHistory } from './coordinator-ports';
 import { OperationRepository } from './operation-repository';
@@ -491,11 +491,16 @@ export class CoordinatorWorkflow {
           entry.userTurnId === item.target.userTurnId &&
           isTerminalAssistantEntry(entry)
       );
+      const failedAssistantTurn =
+        assistant ??
+        targetOutput.find(
+          (entry) => entry.role === 'assistant' && entry.userTurnId === item.target.userTurnId
+        );
       const targetFailed = (): LodyOperationItemResult => ({
         status: 'failed',
         ...(item.label ? { label: item.label } : {}),
         target: item.target,
-        error: makeLodyError('TARGET_FAILED', targetFailureMessage(targetOutput), false),
+        error: targetFailureError(targetOutput, failedAssistantTurn?.id, this.now()),
       });
       const targetCancelled = (
         cancellationReason: SessionHistoryInput['cancellationReason']

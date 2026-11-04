@@ -1057,7 +1057,11 @@ function SessionBrowserPanelController({
 
   const loading =
     currentAddress?.engine === 'public-web' ? publicState?.phase === 'loading' : managedLoading;
-  const navigationBusy = busy || managedNavigationPhase !== null;
+  // The initial status read and candidate document sync are part of opening
+  // the page too; do not show address-entry instructions while the click waits.
+  const awaitingCandidateNavigation =
+    active && candidateNavigationRequestId > handledCandidateNavigationRequestRef.current;
+  const navigationBusy = busy || managedNavigationPhase !== null || awaitingCandidateNavigation;
   const canGoBack =
     (currentAddress?.engine === 'public-web' && publicState?.canGoBack === true) ||
     (currentAddress?.engine === 'managed-preview' && managedState?.canGoBack === true) ||
@@ -1104,7 +1108,7 @@ function SessionBrowserPanelController({
       tunnelDisclosure={runtime?.contentMode === 'e2ee' && !isLocalDesktopSession}
       toolbar={{
         leadingSlot: leadingSlot,
-        focusAddress: active && currentAddress === null,
+        focusAddress: active && currentAddress === null && !navigationBusy,
         address: address,
         canGoBack: canGoBack,
         canGoForward: canGoForward,
@@ -1129,7 +1133,9 @@ function SessionBrowserPanelController({
       previewStatus={currentAddress?.engine === 'managed-preview' ? previewStatusProps : undefined}
       error={error}
       onDismissError={() => setError(null)}
-      navigationPhase={managedNavigationPhase}
+      navigationPhase={
+        managedNavigationPhase ?? (awaitingCandidateNavigation ? 'resolving-machine' : null)
+      }
       suggestedAddress={suggestedAddress}
     >
       {currentAddress?.engine === 'public-web' ? (

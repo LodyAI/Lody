@@ -169,6 +169,83 @@ describe('desktop E2EE content epoch safety', () => {
       vi.unstubAllGlobals();
     }
   });
+  it('closes with a host token call still queued, so the workspace reopens and ignores the late result', async () => {
+    // Electron IPC cannot cancel a host contentStreamsToken call; on a restarted
+    // member device it can queue behind other account work for longer than the
+    // token kernel's release bound. Switching away must still close the token
+    // provider, and the abandoned host answer must never reach the next runtime.
+    type Token = Awaited<ReturnType<E2eeWorkspaceRuntime['contentStreamsToken']>>;
+    let releaseQueued!: (token: Token) => void;
+    const queued = new Promise<Token>((resolve) => (releaseQueued = resolve));
+    let calls = 0;
+    const runtime = {
+      contentStreamsToken: () =>
+        ++calls === 1
+          ? queued
+          : Promise.resolve({
+              token: 'successor-token',
+              bucketId: 'encrypted-content',
+              gatewayBaseUrl: 'https://streams.example.com',
+              expiresIn: 480,
+              expiresAt: 1_900_000_000_000,
+            }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const open = () =>
+      createDesktopE2eeContent({
+        runtime,
+        workspaceId: 'queued-token-workspace',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => 'account-token',
+      });
+    const first = open();
+    const firstProvider = first.e2ee.createTokenProvider(new AbortController().signal);
+    const pending = firstProvider.getToken();
+    const pendingOutcome = pending.then(
+      () => 'resolved',
+      () => 'rejected'
+    );
+    await vi.waitFor(() => expect(calls).toBe(1));
+    let closed: 'ok' | 'failed' | undefined;
+    vi.useFakeTimers();
+    try {
+      const closing = firstProvider.close().then(
+        () => (closed = 'ok'),
+        () => (closed = 'failed')
+      );
+      // Strictly inside the 5s release bound: close must already be confirmed.
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(closed).toBe('ok');
+      await closing;
+    } finally {
+      // Let a bug-path release bound expire before restoring real timers.
+      await vi.advanceTimersByTimeAsync(20_000);
+      vi.useRealTimers();
+    }
+    expect(await pendingOutcome).toBe('rejected');
+    await first.close();
+
+    const second = open();
+    const secondProvider = second.e2ee.createTokenProvider(new AbortController().signal);
+    try {
+      expect(await secondProvider.getToken()).toBe('successor-token');
+      // The abandoned host call answers late with another bucket.
+      releaseQueued({
+        token: 'stale-token',
+        bucketId: 'stale-bucket',
+        gatewayBaseUrl: 'https://streams.example.com',
+        expiresIn: 480,
+        expiresAt: 1_900_000_000_000,
+      });
+      await queued;
+      await Promise.resolve();
+      expect(second.e2ee.bucketId()).toBe('encrypted-content');
+      expect(await secondProvider.getToken()).toBe('successor-token');
+    } finally {
+      await secondProvider.close();
+      await second.close();
+    }
+  });
   it('replaces a gateway-rejected cached token through the native token capability', async () => {
     let cached = 'cached-token';
     const rejected: Array<string | undefined> = [];

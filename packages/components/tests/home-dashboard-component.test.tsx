@@ -42,22 +42,21 @@ function nowRow(id: string, overrides: Partial<HomeNowRow> = {}): HomeNowRow {
   };
 }
 
-const usage = (resetsInHours = 2): HomeWeekUsage => ({
+const usage = (resetsInHours = 2, weekResetsInHours: number | null = 98): HomeWeekUsage => ({
   name: null,
-  windows: [
-    {
-      usedPercent: 38,
-      remainingPercent: 62,
-      windowDurationSeconds: 5 * 60 * 60,
-      resetsAtEpochSeconds: NOW_MS / 1000 + resetsInHours * 60 * 60,
-    },
-    {
-      usedPercent: 21,
-      remainingPercent: 79,
-      windowDurationSeconds: 7 * 24 * 60 * 60,
-      resetsAtEpochSeconds: null,
-    },
-  ],
+  window: {
+    usedPercent: 38,
+    remainingPercent: 62,
+    windowDurationSeconds: 5 * 60 * 60,
+    resetsAtEpochSeconds: NOW_MS / 1000 + resetsInHours * 60 * 60,
+  },
+  otherWindow: {
+    usedPercent: 21,
+    remainingPercent: 79,
+    windowDurationSeconds: 7 * 24 * 60 * 60,
+    resetsAtEpochSeconds:
+      weekResetsInHours == null ? null : NOW_MS / 1000 + weekResetsInHours * 60 * 60,
+  },
 });
 
 const CODEX: HomeWeekUsageSource = {
@@ -204,7 +203,9 @@ describe('HomeDashboard', () => {
       const attention = q('[data-now-column="left"] [data-testid="home-now-attention"]')!;
       expect(attention.textContent).toBe('Needs you0');
       expect(attention.querySelectorAll('[data-session]')).toHaveLength(0);
-      const running = q('[data-now-column="right"] [data-testid="home-now-running"]')!;
+      // Running takes the left column with needs you: with nothing else to place, that is the
+      // arrangement that leaves those two columns level, and just finished stays on the right.
+      const running = q('[data-now-column="left"] [data-testid="home-now-running"]')!;
       expect(running.querySelectorAll('[data-session]')).toHaveLength(4);
       // "Show all" under the last row: an action, not a session.
       const toggle = byTestId('home-now-running-toggle')!;
@@ -217,9 +218,10 @@ describe('HomeDashboard', () => {
       const all = byTestId('home-now-running-all')!;
       expect(all.querySelectorAll('[data-session]')).toHaveLength(6);
       expect(byTestId('home-now')?.getAttribute('data-focus')).toBe('running');
-      expect(q('[data-now-column="right"]')?.contains(all)).toBe(true);
+      expect(q('[data-now-column="left"]')?.contains(all)).toBe(true);
       expect(running.closest('[inert]')).not.toBeNull();
-      expect(attention.closest('[inert]')).toBeNull();
+      expect(attention.closest('[inert]')).not.toBeNull();
+      expect(byTestId('home-now-next')?.closest('[inert]')).toBeNull();
       const back = byTestId('home-now-back')!;
       expect(document.activeElement).toBe(back);
       expect(back.textContent).toBe('Show less');
@@ -271,15 +273,15 @@ describe('HomeDashboard', () => {
         ...Array.from({ length: 9 }, (_, index) => nowRow(`wait-${index}`, { waiting: true })),
         ...Array.from({ length: 6 }, (_, index) => nowRow(`run-${index}`, { working: true })),
       ];
-      // Plenty of room: the whole budget.
+      // With room for the whole board, the chosen arrangement levels needs you to its full list.
       render({ rows, defaultBoard: 'now', stage: { height: 2000, rest: 100 } });
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(6);
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(9);
 
-      // Room for six rows a column (182px of board): needs you keeps one row and its "Show all"
-      // over just finished's title, and running, in the other column, the same.
-      render({ rows, defaultBoard: 'now', stage: { height: 340, rest: 100 } });
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(1);
-      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      // Room for ten rows a column (262px of board): needs you takes the left column alone and
+      // shows seven of its nine, and running the first three of its six on the right.
+      render({ rows, defaultBoard: 'now', stage: { height: 420, rest: 100 } });
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(7);
+      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(3);
       expect(byTestId('home-now-running-toggle')).not.toBeNull();
       expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(false);
 
@@ -326,16 +328,41 @@ describe('HomeDashboard', () => {
   describe('plan usage', () => {
     const text = () => byTestId('home-now')?.textContent ?? '';
 
-    it('shows one window, the shortest, with how much is used and when it resets', () => {
-      render({ usage: usage(2) });
+    it('puts the plan’s two segments side by side, each with how much is used and its reset', () => {
+      render({ usage: usage(2, 98) });
       expect(text()).toContain('Plan usage');
-      expect(text()).toContain('5 hours');
-      expect(text()).toContain('38% used');
-      expect(text()).toContain('Resets in about 2 hours');
-      expect(text()).not.toContain('Weekly');
-      expect(container.querySelectorAll('[data-usage-fill]')).toHaveLength(1);
+      const meters = Array.from(
+        byTestId('home-week-usage')!.querySelectorAll('[data-usage-window]')
+      ).map((meter) => meter.textContent ?? '');
+      expect(meters).toHaveLength(2);
+      expect(meters[0]).toContain('5 hours');
+      expect(meters[0]).toContain('38% used');
+      expect(meters[0]).toContain('Resets in about 2 hours');
+      // The week behind the 5-hour segment: its own percent and its own reset, beside it.
+      expect(meters[1]).toContain('Weekly');
+      expect(meters[1]).toContain('21% used');
+      expect(meters[1]).toContain('Resets in 4 days');
+      expect(container.querySelectorAll('[data-usage-fill]')).toHaveLength(2);
       expect(byTestId('home-week-forecast')).toBeNull();
       expect(byTestId('home-week-usage')?.getAttribute('data-column')).toBe('1 / span 2');
+    });
+
+    it('shows one meter when the provider reports one window', () => {
+      render({ usage: { ...usage(), otherWindow: null } });
+      expect(container.querySelectorAll('[data-usage-window]')).toHaveLength(1);
+      expect(byTestId('home-week-usage-other-window')).toBeNull();
+      expect(text()).toContain('Plan usage');
+    });
+
+    it('keeps the week’s reset in a half tile as a countdown', () => {
+      render({
+        usage: usage(2, 20),
+        forecast: { title: 'Codex reset forecast', chancePercent: 65, when: 'Today 2:00 PM' },
+      });
+      // Beside the forecast the tile is half as wide: one meter, and the other window's reset in
+      // the head as a countdown rather than two columns of labels.
+      expect(container.querySelectorAll('[data-usage-window]')).toHaveLength(1);
+      expect(byTestId('home-week-usage-other-window')?.textContent).toBe('Weekly in 20h');
     });
 
     it('words a scheduled reset without a probability', () => {

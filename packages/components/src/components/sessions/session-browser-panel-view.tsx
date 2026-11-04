@@ -155,11 +155,16 @@ export function SessionBrowserPanelView({
         <div role="status" aria-live="polite" {...stylex.props(styles.progress)}>
           <Spinner label={null} size="small" />
           <span>
-            {navigationPhase === 'resolving-machine'
-              ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
-              : navigationPhase === 'creating-tunnel'
-                ? t('sessions.browser.creatingTunnel', 'Establishing a secure preview connection…')
-                : t('sessions.browser.openingLocal', 'Opening the local preview…')}
+            {isMobile
+              ? t('sessions.browser.connectingNetwork', 'Establishing network connection')
+              : navigationPhase === 'resolving-machine'
+                ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
+                : navigationPhase === 'creating-tunnel'
+                  ? t(
+                      'sessions.browser.creatingTunnel',
+                      'Establishing a secure preview connection…'
+                    )
+                  : t('sessions.browser.openingLocal', 'Opening the local preview…')}
           </span>
         </div>
       ) : (
