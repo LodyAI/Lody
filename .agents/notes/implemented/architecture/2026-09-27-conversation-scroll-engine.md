@@ -767,9 +767,10 @@ collected after release, through the diagnostics below.
   ResizeObserver deliveries in browser order). A small expansion self-heals. A
   fourteen-row expansion stays hidden with no on-screen row mounted until "scroll to
   latest".
-- **P0.5.** A CI job, *Conversation browser tests*. It runs the hydration spec and the
-  engine spec on one worker whenever the components test group runs. It is not part of
-  the required *Tests* check yet. The native-selection spec is left out: its test "finishing a
+- **P0.5.** *Conversation browser tests* now runs on manual dispatch through
+  `conversation-acceptance.yml`, outside the required *Tests* check; the
+  [PR validation decision](../testing/2026-11-05-pr-ci-specialist-acceptance.md)
+  replaces its original automatic execution policy. The native-selection spec is left out: its test "finishing a
   selected turn keeps its prose mounted" fails on unchanged `main` too (3 of 3 runs). A
   streaming spec is timing-sensitive under load.
 - **Contract fixes.**
