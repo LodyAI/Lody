@@ -33,21 +33,29 @@ type Preview = Awaited<ReturnType<NonNullable<Runtime['inspectPersonalJoin']>>>;
 type Prepared = Awaited<ReturnType<NonNullable<Runtime['preparePersonalJoin']>>>;
 type Submission = { offer: E2eePersonalPairingOffer; result: Promise<Prepared> };
 
-/** In-flight registrations by runtime and workspace. Main saves the request before
- * its server `begin` commits, so a remounted card (the control route swaps the full
- * page for the approval guide) must join this registration, not treat the saved
- * request as claimable. Entries leave the map when their registration settles. */
+/** In-flight registrations by runtime, account and workspace. Main saves the request
+ * before its server `begin` commits, so a remounted card (the control route swaps the
+ * full page for the approval guide) must join this registration, not treat the saved
+ * request as claimable. The runtime survives an account switch without a renderer
+ * reload, so the account is part of the key: another account never joins, displays or
+ * acts on this registration. Entries leave the map when their registration settles. */
 const submissions = new WeakMap<object, Map<string, Submission>>();
-const inFlight = (runtime: Runtime, workspaceId: string) =>
-  submissions.get(runtime)?.get(workspaceId);
-const submit = (runtime: Runtime, offer: E2eePersonalPairingOffer): Submission => {
+const submissionKey = (accountId: string, workspaceId: string) =>
+  JSON.stringify([accountId, workspaceId]);
+const inFlight = (runtime: Runtime, accountId: string, workspaceId: string) =>
+  submissions.get(runtime)?.get(submissionKey(accountId, workspaceId));
+const submit = (
+  runtime: Runtime,
+  accountId: string,
+  offer: E2eePersonalPairingOffer
+): Submission => {
   let entries = submissions.get(runtime);
   if (!entries) submissions.set(runtime, (entries = new Map()));
-  const workspaceId = offer.workspaceId;
+  const key = submissionKey(accountId, offer.workspaceId);
   const submission = { offer, result: runtime.preparePersonalJoin!(offer) };
-  entries.set(workspaceId, submission);
+  entries.set(key, submission);
   const settle = () => {
-    if (entries.get(workspaceId) === submission) entries.delete(workspaceId);
+    if (entries.get(key) === submission) entries.delete(key);
   };
   submission.result.then(settle, settle);
   return submission;
@@ -56,6 +64,8 @@ const submit = (runtime: Runtime, offer: E2eePersonalPairingOffer): Submission =
 /** Host-verified evidence is displayed before a separate approval click. An
  * invitation is imported only after the person transfers the existing host's pin. */
 export function E2eePersonalPairing(props: {
+  /** The signed-in account whose local custody owns this card's requests. */
+  accountId: string;
   workspaceId: string;
   runtime: Runtime;
   canApprove: boolean;
@@ -63,18 +73,22 @@ export function E2eePersonalPairing(props: {
   approved?: boolean;
   onJoined: () => void;
 }) {
-  // A workspace owns its pending originals and async UI results. Never carry
-  // the previous workspace's session into a route switch.
-  return <PersonalPairingSession key={props.workspaceId} {...props} />;
+  // An account's workspace owns its pending originals and async UI results. Never
+  // carry the previous account's or workspace's session into a switch.
+  return (
+    <PersonalPairingSession key={submissionKey(props.accountId, props.workspaceId)} {...props} />
+  );
 }
 
 function PersonalPairingSession({
+  accountId,
   workspaceId,
   runtime,
   canApprove,
   approved,
   onJoined,
 }: {
+  accountId: string;
   workspaceId: string;
   runtime: Runtime;
   canApprove: boolean;
@@ -109,7 +123,7 @@ function PersonalPairingSession({
   currentRuntime.current = runtime;
   const isLive = () => live.current && currentRuntime.current === runtime;
   const [recovering, setRecovering] = useState(
-    Boolean(runtime.pendingPersonalJoin || inFlight(runtime, workspaceId))
+    Boolean(runtime.pendingPersonalJoin || inFlight(runtime, accountId, workspaceId))
   );
   useEffect(() => {
     live.current = true;
@@ -119,7 +133,7 @@ function PersonalPairingSession({
   }, []);
   useEffect(() => {
     let cancelled = false;
-    const submission = inFlight(runtime, workspaceId);
+    const submission = inFlight(runtime, accountId, workspaceId);
     setRecovering(Boolean(runtime.pendingPersonalJoin || submission));
     if (runtime.pendingPersonalJoin || submission) {
       const pendingJoin = runtime.pendingPersonalJoin;
@@ -166,7 +180,7 @@ function PersonalPairingSession({
     return () => {
       cancelled = true;
     };
-  }, [runtime, workspaceId]);
+  }, [runtime, accountId, workspaceId]);
   const work = async (operation: () => Promise<void>) => {
     if (busy.current || recovering) return;
     busy.current = true;
@@ -209,7 +223,7 @@ function PersonalPairingSession({
       if (value.workspaceId !== workspaceId) throw new Error('wrong_workspace');
       let result;
       try {
-        result = await submit(runtime, value).result;
+        result = await submit(runtime, accountId, value).result;
       } catch (error) {
         // begin may fail after the host saved its immutable request. Recover
         // the actual session so cancellation/reconciliation remains reachable.

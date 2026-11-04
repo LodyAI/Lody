@@ -1181,7 +1181,8 @@ it.each(['same-owner', 'account-change', 'workspace-change'] as const)(
 // (`begin`) is still in flight when the route learns this desktop has no binding and
 // swaps the full control page for the approval guide. The real pairing component
 // remounts there; it must not offer a claim until that same registration settles.
-it('does not offer a personal claim across the approval-guide remount until registration settles', async () => {
+// Main's journal is account-bound, so the fake keeps saved requests per account.
+const pairingRoute = () => {
   fixture.realPairing = true;
   const offer = {
     version: 1 as const,
@@ -1195,8 +1196,11 @@ it('does not offer a personal claim across the approval-guide remount until regi
   const opening = Promise.withResolvers<never>();
   const begin = Promise.withResolvers<void>();
   const beginEntered = Promise.withResolvers<void>();
-  let saved: { pairingSessionId: string; signingPublicKey: string; offer: typeof offer } | null =
-    null;
+  const saved = new Map<
+    string,
+    { pairingSessionId: string; signingPublicKey: string; offer: typeof offer }
+  >();
+  let opens = 0;
   let registered = false;
   const claims: string[] = [];
   fixture.port = {
@@ -1221,17 +1225,23 @@ it('does not offer a personal claim across the approval-guide remount until regi
       nextCursor: null,
     }),
     runtime: {
-      open: () => opening.promise,
+      // The first open stays pending so the request is made on the full page.
+      open: () =>
+        opens++ === 0
+          ? opening.promise
+          : Promise.reject(
+              new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding")
+            ),
       close: async () => {},
       status: async () => local.status,
-      pendingPersonalJoin: async () => saved,
+      pendingPersonalJoin: async () => saved.get(fixture.session.user.id) ?? null,
       preparePersonalJoin: async (value: typeof offer) => {
         // Main persists the original request before the network registration.
-        saved = {
+        saved.set(fixture.session.user.id, {
           pairingSessionId: value.pairingSessionId,
           signingPublicKey: '55'.repeat(32),
           offer: value,
-        };
+        });
         beginEntered.resolve();
         await begin.promise;
         registered = true;
@@ -1253,37 +1263,63 @@ it('does not offer a personal claim across the approval-guide remount until regi
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
   const button = (text: string) =>
     [...container.querySelectorAll('button')].find((value) => value.textContent === text);
-  await act(async () => root.render(createElement(Component)));
-  // Still loading: the full control page hosts the request form.
-  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).toBeNull();
-  const input = container.querySelector('textarea')!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
-      input,
-      JSON.stringify(offer)
+  /** Submit on the full page, then let the route swap to the approval guide. */
+  const submitThenGuide = async () => {
+    await act(async () => root.render(createElement(Component)));
+    expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).toBeNull();
+    const input = container.querySelector('textarea')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        input,
+        JSON.stringify(offer)
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      button('e2ee.pair.trust')!.click();
+      await beginEntered.promise;
+    });
+    await act(async () =>
+      opening.reject(
+        new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding")
+      )
     );
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await act(async () => {
-    button('e2ee.pair.trust')!.click();
-    await beginEntered.promise;
-  });
-  await act(async () =>
-    opening.reject(
-      new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding")
-    )
-  );
-  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
+  };
+  return { Component, begin, claims, button, submitThenGuide };
+};
+
+it('does not offer a personal claim across the approval-guide remount until registration settles', async () => {
+  const f = pairingRoute();
+  await f.submitThenGuide();
   // The remounted component recovered the saved request, but registration is unconfirmed.
-  const unconfirmed = button('e2ee.pair.claim');
+  const unconfirmed = f.button('e2ee.pair.claim');
   expect(unconfirmed === undefined || unconfirmed.disabled).toBe(true);
   unconfirmed?.click();
-  expect(claims).toEqual([]);
-  await act(async () => begin.resolve());
-  const claim = button('e2ee.pair.claim')!;
+  expect(f.claims).toEqual([]);
+  await act(async () => f.begin.resolve());
+  const claim = f.button('e2ee.pair.claim')!;
   expect(claim.disabled).toBe(false);
   await act(async () => claim.click());
-  expect(claims).toEqual(['pending']);
+  expect(f.claims).toEqual(['pending']);
   expect(container.textContent).toContain('e2ee.pair.waiting');
   expect(container.querySelector('[role="alert"]')).toBeNull();
+});
+
+// The cloud runtime object survives an account switch without a renderer reload. The
+// next account's card must neither join, display nor act on the previous account's
+// in-flight registration; its own request form stays available.
+it('does not carry an in-flight personal registration into another account', async () => {
+  const f = pairingRoute();
+  await f.submitThenGuide();
+  fixture.session.user.id = 'other-account';
+  await act(async () => root.render(createElement(f.Component)));
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
+  await act(async () => f.begin.resolve());
+  expect(container.textContent).not.toContain('44'.repeat(16));
+  expect(container.textContent).not.toContain('55'.repeat(32));
+  expect(f.button('e2ee.pair.claim')).toBeUndefined();
+  expect(f.button('common.cancel')).toBeUndefined();
+  expect(container.querySelector('textarea')).not.toBeNull();
+  expect(f.button('e2ee.pair.trust')).toBeDefined();
 });

@@ -73,6 +73,7 @@ describe('personal desktop approval', () => {
     act(async () =>
       root.render(
         <E2eePersonalPairing
+          accountId="account"
           workspaceId={workspaceId}
           runtime={runtime}
           canApprove={canApprove}
