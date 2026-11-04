@@ -274,9 +274,9 @@ describe('HomeDashboard', () => {
         ...Array.from({ length: 9 }, (_, index) => nowRow(`wait-${index}`, { waiting: true })),
         ...Array.from({ length: 6 }, (_, index) => nowRow(`run-${index}`, { working: true })),
       ];
-      // Plenty of room: the whole budget.
+      // With room for the whole board, the chosen arrangement levels needs you to its full list.
       render({ rows, defaultBoard: 'now', stage: { height: 2000, rest: 100 } });
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(6);
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(9);
 
       // Room for ten rows a column (262px of board): needs you takes the left column alone and
       // shows seven of its nine, and running the first three of its six on the right.
