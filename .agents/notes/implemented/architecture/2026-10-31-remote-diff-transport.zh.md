@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316)
 
 [English](2026-10-31-remote-diff-transport.md)
 
