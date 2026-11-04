@@ -304,7 +304,33 @@ export interface AccountPairingApproverSession {
     access(): Effect.Effect<{ workspaceId: string; credential: string }, unknown>;
   };
   refresh(): Effect.Effect<unknown, unknown>;
+  /** This session's existing key round (receive, reports, distribution, repair). Its
+   * distributor targets only devices of the verified ledger and journals each envelope,
+   * so a later round retries the same id and bytes. */
+  keyRound(): Effect.Effect<unknown, unknown>;
 }
+
+/** Background key delivery after an admission commits. `finished` means the round
+ * completed, not that the device holds the key: the new device's own installed current
+ * key stays its readiness gate, and a later round resumes anything still pending. */
+export interface AccountPairingKeyDeliveryEvent {
+  readonly workspaceId: string;
+  readonly requestId: string;
+  /** The admitted device's signing key, lowercase hex. */
+  readonly device: string;
+  readonly state: 'running' | 'finished' | 'failed';
+  /** Public `e2ee_*` code of a failed round; never a cause, key or token. */
+  readonly code?: string;
+}
+const keyDeliveryCode = (cause: unknown) => {
+  const code =
+    cause && typeof cause === 'object' && 'code' in cause
+      ? (cause as { code: unknown }).code
+      : null;
+  return typeof code === 'string' && /^[a-z0-9_-]{1,64}$/.test(code)
+    ? `e2ee_${code}`
+    : 'e2ee_key_delivery_failed';
+};
 
 /**
  * Approver ports for the shared workflow on a portable host. Each workspace where
@@ -318,6 +344,8 @@ export function makePortableAccountPairingApprover(input: {
   session: (workspaceId: string) => Effect.Effect<AccountPairingApproverSession | null, unknown>;
   /** The account-authenticated ledger append. */
   appendRecord: (request: E2eeAppendRecordRequest) => Effect.Effect<unknown, unknown>;
+  /** Observes the background key delivery started after each committed admission. */
+  onKeyDelivery?: (event: AccountPairingKeyDeliveryEvent) => void;
 }): () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown> {
   return Effect.fnUntraced(function* () {
     const result: AccountPairingApproverWorkspace[] = [];
@@ -352,6 +380,32 @@ export function makePortableAccountPairingApprover(input: {
           }),
         invitation: (record) => approval.invitation(record),
         access: () => approval.access(),
+        // Approval returns first; the session's own key round sends the new device the
+        // current epoch key, as on the desktop. A failure never undoes the admission.
+        deliverKeys: (device, requestId) =>
+          Effect.sync(() => {
+            const report = (state: AccountPairingKeyDeliveryEvent['state'], code?: string) => {
+              try {
+                input.onKeyDelivery?.({
+                  workspaceId,
+                  requestId,
+                  device: toHex(device),
+                  state,
+                  ...(code ? { code } : {}),
+                });
+              } catch {
+                /* An observer never affects delivery. */
+              }
+            };
+            report('running');
+            void Effect.runPromise(Effect.result(session.keyRound())).then(
+              (result) =>
+                Result.isSuccess(result)
+                  ? report('finished')
+                  : report('failed', keyDeliveryCode(result.failure)),
+              (cause: unknown) => report('failed', keyDeliveryCode(cause))
+            );
+          }),
       });
     }
     return result;

@@ -118,6 +118,9 @@ let offer: PersonalPairingOffer,
   records: Uint8Array[],
   mode: 'create-or-open' | 'open-existing',
   events: string[] = [],
+  // Envelopes this device stored for other devices; refused attempts are kept too.
+  putAttempts: { id: string; frame: string; stored: boolean }[] = [],
+  refusePuts = false,
   failKeys = false,
   foreign = false;
 let databasePrefix = 'personal';
@@ -163,6 +166,8 @@ export async function boot(
   databasePrefix = prefix;
   mode = input;
   events = [];
+  putAttempts = [];
+  refusePuts = false;
   session = undefined;
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -371,8 +376,17 @@ export async function boot(
           return Layer.mergeAll(
             indexedDbClientKeyStores({ databaseName: `${databasePrefix}-custody`, binding, mode }),
             Layer.succeed(KeyMailbox, {
+              // Another device's slot holds an envelope only after this device stored one.
               status: (slot) =>
-                Effect.succeed({ ...slot, revision: 0, status: 'InstallationReported' }),
+                Effect.succeed({
+                  ...slot,
+                  revision: 0,
+                  status:
+                    slot.recipient === toHex(binding.device.toBytes()) ||
+                    putAttempts.some((item) => item.stored)
+                      ? ('InstallationReported' as const)
+                      : ('NeedsEnvelope' as const),
+                }),
               fetch: (epoch) =>
                 Effect.gen(function* () {
                   if (failMailbox) {
@@ -426,8 +440,26 @@ export async function boot(
                 Effect.sync(() => {
                   events.push('repair');
                 }),
-              put: () => Effect.void,
-              read: () => Effect.succeed(null),
+              put: (id, frame) =>
+                Effect.suspend(() => {
+                  putAttempts.push({ id, frame: toHex(frame), stored: !refusePuts });
+                  if (refusePuts)
+                    return Effect.fail(
+                      new BackendError({
+                        service: 'mailbox',
+                        reason: 'unavailable',
+                        cause: new Error('synthetic refused envelope storage'),
+                      })
+                    );
+                  events.push('put');
+                  return Effect.void;
+                }),
+              read: (id) =>
+                Effect.succeed(
+                  ((frame) => (frame ? fromHex(frame) : null))(
+                    putAttempts.find((item) => item.id === id && item.stored)?.frame
+                  )
+                ),
             }),
             Layer.succeed(EpochStagingStore, {
               stageGroup: () => Effect.void,
@@ -855,11 +887,20 @@ export async function invoke(action: string) {
               kind: 'personal',
               signer: fresh,
             });
+            const deliveries: string[] = [];
+            let delivered: () => void = () => {};
+            const settled = new Promise<void>((resolve) => (delivered = resolve));
             const approver = makePortableAccountPairingApprover({
               workspaces: () => [
                 { workspaceId: offer.workspaceId, name: 'Alpha', genesisHash: offer.genesisHash },
               ],
               session: () => Effect.succeed(session!),
+              onKeyDelivery: (event) => {
+                deliveries.push(
+                  `${event.state}:${event.device === toHex(fresh.publicKey.toBytes())}`
+                );
+                if (event.state !== 'running') delivered();
+              },
               // The service appends the original under the account's authentication.
               appendRecord: (request) =>
                 Effect.sync(() => {
@@ -881,6 +922,22 @@ export async function invoke(action: string) {
               signed.record,
               new Uint8Array(32).fill(0x66)
             );
+            // After the admission commits the approver sends the current key to the new
+            // device in the background. The first attempt is refused; a later key round
+            // retries the journaled envelope under the same id.
+            refusePuts = true;
+            if (!workspace!.deliverKeys) return { delivery: 'not-scheduled' };
+            yield* workspace!.deliverKeys(fresh.publicKey.toBytes(), signed.requestId);
+            yield* Effect.promise(() => settled);
+            const refused = putAttempts.map((item) => ({ id: item.id, frame: item.frame }));
+            refusePuts = false;
+            yield* session!.keyRound();
+            const stored = putAttempts.filter((item) => item.stored);
+            const retriedExactly =
+              refused.length > 0 &&
+              refused.every((item) =>
+                stored.some((put) => put.id === item.id && put.frame === item.frame)
+              );
             const invitation = yield* workspace!.invitation(signed.record);
             // The new device's own check: the snapshot verifies for this approver.
             yield* Effect.fromResult(
@@ -896,6 +953,9 @@ export async function invoke(action: string) {
             const access = yield* workspace!.access();
             return {
               before,
+              deliveries,
+              refused: refused.length > 0,
+              retriedExactly,
               length: records.length,
               invitation: invitation !== null,
               access: access.workspaceId === offer.workspaceId && access.credential.length === 64,

@@ -89,6 +89,12 @@ it.each(['chromium', 'webkit'] as const)(
       expect(approved.ok, JSON.stringify(approved)).toBe(true);
       expect(approved.value).toEqual({
         before: 'unknown',
+        // Approved is not keyed: the approver must send the new device an envelope.
+        // A refused store still ends the round, so `finished` is not delivery evidence;
+        // the later round stores the journaled envelope under the same id.
+        deliveries: ['running:true', 'finished:true'],
+        refused: true,
+        retriedExactly: true,
         length: 3,
         invitation: true,
         access: true,

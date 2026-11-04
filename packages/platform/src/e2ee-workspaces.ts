@@ -144,6 +144,9 @@ export interface E2eeAccountApprovalSession {
   invitation(record: Uint8Array): Promise<Uint8Array | null>;
   access(): Promise<{ workspaceId: string; credential: string }>;
   refresh(): Promise<void>;
+  /** Runs this session's existing key round once, so the device it just admitted
+   * receives the current epoch key. Distribution targets only verified ledger devices. */
+  keyRound(): Promise<void>;
 }
 
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */

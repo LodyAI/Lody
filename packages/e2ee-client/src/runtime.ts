@@ -234,6 +234,9 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
             invitation: (record: Uint8Array) => run(approval.invitation(record)),
             access: () => run(approval.access()),
             refresh: () => run(Effect.asVoid(lease.session.refresh())),
+            // The session's existing key round, so an approver can send the device it
+            // just admitted the current epoch key. No key or credential leaves.
+            keyRound: () => run(Effect.asVoid(lease.session.keyRound())),
           };
         })
       ),
