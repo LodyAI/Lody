@@ -333,9 +333,21 @@ Steer handoff completion follows applied records in the Session's
 `steerOperationLedger` (`findSteerSuccessor` in `coordinator-model.ts`), covered by
 the `steer handoff` cases in `operation-coordinator.test.ts`. Delivery receipts are
 mapped by `deliveryFromSteerResponse` in `apps/cli/src/commands/session.ts` and
-covered by `session-default-fallback.test.ts`. The Coordinating many Sessions
-section is intended behavior not yet implemented; status still exposes only
-`idle`/`busy`.
+covered by `session-default-fallback.test.ts`.
+
+The Coordinating many Sessions tools live in `apps/cli/src/mcp/lody-mcp-server.ts`
+(pull request filter, short ids, history paging, quotes, `lody_session_queue`),
+with live activity, sender headers and queued-input withdrawal answered by the
+owning Machine in `apps/cli/src/lib/message-handler.ts` behind the
+`sessionLiveActivity`, `machineDiskStatus` and `sessionInputWithdraw` protocol
+capabilities; older Machines degrade to `unknown` or an error outcome. Quota and
+disk come from `apps/cli/src/lib/resource-discovery.ts`. Two items remain
+unimplemented because they would add fields to strictly validated synced results
+that older clients reject: the count of later inputs in completion results, and a
+typed failure cause with a structured reset time. Failures currently carry the
+agent's failure reason and original message as text. Withdrawal of a started
+input reports the `already_started` outcome rather than an error code. No
+mixed-version multi-Machine run has been performed.
 
 This draft records the requested limit of 16. Runtime and deployed-client
 acceptance remain to be verified after dependencies are installed.
