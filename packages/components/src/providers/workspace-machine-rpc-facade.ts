@@ -1,4 +1,10 @@
 import {
+  type CodeCollabOpenDiffManifestRequest,
+  type CodeCollabOpenDiffManifestResponse,
+  type CodeCollabReadBlobRequest,
+  type CodeCollabReadBlobResponse,
+} from '@lody/shared';
+import {
   machineSupportsAndroidEmulatorProtocol,
   AndroidEmulatorResponseSchema,
   type AndroidEmulatorCommand,
@@ -603,6 +609,67 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           ownerSessionId: options?.ownerSessionId,
           timeoutMs: options?.timeoutMs ?? 30_000,
         })
+    );
+
+  const getDiffBlobTransportOptions = async (machineId: MachineId) => ({
+    supported: machineSupportsProtocolCapability(
+      { protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId) },
+      MACHINE_PROTOCOL_CAPABILITIES.codeCollabDiffBlobs
+    ),
+    scope: String(workspaceId),
+    persist: !deps.protectedContent && (await resolveMachineTargetPlane(machineId)) === 'cloud',
+  });
+
+  const requestCodeCollabOpenDiffManifest = (
+    machineId: MachineId,
+    request: CodeCollabOpenDiffManifestRequest,
+    options?: CodeCollabRequestOptions
+  ): Promise<CodeCollabOpenDiffManifestResponse | CodeCollabV2Error | null> =>
+    codeCollabDiffRpcGate(
+      async () =>
+        await requestCodeCollab(
+          machineId,
+          {
+            machineId,
+            workspaceId,
+            method: 'code-collab/open-diff-manifest',
+            params: request,
+            ...ownerSessionFields(options),
+            timeoutMs: options?.timeoutMs ?? 30_000,
+          },
+          async (client) =>
+            await client.requestCodeCollabOpenDiffManifest({
+              ...request,
+              ownerSessionId: options?.ownerSessionId,
+              timeoutMs: options?.timeoutMs ?? 30_000,
+            })
+        )
+    );
+
+  const requestCodeCollabReadBlob = (
+    machineId: MachineId,
+    request: CodeCollabReadBlobRequest,
+    options?: CodeCollabRequestOptions
+  ): Promise<CodeCollabReadBlobResponse | CodeCollabV2Error | null> =>
+    codeCollabDiffRpcGate(
+      async () =>
+        await requestCodeCollab(
+          machineId,
+          {
+            machineId,
+            workspaceId,
+            method: 'code-collab/read-blob',
+            params: request,
+            ...ownerSessionFields(options),
+            timeoutMs: options?.timeoutMs ?? 30_000,
+          },
+          async (client) =>
+            await client.requestCodeCollabReadBlob({
+              ...request,
+              ownerSessionId: options?.ownerSessionId,
+              timeoutMs: options?.timeoutMs ?? 30_000,
+            })
+        )
     );
 
   const requestCodeCollabOpenCurrentDiff = (
@@ -1947,6 +2014,9 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,
     requestCodeCollabSaveText,
+    getDiffBlobTransportOptions,
+    requestCodeCollabOpenDiffManifest,
+    requestCodeCollabReadBlob,
     requestCodeCollabOpenCurrentDiff,
     requestCodeCollabOpenAllChangesDiff,
     requestCodeCollabOpenTurnDiff,

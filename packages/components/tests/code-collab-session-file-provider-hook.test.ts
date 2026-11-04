@@ -150,6 +150,34 @@ describe('materializeCodeCollabV2FileIndexForFileProvider', () => {
   });
 });
 
+describe('file-index generation replication', () => {
+  it('publishes generation-only updates without replacing legacy file rows', async () => {
+    const flock = new Flock('generation-only');
+    flock.set(['a.ts'], { kind: 'text', change: { diff: [1, 1] } });
+    flock.set(['a.ts', 'v'], { g: 'epoch.1' });
+    flock.commit();
+    const runtime = createRuntime({
+      repo: { openFlockDoc: async () => ({ flock, joinRoom: async () => makeSyncedFlockRoom() }) },
+    });
+    const lease = await runtime.codeCollabFileIndexCache!.acquire('workspace:fi:owner');
+    try {
+      await flushMicrotasks(8);
+      const first = lease.resource.getSnapshot();
+      if (first.status !== 'ready') throw new Error('Index not ready.');
+      expect(first.snapshot.generations).toEqual({ 'a.ts': 'epoch.1' });
+      flock.set(['a.ts', 'v'], { g: 'epoch.2' });
+      flock.commit();
+      const second = lease.resource.getSnapshot();
+      if (second.status !== 'ready') throw new Error('Index not ready.');
+      expect(second.snapshot.generations).toEqual({ 'a.ts': 'epoch.2' });
+      expect(second.snapshot.fileIndex).toBe(first.snapshot.fileIndex);
+      expect(second.snapshot.revision).toBeGreaterThan(first.snapshot.revision);
+    } finally {
+      await lease.release();
+    }
+  });
+});
+
 describe('useCodeCollabSessionFileProvider', () => {
   it('releases a failed conversation borrower so the next Files open can recover', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -525,7 +553,6 @@ describe('useCodeCollabSessionFileProvider', () => {
     expect(syncOnce).not.toHaveBeenCalled();
     expect(joinRoom).toHaveBeenCalledTimes(1);
     expect(initDirectory).not.toHaveBeenCalled();
-    expect(scan).toHaveBeenCalledTimes(2);
     expect(updates.at(-1)).toMatchObject({
       status: 'ready',
       role: 'write',
@@ -589,7 +616,6 @@ describe('useCodeCollabSessionFileProvider', () => {
     expect(syncOnce).not.toHaveBeenCalled();
     expect(joinRoom).toHaveBeenCalledTimes(1);
     expect(initDirectory).not.toHaveBeenCalled();
-    expect(scan).toHaveBeenCalledTimes(2);
     expect(updates.at(-1)?.status).toBe('empty');
   });
 

@@ -69,6 +69,9 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   change permission policy.
 
 - Session automation readers require `sessionAutomations` locally or `remoteAutomationControl` remotely; unsupported machines expose no controls, polling or connection warning.
+- `codeCollabDiffBlobs` v1 gates the additive manifest/blob methods and opaque
+  `[path, 'v']` generation siblings. Legacy file rows stay strict and unchanged;
+  content hashes travel only through owner-scoped RPC, never the shared index.
 - Daemon workflows gate on `MachineMeta.protocolCapabilities`, never CLI version.
   Missing means unsupported. Full-message schedules require v3 and `messageVersion: 1`.
 - An ACP capability entry may carry the agent's advertised `authMethods`; absence means no probe

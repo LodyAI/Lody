@@ -387,12 +387,38 @@ const DiffFileBlock = memo(function DiffFileBlock({
   onCommentError,
   onOpenFile,
 }: DiffFileBlockProps) {
+  const hydration = useRef<AbortController | null>(null);
+  const visible = useRef(renderContent);
+  visible.current = renderContent;
+  useEffect(() => {
+    if (!renderContent) hydration.current?.abort();
+    return () => hydration.current?.abort();
+  }, [data, renderContent]);
+  const loadDiffFiles = useMemo(() => {
+    const load = data?.status === 'ready-parsed' ? data.loadDiffFiles : undefined;
+    if (!load) return undefined;
+    return async (diff: Parameters<typeof load>[0]) => {
+      if (!visible.current) throw new DOMException('Diff hidden.', 'AbortError');
+      hydration.current?.abort();
+      const controller = new AbortController();
+      hydration.current = controller;
+      try {
+        return await load(diff, controller.signal);
+      } finally {
+        if (hydration.current === controller) hydration.current = null;
+      }
+    };
+  }, [data]);
   const { t } = useTranslation();
-  const diffViewerParseCacheKey = createConversationDiffViewerParseCacheKey({
-    mode,
-    cacheKey,
-    filePath,
-  });
+  const diffViewerParseCacheKey =
+    (data && 'contentKey' in data && data.contentKey
+      ? `${data.contentKey}:${filePath}`
+      : undefined) ??
+    createConversationDiffViewerParseCacheKey({
+      mode,
+      cacheKey,
+      filePath,
+    });
 
   if (!data) {
     return (
@@ -419,6 +445,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
         oldText=""
         newText=""
         preparsedDiff={data.fileDiff}
+        options={loadDiffFiles ? { loadDiffFiles } : undefined}
         preparsedOldTextLength={data.oldTextLength}
         preparsedNewTextLength={data.newTextLength}
         commentsEnabled={commentsEnabled}

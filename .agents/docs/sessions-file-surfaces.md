@@ -202,11 +202,18 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   rendered Markdown must opt into native selection through
   `data-native-selection-allow`.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
-  turn diff RPC: `specs/code-collab-v2.md`.
-- Diff RPCs return full old and new texts per file today. A content-addressed
-  replacement for remote clients (manifest plus cached blobs, per-file
-  invalidation, remote hunk mode) is proposed, not implemented: see the
-  [remote diff transport proposal](../notes/proposed/architecture/2026-10-31-remote-diff-transport.md).
+  turn diff RPC: `packages/shared/src/code-collab.ts`.
+- Content-addressed diff transport is capability-gated by `codeCollabDiffBlobs` v1: paged manifests
+  identify immutable Git/store/disk bytes and leave All Changes bodies deferred
+  until visible. Reads assemble raw byte ranges, verify the full hash, then decode.
+  Remote large files start with bounded partial patches; Pierre's expand action
+  hydrates full files through the same verified cache. Ordinary remote blobs use
+  bounded IndexedDB; protected/local blobs stay in memory. Opaque file generations
+  invalidate individual entries even if line counts stay equal; comparison-base
+  changes and the first publication after restart invalidate changed paths.
+  Older machines keep the existing RPCs. See the
+  [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md)
+  and [protocol/privacy draft](../../specs/remote-diff-delivery.md).
 - DOCX, XLSX, and PPTX enter through the static `SessionFileOfficePreview` shell.
   An active preview schedules a bounded read at idle and then imports only that
   format's renderer and worker-backed engine. The local resource URL is read

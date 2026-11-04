@@ -30,7 +30,7 @@ File-by-file responsibilities: [README.md](README.md).
   attempt-start head proof and advances a path only when its `newText` matches
   current disk.
 - Shared file tree/All Changes uses owner-session Flock stream
-  `<workspace-id>:fi:<master-session-id>` (one row per path); successful changes or
+  `<workspace-id>:fi:<master-session-id>` (one file row plus an optional opaque generation row per changed path); successful changes or
   targeted repairs advance signal stream `<workspace-id>:fis:<master-session-id>`,
   and the named Flock bridge in `apps/cli/src/lib/loro/doc.ts` lets Electron
   invalidate and refresh its Machine RPC snapshot. Both streams have 180-day TTL and
@@ -97,3 +97,10 @@ File-by-file responsibilities: [README.md](README.md).
   Pure reads (open/refresh/diff) stay lock-free.
 
 - Root-scoped file state shares the owner publication and physical-file save chains. Watch subscriptions include root identity; wire keys must be decoded before filesystem access.
+
+- Diff blob RPCs are capability-gated pure reads: they never start watches, initialize
+  or migrate a snapshot database, or claim execution. Reauthorize each page and serve
+  only session-issued handles; never resolve a caller's hash as global authority.
+  Generation rows contain no content hashes. Disk identity and non-Git base metadata
+  stay daemon-local and invalidate generations even when line counts are unchanged.
+  [Decision](../../../../../.agents/notes/implemented/architecture/2026-10-31-remote-diff-transport.md).

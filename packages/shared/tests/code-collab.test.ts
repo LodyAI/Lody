@@ -1,3 +1,4 @@
+import { readCodeCollabFileGenerations } from '../src/code-collab';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -48,20 +49,32 @@ const smallLimits = {
 
 class FakeFileIndexFlock {
   readonly rows = new Map<string, unknown>();
+  readonly extraRows = new Map<string, { key: readonly unknown[]; value: unknown }>();
   commits = 0;
 
   scan(): Iterable<{ readonly key: readonly unknown[]; readonly value: unknown }> {
-    return [...this.rows.entries()].map(([workspacePath, value]) => ({
-      key: [workspacePath],
-      value,
-    }));
+    return [
+      ...[...this.rows.entries()].map(([workspacePath, value]) => ({
+        key: [workspacePath],
+        value,
+      })),
+      ...this.extraRows.values(),
+    ];
   }
 
-  set(key: readonly [string], value: unknown): void {
+  set(key: readonly [string] | readonly [string, 'v'], value: unknown): void {
+    if (key.length === 2) {
+      this.extraRows.set(JSON.stringify(key), { key, value });
+      return;
+    }
     this.rows.set(key[0], value);
   }
 
-  delete(key: readonly [string]): void {
+  delete(key: readonly [string] | readonly [string, 'v']): void {
+    if (key.length === 2) {
+      this.extraRows.delete(JSON.stringify(key));
+      return;
+    }
     this.rows.delete(key[0]);
   }
 
@@ -71,6 +84,22 @@ class FakeFileIndexFlock {
 }
 
 describe('Code Collab shared protocol helpers', () => {
+  it('keeps generation rows invisible to legacy file readers and commits generation-only updates and removals', () => {
+    const flock = new FakeFileIndexFlock();
+    const files = {
+      'a.ts': { kind: 'text' as const, change: { diff: [1, 0] as [number, number] } },
+    };
+    expect(writeCodeCollabFileIndexToFlock(flock, files, 1, { 'a.ts': 'epoch.1' })).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(files);
+    expect(readCodeCollabFileGenerations(flock)).toEqual({ 'a.ts': 'epoch.1' });
+    expect(writeCodeCollabFileIndexToFlock(flock, files, 2, { 'a.ts': 'epoch.2' })).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(files);
+    expect(readCodeCollabFileGenerations(flock)).toEqual({ 'a.ts': 'epoch.2' });
+    expect(writeCodeCollabFileIndexToFlock(flock, {}, 3, {})).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual({});
+    expect(readCodeCollabFileGenerations(flock)).toEqual({});
+  });
+
   it('derives deterministic v2 content key material from the owner session id', () => {
     expect(bytesToHex(deriveCodeCollabV2ContentKeyBytes('session-1'))).toBe(
       '53fb8315402c9fb68170c10a6d20c7516b022abf995aa74ea5aa84a6de06e4a7'

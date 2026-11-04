@@ -46,7 +46,8 @@ export const E2eeFeatureInputSchema = z
   .strict();
 export type E2eeFeatureInput = { requestId: string; request: LocalMachineRpcRequest };
 
-/** Closed set of reads with no machine writes, process/worker starts or lazy storage setup. */
+/** Closed set of reads with no machine writes or execution claims. Diff reads may
+ * run bounded Git reads and open an existing snapshot database read-only. */
 export const E2EE_READ_QUERY_METHODS = [
   'machine/status',
   'machine/ping',
@@ -56,6 +57,8 @@ export const E2EE_READ_QUERY_METHODS = [
   'file/download-chunk',
   'code-collab/open-text',
   'code-collab/refresh-text',
+  'code-collab/open-diff-manifest',
+  'code-collab/read-blob',
   'code-collab/lsp-definition',
   'code-collab/lsp-references',
 ] as const;

@@ -671,6 +671,76 @@ it('protects feature requests and chunked results with workspace signatures and 
   ).rejects.toThrow('intent_conflict');
 });
 
+it('allows a verified Guest to read diff manifests and blobs while refusing saves', async () => {
+  const f = encryptedRpcFixture({ guest: true });
+  fixtures.push(f);
+  const requests = [
+    {
+      method: 'code-collab/open-diff-manifest' as const,
+      params: { sessionId: f.input.sessionId, path: 'private.ts' },
+    },
+    {
+      method: 'code-collab/read-blob' as const,
+      params: {
+        sessionId: f.input.sessionId,
+        key: `sha256:${'1'.repeat(64)}`,
+        offset: 0,
+        length: 3,
+      },
+    },
+  ];
+  for (const [index, request] of requests.entries()) {
+    const input = {
+      requestId: (index + 40).toString(16).padStart(32, '0'),
+      request: { workspaceId: f.workspaceId, machineId: f.machineId, ...request },
+    };
+    const original = await Effect.runPromise(f.sender.prepareFeature(input));
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    expect(opened?.input).toEqual(input);
+    if (!opened) throw new Error('Missing diff read.');
+    const outcome = {
+      ok: true as const,
+      result:
+        index === 0
+          ? { status: 'ok' as const, entries: [], nextCursor: null }
+          : {
+              offset: 0,
+              length: 3,
+              totalBytes: 3,
+              encoding: 'gzip-base64' as const,
+              data: 'UFJJVkFURV9ESUZG',
+            },
+    };
+    const frames = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, opened, outcome)
+    );
+    expect(
+      await Effect.runPromise(
+        f.sender.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+      )
+    ).toEqual(outcome);
+  }
+  await expect(
+    Effect.runPromise(
+      f.sender.prepareFeature({
+        requestId: 'ab'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'code-collab/save-text',
+          params: {
+            sessionId: f.input.sessionId,
+            requestedByUserId: 'guest',
+            path: 'private.ts',
+            baseDigest: `sha256:${'1'.repeat(64)}`,
+            text: { encoding: 'plain', text: 'write', rawBytes: 5 },
+          },
+        },
+      })
+    )
+  ).rejects.toThrow();
+});
+
 it('reassembles a large save from signed chunks and rejects a response from another request', async () => {
   const f = fixture();
   const text = 'SYNTHETIC_LARGE_SAVE_'.repeat(80_000);

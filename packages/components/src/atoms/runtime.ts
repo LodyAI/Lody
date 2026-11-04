@@ -1,3 +1,9 @@
+import type {
+  CodeCollabOpenDiffManifestRequest,
+  CodeCollabOpenDiffManifestResponse,
+  CodeCollabReadBlobRequest,
+  CodeCollabReadBlobResponse,
+} from '@lody/shared';
 import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
   MemoryProviderRequest,
@@ -506,6 +512,19 @@ export type WorkspaceRuntime = {
     request: CodeCollabV2SaveTextRequest,
     options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
   ) => Promise<CodeCollabV2SaveTextResponse | CodeCollabV2Error | null>;
+  getDiffBlobTransportOptions: (
+    machineId: MachineId
+  ) => Promise<{ supported: boolean; scope: string; persist: boolean }>;
+  requestCodeCollabOpenDiffManifest: (
+    machineId: MachineId,
+    request: CodeCollabOpenDiffManifestRequest,
+    options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
+  ) => Promise<CodeCollabOpenDiffManifestResponse | CodeCollabV2Error | null>;
+  requestCodeCollabReadBlob: (
+    machineId: MachineId,
+    request: CodeCollabReadBlobRequest,
+    options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
+  ) => Promise<CodeCollabReadBlobResponse | CodeCollabV2Error | null>;
   requestCodeCollabOpenCurrentDiff: (
     machineId: MachineId,
     request: CodeCollabV2OpenCurrentDiffRequest,

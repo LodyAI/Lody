@@ -199,6 +199,7 @@ export const CodeCollabV2EncodedTextPayloadSchema = z.discriminatedUnion('encodi
 export type CodeCollabV2EncodedTextPayload = z.infer<typeof CodeCollabV2EncodedTextPayloadSchema>;
 
 export const CodeCollabV2ErrorCodeSchema = z.enum([
+  'stale',
   'invalid_path',
   'session_not_found',
   'workspace_root_unavailable',
@@ -651,8 +652,8 @@ export type CodeCollabFileIndexReadableFlock = {
 };
 
 export type CodeCollabFileIndexWritableFlock = CodeCollabFileIndexReadableFlock & {
-  set(key: [string], value: unknown, timestamp?: number): void;
-  delete(key: [string], timestamp?: number): void;
+  set(key: [string] | [string, 'v'], value: unknown, timestamp?: number): void;
+  delete(key: [string] | [string, 'v'], timestamp?: number): void;
   commit(): void;
 };
 
@@ -822,14 +823,27 @@ const isCorruptedCodeCollabWorkspacePath = (workspacePath: string): boolean =>
 function scanCodeCollabFileIndexFlock(flock: CodeCollabFileIndexReadableFlock): {
   fileIndex: CodeCollabV2FileIndexState;
   corruptedPaths: string[];
+  generations: CodeCollabFileGenerations;
 } {
   const fileIndex: CodeCollabV2FileIndexState = {};
   const corruptedPaths: string[] = [];
+  const generations: Record<string, string> = {};
   for (const row of flock.scan()) {
     if (row.value === undefined) {
       continue;
     }
     const [workspacePath, ...extra] = row.key;
+    if (
+      extra.length === 1 &&
+      extra[0] === 'v' &&
+      typeof workspacePath === 'string' &&
+      isCodeCollabRecord(row.value) &&
+      typeof row.value.g === 'string' &&
+      row.value.g.length > 0
+    ) {
+      generations[workspacePath] = row.value.g;
+      continue;
+    }
     if (typeof workspacePath !== 'string' || workspacePath.length === 0 || extra.length > 0) {
       continue;
     }
@@ -843,7 +857,55 @@ function scanCodeCollabFileIndexFlock(flock: CodeCollabFileIndexReadableFlock): 
     }
     fileIndex[workspacePath] = parsed;
   }
-  return { fileIndex, corruptedPaths };
+  return { fileIndex, corruptedPaths, generations };
+}
+
+export type CodeCollabFileGenerations = Readonly<Record<string, string>>;
+
+export function readCodeCollabFileGenerations(
+  flock: CodeCollabFileIndexReadableFlock
+): CodeCollabFileGenerations {
+  const result: Record<string, string> = {};
+  for (const row of flock.scan()) {
+    if (
+      row.key.length !== 2 ||
+      row.key[1] !== 'v' ||
+      typeof row.key[0] !== 'string' ||
+      !isCodeCollabRecord(row.value)
+    )
+      continue;
+    if (typeof row.value.g === 'string' && row.value.g.length > 0) result[row.key[0]] = row.value.g;
+  }
+  return result;
+}
+
+export function applyCodeCollabFileGenerationEvents(
+  previous: CodeCollabFileGenerations,
+  events: readonly CodeCollabFileIndexFlockEvent[]
+): CodeCollabFileGenerations {
+  let next: Record<string, string> | undefined;
+  for (const event of events) {
+    if (event.key.length !== 2 || event.key[1] !== 'v' || typeof event.key[0] !== 'string')
+      continue;
+    const token =
+      isCodeCollabRecord(event.value) && typeof event.value.g === 'string'
+        ? event.value.g
+        : undefined;
+    const path = event.key[0];
+    if ((next ?? previous)[path] === token) continue;
+    next ??= { ...previous };
+    if (token === undefined) delete next[path];
+    else next[path] = token;
+  }
+  return next ?? previous;
+}
+
+export function readCodeCollabFileIndexSnapshotFromFlock(flock: CodeCollabFileIndexReadableFlock): {
+  fileIndex: CodeCollabV2FileIndexState;
+  generations: CodeCollabFileGenerations;
+} {
+  const { fileIndex, generations } = scanCodeCollabFileIndexFlock(flock);
+  return { fileIndex, generations };
 }
 
 export function readCodeCollabFileIndexFromFlock(
@@ -889,7 +951,8 @@ export function writeCodeCollabFileIndexSignalToFlock(
 export function writeCodeCollabFileIndexToFlock(
   flock: CodeCollabFileIndexWritableFlock,
   next: CodeCollabV2FileIndexState,
-  nowMs: number
+  nowMs: number,
+  generations?: CodeCollabFileGenerations
 ): boolean {
   const { fileIndex: previous, corruptedPaths } = scanCodeCollabFileIndexFlock(flock);
   let changed = false;
@@ -916,6 +979,23 @@ export function writeCodeCollabFileIndexToFlock(
     changed = true;
   }
 
+  const previousGenerations = readCodeCollabFileGenerations(flock);
+  for (const path of Object.keys(previousGenerations)) {
+    if (
+      Object.prototype.hasOwnProperty.call(next, path) &&
+      (generations === undefined || generations[path] !== undefined)
+    )
+      continue;
+    flock.delete([path, 'v'], nowMs);
+    changed = true;
+  }
+  if (generations)
+    for (const [path, g] of Object.entries(generations)) {
+      if (!Object.prototype.hasOwnProperty.call(next, path) || previousGenerations[path] === g)
+        continue;
+      flock.set([path, 'v'], { g }, nowMs);
+      changed = true;
+    }
   if (changed) {
     flock.commit();
   }

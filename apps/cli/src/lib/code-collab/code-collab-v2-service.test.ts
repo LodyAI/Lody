@@ -1,3 +1,5 @@
+import { gunzipSync } from 'node:zlib';
+import { symlink, utimes } from 'node:fs/promises';
 import { encodeSessionFilePath } from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
@@ -157,6 +159,324 @@ it('reads encrypted file content without starting watchers or publishing an inde
 });
 
 describe('CodeCollabV2Service text RPC boundary', () => {
+  it.each(['sha1', 'sha256'])(
+    'serves verified %s Git and disk bytes by session-scoped handles',
+    async (objectFormat) => {
+      await withWorkspace(async (workspaceRoot) => {
+        const git = async (...args: string[]) =>
+          (
+            await execFileAsync('git', ['-c', 'commit.gpgsign=false', ...args], {
+              cwd: workspaceRoot,
+            })
+          ).stdout.trim();
+        await git('init', `--object-format=${objectFormat}`, '-b', 'main');
+        await git('config', 'user.name', 'Test');
+        await git('config', 'user.email', 'test@example.com');
+        const oldText = '\uFEFF旧版本\r\n🙂\r\n';
+        const newText = '\uFEFF新版本\r\n🙂\r\n';
+        await writeFile(path.join(workspaceRoot, 'a.txt'), oldText);
+        await git('add', '.');
+        await git('commit', '-m', 'base');
+        await writeFile(path.join(workspaceRoot, 'a.txt'), newText);
+        let now = 0;
+        const service = new CodeCollabV2Service({
+          resolveWorkspace: async () => ({ ok: true, ownerSessionId: SESSION_ID, workspaceRoot }),
+          diffBlobNow: () => now,
+          readOnly: true,
+        });
+        try {
+          const result = await service.openDiffManifest({ sessionId: SESSION_ID, path: 'a.txt' });
+          expect(result.status).toBe('ok');
+          if (result.status !== 'ok') throw new Error('Expected a manifest.');
+          const entry = result.entries[0];
+          if (!entry?.base || !entry.head) throw new Error('Expected both blobs.');
+          expect(entry.base.key).toBe(`git:${await git('rev-parse', 'HEAD:a.txt')}`);
+          expect(entry.head.key).toBe(digestText(newText));
+          for (const [blob, text] of [
+            [entry.base, oldText],
+            [entry.head, newText],
+          ] as const) {
+            const chunks: Buffer[] = [];
+            for (let offset = 0; offset < blob.rawBytes;) {
+              const page = await service.readBlob({
+                sessionId: SESSION_ID,
+                key: blob.key,
+                offset,
+                length: 5,
+              });
+              chunks.push(gunzipSync(Buffer.from(page.data, 'base64')));
+              offset += page.length;
+            }
+            expect(Buffer.concat(chunks)).toEqual(Buffer.from(text));
+          }
+          await expect(
+            service.readBlob({
+              sessionId: 'another-session',
+              key: entry.head.key,
+              offset: 0,
+              length: 5,
+            })
+          ).rejects.toMatchObject({ code: 'stale' });
+          const diskKey = entry.head.key;
+          await withWorkspace(async (outside) => {
+            await writeFile(path.join(outside, 'secret.txt'), 'outside');
+            await rm(path.join(workspaceRoot, 'a.txt'));
+            await symlink(path.join(outside, 'secret.txt'), path.join(workspaceRoot, 'a.txt'));
+            await expect(
+              service.readBlob({ sessionId: SESSION_ID, key: diskKey, offset: 5, length: 5 })
+            ).rejects.toMatchObject({ code: 'invalid_path' });
+          });
+          now = 600_001;
+          await expect(
+            service.readBlob({ sessionId: SESSION_ID, key: entry.base.key, offset: 0, length: 5 })
+          ).rejects.toMatchObject({ code: 'stale' });
+        } finally {
+          service.dispose();
+        }
+      });
+    }
+  );
+
+  it('serves bounded remote hunks and full local blobs for the same large file', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      const before = Array.from({ length: 2500 }, (_, i) => `line ${i} ${'x'.repeat(120)}\n`).join(
+        ''
+      );
+      const after = before.replace('line 1200 ', 'CHANGED 1200 ');
+      await writeFile(path.join(workspaceRoot, 'large.txt'), before);
+      await gitCommitAll(workspaceRoot, 'base');
+      await writeFile(path.join(workspaceRoot, 'large.txt'), after);
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        readOnly: true,
+      });
+      try {
+        const request = { sessionId: SESSION_ID, path: 'large.txt' };
+        const remote = await service.openDiffManifest(request, {
+          plane: 'remote',
+          measureResponse: async (value) => Buffer.byteLength(JSON.stringify(value)),
+        });
+        expect(remote).toMatchObject({
+          status: 'ok',
+          entries: [{ status: 'ok', hunks: expect.stringContaining('+CHANGED 1200 ') }],
+        });
+        if (remote.status !== 'ok') throw new Error('Expected a manifest.');
+        expect(Buffer.byteLength(remote.entries[0]?.hunks ?? '')).toBeLessThan(4096);
+        const local = await service.openDiffManifest(request);
+        if (local.status !== 'ok') throw new Error('Expected a local manifest.');
+        expect(local.entries[0]?.hunks).toBeUndefined();
+        expect(local.entries[0]?.head).toEqual(remote.entries[0]?.head);
+        await writeFile(
+          path.join(workspaceRoot, 'large.txt'),
+          Array.from({ length: 2500 }, (_, i) => `rewritten ${i} ${'y'.repeat(120)}\n`).join('')
+        );
+        expect(
+          await service.openDiffManifest(request, {
+            plane: 'remote',
+            measureResponse: async (value) => Buffer.byteLength(JSON.stringify(value)),
+          })
+        ).toMatchObject({
+          status: 'ok',
+          entries: [{ status: 'too_large', base: null, head: null }],
+        });
+        expect(activeWorkspaceWatchCount(service)).toBe(0);
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('reports missing evidence without creating a database or workspace watcher', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, 'a.txt'), 'disk only');
+      const reader = new CodeCollabV2DiffStore('workspace-v2', {
+        dbPath: path.join(workspaceRoot, 'missing-evidence', 'db.sqlite3'),
+        readOnly: true,
+      });
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        diffStore: reader,
+        readOnly: true,
+      });
+      try {
+        expect(await service.openDiffManifest({ sessionId: SESSION_ID, path: 'a.txt' })).toEqual({
+          status: 'unavailable',
+          reason: 'base_unavailable',
+        });
+        expect(
+          await service.openDiffManifest({
+            sessionId: SESSION_ID,
+            path: 'a.txt',
+            turnId: 'missing-turn',
+          })
+        ).toEqual({ status: 'unavailable', reason: 'turn_unavailable' });
+        expect(await readdir(workspaceRoot)).toEqual(['a.txt']);
+        expect(activeWorkspaceWatchCount(service)).toBe(0);
+      } finally {
+        service.dispose();
+        await reader.close();
+      }
+    });
+  });
+
+  it('reads retained non-Git and historical bytes through the read-only worker and refuses expired handles', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      let now = 1000;
+      const dbPath = path.join(workspaceRoot, 'evidence.sqlite3');
+      const before = '\uFEFF' + '中文🙂\r\n'.repeat(40_000);
+      const after = before + 'recorded\r\n';
+      const writer = new CodeCollabV2DiffStore('workspace-v2', { dbPath, now: () => now });
+      await writer.recordTurnDiffs({
+        workspaceRoot,
+        ownerSessionId: SESSION_ID,
+        turnId: 'turn-1',
+        capturedAtMs: now,
+        events: [{ path: path.join(workspaceRoot, 'a.txt'), oldText: before, newText: after }],
+      });
+      await writer.close();
+      const reader = new CodeCollabV2DiffStore('workspace-v2', {
+        dbPath,
+        readOnly: true,
+        now: () => now,
+      });
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        diffStore: reader,
+        readOnly: true,
+        diffBlobNow: () => 1000,
+      });
+      try {
+        await writeFile(path.join(workspaceRoot, 'a.txt'), 'current disk');
+        const historical = await service.openDiffManifest({
+          sessionId: SESSION_ID,
+          path: 'a.txt',
+          turnId: 'turn-1',
+        });
+        if (historical.status !== 'ok' || !historical.entries[0]?.head)
+          throw new Error('Expected history.');
+        const head = historical.entries[0].head;
+        const chunks: Buffer[] = [];
+        for (let offset = 0; offset < head.rawBytes;) {
+          const page = await service.readBlob({
+            sessionId: SESSION_ID,
+            key: head.key,
+            offset,
+            length: 131_073,
+          });
+          chunks.push(gunzipSync(Buffer.from(page.data, 'base64')));
+          offset += page.length;
+        }
+        expect(Buffer.concat(chunks)).toEqual(Buffer.from(after));
+        expect(historical.entries[0].base?.key).toBe(digestText(before));
+        const current = await service.openDiffManifest({ sessionId: SESSION_ID, path: 'a.txt' });
+        expect(current).toMatchObject({
+          status: 'ok',
+          entries: [
+            { base: { key: digestText(before) }, head: { key: digestText('current disk') } },
+          ],
+        });
+        const oldKey = historical.entries[0].base?.key;
+        if (!oldKey) throw new Error('Expected pre-image.');
+        now += 101 * 86_400_000;
+        await expect(
+          service.readBlob({ sessionId: SESSION_ID, key: oldKey, offset: 0, length: 100 })
+        ).rejects.toMatchObject({ code: 'stale' });
+        expect(activeWorkspaceWatchCount(service)).toBe(0);
+      } finally {
+        service.dispose();
+        await reader.close();
+      }
+    });
+  });
+
+  it('invalidates only a changed file when its line counts stay equal', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      await writeFile(path.join(workspaceRoot, 'a.txt'), 'old a\n');
+      await writeFile(path.join(workspaceRoot, 'b.txt'), 'old b\n');
+      await gitCommitAll(workspaceRoot, 'base');
+      await writeFile(path.join(workspaceRoot, 'a.txt'), 'new a\n');
+      await writeFile(path.join(workspaceRoot, 'b.txt'), 'new b\n');
+      const published: CodeCollabV2FileIndexPublication[] = [];
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        publishFileIndex: async (state) => {
+          published.push(state);
+          return { changed: true };
+        },
+      });
+      try {
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        const initial = published.at(-1);
+        await writeFile(path.join(workspaceRoot, 'a.txt'), 'nexta\n');
+        await utimes(path.join(workspaceRoot, 'a.txt'), new Date(1000), new Date(2000));
+        await service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
+        const changed = published.at(-1);
+        expect(changed?.fileIndex).toEqual(initial?.fileIndex);
+        expect(changed?.resetDiffGenerations).toBe(false);
+        expect(changed?.bumpDiffPaths).toEqual(['a.txt']);
+        await service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
+        expect(published.at(-1)).toBe(changed);
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('clamps blob pages against the encoded response budget and rejects a cursor after its base moves', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const git = async (...args: string[]) =>
+        (
+          await execFileAsync('git', ['-c', 'commit.gpgsign=false', ...args], {
+            cwd: workspaceRoot,
+          })
+        ).stdout.trim();
+      await git('init', '-b', 'main');
+      await git('config', 'user.name', 'Test');
+      await git('config', 'user.email', 'test@example.com');
+      await writeFile(path.join(workspaceRoot, 'base.txt'), 'base\n');
+      await git('add', '.');
+      await git('commit', '-m', 'base');
+      let seed = 42;
+      const random = Array.from({ length: 700_000 }, () => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return String.fromCharCode(32 + (seed % 95));
+      }).join('');
+      await writeFile(path.join(workspaceRoot, 'a.txt'), random);
+      await writeFile(path.join(workspaceRoot, 'b.txt'), 'b\n');
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: async () => ({ ok: true, ownerSessionId: SESSION_ID, workspaceRoot }),
+      });
+      try {
+        const first = await service.openDiffManifest({ sessionId: SESSION_ID, limit: 1 });
+        if (first.status !== 'ok' || !first.nextCursor)
+          throw new Error('Expected a paged manifest.');
+        const single = await service.openDiffManifest({ sessionId: SESSION_ID, path: 'a.txt' });
+        if (single.status !== 'ok' || !single.entries[0]?.head) throw new Error('Expected a blob.');
+        const key = single.entries[0].head.key;
+        const meter = async (value: unknown) =>
+          Math.ceil((Buffer.byteLength(JSON.stringify(value)) * 4) / 3) + 2048;
+        const page = await service.readBlob(
+          { sessionId: SESSION_ID, key, offset: 0, length: Number.MAX_SAFE_INTEGER },
+          { plane: 'remote', measureResponse: meter }
+        );
+        expect(await meter(page)).toBeLessThanOrEqual(512 * 1024);
+        expect(gunzipSync(Buffer.from(page.data, 'base64'))).toEqual(
+          Buffer.from(random).subarray(0, page.length)
+        );
+        expect(page.length).toBeLessThan(512 * 1024);
+        await git('add', '.');
+        await git('commit', '-m', 'advance base');
+        await expect(
+          service.openDiffManifest({ sessionId: SESSION_ID, limit: 1, cursor: first.nextCursor })
+        ).rejects.toMatchObject({ code: 'stale' });
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
   it('uses the configured refresh deadline, cancels publication and lets a queued refresh publish newer files', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await writeFile(path.join(workspaceRoot, 'old.ts'), 'old');
@@ -1374,6 +1694,28 @@ describe('Project group extra-root files', () => {
       expect(
         await service.openTurnDiff({ sessionId: SESSION_ID, rootId, path: 'a.txt', turnId: 'turn' })
       ).toMatchObject({ status: 'ok' });
+      const manifest = await service.openDiffManifest({ sessionId: SESSION_ID, turnId: 'turn' });
+      expect(manifest).toMatchObject({
+        status: 'ok',
+        entries: [
+          { path: key, base: { key: digestText('old') }, head: { key: digestText('new') } },
+        ],
+      });
+      const allChanges = await service.openDiffManifest({ sessionId: SESSION_ID });
+      expect(allChanges).toMatchObject({
+        status: 'ok',
+        entries: [
+          { path: key, base: { key: digestText('old') }, head: { key: digestText('new') } },
+        ],
+      });
+      const page = await service.readBlob({
+        sessionId: SESSION_ID,
+        rootId,
+        key: digestText('new'),
+        offset: 0,
+        length: 10,
+      });
+      expect(gunzipSync(Buffer.from(page.data, 'base64')).toString()).toBe('new');
       await expect(
         service.openText({ sessionId: SESSION_ID, rootId: 'member:unknown', path: 'a.txt' })
       ).rejects.toThrow();
@@ -1383,6 +1725,79 @@ describe('Project group extra-root files', () => {
       await store.close();
       await rm(base, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Cross-root manifest bases', () => {
+  it('pins and reads each Git root independently, including a focused extra root', async () => {
+    await withWorkspace(async (main) =>
+      withWorkspace(async (extra) => {
+        for (const [root, text] of [
+          [main, 'main old\n'],
+          [extra, 'extra old\n'],
+        ]) {
+          await initGitRepoWithCommit(root);
+          await writeFile(path.join(root, 'a.txt'), text);
+          await gitCommitAll(root, 'base');
+          await writeFile(path.join(root, 'a.txt'), text.replace('old', 'new'));
+        }
+        const rootId = 'member:docs';
+        const key = encodeSessionFilePath({ rootId, relativePath: 'a.txt' });
+        const roots = [
+          { id: 'main', absolutePath: main },
+          { id: rootId, absolutePath: extra },
+        ];
+        const service = new CodeCollabV2Service({
+          resolveWorkspace: async (_, options) => ({
+            ok: true,
+            ownerSessionId: SESSION_ID,
+            workspaceRoot: options?.rootId === rootId ? extra : main,
+            fileRoots: roots,
+          }),
+          readOnly: true,
+        });
+        try {
+          const first = await service.openDiffManifest({
+            sessionId: SESSION_ID,
+            focusPath: key,
+            limit: 1,
+          });
+          if (first.status !== 'ok' || !first.nextCursor || !first.entries[0]?.base)
+            throw new Error('Expected a cross-root page.');
+          expect(first.entries[0].path).toBe(key);
+          const extraPage = await service.readBlob({
+            sessionId: SESSION_ID,
+            rootId,
+            key: first.entries[0].base.key,
+            offset: 0,
+            length: 100,
+          });
+          expect(gunzipSync(Buffer.from(extraPage.data, 'base64')).toString()).toBe('extra old\n');
+          const second = await service.openDiffManifest({
+            sessionId: SESSION_ID,
+            focusPath: key,
+            limit: 1,
+            cursor: first.nextCursor,
+          });
+          expect(second).toMatchObject({
+            status: 'ok',
+            entries: [{ path: 'a.txt' }],
+            nextCursor: null,
+          });
+          await gitCommitAll(extra, 'advance extra base');
+          await expect(
+            service.openDiffManifest({
+              sessionId: SESSION_ID,
+              focusPath: key,
+              limit: 1,
+              cursor: first.nextCursor,
+            })
+          ).rejects.toMatchObject({ code: 'stale' });
+        } finally {
+          service.dispose();
+        }
+      })
+    );
   });
 });
 

@@ -57,8 +57,7 @@ export function workspaceFeatureUnavailableMessage(
 
 /** Display copy for a protected file action the verified ledger role cannot perform. */
 export function protectedFileWriteDeniedMessage(t: TFunction = i18next.t): string {
-  const message =
-    'Guests have read-only file access: saving, comparing changes, loading folders and change history are unavailable.';
+  const message = 'Your workspace role cannot perform this file action.';
   return t('e2ee.unavailable.guest-file-write', { defaultValue: message }) || message;
 }
 

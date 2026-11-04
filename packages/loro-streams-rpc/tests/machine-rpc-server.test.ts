@@ -9,6 +9,7 @@ import {
 } from '../src/rpc-secret';
 import { describe, expect, it, vi } from 'vitest';
 import type {
+  CodeCollabDiffReadContext,
   AgentConfigId,
   LocalProjectControlResponse,
   LocalProjectId,
@@ -2112,6 +2113,107 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     server.stop();
   });
+
+  it.each(['session-parent', 'wrong-owner'])(
+    'serves diff manifests and blobs inside the measured owner envelope (owner=%s)',
+    async (owner) => {
+      const fake = createFakeStreamClient();
+      const key = `sha256:${'1'.repeat(64)}`;
+      const manifest = {
+        status: 'ok' as const,
+        base: 'base',
+        entries: [
+          {
+            path: '合成.txt',
+            status: 'ok' as const,
+            base: null,
+            head: { key, rawBytes: 3, format: { encoding: 'utf8' as const } },
+          },
+        ],
+        nextCursor: null,
+      };
+      const blob = {
+        offset: 0,
+        length: 3,
+        totalBytes: 3,
+        encoding: 'gzip-base64' as const,
+        data: 'SYNTHETIC_PRIVATE_BYTES',
+      };
+      const measured: number[] = [];
+      const measure = async (context: CodeCollabDiffReadContext, value: unknown) => {
+        expect(context.plane).toBe('remote');
+        if (context.plane !== 'remote') throw new Error('Remote context required.');
+        measured.push(await context.measureResponse(value));
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId: 'machine-1' as MachineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        resolveCodeCollabOwnerSessionId: async () => 'session-parent' as SessionId,
+        openCodeCollabDiffManifest: async (params, context) => {
+          expect(params).toEqual({ sessionId: 'child', path: '合成.txt' });
+          await measure(context, manifest);
+          return manifest;
+        },
+        readCodeCollabBlob: async (params, context) => {
+          expect(params).toEqual({ sessionId: 'child', key, offset: 0, length: 3 });
+          await measure(context, blob);
+          return blob;
+        },
+      });
+      const inputs = [
+        ['code-collab/open-diff-manifest', { sessionId: 'child', path: '合成.txt' }],
+        ['code-collab/read-blob', { sessionId: 'child', key, offset: 0, length: 3 }],
+      ] as const;
+      fake.pushBatch({
+        messages: await Promise.all(
+          inputs.map(async ([method, params], index) => ({
+            jsonrpc: '2.0',
+            id: `diff-${index}`,
+            method,
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 5000,
+            params: await encryptCodeCollabV2RpcPayload(owner, params),
+          }))
+        ),
+        nextOffset: '1',
+        cursor: '1',
+        upToDate: true,
+      });
+      await server.start();
+      try {
+        await fake.waitForAppendedCount(2);
+        for (const entry of fake.appended) {
+          const response = entry.value as {
+            method: string;
+            result?: CodeCollabV2RpcContentEnvelope;
+            error?: { code: string };
+          };
+          if (owner === 'wrong-owner') {
+            expect(response.error?.code).toBe('permission_denied');
+            expect(response.result).toBeUndefined();
+          } else {
+            const expected = response.method === inputs[0][0] ? manifest : blob;
+            expect(response.error).toBeUndefined();
+            expect(JSON.stringify(response)).not.toContain('SYNTHETIC_PRIVATE_BYTES');
+            expect(measured).toContain(
+              new TextEncoder().encode(JSON.stringify(response)).byteLength
+            );
+            expect(await decryptCodeCollabV2RpcPayload(response.result!, owner)).toEqual(expected);
+          }
+        }
+      } finally {
+        server.stop();
+      }
+    }
+  );
 
   it.each(['session-parent', 'wrong-owner'])(
     'authorizes and encrypts file download chunks (owner=%s)',

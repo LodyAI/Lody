@@ -65,6 +65,20 @@ test('All Changes starts collapsed and opens deferred code on demand', async ({ 
   await expect(page.locator('diffs-container')).toHaveCount(1);
 });
 
+test('remote hunks render without bodies and hydrate full context only when expanded', async ({
+  page,
+}) => {
+  await page.goto('/iframe.html?id=sessions-conversationdiffpanel--remote-hunks&viewMode=story');
+  const file = page.locator('[data-diff-path="src/remote-large.ts"]');
+  await expect(file.locator('pre')).toContainText('changed1000', { timeout: 30_000 });
+  const bytes = page.getByLabel('Transferred blob bytes');
+  await expect(bytes).toHaveText('0');
+  await file.locator('[data-expand-button]').first().click();
+  await expect(bytes).not.toHaveText('0');
+  await expect(file.locator('pre')).toContainText('value996');
+  await expect(file.locator('[data-error-wrapper]')).toHaveCount(0);
+});
+
 test('provider-side preparsed large diff remains responsive while scrolling', async ({ page }) => {
   test.setTimeout(60_000);
 

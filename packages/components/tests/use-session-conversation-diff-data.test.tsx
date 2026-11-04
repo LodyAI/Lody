@@ -31,6 +31,48 @@ afterEach(() => {
 });
 
 describe('useSessionConversationDiffData', () => {
+  it('cancels hidden page sequences without publishing their late result and permits reopening', async () => {
+    const held = createDeferred<Awaited<ReturnType<SessionFileProvider['getDiff']>>>();
+    let signal: AbortSignal | undefined;
+    const provider = {
+      ...createDiffProvider(async (_path, _turn, _file, options) => {
+        signal = options?.signal;
+        return held.promise;
+      }),
+      supportsCancellableDiffReads: true,
+    };
+    let state: ReturnType<typeof useSessionConversationDiffData> | undefined;
+    const onUpdate = (next: ReturnType<typeof useSessionConversationDiffData>) => {
+      state = next;
+    };
+    render(<DiffDataHarness fileProvider={provider} enabled onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(signal?.aborted).toBe(false);
+    rerender(<DiffDataHarness fileProvider={provider} enabled={false} onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(signal?.aborted).toBe(true);
+    held.resolve({
+      status: 'ready',
+      path: 'README.md',
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'late' },
+    });
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['README.md']).toBeUndefined();
+    const recovered = createDiffProvider(async (path) => ({
+      status: 'ready',
+      path,
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'reopened' },
+    }));
+    rerender(<DiffDataHarness fileProvider={recovered} enabled onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['README.md']).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'reopened' },
+    });
+  });
+
   it('retains an immutable turn snapshot while its provider is rebuilt', async () => {
     const paths = ['immutable.ts'];
     const checkpoint = {
@@ -220,6 +262,7 @@ function createDeferred<T>(): {
 
 function DiffDataHarness({
   fileProvider,
+  enabled = true,
   mode = 'base',
   filePaths = README_PATHS,
   loadFilePaths = README_PATHS,
@@ -229,6 +272,7 @@ function DiffDataHarness({
   onUpdate,
 }: {
   readonly fileProvider: SessionFileProvider;
+  readonly enabled?: boolean;
   readonly mode?: SessionConversationDiffMode;
   readonly filePaths?: string[];
   readonly loadFilePaths?: string[];
@@ -247,6 +291,7 @@ function DiffDataHarness({
     fileDiffs,
     fileProvider,
     allChangesScope,
+    enabled,
   });
 
   useEffect(() => {

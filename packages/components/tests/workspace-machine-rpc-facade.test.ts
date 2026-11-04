@@ -26,6 +26,63 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('negotiates blob cache persistence by plane and protects Guest diff reads without plaintext fallback', async () => {
+    for (const [plane, protectedContent, supported, persist] of [
+      ['local', false, true, false],
+      ['cloud', false, true, true],
+      ['cloud', true, true, false],
+      ['cloud', false, false, true],
+    ] as const) {
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent,
+        protectedCodeCollabRole: () => 'read',
+        getMachineProtocolCapabilities: async () =>
+          supported ? { codeCollabDiffBlobs: 1 } : undefined,
+        targetRouter: {
+          getPlaneForMachine: () => plane,
+          resolvePlaneForMachine: async () => plane,
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Plaintext fallback opened.');
+        },
+        requestEncryptedFeature: async (request) => {
+          expect(request.ownerSessionId).toBe('parent');
+          expect(request.params).toHaveProperty('sessionId', sessionId);
+          if (request.method === 'code-collab/open-diff-manifest')
+            return { ok: true, result: { status: 'ok', entries: [], nextCursor: null } };
+          if (request.method === 'code-collab/read-blob')
+            return {
+              ok: true,
+              result: { offset: 0, length: 0, totalBytes: 0, encoding: 'gzip-base64', data: '' },
+            };
+          throw new Error('Unexpected action.');
+        },
+      });
+      expect(await facade.getDiffBlobTransportOptions(remoteMachineId)).toEqual({
+        supported,
+        persist,
+        scope: workspaceId,
+      });
+      if (protectedContent) {
+        expect(
+          await facade.requestCodeCollabOpenDiffManifest(
+            remoteMachineId,
+            { sessionId, path: 'a.ts' },
+            { ownerSessionId: 'parent' }
+          )
+        ).toEqual({ status: 'ok', entries: [], nextCursor: null });
+        expect(
+          await facade.requestCodeCollabReadBlob(
+            remoteMachineId,
+            { sessionId, key: `sha256:${'1'.repeat(64)}`, offset: 0, length: 100 },
+            { ownerSessionId: 'parent' }
+          )
+        ).toMatchObject({ offset: 0, length: 0, totalBytes: 0 });
+      }
+    }
+  });
+
   it('retrieves every remote wait page using a separately authorized cursor', async () => {
     const claims: unknown[] = [];
     const uninstall = installCloudHttpPort({
@@ -1473,7 +1530,7 @@ describe('encrypted remote files from a browser or mobile device', () => {
     });
   });
 
-  it('refuses Guest writes and diffs before signing, while reads stay available', async () => {
+  it('refuses Guest writes and legacy diff actions before signing, while reads stay available', async () => {
     let role: 'read' | 'write' = 'write';
     const machine = encryptedMachine({ 'src/app.ts': 'one\n' });
     const facade = encryptedFacade(machine, () => role);
@@ -1493,8 +1550,7 @@ describe('encrypted remote files from a browser or mobile device', () => {
       status: 'error',
       code: 'permission_denied',
       retryable: false,
-      message:
-        'Guests have read-only file access: saving, comparing changes, loading folders and change history are unavailable.',
+      message: 'Your workspace role cannot perform this file action.',
     };
     expect(save).toEqual(denied);
     expect(

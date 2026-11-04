@@ -875,6 +875,8 @@ export class MessageHandler {
   private filePreviewService: FilePreviewService;
   private encryptedFileReader?: FilePreviewService;
   private encryptedCodeCollabReader?: CodeCollabV2Service;
+  private diffBlobReader!: CodeCollabV2Service;
+  private diffBlobStoreReader?: CodeCollabV2DiffStore;
 
   /**
    * Get a logger with session context. Caches loggers per session for efficiency.
@@ -3070,6 +3072,8 @@ export class MessageHandler {
           fileIndex: state.fileIndex,
           updatedAtMs: state.updatedAtMs,
           reconcileRemote: state.reconcileRemote,
+          resetDiffGenerations: state.resetDiffGenerations,
+          bumpDiffPaths: state.bumpDiffPaths,
         });
         state.signal?.throwIfAborted();
         if (state.persistAllChangesDiffStats && state.allChangesDiffStats) {
@@ -3138,11 +3142,14 @@ export class MessageHandler {
           : { ok: false, code: resolved.code, message: resolved.message };
       },
     });
+    this.diffBlobStoreReader = new CodeCollabV2DiffStore(this.workspaceId, { readOnly: true });
+    this.diffBlobReader = new CodeCollabV2Service({
+      diffStore: this.diffBlobStoreReader,
+      readOnly: true,
+      resolveWorkspace: this.resolveEncryptedCodeCollabV2Workspace,
+    });
     if (config.encryptedWorkspace) {
-      this.encryptedCodeCollabReader = new CodeCollabV2Service({
-        readOnly: true,
-        resolveWorkspace: this.resolveEncryptedCodeCollabV2Workspace,
-      });
+      this.encryptedCodeCollabReader = this.diffBlobReader;
       this.encryptedFileReader = new FilePreviewService({
         allowGitDiscovery: false,
         canDownloadLargeFiles,
@@ -3737,6 +3744,10 @@ export class MessageHandler {
         openCodeCollabText: async (request) => await codeReader.openText(request),
         refreshCodeCollabText: async (request) => await codeReader.refreshText(request),
         saveCodeCollabText: async (request) => await this.codeCollabV2Service.saveText(request),
+        openCodeCollabDiffManifest: async (request, context) =>
+          await this.diffBlobReader.openDiffManifest(request, context),
+        readCodeCollabBlob: async (request, context) =>
+          await this.diffBlobReader.readBlob(request, context),
         openCodeCollabCurrentDiff: async (request) =>
           await this.codeCollabV2Service.openCurrentDiff(request),
         openCodeCollabAllChangesDiff: async (request) =>
@@ -7377,6 +7388,12 @@ export class MessageHandler {
       case 'code-collab/save-text':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.saveText(request.params);
+      case 'code-collab/open-diff-manifest':
+        await assertOwner(request.params.sessionId as SessionId);
+        return await this.diffBlobReader.openDiffManifest(request.params);
+      case 'code-collab/read-blob':
+        await assertOwner(request.params.sessionId as SessionId);
+        return await this.diffBlobReader.readBlob(request.params);
       case 'code-collab/open-current-diff':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.openCurrentDiff(request.params);
@@ -10940,7 +10957,7 @@ export class MessageHandler {
     this.machineRpcServer?.stop();
     this.encryptedQueryServer?.stop();
     this.sessionDispatchWatcher.stop();
-    this.encryptedCodeCollabReader?.dispose();
+    this.diffBlobReader?.dispose();
     this.codeCollabV2Service.dispose();
     for (const handle of this.sessionLifecycleWatchHandles) handle.unsubscribe();
     this.sessionLifecycleWatchHandles = [];
@@ -10969,9 +10986,22 @@ export class MessageHandler {
       .filter((p): p is Promise<void> => p !== null);
     await Promise.all(inFlightPromises);
     await this.drainCodeCollabTurnPersistenceForCleanup();
-    await this.codeCollabV2DiffStore.close();
-    await this.previewService.closeAllActiveTunnelsForCleanup('Message handler cleanup');
-    await this.sessionManager.cleanUp();
+    const cleanupErrors: unknown[] = [];
+    for (const close of [
+      async () => await this.diffBlobStoreReader?.close(),
+      async () => await this.codeCollabV2DiffStore.close(),
+      async () =>
+        await this.previewService.closeAllActiveTunnelsForCleanup('Message handler cleanup'),
+      async () => await this.sessionManager.cleanUp(),
+    ]) {
+      try {
+        await close();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (cleanupErrors.length)
+      throw new AggregateError(cleanupErrors, 'Message handler cleanup failed.');
   }
 
   private async buildNotificationPresentation(

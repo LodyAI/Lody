@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState, type ComponentProps } from 'react';
+import { useMemo, useState, type ComponentProps } from 'react';
+import { gzipSync } from 'fflate';
+import { DiffBlobCache } from '@/lib/diff-blob-cache';
+import { manifestEntryToDiff, readDiffBlob } from '@/lib/diff-blob-client';
 import { useTranslation } from 'react-i18next';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
@@ -137,3 +140,83 @@ export const AllChangesScopeSwitch: Story = {
   render: (args) => <ScopedAllChangesHarness {...args} />,
 };
 export const Hidden: Story = { args: { active: false } };
+
+// Real partial-metadata -> panel -> Pierre expansion, with counted synthetic transport bytes.
+function RemoteHunksHarness(args: ComponentProps<typeof SessionConversationDiffPanel>) {
+  const [transferred, setTransferred] = useState(0);
+  const remoteProvider = useMemo(() => {
+    const cache = new DiffBlobCache();
+    const lines = Array.from(
+      { length: 2000 },
+      (_, i) => `export const value${i} = "${'x'.repeat(120)}";`
+    );
+    const oldText = lines.join('\n') + '\n';
+    const newText = oldText.replace('value1000 =', 'changed1000 =');
+    const patch =
+      '--- src/remote-large.ts\n+++ src/remote-large.ts\n@@ -998,7 +998,7 @@\n' +
+      lines
+        .slice(997, 1004)
+        .map((line, i) =>
+          i === 3 ? `-${line}\n+${line.replace('value1000 =', 'changed1000 =')}\n` : ` ${line}\n`
+        )
+        .join('');
+    const provider = createFakeSessionFileProvider({});
+    provider.getDiff = async (_path, _turn, _file, options) => {
+      const bodies = new Map<string, Uint8Array>();
+      const describe = async (text: string) => {
+        const bytes = new TextEncoder().encode(text);
+        const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+        const key = `sha256:${Array.from(hash, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+        bodies.set(key, bytes);
+        return { key, rawBytes: bytes.length, format: { encoding: 'utf8' as const } };
+      };
+      const entry = {
+        path: 'src/remote-large.ts',
+        status: 'ok' as const,
+        base: await describe(oldText),
+        head: await describe(newText),
+        hunks: patch,
+      };
+      return manifestEntryToDiff(entry, (blob) =>
+        readDiffBlob({
+          blob,
+          cache,
+          scope: 'synthetic-remote',
+          persist: false,
+          signal: options?.signal,
+          read: async (key, offset, length) => {
+            const bytes = bodies.get(key);
+            if (!bytes) throw new Error('Synthetic blob missing.');
+            const chunk = bytes.subarray(offset, offset + length);
+            setTransferred((total) => total + chunk.length);
+            let binary = '';
+            for (const byte of gzipSync(chunk)) binary += String.fromCharCode(byte);
+            return {
+              offset,
+              length: chunk.length,
+              totalBytes: bytes.length,
+              encoding: 'gzip-base64',
+              data: btoa(binary),
+            };
+          },
+        })
+      );
+    };
+    return provider;
+  }, []);
+  return (
+    <>
+      <output aria-label="Transferred blob bytes">{transferred}</output>
+      <SessionConversationDiffPanel {...args} fileProvider={remoteProvider} />
+    </>
+  );
+}
+export const RemoteHunks: Story = {
+  args: {
+    sessionId: 'synthetic-remote-hunk-session' as SessionId,
+    turnId: 'remote-hunks',
+    filePaths: ['src/remote-large.ts'],
+    fileDiffs: [{ filePath: 'src/remote-large.ts', add: 1, del: 1 }],
+  },
+  render: (args) => <RemoteHunksHarness {...args} />,
+};

@@ -1,5 +1,10 @@
-// @vitest-environment jsdom
-
+import { createHash, webcrypto } from 'node:crypto';
+import { Blob as NodeBlob } from 'node:buffer';
+import { gzipSync } from 'node:zlib';
+import { IDBFactory } from 'fake-indexeddb';
+import { DiffBlobCache, DIFF_BLOB_CACHE_DB } from '../src/lib/diff-blob-cache';
+import { readDiffBlob } from '../src/lib/diff-blob-client';
+import type { CodeCollabDiffManifestEntry, CodeCollabDiffBlobKey } from '@lody/shared';
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import type {
@@ -162,6 +167,264 @@ function createRuntime(
     ...overrides,
   };
 }
+
+describe('Content-addressed diff transport', () => {
+  it('loads bodies only on demand, reuses exact content, and refreshes only a changed generation', async () => {
+    vi.stubGlobal('crypto', webcrypto);
+    vi.stubGlobal('Blob', NodeBlob);
+    try {
+      const textState = createCodeCollabSessionFileProviderTextState();
+      const contents = new Map<CodeCollabDiffBlobKey, Buffer>();
+      const blob = (text: string) => {
+        const bytes = Buffer.from(text);
+        const key =
+          `sha256:${createHash('sha256').update(bytes).digest('hex')}` as CodeCollabDiffBlobKey;
+        contents.set(key, bytes);
+        return { key, rawBytes: bytes.length, format: { encoding: 'utf8' as const } };
+      };
+      const old = blob('原始🙂\r\n');
+      let current = blob('第一🙂\r\n');
+      const other = blob('other\n');
+      const entries = (): CodeCollabDiffManifestEntry[] => [
+        { path: 'a.ts', status: 'ok', base: old, head: current, add: 1, del: 1 },
+        { path: 'b.ts', status: 'ok', base: null, head: other, add: 1, del: 0 },
+      ];
+      let sentBytes = 0;
+      const manifestRequests: (string | undefined)[] = [];
+      const runtime = createRuntime({
+        diffBlobTransportOptions: async () => ({
+          supported: true,
+          scope: 'workspace',
+          persist: false,
+        }),
+        openDiffManifest: async (request) => {
+          manifestRequests.push(request.path);
+          return {
+            status: 'ok',
+            base: 'base',
+            entries: entries().filter(
+              (entry) => request.path === undefined || entry.path === request.path
+            ),
+            nextCursor: null,
+          };
+        },
+        readDiffBlob: async (key, offset) => {
+          const bytes = contents.get(key);
+          if (!bytes) throw new Error('Unknown blob.');
+          const page = bytes.subarray(offset, offset + 3);
+          sentBytes += page.length;
+          return {
+            offset,
+            length: page.length,
+            totalBytes: bytes.length,
+            encoding: 'gzip-base64',
+            data: gzipSync(page).toString('base64'),
+          };
+        },
+      });
+      const options = {
+        runtime,
+        textState,
+        allChanges: {
+          'a.ts': { diff: [1, 1] as [number, number] },
+          'b.ts': { diff: [1, 0] as [number, number] },
+        },
+        generations: { 'a.ts': '1', 'b.ts': '1' },
+      };
+      const first = new CodeCollabSessionFileProvider(options);
+      const manifest = await first.getAllChangesDiff();
+      expect(manifest).toMatchObject({
+        status: 'ready',
+        entries: [
+          { path: 'a.ts', diff: { status: 'deferred' } },
+          { path: 'b.ts', diff: { status: 'deferred' } },
+        ],
+      });
+      expect(sentBytes).toBe(0);
+      expect(await first.getDiff('a.ts')).toMatchObject({
+        status: 'ready',
+        oldSnapshot: { text: '原始🙂\r\n' },
+        newSnapshot: { text: '第一🙂\r\n' },
+      });
+      const firstBytes = old.rawBytes + current.rawBytes;
+      expect(sentBytes).toBe(firstBytes);
+      await first.getDiff('a.ts');
+      expect(sentBytes).toBe(firstBytes);
+      current = blob('第二🙂\r\n');
+      const next = new CodeCollabSessionFileProvider({
+        ...options,
+        generations: { 'a.ts': '2', 'b.ts': '1' },
+      });
+      const refreshed = await next.getAllChangesDiff();
+      expect(refreshed).toMatchObject({
+        status: 'ready',
+        entries: [{ path: 'a.ts' }, { path: 'b.ts' }],
+      });
+      expect(manifestRequests).toEqual([undefined, 'a.ts']);
+      const changed = await next.getDiff('a.ts');
+      expect(changed).toMatchObject({ status: 'ready', newSnapshot: { text: '第二🙂\r\n' } });
+      expect(sentBytes).toBe(firstBytes + current.rawBytes);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('persists ordinary remote blobs within a byte bound, while protected reads stay in memory', async () => {
+    const factory = new IDBFactory();
+    vi.stubGlobal('indexedDB', factory);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const first = new DiffBlobCache();
+      const bytes = new Uint8Array(10 * 1024 * 1024).fill(17);
+      for (let i = 0; i < 7; i++) {
+        vi.setSystemTime(i + 1);
+        await first.put('ordinary', `blob-${i}`, bytes, true);
+      }
+      const reopened = new DiffBlobCache();
+      expect(await reopened.get('ordinary', 'blob-0', true)).toBeUndefined();
+      const retained = await reopened.get('ordinary', 'blob-1', true);
+      expect(retained?.byteLength).toBe(bytes.byteLength);
+      expect(retained?.[retained.length - 1]).toBe(17);
+      const secret = new Uint8Array([21, 22, 23]);
+      await first.put('protected', 'secret', secret, false);
+      expect(await first.get('protected', 'secret', false)).toEqual(secret);
+      first.clear();
+      expect(await first.get('protected', 'secret', false)).toBeUndefined();
+      expect(await reopened.get('protected', 'secret', true)).toBeUndefined();
+      expect(await reopened.get('another-workspace', 'blob-1', true)).toBeUndefined();
+      expect((await factory.databases()).map((row) => row.name)).toEqual([DIFF_BLOB_CACHE_DB]);
+      vi.stubGlobal('indexedDB', undefined);
+      await first.put('ordinary', 'memory-after-disk-failure', secret, true);
+      expect(await first.get('ordinary', 'memory-after-disk-failure', true)).toEqual(secret);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rejects corrupt cached content, verifies its replacement, and stops paging after cancellation', async () => {
+    vi.stubGlobal('crypto', webcrypto);
+    vi.stubGlobal('Blob', NodeBlob);
+    try {
+      const bytes = Buffer.from('合成🙂content');
+      const key =
+        `sha256:${createHash('sha256').update(bytes).digest('hex')}` as CodeCollabDiffBlobKey;
+      const blob = { key, rawBytes: bytes.length, format: { encoding: 'utf8' as const } };
+      const cache = new DiffBlobCache();
+      await cache.put('workspace', key, new Uint8Array(bytes.length).fill(1), false);
+      let transferred = 0;
+      const read = async (_key: string, offset: number) => {
+        const chunk = bytes.subarray(offset, offset + 3);
+        transferred += chunk.length;
+        return {
+          offset,
+          length: chunk.length,
+          totalBytes: bytes.length,
+          encoding: 'gzip-base64' as const,
+          data: gzipSync(chunk).toString('base64'),
+        };
+      };
+      const request = { blob, scope: 'workspace', persist: false, cache, read };
+      expect(await readDiffBlob(request)).toEqual(new Uint8Array(bytes));
+      expect(transferred).toBe(bytes.length);
+      await readDiffBlob(request);
+      expect(transferred).toBe(bytes.length);
+      cache.clear();
+      transferred = 0;
+      const controller = new AbortController();
+      await expect(
+        readDiffBlob({
+          ...request,
+          signal: controller.signal,
+          read: async (...args) => {
+            const page = await read(...args);
+            controller.abort();
+            return page;
+          },
+        })
+      ).rejects.toThrow();
+      expect(transferred).toBe(3);
+      expect(await cache.get('workspace', key, false)).toBeUndefined();
+      expect(await readDiffBlob(request)).toEqual(new Uint8Array(bytes));
+      cache.clear();
+      expect(
+        await readDiffBlob({
+          ...request,
+          read: async (...args) => {
+            const page = await read(...args);
+            cache.clear();
+            return page;
+          },
+        })
+      ).toEqual(new Uint8Array(bytes));
+      expect(await cache.get('workspace', key, false)).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('opens a partial remote patch without blob traffic and hydrates verified complete files on expansion', async () => {
+    vi.stubGlobal('crypto', webcrypto);
+    vi.stubGlobal('Blob', NodeBlob);
+    try {
+      const before =
+        Array.from({ length: 100 }, (_, i) => (i === 50 ? 'before' : `line ${i}`)).join('\n') +
+        '\n';
+      const after = before.replace('before', 'after');
+      const data = new Map<CodeCollabDiffBlobKey, Buffer>();
+      const blob = (text: string) => {
+        const bytes = Buffer.from(text);
+        const key =
+          `sha256:${createHash('sha256').update(bytes).digest('hex')}` as CodeCollabDiffBlobKey;
+        data.set(key, bytes);
+        return { key, rawBytes: bytes.length, format: { encoding: 'utf8' as const } };
+      };
+      const entry: CodeCollabDiffManifestEntry = {
+        path: 'a.ts',
+        status: 'ok',
+        base: blob(before),
+        head: blob(after),
+        hunks: '--- a.ts\n+++ a.ts\n@@ -50,3 +50,3 @@\n line 49\n-before\n+after\n line 51\n',
+      };
+      let sentBytes = 0;
+      const provider = new CodeCollabSessionFileProvider({
+        runtime: createRuntime({
+          diffBlobTransportOptions: async () => ({
+            supported: true,
+            scope: 'workspace',
+            persist: false,
+          }),
+          openDiffManifest: async () => ({ status: 'ok', entries: [entry], nextCursor: null }),
+          readDiffBlob: async (key, offset) => {
+            const bytes = data.get(key);
+            if (!bytes) throw new Error('Unknown blob.');
+            const chunk = bytes.subarray(offset);
+            sentBytes += chunk.length;
+            return {
+              offset,
+              length: chunk.length,
+              totalBytes: bytes.length,
+              encoding: 'gzip-base64',
+              data: gzipSync(chunk).toString('base64'),
+            };
+          },
+        }),
+      });
+      const partial = await provider.getDiff('a.ts');
+      expect(partial.status).toBe('ready-parsed');
+      if (partial.status !== 'ready-parsed' || !partial.loadDiffFiles)
+        throw new Error('Expected a partial diff.');
+      expect(partial.fileDiff.isPartial).toBe(true);
+      expect(sentBytes).toBe(0);
+      const loaded = await partial.loadDiffFiles(partial.fileDiff);
+      expect(loaded.oldFile?.contents).toBe(before);
+      expect(loaded.newFile.contents).toBe(after);
+      expect(sentBytes).toBe(Buffer.byteLength(before) + Buffer.byteLength(after));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe('CodeCollabSessionFileProvider v2', () => {
   it('marks an external preview readonly so the editor cannot offer an impossible save', async () => {

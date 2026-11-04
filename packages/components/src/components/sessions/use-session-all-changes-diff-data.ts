@@ -139,6 +139,9 @@ export function useSessionAllChangesDiffData({
       return undefined;
     }
     let cancelled = false;
+    const controller = fileProvider.supportsCancellableDiffReads
+      ? new AbortController()
+      : undefined;
     const getAllChangesDiff = fileProvider.getAllChangesDiff.bind(fileProvider);
 
     const publish = (
@@ -167,7 +170,9 @@ export function useSessionAllChangesDiffData({
     const run = async (): Promise<void> => {
       const focus = focusPathRef.current ?? undefined;
       const requestScope = scope === 'branch' ? undefined : scope;
-      let result = await getAllChangesDiff(focus, requestScope);
+      let result = await (controller
+        ? getAllChangesDiff(focus, requestScope, controller.signal)
+        : getAllChangesDiff(focus, requestScope));
       if (
         !cancelled &&
         result.status === 'unavailable' &&
@@ -175,7 +180,9 @@ export function useSessionAllChangesDiffData({
       ) {
         await delay(RETRY_DELAY_MS);
         if (cancelled) return;
-        result = await getAllChangesDiff(focus, requestScope);
+        result = await (controller
+          ? getAllChangesDiff(focus, requestScope, controller.signal)
+          : getAllChangesDiff(focus, requestScope));
       }
       if (cancelled) return;
 
@@ -244,6 +251,7 @@ export function useSessionAllChangesDiffData({
     });
     return () => {
       cancelled = true;
+      controller?.abort();
     };
     // Refetch when the provider is rebuilt (file-index/list changed → D4), the path set or
     // the comparison scope changes.

@@ -1,4 +1,10 @@
 import {
+  CodeCollabOpenDiffManifestRequestSchema,
+  CodeCollabOpenDiffManifestResponseSchema,
+  CodeCollabReadBlobRequestSchema,
+  CodeCollabReadBlobResponseSchema,
+} from './code-collab-diff';
+import {
   AndroidEmulatorCommandSchema,
   AndroidEmulatorRequestSchema,
   AndroidEmulatorResponseSchema,
@@ -237,6 +243,14 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('code-collab/save-text'),
     params: CodeCollabV2SaveTextRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('code-collab/open-diff-manifest'),
+    params: CodeCollabOpenDiffManifestRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('code-collab/read-blob'),
+    params: CodeCollabReadBlobRequestSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('code-collab/open-current-diff'),
@@ -515,6 +529,8 @@ export const LocalMachineRpcResultSchema = z.union([
   CodeCollabV2OpenTextOkSchema,
   CodeCollabV2RefreshTextResponseSchema,
   CodeCollabV2SaveTextResponseSchema,
+  CodeCollabOpenDiffManifestResponseSchema,
+  CodeCollabReadBlobResponseSchema,
   CodeCollabV2OpenCurrentDiffResponseSchema,
   CodeCollabV2OpenAllChangesDiffResponseSchema,
   CodeCollabV2OpenTurnDiffResponseSchema,

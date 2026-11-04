@@ -193,6 +193,7 @@ describe('MessageHandler machine registration', () => {
       operationInbox: 2,
       providerRateLimitsRefresh: 1,
       codeCollabAllChangesScope: 1,
+      codeCollabDiffBlobs: 1,
       magpieImport: 1,
       dshProviderIsolation: 1,
       terminalNotifications: 1,
