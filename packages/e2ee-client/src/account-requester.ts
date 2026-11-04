@@ -368,12 +368,27 @@ export function makePortableAccountPairingApprover(input: {
     readonly delays?: readonly number[];
     readonly sleep?: (ms: number) => Effect.Effect<void>;
   };
+  /** Bounded local diagnostics for failures no caller awaits (a background release). */
+  diagnostics?: (scope: string, cause: unknown) => void;
 }): () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown> {
-  return Effect.fnUntraced(function* () {
+  const remember = (scope: string) => (cause: unknown) =>
+    Effect.sync(() => {
+      try {
+        input.diagnostics?.(scope, cause);
+      } catch {
+        /* Diagnostics never fail the caller. */
+      }
+    });
+  const releaseQuietly = (session: AccountPairingApproverSession, scope: string) =>
+    session.release ? session.release().pipe(Effect.catch(remember(scope))) : Effect.void;
+  // Sessions opened before a later workspace fails are not returned, so the caller
+  // cannot release them: release them here on any failure.
+  const list = Effect.fnUntraced(function* (opened: AccountPairingApproverSession[]) {
     const result: AccountPairingApproverWorkspace[] = [];
     for (const hint of input.workspaces()) {
       const session = yield* input.session(hint.workspaceId);
       if (!session) continue;
+      opened.push(session);
       const approval = session.accountApproval;
       const { workspaceId } = hint;
       result.push({
@@ -402,7 +417,8 @@ export function makePortableAccountPairingApprover(input: {
           }),
         invitation: (record) => approval.invitation(record),
         access: () => approval.access(),
-        release: () => (session.release ? Effect.ignore(session.release()) : Effect.void),
+        // Failures reach the workflow, which records them; a failed close stays retryable.
+        release: () => session.release?.() ?? Effect.void,
         // Approval returns first; the session's own key round sends the new device the
         // current epoch key, as on the desktop. Each attempt ends with mailbox evidence;
         // anything short of `delivered` is retried on the bounded due schedule. Every
@@ -436,7 +452,7 @@ export function makePortableAccountPairingApprover(input: {
                 Effect.orElseSucceed(() => null)
               );
             const release = (current: AccountPairingApproverSession) =>
-              current.release ? Effect.ignore(current.release()) : Effect.void;
+              releaseQuietly(current, 'account-pairing-key-delivery-release');
             const attempt = (current: AccountPairingApproverSession) =>
               Effect.gen(function* () {
                 const round = yield* Effect.result(current.keyRound());
@@ -478,6 +494,16 @@ export function makePortableAccountPairingApprover(input: {
     }
     return result;
   });
+  return () => {
+    const opened: AccountPairingApproverSession[] = [];
+    return list(opened).pipe(
+      Effect.onError(() =>
+        Effect.forEach(opened, (session) => releaseQuietly(session, 'account-pairing-release'), {
+          discard: true,
+        })
+      )
+    );
+  };
 }
 
 /**

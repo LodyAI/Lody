@@ -630,7 +630,18 @@ export function makeAccountPairing(input: {
         Effect.ensuring(
           Effect.forEach(
             listed,
-            (workspace) => (workspace.release ? Effect.ignore(workspace.release()) : Effect.void),
+            (workspace) =>
+              workspace.release
+                ? workspace
+                    .release()
+                    .pipe(
+                      Effect.catch((cause) =>
+                        Effect.sync(() =>
+                          rememberDesktopE2eeFailure('account-pairing-release', cause)
+                        )
+                      )
+                    )
+                : Effect.void,
             { discard: true }
           )
         )

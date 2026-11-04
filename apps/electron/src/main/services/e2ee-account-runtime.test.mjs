@@ -3054,6 +3054,41 @@ void test(
   }
 )
 void test(
+  'a key delivery round already in flight never reopens a workspace reset during it',
+  { timeout: 5000 },
+  async () => {
+    let rounds = 0
+    const f = await memberApprovalFixture(() =>
+      Effect.sync(() => {
+        rounds += 1
+      })
+    )
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    let opens = 0
+    const owner = f.owner()
+    const open = owner.host.open
+    owner.host.open = (...args) => {
+      opens += 1
+      return open(...args)
+    }
+    // The round has started and waits for its cloud client when the reset arrives.
+    f.holdCloud()
+    f.ipc.trackKeyDelivery('A', 'team', `account-device-${randomUUID()}`, approvalDevice)
+    await f.cloudEntered.promise
+    const inFlight = f.ipc.keyDeliveries.get('A\nteam').running
+    await f.ipc
+      .resetIdentity({ workspaceId: 'team', resetId: randomUUID(), confirm: true })
+      .catch(() => {})
+    f.cloudGate.resolve()
+    await inFlight
+    assert.equal(opens, 0)
+    assert.equal(rounds, 0)
+    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.deepEqual(clock.pending, [])
+  }
+)
+void test(
   'a failed key delivery stays visible by code and the next due periodic poll retries it until delivered',
   { timeout: 5000 },
   async () => {

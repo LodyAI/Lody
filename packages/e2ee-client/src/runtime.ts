@@ -229,14 +229,27 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           // closed here. The last holder's release closes it, so the workspace drains.
           const held = lease.readers.has('account-approval');
           if (held) approvalHolds.set(lease, (approvalHolds.get(lease) ?? 0) + 1);
-          let released = false;
+          // Done only after the reader's close succeeded: a failed close rejects and
+          // stays retryable instead of leaving the reader open unnoticed.
+          let counted = held;
+          let released = !held;
           const release = async () => {
-            if (released || !held) return;
-            released = true;
-            const left = (approvalHolds.get(lease) ?? 1) - 1;
-            approvalHolds.set(lease, left);
-            if (left > 0 || entry !== lease || !lease.readers.has('account-approval')) return;
+            if (released) return;
+            if (counted) {
+              counted = false;
+              approvalHolds.set(lease, (approvalHolds.get(lease) ?? 1) - 1);
+            }
+            // A close that failed earlier left the lease closing: retry that close.
+            if (
+              (approvalHolds.get(lease) ?? 0) > 0 ||
+              entry !== lease ||
+              !(lease.readers.has('account-approval') || lease.closing)
+            ) {
+              released = true;
+              return;
+            }
             await runtime.close(workspaceId, accountId, 'account-approval');
+            released = true;
           };
           return {
             release,

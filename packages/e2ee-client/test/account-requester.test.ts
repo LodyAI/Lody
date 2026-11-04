@@ -248,4 +248,52 @@ describe('portable account pairing approver key delivery', () => {
       ['ended', 'e2ee_key_delivery_owner_changed'],
     ]);
   });
+
+  it('releases the sessions it already opened when a later workspace fails to list', async () => {
+    const rounds = { count: 0, released: 0 };
+    const exit = await Effect.runPromiseExit(
+      makePortableAccountPairingApprover({
+        workspaces: () => [
+          { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+          { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+        ],
+        session: (workspaceId) =>
+          workspaceId === 'w1'
+            ? Effect.succeed(approverSession(rounds))
+            : Effect.fail(new Error('synthetic approval session failure')),
+        appendRecord: () => Effect.void,
+      })()
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(rounds.released).toBe(1);
+  });
+
+  it('reports a failed release of a delivery session instead of dropping it', async () => {
+    const rounds = { count: 0 };
+    const failure = new Error('synthetic close failure');
+    const reported: [string, unknown][] = [];
+    let ended: () => void = () => {};
+    const done = new Promise<void>((resolve) => (ended = resolve));
+    const session = {
+      ...approverSession(rounds),
+      keyDeliveryEvidence: () => Effect.succeed('delivered'),
+      release: () => Effect.fail(failure),
+    };
+    const [workspace] = await Effect.runPromise(
+      makePortableAccountPairingApprover({
+        workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
+        session: () => Effect.succeed(session),
+        appendRecord: () => Effect.void,
+        onKeyDelivery: (event) => {
+          if (event.state === 'delivered' || event.state === 'ended') ended();
+        },
+        diagnostics: (scope, cause) => reported.push([scope, cause]),
+      })()
+    );
+    await Effect.runPromise(workspace!.deliverKeys!(new Uint8Array(32).fill(2), 'r1'));
+    await done;
+    expect(reported).toEqual([['account-pairing-key-delivery-release', failure]]);
+    // The workflow's own release reaches it as a failure to record, not a success.
+    expect(Exit.isFailure(await Effect.runPromiseExit(workspace!.release!()))).toBe(true);
+  });
 });

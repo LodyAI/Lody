@@ -260,6 +260,8 @@ export class E2eeIpc extends IpcService {
       again: boolean
       timer?: unknown
       autoRetries: number
+      /** Set when the slot is dropped: an in-flight round must not open or send. */
+      aborted?: boolean
     }
   >()
   private keyDeliverySlot(accountId: string, workspaceId: string) {
@@ -276,6 +278,7 @@ export class E2eeIpc extends IpcService {
     const key = `${accountId}\n${workspaceId}`
     const slot = this.keyDeliveries.get(key)
     if (!slot) return
+    slot.aborted = true
     if (slot.timer !== undefined) this.keyDeliveryTimers.clear(slot.timer)
     slot.timer = undefined
     this.keyDeliveries.delete(key)
@@ -386,6 +389,7 @@ export class E2eeIpc extends IpcService {
     const running = (async () => {
       // A request admitted during a round gets one follow-up pass; later ones wait for a poll.
       for (let pass = 0; pass < 2; pass++) {
+        if (slot.aborted) return
         slot.again = false
         const coveredEntries = [...slot.requests].filter(
           ([, delivery]) =>
@@ -416,7 +420,8 @@ export class E2eeIpc extends IpcService {
           evidence = await this.deliverMemberKeys(
             accountId,
             workspaceId,
-            new Set(covered.map((delivery) => delivery.device))
+            new Set(covered.map((delivery) => delivery.device)),
+            () => slot.aborted === true
           )
         } catch (cause) {
           this.pairingFailure = cause
@@ -487,19 +492,28 @@ export class E2eeIpc extends IpcService {
   /** One key round under a main-owned reader, so closing every window cannot stop it.
    * Ingests relay history first, runs the round for devices the local verified ledger
    * targets, then returns per-device evidence: 'delivered' or a retryable code. */
-  private async deliverMemberKeys(accountId: string, workspaceId: string, devices: Set<string>) {
+  private async deliverMemberKeys(
+    accountId: string,
+    workspaceId: string,
+    devices: Set<string>,
+    aborted: () => boolean = () => false
+  ) {
     const scope = this.memberScope(workspaceId)
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== accountId) throw new Error('e2ee_account_mismatch')
+    // A removed or reset workspace is never reopened by a round that started earlier;
+    // the check runs under the account lock, immediately before the open.
     await scope((owner) =>
-      owner.accountId === accountId
-        ? Effect.gen(function* () {
-            yield* owner.host.open(workspaceId)
-            const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
-            readers.set(KEY_DELIVERY_READER, (readers.get(KEY_DELIVERY_READER) ?? 0) + 1)
-            owner.readers.set(workspaceId, readers)
-          })
-        : Effect.fail(new Error('e2ee_account_mismatch'))
+      owner.accountId !== accountId
+        ? Effect.fail(new Error('e2ee_account_mismatch'))
+        : aborted()
+          ? Effect.fail(new Error('e2ee_key_delivery_aborted'))
+          : Effect.gen(function* () {
+              yield* owner.host.open(workspaceId)
+              const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
+              readers.set(KEY_DELIVERY_READER, (readers.get(KEY_DELIVERY_READER) ?? 0) + 1)
+              owner.readers.set(workspaceId, readers)
+            })
     )
     try {
       try {
@@ -516,6 +530,7 @@ export class E2eeIpc extends IpcService {
           targets.push(device)
         else evidence.set(device, KEY_DELIVERY_NOT_INGESTED)
       if (targets.length === 0) return evidence
+      if (aborted()) return evidence
       const credential = await scope((owner) => owner.bootstrap.deviceCredential(workspaceId))
       const mailbox = (signal: AbortSignal) =>
         cloud.client.mailbox({ workspaceId, credential }, signal)

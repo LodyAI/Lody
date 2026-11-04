@@ -1418,6 +1418,8 @@ const runtimeContext = {
   version: 2,
   kind: 'update_batch',
 } as const;
+let heldApproval: Awaited<ReturnType<NonNullable<typeof runtime.accountApproval>>> | undefined;
+let approvalReleaseResult: Promise<{ state: string; code?: string }> | undefined;
 export async function runtimeInvoke(action: string) {
   try {
     let value: unknown;
@@ -1486,6 +1488,20 @@ export async function runtimeInvoke(action: string) {
         value = { held, afterOne, afterAll: await open() };
         break;
       }
+      case 'approvalHold':
+        heldApproval = await runtime.accountApproval!();
+        value = true;
+        break;
+      case 'startApprovalRelease':
+        approvalReleaseResult = heldApproval!.release().then(
+          () => ({ state: 'released' }),
+          (error) => ({ state: 'failed', code: error.code })
+        );
+        value = true;
+        break;
+      case 'approvalReleaseResult':
+        value = await approvalReleaseResult;
+        break;
       case 'approvalSession':
         value = (await runtime.accountApproval!()).device;
         break;

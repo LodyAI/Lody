@@ -375,6 +375,94 @@ it.each(['chromium', 'webkit'] as const)(
 );
 
 it.each(['chromium', 'webkit'] as const)(
+  'a failed approval-reader close keeps the release retryable in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-approval-release-'));
+    let context: BrowserContext | undefined;
+    type Paused = Surface & { nativeBorrow: { entered: Promise<void>; release(): void } };
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      // Hold one native key operation so the reader's close cannot drain in budget.
+      await page.evaluate(() => {
+        const native = SubtleCrypto.prototype.encrypt;
+        let release!: () => void,
+          enter!: () => void,
+          held = false;
+        const entered = new Promise<void>((resolve) => (enter = resolve));
+        const released = new Promise<void>((resolve) => (release = resolve));
+        SubtleCrypto.prototype.encrypt = async function (algorithm, key, data) {
+          const aad = (algorithm as AesGcmParams).additionalData;
+          if (!held && aad && new TextDecoder().decode(aad).includes('installed-epoch-key')) {
+            held = true;
+            enter();
+            await released;
+          }
+          return native.call(this, algorithm, key, data);
+        };
+        (globalThis as Paused).nativeBorrow = { entered, release };
+      });
+      await page.evaluate(async () => {
+        await (globalThis as Surface).HostFixture.boot('create-or-open', true);
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      });
+      await good(page, 'prepare');
+      expect((await raw(page, 'approve')).ok).toBe(true);
+      await good(page, 'claim');
+      try {
+        // Only the approval holds the workspace.
+        await good(page, 'approvalHold');
+        await good(page, 'startReceive');
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.entered);
+        await good(page, 'startApprovalRelease');
+        expect((await raw(page, 'waitCloseBudget')).ok).toBe(true);
+        expect((await raw(page, 'advanceCloseBudget')).ok).toBe(true);
+        expect(await good(page, 'approvalReleaseResult')).toEqual({
+          state: 'failed',
+          code: 'close-incomplete',
+        });
+        // Not silently done: the workspace still has an unfinished close.
+        expect((await call(page, 'open')).reason).toBe('close-incomplete');
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.release());
+        await call(page, 'workResult');
+        // The same holder releases again; this time the close completes.
+        await good(page, 'startApprovalRelease');
+        expect(await good(page, 'approvalReleaseResult')).toEqual({ state: 'released' });
+        expect(await good(page, 'open')).toMatchObject({ deviceKind: 'personal' });
+      } finally {
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.release());
+        await raw(page, 'expireCloseWaiters');
+        await call(page, 'close');
+      }
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
   'runtime close retains native ownership and refuses a successor until actual drain in %s',
   async (engine) => {
     const directory = await mkdtemp(join(tmpdir(), 'lody-runtime-close-'));
