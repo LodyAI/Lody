@@ -138,6 +138,24 @@ describe('usage delivery', () => {
     expect([...stored.values()].reduce((a, b) => a + b, 0)).toBe(12500);
   });
 
+  it('delivers custom adapter costs without inventing prices for known model names', async () => {
+    const report = input(100, 'custom');
+    const usage = { inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 0 };
+    report.update.usage = { ...usage, costUSD: 0.75 };
+    report.update.modelUsage = {
+      'gpt-5.6': { ...usage, costUSD: 0.5 },
+      'gpt-5.5': { ...usage },
+    };
+    service.recordSessionUsageUpdate(report);
+    await service.flushSessionUsage('s');
+    expect(persisted[0]).toMatchObject({
+      cliType: 'custom',
+      usage: { ...usage, costUSD: 0.75 },
+      modelUsage: { 'gpt-5.6': { ...usage, costUSD: 0.5 }, 'gpt-5.5': usage },
+    });
+    expect(persisted[0]?.modelUsage?.['gpt-5.5'].costUSD).toBeUndefined();
+  });
+
   it('projects provider fields without losing token buckets, known costs or unknown costs', async () => {
     const report = input(100);
     report.update.usage.webSearchRequests = 2;
