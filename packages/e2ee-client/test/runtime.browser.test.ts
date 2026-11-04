@@ -325,6 +325,13 @@ it.each(['chromium', 'webkit'] as const)(
       expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });
       expect(await good(page, 'sealOldHint')).toEqual({ epoch: 1 });
       expect(await good(page, 'openBody')).toEqual([72, 105]);
+      // A key delivery's approval sessions never leak a reader: the last release
+      // closes the workspace the approval opened.
+      expect(await good(page, 'approvalRelease')).toEqual({
+        held: true,
+        afterOne: true,
+        afterAll: false,
+      });
       await good(page, 'close');
       await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
       await good(page, 'open');
@@ -344,6 +351,8 @@ it.each(['chromium', 'webkit'] as const)(
       await good(page, 'switchAccount');
       expect(await good(page, 'releaseGrant')).toEqual({ ok: false, reason: 'scope-mismatch' });
       expect((await call(page, 'seal')).reason).toBe('closed');
+      // After an account switch a delivery retry gets no approval session.
+      expect((await call(page, 'approvalSession')).ok).toBe(false);
       await good(page, 'restoreAccount');
       await good(page, 'close');
       expect((await call(page, 'open')).reason).toBe('closed');

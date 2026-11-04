@@ -2976,6 +2976,84 @@ void test(
   }
 )
 void test(
+  'a request admitted while the second delivery pass runs is still delivered by main without a poll',
+  { timeout: 5000 },
+  async () => {
+    // Each round waits for its own gate, so the test decides when each pass ends.
+    const gates = []
+    const entered = []
+    const f = await memberApprovalFixture(() =>
+      Effect.promise(() => {
+        const gate = deferredMember()
+        gates.push(gate)
+        entered.shift()?.resolve()
+        return gate.promise
+      })
+    )
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    const round = () => {
+      const signal = deferredMember()
+      entered.push(signal)
+      return signal.promise
+    }
+    const first = `account-device-${randomUUID()}`
+    const second = `account-device-${randomUUID()}`
+    const third = `account-device-${randomUUID()}`
+    let started = round()
+    f.ipc.trackKeyDelivery('A', 'team', first, approvalDevice)
+    await started
+    // Admitted during pass one: covered by the follow-up pass.
+    f.ipc.trackKeyDelivery('A', 'team', second, approvalDevice)
+    started = round()
+    gates[0].resolve()
+    await started
+    // Admitted during pass two, the last pass of this run.
+    f.ipc.trackKeyDelivery('A', 'team', third, approvalDevice)
+    gates[1].resolve()
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(keyDeliveryState(f, third).state, 'pending')
+    // Main scheduled it at once; firing that timer is the only step taken here.
+    assert.deepEqual(
+      clock.pending.map((timer) => timer.ms),
+      [0]
+    )
+    started = round()
+    clock.pending.shift().run()
+    await started
+    gates[2].resolve()
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    for (const requestId of [first, second, third])
+      assert.equal(keyDeliveryState(f, requestId).state, 'delivered')
+    assert.deepEqual(clock.pending, [])
+  }
+)
+void test(
+  'a workspace reset ends its pending key delivery so no timer reopens it',
+  { timeout: 5000 },
+  async () => {
+    let rounds = 0
+    const f = await memberApprovalFixture(() =>
+      Effect.suspend(() => {
+        rounds += 1
+        return Effect.fail(new Error('e2ee_management_retry'))
+      })
+    )
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    f.ipc.trackKeyDelivery('A', 'team', `account-device-${randomUUID()}`, approvalDevice)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(clock.pending.length, 1)
+    // The reset itself is outside this fixture; the delivery must end before it runs.
+    await f.ipc
+      .resetIdentity({ workspaceId: 'team', resetId: randomUUID(), confirm: true })
+      .catch(() => {})
+    assert.deepEqual(clock.pending, [])
+    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(rounds, 1)
+  }
+)
+void test(
   'a failed key delivery stays visible by code and the next due periodic poll retries it until delivered',
   { timeout: 5000 },
   async () => {

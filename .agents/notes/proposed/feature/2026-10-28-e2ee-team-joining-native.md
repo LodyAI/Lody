@@ -62,7 +62,9 @@ Security review of #2302 found that a failed first delivery was retried only by 
 - it is cleared on delivery, terminal causes and slot removal, and is unref'd so it never holds the process;
 - when it fires, it re-checks the signed-in account and drops the slot if the account changed.
 
-Polls and explicit retries still work after the bound. Delivery state remains in memory: after a restart, the device's next full key round resumes pending deliveries from the core journal.
+Polls and explicit retries still work after the bound. A request admitted during a run's last pass is still `pending` when the run ends; the timer treats it as due at once.
+
+Reopening rule: a delivery may reopen a workspace that no window is reading, because main's reader (desktop) or the per-attempt approval session (portable) is held only while one attempt runs, so the workspace still drains between attempts. A delivery never reopens a workspace after it was removed, revoked or reset: those paths drop its slot and timer. It also never continues after sign-out or an account change, or when the portable runtime retired. `runtime.accountApproval` counts holders of the `account-approval` reader it opens, and the last `release()` closes that reader. The workflow releases the sessions it listed when inspect or approve ends. Delivery state remains in memory: after a restart, the device's next full key round resumes pending deliveries from the core journal.
 
 Blast radius: the trigger is a slow or failing relay, mailbox or staging request during a key round. It reaches only the delivery state of the members that round covers. Approval, the request list and other workspaces continue. Recovery is owned by the service instance for the app's lifetime, and retained records are capped at 32 per account/workspace. Quit, sign-out and account changes close the owner. A round in flight then fails `closed` or `account_mismatch`, and the record is not shown to another account. State is in memory only. After a restart, unfinished distribution is rediscovered by the core journals on the next full key round on this device, not by this record. That gap existed before this change.
 

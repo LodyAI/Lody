@@ -144,9 +144,13 @@ describe('account-level runtime', () => {
 describe('portable account pairing approver key delivery', () => {
   /** An approving session whose mailbox never confirms an envelope for the new device. */
   const approverSession = (
-    rounds: { count: number },
+    rounds: { count: number; released?: number },
     device = 1
   ): AccountPairingApproverSession => ({
+    release: () =>
+      Effect.sync(() => {
+        rounds.released = (rounds.released ?? 0) + 1;
+      }),
     binding: { device: { toBytes: () => new Uint8Array(32).fill(device) } },
     accountApproval: {
       sign: () => Effect.die('unused'),
@@ -188,10 +192,12 @@ describe('portable account pairing approver key delivery', () => {
   };
 
   it('stops a delivery that never reaches the mailbox after its retry bound', async () => {
-    const rounds = { count: 0 };
+    const rounds = { count: 0, released: 0 };
     const session = approverSession(rounds);
     const { events, sleeps } = await deliver([session, session, session, session]);
     expect(rounds.count).toBe(4);
+    // Every attempt released the session it held: no reader stays open in the backoff.
+    expect(rounds.released).toBe(4);
     expect(sleeps).toEqual([10, 20, 40]);
     expect(events.map((event) => event.state)).toEqual([
       'running',
@@ -217,8 +223,8 @@ describe('portable account pairing approver key delivery', () => {
   it("never continues on another account's session for the same workspace", async () => {
     // Account A's first delivery fails; during the backoff account B signs in and opens
     // the same workspace, so the lookup now returns B's session (B's own device).
-    const original = { count: 0 };
-    const other = { count: 0 };
+    const original = { count: 0, released: 0 };
+    const other = { count: 0, released: 0 };
     const otherSession = approverSession(other, 9);
     let evidenceAsked = false;
     const { events } = await deliver([
@@ -233,6 +239,8 @@ describe('portable account pairing approver key delivery', () => {
     ]);
     expect(original.count).toBe(1);
     expect(other.count).toBe(0);
+    // The foreign session is released without any other call.
+    expect([original.released, other.released]).toEqual([1, 1]);
     expect(evidenceAsked).toBe(false);
     expect(events.map((event) => [event.state, event.code])).toEqual([
       ['running', undefined],

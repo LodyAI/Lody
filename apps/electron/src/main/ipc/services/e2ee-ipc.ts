@@ -280,8 +280,23 @@ export class E2eeIpc extends IpcService {
     slot.timer = undefined
     this.keyDeliveries.delete(key)
   }
-  /** Schedules the next round at the earliest retryable failure's `retryAt`. Bounded per
-   * slot; the timer re-checks the signed-in account and drops the slot if it changed. */
+  /** Drops every slot of a removed or reset workspace (all accounts when `accountId` is
+   * absent, every workspace when `workspaceId` is too): nothing reopens it afterwards. */
+  private dropKeyDeliveryWorkspace(workspaceId?: string, accountId?: string) {
+    for (const key of [...this.keyDeliveries.keys()]) {
+      const [account, workspace] = key.split('\n')
+      if (
+        (accountId === undefined || account === accountId) &&
+        (workspaceId === undefined || workspace === workspaceId)
+      )
+        this.dropKeyDeliverySlot(account!, workspace!)
+    }
+  }
+  /** Schedules the next round at the earliest retryable failure's `retryAt`, or at once for
+   * a request admitted after the last pass began. Bounded per slot; the timer re-checks the
+   * signed-in account and drops the slot if it changed. A delivery may reopen a workspace
+   * no window is reading (main's reader is held only during a round), but never one that
+   * was removed or reset: those drop their slot. */
   private scheduleKeyDeliveryRetry(accountId: string, workspaceId: string) {
     const key = `${accountId}\n${workspaceId}`
     const slot = this.keyDeliveries.get(key)
@@ -292,9 +307,10 @@ export class E2eeIpc extends IpcService {
     const due = [...slot.requests.values()]
       .filter(
         (delivery) =>
-          delivery.state === 'failed' && !TERMINAL_KEY_DELIVERY.has(delivery.code ?? '')
+          delivery.state === 'pending' ||
+          (delivery.state === 'failed' && !TERMINAL_KEY_DELIVERY.has(delivery.code ?? ''))
       )
-      .map((delivery) => delivery.retryAt)
+      .map((delivery) => (delivery.state === 'pending' ? 0 : delivery.retryAt))
     if (due.length === 0) return
     let now = 0
     try {
@@ -2190,6 +2206,8 @@ export class E2eeIpc extends IpcService {
     reason: AccessLoss
   ): Promise<never> {
     const { workspaceId, genesisHash, signingPublicKey } = access.status
+    // A removed workspace ends its key delivery; no later timer may reopen it.
+    this.dropKeyDeliveryWorkspace(workspaceId, access.accountId)
     if (!signingPublicKey) throw new Error('e2ee_local_cleanup_pending')
     let cleanup: Effect.Effect<void, unknown> = Effect.void
     try {
@@ -2586,6 +2604,8 @@ export class E2eeIpc extends IpcService {
       (input.workspaceId !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(input.workspaceId))
     )
       throw new Error('e2ee_invalid-input')
+    // A reset identity cannot deliver; its pending deliveries end and never reopen it.
+    this.dropKeyDeliveryWorkspace(input.workspaceId)
     return resetDesktopE2eeIdentity({ workspaceId: input.workspaceId, resetId: input.resetId })
   }
   @IpcMethod()

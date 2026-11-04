@@ -311,6 +311,8 @@ export interface AccountPairingApproverSession {
   /** Positive mailbox evidence for `device` at the current epoch: 'delivered', or a
    * public retryable `e2ee_*` code. */
   keyDeliveryEvidence(device: string): Effect.Effect<string, unknown>;
+  /** Ends this holder's use; the runtime closes a reader it opened for approval. */
+  release?(): Effect.Effect<void, unknown>;
 }
 
 /** Background key delivery after an admission commits. `delivered` rests on mailbox
@@ -400,6 +402,7 @@ export function makePortableAccountPairingApprover(input: {
           }),
         invitation: (record) => approval.invitation(record),
         access: () => approval.access(),
+        release: () => (session.release ? Effect.ignore(session.release()) : Effect.void),
         // Approval returns first; the session's own key round sends the new device the
         // current epoch key, as on the desktop. Each attempt ends with mailbox evidence;
         // anything short of `delivered` is retried on the bounded due schedule. Every
@@ -409,7 +412,7 @@ export function makePortableAccountPairingApprover(input: {
         // same workspace (its own device) ends it before any call. A failure never undoes
         // the admission.
         deliverKeys: (deviceBytes, requestId) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             const device = toHex(deviceBytes);
             const delays = input.keyDeliveryRetry?.delays ?? KEY_DELIVERY_RETRY_DELAYS;
             const sleep = input.keyDeliveryRetry?.sleep ?? ((ms: number) => Effect.sleep(ms));
@@ -426,6 +429,14 @@ export function makePortableAccountPairingApprover(input: {
                 /* An observer never affects delivery. */
               }
             };
+            // Each attempt holds its own session only while it runs and releases it
+            // afterwards, so the delivery never keeps a reader open across the backoff.
+            const acquire = () =>
+              Effect.suspend(() => input.session(workspaceId)).pipe(
+                Effect.orElseSucceed(() => null)
+              );
+            const release = (current: AccountPairingApproverSession) =>
+              current.release ? Effect.ignore(current.release()) : Effect.void;
             const attempt = (current: AccountPairingApproverSession) =>
               Effect.gen(function* () {
                 const round = yield* Effect.result(current.keyRound());
@@ -436,21 +447,26 @@ export function makePortableAccountPairingApprover(input: {
                 return Result.isSuccess(evidence)
                   ? evidence.success
                   : keyDeliveryCode(evidence.failure);
-              });
+              }).pipe(Effect.ensuring(release(current)));
             const owner = toHex(session.binding.device.toBytes());
+            // The first hold is taken before approval continues, so the workflow may
+            // release its own listing session without closing the reader underneath.
+            const first = yield* acquire();
             const deliver = Effect.gen(function* () {
-              let current: AccountPairingApproverSession | null = session;
+              let current: AccountPairingApproverSession | null = first;
               for (let retry = 0; ; retry++) {
                 if (!current) return report('ended', 'e2ee_key_delivery_closed');
-                if (toHex(current.binding.device.toBytes()) !== owner)
+                if (toHex(current.binding.device.toBytes()) !== owner) {
+                  yield* release(current);
                   return report('ended', 'e2ee_key_delivery_owner_changed');
+                }
                 const code = yield* attempt(current);
                 if (code === 'delivered') return report('delivered');
                 if (TERMINAL_KEY_DELIVERY.has(code) || retry >= delays.length)
                   return report('ended', code);
                 report('retrying', code);
                 yield* sleep(delays[retry]!);
-                current = yield* input.session(workspaceId).pipe(Effect.orElseSucceed(() => null));
+                current = yield* acquire();
               }
             });
             report('running');

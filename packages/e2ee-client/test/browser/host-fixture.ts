@@ -1468,6 +1468,27 @@ export async function runtimeInvoke(action: string) {
       case 'status':
         value = await runtime.status(offer.workspaceId);
         break;
+      // Only approval holds the workspace: the last release must close its reader.
+      case 'approvalRelease': {
+        await runtime.close(offer.workspaceId, 'account', runtimeLease);
+        const open = () =>
+          runtime.status(offer.workspaceId).then(
+            () => true,
+            () => false
+          );
+        const first = await runtime.accountApproval!();
+        const second = await runtime.accountApproval!();
+        const held = await open();
+        await first.release();
+        const afterOne = await open();
+        await second.release();
+        await second.release();
+        value = { held, afterOne, afterAll: await open() };
+        break;
+      }
+      case 'approvalSession':
+        value = (await runtime.accountApproval!()).device;
+        break;
       case 'refresh':
         value = await runtime.refresh(offer.workspaceId);
         break;

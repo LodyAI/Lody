@@ -150,6 +150,9 @@ export interface E2eeAccountApprovalSession {
   /** Positive mailbox evidence for `device` at the current epoch: 'delivered', or a
    * public retryable `e2ee_*` code. */
   keyDeliveryEvidence(device: string): Promise<string>;
+  /** Ends this holder's use of the approval session. When it opened a reader for
+   * approval, the last release closes it so the workspace can drain. Idempotent. */
+  release(): Promise<void>;
 }
 
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
