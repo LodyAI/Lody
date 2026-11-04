@@ -64,6 +64,143 @@ const createLogger = (): Logger => {
 const createTestCloudPort = () =>
   createLocalCloudPort({ identity: { userId: 'user-1' }, workspaces: [] });
 
+describe('SessionManager agent archive (#1537)', () => {
+  const sessionId = 'native-archive' as SessionId;
+  function fixture(
+    sync: NonNullable<ConstructorParameters<typeof SessionManager>[5]['syncAgentSessionArchive']>
+  ) {
+    const meta: SessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1' as MachineId,
+      userId: 'user-1',
+      createdAt: '2026-11-03T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      agentConfigId: 'codex-provider' as AgentConfigId,
+      acpSessionId: 'exact-native-id' as ACPSessionId,
+      isArchived: true,
+    };
+    const provider: AgentConfigMeta = {
+      id: 'codex-provider' as AgentConfigId,
+      machineId: 'machine-1' as MachineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: { CODEX_HOME: '/synthetic/codex-account' },
+      runtimeOverrides: { codexPath: '/synthetic/codex' },
+    };
+    let clean = false;
+    const workspace = {
+      repo: { getDocMeta: async () => ({ meta }) },
+      getAgentConfigById: async () => provider,
+      cleanSessionDoc: async () => {
+        clean = true;
+      },
+    } as unknown as LoroDocumentManager;
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      workspace,
+      { cloudPort: createTestCloudPort(), syncAgentSessionArchive: sync }
+    );
+    return { manager, meta, provider, cleaned: () => clean };
+  }
+
+  it('syncs the exact native id and saved account before releasing the Lody document', async () => {
+    let archived: string | undefined;
+    const state = fixture(async (input) => {
+      expect(state.cleaned()).toBe(false);
+      expect(input.env?.CODEX_HOME).toBe('/synthetic/codex-account');
+      expect(await input.shouldApply?.()).toBe(true);
+      archived = input.nativeSessionId;
+      return 'native';
+    });
+    await state.manager.archiveSession(sessionId);
+    expect(archived).toBe('exact-native-id');
+    expect(state.cleaned()).toBe(true);
+  });
+
+  it.each(['builtin', 'custom', 'registry'] as const)(
+    'negotiates archives for a %s provider',
+    async (cliType) => {
+      let nativeId: string | undefined;
+      const state = fixture(async (input) => {
+        expect(input.cliType).toBe(cliType);
+        expect(input.agentType).toBe('claude');
+        nativeId = input.nativeSessionId;
+        return 'native';
+      });
+      state.provider.cliType = cliType;
+      state.provider.agentType = 'claude';
+      await expect(state.manager.archiveSession(sessionId)).resolves.toBeUndefined();
+      expect(nativeId).toBe('exact-native-id');
+      expect(state.cleaned()).toBe(true);
+    }
+  );
+
+  it.each(['unsupported', 'title-marker'] as const)(
+    'reports %s separately from native archive success',
+    async (result) => {
+      const state = fixture(async () => result);
+      const warning = await state.manager.archiveSession(sessionId);
+      expect(state.cleaned()).toBe(true);
+      expect(warning?.message).toContain(
+        result === 'unsupported' ? 'Lody only' : 'native history picker'
+      );
+    }
+  );
+
+  it('still releases the Lody document and exposes a warning after a native failure', async () => {
+    const state = fixture(async () => {
+      throw new Error('native failure');
+    });
+    const warning = await state.manager.archiveSession(sessionId);
+    expect(state.cleaned()).toBe(true);
+    expect(warning?.message).toContain('Agent archive synchronization failed');
+  });
+
+  it('serializes restore behind archive and applies the newest committed state', async () => {
+    const started = deferred<void>();
+    const release = deferred<void>();
+    const states: boolean[] = [];
+    const state = fixture(async (input) => {
+      if (input.archived) {
+        started.resolve();
+        await release.promise;
+      }
+      states.push(input.archived);
+      return 'native';
+    });
+    const archive = state.manager.syncNativeSessionArchive(sessionId, true);
+    await started.promise;
+    state.meta.isArchived = false;
+    const restore = state.manager.syncNativeSessionArchive(sessionId, false);
+    expect(states).toEqual([]);
+    release.resolve();
+    await Promise.all([archive, restore]);
+    expect(states).toEqual([true, false]);
+  });
+
+  it.each(['foreign-machine', 'missing-id', 'different-provider', 'stale-state'] as const)(
+    'does not change a native thread for %s',
+    async (reason) => {
+      const state = fixture(async () => {
+        throw new Error('must not reach native operation');
+      });
+      if (reason === 'foreign-machine') state.meta.machineId = 'machine-2' as MachineId;
+      if (reason === 'missing-id') state.meta.acpSessionId = undefined;
+      if (reason === 'different-provider') state.provider.id = 'different-id' as AgentConfigId;
+      if (reason === 'stale-state') state.meta.isArchived = false;
+      await expect(
+        state.manager.syncNativeSessionArchive(sessionId, true)
+      ).resolves.toBeUndefined();
+    }
+  );
+});
+
 type FakeSessionDoc = {
   getMetaState: ReturnType<typeof vi.fn<() => Promise<SessionMeta | undefined>>>;
   setRepoFullName: ReturnType<typeof vi.fn<(repoFullName: string) => Promise<void>>>;

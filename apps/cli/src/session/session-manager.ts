@@ -45,6 +45,7 @@ import {
   type ProjectRef,
   getSessionRoomId,
   isLoroRepoDocDeleted,
+  resolveSessionAcpTargetId,
   type SessionMeta,
   encodeProjectPreparationProgress,
 } from '@lody/shared';
@@ -119,6 +120,8 @@ import { formatErrorMessage, formatErrorWithCauses } from '@/utils/format-error'
 import { captureCli } from '@/lib/analytics/posthog';
 import { getEffectiveMemoryLimitBytes } from '@/utils/memory';
 import { withSlowOperationWarning } from '@/utils/slow-operation-warning';
+import { setLocalAcpSessionArchived } from '@/agent/acp-runner';
+import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
 import { resolveGitHubRepoWorktreeConfig } from './worktree/worktree-config-resolver';
 import type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization';
 import {
@@ -394,6 +397,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   // shared machine-wide budget. This avoids create/exit races briefly applying stale
   // shares of the 90% execution-plane budget. See docs/exec-sandbox.md.
   private sandboxRebalanceChain: Promise<void> = Promise.resolve();
+  private readonly nativeArchiveJobs = new Map<
+    SessionId,
+    Promise<AgentSessionWarning | undefined>
+  >();
+  private readonly syncAgentSessionArchive: typeof setLocalAcpSessionArchived;
   private requestPermissionHandler?: (
     sessionId: SessionId,
     requestId: string,
@@ -410,6 +418,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     options: {
       sessionSandboxFactory?: SessionSandboxFactory;
       cloudPort: CloudPort;
+      syncAgentSessionArchive?: typeof setLocalAcpSessionArchived;
     }
   ) {
     super();
@@ -421,6 +430,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       throw new Error('SessionManager requires an assembled CloudPort');
     }
     this.cloudPort = options.cloudPort;
+    this.syncAgentSessionArchive = options.syncAgentSessionArchive ?? setLocalAcpSessionArchived;
     this.mcpAuthentication = new McpAuthenticationLegacy({
       machineId,
       workspaceId,
@@ -822,6 +832,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.reportStartStage(config, 'credentials');
     await this.freezeCodexProfile(config);
     signal?.throwIfAborted();
+    if (config.sessionId && agentStart?.resumeSessionId && !agentStart.forkSessionId) {
+      try {
+        const warning = await this.syncNativeSessionArchive(config.sessionId, false, signal);
+        if (warning) this.emit('onAgentWarning', config.sessionId, warning);
+      } catch (error) {
+        this.reportNativeArchiveFailure(config.sessionId, error);
+      }
+      signal?.throwIfAborted();
+    }
     const credentials = await this.prepareGitHubRepoSessionConfig(config);
     let session: Session | undefined;
     try {
@@ -2010,8 +2029,119 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return childSessionIds;
   }
 
-  async archiveSession(sessionId: SessionId): Promise<void> {
-    await this.workspaceDocument.cleanSessionDoc(sessionId);
+  async archiveSession(sessionId: SessionId): Promise<AgentSessionWarning | undefined> {
+    let warning: AgentSessionWarning | undefined;
+    try {
+      warning = await this.syncNativeSessionArchive(sessionId, true);
+    } catch (error) {
+      warning = this.nativeArchiveFailureWarning(sessionId, error);
+    } finally {
+      await this.workspaceDocument.cleanSessionDoc(sessionId);
+    }
+    return warning;
+  }
+
+  async syncNativeSessionArchive(
+    sessionId: SessionId,
+    archived: boolean,
+    signal?: AbortSignal
+  ): Promise<AgentSessionWarning | undefined> {
+    const previous = this.nativeArchiveJobs.get(sessionId) ?? Promise.resolve();
+    // The previous caller reports its error; a failed archive must not fence restore.
+    const next = previous
+      .catch(() => {})
+      .then(async () => {
+        const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+        const meta = snapshot?.meta as SessionMeta | undefined;
+        if (!meta || isLoroRepoDocDeleted(snapshot) || meta.machineId !== this.machineId) return;
+        if ((meta.isArchived === true) !== archived || !meta.agentConfigId) return;
+        const nativeSessionId = resolveSessionAcpTargetId(meta);
+        if (!nativeSessionId) return;
+        const provider = await this.workspaceDocument.getAgentConfigById(
+          meta.agentConfigId,
+          this.machineId
+        );
+        if (
+          !provider ||
+          provider.id !== meta.agentConfigId ||
+          provider.machineId !== this.machineId
+        )
+          return;
+        const profiles = getCodexProfileStore();
+        const codex = provider.cliType === 'builtin' && provider.agentType === 'codex';
+        if (
+          codex &&
+          !provider.codexAuth &&
+          (await profiles.isAccountBound({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            configId: provider.id,
+          }))
+        )
+          throw new Error('This Codex provider account reference is missing');
+        const profile = codex ? await profiles.resolve(this.workspaceId, provider) : undefined;
+        const result = await this.syncAgentSessionArchive({
+          cliType: provider.cliType,
+          agentType: provider.agentType,
+          customAcp: provider.customAcp,
+          runtimeOverrides: provider.runtimeOverrides,
+          agentConfigId: provider.id,
+          magpieGatewayUrl: provider.magpieGatewayUrl,
+          codexProfile: profile ? { profile } : undefined,
+          env: withoutElectronBootstrapCredentials({ ...process.env, ...provider.env }),
+          nativeSessionId,
+          archived,
+          signal,
+          logger: this.logger,
+          shouldApply: async () => {
+            const current = await this.workspaceDocument.repo.getDocMeta(
+              getSessionRoomId(sessionId)
+            );
+            const latest = current?.meta as SessionMeta | undefined;
+            return (
+              !isLoroRepoDocDeleted(current) &&
+              latest?.machineId === this.machineId &&
+              latest.agentConfigId === provider.id &&
+              (latest.isArchived === true) === archived &&
+              resolveSessionAcpTargetId(latest) === nativeSessionId
+            );
+          },
+        });
+        if (archived && result === 'unsupported')
+          return {
+            source: 'native-session-archive',
+            message:
+              'This agent does not advertise archive synchronization. The conversation is archived in Lody only.',
+          };
+        if (archived && result === 'title-marker')
+          return {
+            source: 'native-session-archive',
+            message:
+              'The agent marked its native session title as archived. The session may still appear in its native history picker.',
+          };
+        return undefined;
+      });
+    this.nativeArchiveJobs.set(sessionId, next);
+    try {
+      return await next;
+    } finally {
+      if (this.nativeArchiveJobs.get(sessionId) === next) this.nativeArchiveJobs.delete(sessionId);
+    }
+  }
+
+  reportNativeArchiveFailure(sessionId: SessionId, error: unknown): void {
+    this.emit('onAgentWarning', sessionId, this.nativeArchiveFailureWarning(sessionId, error));
+  }
+
+  private nativeArchiveFailureWarning(sessionId: SessionId, error: unknown): AgentSessionWarning {
+    this.logger.warn(
+      `[${sessionId}] Native session archive synchronization failed: ${formatErrorMessage(error)}`
+    );
+    return {
+      source: 'native-session-archive',
+      message:
+        'Agent archive synchronization failed. The Lody archive state is unchanged. Restore and archive the conversation again to retry.',
+    };
   }
 
   /**

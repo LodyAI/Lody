@@ -83,6 +83,9 @@ const LodyCapabilitiesSchema = z
     }).optional(),
     compaction: VersionOneSchema.optional(),
     sessionHistory: VersionOneSchema.optional(),
+    sessionArchive: VersionOneSchema.extend({ mode: z.enum(['native', 'title-marker']) })
+      .optional()
+      .catch(undefined),
     worktreeProject: VersionOneSchema.optional(),
     sessionActivity: VersionOneSchema.optional().catch(undefined),
     promptSuggestions: VersionOneSchema.optional().catch(undefined),

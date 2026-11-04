@@ -1,5 +1,6 @@
+import { isPidAliveSyncLegacy } from '@lody/shared/node/process';
 import { AgentSideConnection, PROTOCOL_VERSION, type Stream } from '@agentclientprotocol/sdk';
-import { initializeAndReadAcpRateLimits } from './acp-runner';
+import { initializeAndReadAcpRateLimits, initializeAndSetAcpSessionArchived } from './acp-runner';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import fs from 'node:fs';
@@ -9,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   __test__,
+  setLocalAcpSessionArchived,
   prepareAcpProcessEnvironmentLegacy,
   shutdownLocalAcpAgent,
   spawnAcpProcess,
@@ -311,4 +313,167 @@ describe('ACP system Node prerequisites', () => {
       '[DSH_NODE_NOT_FOUND]'
     );
   });
+});
+
+describe('ACP archive synchronization (#1537)', () => {
+  it.each([
+    [{ version: 1, mode: 'native' }, 'native'],
+    [{ version: 1, mode: 'title-marker' }, 'title-marker'],
+    [undefined, 'unsupported'],
+    [{ version: 2, mode: 'native' }, 'unsupported'],
+    [{ version: 1, mode: 'unknown' }, 'unsupported'],
+  ] as const)('distinguishes negotiated support %j', async (capability, result) => {
+    const inbound = new TransformStream();
+    const outbound = new TransformStream();
+    const requests: unknown[] = [];
+    const unexpected = async () => {
+      throw new Error('Archive must never activate an agent');
+    };
+    const _server = new AgentSideConnection(
+      () => ({
+        initialize: async (params) => {
+          expect(params.clientCapabilities).toMatchObject({
+            terminal: false,
+            fs: { readTextFile: false, writeTextFile: false },
+          });
+          return {
+            protocolVersion: PROTOCOL_VERSION,
+            agentCapabilities: {
+              _meta: { lody: { sessionArchive: capability } },
+            },
+          };
+        },
+        newSession: unexpected,
+        loadSession: unexpected,
+        authenticate: unexpected,
+        prompt: unexpected,
+        cancel: unexpected,
+        extMethod: async (method, params) => {
+          requests.push({ method, params });
+          return {};
+        },
+      }),
+      { readable: outbound.readable, writable: inbound.writable } as Stream
+    );
+    const stream = { readable: inbound.readable, writable: outbound.writable } as Stream;
+    const archived = result !== 'title-marker';
+    {
+      await expect(
+        initializeAndSetAcpSessionArchived(stream, {
+          nativeSessionId: 'exact-native-id',
+          archived,
+          shouldApply: async () => true,
+        })
+      ).resolves.toBe(result);
+    }
+    expect(requests).toEqual(
+      result === 'unsupported'
+        ? []
+        : [
+            {
+              method: archived ? '_lody/session/archive' : '_lody/session/unarchive',
+              params: { sessionId: 'exact-native-id' },
+            },
+          ]
+    );
+  });
+
+  it.each([true, false])('checks current metadata before applying archive=%s', async (archived) => {
+    const inbound = new TransformStream();
+    const outbound = new TransformStream();
+    const mutations: unknown[] = [];
+    const unexpected = async () => {
+      throw new Error('Unexpected activation');
+    };
+    const _server = new AgentSideConnection(
+      () => ({
+        initialize: async () => ({
+          protocolVersion: PROTOCOL_VERSION,
+          agentCapabilities: {
+            _meta: { lody: { sessionArchive: { version: 1, mode: 'native' } } },
+          },
+        }),
+        newSession: unexpected,
+        authenticate: unexpected,
+        prompt: unexpected,
+        cancel: unexpected,
+        extMethod: async (method, params) => {
+          mutations.push({ method, params });
+          return {};
+        },
+      }),
+      { readable: outbound.readable, writable: inbound.writable } as Stream
+    );
+    await expect(
+      initializeAndSetAcpSessionArchived(
+        { readable: inbound.readable, writable: outbound.writable } as Stream,
+        {
+          nativeSessionId: 'old-native-id',
+          archived,
+          shouldApply: async () => false,
+        }
+      )
+    ).resolves.toBe('superseded');
+    expect(mutations).toEqual([]);
+  });
+});
+
+describe('archive ACP process ownership', () => {
+  it.each([false, true])(
+    'releases a real custom ACP process on cancelled=%s',
+    async (cancelled) => {
+      vi.stubEnv('LODY_DISABLE_SHELL_ENV', '1');
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-archive-process-'));
+      const script = path.join(directory, 'agent.cjs');
+      const resultFile = path.join(directory, 'state.json');
+      const pidFile = path.join(directory, 'pid');
+      fs.writeFileSync(
+        script,
+        `
+const fs = require('node:fs');
+fs.writeFileSync(process.env.PID_FILE, String(process.pid));
+require('node:readline').createInterface({input: process.stdin}).on('line', line => {
+ const {id, method, params} = JSON.parse(line);
+ if (id === undefined) return;
+ let result;
+ if (method === 'initialize') result = {protocolVersion: 1, agentCapabilities: {_meta: {lody: {sessionArchive: {version: 1, mode: 'native'}}}}};
+ else if (method === '_lody/session/archive') { fs.writeFileSync(process.env.RESULT_FILE, JSON.stringify(params)); result = {}; }
+ else throw new Error('Unexpected method');
+ console.log(JSON.stringify({jsonrpc:'2.0', id, result}));
+});
+`
+      );
+      const controller = new AbortController();
+      try {
+        const operation = setLocalAcpSessionArchived({
+          cliType: 'custom',
+          agentType: 'fixture',
+          customAcp: { command: process.execPath, args: [script] },
+          env: { ...process.env, PID_FILE: pidFile, RESULT_FILE: resultFile },
+          nativeSessionId: 'exact-native-id',
+          archived: true,
+          logger: createSilentLogger(),
+          signal: controller.signal,
+          shouldApply: async () => {
+            if (cancelled) {
+              controller.abort();
+              return new Promise<boolean>(() => {});
+            }
+            return true;
+          },
+        });
+        if (cancelled) await expect(operation).rejects.toThrow();
+        else await expect(operation).resolves.toBe('native');
+        const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+        expect(isPidAliveSyncLegacy(pid)).toBe(false);
+        expect(fs.existsSync(resultFile)).toBe(!cancelled);
+        if (!cancelled)
+          expect(JSON.parse(fs.readFileSync(resultFile, 'utf8'))).toEqual({
+            sessionId: 'exact-native-id',
+          });
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  );
 });
