@@ -404,7 +404,9 @@ export function makePortableAccountPairingApprover(input: {
         // current epoch key, as on the desktop. Each attempt ends with mailbox evidence;
         // anything short of `delivered` is retried on the bounded due schedule. Every
         // retry asks for the session again, so a signed-out or switched account ends the
-        // delivery and a closed reader is reopened by the runtime. A failure never undoes
+        // delivery and a closed reader is reopened by the runtime. The delivery is bound
+        // to the approving session's own device: a session of another account for the
+        // same workspace (its own device) ends it before any call. A failure never undoes
         // the admission.
         deliverKeys: (deviceBytes, requestId) =>
           Effect.sync(() => {
@@ -435,10 +437,13 @@ export function makePortableAccountPairingApprover(input: {
                   ? evidence.success
                   : keyDeliveryCode(evidence.failure);
               });
+            const owner = toHex(session.binding.device.toBytes());
             const deliver = Effect.gen(function* () {
               let current: AccountPairingApproverSession | null = session;
               for (let retry = 0; ; retry++) {
                 if (!current) return report('ended', 'e2ee_key_delivery_closed');
+                if (toHex(current.binding.device.toBytes()) !== owner)
+                  return report('ended', 'e2ee_key_delivery_owner_changed');
                 const code = yield* attempt(current);
                 if (code === 'delivered') return report('delivered');
                 if (TERMINAL_KEY_DELIVERY.has(code) || retry >= delays.length)

@@ -237,8 +237,9 @@ workflow's.
     background (`deliverKeys`) so the new device receives the current epoch key, which
     the invitation does not carry. Approval does not wait for it. Each attempt ends
     with mailbox evidence (`keyDeliveryEvidence`); anything short of `delivered` is
-    retried on a bounded backoff, reacquiring the session each time, and the journal
-    stores the same envelope id and bytes. `onKeyDelivery` reports `running`,
+    retried on a bounded backoff, reacquiring the session each time and ending if it
+    belongs to another device (another account), and the journal stores the same
+    envelope id and bytes. `onKeyDelivery` reports `running`,
     `retrying`, `delivered` or `ended`;
   - its device access for the relay stays inside this composition.
 - **`makeAccountE2eeRuntime`** routes an account's `E2eeWorkspaceRuntime` calls to

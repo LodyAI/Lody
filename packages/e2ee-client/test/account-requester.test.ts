@@ -143,8 +143,11 @@ describe('account-level runtime', () => {
 
 describe('portable account pairing approver key delivery', () => {
   /** An approving session whose mailbox never confirms an envelope for the new device. */
-  const approverSession = (rounds: { count: number }): AccountPairingApproverSession => ({
-    binding: { device: { toBytes: () => new Uint8Array(32).fill(1) } },
+  const approverSession = (
+    rounds: { count: number },
+    device = 1
+  ): AccountPairingApproverSession => ({
+    binding: { device: { toBytes: () => new Uint8Array(32).fill(device) } },
     accountApproval: {
       sign: () => Effect.die('unused'),
       settle: () => Effect.succeed('committed' as const),
@@ -208,6 +211,33 @@ describe('portable account pairing approver key delivery', () => {
       ['running', undefined],
       ['retrying', 'e2ee_key_not_sent'],
       ['ended', 'e2ee_key_delivery_closed'],
+    ]);
+  });
+
+  it("never continues on another account's session for the same workspace", async () => {
+    // Account A's first delivery fails; during the backoff account B signs in and opens
+    // the same workspace, so the lookup now returns B's session (B's own device).
+    const original = { count: 0 };
+    const other = { count: 0 };
+    const otherSession = approverSession(other, 9);
+    let evidenceAsked = false;
+    const { events } = await deliver([
+      approverSession(original),
+      {
+        ...otherSession,
+        keyDeliveryEvidence: (device) => {
+          evidenceAsked = true;
+          return otherSession.keyDeliveryEvidence(device);
+        },
+      },
+    ]);
+    expect(original.count).toBe(1);
+    expect(other.count).toBe(0);
+    expect(evidenceAsked).toBe(false);
+    expect(events.map((event) => [event.state, event.code])).toEqual([
+      ['running', undefined],
+      ['retrying', 'e2ee_key_not_sent'],
+      ['ended', 'e2ee_key_delivery_owner_changed'],
     ]);
   });
 });
