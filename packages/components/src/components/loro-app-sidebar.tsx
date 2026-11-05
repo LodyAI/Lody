@@ -29,6 +29,7 @@ import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   findFreshSessionPresenceState,
+  getSessionGroupTitle,
   machineSupportsLocalProjectRemovalProtocol,
   resolveProjectGitHubRepo,
   resolveSessionHistoryBackendKind,
@@ -447,7 +448,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
 }: LocalProjectSessionItemProps) {
   const { t } = useTranslation();
   const moreActionsLabel = t('sessions.moreActions', 'More actions');
-  const title = (session.title ?? '').trim() || defaultSessionTitle;
+  const title = getSessionGroupTitle(session) || defaultSessionTitle;
   // Self-ticking on the shared sidebar timer: a tick re-renders only this row's
   // time label, not every row in the project section.
   const now = useStableNow(SIDEBAR_RELATIVE_TIME_REFRESH_MS);
@@ -1793,7 +1794,7 @@ export function LoroAppSidebar({
     [postHog, setShowBranchNames]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
-  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
+  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionGroupTitle } =
     useSessionActions();
   const { removeLocalProject } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
@@ -1909,7 +1910,7 @@ export function LoroAppSidebar({
       }
       setPendingSessionShare({
         sessionId: sessionId,
-        title: session?.title?.trim() || defaultSessionTitle,
+        title: getSessionGroupTitle(session) || defaultSessionTitle,
         sharing,
       });
     },
@@ -2063,9 +2064,9 @@ export function LoroAppSidebar({
   const handleRenameSession = useCallback(
     (sessionId: string, nextTitle: string) => {
       if (rejectHistoryWrite([sessionId])) return Promise.resolve();
-      return updateSessionTitle(sessionId as SessionId, nextTitle);
+      return updateSessionGroupTitle(sessionId as SessionId, nextTitle);
     },
-    [rejectHistoryWrite, updateSessionTitle]
+    [rejectHistoryWrite, updateSessionGroupTitle]
   );
   const [repoCollapseState, setRepoCollapseState] = useAtom(repoCollapseStateAtom);
   const [repoOrder, setRepoOrder] = useAtom(repoOrderAtom);
@@ -2601,7 +2602,7 @@ export function LoroAppSidebar({
         const sessionsForProject = localProjectSessionsByKey.get(projectKey) ?? [];
         const sectionLabel = `${localSectionLabel} · ${project.name}`;
         for (const session of sessionsForProject) {
-          const title = (session.title ?? '').trim() || defaultSessionTitle;
+          const title = getSessionGroupTitle(session) || defaultSessionTitle;
           const activity = getEffectiveSessionActivitySummary(
             session,
             childSessionsByParent,

@@ -6,7 +6,7 @@ import {
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
-import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
+import { bindAgentRoleTarget, getSessionGroupTitle, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
@@ -4992,7 +4992,7 @@ function WorkspaceChatLanding({
         }
         return {
           id: session.id,
-          title: session.title?.trim() || t('sessions.untitled', 'Untitled session'),
+          title: getSessionGroupTitle(session) || t('sessions.untitled', 'Untitled session'),
           kind,
           branchName: session.branchName?.trim() || null,
           prNumber: prInfo.number,
@@ -5910,7 +5910,7 @@ function WorkspaceChatLanding({
         }
         return {
           id: session.id,
-          title: session.title?.trim() || t('sessions.untitled', 'Untitled session'),
+          title: getSessionGroupTitle(session) || t('sessions.untitled', 'Untitled session'),
           kind,
           branchName: session.branchName?.trim() || null,
           prNumber: prInfo.number,

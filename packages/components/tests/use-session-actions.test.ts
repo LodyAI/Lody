@@ -29,6 +29,7 @@ import {
   SESSION_DOC_PREFIX,
   getMachineRoomId,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  getSessionGroupTitle,
   getSessionRoomId,
   getSessionCancelRequestMarker,
   createSessionControlPlaneMirror,
@@ -772,6 +773,55 @@ describe('useSessionActions', () => {
       });
       expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.title).toBe('Changed');
       expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.projectGroup).toBeUndefined();
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('renames a root tab and its sidebar group title independently', async () => {
+    const repo = await LoroRepo.create({});
+    const id = 'titled-root' as SessionId;
+    const meta = {
+      id,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Generated root',
+      titleSource: 'generated',
+    } as SessionMeta;
+    const child = {
+      ...meta,
+      id: 'titled-child' as SessionId,
+      title: 'Child tab',
+      parentSessionId: id,
+    };
+    await repo.upsertDocMeta(getSessionRoomId(id), meta);
+    await repo.upsertDocMeta(getSessionRoomId(child.id), child);
+    const runtime = createRuntime({ repo, writer: createDirectWorkspaceWriter({ repo } as never) });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(id)]: meta },
+    });
+    const read = async (sessionId: SessionId) =>
+      (await repo.getDocMeta(getSessionRoomId(sessionId)))?.meta as SessionMeta;
+    try {
+      // Renaming the first tab no longer renames the sidebar row.
+      await actions.updateSessionTitle(id, 'Root tab');
+      expect(await read(id)).toMatchObject({
+        title: 'Root tab',
+        titleSource: 'user',
+        groupTitle: 'Generated root',
+      });
+      expect(getSessionGroupTitle(await read(id))).toBe('Generated root');
+
+      // Renaming the sidebar row leaves every tab title alone.
+      await actions.updateSessionGroupTitle(id, 'Sidebar name');
+      expect(await read(id)).toMatchObject({ title: 'Root tab', groupTitle: 'Sidebar name' });
+      expect((await read(child.id)).title).toBe('Child tab');
+
+      // A child tab rename never touches the group.
+      await actions.updateSessionTitle(child.id, 'Renamed child');
+      expect(await read(child.id)).not.toHaveProperty('groupTitle');
+      expect(getSessionGroupTitle(await read(id))).toBe('Sidebar name');
     } finally {
       await repo.destroy();
     }

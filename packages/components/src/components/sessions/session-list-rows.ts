@@ -1,4 +1,4 @@
-import { resolveSessionPrimaryPullRequest } from '@lody/shared';
+import { getSessionGroupTitle, resolveSessionPrimaryPullRequest } from '@lody/shared';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import type {
   LocalProjectHistoryProvider,
@@ -284,7 +284,7 @@ export function mapSessionMetaToSessionListRow(
    */
   resolveOpenerRowId?: (openerSessionId: string | null | undefined) => string | null
 ): SessionListRow {
-  const title = normalizeString(session.title) || defaultTitle;
+  const title = getSessionGroupTitle(session) || defaultTitle;
   // Align with the info bar (`getSessionGitHubState`): the GitHub repo identity
   // lives on `session.project` for current writes; the legacy top-level
   // `repoFullName` is only a fallback. Reading just the legacy field
