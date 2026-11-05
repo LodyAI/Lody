@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/2344
 
 [中文](2026-11-05-e2ee-execution-origin-without-forkat.zh.md)
 
