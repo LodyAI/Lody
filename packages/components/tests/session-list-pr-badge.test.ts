@@ -173,7 +173,11 @@ describe('SessionList PR badge', () => {
     expect(row?.querySelector('[data-session-mergeable-pill]')?.textContent).toBe('Mergeable');
     expect(row?.querySelector('.text-github-addition')).toBeNull();
     expect(row?.querySelector('.text-github-deletion')).toBeNull();
-    expect(row?.querySelector('.lucide-git-pull-request')).not.toBeNull();
+    const anchor = row?.querySelector('[data-session-pr-icon-anchor]');
+    expect(anchor).not.toBeNull();
+    expect(anchor?.className).toContain('w-5');
+    expect(anchor?.querySelector('.lucide-git-pull-request')).not.toBeNull();
+    expect(anchor?.querySelector('[data-session-mergeable-pill]')).toBeNull();
 
     flushSync(() => {
       root?.render(
@@ -189,7 +193,58 @@ describe('SessionList PR badge', () => {
     expect(selectedRow?.querySelector('[data-session-mergeable-pill]')).toBeNull();
     expect(selectedRow?.querySelector('.text-github-addition')).toBeNull();
     expect(selectedRow?.querySelector('.text-github-deletion')).toBeNull();
-    expect(selectedRow?.querySelector('.lucide-git-pull-request')).not.toBeNull();
+    const selectedAnchor = selectedRow?.querySelector('[data-session-pr-icon-anchor]');
+    expect(selectedAnchor?.className).toBe(anchor?.className);
+    expect(selectedAnchor?.querySelector('.lucide-git-pull-request')).not.toBeNull();
+  });
+
+  it('keeps the PR mark in the same trailing box when a sibling row has no Mergeable pill', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const row = (sessionId: string, prReadiness?: 'y') => ({
+      sessionId,
+      title: sessionId,
+      repoFullName: 'loro-dev/lody',
+      branchName: sessionId,
+      prUrl: `https://github.com/loro-dev/lody/pull/${sessionId}`,
+      prStatus: 'open' as const,
+      prCiState: 's' as const,
+      prReadiness,
+      latestMessageAt: '2026-04-22T00:00:00.000Z',
+      addedLines: 1,
+      deletedLines: 0,
+      isWorking: false,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+    });
+
+    flushSync(() => {
+      root?.render(
+        React.createElement(SessionList, {
+          sessions: [row('plain'), row('ready', 'y')],
+          repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+        })
+      );
+    });
+
+    const anchorOf = (sessionId: string) =>
+      container?.querySelector(
+        `[data-sidebar-session-id="${sessionId}"] [data-session-pr-icon-anchor]`
+      );
+    const plain = anchorOf('plain');
+    const ready = anchorOf('ready');
+    expect(plain).not.toBeNull();
+    expect(ready?.className).toBe(plain?.className);
+    expect(
+      container?.querySelector('[data-sidebar-session-id="plain"] [data-session-mergeable-pill]')
+    ).toBeNull();
+    const readyPill = container?.querySelector(
+      '[data-sidebar-session-id="ready"] [data-session-mergeable-pill]'
+    );
+    expect(readyPill).not.toBeNull();
+    expect(ready?.contains(readyPill ?? null)).toBe(false);
   });
 
   it('keeps a folded repo group telling what its hidden sessions are doing', () => {
