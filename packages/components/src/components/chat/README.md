@@ -78,9 +78,8 @@ while the rest steps back (`home/focus-motion.ts`). [Why](../../../../../.agents
   the menu mountable while search still ranks over everything. The project
   picker uses `DropdownMenuSearchInput` for mount-owned autofocus and to route
   typing back to search after pointer movement focuses a project row.
-- **Composer and queue typography.** Prompt and queued-message text share the
-  scalable body size; peer context selectors use regular-weight subheadline text.
-  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-composer-queue-typography.md).
+- **Composer and queue typography.** Queued-message text matches the session
+  prompt's size and line height; peer context selectors use regular-weight subheadline text.
 - **Project context material.** The selected project and its Private segment use
   the same raised tokens as the machine and worktree controls above the composer.
   [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-09-27-project-context-pill-elevation.md).

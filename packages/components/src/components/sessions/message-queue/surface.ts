@@ -9,7 +9,7 @@ const TOUCH_ROW = 36;
 const TOUCH_MORE_WIDTH = 40;
 
 /** One line of queue text; the gutter, index and actions center on this box. */
-export const QUEUE_LINE = text.bodyLeading;
+export const QUEUE_LINE = '1.5rem';
 /** The leading gutter (index, drag handle, section label) every row shares. */
 export const QUEUE_GUTTER = 16;
 
@@ -65,14 +65,14 @@ export const queueSurface = stylex.create({
   editor: { gridColumn: '1 / -1', width: '100%' },
   text: {
     overflowWrap: 'anywhere',
-    fontSize: text.bodySize,
+    fontSize: '0.875rem',
     lineHeight: QUEUE_LINE,
     fontWeight: 400,
     color: colors.label,
     opacity: 0.86,
   },
   preparingText: { opacity: 0.55 },
-  editorText: { fontSize: text.bodySize, lineHeight: QUEUE_LINE, fontWeight: 400 },
+  editorText: { fontSize: '0.875rem', lineHeight: QUEUE_LINE, fontWeight: 400 },
   actions: {
     display: 'flex',
     flexShrink: 0,
