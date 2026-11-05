@@ -480,8 +480,39 @@ void test('a different account retains its KeyPackage, joins as Member, exchange
         yield* owner.host.keyDeliveryEvidence(workspaceId, memberDevice, () => ownerPort),
         'delivered'
       )
+      // Genuine content of an epoch this admitted device's verified ledger holds, read
+      // before its own key arrives (a rotation it has not received yet): retryable
+      // key-pending, never a terminal ledger failure.
+      const early = yield* owner.host.seal(workspaceId, {
+        epoch: 0,
+        room,
+        context,
+        plaintext,
+        additionalData
+      })
+      const pending = yield* Effect.flip(
+        member.host.openContent(workspaceId, { room, context, ...early, additionalData })
+      )
+      assert.equal(pending.code, 'key-pending')
+      // A frame that fails authentication stays terminal, key or no key.
+      const forged = new Uint8Array(early.sealed)
+      forged[forged.length - 1] ^= 1
+      const refused = yield* Effect.flip(
+        member.host.openContent(workspaceId, {
+          room,
+          context,
+          ...early,
+          sealed: forged,
+          additionalData
+        })
+      )
+      assert.notEqual(refused.code, 'key-pending')
       yield* member.host.keyRound(workspaceId, () => memberPort)
       assert.equal((yield* member.host.status(workspaceId)).hasCurrentKey, true)
+      assert.deepEqual(
+        yield* member.host.openContent(workspaceId, { room, context, ...early, additionalData }),
+        plaintext
+      )
       encrypted = yield* owner.host.seal(workspaceId, {
         epoch: 0,
         room,
