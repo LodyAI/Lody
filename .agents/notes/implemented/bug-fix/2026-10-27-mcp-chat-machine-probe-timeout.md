@@ -4,7 +4,7 @@ Status: implemented
 Translation: current
 
 PR: [#1939](https://github.com/LodyAI/Lody/pull/1939); status shape and unjoined-room
-reads: this branch's PR (`fix/streams-reconnect-presence-flap`)
+reads: [#2332](https://github.com/LodyAI/Lody/pull/2332)
 
 [中文](2026-10-27-mcp-chat-machine-probe-timeout.zh.md)
 
@@ -90,4 +90,4 @@ acceptance, and is unchanged. Tests use injected presence and a rejecting RPC st
 (`daemon-session-tools.test.ts` pins all three `session_status_many` outcomes); no
 end-to-end reproduction of the Streams slowdown was run. The trigger that keeps a daemon's
 own room unjoined for minutes is not established: its presence diagnostics were
-discarded until this branch bound early scoped loggers to the daemon file sink.
+discarded until #2332 bound early scoped loggers to the daemon file sink.

@@ -3,8 +3,8 @@
 Status: implemented
 Translation: current
 
-PR: [#1939](https://github.com/LodyAI/Lody/pull/1939)；状态结构与未加入房间时的读取：本分支的 PR
-（`fix/streams-reconnect-presence-flap`）
+PR: [#1939](https://github.com/LodyAI/Lody/pull/1939)；状态结构与未加入房间时的读取：
+[#2332](https://github.com/LodyAI/Lody/pull/2332)
 
 [English](2026-10-27-mcp-chat-machine-probe-timeout.md)
 
@@ -73,5 +73,5 @@ SDK 打补丁暴露读端状态，暂缓，因为它改动锁定的依赖，而�
 在线但不可达的远端机器，会由 cancel RPC 或最终投递发现。MCP `session_create` 在接受
 前本来就跳过这项检查，保持不变。测试使用注入的 presence 和会拒绝的 RPC stub
 （`daemon-session-tools.test.ts` 固定了 `session_status_many` 的三种结果），没有端到端复现
-Streams 变慢。让 daemon 自己的房间数分钟保持未加入的触发原因尚未确定：在本分支把早期创建的
+Streams 变慢。让 daemon 自己的房间数分钟保持未加入的触发原因尚未确定：在 #2332 把早期创建的
 scoped logger 绑定到 daemon 文件日志之前，它的 presence 诊断一直被丢弃。
