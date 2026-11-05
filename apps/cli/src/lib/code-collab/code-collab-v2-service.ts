@@ -84,7 +84,8 @@ import {
   resolveProjectGitDirectory,
   resolveAllChangesDiffBase,
   scanGitDirectoryEntries,
-  dropGitIgnoredScanEntries,
+  createGitIgnoreScanFilter,
+  relativeScanDirectory,
   listGitIgnoredPaths,
 } from './file-index-scan-core';
 import { closeDirectoryQuietly } from './directory-handle';
@@ -3071,6 +3072,11 @@ async function scanDirectoryEntries(options: {
     },
   ];
   let remainingEntries = Math.max(0, options.entryBudget);
+  // Prune `.gitignore`d entries before reading into them; null outside Git.
+  const ignoreFilter = await createGitIgnoreScanFilter(
+    options.directoryAbsolutePath,
+    options.signal
+  );
 
   while (queue.length > 0 && remainingEntries > 0) {
     options.signal?.throwIfAborted();
@@ -3091,8 +3097,21 @@ async function scanDirectoryEntries(options: {
     if (!directoryEntries) {
       continue;
     }
-    const collisionKeys = findDirectoryEntryCollisionKeys(directoryEntries);
-    for (const { entry, comparisonKey } of directoryEntries) {
+    const ignoredNames = ignoreFilter
+      ? await ignoreFilter.ignoredEntryNames(
+          relativeScanDirectory(options.directoryWorkspacePath, currentDirectory.workspacePath),
+          directoryEntries.map(({ entry }) => ({
+            name: entry.name,
+            isDirectory: entry.isDirectory(),
+          }))
+        )
+      : undefined;
+    const visibleEntries =
+      ignoredNames && ignoredNames.size > 0
+        ? directoryEntries.filter(({ entry }) => !ignoredNames.has(entry.name))
+        : directoryEntries;
+    const collisionKeys = findDirectoryEntryCollisionKeys(visibleEntries);
+    for (const { entry, comparisonKey } of visibleEntries) {
       if (remainingEntries <= 0) {
         break;
       }
@@ -3111,7 +3130,7 @@ async function scanDirectoryEntries(options: {
       }
     }
   }
-  return await dropGitIgnoredScanEntries(options, entries);
+  return entries;
 }
 
 function scanDirectoryReadErrorValue(error: unknown): CodeCollabV2FileTreeValue {

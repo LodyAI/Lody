@@ -31,7 +31,7 @@ Nightly CLI 主线程持续约 100% CPU，本地 Supervisor 反复进入 reconne
 
 - **合并导出（依赖补丁）。** `patches/@loro-dev__streams-crdt@0.19.2.patch` 修改 `createFlockAdapter().subscribeLocalUpdates`：每个订阅最多只有一个待执行的导出。导出前先让出一个 macrotask（`setTimeout`），因为只让出 Promise 无法让 IPC 和定时器运行。待导出标记在同步的 Wasm 导出之前清除，所以导出期间发生的提交恰好再安排一次导出。导出进度只按实际导出的 bundle 推进。导出失败时，未导出的范围留给下一次提交；退订后不再交付，也不推进导出进度。这个补丁是临时的：上游 streams-crdt 的发布版本合并了本地导出后即可删除，并把这里的测试移植到那个版本。
 - **缓存过滤。** `.pnpm-store` 加入 `CODE_COLLAB_IGNORED_DIRECTORY_NAMES`。watcher、FS fallback 和 Git 列表中的未跟踪部分都使用这份集合。Git 列表现在分别列出已跟踪和未跟踪路径，所以位于被过滤目录下的已跟踪文件仍然可见。All Changes 的未跟踪路径在读取内容之前先过滤，并且只为前 `CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries` 个读取内容统计行数。
-- **全面遵守项目 `.gitignore`。** 递归的 Git 列表原本就使用 `--exclude-standard`。但在 Git 工作区里，有两种情况仍会走文件系统扫描：非递归的目录刷新（Turn 结束时按变更目录刷新就是这种），以及 `git ls-files` 失败时。这类扫描会列出 `coverage/`、`.env` 之类被忽略的产物。现在扫描后用一次 `git check-ignore --stdin` 去掉它们；该命令会参考 index，所以已跟踪文件仍然保留。watcher 的 dirty 事件现在带上相对于根目录的路径：一个防抖窗口内的路径如果全部被 Git 忽略，就不重新扫描。没有路径的事件、非 `event` 原因、超过 256 条路径，或 Git 无法回答时，仍然重新扫描。
+- **全面遵守项目 `.gitignore`。** 递归的 Git 列表原本就使用 `--exclude-standard`。但在 Git 工作区里，有两种情况仍会走文件系统扫描：非递归的目录刷新（Turn 结束时按变更目录刷新就是这种），以及 `git ls-files` 失败时。这类扫描会列出 `coverage/`、`.env` 之类被忽略的产物。现在文件系统扫描在遍历过程中就剪枝：`createGitIgnoreScanFilter` 用 `ignore` 包在进程内判断规则。最深一层的 `.gitignore` 优先决定（按目录懒加载），然后依次是上层目录、`info/exclude` 和 `core.excludesFile`。被忽略的条目不会被分类，不占用预算，也不会进入其子目录。对每个含有被忽略条目的目录，执行一次 `git ls-files --cached`，以保留其中含有强制添加的已跟踪文件的条目。不在 Git 工作区时，扫描根目录下的 `.gitignore` 仍会为递归扫描剪枝，这正是不剪枝时遍历代价最大的情况。否决了“扫描后再用 `git check-ignore` 过滤”的做法：那样仍会遍历被忽略的目录树，并让它们占用条目预算。watcher 的 dirty 事件现在带上相对于根目录的路径：一个防抖窗口内的路径如果全部被 Git 忽略，就不重新扫描。没有路径的事件、非 `event` 原因、超过 256 条路径，或 Git 无法回答时，仍然重新扫描。
 - **全量预算（owner 于 2026-11-05 决定）。** `CODE_COLLAB_FILE_INDEX_LIMITS` 规定完整的可发布索引最多 1,000 行、估算 102,400 字节。估算计入转义后的 JSON 键、值，以及每行 113 字节的时钟与标点上界（已用真实 Flock 校准）。超出预算时按以下顺序保留：根目录子项、最近展开目录的子项、变更行（连同祖先目录），然后按广度优先。展开目录按 owner 在内存中保存最近 32 个。扫描预算同样降为 1,000。
 - **删除语义。** 只有记录了 `del: true` 的变更才成为 `deleted`。Git 二进制删除和 diff-store 中已缺失的文件现在都会记录 `del`。其他不在文件树中的变更路径，作为现存的 `file` 行发布，并补上 `lazy` 祖先目录。
 - **有界提交。** 发布器把写入规划成多个批次，每批不超过 100 KiB，先写 set 再写 delete。每批之后执行 flush 加 sync，以此作为屏障，让每批成为单独的一次 Streams 追加。某一批失败时进入现有的 owner 修复循环，修复循环会根据副本重新规划。
@@ -54,7 +54,7 @@ Nightly CLI 主线程持续约 100% CPU，本地 Supervisor 反复进入 reconne
 
 - `apps/cli/tests/streams-crdt-flock-local-export.test.ts` 用真实 Flock 测试合并导出、定时器公平性、待导出期间的写入、失败重试和退订。它在未打补丁的适配器上会失败。
 - `apps/cli/src/lib/code-collab/file-index-scan-worker.test.ts` 测试缓存过滤与已跟踪文件、1,500 个未跟踪文件涌入时仍在预算内且不伪造删除，以及有界的行数读取。
-- `file-index-scan-worker.test.ts` 还测试非递归扫描对 `.gitignore` 的处理，包括被强制添加的已跟踪文件；`code-collab-v2-service.test.ts` 测试只涉及被忽略路径的 watcher 批次不触发重新扫描；`workspace-watch-coordinator.test.ts` 测试事件路径相对于根目录。
+- `file-index-scan-worker.test.ts` 还测试：非递归扫描对 `.gitignore` 的处理，包括被强制添加的已跟踪文件；嵌套规则、`!` 反选、`info/exclude`、只匹配目录的规则和从子目录开始的扫描；以及非 Git 递归扫描中被忽略目录的剪枝。`code-collab-v2-service.test.ts` 测试只涉及被忽略路径的 watcher 批次不触发重新扫描；`workspace-watch-coordinator.test.ts` 测试事件路径相对于根目录。
 - `apps/cli/src/lib/code-collab/code-collab-flock-publish.test.ts` 在真实 Flock 中替换一份 4,000 行、包含长路径、多字节字符和需转义字符的旧索引：每次导出的提交都不超过 102,400 字节，结果等于有界状态。
 - `packages/shared/tests/code-collab.test.ts` 测试删除语义、优先顺序和字节预算。
 - 未验证：原机器上打包版 Electron 的行为，以及经由真实 Streams 服务器的远端收敛。

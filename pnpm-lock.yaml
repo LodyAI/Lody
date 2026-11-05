@@ -285,6 +285,9 @@ importers:
       better-sqlite3:
         specifier: 'catalog:'
         version: 13.0.3
+      ignore:
+        specifier: 7.0.5
+        version: 7.0.5
       loro-crdt:
         specifier: 1.17.0
         version: 1.17.0

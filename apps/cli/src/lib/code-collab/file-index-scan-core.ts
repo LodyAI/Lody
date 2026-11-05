@@ -3,7 +3,9 @@ import {
   resolveSessionFilePath,
   isSafeProjectPath,
 } from '@lody/shared';
+import ignore, { type Ignore } from 'ignore';
 import { readFile, realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 
 import type {
@@ -376,45 +378,163 @@ async function runGit(
   }
 }
 
+type GitIgnoreSource = { readonly baseDirectory: string; readonly rules: Ignore };
+
+export type GitIgnoreScanFilter = {
+  /**
+   * Names in `relativeDirectory` (POSIX, relative to the scan root; `''` is the
+   * root) that the worktree's ignore rules exclude and that hold no tracked file.
+   * Callers skip them before classifying, counting or descending.
+   */
+  ignoredEntryNames(
+    relativeDirectory: string,
+    entries: ReadonlyArray<{ readonly name: string; readonly isDirectory: boolean }>
+  ): Promise<ReadonlySet<string>>;
+};
+
+const NO_IGNORED_ENTRIES: ReadonlySet<string> = new Set();
+
+/** `directoryWorkspacePath` relative to a scan rooted at `scanWorkspacePath`. */
+export function relativeScanDirectory(scanWorkspacePath: string, directoryWorkspacePath: string) {
+  if (directoryWorkspacePath === scanWorkspacePath) return '';
+  return scanWorkspacePath
+    ? directoryWorkspacePath.slice(scanWorkspacePath.length + 1)
+    : directoryWorkspacePath;
+}
+
 /**
- * Drops entries that the directory's Git rules ignore from a filesystem scan.
- * Filesystem scans run inside Git worktrees for non-recursive directory refreshes
- * (Git does not record empty directories) and when `git ls-files` fails; without
- * this they would list `.gitignore`d outputs such as `coverage/` or `.env`.
- * `git check-ignore` consults the index, so tracked files are never dropped.
- * Outside a worktree, or when Git fails, the scan is returned unchanged.
+ * Git ignore rules for a filesystem scan, evaluated in-process with `ignore`
+ * so ignored directories are pruned instead of walked. Filesystem scans run
+ * inside Git worktrees for non-recursive directory refreshes (Git does not
+ * record empty directories) and when `git ls-files` fails.
+ *
+ * Precedence follows gitignore(5): the deepest `.gitignore` decides first, then
+ * parents, then `$GIT_DIR/info/exclude`, then `core.excludesFile`. Nested
+ * `.gitignore` files load lazily as the scan reaches their directory. An ignored
+ * entry that still contains a tracked file stays visible (one `git ls-files`
+ * call per directory that has ignored entries).
+ *
+ * Outside a Git worktree the scan root acts as the top level: its `.gitignore`
+ * files still prune the walk, without `info/exclude`, global excludes or a
+ * tracked-file check. Returns `null` only when the scan root cannot be resolved.
  */
-export async function dropGitIgnoredScanEntries(
-  options: {
-    readonly directoryAbsolutePath: string;
-    readonly directoryWorkspacePath: string;
-    readonly signal?: AbortSignal;
-  },
-  entries: Map<string, CodeCollabV2FileTreeValue>
-): Promise<Map<string, CodeCollabV2FileTreeValue>> {
-  const prefix = options.directoryWorkspacePath ? `${options.directoryWorkspacePath}/` : '';
-  const queried = new Map<string, string>();
-  for (const [workspacePath, value] of entries) {
-    if (workspacePath === options.directoryWorkspacePath) continue;
-    if (prefix && !workspacePath.startsWith(prefix)) continue;
-    const relativePath = workspacePath.slice(prefix.length);
-    // A trailing slash lets directory-only patterns (`coverage/`) match.
-    const isDirectory = value !== true && value.kind === 'lazy';
-    queried.set(isDirectory ? `${relativePath}/` : relativePath, workspacePath);
+export async function createGitIgnoreScanFilter(
+  scanRootAbsolutePath: string,
+  signal?: AbortSignal
+): Promise<GitIgnoreScanFilter | null> {
+  const [described, configuredExcludes] = await Promise.all([
+    runGit(
+      scanRootAbsolutePath,
+      ['rev-parse', '--show-toplevel', '--git-path', 'info/exclude'],
+      signal
+    ),
+    runGit(scanRootAbsolutePath, ['config', '--path', '--get', 'core.excludesFile'], signal),
+  ]);
+  const [reportedTopLevel, gitPathExclude] = described.ok ? described.stdout.split(/\r?\n/u) : [];
+  const inWorktree = Boolean(reportedTopLevel && gitPathExclude);
+  const [topLevel, scanRoot] = await Promise.all([
+    realpath(inWorktree && reportedTopLevel ? reportedTopLevel : scanRootAbsolutePath).catch(
+      () => null
+    ),
+    realpath(scanRootAbsolutePath).catch(() => null),
+  ]);
+  if (topLevel === null || scanRoot === null) return null;
+  const scanRootFromTop = path.relative(topLevel, scanRoot).split(path.sep).join('/');
+  if (scanRootFromTop.startsWith('..') || path.isAbsolute(scanRootFromTop)) return null;
+
+  const globalExcludes =
+    configuredExcludes.ok && configuredExcludes.stdout.trim()
+      ? configuredExcludes.stdout.trim()
+      : path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), '.config'), 'git', 'ignore');
+  const readRules = async (file: string): Promise<Ignore | null> => {
+    const text = await readFile(file, 'utf8').catch(() => null);
+    return text === null ? null : ignore().add(text);
+  };
+  const fallbackSources: GitIgnoreSource[] = [];
+  const fallbackFiles =
+    inWorktree && gitPathExclude
+      ? // `--git-path` is relative to the working directory unless the Git dir is elsewhere.
+        [path.resolve(scanRootAbsolutePath, gitPathExclude), globalExcludes]
+      : [];
+  for (const file of fallbackFiles) {
+    const rules = await readRules(file);
+    if (rules) fallbackSources.push({ baseDirectory: '', rules });
   }
-  if (queried.size === 0) return entries;
-  const reported = await listGitIgnoredPaths(
-    options.directoryAbsolutePath,
-    [...queried.keys()],
-    options.signal
-  );
-  const ignored = new Set<string>();
-  for (const relativePath of reported ?? []) {
-    const workspacePath = queried.get(relativePath);
-    if (workspacePath !== undefined) ignored.add(workspacePath);
-  }
-  if (ignored.size === 0) return entries;
-  return new Map([...entries].filter(([workspacePath]) => !ignored.has(workspacePath)));
+
+  // Keyed by directory relative to the top level; the promise is shared so a
+  // directory's `.gitignore` is read once per scan.
+  const directoryRules = new Map<string, Promise<Ignore | null>>();
+  const rulesFor = (directoryFromTop: string): Promise<Ignore | null> => {
+    let rules = directoryRules.get(directoryFromTop);
+    if (!rules) {
+      rules = readRules(path.join(topLevel, ...directoryFromTop.split('/'), '.gitignore'));
+      directoryRules.set(directoryFromTop, rules);
+    }
+    return rules;
+  };
+  // Sources that can decide for entries of one directory, highest precedence first.
+  const sourcesFor = async (directoryFromTop: string): Promise<GitIgnoreSource[]> => {
+    const segments = directoryFromTop ? directoryFromTop.split('/') : [];
+    const sources: GitIgnoreSource[] = [];
+    for (let depth = segments.length; depth >= 0; depth -= 1) {
+      const baseDirectory = segments.slice(0, depth).join('/');
+      const rules = await rulesFor(baseDirectory);
+      if (rules) sources.push({ baseDirectory, rules });
+    }
+    return [...sources, ...fallbackSources];
+  };
+  const isIgnored = (
+    sources: readonly GitIgnoreSource[],
+    pathFromTop: string,
+    isDirectory: boolean
+  ): boolean => {
+    for (const source of sources) {
+      const relative = source.baseDirectory
+        ? pathFromTop.slice(source.baseDirectory.length + 1)
+        : pathFromTop;
+      const result = source.rules.test(isDirectory ? `${relative}/` : relative);
+      if (result.ignored) return true;
+      if (result.unignored) return false;
+    }
+    return false;
+  };
+
+  return {
+    async ignoredEntryNames(relativeDirectory, entries) {
+      const directoryFromTop = [scanRootFromTop, relativeDirectory].filter(Boolean).join('/');
+      const sources = await sourcesFor(directoryFromTop);
+      if (sources.length === 0) return NO_IGNORED_ENTRIES;
+      const candidates: string[] = [];
+      for (const entry of entries) {
+        const pathFromTop = directoryFromTop ? `${directoryFromTop}/${entry.name}` : entry.name;
+        if (isIgnored(sources, pathFromTop, entry.isDirectory)) candidates.push(entry.name);
+      }
+      if (candidates.length === 0) return NO_IGNORED_ENTRIES;
+      if (!inWorktree) return new Set(candidates);
+      // `git add -f` keeps a matching path tracked; Git listings show it, so must we.
+      const tracked = await runGit(
+        topLevel,
+        [
+          'ls-files',
+          '-z',
+          '--cached',
+          '--',
+          ...candidates.map(
+            (name) => `:(literal)${directoryFromTop ? `${directoryFromTop}/` : ''}${name}`
+          ),
+        ],
+        signal
+      );
+      const ignored = new Set(candidates);
+      if (!tracked.ok) return ignored;
+      const prefixLength = directoryFromTop ? directoryFromTop.length + 1 : 0;
+      for (const trackedPath of tracked.stdout.split('\0')) {
+        if (!trackedPath) continue;
+        ignored.delete(normalizeGitPath(trackedPath).slice(prefixLength).split('/')[0] ?? '');
+      }
+      return ignored;
+    },
+  };
 }
 
 /**

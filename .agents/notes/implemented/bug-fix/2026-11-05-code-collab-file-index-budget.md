@@ -71,8 +71,16 @@ length are inferred, not observed.
   `--exclude-standard`. But a filesystem scan still runs in a Git worktree for
   non-recursive directory refreshes (turn-end refresh scans changed directories
   this way) and whenever `git ls-files` fails, and it listed ignored outputs such as
-  `coverage/` or `.env`. It now drops them with one `git check-ignore --stdin`
-  call; that command consults the index, so tracked files remain. Watcher dirt now
+  `coverage/` or `.env`. Filesystem scans now prune them while walking:
+  `createGitIgnoreScanFilter` evaluates the rules in-process with the `ignore`
+  package. The deepest `.gitignore` decides first (loaded lazily per directory),
+  then its parents, `info/exclude` and `core.excludesFile`. An ignored entry is
+  never classified, counted against the budget, or descended into. One
+  `git ls-files --cached` call per directory that has ignored entries keeps entries
+  that hold force-added tracked files. Outside a worktree, the scan root's
+  `.gitignore` files still prune recursive scans, which is where an unpruned walk
+  costs the most. Post-filtering with `git check-ignore` was rejected: it would
+  still walk the ignored trees and let them consume the entry budget. Watcher dirt now
   carries the root-relative event path. A debounce window whose paths Git ignores
   entirely does not rescan. A path-less event, a non-`event` reason, or more than
   256 paths still rescans, and so does any failure of Git to answer.
@@ -125,8 +133,10 @@ length are inferred, not observed.
 - `apps/cli/src/lib/code-collab/file-index-scan-worker.test.ts` tests the cache
   policy versus tracked files, a 1,500-file untracked flood that stays within the
   budget without deletions, and the bounded line-count reads.
-- `file-index-scan-worker.test.ts` also tests `.gitignore` in non-recursive scans,
-  including a force-added tracked file. `code-collab-v2-service.test.ts` tests that
+- `file-index-scan-worker.test.ts` also tests: `.gitignore` in non-recursive scans,
+  including a force-added tracked file; nested rules, negation, `info/exclude`,
+  directory-only patterns and subdirectory scan roots; and pruning of ignored
+  directories from a recursive non-Git scan. `code-collab-v2-service.test.ts` tests that
   ignored-only watcher batches skip the rescan. `workspace-watch-coordinator.test.ts`
   tests the root-relative event paths.
 - `apps/cli/src/lib/code-collab/code-collab-flock-publish.test.ts` replaces a 4,000-row

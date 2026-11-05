@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CODE_COLLAB_FILE_INDEX_LIMITS, estimateCodeCollabFileIndexStateBytes } from '@lody/shared';
 
-import { computeAllChanges } from './file-index-scan-core';
+import { computeAllChanges, createGitIgnoreScanFilter } from './file-index-scan-core';
 import fileIndexScanWorker from './file-index-scan-worker';
 
 const execFileAsync = promisify(execFile);
@@ -268,6 +268,77 @@ describe('fileIndexScanWorker', () => {
       });
       // Rules from the repository root apply to a subdirectory scan.
       expect(nested.entries.map(([file]) => file).sort()).toEqual(['src/app.ts', 'src/new.ts']);
+    });
+  });
+
+  it('evaluates nested gitignore rules in-process so scans can prune ignored directories', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, '.gitignore'), '*.log\nbuild-out/\n');
+      await writeFile(path.join(workspaceRoot, '.git', 'info', 'exclude'), 'local-only/\n');
+      await mkdir(path.join(workspaceRoot, 'pkg', 'generated'), { recursive: true });
+      await writeFile(path.join(workspaceRoot, 'pkg', '.gitignore'), '!keep.log\ngenerated/\n');
+      await writeFile(path.join(workspaceRoot, 'pkg', 'vendor.log'), 'tracked\n');
+      await git(workspaceRoot, ['add', '.gitignore', 'pkg/.gitignore']);
+      await git(workspaceRoot, ['add', '-f', 'pkg/vendor.log']);
+      await git(workspaceRoot, ['commit', '-m', 'rules']);
+
+      const filter = await createGitIgnoreScanFilter(workspaceRoot);
+      if (!filter) throw new Error('Expected a Git ignore filter inside the worktree');
+      expect(
+        [
+          ...(await filter.ignoredEntryNames('', [
+            { name: 'build-out', isDirectory: true },
+            { name: 'a.log', isDirectory: false },
+            { name: 'local-only', isDirectory: true },
+            { name: 'pkg', isDirectory: true },
+            { name: 'README.md', isDirectory: false },
+          ])),
+        ].sort()
+      ).toEqual(['a.log', 'build-out', 'local-only']);
+      // A directory-only rule does not hide a file of the same name.
+      expect(
+        await filter.ignoredEntryNames('', [{ name: 'build-out', isDirectory: false }])
+      ).toEqual(new Set());
+
+      const nested = [
+        { name: 'keep.log', isDirectory: false },
+        { name: 'other.log', isDirectory: false },
+        { name: 'generated', isDirectory: true },
+        { name: 'vendor.log', isDirectory: false },
+      ];
+      // Deeper rules win (`!keep.log`); a force-added tracked file stays visible.
+      expect([...(await filter.ignoredEntryNames('pkg', nested))].sort()).toEqual([
+        'generated',
+        'other.log',
+      ]);
+      // A scan rooted below the top level applies the same chain of rules.
+      const subdirectory = await createGitIgnoreScanFilter(path.join(workspaceRoot, 'pkg'));
+      expect([...((await subdirectory?.ignoredEntryNames('', nested)) ?? [])].sort()).toEqual([
+        'generated',
+        'other.log',
+      ]);
+    });
+  });
+
+  it('prunes .gitignore directories from a recursive filesystem scan', async () => {
+    await withPlainWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, '.gitignore'), 'out/\n');
+      await mkdir(path.join(workspaceRoot, 'out', 'nested'), { recursive: true });
+      for (let index = 0; index < 50; index += 1) {
+        await writeFile(path.join(workspaceRoot, 'out', 'nested', `bundle-${index}.js`), 'x');
+      }
+
+      const result = await fileIndexScanWorker({
+        directoryAbsolutePath: workspaceRoot,
+        directoryWorkspacePath: '',
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+        recursive: true,
+      });
+      const paths = result.entries.map(([file]) => file);
+      expect(paths).toEqual(expect.arrayContaining(['README.md', 'src', 'src/app.ts']));
+      // Neither the ignored directory nor anything below it is read or counted.
+      expect(paths.filter((file) => file === 'out' || file.startsWith('out/'))).toEqual([]);
     });
   });
 
