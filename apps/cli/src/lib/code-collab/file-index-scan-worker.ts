@@ -19,6 +19,7 @@ import {
   joinWorkspacePath,
   pathSegmentComparisonKey,
   scanGitDirectoryEntries,
+  dropGitIgnoredScanEntries,
 } from './file-index-scan-core';
 import { CODE_COLLAB_IGNORED_DIRECTORY_NAMES } from './workspace-watch-path-policy';
 
@@ -284,7 +285,7 @@ async function scanDirectoryEntries(
       }
     }
   }
-  return entries;
+  return await dropGitIgnoredScanEntries(options, entries);
 }
 
 function scanDirectoryReadErrorValue(error: unknown): CodeCollabV2FileTreeValue {

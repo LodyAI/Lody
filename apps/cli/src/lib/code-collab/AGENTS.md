@@ -45,8 +45,10 @@ File-by-file responsibilities: [README.md](README.md).
   parents; only a change recording `del: true` may publish `deleted`. Publication
   commits batches within that byte budget, separated by flush/sync. Package-manager
   caches in `CODE_COLLAB_IGNORED_DIRECTORY_NAMES` filter watcher, FS and untracked
-  Git paths before any read, never tracked files. Local Flock exports rely on the
-  coalescing streams-crdt patch.
+  Git paths before any read, never tracked files. Git worktree filesystem scans and
+  watcher refreshes also honour `.gitignore` via `git check-ignore`: event batches
+  confined to ignored paths skip the rescan, and pathless dirt always rescans. Local
+  Flock exports rely on the coalescing streams-crdt patch.
   [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-05-code-collab-file-index-budget.md).
 - A file-index row whose path key carries U+FFFD came from a byte stream decoded
   across a chunk boundary, not from a scan; it is its own LWW key, so a correct

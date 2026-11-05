@@ -354,7 +354,8 @@ function parseDeletedPathsFromNameStatus(stdout: string): Set<string> {
 async function runGit(
   cwd: string,
   args: readonly string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  input?: string
 ): Promise<{ readonly ok: true; readonly stdout: string } | { readonly ok: false }> {
   try {
     signal?.throwIfAborted();
@@ -362,6 +363,7 @@ async function runGit(
       {
         command: 'git',
         args: ['-C', cwd, ...args],
+        ...(input === undefined ? {} : { input }),
         maxOutputBytes: GIT_MAX_BUFFER_BYTES,
         check: 'exit-0',
       },
@@ -372,6 +374,70 @@ async function runGit(
     signal?.throwIfAborted();
     return { ok: false };
   }
+}
+
+/**
+ * Drops entries that the directory's Git rules ignore from a filesystem scan.
+ * Filesystem scans run inside Git worktrees for non-recursive directory refreshes
+ * (Git does not record empty directories) and when `git ls-files` fails; without
+ * this they would list `.gitignore`d outputs such as `coverage/` or `.env`.
+ * `git check-ignore` consults the index, so tracked files are never dropped.
+ * Outside a worktree, or when Git fails, the scan is returned unchanged.
+ */
+export async function dropGitIgnoredScanEntries(
+  options: {
+    readonly directoryAbsolutePath: string;
+    readonly directoryWorkspacePath: string;
+    readonly signal?: AbortSignal;
+  },
+  entries: Map<string, CodeCollabV2FileTreeValue>
+): Promise<Map<string, CodeCollabV2FileTreeValue>> {
+  const prefix = options.directoryWorkspacePath ? `${options.directoryWorkspacePath}/` : '';
+  const queried = new Map<string, string>();
+  for (const [workspacePath, value] of entries) {
+    if (workspacePath === options.directoryWorkspacePath) continue;
+    if (prefix && !workspacePath.startsWith(prefix)) continue;
+    const relativePath = workspacePath.slice(prefix.length);
+    // A trailing slash lets directory-only patterns (`coverage/`) match.
+    const isDirectory = value !== true && value.kind === 'lazy';
+    queried.set(isDirectory ? `${relativePath}/` : relativePath, workspacePath);
+  }
+  if (queried.size === 0) return entries;
+  const reported = await listGitIgnoredPaths(
+    options.directoryAbsolutePath,
+    [...queried.keys()],
+    options.signal
+  );
+  const ignored = new Set<string>();
+  for (const relativePath of reported ?? []) {
+    const workspacePath = queried.get(relativePath);
+    if (workspacePath !== undefined) ignored.add(workspacePath);
+  }
+  if (ignored.size === 0) return entries;
+  return new Map([...entries].filter(([workspacePath]) => !ignored.has(workspacePath)));
+}
+
+/**
+ * Which of `relativePaths` (relative to `cwd`; a trailing `/` marks a directory)
+ * the worktree's Git rules ignore. Tracked files are never reported. Returns
+ * `null` when Git cannot answer (not a worktree, failure); an empty set when
+ * nothing is ignored (`check-ignore` exit 1).
+ */
+export async function listGitIgnoredPaths(
+  cwd: string,
+  relativePaths: readonly string[],
+  signal?: AbortSignal
+): Promise<Set<string> | null> {
+  if (relativePaths.length === 0) return new Set();
+  const result = await runGit(
+    cwd,
+    ['check-ignore', '-z', '--stdin'],
+    signal,
+    `${relativePaths.join('\0')}\0`
+  );
+  if (result.ok) return new Set(result.stdout.split('\0').filter(Boolean));
+  // Exit 1 also lands here; distinguish it from "not a worktree".
+  return (await isInsideGitWorktree(cwd, signal)) ? new Set() : null;
 }
 
 function buildEntriesFromGitFilePaths(options: {

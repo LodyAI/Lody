@@ -84,6 +84,8 @@ import {
   resolveProjectGitDirectory,
   resolveAllChangesDiffBase,
   scanGitDirectoryEntries,
+  dropGitIgnoredScanEntries,
+  listGitIgnoredPaths,
 } from './file-index-scan-core';
 import { closeDirectoryQuietly } from './directory-handle';
 import { CODE_COLLAB_IGNORED_DIRECTORY_NAMES } from './workspace-watch-path-policy';
@@ -101,6 +103,8 @@ const ROOT_DIRECTORY_REQUEST_PATH = '.';
 // A scan never needs more rows than the published file index can hold.
 const DEFAULT_FILE_TREE_SCAN_ENTRY_BUDGET = CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries;
 const MAX_TRACKED_EXPANDED_DIRECTORIES = 32;
+// Past this many distinct event paths per debounce window, refresh without asking Git.
+const MAX_GIT_IGNORE_CHECKED_DIRTY_PATHS = 256;
 export const DEFAULT_CODE_COLLAB_WATCH_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
 type WorkspaceResolution =
@@ -286,6 +290,8 @@ type OwnerWorkspaceWatchState = {
   subscription: WorkspaceWatchSubscription | null;
   refreshTimer: ReturnType<typeof setTimeout> | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /** Event paths since the last refresh; `null` once any dirt lacks a usable path. */
+  pendingDirtyPaths: Set<string> | null;
 };
 
 type OwnerFileIndexRepairState = {
@@ -2128,6 +2134,7 @@ export class CodeCollabV2Service {
       subscription: null,
       refreshTimer: null,
       idleTimer: null,
+      pendingDirtyPaths: new Set(),
     };
     this.watchByOwnerSessionId.set(resolved.ownerSessionId, state);
     this.armWorkspaceWatchIdleTimer(state);
@@ -2137,7 +2144,11 @@ export class CodeCollabV2Service {
         ? `${resolved.ownerSessionId}:root:${this.deps.rootId}`
         : resolved.ownerSessionId,
       workspaceRoot,
-      onDirty: () => this.scheduleWatchedWorkspaceRefresh(resolved.ownerSessionId),
+      onDirty: (reason, dirtyPath) =>
+        this.scheduleWatchedWorkspaceRefresh(
+          resolved.ownerSessionId,
+          reason === 'event' ? dirtyPath : undefined
+        ),
     });
     if (this.watchByOwnerSessionId.get(resolved.ownerSessionId) !== state) {
       subscription?.release();
@@ -2146,10 +2157,19 @@ export class CodeCollabV2Service {
     state.subscription = subscription;
   }
 
-  private scheduleWatchedWorkspaceRefresh(ownerSessionId: SessionId): void {
+  private scheduleWatchedWorkspaceRefresh(ownerSessionId: SessionId, dirtyPath?: string): void {
     const state = this.watchByOwnerSessionId.get(ownerSessionId);
     if (!state) {
       return;
+    }
+    if (
+      dirtyPath === undefined ||
+      state.pendingDirtyPaths === null ||
+      state.pendingDirtyPaths.size >= MAX_GIT_IGNORE_CHECKED_DIRTY_PATHS
+    ) {
+      state.pendingDirtyPaths = null;
+    } else {
+      state.pendingDirtyPaths.add(dirtyPath);
     }
     if (state.refreshTimer) {
       this.deps.workspaceWatchCoordinator?.recordCoalescedRefresh?.();
@@ -2157,11 +2177,27 @@ export class CodeCollabV2Service {
     }
     state.refreshTimer = setTimeout(() => {
       state.refreshTimer = null;
-      void this.refreshWatchedWorkspace(ownerSessionId).catch(() => undefined);
+      const dirtyPaths = state.pendingDirtyPaths;
+      state.pendingDirtyPaths = new Set();
+      void this.refreshWatchedWorkspace(ownerSessionId, state.workspaceRoot, dirtyPaths).catch(
+        () => undefined
+      );
     }, 150);
   }
 
-  private async refreshWatchedWorkspace(ownerSessionId: SessionId): Promise<void> {
+  private async refreshWatchedWorkspace(
+    ownerSessionId: SessionId,
+    watchRoot: string,
+    dirtyPaths: ReadonlySet<string> | null
+  ): Promise<void> {
+    // Writes that land only in `.gitignore`d paths (build output, caches) cannot
+    // change the Git-based index, so they must not keep waking full rescans.
+    if (dirtyPaths !== null && dirtyPaths.size > 0) {
+      const ignored = await listGitIgnoredPaths(watchRoot, [...dirtyPaths]);
+      if (ignored !== null && [...dirtyPaths].every((dirtyPath) => ignored.has(dirtyPath))) {
+        return;
+      }
+    }
     const resolved = await this.resolveRequestDirectoryPath(
       ownerSessionId,
       ROOT_DIRECTORY_REQUEST_PATH
@@ -3075,7 +3111,7 @@ async function scanDirectoryEntries(options: {
       }
     }
   }
-  return entries;
+  return await dropGitIgnoredScanEntries(options, entries);
 }
 
 function scanDirectoryReadErrorValue(error: unknown): CodeCollabV2FileTreeValue {

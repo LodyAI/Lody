@@ -233,6 +233,44 @@ describe('fileIndexScanWorker', () => {
     });
   });
 
+  it('honours .gitignore in non-recursive filesystem refreshes but keeps tracked files', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, '.gitignore'), 'coverage/\n*.log\n.env\n');
+      await writeFile(path.join(workspaceRoot, 'forced.log'), 'tracked despite the rule\n');
+      await git(workspaceRoot, ['add', '.gitignore']);
+      await git(workspaceRoot, ['add', '-f', 'forced.log']);
+      await git(workspaceRoot, ['commit', '-m', 'ignore rules']);
+      await mkdir(path.join(workspaceRoot, 'coverage'));
+      await writeFile(path.join(workspaceRoot, 'coverage', 'lcov.info'), 'x\n');
+      await writeFile(path.join(workspaceRoot, 'debug.log'), 'x\n');
+      await writeFile(path.join(workspaceRoot, '.env'), 'SECRET=1\n');
+      await mkdir(path.join(workspaceRoot, 'src', 'coverage'));
+
+      const result = await fileIndexScanWorker({
+        directoryAbsolutePath: workspaceRoot,
+        directoryWorkspacePath: '',
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+        recursive: false,
+      });
+      const rootPaths = result.entries.map(([file]) => file);
+      expect(rootPaths).toEqual(expect.arrayContaining(['README.md', 'src', 'forced.log']));
+      expect(rootPaths).not.toContain('coverage');
+      expect(rootPaths).not.toContain('debug.log');
+      expect(rootPaths).not.toContain('.env');
+
+      const nested = await fileIndexScanWorker({
+        directoryAbsolutePath: path.join(workspaceRoot, 'src'),
+        directoryWorkspacePath: 'src',
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+        recursive: false,
+      });
+      // Rules from the repository root apply to a subdirectory scan.
+      expect(nested.entries.map(([file]) => file).sort()).toEqual(['src/app.ts', 'src/new.ts']);
+    });
+  });
+
   it('bounds the published index for a flood of untracked files without inventing deletions', async () => {
     await withGitWorkspace(async (workspaceRoot) => {
       const generated = path.join(workspaceRoot, 'generated-output', 'deeply', 'nested', 'chunks');
