@@ -82,7 +82,7 @@ by default. `LodyOptions.authorizeEncryptedExecution` can override this capabili
 with the same signature. Missing signer or authorization denies new starts;
 revoking a device cannot borrow another device's authority from the same user.
 Original ciphertext receipts live in `execution-origins.sqlite`; snapshot authors
-cannot substitute for the original turn signer. Snapshot recovery backfills retained
+cannot substitute for the original turn signer ([claim design](../../.agents/notes/proposed/architecture/2026-10-28-encrypted-agent-execution-claim.md)). Snapshot recovery backfills retained
 signed updates from Streams. Missing originals keep the turn pending and retryable
 until its original window expires; they never grant a start. Each backfill attempt
 has a three-second/eight-page bound; stop cancels the watcher's delayed retry.
@@ -93,6 +93,8 @@ Member removal retains its identity-verified receipt/erasure path; single-device
 revocation closes the workspace while retaining local originals. Ordinary transport
 failures continue to leave missing-origin turns pending.
 Ordinary workspaces do not open this log.
+A [proposal](../../.agents/notes/proposed/architecture/2026-11-05-e2ee-execution-origin-without-forkat.md)
+would replace the retained-update reconstruction after E2EE acceptance.
 Transport frames keep their own original request/response receipts; execution evidence
 contains intent identities and a settlement marker, never prompt or response plaintext.
 See the

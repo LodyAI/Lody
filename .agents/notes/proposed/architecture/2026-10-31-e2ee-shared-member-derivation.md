@@ -79,3 +79,4 @@ discussion.
   signed row can carry `derivedFrom`.
 - Cross-machine derivation, hosted backend checks and real-device behavior are unverified.
 - Related: [machine sharing](2026-10-28-e2ee-machine-sharing.md); [#2149](https://github.com/LodyAI/Lody/pull/2149).
+- Replacing its signed-row evidence: [execution origin without forkAt](2026-11-05-e2ee-execution-origin-without-forkat.md) (proposed).

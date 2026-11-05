@@ -147,3 +147,5 @@ GREEN。原生生产回归还覆盖有效显示账号不能使设备撤销前、
 仍明确拒绝派发。新增 RED→GREEN 回归覆盖另一设备签署的真实验签快照、延后获得原件而不写
 终态、原期限过期、真实 Streams HTTP 向后读取解析、有界 I/O 取消，以及 watcher 停止
 时取消重试。这些测试不代表生产交付。
+
+替换保留增量重建的提议：[不用 forkAt 的执行来源校验](2026-11-05-e2ee-execution-origin-without-forkat.zh.md)（proposed）。

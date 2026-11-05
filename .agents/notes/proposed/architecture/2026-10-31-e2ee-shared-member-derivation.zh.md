@@ -56,3 +56,4 @@ Translation: current
 - RPC 分派快路径不再验证这台机器自己写的输入，因为只有已签名的行能携带 `derivedFrom`。
 - 跨机器派生、托管后端检查和真机行为均未验证。
 - 相关：[机器共享](2026-10-28-e2ee-machine-sharing.zh.md)；[#2149](https://github.com/LodyAI/Lody/pull/2149)。
+- 替换其已签名行证据的提议：[不用 forkAt 的执行来源校验](2026-11-05-e2ee-execution-origin-without-forkat.zh.md)（proposed）。

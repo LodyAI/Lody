@@ -23,3 +23,5 @@ Generated encrypted turns freeze the fingerprint and optional manual run key in 
 ## Evidence and limits
 
 The adversarial fixture in `apps/cli/tests/e2ee-runtime.test.ts` uses a real foreign ledger member, signed encrypted Schedule/Registry content and SQLite planning. It verifies rejection before preparation, plus actual-start rejection without source authority or after tampering. Related cases cover target/rule/prompt edits, same-value rewrites, snapshot-only evidence, manual requests and changes during authorization. These fixtures do not establish deployed or packaged multi-device acceptance.
+
+Replacing the declaration reconstruction: [execution origin without forkAt](../../proposed/architecture/2026-11-05-e2ee-execution-origin-without-forkat.md) (proposed).
