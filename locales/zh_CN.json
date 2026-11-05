@@ -918,7 +918,6 @@
   "chat.machineSelector.local": "本机",
   "chat.machineSelector.placeholder": "机器",
   "chat.machineSelector.searchPlaceholder": "搜索机器",
-  "chat.machineSelector.selectedOffline": "{{name}} · 离线",
   "chat.machineSelector.selectFirst": "请先选择一台机器",
   "chat.machineSelector.offline": "离线",
   "chat.projectPicker.groups": "项目组",

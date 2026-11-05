@@ -4069,15 +4069,9 @@ function WorkspaceChatLanding({
   // An offline selection stays visible and marked rather than reading as unset.
   const desktopSelectedMachineId =
     selectedMachineState === 'offline' ? selectedMachineId : scopedMachineId;
-  const desktopSelectedMachineName = desktopSelectedMachineId
+  const desktopSelectedMachineLabel = desktopSelectedMachineId
     ? machines.get(desktopSelectedMachineId)?.name
     : null;
-  const desktopSelectedMachineLabel =
-    desktopSelectedMachineName && selectedMachineState === 'offline'
-      ? t('chat.machineSelector.selectedOffline', '{{name}} · Offline', {
-          name: desktopSelectedMachineName,
-        })
-      : desktopSelectedMachineName;
   const desktopLocalProjectOptions = useMemo(
     () =>
       buildUnifiedLocalProjectOptions({
@@ -4124,6 +4118,7 @@ function WorkspaceChatLanding({
           value={desktopSelectedMachineId}
           visibleLocalMachineId={visibleLocalMachineId}
           selectedLabel={desktopSelectedMachineLabel}
+          offline={selectedMachineState === 'offline'}
           options={desktopMachineOptions}
           onChange={handleMachineChange}
           disabled={isInitialDataLoading}
