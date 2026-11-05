@@ -515,6 +515,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       PROMPT_COMMAND: '',
       LODY_SESSION_ID: this.sessionId,
       LODY_WORKSPACE_SESSION_ID: workspaceSessionId,
+      LODY_AGENT_ROLE_ID: this.config.agentRoleId || undefined,
+      LODY_PARENT_SESSION_ID: this.config.parentSessionId || undefined,
+      LODY_OPENED_BY_SESSION_ID: this.config.openedBySessionId || undefined,
     };
 
     // Same ENOENT trap as the ACP runner: overlay the login-shell env so a

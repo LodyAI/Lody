@@ -1678,10 +1678,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const repoId = config.repoId;
     this.reportStartStage(config, 'workdir');
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(config.sessionId!);
+    const sessionMeta = await sessionDoc.getMetaState();
+    config.agentRoleId = sessionMeta?.agentRoleId;
+    config.openedBySessionId = sessionMeta?.openedBySessionId;
     const ownerDoc = config.parentSessionId
       ? await this.workspaceDocument.getOrCreateSessionDoc(config.parentSessionId)
       : sessionDoc;
-    config.projectRun = (await ownerDoc.getMetaState())?.projectRun ?? config.projectRun;
+    const ownerMeta = config.parentSessionId ? await ownerDoc.getMetaState() : sessionMeta;
+    config.projectRun = ownerMeta?.projectRun ?? config.projectRun;
     if (config.projectRun)
       await config.authorizeExecutionInputs?.({ projectRun: config.projectRun });
     if (config.githubRepo && !config.projectRun)

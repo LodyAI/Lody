@@ -2881,6 +2881,7 @@ const buildSessionCurrentInfo = async (
     ...(session.openedByRootSessionId
       ? { openedByRootSessionId: session.openedByRootSessionId }
       : {}),
+    ...(session.agentRoleId ? { agentRoleId: session.agentRoleId } : {}),
     workContext: await buildSessionWorkContext(
       manager,
       workspaceId,
