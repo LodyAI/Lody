@@ -73,8 +73,13 @@ interface LodyOptions {
   onStorageWriteFailure?: (error: Error) => void;
   onInboxAvailabilityChange?: (message: string | undefined) => void;
   /** Drain this owner on confirmed member removal or device revocation.
+   * `member-removed` ends the account's membership; `device-revoked` retires only
+   * this machine identity, so the workspace may re-enrol with a fresh one.
    * The workspace host alone owns receipt-verified member-data erasure. */
-  onEncryptedMemberRemoved?: (owner: Lody) => Promise<void>;
+  onEncryptedAccessLost?: (
+    owner: Lody,
+    reason: 'member-removed' | 'device-revoked'
+  ) => Promise<void>;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
@@ -138,7 +143,7 @@ export class Lody {
           if (recorded) owner.clientLossReceipt?.loss(owner.encryptedRevocation);
           try {
             await owner.startReceipt?.catch(() => undefined);
-            if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
+            if (options.onEncryptedAccessLost) await options.onEncryptedAccessLost(owner, reason);
             else await owner.cleanup();
             if (!owner.startReceipt) await owner.documentManager.cleanUp();
             owner.clientLossReceipt?.retired();

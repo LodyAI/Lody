@@ -3322,7 +3322,7 @@ describe('SessionExecutionService', () => {
         memoryPressure: {} as never,
         ...(terminalBackfill
           ? {
-              onEncryptedMemberRemoved: async () => {
+              onEncryptedAccessLost: async () => {
                 await removalReleased.promise;
               },
             }

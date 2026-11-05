@@ -2,7 +2,7 @@ import {
   LOCAL_E2EE_PAIRING_PATH,
   LOCAL_E2EE_RESET_PATH,
   LocalE2eeResetResponseSchema,
-  LocalE2eeRecoveryFailureSchema,
+  LocalE2eePairingFailureSchema,
   type LocalE2eeResetRequest,
   type LocalE2eeResetResponse,
   LocalE2eePrepareReplySchema,
@@ -991,7 +991,7 @@ function makeControlClient(
         ),
         ({ response, payload }) =>
           parseJsonBody<LocalE2eePrepareReply>(LocalE2eePrepareReplySchema, () => {
-            const safe = LocalE2eeRecoveryFailureSchema.safeParse(payload);
+            const safe = LocalE2eePairingFailureSchema.safeParse(payload);
             return safe.success ? safe.data.error : 'e2ee_pairing_unavailable';
           })(response, payload)
       ),
@@ -1004,7 +1004,7 @@ function makeControlClient(
         ),
         ({ response, payload }) =>
           parseJsonBody<LocalE2eeActivateResponse>(LocalE2eeActivateResponseSchema, () => {
-            const safe = LocalE2eeRecoveryFailureSchema.safeParse(payload);
+            const safe = LocalE2eePairingFailureSchema.safeParse(payload);
             return safe.success ? safe.data.error : 'e2ee_pairing_unavailable';
           })(response, payload)
       ),

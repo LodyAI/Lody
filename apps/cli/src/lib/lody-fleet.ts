@@ -920,9 +920,31 @@ export class LodyFleet {
     this.reconcileRetryDelayMs = 0;
   }
 
+  /** A start may proceed only for a desired workspace that is not waiting for a
+   * fresh identity; re-checked after every await in startWorkspace. */
+  private mayStart(workspaceId: string): boolean {
+    return (
+      !this.stopped &&
+      !this.e2eeResets.has(workspaceId) &&
+      this.desiredWorkspaces.has(workspaceId) &&
+      !this.waitingForPairing.has(workspaceId)
+    );
+  }
+
+  /** Hold a workspace until a fresh identity activates: cancel any queued startup
+   * retry so nothing reopens it with the retained, revoked device credential. */
+  private parkForPairing(workspaceId: string): void {
+    this.waitingForPairing.add(workspaceId);
+    const retryTimer = this.retryTimers.get(workspaceId);
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      this.retryTimers.delete(workspaceId);
+    }
+    this.refreshRuntimeState();
+  }
+
   private async startWorkspace(workspace: WorkspaceListItem): Promise<void> {
-    if (this.stopped || this.e2eeResets.has(workspace.id)) return;
-    if (!this.desiredWorkspaces.has(workspace.id)) return;
+    if (!this.mayStart(workspace.id)) return;
     if (this.startupCleanupOwners.has(workspace.id) || this.cleanupOwners.has(workspace.id)) {
       try {
         await this.retryWorkspaceCleanup(workspace.id);
@@ -931,7 +953,7 @@ export class LodyFleet {
         this.scheduleRetry(workspace);
         return;
       }
-      if (this.stopped || !this.desiredWorkspaces.has(workspace.id)) return;
+      if (!this.mayStart(workspace.id)) return;
     }
     if (this.runtimes.has(workspace.id)) return;
 
@@ -945,9 +967,8 @@ export class LodyFleet {
     const inFlight = this.startInFlight.get(workspace.id);
     if (inFlight) {
       await inFlight;
-      if (this.stopped) return;
       if (this.runtimes.has(workspace.id)) return;
-      if (!this.desiredWorkspaces.has(workspace.id)) return;
+      if (!this.mayStart(workspace.id)) return;
     }
 
     const task = (async () => {
@@ -958,7 +979,7 @@ export class LodyFleet {
       });
 
       let lody: Lody | null = null;
-      let memberRemoved = false;
+      let accessLost = false;
       let stopSchedules: (() => Promise<void>) | undefined;
       let stopAutomations: (() => Promise<void>) | undefined;
       let partialPoller: PrPollerWorkspaceHandle | undefined;
@@ -979,10 +1000,17 @@ export class LodyFleet {
               });
             else this.runtimeStateReporter.clearIssue(code);
           },
-          onEncryptedMemberRemoved: async (owner) => {
-            memberRemoved = true;
+          onEncryptedAccessLost: async (owner, reason) => {
+            // Either loss stops this owner and any start still in flight for it.
+            accessLost = true;
             const state = this.runtimes.get(workspace.id);
-            if (!state || state.lody === owner) this.desiredWorkspaces.delete(workspace.id);
+            if (!state || state.lody === owner) {
+              // Only a removed member loses the workspace. A revoked machine identity
+              // keeps the binding and waits for re-enrolment; it never restarts with
+              // the revoked identity.
+              if (reason === 'member-removed') this.desiredWorkspaces.delete(workspace.id);
+              else this.parkForPairing(workspace.id);
+            }
             if (state?.lody === owner) await this.stopWorkspace(workspace.id);
             else await owner.cleanup();
           },
@@ -1051,14 +1079,14 @@ export class LodyFleet {
           workspaceWatchCoordinator: this.workspaceWatchCoordinator,
         });
 
-        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || memberRemoved) {
+        if (!this.mayStart(workspace.id) || accessLost) {
           await lody.cleanup();
           return;
         }
 
         await lody.start();
 
-        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || memberRemoved) {
+        if (!this.mayStart(workspace.id) || accessLost) {
           await lody.cleanup();
           return;
         }
@@ -1264,8 +1292,7 @@ export class LodyFleet {
   }
 
   private scheduleRetry(workspace: WorkspaceListItem): void {
-    if (this.stopped) return;
-    if (!this.desiredWorkspaces.has(workspace.id)) return;
+    if (!this.mayStart(workspace.id)) return;
     if (this.retryTimers.has(workspace.id)) return;
 
     const delayMs = 10_000;
@@ -1273,7 +1300,7 @@ export class LodyFleet {
       this.retryTimers.delete(workspace.id);
       this.refreshRuntimeState();
       const desiredWorkspace = this.desiredWorkspaces.get(workspace.id);
-      if (!desiredWorkspace || this.stopped) return;
+      if (!desiredWorkspace || !this.mayStart(workspace.id)) return;
       void this.startWorkspace(desiredWorkspace);
     }, delayMs);
     timer.unref?.();
