@@ -752,6 +752,16 @@ function publicE2eeFailure(error: unknown): Error {
     return projected
   }
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+  if (code === 'device_revoked') {
+    const projected = new Error('e2ee_device_revoked')
+    publicAccessLosses.set(projected, 'device_revoked')
+    return projected
+  }
+  if (code === 'member_removed') {
+    const projected = new Error('e2ee_member_removed')
+    publicAccessLosses.set(projected, 'member_removed')
+    return projected
+  }
   const allowed = new Set([
     'identity-busy',
     'permissions',

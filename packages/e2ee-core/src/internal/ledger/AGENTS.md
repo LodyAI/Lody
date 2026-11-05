@@ -56,6 +56,9 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
 - `VerifiedLedger` is the single rollback guard: genuine view, same workspace,
   continuation of the newest observed view, containment of the durable pin.
   Unchanged pins are not rewritten; failed pin writes keep the in-memory view.
+- A genuine view may classify a signing key from current plus retained device
+  history for an exact local refusal. Classification is not authority and never
+  replaces signature/policy verification.
 
 Retained origins include their source locator. A pin ahead of the restored view
 must be proved by the suffix; a cache ahead of the pin is rebuildable. Equal
