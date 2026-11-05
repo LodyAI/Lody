@@ -96,6 +96,9 @@ const styles = stylex.create({
     cornerShape: corner.round,
   },
   screenAlone: { boxShadow: shadow.card },
+  // Let DeviceKit's glass back fractional iframe edges and antialiased corners.
+  // A theme-coloured backing shows through as a hairline on dark guest screens.
+  nativeScreen: { backgroundColor: 'transparent' },
   nativeImage: {
     position: 'absolute',
     inset: 0,
@@ -315,7 +318,14 @@ export const IosSimulatorDeviceFrame = forwardRef<HTMLDivElement, IosSimulatorDe
                 )}
               </div>
             ) : null}
-            <div {...stylex.props(styles.screen, !bezel && styles.screenAlone)} style={screenStyle}>
+            <div
+              {...stylex.props(
+                styles.screen,
+                native && styles.nativeScreen,
+                !bezel && styles.screenAlone
+              )}
+              style={screenStyle}
+            >
               {children}
             </div>
           </div>
