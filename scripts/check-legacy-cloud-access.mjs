@@ -315,7 +315,15 @@ export function auditLegacyCloudTree(root) {
       file === 'packages/components/src/lib/cloud-api-operations.ts'
     )
       continue;
-    const result = auditLegacyCloudSource(file, fs.readFileSync(path.join(root, file), 'utf8'));
+    let source;
+    try {
+      source = fs.readFileSync(path.join(root, file), 'utf8');
+    } catch (error) {
+      // The pre-commit gate sees tracked files deleted from the working tree.
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
+    const result = auditLegacyCloudSource(file, source);
     rows.push(...result.rows);
     errors.push(...result.errors);
   }

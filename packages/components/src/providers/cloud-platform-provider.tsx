@@ -27,6 +27,7 @@ import {
   type MutableStore,
   type E2eeWorkspaceRuntime,
   type E2eeRuntimeFactory,
+  type PlatformE2eeWorkspaces,
   type PlatformSessionState,
   type WorkspaceSummary,
   type WorkspacesState,
@@ -90,9 +91,11 @@ function toWorkspaceSummary(
 export function CloudPlatformProvider({
   children,
   createE2eeRuntime,
+  prepareE2eeCreation,
 }: {
   children: ReactNode;
   createE2eeRuntime?: E2eeRuntimeFactory;
+  prepareE2eeCreation?: PlatformE2eeWorkspaces['prepareCreation'];
 }) {
   const electron = isElectronRenderer();
   const cloudClient = useCloudPlatformClient();
@@ -251,6 +254,7 @@ export function CloudPlatformProvider({
     const native = electron ? getIpcServices()?.e2ee : undefined;
     return createCloudE2eeWorkspaces({
       session: () => sessionStore.get(),
+      ...(prepareE2eeCreation ? { prepareCreation: prepareE2eeCreation } : {}),
       ...(native
         ? {
             prepareCreation: (request) => native.prepareCreation(request),
@@ -261,6 +265,9 @@ export function CloudPlatformProvider({
               memberJoinRequests: (workspaceId) => native.memberJoinRequests(workspaceId),
               approveMemberJoin: (workspaceId, requestId, mode) =>
                 native.approveMemberJoin(workspaceId, requestId, mode),
+              memberKeyDeliveries: (workspaceId) => native.memberKeyDeliveries(workspaceId),
+              retryMemberKeyDelivery: (workspaceId, requestId) =>
+                native.retryMemberKeyDelivery(workspaceId, requestId),
               rejectMemberJoin: (workspaceId, requestId) =>
                 native.rejectMemberJoin(workspaceId, requestId),
               revokeMemberInvitation: (workspaceId, token) =>
@@ -369,7 +376,15 @@ export function CloudPlatformProvider({
         await readOrganization().refetchOrganizations();
       },
     });
-  }, [cloudClient, electron, portableRuntime, readOrganization, sessionStore, workspacesStore]);
+  }, [
+    cloudClient,
+    electron,
+    portableRuntime,
+    prepareE2eeCreation,
+    readOrganization,
+    sessionStore,
+    workspacesStore,
+  ]);
 
   const provider = useMemo<PlatformProvider>(
     () => ({

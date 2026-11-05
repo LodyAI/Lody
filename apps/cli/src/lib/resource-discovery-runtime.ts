@@ -1,5 +1,8 @@
 import {
   getMachineFlockAcpCapabilities,
+  getMachineFlockRateLimits,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  machineSupportsProtocolCapability,
   getMachineFlockDocId,
   getWorkspaceFlockDocId,
   isMachineDocRoomId,
@@ -13,6 +16,7 @@ import {
 import {
   listAliveDocMetas,
   syncWorkspaceMetaForRead,
+  withMachineRpcClient,
   WorkspaceSyncUnavailableError,
   type AuthContext,
 } from './command-runtime';
@@ -25,6 +29,8 @@ import { listWorkspaceMcpCatalog } from './workspace-mcp-store';
 import { ResourceDiscovery } from './resource-discovery';
 import { getCliPlatformKind } from './cli-platform';
 import { getDaemonWorkspace, getSessionCommandEnvironment } from './session-command-environment';
+
+const MACHINE_RESOURCES_TIMEOUT_MS = 5_000;
 
 export async function createResourceDiscovery(args: {
   manager: LoroDocumentManager;
@@ -90,6 +96,12 @@ export async function createResourceDiscovery(args: {
       synced.add(id);
     }
   }
+  async function readMachineFlockRows(machineId: MachineId) {
+    const id = getMachineFlockDocId(workspaceId, machineId);
+    await sync(id);
+    const handle = await manager.repo.openFlockDoc(id);
+    return readMachineFlockRowsFromFlock(handle.flock);
+  }
   return new ResourceDiscovery({
     workspaceId,
     userId: args.delegatedRequester?.userId ?? auth.userId,
@@ -105,12 +117,12 @@ export async function createResourceDiscovery(args: {
       workspace: baselines.get(getWorkspaceFlockDocId(workspaceId)) !== false,
       machines: machineBaselines,
     }),
-    onlineMachineIds: async () =>
+    machinePresence: async () =>
       getSessionCommandEnvironment()
-        ? new Set([auth.machineId])
+        ? { online: new Set([auth.machineId]), synced: true }
         : args.offline
-          ? null
-          : manager.getOnlineMachineIds(),
+          ? { online: new Set(), synced: false }
+          : manager.getMachinePresenceView(),
     canAccess: async (machineId, localProjectId) =>
       (
         await readSessionMachineAccess({
@@ -130,11 +142,43 @@ export async function createResourceDiscovery(args: {
       return listMergedAgentConfigs(manager.repo, workspaceId, [machineId]);
     },
     capabilities: async (machineId: MachineId) => {
-      const id = getMachineFlockDocId(workspaceId, machineId);
-      await sync(id);
-      machineBaselines.set(machineId, baselines.get(id) !== false);
-      const handle = await manager.repo.openFlockDoc(id);
-      return getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(handle.flock));
+      const rows = await readMachineFlockRows(machineId);
+      machineBaselines.set(
+        machineId,
+        baselines.get(getMachineFlockDocId(workspaceId, machineId)) !== false
+      );
+      return getMachineFlockAcpCapabilities(rows);
+    },
+    rateLimits: async (machineId: MachineId) =>
+      getMachineFlockRateLimits(await readMachineFlockRows(machineId)),
+    machineResources: async (machine: MachineMeta) => {
+      const response = await withMachineRpcClient(
+        { auth, workspaceId, machineId: machine.id },
+        async (client) =>
+          await client.requestMachineStatus({
+            timeoutMs: MACHINE_RESOURCES_TIMEOUT_MS,
+            // Older daemons reject unknown params, so only capable ones get the flag.
+            ...(machineSupportsProtocolCapability(
+              machine,
+              MACHINE_PROTOCOL_CAPABILITIES.machineDiskStatus
+            )
+              ? { includeDisk: true }
+              : {}),
+          })
+      );
+      if (!response?.success) return undefined;
+      return {
+        ...(response.resources
+          ? {
+              memory: {
+                totalGB: response.resources.totalMemoryGB,
+                freeGB: response.resources.freeMemoryGB,
+              },
+              cpuUsagePercent: response.resources.cpuUsagePercent,
+            }
+          : {}),
+        ...(response.disk ? { disk: response.disk } : {}),
+      };
     },
     projects: async (machineId) => {
       await sync(getMachineFlockDocId(workspaceId, machineId));

@@ -34,6 +34,57 @@ function createDeferred<T>() {
 }
 
 describe('Custom ACP authentication real process', () => {
+  it('keeps the machine-wide slot across manager replacement until the child exits', async () => {
+    const scratchDir = await mkdtemp(path.join(tmpdir(), 'lody-acp-auth-fence-'));
+    const marker = path.join(scratchDir, 'terminated');
+    const first = new AcpAuthenticationManager(createSilentLogger(), {
+      resolveLoginShellEnv: async () => ({}),
+    });
+    const reopened = new AcpAuthenticationManager(createSilentLogger(), {
+      resolveLoginShellEnv: async () => ({}),
+    });
+    const ready = createDeferred<void>();
+    const input = {
+      cliType: 'custom' as const,
+      agentType: 'real-process-reopen-fence',
+      customAcp: { command: process.execPath, args: [fixturePath, marker] },
+    };
+    try {
+      const original = first.authenticate({
+        ...input,
+        requestId: 'original',
+        onProgress: (event) => {
+          if (event.status === 'auth-methods') ready.resolve();
+        },
+      });
+      await ready.promise;
+      expect(first.cancel('original').disposition).toBe('cancelled');
+      await expect(
+        reopened.authenticate({ ...input, requestId: 'overlap' })
+      ).resolves.toMatchObject({
+        success: false,
+        disposition: 'error',
+      });
+      await original;
+      await expect(readFile(marker, 'utf8')).resolves.toBe('terminated');
+      const nextReady = createDeferred<void>();
+      const next = reopened.authenticate({
+        ...input,
+        requestId: 'after-exit',
+        onProgress: (event) => {
+          if (event.status === 'auth-methods') nextReady.resolve();
+        },
+      });
+      await nextReady.promise;
+      expect(reopened.cancel('after-exit').disposition).toBe('cancelled');
+      await next;
+    } finally {
+      first.cancel('original');
+      reopened.cancel('after-exit');
+      await rm(scratchDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it('keeps method selection and a versioned secret form on one process through cleanup', async () => {
     const scratchDir = await mkdtemp(path.join(tmpdir(), 'lody-acp-auth-'));
     const shutdownMarkerPath = path.join(scratchDir, 'terminated');

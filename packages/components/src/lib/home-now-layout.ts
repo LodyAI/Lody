@@ -4,10 +4,11 @@
  * arithmetic only; the picture is `components/chat/home/now-board.tsx`.
  *
  * Four rules keep it calm under load, and one keeps it still:
- * - Fixed places. Every list always has its tile in the same place: needs you over just
- *   finished on the left, the usage over running over worth continuing on the right. A list with
- *   nothing is a one-line tile, not a gap, so no tile ever changes column or disappears from
- *   under the pointer while the lists change; tiles only grow and shrink in place.
+ * - Fixed places. Needs you always opens the left column and the usage and worth continuing the
+ *   right one, whatever the lists hold; running and just finished take whichever side leaves the
+ *   columns level, and move only when that buys `HOME_NOW_SWITCH_MARGIN` rows or more (see
+ *   `solveHomeNowColumn`). A list with nothing is a one-line tile, not a gap, so no tile ever
+ *   disappears from under the pointer while the lists change; tiles only grow and shrink in place.
  * - One statement when nothing happens. With every list empty, one card on the left says that
  *   all is quiet while usage keeps its place on the right; the busy lists return the moment
  *   anything is happening.
@@ -46,18 +47,103 @@ export type HomeNowBlock =
   | { kind: 'usage' }
   | { kind: 'quiet' };
 
+export type HomeNowColumn = Readonly<Record<HomeNowListKey, 0 | 1>>;
+
 /**
- * The fixed column of each list. What waits on the person's reply (needs you, just finished)
- * reads first at the left; what is in motion and what can wait sit under the usage at the right.
- * The two longest lists, needs you and running, stand in different columns, so a busy board
- * spends both.
+ * The fixed column of each list: the ruler on the right, everything elastic on the left.
+ *
+ * Levelling can only *add* rows, and only from a column's own lists that hide some
+ * (`levelHomeNow`): a column whose lists all fit their rows cannot move, and the other column
+ * cannot come down without hiding rows the person could act on. So the board is even exactly
+ * when the short column is the one with hidden rows. A tile's height is 2 (its head) + the rows
+ * it shows + 1 while it hides any, so the blocks that never stretch are the one at its cap
+ * (`worth continuing`, 6 rows with a backlog: 2 + 3 + 1) and the usage (4, a fixed card). Put
+ * those two together and that column is a ruler of 10 rows, against which the other column's
+ * lists — needs you, running, just finished, none of them capped in the state the page sits in
+ * — are levelled one row at a time. Any other arrangement puts a stretching block on the ruler
+ * side, so levelling chases a target that moves with it.
+ *
+ * That is the state the page sits in most of the day: nothing waiting on the person, a backlog
+ * over its cap. Over every such state (needs you empty, running 0-5, just finished 0-4, worth
+ * continuing over its cap) this split leaves 1.1 rows between the columns on average and 5 at
+ * worst; the split it replaces (needs you over just finished, the usage over running over worth
+ * continuing) leaves 8.5, and no other of the eight arrangements beats it. `home-now.test.ts`
+ * re-derives that argmin, so a cap or budget change that moves the answer fails the suite.
+ *
+ * No fixed arrangement is even everywhere: this one leaves ten rows on a day with thirteen
+ * waiting, six just finished and one worth continuing, where putting running on the left and
+ * just finished on the right leaves none. So the board does not commit to one for good:
+ * `solveHomeNowColumn` picks between the four that keep the anchors, and only moves a tile when
+ * it buys `HOME_NOW_SWITCH_MARGIN` rows. This arrangement is where it starts, and where it stays
+ * on the day the page sits in most of the time.
  */
-const HOME_NOW_COLUMN: Readonly<Record<HomeNowListKey, 0 | 1>> = {
+export const HOME_NOW_COLUMN: HomeNowColumn = {
   attention: 0,
+  running: 0,
   finished: 0,
-  running: 1,
   next: 1,
 };
+
+/**
+ * The four arrangements that keep both anchors: needs you opens the left column, the usage and
+ * worth continuing open the right. Only running and just finished change sides, so a tile that
+ * moves never leaves the top of its column and the reading order of the queue never changes.
+ * Order matters: the last one, every list but the anchors on the left, is `HOME_NOW_COLUMN`.
+ */
+export const HOME_NOW_ARRANGEMENTS: readonly HomeNowColumn[] = [
+  { attention: 0, running: 1, finished: 1, next: 1 },
+  { attention: 0, running: 0, finished: 1, next: 1 },
+  { attention: 0, running: 1, finished: 0, next: 1 },
+  { attention: 0, running: 0, finished: 0, next: 1 },
+];
+
+/**
+ * How many rows an arrangement must save before the board takes it. Two is the smallest move
+ * worth a tile changing sides: one row reads as rounding, and a count that hovers on a boundary
+ * would otherwise flap every time it ticks. It also bounds the cost of staying put —
+ * `solveHomeNowColumn` never leaves more than this above the best arrangement of that state.
+ */
+export const HOME_NOW_SWITCH_MARGIN = 2;
+
+/** The gap between the columns this arrangement leaves, after levelling. */
+function arrangementGap(
+  totals: HomeNowTotals,
+  hasUsage: boolean,
+  maxRows: number,
+  column: HomeNowColumn
+): number {
+  const { columns } = layoutHomeNow(totals, hasUsage, maxRows, column);
+  // An empty board without usage is one quiet column. There is no second column to
+  // compare, and every arrangement places the same quiet card, so the gap is zero.
+  if (!columns[1]) return 0;
+  return Math.abs(columnHeight(columns[0]!, totals) - columnHeight(columns[1], totals));
+}
+
+/**
+ * Which arrangement the board takes for these lists, given the one it showed last. The best of
+ * the four, unless keeping `previous` costs less than `HOME_NOW_SWITCH_MARGIN` rows — so a count
+ * crossing a boundary does not move a tile for a single row, while a day the arrangement was
+ * never meant for (thirteen waiting and a backlog, say) does change sides. Pure: the same lists
+ * and the same previous arrangement always give the same answer.
+ */
+export function solveHomeNowColumn(
+  totals: HomeNowTotals,
+  hasUsage: boolean,
+  maxRows: number = Number.POSITIVE_INFINITY,
+  previous: HomeNowColumn = HOME_NOW_COLUMN
+): HomeNowColumn {
+  const previousGap = arrangementGap(totals, hasUsage, maxRows, previous);
+  let best = previous;
+  let bestGap = previousGap;
+  for (const column of HOME_NOW_ARRANGEMENTS) {
+    const gap = arrangementGap(totals, hasUsage, maxRows, column);
+    if (gap < bestGap) {
+      best = column;
+      bestGap = gap;
+    }
+  }
+  return bestGap + HOME_NOW_SWITCH_MARGIN <= previousGap ? best : previous;
+}
 
 /**
  * Two halves when usage is present. `fits` is false when even one row per list is taller than
@@ -106,7 +192,8 @@ function columnHeight(column: readonly HomeNowBlock[], totals: HomeNowTotals): n
 function placeHomeNow(
   shown: Record<HomeNowListKey, number>,
   hasUsage: boolean,
-  nothingHappening: boolean
+  nothingHappening: boolean,
+  column: HomeNowColumn
 ): HomeNowBlock[][] {
   // Nothing at all is happening: one statement about it, instead of four empty lists.
   if (nothingHappening) {
@@ -116,7 +203,7 @@ function placeHomeNow(
   }
   const columns: HomeNowBlock[][] = [[], hasUsage ? [{ kind: 'usage' }] : []];
   for (const key of HOME_NOW_LISTS) {
-    columns[HOME_NOW_COLUMN[key]]!.push({ kind: 'list', key, shown: shown[key] });
+    columns[column[key]]!.push({ kind: 'list', key, shown: shown[key] });
   }
   return columns;
 }
@@ -152,19 +239,21 @@ function levelHomeNow(columns: HomeNowBlock[][], totals: HomeNowTotals): void {
 /**
  * The board for these lists. With `maxRows` (the rows one column has room for, in
  * `homeNowBlockHeight` units) the budget gives way until the taller column fits; without it the
- * board is as tall as the budget makes it.
+ * board is as tall as the budget makes it. `column` is the placement (`HOME_NOW_COLUMN`); the
+ * suite passes other arrangements to prove that one is the best of the eight.
  */
 export function layoutHomeNow(
   totals: HomeNowTotals,
   hasUsage: boolean,
-  maxRows: number = Number.POSITIVE_INFINITY
+  maxRows: number = Number.POSITIVE_INFINITY,
+  column: HomeNowColumn = HOME_NOW_COLUMN
 ): HomeNowLayout {
   const lists = HOME_NOW_LISTS.filter((key) => totals[key] > 0).length;
   const nothingHappening = lists === 0;
   let columns: HomeNowBlock[][] = [];
   for (let budget = HOME_NOW_ROW_BUDGET; budget >= lists; budget -= 1) {
-    columns = placeHomeNow(allocateHomeNowRows(totals, budget), hasUsage, nothingHappening);
-    const tallest = Math.max(...columns.map((column) => columnHeight(column, totals)));
+    columns = placeHomeNow(allocateHomeNowRows(totals, budget), hasUsage, nothingHappening, column);
+    const tallest = Math.max(...columns.map((each) => columnHeight(each, totals)));
     if (tallest <= maxRows) {
       levelHomeNow(columns, totals);
       return { columns, fits: true };

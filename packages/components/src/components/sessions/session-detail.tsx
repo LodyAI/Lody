@@ -4030,7 +4030,7 @@ const SessionDetail = ({
   }, [replaceSessionUrlPr]);
 
   const handleOpenBrowser = useCallback(
-    (tabSessionId?: SessionId, navigateCandidate = false) => {
+    (tabSessionId?: SessionId, navigateCandidate = isMobile) => {
       requireWorkspaceFeature(
         { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
         'remote-preview'
@@ -7264,6 +7264,7 @@ const SessionDetail = ({
         isActive && chatSession.id === sessionId ? claimNavigationFocus : undefined,
       session: chatSession,
       workspaceSession: activeSession,
+      onRestoreSession: handleRestoreCurrentSession,
       className: stylex.props(detailStyles.rootFill).className,
       hideHeader: true,
       toolbar: chatSession.id === sessionId ? desktopToolbar : undefined,

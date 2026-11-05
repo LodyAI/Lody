@@ -1,5 +1,3 @@
-import { SidebarPullRequests } from './sidebar-pull-requests';
-import type { SessionPullRequestMeta } from '@lody/shared';
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
@@ -41,6 +39,7 @@ import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
   GitHubOwnerIcon,
   SessionOpenedByTreeRow,
+  SessionPrIcon,
   SessionMergeablePill,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
@@ -109,8 +108,8 @@ export type SidebarUpdatedItem = {
    * Sidebar row this one nests under — the opener's ROOT Session when the opener
    * is a child Tab, otherwise the opener itself. It is also the root route for
    * precise child-Tab navigation; it never replaces `openedBySessionId`.
-   * Nesting is still resolved WITHIN one rendered section, so a pinned opener
-   * and an unpinned opened Session (different sections) both stay top-level.
+   * Nesting is resolved within one rendered section; desktop section placement
+   * keeps pinned openers together with their visible opened Sessions.
    */
   openedByRowSessionId?: string | null;
   /**
@@ -146,7 +145,6 @@ export type SidebarUpdatedItem = {
   prCiState?: SessionPullRequestCiState | null;
   prReadiness?: SessionPullRequestReadiness | null;
   prNumber?: number | null;
-  pullRequests?: readonly SessionPullRequestMeta[];
   prUrl?: string | null;
   owner?: SessionListRowOwner | null;
   addedLines?: number;
@@ -807,18 +805,18 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const showPr = Boolean(prUrl);
   const addedLines = typeof item.addedLines === 'number' ? item.addedLines : 0;
   const deletedLines = typeof item.deletedLines === 'number' ? item.deletedLines : 0;
-  // Display only recorded, nonzero change counts.
-  const hasChanges =
-    Number.isFinite(item.addedLines) &&
-    Number.isFinite(item.deletedLines) &&
-    (addedLines !== 0 || deletedLines !== 0);
+  // +/- diff stats only exist for repo (worktree) sessions. Local-project and
+  // chat rows never have a meaningful change count; rendering 0/0 there would
+  // be noise. Workspace mode reaches the same conclusion structurally because
+  // only github rows pass through SessionList's diff path.
+  const hasChanges = item.kind === 'github' && (addedLines !== 0 || deletedLines !== 0);
   // A merged/closed PR can leave a stale "clean/mergeable" record in
   // `pullRequestState` (the webhook fan-out sets status='merged' but can't
   // clear that field, and the poller stops observing terminal PRs). Gate the
   // pill on the PR still being live so it doesn't linger next to a merged PR.
   const isMergeable =
     showPr && item.prReadiness === 'y' && prStatus !== 'merged' && prStatus !== 'closed';
-  const showMergeablePill = (item.pullRequests?.length ?? 0) <= 1 && isMergeable && !selected;
+  const showMergeablePill = isMergeable && !selected;
   const branchName =
     typeof item.branchName === 'string' && item.branchName.trim() ? item.branchName.trim() : null;
   const repoFullName =
@@ -867,7 +865,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   // other actions in both organize modes — keeping it consistent rather than
   // inventing a new mobile entry point here.
   // Reverse leg of the opened-by relationship. Available even when the row is
-  // NOT nested (opener pinned into the other section, archived, or filtered
+  // NOT nested (opener archived or filtered
   // out), which is exactly when the tree cannot show the link.
   const openerSessionId = normalizeSessionRowId(item.openedBySessionId);
   const openerRootSessionId = normalizeSessionRowId(item.openedByRowSessionId) ?? openerSessionId;
@@ -1049,24 +1047,16 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             </div>
           ) : null}
         </div>
-        {/* Keep the metadata controls separate from the title-line status. */}
-        <div
-          className={
-            showBranchLine && (showPr || hasChanges)
-              ? 'flex self-stretch'
-              : cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)
-          }
-        >
+        {/* Keep PR at the right edge. Line totals stay in the hover card. */}
+        <div className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
           <SidebarRowEndSlot
             sessionId={item.id}
             isWaitingPermission={item.isWaitingPermission}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
-            restOnSecondLine={showBranchLine && (showPr || hasChanges)}
-            interactiveRest={showBranchContext && (showPr || (showBranchLine && hasChanges))}
             restIcon={
-              (showPr && showBranchContext) ||
+              showPr ||
               showMergeablePill ||
               isMobile ||
               (item.kind === 'local' && item.isWorktree) ? (
@@ -1083,15 +1073,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   <SessionRowWorktreeIndicator
                     isWorktree={item.kind === 'local' && item.isWorktree}
                   />
-                  {showPr && showBranchContext ? (
-                    <SidebarPullRequests
-                      alignWithBranch={showBranchLine}
-                      pullRequests={
-                        item.pullRequests?.length
-                          ? item.pullRequests
-                          : [{ url: prUrl!, status: prStatus }]
-                      }
-                    />
+                  {showPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
                   ) : null}
                 </span>
               ) : undefined

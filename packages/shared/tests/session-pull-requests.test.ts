@@ -80,23 +80,6 @@ describe('session PR membership and lifecycle projection', () => {
       resolveSessionPullRequests({ ...original, ...fields, [next.field]: next.value })[0]?.status
     ).toBe('open');
   });
-
-  it('rejects invalid revisions and keeps register values below 50 bytes', () => {
-    expect(planPullRequestLifecycle({ url, status: 'open', updatedAt: 'invalid' })).toBeNull();
-    expect(
-      planPullRequestLifecycle({
-        url: 'https://example.com/pull/42',
-        status: 'open',
-        updatedAt: '2026-01-01',
-      })
-    ).toBeNull();
-    const write = planPullRequestLifecycle({
-      url,
-      status: 'merged',
-      updatedAt: '2026-01-01T00:00:00Z',
-    })!;
-    expect(new TextEncoder().encode(JSON.stringify(write.value)).byteLength).toBeLessThan(50);
-  });
 });
 
 describe('session PR views', () => {

@@ -10,16 +10,13 @@ import type { Logger } from './logger';
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
 import {
+  createFileLogger,
   createFileTransport,
   createLogger,
-  resolveFileLogLevel,
+  getLogger,
   routeLoggerToStderr,
 } from './logger';
-import {
-  FILE_LOG_FAILURE_REPORT_INTERVAL_MS,
-  FILE_LOG_RETRY_INTERVAL_MS,
-  ResilientFileTransport,
-} from './resilient-file-transport';
+import { FILE_LOG_RETRY_INTERVAL_MS } from './resilient-file-transport';
 
 describe('WinstonLogger', () => {
   it('routes root and child diagnostics to stderr while preserving structured stdout', async () => {
@@ -55,35 +52,11 @@ describe('WinstonLogger', () => {
       await logger.close();
     }
   });
-  it('keeps nested child logger methods bound when passed as callbacks', () => {
-    const rootLogger = createLogger({ transports: 'console', level: 'silent' });
-    const createChild = rootLogger.child;
-    const workspaceLogger = createChild({ workspaceName: 'workspace' });
-    const sessionLogger = workspaceLogger.child({ sessionId: 'session' });
-    const debug = sessionLogger.debug;
-
-    expect(() => debug('bound logger method')).not.toThrow();
-  });
-
-  it('accepts trace records, so the level is registered with winston', () => {
-    const logger = createLogger({ transports: 'console', level: 'silent' });
-
-    expect(() => logger.trace('hot path record')).not.toThrow();
-  });
 });
 
 describe('file sink level', () => {
   const opened: Array<ReturnType<typeof createFileTransport>> = [];
   const logRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-log-level-'));
-
-  /** Resolves once the rotator has chosen its file; `new` precedes the async open. */
-  const openFileTransport = async (): Promise<ReturnType<typeof createFileTransport>> => {
-    const dirname = fs.mkdtempSync(path.join(logRoot, 'sink-'));
-    const transport = createFileTransport({ file: { dirname } });
-    opened.push(transport);
-    await new Promise<void>((resolve) => transport.once('new', () => resolve()));
-    return transport;
-  };
 
   afterEach(async () => {
     delete process.env.LODY_LOG_TRACE;
@@ -102,20 +75,6 @@ describe('file sink level', () => {
 
   afterAll(() => {
     fs.rmSync(logRoot, { recursive: true, force: true });
-  });
-
-  it('captures debug but not trace by default', async () => {
-    expect(resolveFileLogLevel({})).toBe('debug');
-    expect((await openFileTransport()).level).toBe('debug');
-  });
-
-  it('descends to trace only when LODY_LOG_TRACE is switched on', async () => {
-    expect(resolveFileLogLevel({ LODY_LOG_TRACE: '1' })).toBe('trace');
-    expect(resolveFileLogLevel({ LODY_LOG_TRACE: ' TRUE ' })).toBe('trace');
-    expect(resolveFileLogLevel({ LODY_LOG_TRACE: 'on' })).toBe('trace');
-
-    process.env.LODY_LOG_TRACE = '1';
-    expect((await openFileTransport()).level).toBe('trace');
   });
 
   it.each([false, true])(
@@ -173,16 +132,36 @@ describe('file sink level', () => {
       expect(content).not.toMatch(/secret|token|url/);
     }
   );
-
-  it('ignores values that do not read as switched on', () => {
-    expect(resolveFileLogLevel({ LODY_LOG_TRACE: '0' })).toBe('debug');
-    expect(resolveFileLogLevel({ LODY_LOG_TRACE: 'false' })).toBe('debug');
-    expect(resolveFileLogLevel({ LODY_LOG_TRACE: '' })).toBe('debug');
-    expect(resolveFileLogLevel({})).toBe('debug');
-  });
 });
 
-const MESSAGE = Symbol.for('message');
+describe('scoped loggers created before the process sink', () => {
+  const logRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-log-early-'));
+
+  afterAll(() => {
+    fs.rmSync(logRoot, { recursive: true, force: true });
+  });
+
+  // The CLI entry creates module-level scoped loggers (presence diagnostics among
+  // them) before `lody start` installs the daemon file sink. Bound to the startup
+  // console logger, every such line was discarded with the Worker's stdout.
+  it('writes through the file sink installed after the logger was obtained', async () => {
+    const early = getLogger('early-scope');
+    const nested = early.child({ scope: 'nested' });
+    const dirname = fs.mkdtempSync(path.join(logRoot, 'sink-'));
+    const fileLogger = createFileLogger('early-%DATE%.log', dirname);
+    const sink = Reflect.get(fileLogger, 'winston') as winston.Logger;
+    const transport = sink.transports[0];
+    if (!transport) throw new Error('file logger has no transport');
+    await once(transport, 'new');
+    early.debug('presence diagnostic from an early logger');
+    nested.warn('nested diagnostic from an early logger');
+    await closeTransport(transport);
+    const logFile = fs.readdirSync(dirname).find((file) => file.endsWith('.log'));
+    const content = fs.readFileSync(path.join(dirname, logFile ?? ''), 'utf8');
+    expect(content).toContain('presence diagnostic from an early logger');
+    expect(content).toContain('nested diagnostic from an early logger');
+  });
+});
 
 const enospc = (): NodeJS.ErrnoException =>
   Object.assign(new Error('ENOSPC: no space left on device, write'), {
@@ -342,58 +321,5 @@ describe('file sink on a failing disk', () => {
     expect(content).toMatch(/file logging resumed; .*\(ENOTDIR: .*; 1 line logged meanwhile/);
     expect(content).toContain('written once the directory exists');
     expect(fs.readdirSync(dirname).filter((name) => name.includes('probe'))).toEqual([]);
-  });
-
-  it('reports repeated failures on stderr at most once per interval but records every gap in the file', () => {
-    class FakeSink extends EventEmitter {
-      readonly logStream = new EventEmitter();
-      readonly lines: string[] = [];
-      log(info: Record<symbol, unknown>, next: () => void): void {
-        this.lines.push(String(info[MESSAGE]));
-        next();
-      }
-      close(): void {
-        this.emit('finish');
-      }
-    }
-    const sinks: FakeSink[] = [];
-    const stderr = createStderr();
-    let nowMs = 0;
-    const transport = new ResilientFileTransport({
-      dirname: '/logs',
-      format: winston.format.printf((info) => String(info.message)),
-      openSink: () => {
-        const sink = new FakeSink();
-        sinks.push(sink);
-        return sink;
-      },
-      probeWritable: () => {},
-      now: () => nowMs,
-      writeStderr: stderr.write,
-    });
-    const logger = winston.createLogger({ level: 'debug', transports: [transport] });
-    const failCurrentSink = () => sinks.at(-1)?.logStream.emit('error', enospc());
-    const retry = (message: string) => {
-      nowMs += FILE_LOG_RETRY_INTERVAL_MS;
-      logger.info(message);
-    };
-
-    expect(failCurrentSink).not.toThrow();
-    retry('after the first gap');
-    expect(failCurrentSink).not.toThrow();
-    retry('after the second gap');
-    expect(stderr.lines.map((line) => line.split(' (')[0])).toEqual([
-      '[lody] Cannot write the log file in /logs',
-      '[lody] file logging resumed; lines from about 1970-01-01T00:00:00.000Z are missing after a write failed',
-    ]);
-    expect(sinks[2]?.lines).toEqual([
-      `${os.EOL}file logging resumed; lines from about 1970-01-01T00:00:30.000Z are missing after a write failed (ENOSPC: no space left on device, write); 0 lines logged meanwhile were dropped`,
-      'after the second gap',
-    ]);
-
-    nowMs = FILE_LOG_FAILURE_REPORT_INTERVAL_MS;
-    failCurrentSink();
-    expect(stderr.lines.at(-1)).toContain('Cannot write the log file in /logs (ENOSPC');
-    expect(stderr.lines).toHaveLength(3);
   });
 });

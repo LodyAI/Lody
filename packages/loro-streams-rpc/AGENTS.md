@@ -21,6 +21,9 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
 - Encrypted dispatch fails with `e2ee_machine_not_shared` only when `authorizeTarget`
   returns a verified `false`; its failure is `e2ee_machine_sharing_unavailable`, because
   senders withhold input only for a known withdrawal.
+- A fully verified ledger view that no longer contains the requester classifies
+  dispatch/read as exact `e2ee_device_revoked` (membership retained) or
+  `e2ee_member_removed`; never as generic `e2ee_rpc_denied`.
 - Encrypted dispatch retains exact frames across retry/fallback. Receipt ACK never
   completes the shared execution claim. [Ownership/close](README.md#encrypted-dispatch).
 - Request stream ids are workspace/machine scoped:

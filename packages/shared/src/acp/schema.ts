@@ -12,6 +12,15 @@ import type {
 import { z } from 'zod';
 import { isLodySubagentEvent, type LodySubagentEvent } from 'acp-extension-core';
 
+export const MessagePhaseSchema = z.enum(['commentary', 'final_answer']);
+
+export function parseLodyMessagePhase(meta: Record<string, unknown> | null | undefined) {
+  const canonical = z.object({ messagePhase: MessagePhaseSchema }).safeParse(meta?.lody);
+  if (canonical.success) return canonical.data.messagePhase;
+  const legacy = z.object({ phase: MessagePhaseSchema }).safeParse(meta?.codex);
+  return legacy.success ? legacy.data.phase : undefined;
+}
+
 const zMeta = z.record(z.string(), z.unknown()).nullish();
 
 const withMeta = <T extends z.ZodRawShape>(shape: T) =>

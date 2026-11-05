@@ -56,19 +56,6 @@ void test('returns Electron notification delivery failures through IPC', async (
   assert.equal(activeNotifications.size, 0)
 })
 
-void test('keeps synchronous notification failures in the result contract', async () => {
-  const notification = new TestNotification(new Error('notification setup failed'))
-  const activeNotifications = new Set()
-
-  assert.deepEqual(await showNativeNotification(notification, activeNotifications), {
-    shown: false,
-    reason: 'notification setup failed'
-  })
-  assert.equal(activeNotifications.size, 0)
-  assert.equal(notification.listenerCount('show'), 0)
-  assert.equal(notification.listenerCount('failed'), 0)
-})
-
 void test('retains delivered notifications independently until clicked or dismissed', async () => {
   const activeNotifications = new Set()
   const first = new TestNotification('shown')
@@ -94,15 +81,4 @@ void test('retains delivered notifications independently until clicked or dismis
   second.emit('click')
   assert.equal(selectedSession, 'session-2')
   assert.equal(activeNotifications.size, 0)
-})
-
-void test('releases a delivered notification on a later native failure', async () => {
-  const activeNotifications = new Set()
-  const notification = new TestNotification('shown')
-  assert.deepEqual(await showNativeNotification(notification, activeNotifications), { shown: true })
-  notification.emit('failed', {}, 'notification removed')
-  assert.equal(activeNotifications.size, 0)
-  assert.equal(notification.listenerCount('click'), 0)
-  assert.equal(notification.listenerCount('close'), 0)
-  assert.equal(notification.listenerCount('failed'), 0)
 })

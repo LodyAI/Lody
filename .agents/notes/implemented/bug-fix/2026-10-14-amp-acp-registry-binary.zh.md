@@ -7,8 +7,8 @@ Translation: current
 
 ## 摘要
 
-Lody 通过本地覆盖项 `npx -y amp-acp` 启动 Registry 中的 Amp Provider，这个命令不带版本号，而所有
-npx 启动都会加上 `--prefer-offline`。于是 npm 会一直复用第一次缓存的安装，用户停留在旧适配器上，目录里却显示
+Lody 通过本地覆盖项 `npx -y amp-acp` 启动 Registry 中的 Amp Provider，这个命令不带版本号，而当时的
+npx 启动会加上 `--prefer-offline`。于是 npm 会一直复用第一次缓存的安装，用户停留在旧适配器上，目录里却显示
 Registry 的当前版本。现在删除了该覆盖项，Amp 改用 ACP Registry 的二进制分发；ACP 二进制管理器按版本缓存，
 与 Zed 的做法一致。代价是：用户需要自己安装 Amp CLI（以前由 npx 顺带安装）；Registry 没有发布 Windows ARM64
 构建；Lody 不校验 Registry 提供的归档校验和。

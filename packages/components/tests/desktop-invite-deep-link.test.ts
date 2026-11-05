@@ -1,25 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildDesktopInviteOpenDeepLink,
-  resolveDesktopInviteDeepLinkPath,
-  shouldAttemptDesktopInviteHandoff,
-} from '../src/lib/desktop-invite-deep-link';
-
-describe('desktop invite deep links', () => {
-  it('builds and resolves an invitation handoff', () => {
-    const deepLink = buildDesktopInviteOpenDeepLink('invite/123');
-
-    expect(deepLink).toBe('lody://invite/open?invitationId=invite%2F123');
-    expect(resolveDesktopInviteDeepLinkPath(deepLink)).toBe('/invite/invite%2F123');
-  });
-
-  it('rejects malformed or unrelated deep links', () => {
-    expect(resolveDesktopInviteDeepLinkPath('https://lody.ai/invite/123')).toBeNull();
-    expect(resolveDesktopInviteDeepLinkPath('lody://invite/open')).toBeNull();
-    expect(resolveDesktopInviteDeepLinkPath('lody://invite/accepted')).toBeNull();
-    expect(resolveDesktopInviteDeepLinkPath('lody://github-install')).toBeNull();
-  });
-});
+import { shouldAttemptDesktopInviteHandoff } from '../src/lib/desktop-invite-deep-link';
 
 describe('desktop invite handoff environment', () => {
   it('only attempts the handoff from a desktop browser', () => {

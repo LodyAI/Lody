@@ -23,6 +23,8 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   prefixes. A separately trusted endpoint is required, not inferred from remote
   position. Persist records and cursor atomically; no progress on failure.
   Local retention budgets fail closed, without deleting committed history.
+  Optional `LedgerFeedInvalidation` retires RAM grants synchronously with a changed
+  verified head/count publication; it performs no I/O and supplies no authority.
 - Borrowed SDK reads propagate abort and are retained/awaited until settlement.
   Close this Scope before destroying the SDK owner. ACK/CAS and snapshot bootstrap
   remain separate contracts; no fallback append or new snapshot header.
@@ -54,6 +56,9 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
 - `VerifiedLedger` is the single rollback guard: genuine view, same workspace,
   continuation of the newest observed view, containment of the durable pin.
   Unchanged pins are not rewritten; failed pin writes keep the in-memory view.
+- A genuine view may classify a signing key from current plus retained device
+  history for an exact local refusal. Classification is not authority and never
+  replaces signature/policy verification.
 
 Retained origins include their source locator. A pin ahead of the restored view
 must be proved by the suffix; a cache ahead of the pin is rebuildable. Equal

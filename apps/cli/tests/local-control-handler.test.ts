@@ -491,6 +491,34 @@ describe('local E2EE pairing authority', () => {
     ).toEqual({ status: 200, payload: { ok: true, type: 'activate' } });
     expect(accepted).toBe(true);
   });
+  // The desktop must learn why pairing was refused; raw causes still never cross IPC.
+  it('reports a fixed pairing refusal by its exact code and keeps raw failures generic', async () => {
+    let failure: Error = new Error('e2ee_binding_conflict');
+    const handler = new LocalControlHandler({
+      machineId: 'machine',
+      logger,
+      dispatchSession: async () => [],
+      dispatchProject: async () => ({ ok: false, error: 'unused' }),
+      dispatchE2eePairing: async () => {
+        throw failure;
+      },
+    });
+    const send = () =>
+      handler.handle({
+        path: LOCAL_E2EE_PAIRING_PATH,
+        rawBody: JSON.stringify(request),
+        requestId: 1,
+      });
+    expect(await send()).toEqual({
+      status: 503,
+      payload: { ok: false, error: 'e2ee_binding_conflict' },
+    });
+    failure = new Error('/home/someone/.lody/e2ee/secret.key: EACCES token=abc');
+    expect(await send()).toEqual({
+      status: 503,
+      payload: { ok: false, error: 'e2ee_pairing_unavailable' },
+    });
+  });
   it('refuses another account, ordinary workspace, foreign genesis and OSS mode before starting anything', async () => {
     for (const instance of [
       target({ userId: 'other' }),

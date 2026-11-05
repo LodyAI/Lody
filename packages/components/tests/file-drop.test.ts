@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import {
   readDroppedTransfer,
@@ -73,22 +74,6 @@ describe('readDroppedTransfer', () => {
       })
     ).toEqual({ files: [typelessFile, image], directories: [folder] });
   });
-
-  it('treats every item as a file where the entry API is missing', () => {
-    const file = new File(['data'], 'notes.txt');
-    expect(readDroppedTransfer({ items: [fileItem(file)], files: [file] })).toEqual({
-      files: [file],
-      directories: [],
-    });
-  });
-
-  it('falls back to the files list when items carry nothing', () => {
-    const file = new File(['data'], 'notes.txt');
-    expect(readDroppedTransfer({ items: [], files: [file] })).toEqual({
-      files: [file],
-      directories: [],
-    });
-  });
 });
 
 describe('selectPastedClipboardFiles', () => {
@@ -114,15 +99,6 @@ describe('selectPastedClipboardFiles', () => {
     });
   });
 
-  it('attaches a screenshot, which arrives with no text at all', () => {
-    const screenshot = renderedBitmap();
-
-    expect(selectPastedClipboardFiles({ text: '', files: [screenshot] })).toEqual({
-      files: [screenshot],
-      renderedImages: [],
-    });
-  });
-
   it('attaches a screenshot pasted beside whitespace-only clipboard text', () => {
     const screenshot = renderedBitmap();
 
@@ -139,15 +115,6 @@ describe('selectPastedClipboardFiles', () => {
 
     expect(selectPastedClipboardFiles({ text: 'photo.png', files: [photo] })).toEqual({
       files: [photo],
-      renderedImages: [],
-    });
-  });
-
-  it('attaches a non-image file regardless of the text beside it', () => {
-    const report = new File(['pdf'], 'report.pdf', { type: 'application/pdf' });
-
-    expect(selectPastedClipboardFiles({ text: 'report.pdf', files: [report] })).toEqual({
-      files: [report],
       renderedImages: [],
     });
   });

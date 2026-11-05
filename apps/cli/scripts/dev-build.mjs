@@ -55,7 +55,6 @@ const entryPoints = {
   'deepseek-acp': path.join(sourceDirectory, 'deepseek-acp-entry.ts'),
   'devin-acp': path.join(sourceDirectory, 'devin-acp-entry.ts'),
   'grok-acp': path.join(sourceDirectory, 'grok-acp-entry.ts'),
-  'automation-program-worker': path.join(sourceDirectory, 'automations/programs/worker.ts'),
   'diff-worker': path.join(sourceDirectory, 'lib/code-collab/diff-worker.ts'),
   'file-index-scan-worker': path.join(sourceDirectory, 'lib/code-collab/file-index-scan-worker.ts'),
   'turn-diff-store-worker': path.join(sourceDirectory, 'lib/code-collab/turn-diff-store-worker.ts'),

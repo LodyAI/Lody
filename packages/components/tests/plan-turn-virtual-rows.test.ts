@@ -3,6 +3,7 @@ import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shar
 
 import { buildChatVirtualRows } from '../src/components/ai-gui/view';
 import { collectSubagentTasks } from '../src/components/ai-gui/subagent-task-panel';
+import { getMessageItemPrefix } from '../src/lib/session-chat-search';
 
 /**
  * End of the wiring, not just the layout helper: `buildChatVirtualRows` is what
@@ -75,7 +76,12 @@ const assistantMessage = (items: MessageContent[], finished: boolean): SessionHi
     ...(finished ? { finished: true, endedAt: Date.parse('2026-08-10T00:05:00.000Z') } : {}),
   }) as unknown as SessionHistoryParsed;
 
-const buildRows = (items: MessageContent[], finished: boolean) =>
+const buildRows = (
+  items: MessageContent[],
+  finished: boolean,
+  expanded?: boolean,
+  search = false
+) =>
   buildChatVirtualRows({
     items: [
       {
@@ -86,6 +92,25 @@ const buildRows = (items: MessageContent[], finished: boolean) =>
     ],
     lastAssistantMessageId: 'assistant-1',
     expansionVersion: 0,
+    ...(expanded !== undefined
+      ? {
+          selectionLayouts: new Map([
+            [
+              'assistant-1',
+              {
+                finished,
+                activeSearchBlockId: search ? getMessageItemPrefix('assistant-1', 0) : null,
+                expandState: {
+                  expandedWorkedGroups: { 'segment:assistant-1:0': expanded },
+                  expandedGroups: {},
+                  expandedByIndex: {},
+                  planOpen: false,
+                },
+              },
+            ],
+          ]),
+        }
+      : {}),
   });
 
 const taskIdsInVisibleRow = (rows: ReturnType<typeof buildRows>) => {
@@ -108,9 +133,9 @@ const workedHeaders = (rows: ReturnType<typeof buildRows>) =>
  * The rows a reader actually sees top to bottom, minus the turn's own footer
  * (copy/actions — always last, not part of the plan/execution question).
  */
-const visibleContentKinds = (rows: ReturnType<typeof buildRows>) =>
+const visibleContentKinds = (rows: ReturnType<typeof buildRows>, includeDetails = false) =>
   rows.flatMap((row) => {
-    if (row.type !== 'assistant' || row.isWorkedDetail) return [];
+    if (row.type !== 'assistant' || (!includeDetails && row.isWorkedDetail)) return [];
     if (row.content.kind === 'footer') return [];
     if (row.content.kind !== 'content') return [row.content.kind];
     return [
@@ -188,33 +213,101 @@ describe('approved plan renders its own region', () => {
   it('keeps every step visible while the turn is still streaming', () => {
     const rows = buildRows(planTurnItems, false);
 
-    expect(workedHeaders(rows)).toHaveLength(0);
-    expect(visibleContentKinds(rows)).toEqual([
+    expect(workedHeaders(rows).map((header) => header.expanded)).toEqual([true, true]);
+    expect(visibleContentKinds(rows, true)).toEqual([
+      'worked_group_header',
       'activity_group_header',
       'content:tool_call',
+      'worked_group_header',
       'activity_group_header',
       'content:text',
     ]);
   });
+});
 
-  it('leaves an ordinary turn with exactly one region', () => {
-    const rows = buildRows(
-      [tool('read-1', 'read'), tool('edit-1', 'edit'), { type: 'text', text: 'Done.' }],
-      true
-    );
+describe('phased text in finished turns', () => {
+  const phased = (text: string, messagePhase: 'commentary' | 'final_answer'): MessageContent =>
+    ({ type: 'text', text, messagePhase }) as MessageContent;
 
-    expect(workedHeaders(rows)).toHaveLength(1);
-    expect(visibleContentKinds(rows)).toEqual(['worked_group_header', 'content:text']);
+  it('places the header before commentary and restores chronological rows when expanded', () => {
+    const items = [
+      phased('Inspecting', 'commentary'),
+      tool('read', 'read'),
+      answerText('Unphased'),
+      phased('Checking', 'commentary'),
+      phased('Done', 'final_answer'),
+    ];
+    expect(visibleContentKinds(buildRows(items, true))).toEqual([
+      'worked_group_header',
+      'content:text',
+      'content:text',
+    ]);
+    const rows = buildRows(items, true, true);
+    const ordered = rows.flatMap((row) => {
+      if (row.type !== 'assistant') return [];
+      if (
+        row.content.kind === 'worked_group_header' ||
+        row.content.kind === 'activity_group_header'
+      )
+        return [row.content.kind];
+      if (row.content.kind === 'content' && row.content.block.entry.content.type === 'text')
+        return [row.content.block.entry.content.text];
+      return [];
+    });
+    expect(ordered).toEqual([
+      'worked_group_header',
+      'Inspecting',
+      'activity_group_header',
+      'Unphased',
+      'Checking',
+      'Done',
+    ]);
   });
 
-  it('does not emit an empty region when the turn ends on the plan card', () => {
-    const rows = buildRows(
-      [tool('read-1', 'read'), tool('plan-exit-1', 'switch_mode', { title: 'Ready to code?' })],
-      true
-    );
+  it('allows manual live folding and restores interrupted progress', () => {
+    const items = [phased('Inspecting', 'commentary'), tool('read', 'read'), answerText('Unknown')];
+    expect(workedHeaders(buildRows(items, false))[0]?.expanded).toBe(true);
+    expect(visibleContentKinds(buildRows(items, false, false), true)).toEqual([
+      'worked_group_header',
+      'content:text',
+    ]);
+    expect(visibleContentKinds(buildRows(items.slice(0, 2), true, false), true)).toEqual([
+      'content:text',
+      'activity_group_header',
+    ]);
+    expect(visibleContentKinds(buildRows(items, false, true), true)).toEqual([
+      'worked_group_header',
+      'content:text',
+      'activity_group_header',
+      'content:text',
+    ]);
+    expect(visibleContentKinds(buildRows(items, false, false, true), true)).toEqual([
+      'worked_group_header',
+      'content:text',
+      'activity_group_header',
+      'content:text',
+    ]);
+    expect(
+      visibleContentKinds(buildRows([...items, phased('Done', 'final_answer')], false, false), true)
+    ).toEqual(['worked_group_header', 'content:text', 'content:text']);
+  });
 
-    expect(workedHeaders(rows)).toHaveLength(1);
-    expect(visibleContentKinds(rows)).toEqual(['worked_group_header', 'content:tool_call']);
+  it('keeps commentary visible while streaming and when no explicit answer exists', () => {
+    const items = [phased('Inspecting', 'commentary'), tool('read', 'read')];
+    expect(visibleContentKinds(buildRows(items, false), true)).toEqual([
+      'worked_group_header',
+      'content:text',
+      'activity_group_header',
+    ]);
+    expect(visibleContentKinds(buildRows(items, true))).toEqual([
+      'content:text',
+      'activity_group_header',
+    ]);
+    expect(visibleContentKinds(buildRows([...items, answerText('Unknown phase')], true))).toEqual([
+      'content:text',
+      'activity_group_header',
+      'content:text',
+    ]);
   });
 });
 
@@ -266,34 +359,5 @@ describe('finished turns with background tasks', () => {
     );
 
     expect(visibleContentKinds(rows)).toEqual(['worked_group_header', 'content:text']);
-  });
-
-  it('rebuilds the same visible task row and task order from reloaded history', () => {
-    const createHistory = () =>
-      assistantMessage(
-        [
-          tool('build', 'execute'),
-          answerText('The answer is ready.'),
-          task('task-a', 'in_progress'),
-          task('task-b', 'in_progress'),
-        ],
-        true
-      );
-    const buildHistoryRows = (message: SessionHistoryParsed) =>
-      buildChatVirtualRows({
-        items: [{ type: 'message', sessionId: 'session-1' as SessionId, message }],
-        lastAssistantMessageId: 'assistant-1',
-        expansionVersion: 0,
-      });
-    const firstRows = buildHistoryRows(createHistory());
-    const loadedRows = buildHistoryRows(createHistory());
-    const taskRow = (rows: ReturnType<typeof buildRows>) =>
-      rows.find((row) => row.type === 'assistant' && row.content.kind === 'subagent_tasks');
-
-    expect(taskRow(firstRows)?.key).toBe('assistant:assistant-1:subagent-tasks');
-    expect(taskRow(loadedRows)?.key).toBe(taskRow(firstRows)?.key);
-    expect(taskIdsInVisibleRow(firstRows)).toEqual(['task-a', 'task-b']);
-    expect(taskIdsInVisibleRow(loadedRows)).toEqual(taskIdsInVisibleRow(firstRows));
-    expect(visibleContentKinds(firstRows)).toEqual(visibleContentKinds(loadedRows));
   });
 });

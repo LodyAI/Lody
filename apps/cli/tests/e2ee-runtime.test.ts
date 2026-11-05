@@ -4401,6 +4401,283 @@ it('records an exact device revocation so the next offer uses a fresh identity o
   }
 });
 
+it('discovers device revocation from the bounded authority check without a caller refresh', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-authority-check-'));
+  vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+  const { CloudE2eeDeviceRevoked } = await import('../src/lib/cloud-e2ee-errors');
+  const accountId = 'authority-check-account';
+  const root = join(
+    getLodyDataDir(),
+    'e2ee',
+    createHash('sha256').update(accountId).digest('hex'),
+    'workspace'
+  );
+  let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+  const intervals: Array<() => void> = [];
+  const realSetInterval = globalThis.setInterval;
+  const intervalSpy = vi.spyOn(globalThis, 'setInterval').mockImplementation(((
+    callback: Parameters<typeof setInterval>[0],
+    delay?: number,
+    ...args: never[]
+  ) => {
+    if (delay === 5 * 60_000) {
+      intervals.push(() => {
+        if (typeof callback === 'function') callback(...args);
+      });
+      return 0 as unknown as ReturnType<typeof setInterval>;
+    }
+    return realSetInterval(callback, delay, ...args);
+  }) as typeof setInterval);
+  try {
+    const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+    const binding = {
+      workspaceId: 'workspace',
+      genesisHash: hex(fixture.genesis.toBytes()),
+      genesisRecordHex: hex(fixture.genesisRecord),
+    };
+    await retainCliE2eeWorkspaceBinding(accountId, binding);
+    const key = await execute(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(root, 'custody'),
+          keyring: noKeyring,
+        });
+        return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+      })
+    );
+    await fs.writeFile(
+      join(root, 'activation.json'),
+      JSON.stringify({ genesisHash: binding.genesisHash, signingPublicKey: key })
+    );
+    const removed: string[] = [];
+    const removedSignal = Promise.withResolvers<void>();
+    host = await openCliE2eeWorkspaceLegacy({
+      accountId,
+      ...binding,
+      keyring: noKeyring,
+      onUnavailable: () => {},
+      onRemoved: async (reason) => {
+        removed.push(String(reason));
+        removedSignal.resolve();
+      },
+      cloud: {
+        getHistory: async () => page(fixture.records),
+        getContentToken: async () => {
+          throw new CloudE2eeDeviceRevoked();
+        },
+        mailboxCall: async (method: string) => {
+          if (method === 'fetch') return { items: [], next: null };
+          throw new Error('unavailable');
+        },
+      } as unknown as CloudE2eePort,
+    });
+    await host.refresh();
+    expect(intervals).toHaveLength(1);
+    intervals[0]!();
+    await removedSignal.promise;
+    await host.removalCleanup();
+    expect(removed).toEqual(['device-revoked']);
+    expect(JSON.parse(await fs.readFile(join(root, 'revoked-device.json'), 'utf8'))).toEqual({
+      genesisHash: binding.genesisHash,
+      signingPublicKey: key,
+    });
+  } finally {
+    await host?.close().catch(() => undefined);
+    intervalSpy.mockRestore();
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('keeps the J07 owner-retired member fence when the verified ledger cannot advance', () => {
+  const deviceKey = 'cd'.repeat(32);
+  const authority = {
+    membershipId: 'ef'.repeat(16),
+    ownerMembershipId: 'ef'.repeat(16),
+    devicePresent: true,
+    memberPresent: true,
+    length: 11,
+    generation: 0,
+  };
+  const observed = createDaemonLossRegistry(true);
+  const receipt = observed.register(
+    { workspaceId: 'workspace', machineId: 'machine', accountId: 'account', deviceKey },
+    () => ({
+      intakeClosed: true,
+      pending: {
+        processorActive: 0,
+        processorQueued: 0,
+        watcherChecks: 0,
+        executionTurns: 0,
+        executionBookkeeping: 0,
+      },
+    }),
+    () => authority
+  );
+  receipt!.loss('e2ee_member_removed');
+  receipt!.retired();
+  expect(observed.inspect('workspace', deviceKey)).toMatchObject({
+    code: 'e2ee_member_removed',
+    fence: 'owner-retired',
+    drained: true,
+    retired: true,
+    authorityLength: 11,
+    authorityGeneration: 0,
+  });
+});
+
+it('retries a transient history refresh without waiting for the periodic check', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-history-retry-'));
+  vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+  const accountId = 'history-retry-account';
+  const root = join(
+    getLodyDataDir(),
+    'e2ee',
+    createHash('sha256').update(accountId).digest('hex'),
+    'workspace'
+  );
+  let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+  try {
+    const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+    const binding = {
+      workspaceId: 'workspace',
+      genesisHash: hex(fixture.genesis.toBytes()),
+      genesisRecordHex: hex(fixture.genesisRecord),
+    };
+    await retainCliE2eeWorkspaceBinding(accountId, binding);
+    const key = await execute(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(root, 'custody'),
+          keyring: noKeyring,
+        });
+        return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+      })
+    );
+    await fs.writeFile(
+      join(root, 'activation.json'),
+      JSON.stringify({ genesisHash: binding.genesisHash, signingPublicKey: key })
+    );
+    let historyCalls = 0;
+    let failNext = false;
+    let retryAt = 0;
+    const retried = Promise.withResolvers<void>();
+    host = await openCliE2eeWorkspaceLegacy({
+      accountId,
+      ...binding,
+      keyring: noKeyring,
+      onUnavailable: () => {},
+      cloud: {
+        getHistory: async () => {
+          historyCalls++;
+          if (retryAt !== 0 && historyCalls === retryAt) retried.resolve();
+          if (failNext) {
+            failNext = false;
+            throw new Error('temporary_network_failure');
+          }
+          return page(fixture.records);
+        },
+        getContentToken: async () => ({
+          token: 'synthetic-token',
+          bucketId: 'synthetic-bucket',
+          gatewayBaseUrl: 'https://synthetic.invalid',
+          expiresIn: 60,
+          expiresAt: 1_000_000,
+        }),
+        mailboxCall: async (method: string) => {
+          if (method === 'fetch') return { items: [], next: null };
+          throw new Error('unavailable');
+        },
+      } as unknown as CloudE2eePort,
+    });
+    await host.refresh();
+    const callsAfterOpen = historyCalls;
+    retryAt = callsAfterOpen + 2;
+    const retryCallbacks: Array<() => void> = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: Parameters<typeof setTimeout>[0],
+      delay?: number,
+      ...args: never[]
+    ) => {
+      if (delay === 1_000) {
+        retryCallbacks.push(() => {
+          if (typeof callback === 'function') callback(...args);
+        });
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }
+      return realSetTimeout(callback, delay, ...args);
+    }) as typeof setTimeout);
+    try {
+      failNext = true;
+      await host.refresh();
+      expect(historyCalls).toBe(callsAfterOpen + 1);
+      expect(retryCallbacks).toHaveLength(1);
+      retryCallbacks[0]!();
+      await retried.promise;
+      expect(historyCalls).toBe(callsAfterOpen + 2);
+      expect((await host.status()).length).toBe(fixture.records.length);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  } finally {
+    await host?.close().catch(() => undefined);
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('fences a credential-confirmed revoked device when the verified ledger cannot advance', () => {
+  const deviceKey = 'ab'.repeat(32);
+  const authority = {
+    membershipId: 'cd'.repeat(16),
+    ownerMembershipId: 'cd'.repeat(16),
+    devicePresent: true,
+    memberPresent: true,
+    length: 14,
+    generation: 0,
+  };
+  const observed = createDaemonLossRegistry(true);
+  const receipt = observed.register(
+    { workspaceId: 'workspace', machineId: 'machine', accountId: 'account', deviceKey },
+    () => ({
+      intakeClosed: true,
+      pending: {
+        processorActive: 0,
+        processorQueued: 0,
+        watcherChecks: 0,
+        executionTurns: 0,
+        executionBookkeeping: 0,
+      },
+    }),
+    () => authority
+  );
+  expect(receipt).toBeDefined();
+  expect(observed.inspect('workspace', deviceKey)).toMatchObject({
+    code: null,
+    fence: null,
+    drained: false,
+    authorityLength: 14,
+    authorityGeneration: 0,
+  });
+  receipt!.loss('e2ee_device_revoked');
+  receipt!.retired();
+  expect(observed.inspect('workspace', deviceKey)).toMatchObject({
+    code: 'e2ee_device_revoked',
+    fence: 'owner-retired',
+    drained: true,
+    retired: true,
+    authorityLength: 14,
+    authorityGeneration: 0,
+  });
+  // The exact refusal is scoped to this daemon's identity, not another requester.
+  expect(observed.inspect('workspace', 'ef'.repeat(32))).toMatchObject({
+    code: null,
+    fence: null,
+    drained: false,
+  });
+});
+
 it.each(['history', 'renewal', 'snapshot', 'account-race', 'close-race', 'receipt-error'] as const)(
   'member removal drains the machine owner before erasing managed data and requires a fresh member (%s)',
   async (source) => {
@@ -6553,6 +6830,25 @@ describe('machine execution authorization freshness', () => {
           expect(
             readObservedAuthority(extraKey, hex(fixture.membershipId.toBytes()))
           ).toMatchObject({ devicePresent: false, memberPresent: true });
+          const revokedRpc = makeE2eeRpcNative({
+            workspaceId: 'workspace',
+            requesterDevice: extraKey,
+            originals: new E2eeRpcOriginals(join(directory, 'revoked-rpc.sqlite')),
+            ledger: runtime.executionLedger,
+            binding: () => Effect.die('revoked writer must not sign'),
+          });
+          const revokedPrepare = yield* revokedRpc
+            .prepareDispatch('synthetic-machine', {
+              sessionId: 'synthetic-session',
+              userTurnId: 'synthetic-turn',
+              userId: 'display-only',
+              timestamp: new Date(0).toISOString(),
+              inputConfig: { prompt: 'synthetic' },
+            })
+            .pipe(Effect.result);
+          expect(revokedPrepare._tag).toBe('Failure');
+          if (revokedPrepare._tag === 'Failure')
+            expect(revokedPrepare.failure.message).toBe('e2ee_device_revoked');
           io.offline = true;
           expect(yield* gate.authorizeExecution('workspace', extraKey)).toEqual({
             _tag: 'Denied',
@@ -6594,6 +6890,25 @@ describe('machine execution authorization freshness', () => {
             devicePresent: false,
             memberPresent: false,
           });
+          const removedRpc = makeE2eeRpcNative({
+            workspaceId: 'workspace',
+            requesterDevice: key,
+            originals: new E2eeRpcOriginals(join(directory, 'removed-rpc.sqlite')),
+            ledger: runtime.executionLedger,
+            binding: () => Effect.die('removed writer must not sign'),
+          });
+          const removedPrepare = yield* removedRpc
+            .prepareDispatch('synthetic-machine', {
+              sessionId: 'synthetic-session',
+              userTurnId: 'synthetic-turn',
+              userId: 'display-only',
+              timestamp: new Date(0).toISOString(),
+              inputConfig: { prompt: 'synthetic' },
+            })
+            .pipe(Effect.result);
+          expect(removedPrepare._tag).toBe('Failure');
+          if (removedPrepare._tag === 'Failure')
+            expect(removedPrepare.failure.message).toBe('e2ee_member_removed');
           expect(yield* gate.authorizeExecution('workspace', key)).toMatchObject({
             _tag: 'Denied',
           });
@@ -6665,11 +6980,89 @@ describe('machine execution authorization freshness', () => {
           );
           const shared = yield* gate.authorizeExecution('workspace', key);
           expect(shared).toMatchObject({ _tag: 'Authorized' });
+          expect(yield* gate.authorizeOwnedExecution('workspace', key)).toEqual({
+            _tag: 'Denied',
+            reason: 'e2ee_machine_not_owned',
+          });
+          const owned = yield* gate.authorizeOwnedExecution('workspace', fixture.sender);
+          expect(owned).toMatchObject({ _tag: 'Authorized', principal: 'owner' });
+          const generationSignal = runtime.executionAuthoritySignal();
+          expect(generationSignal.aborted).toBe(false);
+          if (owned._tag !== 'Authorized' || !owned.isCurrent) throw new Error('missing authority');
+          const isCurrent = owned.isCurrent;
+          const { createAcpInteractionOwner } = yield* Effect.promise(
+            () => import('../src/lib/e2ee/acp-interaction-owner')
+          );
+          const { createRpcSecretRecipient, encryptRpcSecret } = yield* Effect.promise(
+            () => import('@lody/loro-streams-rpc')
+          );
+          const recipient = yield* Effect.promise(createRpcSecretRecipient);
+          let taskAborted = false;
+          const owner = createAcpInteractionOwner({
+            workspaceId: 'workspace',
+            machineId: 'machine',
+            createRecipient: createRpcSecretRecipient,
+            encrypt: encryptRpcSecret,
+            submit: async () => {},
+            start: ({ signal }) => ({
+              result: new Promise((resolve) => {
+                signal.addEventListener(
+                  'abort',
+                  () => {
+                    taskAborted = true;
+                    resolve(undefined);
+                  },
+                  { once: true }
+                );
+              }),
+              cancel: () => {},
+            }),
+          });
+          yield* Effect.promise(() =>
+            owner.handle(
+              {
+                action: 'start',
+                kind: 'authenticate',
+                configId: 'config' as never,
+                responseKey: recipient.publicKey,
+              },
+              {
+                requestId: 'a'.repeat(32),
+                requesterDevice: fixture.sender,
+                expiresAt: Date.now() + 60_000,
+                authority: { isCurrent, signal: generationSignal },
+              }
+            )
+          );
+          yield* Effect.promise(() =>
+            owner.handle(
+              { action: 'activate', interactionRequestId: 'a'.repeat(32) },
+              {
+                requestId: 'b'.repeat(32),
+                requesterDevice: fixture.sender,
+                expiresAt: Date.now() + 60_000,
+                authority: { isCurrent, signal: generationSignal },
+              }
+            )
+          );
+          // A genuine authorization refresh can replay the full retained page,
+          // while another receiver concurrently delivers the empty tail.
+          yield* Effect.all(
+            [gate.refreshLedger, runtime.ingest(page(fixture.records, fixture.records.length))],
+            { concurrency: 'unbounded' }
+          );
+          expect(generationSignal.aborted).toBe(false);
+          expect(isCurrent()).toBe(true);
+          expect(taskAborted).toBe(false);
           removeDuringCheck = true;
           const raced = yield* gate.authorizeExecution('workspace', key);
           expect(raced).toMatchObject({ _tag: 'Denied', reason: 'not-authorized' });
           // The grant from before the removal can no longer admit a start either.
           expect(shared._tag === 'Authorized' && shared.isCurrent?.()).toBe(false);
+          expect(owned._tag === 'Authorized' && owned.isCurrent?.()).toBe(false);
+          expect(generationSignal.aborted).toBe(true);
+          expect(taskAborted).toBe(true);
+          yield* Effect.promise(() => owner.close());
           expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Authorized',
           });
@@ -6791,4 +7184,263 @@ describe('machine execution authorization freshness', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+});
+
+it('revokes a real encrypted ACP owner when the verified runtime ledger changes', async () => {
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+  const directory = await mkdtemp(join(tmpdir(), 'acp-owner-authority-'));
+  try {
+    await execute(
+      Effect.gen(function* () {
+        const { fixture, runtime, gate, makeGate, device } = yield* executionFixture(directory, 3);
+        const member = [...fixture.current.inspectState().members].find(
+          ([, value]) => value.role === 'member'
+        );
+        if (!member) throw new Error('missing shared member');
+        const sharedDevice = [...fixture.current.inspectState().devices].find(
+          ([, value]) => hex(value.membershipId.toBytes()) === member[0]
+        );
+        if (!sharedDevice) throw new Error('missing shared member device');
+        const sharedGate = yield* makeGate(() =>
+          Effect.succeed({ allowed: true, isCurrent: () => true })
+        );
+        expect(yield* sharedGate.authorizeExecution('workspace', sharedDevice[0])).toMatchObject({
+          _tag: 'Authorized',
+          principal: 'member',
+        });
+        expect(yield* sharedGate.authorizeOwnedExecution('workspace', sharedDevice[0])).toEqual({
+          _tag: 'Denied',
+          reason: 'e2ee_machine_not_owned',
+        });
+        const extraCustody = yield* makeNodeE2eeCustody({
+          directory: join(directory, 'requester'),
+          wrapper,
+        });
+        const requester = yield* extraCustody.prepareDevice();
+        const admission = yield* prepareDeviceAdmission({
+          genesis: fixture.genesis,
+          membershipId: fixture.membershipId,
+          signer: requester,
+          encryptionPublicKey: requester.enc,
+          kind: 'personal',
+        });
+        const admitted = yield* signLedgerRecord(
+          Result.getOrThrow(
+            prepareLedgerCommand(fixture.current, fixture.owner.publicKey, admission)
+          ),
+          fixture.owner
+        );
+        fixture.records.push(admitted);
+        fixture.current = Result.getOrThrow(
+          extendLedger(fixture.current, [admitted], {
+            length: fixture.records.length,
+            head: hashRecordBytes(admitted),
+          })
+        );
+        yield* runtime.ingest(page(fixture.records));
+        const requesterKey = hex(requester.publicKey.toBytes());
+        const { MessageHandler } = yield* Effect.promise(
+          () => import('../src/lib/message-handler')
+        );
+        const { MachineRuntime } = yield* Effect.promise(
+          () => import('../src/lib/machine-runtime')
+        );
+        const { createRpcSecretRecipient } = yield* Effect.promise(
+          () => import('@lody/loro-streams-rpc')
+        );
+        const recipient = yield* Effect.promise(() => createRpcSecretRecipient());
+        const started = deferred<void>();
+        const stopped = deferred<void>();
+        let cancelled = false;
+        const handler = Object.create(MessageHandler.prototype) as InstanceType<
+          typeof MessageHandler
+        >;
+        Object.assign(handler, {
+          encryptedAttachments: true,
+          workspaceId: 'workspace',
+          machineId: 'machine',
+          acpInteractionStopping: false,
+          executionService: {
+            authenticateMachineAcp: async (
+              request: { action: string },
+              options?: { signal?: AbortSignal }
+            ) => {
+              if (request.action === 'cancel') {
+                cancelled = true;
+                stopped.resolve();
+                return { success: true };
+              }
+              started.resolve();
+              await new Promise<void>((resolve) => {
+                if (options?.signal?.aborted) resolve();
+                else options?.signal?.addEventListener('abort', () => resolve(), { once: true });
+              });
+              return { success: false };
+            },
+          },
+        });
+        const machine = Object.create(MachineRuntime.prototype) as InstanceType<
+          typeof MachineRuntime
+        >;
+        Object.assign(machine, {
+          handler,
+          options: {
+            handlerConfig: {
+              encryptedWorkspace: true,
+              workspaceId: 'workspace',
+              machineId: 'machine',
+              userId: 'owner',
+            },
+          },
+        });
+        const grant = yield* gate.authorizeOwnedExecution('workspace', requesterKey);
+        if (grant._tag !== 'Authorized' || !grant.isCurrent) throw new Error('missing owner grant');
+        const signal = AbortSignal.any([runtime.executionAuthoritySignal(), gate.authoritySignal]);
+        const { makeRealtimeContentBinding } = yield* Effect.promise(
+          () => import('@lody/e2ee-core/adapters/loro-streams')
+        );
+        const { makeEncryptedFeatureReceiver } = yield* Effect.promise(
+          () => import('../src/lib/e2ee/feature-rpc')
+        );
+        const { RealtimeJournal } = yield* Effect.promise(
+          () => import('../src/lib/e2ee/realtime-journal')
+        );
+        const binding = (signer: typeof requester) => (resource: string) =>
+          makeRealtimeContentBinding({
+            genesis: fixture.genesis,
+            resource,
+            signer,
+            ledger: runtime.executionLedger,
+            readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+          });
+        const sender = makeE2eeRpcNative({
+          workspaceId: 'workspace',
+          requesterDevice: requesterKey,
+          originals: new E2eeRpcOriginals(join(directory, 'sender-acp.sqlite')),
+          ledger: runtime.executionLedger,
+          binding: binding(requester),
+        });
+        const receiver = makeE2eeRpcNative({
+          workspaceId: 'workspace',
+          requesterDevice: hex(device.publicKey.toBytes()),
+          originals: new E2eeRpcOriginals(join(directory, 'receiver-acp.sqlite')),
+          ledger: runtime.executionLedger,
+          binding: binding(device),
+        });
+        let delivered = deferred<{ id: string; frame: string }>();
+        const journal = RealtimeJournal.create(join(directory, 'acp-feature.sqlite'), Date.now);
+        const feature = yield* makeEncryptedFeatureReceiver({
+          workspaceId: 'workspace',
+          machineId: 'machine',
+          genesis: hex(fixture.genesis.toBytes()),
+          native: receiver,
+          journal: () => journal,
+          authorize: gate.authorizeOwnedExecution,
+          authorizeRead: gate.authorizeRead,
+          authoritySignal: () =>
+            AbortSignal.any([runtime.executionAuthoritySignal(), gate.authoritySignal]),
+          isOpen: () => true,
+          client: {
+            ensureJsonStream: async () => {},
+            appendJson: async (_stream, frame) => {
+              delivered.resolve(frame as { id: string; frame: string });
+              return '1';
+            },
+            readJsonLive: async () => {
+              throw new Error('unused');
+            },
+          },
+          handle: (request, context) => {
+            if (request.method !== 'machine/acp-interaction') throw new Error('unexpected feature');
+            return machine.handleEncryptedFeatureRpc(request, context);
+          },
+        });
+        const input = {
+          requestId: '1'.repeat(32),
+          request: {
+            workspaceId: 'workspace',
+            machineId: 'machine',
+            method: 'machine/acp-interaction' as const,
+            params: {
+              action: 'start' as const,
+              kind: 'authenticate' as const,
+              configId: 'config',
+              responseKey: recipient.publicKey,
+            },
+          },
+        };
+        const prepared = yield* sender.prepareFeature(input);
+        yield* feature({ id: prepared.requestId, frame: prepared.frameHex });
+        const envelope = yield* Effect.promise(() => delivered.promise);
+        const response = yield* sender.acceptFeatureResponse(input, envelope.frame);
+        expect(response).toMatchObject({ ok: true, result: { state: 'running' } });
+        delivered = deferred<{ id: string; frame: string }>();
+        const activation = {
+          requestId: '3'.repeat(32),
+          request: {
+            workspaceId: 'workspace',
+            machineId: 'machine',
+            method: 'machine/acp-interaction' as const,
+            params: { action: 'activate' as const, interactionRequestId: input.requestId },
+          },
+        };
+        const activationFrame = yield* sender.prepareFeature(activation);
+        yield* feature({ id: activationFrame.requestId, frame: activationFrame.frameHex });
+        const activationEnvelope = yield* Effect.promise(() => delivered.promise);
+        expect(
+          yield* sender.acceptFeatureResponse(activation, activationEnvelope.frame)
+        ).toMatchObject({ ok: true });
+        yield* Effect.promise(() => started.promise);
+        // A signed removal enters through the real runtime and aborts the captured watcher.
+        const revocation = yield* signLedgerRecord(
+          Result.getOrThrow(
+            prepareLedgerCommand(fixture.current, fixture.owner.publicKey, {
+              _tag: 'RevokeDevice',
+              target: requester.publicKey,
+            })
+          ),
+          fixture.owner
+        );
+        fixture.records.push(revocation);
+        yield* runtime.ingest(page(fixture.records));
+        yield* Effect.promise(() => stopped.promise);
+        expect(signal.aborted).toBe(true);
+        expect(cancelled).toBe(true);
+        const hidden = yield* Effect.promise(() =>
+          handler
+            .handleEncryptedAcpInteraction(
+              {
+                workspaceId: 'workspace',
+                machineId: 'machine',
+                method: 'machine/acp-interaction',
+                params: { action: 'poll', interactionRequestId: '1'.repeat(32) },
+              },
+              {
+                requestId: '2'.repeat(32),
+                requesterDevice: requesterKey,
+                expiresAt: Date.now() + 60_000,
+                signal: new AbortController().signal,
+                authority: { isCurrent: grant.isCurrent, signal },
+              }
+            )
+            .catch((error: Error) => error.message)
+        );
+        expect(hidden).toBe('e2ee_feature_unavailable');
+        const internals = handler as unknown as {
+          acpInteractionOwner?: Promise<{ close(): Promise<void> }>;
+        };
+        yield* Effect.promise(async () => {
+          await (await internals.acpInteractionOwner)?.close();
+        });
+      })
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

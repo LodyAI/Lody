@@ -950,6 +950,10 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         compact
         viewportRef={viewportRef}
         className={stylex.props(styles.viewport).className}
+        // The strip sits in the window drag region; Electron hands pointer
+        // events over a drag region to the OS, so the track would never see
+        // hover or a press and could not be dragged.
+        scrollbarClassName={WINDOW_DRAG_EXEMPT_CLASS}
       >
         <MotionConfig reducedMotion="user" transition={TAB_LAYOUT_TRANSITION}>
           <LayoutGroup id={layoutGroupId}>

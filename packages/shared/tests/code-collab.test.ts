@@ -1,20 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CODE_COLLAB_FILE_INDEX_LIMITS,
   CODE_COLLAB_LIMITS,
   CodeCollabDomainErrorSchema,
+  buildBoundedCodeCollabFileIndexState,
+  estimateCodeCollabFileIndexStateBytes,
   applyCodeCollabFileIndexFlockEvents,
   CodeCollabFileEntrySchema,
   authorizeCodeCollabRoleRequest,
   checkRealtimeTextLineLimits,
   classifyCodeCollabFileSystemNode,
   classifyRegularFileContent,
-  codeCollabFileIndexToSharedState,
   deriveCodeCollabFileSourceState,
   deriveCodeCollabRoleFromPermissions,
   deriveCodeCollabV2ContentKeyBytes,
   deriveCodeCollabV2ContentKeyId,
-  detectTextEol,
   diffCodeCollabFileMetadata,
   findCodeCollabPathCollisions,
   getCodeCollabExecutableFromMode,
@@ -23,19 +24,17 @@ import {
   getCodeCollabMaxRoleForWorkspaceMember,
   getCodeCollabRepositorySupport,
   hasCodeCollabRoleAtLeast,
-  hasUtf8Bom,
   isCodeCollabDomainError,
   normalizeCodeCollabDomainError,
   normalizeWorkspaceRelativePath,
-  readCodeCollabFileIndexSignalFromFlock,
   readCodeCollabFileIndexFromFlock,
   resolveCodeCollabSymlinkTarget,
   serializeCodeCollabText,
   shouldCountForCodeCollabFileLimit,
-  writeCodeCollabFileIndexSignalToFlock,
   writeCodeCollabFileIndexToFlock,
   type CodeCollabFileEntry,
   type CodeCollabV2FileIndexState,
+  type CodeCollabV2FileTreeState,
 } from '../src/code-collab';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -106,57 +105,6 @@ describe('Code Collab shared protocol helpers', () => {
     });
   });
 
-  it('reads and writes path-keyed file index Flock rows', () => {
-    const flock = new FakeFileIndexFlock();
-    flock.set(['README.md'], { kind: 'text', change: { diff: [1, 0] } });
-    flock.set(['assets/logo.png'], { kind: 'binary' });
-    flock.set(['bad.txt'], { kind: 'unknown' });
-
-    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual({
-      'README.md': { kind: 'text', change: { diff: [1, 0] } },
-      'assets/logo.png': { kind: 'binary' },
-    });
-    expect(codeCollabFileIndexToSharedState(readCodeCollabFileIndexFromFlock(flock))).toMatchObject(
-      {
-        fileTree: {
-          'README.md': true,
-          'assets/logo.png': true,
-        },
-        allChanges: {
-          'README.md': { diff: [1, 0] },
-        },
-      }
-    );
-
-    expect(
-      writeCodeCollabFileIndexToFlock(
-        flock,
-        {
-          'README.md': { kind: 'file', change: { diff: [1, 0] } },
-          'src/index.ts': true,
-        },
-        123
-      )
-    ).toBe(true);
-    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual({
-      'README.md': { kind: 'file', change: { diff: [1, 0] } },
-      'src/index.ts': true,
-    });
-    expect(flock.commits).toBe(1);
-
-    expect(
-      writeCodeCollabFileIndexToFlock(
-        flock,
-        {
-          'README.md': { kind: 'file', change: { diff: [1, 0] } },
-          'src/index.ts': true,
-        },
-        124
-      )
-    ).toBe(false);
-    expect(flock.commits).toBe(1);
-  });
-
   // A replica poisoned before the data-plane decode fix keeps rows whose key
   // carries U+FFFD. They are LWW records under their own key, so a correct
   // republish never overwrites them: they must be invisible on read and pruned
@@ -177,31 +125,6 @@ describe('Code Collab shared protocol helpers', () => {
     expect(
       applyCodeCollabFileIndexFlockEvents({}, [{ key: [corrupted], value: { kind: 'text' } }])
     ).toEqual({});
-  });
-
-  it('reads and writes the file-index signal Flock revision', () => {
-    const flock = new FakeFileIndexFlock();
-
-    expect(readCodeCollabFileIndexSignalFromFlock(flock)).toBeNull();
-    expect(writeCodeCollabFileIndexSignalToFlock(flock, 1, 123)).toBe(true);
-    expect(readCodeCollabFileIndexSignalFromFlock(flock)).toEqual({ v: 1, r: 1 });
-    expect(flock.commits).toBe(1);
-
-    expect(writeCodeCollabFileIndexSignalToFlock(flock, 1, 124)).toBe(false);
-    expect(flock.commits).toBe(1);
-
-    expect(writeCodeCollabFileIndexSignalToFlock(flock, 2, 125)).toBe(true);
-    expect(readCodeCollabFileIndexSignalFromFlock(flock)).toEqual({ v: 1, r: 2 });
-    expect(flock.commits).toBe(2);
-  });
-
-  it('throws on invalid file-index signal values', () => {
-    const flock = new FakeFileIndexFlock();
-    flock.set(['s'], { v: 1, r: 'not-a-revision' });
-
-    expect(() => readCodeCollabFileIndexSignalFromFlock(flock)).toThrow(
-      'Invalid Code Collab file-index signal Flock value.'
-    );
   });
 
   it('normalizes null optional fields in file-index Flock rows', () => {
@@ -267,27 +190,6 @@ describe('Code Collab shared protocol helpers', () => {
     expect(flock.rows.get('src/index.ts')).toEqual({ kind: 'text' });
   });
 
-  it('applies file-index Flock events without rescanning unrelated rows', () => {
-    const previous = {
-      'README.md': true,
-      'old.txt': { kind: 'file' as const, change: { diff: [1, 0] as [number, number] } },
-    };
-
-    const next = applyCodeCollabFileIndexFlockEvents(previous, [
-      { key: ['README.md'], value: true },
-      { key: ['new.txt'], value: { kind: 'file' } },
-      { key: ['old.txt'], value: undefined },
-      { key: ['ignored', 'nested'], value: { kind: 'file' } },
-      { key: ['invalid.txt'], value: { kind: 'unknown' } },
-    ]);
-
-    expect(next).toEqual({
-      'README.md': true,
-      'new.txt': { kind: 'file' },
-    });
-    expect(next).not.toBe(previous);
-  });
-
   it('classifies repository file count support after ordinary-file counting', () => {
     expect(getCodeCollabRepositorySupport(100_000)).toEqual({
       supported: true,
@@ -335,19 +237,6 @@ describe('Code Collab shared protocol helpers', () => {
       { comparisonKey: 'src/foo.ts', paths: ['src/Foo.ts', 'src/foo.ts'] },
       { comparisonKey: 'notes/é.md', paths: ['notes/e\u0301.md', 'notes/é.md'] },
     ]);
-  });
-
-  it('classifies UTF-8 text, EOL style, and BOM', () => {
-    const bomText = new Uint8Array([0xef, 0xbb, 0xbf, ...bytes('a\r\nb\r\n')]);
-    const result = classifyRegularFileContent({ sizeBytes: bomText.byteLength, bytes: bomText });
-
-    expect(result.kind).toBe('text');
-    if (result.kind !== 'text') return;
-    expect(result.textEol).toBe('crlf');
-    expect(result.hasBom).toBe(true);
-    expect(hasUtf8Bom(bomText)).toBe(true);
-    expect(detectTextEol('a\nb\r\nc')).toBe('mixed');
-    expect(detectTextEol('single line')).toBe('unknown');
   });
 
   it('serializes text while preserving known BOM and EOL metadata', () => {
@@ -628,3 +517,72 @@ describe('Code Collab shared protocol helpers', () => {
     ).toEqual({ ok: true, role: 'host' });
   });
 });
+
+describe('Code Collab file-index budget', () => {
+  it('marks only recorded deletions as deleted and loads other changed paths as files', () => {
+    const { fileIndex, omittedPaths } = buildBoundedCodeCollabFileIndexState(
+      { 'README.md': true },
+      {
+        'gone.ts': { diff: [0, 3], del: true },
+        'gone.bin': { del: true },
+        // Changed but outside the (truncated) tree: still a file on disk.
+        'pkg/deep/new.ts': { diff: [4, 0] },
+      }
+    );
+    expect(omittedPaths).toBe(0);
+    expect(fileIndex).toEqual({
+      'README.md': true,
+      'gone.ts': { kind: 'deleted', change: { diff: [0, 3], del: true } },
+      'gone.bin': { kind: 'deleted', change: { del: true } },
+      'pkg/deep/new.ts': { kind: 'file', change: { diff: [4, 0] } },
+      'pkg/deep': { kind: 'lazy' },
+      pkg: { kind: 'lazy' },
+    });
+  });
+
+  it('keeps root entries, expanded directories and changes ahead of breadth-first rows', () => {
+    const tree: CodeCollabV2FileTreeState = {
+      'README.md': true,
+      a: { kind: 'lazy' },
+      b: { kind: 'lazy' },
+      'b/expanded': { kind: 'lazy' },
+    };
+    for (let index = 0; index < 50; index += 1) {
+      tree[`a/filler-${String(index).padStart(2, '0')}.ts`] = true;
+      tree[`b/expanded/child-${String(index).padStart(2, '0')}.ts`] = true;
+    }
+    tree['a/z/changed.ts'] = true;
+    tree['a/z'] = { kind: 'lazy' };
+
+    const { fileIndex, omittedPaths } = buildBoundedCodeCollabFileIndexState(
+      tree,
+      { 'a/z/changed.ts': { diff: [1, 0] } },
+      { budget: { maxEntries: 60, maxBytes: 1024 * 1024 }, priorityDirectories: ['b/expanded'] }
+    );
+    const paths = Object.keys(fileIndex);
+    expect(paths).toHaveLength(60);
+    expect(omittedPaths).toBe(Object.keys(tree).length - 60);
+    expect(paths).toEqual(expect.arrayContaining(['README.md', 'a', 'b', 'b/expanded']));
+    expect(paths.filter((file) => file.startsWith('b/expanded/'))).toHaveLength(50);
+    // The changed row is kept together with its ancestors.
+    expect(fileIndex['a/z/changed.ts']).toEqual({ kind: 'file', change: { diff: [1, 0] } });
+    expect(fileIndex['a/z']).toEqual({ kind: 'lazy' });
+    // Omitted rows are not loaded, never deleted.
+    expect(Object.values(fileIndex).some((value) => value !== true && value.kind === 'deleted')).toBe(
+      false
+    );
+  });
+
+  it('enforces the byte budget for long multi-byte paths before the row count', () => {
+    const tree: CodeCollabV2FileTreeState = { dir: { kind: 'lazy' } };
+    for (let index = 0; index < CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries; index += 1) {
+      tree[`dir/${'长路径'.repeat(40)}-${index}.ts`] = true;
+    }
+    const { fileIndex, estimatedBytes } = buildBoundedCodeCollabFileIndexState(tree, {});
+    expect(Object.keys(fileIndex).length).toBeLessThan(CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries);
+    expect(estimatedBytes).toBe(estimateCodeCollabFileIndexStateBytes(fileIndex));
+    expect(estimatedBytes).toBeLessThanOrEqual(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes);
+    expect(estimatedBytes).toBeGreaterThan(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes - 1024);
+  });
+});
+

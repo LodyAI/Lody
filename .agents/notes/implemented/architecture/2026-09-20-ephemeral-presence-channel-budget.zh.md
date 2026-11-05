@@ -78,7 +78,8 @@ Translation: current
 
 ### 「未知」不等于「离线」
 
-写入侧只覆盖了契约的一半。`getOnlineMachineIds()` 在 presence room 无法加入时返回 null，
+写入侧只覆盖了契约的一半。presence 读取函数（当时的 `getOnlineMachineIds()`，现为
+`getMachinePresenceView()`）在 presence room 无法加入时报告 null，
 作用域规则把它定义为状态**未知**，而 MCP 服务端用 `?.has(id) === true` 把它坍缩成了离线。
 一个辅助函数扇出到五处 agent 可见的后果：单命令派发与两条批量路径都抛出 `MACHINE_OFFLINE`，
 会话列表报告 `temporarily_blocked`，选项路径则**静默**地把所有远端机器从候选列表中删除。
@@ -93,8 +94,8 @@ null 分支此前完全没有测试，而 `commands/agent-config.ts` 早已正�
 新增的 `onlineStatus` 字段承载全部三种状态。`--online-only` 仍按"已证明在线"过滤，对该标志
 而言是正确的，警告也仍会输出。
 
-反向映射刻意未动：`session_status_many` 的 `machineOnline` 来自实时 RPC 而非 presence，
-属于不同来源，不在本契约范围内。
+`session_status_many` 起初作为不同来源被保留未动。它现在同样从 presence 取得机器状态，
+并在 RPC 未应答时保持未知；见[状态读取决策](../bug-fix/2026-10-27-mcp-chat-machine-probe-timeout.zh.md)。
 
 ## 验证
 

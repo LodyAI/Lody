@@ -16,6 +16,7 @@ import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspa
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
+import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
 import { SESSION_GOAL_ACTIONS } from './goal';
 import {
@@ -129,10 +130,167 @@ export const SessionToolResultSchema = z
   })
   .strict();
 
+export const SorbetProviderIdSchema = z.string().min(1).max(1024);
+export const SorbetCredentialTypeSchema = z.string().min(1).max(1024);
+export const SORBET_CREDENTIALS_MAX_COUNT = 1000;
+const SorbetCredentialSchema = z
+  .object({
+    providerId: SorbetProviderIdSchema,
+    type: SorbetCredentialTypeSchema,
+  })
+  .strict();
+export const SorbetCredentialsResultSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('sorbet/credentials-list'),
+      credentials: z.array(SorbetCredentialSchema).max(SORBET_CREDENTIALS_MAX_COUNT),
+    })
+    .strict(),
+  z.object({ type: z.literal('sorbet/credentials-logout') }).strict(),
+]);
+
+export type SorbetCredentialsResult = z.infer<typeof SorbetCredentialsResultSchema>;
+
+/**
+ * A custom Provider Sorbet hosts on the Client's behalf. Its identity, protocol and model
+ * list come from Lody; Sorbet assigns and owns `id`. Models are `{ id, name? }` on the wire.
+ */
+export const SorbetCustomProviderProtocolSchema = z.enum([
+  'anthropic-messages',
+  'openai-responses',
+  'openai-completions',
+]);
+export const SORBET_CUSTOM_PROVIDER_MODELS_MAX_COUNT = 200;
+const SorbetCustomProviderModelSchema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    name: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+export const SorbetCustomProviderInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    protocol: SorbetCustomProviderProtocolSchema,
+    baseUrl: z.string().trim().min(1).max(2048),
+    models: z
+      .array(SorbetCustomProviderModelSchema)
+      .min(1)
+      .max(SORBET_CUSTOM_PROVIDER_MODELS_MAX_COUNT),
+  })
+  .strict();
+export const SorbetCustomProviderSchema = SorbetCustomProviderInputSchema.extend({
+  id: SorbetProviderIdSchema,
+}).strict();
+
+export const SorbetProvidersResultSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('sorbet/providers-list'),
+      providers: z.array(SorbetCustomProviderSchema).max(SORBET_CREDENTIALS_MAX_COUNT),
+    })
+    .strict(),
+  z
+    .object({ type: z.literal('sorbet/providers-create'), provider: SorbetCustomProviderSchema })
+    .strict(),
+  z.object({ type: z.literal('sorbet/providers-delete') }).strict(),
+]);
+
+export type SorbetCustomProviderInput = z.infer<typeof SorbetCustomProviderInputSchema>;
+export type SorbetCustomProvider = z.infer<typeof SorbetCustomProviderSchema>;
+export type SorbetProvidersResult = z.infer<typeof SorbetProvidersResultSchema>;
+
+export const E2eeAcpInteractionParamsSchema = z.union([
+  z
+    .object({
+      action: z.literal('start'),
+      kind: z.literal('probe'),
+      configId: AgentConfigIdSchema,
+      force: z.boolean().optional(),
+      responseKey: RpcSecretPublicKeySchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('start'),
+      kind: z.literal('authenticate'),
+      configId: AgentConfigIdSchema,
+      methodId: z.string().trim().min(1).max(1024).optional(),
+      responseKey: RpcSecretPublicKeySchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('activate'),
+      interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('poll'),
+      interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/),
+      progressAck: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('submit'),
+      interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/),
+      interactionId: z.string().trim().min(1).max(1024),
+      inputEnvelope: RpcSecretEnvelopeSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('cancel'),
+      interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/),
+    })
+    .strict(),
+]);
+
+export const E2eeAcpInteractionResultSchema = z
+  .object({
+    type: z.literal('machine/acp-interaction'),
+    interactionRequestId: z.string().regex(/^[0-9a-f]{32}$/),
+    state: z.enum(['running', 'completed', 'cancelled', 'expired']),
+    inputPublicKey: RpcSecretPublicKeySchema.optional(),
+    responseEnvelope: RpcSecretEnvelopeSchema.optional(),
+  })
+  .strict();
+
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/acp-interaction'),
+    params: E2eeAcpInteractionParamsSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/credentials-list'),
+    params: z.object({ configId: AgentConfigIdSchema }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/credentials-logout'),
+    params: z
+      .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/providers-list'),
+    params: z.object({ configId: AgentConfigIdSchema }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/providers-create'),
+    params: z
+      .object({ configId: AgentConfigIdSchema, provider: SorbetCustomProviderInputSchema })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/providers-delete'),
+    params: z
+      .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/status'),
-    params: z.object({}).strict(),
+    params: z.object({ includeDisk: z.literal(true).optional() }).strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/ping'),
@@ -144,7 +302,12 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/live-status'),
-    params: z.object({ sessionId: z.string().trim().min(1) }).strict(),
+    params: z
+      .object({
+        sessionId: z.string().trim().min(1),
+        includeActivity: z.literal(true).optional(),
+      })
+      .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('file/download-chunk'),
@@ -430,6 +593,43 @@ export type ProjectProbeLocalMemberResult = z.infer<typeof ProjectProbeLocalMemb
 
 const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
 
+/**
+ * What a busy Session is doing, read on demand by its owning daemon and never
+ * published on presence. Sent only when the request asked with `includeActivity`.
+ */
+export const SessionLiveActivitySchema = z
+  .object({
+    turnStartedAt: z.number().finite().nonnegative().optional(),
+    lastOutputAt: z.number().finite().nonnegative().optional(),
+    currentAction: z.string().max(200).optional(),
+    queuedInputs: z.number().int().nonnegative(),
+  })
+  .strict();
+export type SessionLiveActivity = z.infer<typeof SessionLiveActivitySchema>;
+
+/**
+ * Best-effort withdrawal of a queued input that has not started. `withdrawn`
+ * means the input was still pending and is now canceled; a dispatch racing the
+ * withdrawal may still run it, which callers observe in the target history.
+ */
+export const SessionWithdrawInputResponseSchema = z
+  .object({
+    type: z.literal('session/withdraw-input_response'),
+    sessionId: z.string().trim().min(1),
+    userTurnId: z.string().trim().min(1),
+    outcome: z.enum([
+      'withdrawn',
+      'already_withdrawn',
+      'already_started',
+      'not_found',
+      'not_owner',
+      'error',
+    ]),
+    error: z.string().optional(),
+  })
+  .strict();
+export type SessionWithdrawInputResponse = z.infer<typeof SessionWithdrawInputResponseSchema>;
+
 export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
   z
     .object({
@@ -440,6 +640,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
       state: SessionLiveStateSchema,
       observedAtMs: z.number().finite().nonnegative(),
       reason: z.string().trim().min(1).optional(),
+      activity: SessionLiveActivitySchema.optional(),
     })
     .strict(),
   z
@@ -455,6 +656,8 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
 ]);
 
 export const LocalMachineRpcResultSchema = z.union([
+  E2eeAcpInteractionResultSchema,
+  SorbetProvidersResultSchema,
   MachineStatusResponseSchema,
   MachinePingResponseSchema,
   MachineAcpBinaryStatusResponseSchema,
@@ -466,6 +669,7 @@ export const LocalMachineRpcResultSchema = z.union([
   AndroidEmulatorResponseSchema,
   McpToolListResultSchema,
   McpAuthenticationResultSchema,
+  SorbetCredentialsResultSchema,
   SessionToolResultSchema,
   SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
@@ -496,6 +700,23 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionTerminateResponseSchema,
   MachinePiExtensionsResponseSchema,
 ]);
+export type SorbetCredentialsListRequest = Extract<
+  LocalMachineRpcRequest,
+  { method: 'sorbet/credentials-list' }
+>;
+export type SorbetCredentialsLogoutRequest = Extract<
+  LocalMachineRpcRequest,
+  { method: 'sorbet/credentials-logout' }
+>;
+export type SorbetCredentialsListResult = Extract<
+  SorbetCredentialsResult,
+  { type: 'sorbet/credentials-list' }
+>;
+export type SorbetCredentialsLogoutResult = Extract<
+  SorbetCredentialsResult,
+  { type: 'sorbet/credentials-logout' }
+>;
+
 export type LocalMachineRpcResult = z.infer<typeof LocalMachineRpcResultSchema>;
 
 export const LocalMachineRpcResponseSchema = z.union([

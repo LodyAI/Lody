@@ -32,6 +32,8 @@ export type SessionContinuationNoteProps = {
   now: number;
   /** The one-line phone form: title + countdown, detail stays in the popover. */
   compact?: boolean;
+  /** The last known state could not be refreshed. */
+  statusUnavailable?: boolean;
   onCancel: (id: string) => void;
   onResume?: (id: string) => void;
   onAskAgent?: (view: SessionContinuationView) => void;
@@ -332,6 +334,7 @@ export function SessionContinuationNote({
   view,
   now,
   compact = false,
+  statusUnavailable = false,
   onCancel,
   onResume,
   onAskAgent,
@@ -345,7 +348,9 @@ export function SessionContinuationNote({
   if (!descriptor.visible) return null;
 
   const title = descriptor.title ?? t('sessions.continuation.fallbackTitle', '会话自动继续');
-  const detail = t(DETAIL_COPY[descriptor.detail].key, DETAIL_COPY[descriptor.detail].fallback);
+  const detail = statusUnavailable
+    ? t('sessions.continuation.statusUnavailable', 'Status temporarily unavailable. Retrying…')
+    : t(DETAIL_COPY[descriptor.detail].key, DETAIL_COPY[descriptor.detail].fallback);
   const nextCheck = nextCheckLabel(descriptor.nextCheck, t, locale);
   const tone = descriptor.tone;
   const Icon = iconFor(descriptor.detail, tone);
@@ -413,14 +418,14 @@ export function SessionContinuationNote({
         <Icon size={13} strokeWidth={2} />
       </span>
       <span {...stylex.props(styles.title)}>{title}</span>
-      {compact ? null : (
+      {!compact || statusUnavailable ? (
         <>
           <span {...stylex.props(styles.separator)} aria-hidden="true">
             ·
           </span>
           <span {...stylex.props(styles.detail)}>{detail}</span>
         </>
-      )}
+      ) : null}
       {nextCheck ? (
         <>
           <span {...stylex.props(styles.separator)} aria-hidden="true">

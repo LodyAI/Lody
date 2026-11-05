@@ -60,6 +60,8 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 ## Machine protocol negotiation
 
+- Sorbet credential metadata and per-provider logout use local Machine RPC or signed E2EE owned execution, gated remotely by `sorbetCredentialsRemote`. The target verifies the signing device belongs to its owner's membership; shared members and plaintext fallback are forbidden. Metadata does not imply credential validity or account identity.
+
 - Ask Question consumers must preserve Core note/replacement semantics and validate
   associations per the [notes contract](../../specs/ask-question-answer-notes.md).
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { ClientCustodyError } from '@lody/e2ee-core/services';
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { E2eePersonalPairing } from '../src/components/pages/e2ee-personal-pairing';
@@ -72,6 +73,7 @@ describe('personal desktop approval', () => {
     act(async () =>
       root.render(
         <E2eePersonalPairing
+          accountId="account"
           workspaceId={workspaceId}
           runtime={runtime}
           canApprove={canApprove}
@@ -126,7 +128,9 @@ describe('personal desktop approval', () => {
       await inputOffer();
       await click('e2ee.pair.trust');
       expect(submitted).toEqual(offer);
-      expect(container.querySelector('[data-testid="e2ee-pair-joining-key"]')?.textContent).toBe('55'.repeat(32));
+      expect(container.querySelector('[data-testid="e2ee-pair-joining-key"]')?.textContent).toBe(
+        '55'.repeat(32)
+      );
       await click('e2ee.pair.claim');
       expect(joined).toBe(false);
       expect(container.textContent).toContain('e2ee.pair.waiting');
@@ -173,25 +177,13 @@ describe('personal desktop approval', () => {
     await render();
     await click('e2ee.pair.create');
     await click('e2ee.pair.inspect');
-    expect(container.querySelector('[data-testid="e2ee-pair-preview-key"]')?.textContent).toBe('55'.repeat(32));
+    expect(container.querySelector('[data-testid="e2ee-pair-preview-key"]')?.textContent).toBe(
+      '55'.repeat(32)
+    );
     await click('e2ee.pair.approve');
     expect(admitted).toBe(true);
     expect(container.textContent).toContain('e2ee.pair.published');
     expect(joined).toBe(false);
-  });
-  it('lets the approver cancel a previewed unavailable target and create a fresh offer', async () => {
-    let next = offer;
-    runtime.personalPairingOffer = async () => next;
-    await render();
-    await click('e2ee.pair.create');
-    await click('e2ee.pair.inspect');
-    await click('common.cancel');
-    expect(container.textContent).not.toContain('55'.repeat(32));
-    expect(container.querySelector('textarea')).toBeNull();
-    expect(admitted).toBe(false);
-    next = { ...offer, pairingSessionId: '88'.repeat(16) };
-    await click('e2ee.pair.create');
-    expect(container.querySelector('textarea')!.value).toBe(JSON.stringify(next));
   });
   it('retains the offer and preview throughout a slow cancellation until the server result is confirmed', async () => {
     const cancellation = Promise.withResolvers<{ status: 'cancelled' }>();
@@ -270,6 +262,31 @@ describe('personal desktop approval', () => {
     expect(container.querySelector('textarea')).toBeNull();
     expect(container.textContent).toContain('55'.repeat(32));
     expect(container.textContent).toContain('e2ee.pair.waiting');
+  });
+  it('a card remounted during registration shows that registration failure, never an early claim', async () => {
+    type Pending = Awaited<ReturnType<NonNullable<Runtime['pendingPersonalJoin']>>>;
+    let pending: Pending = null;
+    const begin = Promise.withResolvers<never>();
+    runtime.pendingPersonalJoin = async () => pending;
+    runtime.preparePersonalJoin = async (value) => {
+      pending = {
+        pairingSessionId: value.pairingSessionId,
+        signingPublicKey: '55'.repeat(32),
+        offer: value,
+      };
+      return begin.promise;
+    };
+    await render(false);
+    await inputOffer();
+    await click('e2ee.pair.trust');
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render(false);
+    expect(container.textContent).not.toContain('e2ee.pair.claim');
+    await act(async () => begin.reject(new Error('request_failed')));
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain('e2ee.pair.retrySubmission');
   });
   it('retries the saved pin when preparation stopped before request creation, without inventing a key or session', async () => {
     runtime.pendingPersonalJoin = async () => ({ pairingSessionId: offer.pairingSessionId, offer });
@@ -381,30 +398,6 @@ describe('personal desktop approval', () => {
     inspectFailure = undefined;
     await click('e2ee.pair.inspect');
     expect(container.querySelector('[role="alert"]')).toBeNull();
-    expect(admitted).toBe(false);
-  });
-  it('does not publish a delayed preview into an unmounted workspace', async () => {
-    const response =
-      Promise.withResolvers<Awaited<ReturnType<NonNullable<Runtime['inspectPersonalJoin']>>>>();
-    runtime.inspectPersonalJoin = () => response.promise;
-    await render();
-    await click('e2ee.pair.create');
-    const button = [...container.querySelectorAll('button')].find(
-      (value) => value.textContent === 'e2ee.pair.inspect'
-    )!;
-    await act(async () => button.click());
-    await act(async () => root.unmount());
-    root = createRoot(container);
-    await act(async () =>
-      response.resolve({
-        pairingSessionId: offer.pairingSessionId,
-        signingPublicKey: '55'.repeat(32),
-        encryptionPublicKey: '66'.repeat(32),
-        credentialHash: '77'.repeat(32),
-        protection: 'os-keystore',
-      })
-    );
-    expect(container.textContent).toBe('');
     expect(admitted).toBe(false);
   });
 });

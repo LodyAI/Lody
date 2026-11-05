@@ -304,7 +304,50 @@ export interface AccountPairingApproverSession {
     access(): Effect.Effect<{ workspaceId: string; credential: string }, unknown>;
   };
   refresh(): Effect.Effect<unknown, unknown>;
+  /** This session's existing key round (receive, reports, distribution, repair). Its
+   * distributor targets only devices of the verified ledger and journals each envelope,
+   * so a later round retries the same id and bytes. */
+  keyRound(): Effect.Effect<unknown, unknown>;
+  /** Positive mailbox evidence for `device` at the current epoch: 'delivered', or a
+   * public retryable `e2ee_*` code. */
+  keyDeliveryEvidence(device: string): Effect.Effect<string, unknown>;
+  /** Ends this holder's use; the runtime closes a reader it opened for approval. */
+  release?(): Effect.Effect<void, unknown>;
 }
+
+/** Background key delivery after an admission commits. `delivered` rests on mailbox
+ * evidence for the admitted device, never on a finished round. `retrying` carries the
+ * code of the attempt that will be retried; `ended` is final (terminal cause, retry
+ * bound, or the approving session is no longer available to this account). */
+export interface AccountPairingKeyDeliveryEvent {
+  readonly workspaceId: string;
+  readonly requestId: string;
+  /** The admitted device's signing key, lowercase hex. */
+  readonly device: string;
+  readonly state: 'running' | 'retrying' | 'delivered' | 'ended';
+  /** Public `e2ee_*` code; never a cause, key or token. */
+  readonly code?: string;
+}
+/** The desktop's member delivery backoff: 10 s doubling to a 5 min cap, eight retries. */
+const KEY_DELIVERY_RETRY_DELAYS = [
+  10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000,
+] as const;
+/** Causes after which this device can never deliver; retrying would only repeat them. */
+const TERMINAL_KEY_DELIVERY = new Set([
+  'e2ee_member_removed',
+  'e2ee_device_revoked',
+  'e2ee_missing-binding',
+  'e2ee_restart-required',
+]);
+const keyDeliveryCode = (cause: unknown) => {
+  const code =
+    cause && typeof cause === 'object' && 'code' in cause
+      ? (cause as { code: unknown }).code
+      : null;
+  return typeof code === 'string' && /^[a-z0-9_-]{1,64}$/.test(code)
+    ? `e2ee_${code}`
+    : 'e2ee_key_delivery_failed';
+};
 
 /**
  * Approver ports for the shared workflow on a portable host. Each workspace where
@@ -318,12 +361,34 @@ export function makePortableAccountPairingApprover(input: {
   session: (workspaceId: string) => Effect.Effect<AccountPairingApproverSession | null, unknown>;
   /** The account-authenticated ledger append. */
   appendRecord: (request: E2eeAppendRecordRequest) => Effect.Effect<unknown, unknown>;
+  /** Observes the background key delivery started after each committed admission. */
+  onKeyDelivery?: (event: AccountPairingKeyDeliveryEvent) => void;
+  /** Due-retry schedule; tests inject `sleep` instead of waiting. */
+  keyDeliveryRetry?: {
+    readonly delays?: readonly number[];
+    readonly sleep?: (ms: number) => Effect.Effect<void>;
+  };
+  /** Bounded local diagnostics for failures no caller awaits (a background release). */
+  diagnostics?: (scope: string, cause: unknown) => void;
 }): () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown> {
-  return Effect.fnUntraced(function* () {
+  const remember = (scope: string) => (cause: unknown) =>
+    Effect.sync(() => {
+      try {
+        input.diagnostics?.(scope, cause);
+      } catch {
+        /* Diagnostics never fail the caller. */
+      }
+    });
+  const releaseQuietly = (session: AccountPairingApproverSession, scope: string) =>
+    session.release ? session.release().pipe(Effect.catch(remember(scope))) : Effect.void;
+  // Sessions opened before a later workspace fails are not returned, so the caller
+  // cannot release them: release them here on any failure.
+  const list = Effect.fnUntraced(function* (opened: AccountPairingApproverSession[]) {
     const result: AccountPairingApproverWorkspace[] = [];
     for (const hint of input.workspaces()) {
       const session = yield* input.session(hint.workspaceId);
       if (!session) continue;
+      opened.push(session);
       const approval = session.accountApproval;
       const { workspaceId } = hint;
       result.push({
@@ -352,10 +417,93 @@ export function makePortableAccountPairingApprover(input: {
           }),
         invitation: (record) => approval.invitation(record),
         access: () => approval.access(),
+        // Failures reach the workflow, which records them; a failed close stays retryable.
+        release: () => session.release?.() ?? Effect.void,
+        // Approval returns first; the session's own key round sends the new device the
+        // current epoch key, as on the desktop. Each attempt ends with mailbox evidence;
+        // anything short of `delivered` is retried on the bounded due schedule. Every
+        // retry asks for the session again, so a signed-out or switched account ends the
+        // delivery and a closed reader is reopened by the runtime. The delivery is bound
+        // to the approving session's own device: a session of another account for the
+        // same workspace (its own device) ends it before any call. A failure never undoes
+        // the admission.
+        deliverKeys: (deviceBytes, requestId) =>
+          Effect.gen(function* () {
+            const device = toHex(deviceBytes);
+            const delays = input.keyDeliveryRetry?.delays ?? KEY_DELIVERY_RETRY_DELAYS;
+            const sleep = input.keyDeliveryRetry?.sleep ?? ((ms: number) => Effect.sleep(ms));
+            const report = (state: AccountPairingKeyDeliveryEvent['state'], code?: string) => {
+              try {
+                input.onKeyDelivery?.({
+                  workspaceId,
+                  requestId,
+                  device,
+                  state,
+                  ...(code ? { code } : {}),
+                });
+              } catch {
+                /* An observer never affects delivery. */
+              }
+            };
+            // Each attempt holds its own session only while it runs and releases it
+            // afterwards, so the delivery never keeps a reader open across the backoff.
+            const acquire = () =>
+              Effect.suspend(() => input.session(workspaceId)).pipe(
+                Effect.orElseSucceed(() => null)
+              );
+            const release = (current: AccountPairingApproverSession) =>
+              releaseQuietly(current, 'account-pairing-key-delivery-release');
+            const attempt = (current: AccountPairingApproverSession) =>
+              Effect.gen(function* () {
+                const round = yield* Effect.result(current.keyRound());
+                const evidence = yield* Effect.result(current.keyDeliveryEvidence(device));
+                if (Result.isSuccess(evidence) && evidence.success === 'delivered')
+                  return 'delivered';
+                if (Result.isFailure(round)) return keyDeliveryCode(round.failure);
+                return Result.isSuccess(evidence)
+                  ? evidence.success
+                  : keyDeliveryCode(evidence.failure);
+              }).pipe(Effect.ensuring(release(current)));
+            const owner = toHex(session.binding.device.toBytes());
+            // The first hold is taken before approval continues, so the workflow may
+            // release its own listing session without closing the reader underneath.
+            const first = yield* acquire();
+            const deliver = Effect.gen(function* () {
+              let current: AccountPairingApproverSession | null = first;
+              for (let retry = 0; ; retry++) {
+                if (!current) return report('ended', 'e2ee_key_delivery_closed');
+                if (toHex(current.binding.device.toBytes()) !== owner) {
+                  yield* release(current);
+                  return report('ended', 'e2ee_key_delivery_owner_changed');
+                }
+                const code = yield* attempt(current);
+                if (code === 'delivered') return report('delivered');
+                if (TERMINAL_KEY_DELIVERY.has(code) || retry >= delays.length)
+                  return report('ended', code);
+                report('retrying', code);
+                yield* sleep(delays[retry]!);
+                current = yield* acquire();
+              }
+            });
+            report('running');
+            void Effect.runPromise(deliver).catch((cause: unknown) =>
+              report('ended', keyDeliveryCode(cause))
+            );
+          }),
       });
     }
     return result;
   });
+  return () => {
+    const opened: AccountPairingApproverSession[] = [];
+    return list(opened).pipe(
+      Effect.onError(() =>
+        Effect.forEach(opened, (session) => releaseQuietly(session, 'account-pairing-release'), {
+          discard: true,
+        })
+      )
+    );
+  };
 }
 
 /**

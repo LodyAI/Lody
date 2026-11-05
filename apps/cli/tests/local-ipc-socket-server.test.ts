@@ -9,7 +9,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Effect } from 'effect';
-import type { LocalSessionControlRequest, LocalSessionControlResponse } from '@lody/shared';
+import {
+  LOCAL_MACHINE_RPC_PATH,
+  type LocalSessionControlRequest,
+  type LocalSessionControlResponse,
+} from '@lody/shared';
 import {
   LOCAL_CONTROL_HEADER,
   LOCAL_SESSION_CONTROL_PATH,
@@ -162,6 +166,50 @@ describe('local IPC socket server', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
     vi.clearAllMocks();
+  });
+
+  it('aborts an in-flight machine RPC when the local socket disconnects', async () => {
+    const paths = makePaths();
+    const config = makeServerConfig(paths);
+    let markStarted: (() => void) | undefined;
+    let markAborted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const aborted = new Promise<void>((resolve) => {
+      markAborted = resolve;
+    });
+    await startLocalIpcSocketServers({
+      ...config,
+      control: {
+        ...config.control,
+        dispatchMachineRpc: async (_message, signal) => {
+          markStarted?.();
+          if (signal?.aborted) markAborted?.();
+          else signal?.addEventListener('abort', () => markAborted?.(), { once: true });
+          await aborted;
+          return { ok: false, error: 'cancelled' };
+        },
+      },
+    });
+    const request = http.request({
+      socketPath: paths.controlSocketPath,
+      path: LOCAL_MACHINE_RPC_PATH,
+      method: 'POST',
+      headers: { [LOCAL_CONTROL_HEADER]: '1', 'Content-Type': 'application/json' },
+    });
+    request.on('error', () => {});
+    request.end(
+      JSON.stringify({
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1',
+        method: 'sorbet/credentials-logout',
+        params: { configId: 'provider', providerId: 'example' },
+      })
+    );
+    await started;
+    request.destroy();
+    await aborted;
   });
 
   it('serves probe and control requests over sockets and cleans the run-file', async () => {

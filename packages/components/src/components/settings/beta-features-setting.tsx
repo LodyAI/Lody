@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { Switch } from '@lody/ui/switch';
 import {
   developerModeEnabledAtom,
-  e2eeAccountPairingEnabledAtom,
   e2eeWorkspaceCreationEnabledAtom,
   inboxBetaEnabledAtom,
+  lodyAgentBetaEnabledAtom,
   roostHistoryExperimentEnabledAtom,
   semanticShortcutsBetaEnabledAtom,
 } from '@/atoms/settings';
@@ -28,11 +28,9 @@ import { CompactRow, CompactSection } from './compact-layout';
 export function BetaFeaturesSection() {
   const { t } = useTranslation();
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
+  const [lodyAgentEnabled, setLodyAgentEnabled] = useAtom(lodyAgentBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
   const [e2eeCreationEnabled, setE2eeCreationEnabled] = useAtom(e2eeWorkspaceCreationEnabledAtom);
-  const [e2eeAccountPairingEnabled, setE2eeAccountPairingEnabled] = useAtom(
-    e2eeAccountPairingEnabledAtom
-  );
 
   const [semanticShortcutsEnabled, setSemanticShortcutsEnabled] = useAtom(
     semanticShortcutsBetaEnabledAtom
@@ -44,6 +42,16 @@ export function BetaFeaturesSection() {
   return (
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
       <CompactRow
+        label={t('settings.beta.lodyAgent', 'Lody Agent')}
+        helper={t('settings.beta.lodyAgentHelper', 'Show Lody Agent when adding a provider.')}
+      >
+        <Switch
+          checked={lodyAgentEnabled}
+          onCheckedChange={setLodyAgentEnabled}
+          aria-label={t('settings.beta.lodyAgent', 'Lody Agent')}
+        />
+      </CompactRow>
+      <CompactRow
         label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
         helper={t(
           'settings.beta.e2eeWorkspaceHelper',
@@ -54,19 +62,6 @@ export function BetaFeaturesSection() {
           checked={e2eeCreationEnabled}
           onCheckedChange={setE2eeCreationEnabled}
           aria-label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
-        />
-      </CompactRow>
-      <CompactRow
-        label={t('settings.beta.e2eeAccountPairing', 'Account-wide device pairing')}
-        helper={t(
-          'settings.beta.e2eeAccountPairingHelper',
-          'Add a device to all your encrypted workspaces with one scanned or pasted code. Requires host support; the existing pairing stays available.'
-        )}
-      >
-        <Switch
-          checked={e2eeAccountPairingEnabled}
-          onCheckedChange={setE2eeAccountPairingEnabled}
-          aria-label={t('settings.beta.e2eeAccountPairing', 'Account-wide device pairing')}
         />
       </CompactRow>
       <CompactRow

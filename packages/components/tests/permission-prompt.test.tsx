@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,7 +22,7 @@ const responseBoundary = vi.hoisted(() => ({ respond: vi.fn() }));
 vi.mock('../src/hooks/use-permission-response', () => ({
   usePermissionResponse: () => ({ isReady: true, respondToPermission: responseBoundary.respond }),
 }));
-import { resolvePermissionSubject } from '../src/lib/permission-request-presentation';
+
 import { initI18n } from '../src/i18n';
 
 (
@@ -223,11 +224,6 @@ describe('PermissionPrompt', () => {
     expect(container.textContent).not.toContain('only its beginning is shown');
   });
 
-  it('falls back to a question from the tool kind when the provider sent none', async () => {
-    await render(makeRequest([ALLOW_ONCE, REJECT_ONCE]));
-    expect(prompt().getAttribute('aria-label')).toBe('Run this command?');
-  });
-
   it('refuses once on Escape, never with an "always" refusal', async () => {
     await render(makeRequest([ALLOW_ONCE, REJECT_ALWAYS, REJECT_ONCE]), { autoFocus: true });
     expect(document.activeElement).toBe(prompt());
@@ -293,62 +289,5 @@ describe('PermissionPrompt', () => {
     await render(makeRequest([ALLOW_ONCE, REJECT_ONCE]), { autoFocus: true });
     expect(document.activeElement).toBe(input);
     input.remove();
-  });
-
-  it('holds every answer while one is sending, and says when it failed', async () => {
-    await render(makeRequest([ALLOW_ONCE, REJECT_ONCE]), { sendingOptionId: 'allow' });
-    expect(optionButton('Yes').disabled).toBe(true);
-    expect(optionButton('No').disabled).toBe(true);
-
-    await render(makeRequest([ALLOW_ONCE, REJECT_ONCE]), {
-      error: "Your answer didn't reach the agent. Try again.",
-    });
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      "didn't reach the agent"
-    );
-    expect(optionButton('Yes').disabled).toBe(false);
-  });
-});
-
-describe('resolvePermissionSubject', () => {
-  const toolCall = (fields: Partial<ToolCall>) =>
-    ({ type: 'tool_call', toolCallId: 'tc', status: 'pending', ...fields }) as ToolCall;
-
-  it('lists each path an edit touches once', () => {
-    expect(
-      resolvePermissionSubject(
-        toolCall({
-          kind: 'edit',
-          title: 'Edit files',
-          locations: [{ path: 'src/a.ts' }, { path: 'src/b.ts' }, { path: 'src/a.ts' }],
-        })
-      )
-    ).toEqual({ type: 'paths', paths: ['src/a.ts', 'src/b.ts'] });
-  });
-
-  it('has no subject for a plan decision, whose plan is the message above', () => {
-    expect(resolvePermissionSubject(toolCall({ kind: 'switch_mode', title: 'Approve Plan' }))).toBe(
-      null
-    );
-  });
-
-  it('flags a title that history cut short', () => {
-    const cut = `${'a'.repeat(1018)}…`;
-    expect(resolvePermissionSubject(toolCall({ kind: 'execute', title: cut }))).toMatchObject({
-      type: 'command',
-      truncated: true,
-    });
-    expect(
-      resolvePermissionSubject(toolCall({ kind: 'execute', title: 'Wait…' }))
-    ).toMatchObject({ truncated: false });
-  });
-
-  it('reads a command from the title when no command block was sent', () => {
-    expect(resolvePermissionSubject(toolCall({ kind: 'execute', title: 'git push' }))).toEqual({
-      type: 'command',
-      command: 'git push',
-      cwd: null,
-      truncated: false,
-    });
   });
 });

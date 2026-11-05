@@ -41,3 +41,27 @@ Translation: current
 ## 协议归属
 
 公开邀请 DTO 只有 `packages/cloud-api/src/e2ee-members.ts` 一处声明，平台和 UI 复用。`E2eeWorkspaceRuntime` 保留已合入的签名公钥、成员实例、角色和 `setMemberRole`，并加入本 PR 的临时 reader 所有权标识。原生配套可先合入，产品邀请与设置界面由 #1986 提供。两个独立分支不互相叠栈，也不保留临时 core overlay。
+
+## 准入后的派钥
+
+过去审批要等完整的 `refresh()` 结束才返回，其中包含最多四遍的 key round。在打包版的 B④ 运行里，中继已经提交了准入，审批桌面却又多等了 30 秒。这段时间管理员的审批卡一直是禁用状态，没有任何进度提示，邮件 worker 的调用也一直挂着。现在 `approveMemberJoin` 只做一次 ledger 摄入（`installKeys: false`），读取中继结果后就返回 `admitted`，同时带上 `keyDelivery: 'pending'`。派钥结果无法撤销准入。加入方设备本来就要等自己装好当前密钥后才显示"就绪"，所以不会出现显示已加入、却打不开工作区的情况。
+
+派钥归主进程的 `E2eeIpc` 服务所有，不再依附于某个渲染端请求。每个账户和工作区同时只跑一轮，这一轮由主进程自己持有的 host reader 承载，所以即使关掉所有窗口也不会中断。host 原有的 key round 单飞和锁规则保持不变，派发对象也仍然只限于 ledger 中已验证的成员。每一轮都先在这个 reader 下 ingest 中继历史。只有拿到正面证据时，请求才标为 `delivered`：mailbox 在当前 epoch 下为被准入的设备存有 envelope（状态为 `EnvelopeStored` 或 `InstallationReported`），这也是 `KeyDistributor` 记录 `Observed` 之前用的判断。这一轮成功不算证据：sender 不 eligible、目标被 blocked、本机没有当前密钥、只是接上了别人的 round，这些情况都会以成功结束。每种情况都保持可重试，并各有原因码：`e2ee_admission_not_ingested`、`e2ee_key_sender_ineligible`、`e2ee_key_unavailable`、`e2ee_key_not_sent`、`e2ee_key_epoch_changed`、`e2ee_key_recipient_ineligible`、`e2ee_key_status_unavailable`。本地检查在 host 锁内完成，mailbox 状态查询在释放锁之后进行。设备公钥取自已验证的 KeyPackage，不用中继给的标签。失败时只记录公开的 `e2ee_*` 原因码，不记录密钥字节、token 或错误原因，同时保留 `pairingFailure`。之后按退避等待：从 10 秒开始，每失败一次翻倍，上限 5 分钟。到期后由下一次 `memberJoinRequests` 或 `memberKeyDeliveries` 调用触发重试；邮件 worker 和团队设置页每 10 秒都会轮询这两个接口。不另设定时器或循环。显式重试会跳过退避。只有永久性原因才算终态：成员被移除、设备被吊销、绑定缺失、`restart-required`。工作区已关闭仍可重试，因为下一轮会重新打开它。上述终态原因会直接清掉 slot，不再重试。这些原因即使嵌套在 `WorkspaceKeyRoundFailure` 的阶段 Result 里也能识别，识别发生在公开投影把它们压平成通用失败之前。团队设置页在派钥成功前显示"已加入 · 正在发送密钥"，失败时提供重试按钮。加入页补充说明：需要管理员的桌面端在线。
+
+影响范围：触发条件是 key round 期间中继、mailbox 或 staging 请求变慢或失败。影响只落在这一轮所覆盖成员的派钥状态上，审批、请求列表和其他工作区都照常工作。恢复由服务实例负责，生命周期与应用一致；每个账户和工作区最多保留 32 条记录。退出、登出或切换账户时会关闭 owner，正在进行的一轮会以 `closed` 或 `account_mismatch` 失败，这条记录也不会显示给另一个账户。状态只保存在内存里。重启后，未完成的派发要等本设备下一次完整的 key round 时，由 core journal 重新发现，而不是靠这里的记录。这个缺口在本次改动之前就存在。
+
+### 到 ready 的时间（R16 B 组运行）
+
+改成提前返回之后，打包版 B 组运行仍然在等成员 ready 的 60 秒上超时。我用两个真实账户、一个合成 relay 和一个 reference mailbox 复现了这条链路：功能上是完整的，派钥完成后，成员下一次 claim 就能装上密钥。问题出在串行代价上。每次 relay 调用约 2.3 秒（每次都要重新签一个 Convex token，再加上调用本身）。审批方派钥要 14 次调用；成员每次 claim 也要 14 次，因为每次 claim 都会跑一整轮包含派发的 key round。再加上成员每 10 秒才 claim 一次，可能整整错过一个周期才拿到已经送达的密钥。现在成员的 claim 改成只收钥：在同一个单飞下，只从 staged group 或 mailbox 取自己的密钥，然后提交安装回报。ready 仍然要求 native host 自己装好当前密钥。派发和修复留给之后的完整 round 去做；如果遇到正在进行的只收钥 round，完整 round 会等它结束再跑。请求已 committed 但还没 ready 时，加入页改为每 3 秒 claim 一次，最多持续两分钟，之后恢复每 10 秒一次。对应的测试显示，从审批返回到 ready 的串行调用从 28 次（约 67 秒）降到 24 次（约 58 秒）。派钥状态的每次变化（`pending`、`delivering`、`delivered`、带原因码的 `failed`、`ended`）和 claim 的各个阶段都会写进日志，日志里只放 requestId 的 12 位十六进制哈希，不放原始 requestId。跨调用复用 Convex token 涉及 auth，另开 follow-up 跟踪；core 的 distributor 和 receiver 的调用次数这次没有改。
+
+### 关键路径压到 30 秒以内
+
+对应的测试从审批返回开始测关键路径，并且审批方事先已经预热过。关键路径由三段组成：审批方发出 envelope `put` 之前的调用；成员恰好错过它的那次重试，加上 3 秒间隔；以及完成安装的那次 claim。这三段原来是 6 + 3 + 10 次调用，按每次 2.3 秒（含一次签 token）约 46.7 秒；现在是 5 + 2 + 6 次。复用 Convex token 后，每次调用约 1.9 秒，整条路径最多签一次 token（约 0.4 秒），合计约 28.1 秒；如果仍按每次 2.3 秒算，则是 32.9 秒。core 协议的校验没有改。具体做法：
+
+- 审批方派钥改为在 keyRound 单飞下跑只派发的 round。调用方遇到同一模式的 round 或完整 round 时直接合入，否则等它结束再跑自己的。
+- 如果本地已经为同一个请求 accept 过，claim 跳过 relay claim、完整 history 和 accept。但收钥之前仍然会先 ingest relay 上本地 checkpoint 之后的历史后缀，所以即使发生了 epoch 轮换或本地账本落后，也不会用旧 epoch 的钥报 ready。这一步追平失败，或者翻满 256 页之后 relay 还有下一页（返回非终态的 `e2ee_history_not_caught_up`）时，claim 不报 ready。追平被拒绝时，会用本设备的 credential 确认一次；如果确认是 access loss，就和其他路径一样清理本地工作区。
+- 只收钥的 round 不再 flush report。成员 ready 之后，主进程用自己的 reader 接管工作区，跑一整轮完整 round：flush 安装回报，完成派发和修复，然后释放 reader。
+- cloud client 在同一个 owner 内复用未过期的 Convex JWT，在 `exp` 之前 60 秒续签。owner 只属于一个账户，账户切换或登出时会关闭，token 随之丢弃；任何一次调用失败也会丢弃 token；调用因 30 秒超时或被取消而中断时同样丢弃。
+- 两分钟的快速重试期结束后，加入页会提示成员"仍在等待管理员设备"；点击重试会重新进入快速节奏。
+
+receiver 在安装过程中会多次重新查询远端 revision，共 4 次 `status` 调用。这是有意保留的安全复核，没有删减。

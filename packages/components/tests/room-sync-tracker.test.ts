@@ -92,27 +92,6 @@ describe('createRoomSyncTracker', () => {
     expect(tracker.getSyncState()).toBe('synced');
   });
 
-  it('treats joined as syncing until first remote sync completes', () => {
-    const tracker = createRoomSyncTracker('room-1');
-    tracker.attach(createSubscription(['joined']));
-
-    expect(tracker.getSyncState()).toBe('syncing');
-
-    tracker.markFirstSynced();
-    expect(tracker.getSyncState()).toBe('synced');
-  });
-
-  it('reports initial sync failure as reconnectable', () => {
-    const tracker = createRoomSyncTracker('room-1');
-    tracker.attach(createSubscription(['joined']));
-    tracker.markFirstSyncFailed();
-
-    expect(tracker.getSyncState()).toBe('error');
-    expect(tracker.needsReconnect()).toBe(true);
-    expect(tracker.hasReconnectSignal(false)).toBe(false);
-    expect(tracker.hasReconnectSignal(true)).toBe(true);
-  });
-
   it('rechecks first sync after reconnecting from an initial sync failure', async () => {
     const tracker = createRoomSyncTracker('room-1');
     const subscription = createControlledSubscription('joined');

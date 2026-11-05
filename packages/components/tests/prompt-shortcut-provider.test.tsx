@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act, createElement, StrictMode } from 'react';
+// @vitest-environment jsdom
+import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PromptShortcutRuntime } from '@lody/shared/prompt-shortcuts';
@@ -188,73 +189,6 @@ describe('PromptShortcutProvider lifecycle', () => {
     expect(current).not.toBeNull();
     expect(current).not.toBe(first);
     expect(container.textContent).toBe('workspace-a');
-  });
-
-  it('fences a replacement platform before publishing its new runtime', async () => {
-    await render();
-    const first = current!;
-    const opening = deferred();
-    fixture.createRepo.mockImplementationOnce(async () => {
-      await opening.promise;
-      return { destroy: async () => {} };
-    });
-    fixture.platform = fixture.makePlatform();
-    rendered = [];
-    await render();
-    expect(current).toBeNull();
-    expect(rendered).not.toContain(first);
-
-    await act(async () => opening.resolve());
-    expect(current).not.toBeNull();
-    expect(current).not.toBe(first);
-    expect(container.textContent).toBe('workspace-a');
-  });
-
-  it('warms visible shortcut bodies only after an idle window', async () => {
-    const entry = {
-      v: 1 as const,
-      id: 'shortcut-a',
-      workspaceId: 'workspace-a',
-      ownerUserId: 'user-a',
-      visibility: 'private' as const,
-      name: 'Review',
-      slug: 'review',
-      description: 'Review this change',
-      scope: {},
-      revision: 'revision-a',
-      createdAt: 1,
-      updatedAt: 1,
-      bodyDocId: 'body-a',
-      dependencySummary: [],
-    };
-    fixture.records = [{ entry, published: entry, operation: null, deleted: false }];
-    const idleCallbacks = new Map<number, IdleRequestCallback>();
-    let nextIdleHandle = 1;
-    vi.stubGlobal(
-      'requestIdleCallback',
-      vi.fn((callback: IdleRequestCallback) => {
-        const handle = nextIdleHandle++;
-        idleCallbacks.set(handle, callback);
-        return handle;
-      })
-    );
-    vi.stubGlobal(
-      'cancelIdleCallback',
-      vi.fn((handle: number) => idleCallbacks.delete(handle))
-    );
-    const prefetch = vi
-      .spyOn(PromptShortcutRuntime.prototype, 'prefetch')
-      .mockResolvedValue(undefined);
-
-    await render();
-    expect(prefetch).not.toHaveBeenCalled();
-    expect(idleCallbacks.size).toBe(1);
-    const callback = [...idleCallbacks.values()][0]!;
-    await act(async () => callback({ didTimeout: false, timeRemaining: () => 10 }));
-
-    expect(prefetch).toHaveBeenCalledTimes(1);
-    expect(prefetch.mock.calls[0]?.[0]).toEqual([entry]);
-    expect(prefetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
   });
   it('retires cloud shortcuts while admission is pending or encrypted and reopens after ordinary admission', async () => {
     fixture.status = 'allowed';

@@ -24,7 +24,6 @@
     "typecheck": "tsgo --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:roost-recovery:perf": "LODY_ROOST_RECOVERY_PERF=1 vitest run tests/roost-session-backend-contract.test.ts -t 'Roost cache recovery'",
-    "bench:acp-history": "vitest bench tests/acp-history.bench.ts",
     "bench:turn-diff-store": "pnpm --filter @lody/turn-diff-store bench",
     "test:e2e": "LODY_E2E=1 vitest run",
     "test:watch": "vitest",
@@ -142,6 +141,7 @@
     "@lydell/node-pty": "1.2.0-beta.14",
     "@napi-rs/keyring": "2.1.0",
     "better-sqlite3": "catalog:",
+    "ignore": "7.0.5",
     "loro-crdt": "1.17.0",
     "tinypool": "^1.0.0",
     "typescript": "^5.9.3"

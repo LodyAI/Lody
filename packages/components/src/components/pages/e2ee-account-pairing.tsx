@@ -105,7 +105,10 @@ type RequestRuntime = Pick<
 export function E2eeAccountPairingRequest(props: {
   runtime: RequestRuntime;
   autoStart: boolean;
+  /** Called once the whole request joined, or once `workspaceId` itself joined:
+   * workspaces join independently while others may stay pending. */
   onJoined: () => void;
+  workspaceId?: string;
   pollMs?: number;
 }) {
   const { runtime } = props;
@@ -121,7 +124,10 @@ export function E2eeAccountPairingRequest(props: {
     if (!live.current) return;
     setState(next);
     setPhase(next ? 'ready' : 'idle');
-    if (next?.status === 'joined' && !joined.current) {
+    const workspaceJoined = next?.workspaces.some(
+      (workspace) => workspace.workspaceId === props.workspaceId && workspace.state === 'joined'
+    );
+    if ((next?.status === 'joined' || workspaceJoined) && !joined.current) {
       joined.current = true;
       props.onJoined();
     }
@@ -269,6 +275,19 @@ export function E2eeAccountPairingRequest(props: {
         </p>
       )}
     </Card.Root>
+  );
+}
+
+/** The key request after a join failed: says so, and asks again only when the user does. */
+export function E2eeAccountPairingKeyRetry(props: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div role="alert" className="flex items-center gap-3 px-4 py-2 text-sm">
+      <span>{t('e2ee.accountPair.request.keyFailed')}</span>
+      <Button variant="secondary" size="small" onClick={props.onRetry}>
+        {t('e2ee.accountPair.request.keyRetry')}
+      </Button>
+    </div>
   );
 }
 

@@ -18,6 +18,6 @@ Translation: current
 ## 证据
 
 - 实现：[公式定界符归一化器](../../../../packages/components/src/lib/markdown-single-dollar-math.ts)。
-- 回归覆盖：[定界符测试](../../../../packages/components/tests/markdown-math-delimiters.test.ts) 和 [渲染器测试](../../../../packages/components/tests/markdown-streaming-reparse.test.ts)。
+- 回归覆盖：定界符测试（实现细节测试已退役） 和 [渲染器测试](../../../../packages/components/tests/markdown-streaming-reparse.test.ts)。
 - 契约：[Markdown 公式渲染 Spec](../../../../specs/markdown-math-rendering.zh.md)。
 - 正文后出现块级定界符的合成用例，不会再阻止后续行内公式排版。

@@ -3,6 +3,7 @@ import {
   LOCAL_E2EE_RESET_PATH,
   LocalE2eeResetRequestSchema,
   LocalE2eeResetResponseSchema,
+  LocalE2eePairingFailureSchema,
   LocalE2eeRecoveryFailureSchema,
   type LocalE2eeResetRequest,
   type LocalE2eeResetResponse,
@@ -71,7 +72,8 @@ export interface LocalSessionControlConfig {
     message: LocalProjectControlRequestValidated
   ) => Promise<LocalProjectControlResponse>;
   dispatchMachineRpc?: (
-    message: LocalMachineRpcRequestValidated
+    message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ) => Promise<LocalMachineRpcResponse>;
 }
 
@@ -269,7 +271,8 @@ async function handleProjectControlRequest(
 async function handleMachineRpcRequest(
   config: LocalSessionControlConfig,
   raw: string,
-  requestId: number
+  requestId: number,
+  signal?: AbortSignal
 ): Promise<LocalControlHandlerResponse> {
   const parsed = safeParseLocalMachineRpcRequest(raw);
   if (!parsed.success) {
@@ -298,7 +301,7 @@ async function handleMachineRpcRequest(
   }
 
   try {
-    const response = await config.dispatchMachineRpc(message);
+    const response = await config.dispatchMachineRpc(message, signal);
     const validated = LocalMachineRpcResponseSchema.safeParse(response).success;
     if (!validated) {
       config.logger.error('Local machine RPC produced invalid response payload');
@@ -320,6 +323,7 @@ export class LocalControlHandler {
     rawBody: string;
     requestId: number;
     onSessionResponse?: (response: LocalSessionControlResponse) => void;
+    signal?: AbortSignal;
   }): Promise<LocalControlHandlerResponse> {
     if (request.path === AUTOMATION_CONTROL_PATH) {
       return (async () => {
@@ -396,13 +400,19 @@ export class LocalControlHandler {
         } catch (error) {
           const code =
             error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-          const safe = LocalE2eeRecoveryFailureSchema.safeParse({
+          const recovery = LocalE2eeRecoveryFailureSchema.safeParse({
             ok: false,
             error: `e2ee_${code}`,
           });
+          if (recovery.success) return handlerResponse(503, recovery.data);
+          // Fixed pairing refusals are thrown as their exact code; nothing else crosses IPC.
+          const refusal = LocalE2eePairingFailureSchema.safeParse({
+            ok: false,
+            error: error instanceof Error ? error.message : undefined,
+          });
           return handlerResponse(
             503,
-            safe.success ? safe.data : { ok: false, error: 'e2ee_pairing_unavailable' }
+            refusal.success ? refusal.data : { ok: false, error: 'e2ee_pairing_unavailable' }
           );
         }
       })();
@@ -434,7 +444,12 @@ export class LocalControlHandler {
       });
     }
     if (request.path === LOCAL_MACHINE_RPC_PATH) {
-      return handleMachineRpcRequest(this.config, request.rawBody, request.requestId);
+      return handleMachineRpcRequest(
+        this.config,
+        request.rawBody,
+        request.requestId,
+        request.signal
+      );
     }
     if (request.path === LOCAL_PROJECT_CONTROL_PATH) {
       return handleProjectControlRequest(this.config, request.rawBody, request.requestId);

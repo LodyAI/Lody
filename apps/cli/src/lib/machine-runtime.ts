@@ -47,6 +47,12 @@ export class MachineRuntime {
     request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
     context?: EncryptedFeatureContext
   ) {
+    if (
+      (request.method === 'sorbet/credentials-list' ||
+        request.method === 'sorbet/credentials-logout') &&
+      !context
+    )
+      throw new Error('e2ee_feature_unavailable');
     const config = this.options.handlerConfig;
     if (
       !config.encryptedWorkspace ||
@@ -60,7 +66,12 @@ export class MachineRuntime {
       if (!context) throw new Error('e2ee_rpc_unavailable');
       return this.requireHandler().readEncryptedMachineRequest(request, context);
     }
-    return this.dispatchLocalMachineRpc(request);
+    if (request.method === 'machine/acp-interaction') {
+      if (!context?.authority || context.authority.signal.aborted || !context.authority.isCurrent())
+        throw new Error('e2ee_feature_unavailable');
+      return this.requireHandler().handleEncryptedAcpInteraction(request, context);
+    }
+    return this.dispatchLocalMachineRpc(request, context?.signal);
   }
   private handler: MessageHandler | null = null;
   private clientLossHandler: MessageHandler | null = null;
@@ -392,7 +403,8 @@ export class MachineRuntime {
   }
 
   async dispatchLocalMachineRpc(
-    message: LocalMachineRpcRequestValidated
+    message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
     if (
       this.options.handlerConfig.encryptedWorkspace &&
@@ -400,7 +412,7 @@ export class MachineRuntime {
     )
       throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();
-    return await handler.handleLocalMachineRpc(message);
+    return await handler.handleLocalMachineRpc(message, signal);
   }
 
   private initializeGCManager(): void {

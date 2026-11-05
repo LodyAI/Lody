@@ -100,6 +100,17 @@ export function buildVisibleLocalProjectIndex({
     const machineAccess = machineAccessByMachineId.get(machineId);
     const project = machine?.localProjects?.[localProjectId];
     if (!machine || !project) continue;
+    // Legacy machine metadata bypasses Flock's local-project validation. Keep
+    // incomplete rows out of display/launch indexes without deleting their access
+    // or source data; a later complete snapshot makes the project visible again.
+    if (
+      typeof project.name !== 'string' ||
+      !project.name.trim() ||
+      typeof project.rootPath !== 'string' ||
+      !project.rootPath.trim()
+    ) {
+      continue;
+    }
     projects.set(key, {
       key,
       machineId,

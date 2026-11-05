@@ -115,3 +115,22 @@ export const LocalE2eeRecoveryFailureSchema = z
     ]),
   })
   .strict();
+
+/** Content-free local pairing failures: the recovery codes plus fixed pairing
+ * refusals, so the desktop learns the exact reason. Raw causes never cross IPC. */
+export const LocalE2eePairingFailureSchema = z
+  .object({
+    ok: z.literal(false),
+    error: z.enum([
+      ...LocalE2eeRecoveryFailureSchema.shape.error.options,
+      'e2ee_binding_conflict',
+      'e2ee_identity_busy',
+      'e2ee_account_unavailable',
+      'e2ee_device_revoked',
+      'e2ee_machine_mismatch',
+      'e2ee_invalid_input',
+      'e2ee_invalid_response',
+      'e2ee_pairing_unavailable',
+    ]),
+  })
+  .strict();

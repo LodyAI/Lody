@@ -1681,9 +1681,12 @@ describe('session MCP input schemas', () => {
   });
 
   it('shares one remote Machine presence read across a batch', async () => {
-    const getOnlineMachineIds = vi.fn(async () => new Set(['remote-a', 'remote-b']));
+    const getMachinePresenceView = vi.fn(async () => ({
+      online: new Set(['remote-a', 'remote-b']),
+      synced: true,
+    }));
     const machineLiveness = makeMachineLivenessLookupForMcp(
-      { getOnlineMachineIds } as never,
+      { getMachinePresenceView } as never,
       createMcpContext()
     );
 
@@ -1694,25 +1697,37 @@ describe('session MCP input schemas', () => {
         machineLiveness('remote-b'),
       ])
     ).resolves.toEqual(['online', 'online', 'online']);
-    expect(getOnlineMachineIds).toHaveBeenCalledTimes(1);
+    expect(getMachinePresenceView).toHaveBeenCalledTimes(1);
   });
 
   it('separates a Machine absent from a joined presence room from one it could not check', async () => {
     const joined = makeMachineLivenessLookupForMcp(
-      { getOnlineMachineIds: vi.fn(async () => new Set(['remote-a'])) } as never,
+      {
+        getMachinePresenceView: vi.fn(async () => ({
+          online: new Set(['remote-a']),
+          synced: true,
+        })),
+      } as never,
       createMcpContext()
     );
     // A joined room that simply lacks the entry is real evidence of an offline Machine.
     await expect(joined('remote-b')).resolves.toBe('offline');
 
     const unavailable = makeMachineLivenessLookupForMcp(
-      { getOnlineMachineIds: vi.fn(async () => null) } as never,
+      {
+        getMachinePresenceView: vi.fn(async () => ({
+          online: new Set(['remote-a']),
+          synced: false,
+        })),
+      } as never,
       createMcpContext()
     );
-    // A null snapshot is "presence room unavailable" and must never read as offline:
-    // every dispatch guard blocks on 'offline' alone, so this is what kept a healthy
-    // remote Machine usable while presence was still joining.
+    // An unjoined room cannot prove absence and must never read as offline: every
+    // dispatch guard blocks on 'offline' alone, so this is what kept a healthy remote
+    // Machine usable while presence was still joining or recycling its live read.
     await expect(unavailable('remote-b')).resolves.toBe('unknown');
+    // A heartbeat received before the room left 'joined' still proves liveness.
+    await expect(unavailable('remote-a')).resolves.toBe('online');
     // The local Machine never depends on the presence room to prove its own liveness.
     await expect(unavailable('machine-id')).resolves.toBe('online');
   });

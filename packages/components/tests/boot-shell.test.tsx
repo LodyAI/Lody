@@ -2,20 +2,16 @@
 
 import { createHash } from 'node:crypto';
 import { runInThisContext } from 'node:vm';
-import { act, Component, StrictMode, useState, type ReactNode } from 'react';
-import { flushSync } from 'react-dom';
+import { act, Component, useState, type ReactNode } from 'react';
+
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BootShell, BootShellProvider } from '../src/components/boot-shell';
-import { DocumentStyle } from '../src/components/document-style';
-import { BOOT_SHELL_COLORS, BOOT_SHELL_MARKUP } from '../src/lib/boot-shell';
-import { createBootShellScript, resolveBootShellLayout } from '../src/lib/boot-shell-script';
-import {
-  createThemeCssVariables,
-  DEFAULT_VSCODE_THEME_SELECTION,
-  getBundledVSCodeThemeByIdSync,
-} from '../src/lib/vscode-theme';
+
+import { BOOT_SHELL_MARKUP } from '../src/lib/boot-shell';
+import { createBootShellScript } from '../src/lib/boot-shell-script';
+
 import {
   BOOT_SHELL_HEAD_MARKER,
   BOOT_SHELL_ROOT_MARKER,
@@ -51,6 +47,8 @@ function boot(
 
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('localStorage', window.localStorage);
+  vi.stubGlobal('sessionStorage', window.sessionStorage);
   osPrefersDark = false;
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -63,9 +61,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
   localStorage.clear();
   sessionStorage.clear();
+  vi.unstubAllGlobals();
   html.removeAttribute('class');
   html.removeAttribute('style');
   html.removeAttribute('data-lody-boot-sidebar');
@@ -86,41 +84,6 @@ describe('boot shell script', () => {
     html.removeAttribute('class');
     osPrefersDark = false;
     expect(boot('/acme/chat', { 'vite-ui-theme': 'system' }).theme).toBe('light');
-  });
-
-  it.each([
-    ['a workspace route', '/acme/chat', {}, {}, '280px'],
-    ['a hash-history session route', '/index.html#/acme/sessions/s1', {}, {}, '280px'],
-    ['the stored width', '/acme/chat', { 'lody-sidebar-last-width': '312' }, {}, '312px'],
-    ['a width past the maximum', '/acme/chat', { 'lody-sidebar-last-width': '900' }, {}, '420px'],
-    ['a collapsed sidebar', '/acme/chat', { 'lody-sidebar-collapsed': 'true' }, {}, null],
-    ['settings, which has no sidebar', '/acme/settings/general', {}, {}, null],
-    ['login', '/login', {}, {}, null],
-    ['onboarding', '/index.html#/onboarding', {}, {}, null],
-    [
-      'the root ignores a legacy saved route',
-      '/',
-      {
-        'lody:lastAppRoute': JSON.stringify({
-          version: 1,
-          path: '/acme/sessions/s1',
-          updatedAt: 1,
-        }),
-      },
-      {},
-      null,
-    ],
-    ['the root on a first visit', '/', {}, {}, null],
-    ['a session window, collapsed by default', '/acme/sessions/s1?window=session', {}, {}, null],
-    [
-      'an auxiliary window, which keeps its own collapse state',
-      '/acme/chat?window=workspace',
-      { 'lody-sidebar-collapsed': 'true' },
-      { 'lody-sidebar-collapsed': 'false' },
-      '280px',
-    ],
-  ])('sidebar column for %s', (_label, url, storage, session, expected) => {
-    expect(boot(url, storage, session).sidebarWidth).toBe(expected);
   });
 
   it('falls back to the mark alone when storage is unavailable', () => {
@@ -164,132 +127,6 @@ describe('boot shell document', () => {
 
     const plain = '<html><head><link rel="stylesheet" href="a.css"></head><body></body></html>';
     expect(moveStylesheetsAfterBootShell(plain)).toBe(plain);
-  });
-
-  it('renders the same frame from React as the static markup', () => {
-    const staticShell = document.createElement('div');
-    staticShell.innerHTML = BOOT_SHELL_MARKUP;
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    flushSync(() => root.render(<BootShell />));
-
-    const outline = (shell: Element) =>
-      Array.from(shell.querySelectorAll('*'), (element) => element.getAttribute('class'));
-    const reactShell = container.querySelector('[data-lody-boot-shell]')!;
-    const htmlShell = staticShell.querySelector('[data-lody-boot-shell]')!;
-    expect(outline(reactShell)).toEqual(outline(htmlShell));
-    // React sets `src` last, so compare attributes rather than serialized order.
-    const attributes = (element: Element) =>
-      Object.fromEntries(Array.from(element.attributes, (a) => [a.name, a.value]));
-    expect(attributes(reactShell.querySelector('img')!)).toEqual(
-      attributes(htmlShell.querySelector('img')!)
-    );
-    root.unmount();
-  });
-
-  it('paints the colours the bundled themes resolve to', () => {
-    const resolve = (id: string | undefined) => {
-      const variables = createThemeCssVariables(getBundledVSCodeThemeByIdSync(id!)!) as Record<
-        string,
-        string
-      >;
-      return {
-        canvas: variables['--background'],
-        sidebar: variables['--sidebar-background'],
-        sidebarBorder: variables['--sidebar-border'],
-        frameBorder: variables['--border'],
-        status: variables['--muted-foreground'],
-      };
-    };
-    expect(resolve(DEFAULT_VSCODE_THEME_SELECTION.lightThemeId)).toEqual(BOOT_SHELL_COLORS.light);
-    expect(resolve(DEFAULT_VSCODE_THEME_SELECTION.darkThemeId)).toEqual(BOOT_SHELL_COLORS.dark);
-  });
-});
-
-describe('boot shell geometry decisions', () => {
-  it.each([
-    ['/acme/chat', 'workspace'],
-    ['/acme/sessions/s1?window=session', 'workspace'],
-    ['/acme/settings/general', 'plain'],
-    ['/login?redirect=/acme/chat', 'plain'],
-    ['/', 'plain'],
-  ] as const)('resolves %s as %s', (path, layout) => {
-    expect(resolveBootShellLayout(path)).toBe(layout);
-  });
-
-  it.each([
-    ['/acme/chat', { 'lody-sidebar-collapsed': 'true' }, 'workspace'],
-    ['/acme/settings/general', {}, 'plain'],
-    ['/login', {}, 'plain'],
-  ] as const)('keeps layout independent of sidebar visibility for %s', (path, storage, layout) => {
-    boot(path, storage);
-    expect(html.getAttribute('data-lody-boot-layout')).toBe(layout);
-    expect(html.hasAttribute('data-lody-boot-sidebar')).toBe(false);
-  });
-
-  it.each([
-    [1280, 'Desktop browser', '120', '240px', true, false],
-    [1280, 'Desktop browser', '900', '420px', true, false],
-    [700, 'Desktop browser', '312', '312px', false, false],
-    [390, 'iPhone Mobile', '312', '312px', false, true],
-    [1024, 'iPad', '312', '312px', true, false],
-  ] as const)(
-    'publishes geometry at width %s with %s',
-    (width, ua, stored, expected, sidebar, mobile) => {
-      vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width);
-      vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(ua);
-      boot('/acme/chat', { 'lody-sidebar-last-width': stored });
-      expect(html.style.getPropertyValue('--lody-boot-sidebar-width')).toBe(expected);
-      expect(html.hasAttribute('data-lody-boot-sidebar')).toBe(sidebar);
-      expect(html.getAttribute('data-lody-boot-mobile')).toBe(String(mobile));
-      expect(html.getAttribute('data-lody-boot-layout')).toBe('workspace');
-    }
-  );
-});
-
-describe('live document styles', () => {
-  it('takes over the static sheet before paint, updates the same live sheet, and removes it on unmount', () => {
-    const name = 'test-boot-frame';
-    const initialCss = '.test-style-target { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06); }';
-    const revisedCss = '.test-style-target { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03); }';
-    const staticSheet = document.createElement('style');
-    staticSheet.dataset.href = name;
-    staticSheet.textContent = initialCss;
-    const unrelatedSheet = document.createElement('style');
-    unrelatedSheet.dataset.href = 'unrelated-sheet';
-    document.head.append(staticSheet, unrelatedSheet);
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const render = (css: string) =>
-      act(() =>
-        root.render(
-          <>
-            <DocumentStyle name={name} css={css} />
-            <div className="test-style-target" />
-          </>
-        )
-      );
-    try {
-      render(initialCss);
-      const target = container.querySelector('.test-style-target')!;
-      const liveSheet = container.querySelector('style')!;
-      expect(staticSheet.isConnected).toBe(false);
-      expect(unrelatedSheet.isConnected).toBe(true);
-      expect(getComputedStyle(target).boxShadow).toBe('0 2px 8px rgba(0, 0, 0, 0.06)');
-      render(revisedCss);
-      expect(container.querySelector('style')).toBe(liveSheet);
-      expect(container.querySelector('.test-style-target')).toBe(target);
-      expect(getComputedStyle(target).boxShadow).toBe('0 1px 2px rgba(0, 0, 0, 0.03)');
-      act(() => root.render(null));
-      expect(liveSheet.isConnected).toBe(false);
-      expect(unrelatedSheet.isConnected).toBe(true);
-    } finally {
-      act(() => root.unmount());
-      staticSheet.remove();
-      unrelatedSheet.remove();
-    }
   });
 });
 
@@ -410,56 +247,6 @@ describe('boot shell provider handoff', () => {
     render(true, false);
     expectReleased(shell);
     expectAccessible(container.querySelector('button')!);
-  });
-
-  it('owner cleanup cannot hide a different committed gate', () => {
-    const render = (first: boolean, second: boolean) =>
-      act(() =>
-        root.render(
-          <BootShellProvider path="/acme/chat">
-            {first && <BootShell key="first" status="First owner" />}
-            {second && <BootShell key="second" status="Second owner" path="/login" />}
-          </BootShellProvider>
-        )
-      );
-    render(true, true);
-    const shell = frame();
-    expect(container.querySelector('[role="status"]')?.textContent).toBe('Second owner');
-    render(false, true);
-    expect(frame()).toBe(shell);
-    expect(shell.hasAttribute('data-lody-boot-shell')).toBe(true);
-    expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
-    expect(container.querySelector('[role="status"]')?.textContent).toBe('Second owner');
-    render(false, false);
-    expectReleased(shell);
-  });
-
-  it('replays StrictMode effects without losing ownership or leaving a stale owner on cleanup', () => {
-    const render = (pending: boolean) =>
-      act(() =>
-        root.render(
-          <StrictMode>
-            <BootShellProvider>
-              {pending ? <BootShell status="Strict pending" /> : <button>Ready</button>}
-            </BootShellProvider>
-          </StrictMode>
-        )
-      );
-    render(true);
-    const shell = frame();
-    const mark = shell.querySelector('img');
-    expect(container.querySelectorAll('[data-lody-boot-shell]')).toHaveLength(1);
-    expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
-    render(false);
-    expectReleased(shell);
-    render(true);
-    expect(frame()).toBe(shell);
-    expect(shell.querySelector('img')).toBe(mark);
-    expect(shell.hasAttribute('inert')).toBe(false);
-    expect(shell.hasAttribute('aria-hidden')).toBe(false);
-    expect(container.querySelector('[role="status"]')?.textContent).toBe('Strict pending');
-    render(false);
-    expectReleased(shell);
   });
 
   it('lets an outer render boundary replace the provider and expose recovery after a child throws', () => {

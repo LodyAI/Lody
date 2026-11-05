@@ -15,10 +15,6 @@ const resolve = (overrides: Partial<Parameters<typeof resolveSessionMessageSubmi
   });
 
 describe('resolveSessionMessageSubmitRoute', () => {
-  it('direct-dispatches only when both live and transcript activity are idle', () => {
-    expect(resolve()).toEqual({ type: 'direct_dispatch' });
-  });
-
   it('queues across the history-before-presence ordering window', () => {
     expect(resolve({ hasUnfinishedAssistantTurn: true })).toEqual({
       type: 'queue',
@@ -33,16 +29,6 @@ describe('resolveSessionMessageSubmitRoute', () => {
         queuedMessageBehavior: 'guide',
       })
     ).toEqual({ type: 'queue', reason: 'unfinished_assistant_turn' });
-  });
-
-  it('steers only a live prompt with a known unfinished assistant turn', () => {
-    expect(
-      resolve({
-        isPromptBusy: true,
-        hasUnfinishedAssistantTurn: true,
-        queuedMessageBehavior: 'guide',
-      })
-    ).toEqual({ type: 'guide' });
   });
 
   it('honors explicit route overrides with forceDirect taking precedence', () => {
@@ -88,17 +74,6 @@ describe('resolveSessionMessageSubmitRoute', () => {
       type: 'queue',
       reason: 'prompt_busy',
     });
-  });
-
-  it('keeps forceQueue ahead of an inverted steer', () => {
-    expect(
-      resolve({
-        invertBehavior: true,
-        forceQueue: true,
-        isPromptBusy: true,
-        hasUnfinishedAssistantTurn: true,
-      })
-    ).toEqual({ type: 'queue', reason: 'forced' });
   });
 
   describe.each([

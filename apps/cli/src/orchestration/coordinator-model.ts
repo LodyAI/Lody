@@ -1,4 +1,11 @@
-import type { MessageContent, SessionHistoryInput, StoredLodyOperation } from '@lody/shared';
+import type {
+  LodyError,
+  MessageContent,
+  SessionHistoryInput,
+  SessionMeta,
+  StoredLodyOperation,
+} from '@lody/shared';
+import { describeChatFailure, readChatFailureNotice } from '@lody/shared';
 import {
   getOperationProgressTargetKey,
   type OperationProgressStatusByTarget,
@@ -53,8 +60,76 @@ export const assistantOutputPreview = (
   return text.length > 0 ? truncateTargetOutput(text) : undefined;
 };
 
+const failureReferenceMs = (output: readonly SessionHistoryInput[], fallbackMs: number): number => {
+  const notice = readChatFailureNotice(output);
+  if (!notice) return fallbackMs;
+  const parsed = notice.at ? Date.parse(notice.at) : Number.NaN;
+  if (Number.isFinite(parsed)) return parsed;
+  // The notice normally carries its own timestamp. A malformed one degrades to
+  // the coordinator clock, never a clock read inside this native model.
+  for (let index = output.length - 1; index >= 0; index -= 1) {
+    const turnAt = Date.parse(output[index]?.timestamp ?? '');
+    if (Number.isFinite(turnAt)) return turnAt;
+  }
+  return fallbackMs;
+};
+
+/**
+ * Explains a failed target from the durable `chat_failed` notice recorded after
+ * its user turn. The reason and redacted provider text remain in the message for
+ * plain-text consumers; readers that validate the strict Operation schema get
+ * the normalized cause and quota reset as structured fields. Without a notice
+ * the generic text stands; a cause is never guessed.
+ */
+export const targetFailureError = (
+  output: readonly SessionHistoryInput[],
+  assistantTurnId?: string,
+  referenceMs = 0
+): LodyError => {
+  const notice = readChatFailureNotice(output);
+  if (!notice)
+    return {
+      code: 'TARGET_FAILED',
+      message: 'Target Turn failed.',
+      retryable: false,
+      reason: 'unknown',
+    };
+  const failure = describeChatFailure(notice, failureReferenceMs(output, referenceMs));
+  const detail = failure.detail ? `: ${failure.detail}` : '';
+  return {
+    code: 'TARGET_FAILED',
+    message: `Target Turn failed (${notice.reason ?? 'unknown'})${detail}`,
+    retryable: failure.retryable,
+    reason: failure.reason,
+    ...(failure.detail ? { detail: failure.detail } : {}),
+    ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
+    ...(assistantTurnId ? { assistantTurnId } : {}),
+  };
+};
+
+export const targetFailureMessage = (
+  output: readonly SessionHistoryInput[],
+  referenceMs = 0
+): string => targetFailureError(output, undefined, referenceMs).message;
+
 export const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>
   entry.role === 'assistant' && (entry.finished === true || typeof entry.endedAt === 'number');
+/** Bounds a handoff walk so a malformed steer ledger cannot loop reconciliation. */
+export const MAX_STEER_HANDOFF_HOPS = 16;
+
+/**
+ * The steered input that took over an assistant turn's work. An applied steer
+ * seals the running assistant turn and continues the same work under the steered
+ * input, so a delegated target completes with that successor's final reply.
+ */
+export const findSteerSuccessor = (
+  meta: Pick<SessionMeta, 'steerOperationLedger'>,
+  assistantTurnId: string
+): string | undefined =>
+  Object.values(meta.steerOperationLedger ?? {}).find(
+    (record) => record.expectedTurnId === assistantTurnId && record.delivery === 'applied'
+  )?.userTurnId;
+
 export function progressIsSettled(
   operation: StoredLodyOperation,
   row: SessionHistoryInput | undefined,

@@ -1,3 +1,4 @@
+import { lodyAgentFeatureEnabledAtom } from '@/atoms/settings';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { useMachineRpcFeatureReason } from '@/hooks/use-workspace-feature';
 import {
@@ -118,6 +119,7 @@ import {
   space,
 } from '@lody/ui/tokens/scales.stylex';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
+import { LodyAgentAccountsController } from './lody-agent-accounts-controller';
 import { Field } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { BubInstallGuide } from './bub-install-guide';
@@ -1008,6 +1010,16 @@ type AgentTypeOption = {
 const BUILTIN_OPTIONS: AgentTypeOption[] = [
   {
     kind: 'builtin',
+    value: 'builtin:sorbet',
+    label: 'Lody Agent',
+    descriptionKey: 'settings.agent.dialog.option.sorbet.description',
+    descriptionDefault: 'An agent harness for work that outlives one conversation. Built for Lody.',
+    cliType: 'builtin',
+    agentType: 'sorbet',
+    searchKeys: 'lody agent sorbet',
+  },
+  {
+    kind: 'builtin',
     value: 'builtin:kimi',
     label: 'Kimi Code',
     descriptionKey: 'settings.agent.dialog.option.kimi.description',
@@ -1311,8 +1323,8 @@ export type AddableProvider = {
  * form that opens the dialog straight on it. Experimental runtimes, registry
  * agents and custom commands stay behind the dialog's own rail.
  */
-export function listAddableProviders(t: Translate): AddableProvider[] {
-  const builtins = BUILTIN_OPTIONS.filter((option) => !option.experimental).map((option) => ({
+export function listAddableProviders(t: Translate, lodyAgentEnabled = false): AddableProvider[] {
+  const builtins = BUILTIN_OPTIONS.filter((option) => !option.experimental && (option.agentType !== 'sorbet' || lodyAgentEnabled)).map((option) => ({
     key: option.value,
     label: getOptionLabel(t, option),
     description: getOptionDescription(t, option) ?? option.descriptionDefault,
@@ -1552,6 +1564,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     onManagedRuntimeSelected,
   } = props;
   const { t } = useTranslation();
+  const [accountsRefreshVersion, setAccountsRefreshVersion] = useState(0);
   const draftConfigIdRef = useRef<AgentConfigId | null>(null);
   const agentConfigId =
     mode.kind === 'edit'
@@ -1568,7 +1581,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     testingBuiltinSetup &&
     publishedConfig?.machineId === machine.id &&
     publishedConfig.cliType === 'builtin' &&
-    (publishedConfig.agentType === 'bub' || publishedConfig.agentType === 'dimcode');
+    (publishedConfig.agentType === 'bub' ||
+      publishedConfig.agentType === 'dimcode' ||
+      publishedConfig.agentType === 'sorbet');
   const builtinSetup = testingBuiltinSetup
     ? setups.find((setup) => setup.id === agentConfigId)
     : undefined;
@@ -1649,6 +1664,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     required?: string;
     error?: string;
   } | null>(null);
+  const lodyAgentEnabled = useAtomValue(lodyAgentFeatureEnabledAtom);
   const workspaceRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
   const liveBinaryState = useMachineAcpBinaryProgress(
     workspaceRuntime,
@@ -1718,7 +1734,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   // provider that fails later on its first turn.
   const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
   const isQueuedBuiltin =
-    isBubBuiltin || (formData.cliType === 'builtin' && formData.agentType === 'dimcode');
+    isBubBuiltin ||
+    (formData.cliType === 'builtin' &&
+      (formData.agentType === 'dimcode' || formData.agentType === 'sorbet'));
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
@@ -2578,9 +2596,10 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
 
   const filteredOptions = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return ALL_OPTIONS;
-    return ALL_OPTIONS.filter((o) => o.searchKeys.toLowerCase().includes(q));
-  }, [query]);
+    return ALL_OPTIONS.filter((o) =>
+      (o.agentType !== 'sorbet' || lodyAgentEnabled) && (!q || o.searchKeys.toLowerCase().includes(q))
+    );
+  }, [query, lodyAgentEnabled]);
 
   const groupedOptions = useMemo(() => {
     return {
@@ -3129,6 +3148,22 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               </p>
             </Field>
           ) : null}
+          {mode.kind === 'create' &&
+          formData.cliType === 'builtin' &&
+          formData.agentType === 'sorbet' &&
+          !showAuthenticationPanel ? (
+            <Field
+              label={t('settings.agent.dialog.section.account', 'Account')}
+              icon={<KeyRound aria-hidden="true" {...stylex.props(catalog.icon)} />}
+            >
+              <p {...stylex.props(styles.statusText)}>
+                {t(
+                  'settings.agent.dialog.lodyAgentSignInHint',
+                  'After setup, open this provider to sign in and choose an available account.'
+                )}
+              </p>
+            </Field>
+          ) : null}
           {showAuthenticationPanel ? (
             <Field
               label={t('settings.agent.dialog.section.account', 'Account')}
@@ -3161,6 +3196,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 onBeforeStart={persistConfigBeforeMachineLaunch}
                 onAuthenticated={() => {
                   setAuthRequired(false);
+                  setAccountsRefreshVersion((version) => version + 1);
                   setProbeError(null);
                   setManuallyTested(true);
                   if (isCustom && parsedCustomAcp) {
@@ -3173,6 +3209,35 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               />
             </Field>
           ) : null}
+
+          {open &&
+            mode.kind === 'edit' &&
+            formData.cliType === 'builtin' &&
+            formData.agentType === 'sorbet' && (
+              <LodyAgentAccountsController
+                key={JSON.stringify([machine.id, agentConfigId])}
+                machineId={machine.id}
+                configId={agentConfigId}
+                supported={
+                  machineSupportsProtocolCapability(machine, 'sorbetCredentials', 1) ||
+                  machineSupportsProtocolCapability(machine, 'sorbetCredentialsRemote', 1)
+                }
+                refreshVersion={accountsRefreshVersion}
+                onProvidersChanged={async () => {
+                  // Saving a Provider only matters once the probe reads it, so re-probe
+                  // here and let the refreshed method list reach both panels.
+                  const response = await onRefreshCapabilities({
+                    machineId: machine.id,
+                    configId: agentConfigId,
+                  });
+                  // A Provider without credentials makes the agent require sign-in. That is
+                  // the expected next step, not a failure. Anything else must be visible.
+                  if (!response.success && !response.authRequired)
+                    throw new Error(response.error ?? 'ACP credential discovery failed');
+                  setAccountsRefreshVersion((version) => version + 1);
+                }}
+              />
+            )}
 
           {showBinaryPanel && (
             <div {...stylex.props(surface.formBlock, styles.status)}>

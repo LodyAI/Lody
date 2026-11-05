@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { inspectNpxInstallState } from './npx-cache';
 
 import {
   type AgentConfigCliType,
@@ -176,6 +178,15 @@ const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
 // User-managed version; refresh capabilities explicitly after upgrading.
 const BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION = 'builtin-dimcode:local-acp';
+/**
+ * Sorbet ships runtime fixes on its own cadence, so Lody launches the dist-tag and never
+ * pins a version. The tag names the requested install, not the build that runs: the
+ * capability source version below reports the installed version when the npx cache can
+ * name it and falls back to this tag when it cannot.
+ */
+const SORBET_ACP_PACKAGE_NAME = '@sorbetai/acp';
+const SORBET_ACP_DIST_TAG = 'alpha';
+const SORBET_ACP_PACKAGE = `${SORBET_ACP_PACKAGE_NAME}@${SORBET_ACP_DIST_TAG}`;
 
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are
@@ -265,13 +276,34 @@ export function resolveBuiltinACPSetting(agentType: string): ResolvedACPSetting 
   );
 }
 
+/**
+ * The Sorbet build an npx launch would run, when the local cache can name it.
+ *
+ * `@sorbetai/acp@alpha` names the requested install, so a capability entry stamped
+ * with the tag cannot say which build produced it. Reading the installed
+ * `package.json` version fixes that for provenance and for future targeted
+ * invalidations, while a cold or ambiguous cache falls back to the tag instead of
+ * asserting a build Lody has not observed. Nothing keys a cache hit on this value:
+ * `resolveExpectedAcpCapabilitySourceVersion` always re-probes Sorbet.
+ */
+function resolveSorbetInstalledAcpVersion(): string | undefined {
+  const state = inspectNpxInstallState(SORBET_ACP_PACKAGE_NAME, SORBET_ACP_DIST_TAG);
+  return state.kind === 'ready' ? state.resolvedVersion : undefined;
+}
+
 export function getAcpCapabilitySourceVersion(
   input: ResolveACPSettingInput,
-  managedRuntimeVersion?: string
+  managedRuntimeVersion?: string,
+  /** The Sorbet build the npx cache would run; omitted when it cannot be named. */
+  sorbetInstalledVersion?: string
 ): string {
   if (input.cliType === 'builtin' && input.magpieGatewayUrl) {
     const { magpieGatewayUrl: gateway, ...nativeInput } = input;
-    const base = getAcpCapabilitySourceVersion(nativeInput, managedRuntimeVersion);
+    const base = getAcpCapabilitySourceVersion(
+      nativeInput,
+      managedRuntimeVersion,
+      sorbetInstalledVersion
+    );
     const suffix = getBuiltinRuntimeOverrideSourceVersionSuffix(input.runtimeOverrides);
     const prefix = suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) : base;
     return `${prefix}+magpie-v1:${createHash('sha256').update(gateway).digest('hex').slice(0, 12)}${suffix}`;
@@ -319,6 +351,9 @@ export function getAcpCapabilitySourceVersion(
         return baseUrl?.trim()
           ? `${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION}+endpoint:${createHash('sha256').update(baseUrl).digest('hex').slice(0, 12)}`
           : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
+      }
+      if (input.agentType === 'sorbet') {
+        return `builtin-sorbet:${SORBET_ACP_PACKAGE_NAME}@${sorbetInstalledVersion ?? SORBET_ACP_DIST_TAG}+auth-discovery:1`;
       }
       if (input.agentType === 'dimcode') {
         return BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION;
@@ -370,6 +405,11 @@ const MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS = {
 export async function resolveExpectedAcpCapabilitySourceVersion(
   input: ResolveACPSettingInput
 ): Promise<string | undefined> {
+  if (input.cliType === 'builtin' && input.agentType === 'sorbet') {
+    // The tag may move without changing the launch spec, and the build stamped into a
+    // cached entry is provenance only. Always probe on refresh.
+    return undefined;
+  }
   if (input.cliType !== 'builtin' || !isManagedBuiltinAgentType(input.agentType)) {
     return getAcpCapabilitySourceVersion(input);
   }
@@ -566,6 +606,28 @@ async function resolveBuiltinACPProcessLaunch(
     return {
       ...launch,
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+    };
+  }
+  if (input.agentType === 'sorbet') {
+    return {
+      command: 'npx',
+      args: ['-y', SORBET_ACP_PACKAGE, '--no-session-title', ...(input.extraArgs ?? [])],
+      env: {
+        // Bound npm's registry requests; npm can use cached metadata when offline.
+        npm_config_fetch_retries: '0',
+        npm_config_fetch_timeout: '5000',
+        // Third-party state: the agent owns this store's format, atomicity and migration.
+        // Lody only passes the path, and only reaches it through the bounded credentials
+        // operations. Never parse, rewrite, export or preview it from Lody.
+        SORBET_DATA_DIR: join(getLodyDataDir(), 'sorbet'),
+        SORBET_OBSERVABILITY_RECORDING: 'false',
+        SORBET_OBSERVABILITY_CONFIG: '',
+      },
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(
+        input,
+        undefined,
+        resolveSorbetInstalledAcpVersion()
+      ),
     };
   }
   if (input.agentType === 'dimcode') {

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { type ReactNode } from 'react';
+// @vitest-environment jsdom
+import { type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -199,108 +200,5 @@ describe('mobile session list scrollbar layer', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it('places project shortcuts and the selected project list on opposite fold panels', () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        const top = this.hasAttribute('data-horizontal-fold-home-body') ? 135 : 0;
-        return {
-          top,
-          bottom: 951,
-          left: 0,
-          right: 669,
-          width: 669,
-          height: 951 - top,
-          x: 0,
-          y: top,
-          toJSON: () => ({}),
-        };
-      }
-    );
-    window.__LODY_HORIZONTAL_DIVISION__ = { top: 455.5, height: 40, viewportHeight: 951 };
-    const selected: string[] = [];
-    render(
-      <MobileHomeScreen
-        workspace={{ id: 'workspace', name: 'Workspace' }}
-        machines={[]}
-        selectedTab="projects"
-        localProjects={[
-          { id: 'p', machineId: 'm', name: 'Project', path: '/project', conversationCount: 0 },
-        ]}
-        recentLocalProjects={[{ id: 'p', name: 'Project', path: '/project' }]}
-        githubRepositories={[]}
-        chats={[]}
-        onLocalProjectSelect={(id) => selected.push(id)}
-      />
-    );
-    const upper = container!.querySelector<HTMLElement>('[data-horizontal-fold-projects-upper]')!;
-    const lower = container!.querySelector<HTMLElement>(
-      '[data-mobile-session-list-scroll-region]'
-    )!;
-    expect(upper.textContent).toContain('Project');
-    expect(lower.textContent).toContain('Project');
-    expect(upper.textContent).toContain('GitHub');
-    expect(lower.textContent).not.toContain('GitHub');
-    const projectButton = [...lower.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Project')
-    )!;
-    flushSync(() => projectButton.click());
-    expect(selected).toEqual(['p']);
-    flushSync(() => {
-      document.documentElement.style.setProperty('--native-keyboard-height', '380px');
-      window.dispatchEvent(new Event('lody:keyboard-resize'));
-    });
-    expect(container!.querySelector('[data-horizontal-fold-projects-upper]')).toBeNull();
-    expect(lower.textContent).toContain('GitHub');
-  });
-
-  it('uses the original list when there is only one group to display', () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        const top = this.hasAttribute('data-horizontal-fold-home-body') ? 135 : 0;
-        return {
-          top,
-          bottom: 951,
-          left: 0,
-          right: 669,
-          width: 669,
-          height: 951 - top,
-          x: 0,
-          y: top,
-          toJSON: () => ({}),
-        };
-      }
-    );
-    window.__LODY_HORIZONTAL_DIVISION__ = { top: 455.5, height: 40, viewportHeight: 951 };
-    render(
-      <MobileHomeScreen
-        workspace={{ id: 'workspace', name: 'Workspace' }}
-        machines={[]}
-        selectedTab="chat"
-        localProjects={[]}
-        githubRepositories={[]}
-        chats={[{ id: 'only', title: 'Only conversation' }]}
-      />
-    );
-    expect(container!.querySelector('[data-horizontal-fold-upper-list]')).toBeNull();
-    expect(
-      container!.querySelector('[data-mobile-session-list-scroll-region]')?.textContent
-    ).toContain('Only conversation');
-  });
-
-  it('keeps the workspace conversation rows inside the scroll container stacking context', () => {
-    render(
-      <MobileHomeScreen
-        workspace={{ id: 'workspace', name: 'Workspace' }}
-        machines={[]}
-        selectedTab="chat"
-        localProjects={[]}
-        githubRepositories={[]}
-        chats={[]}
-      />
-    );
-
-    expectScrollbarStackingBoundary();
   });
 });

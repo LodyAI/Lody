@@ -890,3 +890,47 @@ it.each(['e2ee_member_removed', 'e2ee_device_revoked', 'temporary_network_failur
     }
   }
 );
+
+it.each(['e2ee_member_removed', 'e2ee_device_revoked', 'temporary_network_failure'] as const)(
+  'brands exact ledger history refusals (%s)',
+  async (code) => {
+    vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      trace: () => {},
+      success: () => {},
+      setLevel: () => {},
+      child: () => logger,
+      close: async () => {},
+    };
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body.path).toBe('e2eeWorkspaces:history');
+      expect(body.args[0]).toMatchObject({
+        workspaceId: 'workspace',
+        credential: 'synthetic-device-credential',
+      });
+      return Response.json({
+        status: 'error',
+        errorMessage: 'e2ee_device_revoked',
+        errorData: { code },
+      });
+    });
+    const e2ee = createCloudE2eePort({
+      authBaseUrl: 'https://history-fixture.convex.cloud',
+      logger,
+    });
+    const failure = await e2ee
+      .getHistory({ workspaceId: 'workspace', credential: 'synthetic-device-credential' })
+      .catch((cause: unknown) => cause);
+    try {
+      expect(isCloudE2eeMemberRemoved(failure)).toBe(code === 'e2ee_member_removed');
+      expect(isCloudE2eeDeviceRevoked(failure)).toBe(code === 'e2ee_device_revoked');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+);

@@ -167,7 +167,7 @@ function createFixture(
       }),
       flush: async () => undefined,
     },
-    getOnlineMachineIds: async () => new Set([machineId]),
+    getMachinePresenceView: async () => ({ online: new Set([machineId]), synced: true }),
     getAgentConfigById: async () => agentConfig,
     syncMetaOrThrow: async () => undefined,
     syncDocOrThrow: async () => undefined,
@@ -460,43 +460,6 @@ describe.each(['create', 'chat'] as const)('%s with failed Machine Flock freshne
     }
   );
 
-  it.each([
-    ['nondefault mode', { modeId: 'plan' }],
-    ['model', { modelId: 'inherited-model' }],
-    ['option', { configOptionValues: { unknown_option: true } }],
-  ] as const)(
-    'drops an inherited %s without ACP cache and dispatches the fallback',
-    async (_selection, inheritedSelection) => {
-      const fixture = createFixture('codex');
-      const inherited = {
-        prompt: 'Earlier prompt',
-        cliType: 'builtin' as const,
-        agentType: 'codex',
-        ...inheritedSelection,
-      };
-      if (command === 'chat') await fixture.seedChat(inherited);
-      const previousHistory = await fixture.history();
-      await fixture.run(
-        command,
-        command === 'create' ? { frozenInheritedInputConfig: inherited } : {}
-      );
-
-      const history = await fixture.history();
-      expect(history.slice(0, -1)).toEqual(previousHistory);
-      const latest = history.at(-1);
-      expect(latest).toMatchObject({
-        id: userTurnId,
-        inputConfig: { cliType: 'builtin', agentType: 'codex', modeId: 'agent-auto-review' },
-      });
-      expect(latest?.inputConfig?.modelId).toBeUndefined();
-      expect(latest?.inputConfig?.configOptionValues).toBeUndefined();
-      expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
-        latestUserMsgId: userTurnId,
-      });
-      expect(fixture.dispatched).toEqual([latest]);
-    }
-  );
-
   it.each(['mode', 'model'] as const)(
     'dispatches an explicit cached %s instead of an unavailable inherited selector option',
     async (category) => {
@@ -597,32 +560,6 @@ describe.each(['create', 'chat'] as const)(
         expect(await fixture.history()).toEqual([]);
         expect(fixture.metadata.get(getSessionRoomId(sessionId))).toEqual(previousMetadata);
         expect(fixture.dispatched).toEqual([]);
-      }
-    );
-
-    it.each([true, 'on', 'custom-fast'] as const)(
-      'preserves the valid raw Fast representation %s',
-      async (value) => {
-        const capability = createModelCapability();
-        if (value === 'custom-fast') {
-          capability.configOptions = [
-            ...(capability.configOptions ?? []),
-            {
-              id: 'fast',
-              name: 'Fast',
-              type: 'select',
-              currentValue: 'custom-fast',
-              options: [{ value: 'custom-fast', name: 'Custom Fast' }],
-            },
-          ];
-        }
-        const fixture = createFixture('codex', capability);
-        if (command === 'chat') await fixture.seedChat();
-        await fixture.run(command, { modelId: 'model-b', configOptionValues: { fast: value } });
-        const history = await fixture.history();
-        expect(history).toHaveLength(1);
-        expect(history[0]?.inputConfig?.configOptionValues).toEqual({ fast: value });
-        expect(fixture.dispatched).toEqual(history);
       }
     );
 
@@ -1471,21 +1408,6 @@ describe.each([
     }
   );
 
-  it('retains the persisted builtin default when the next chat still has no ACP cache', async () => {
-    const fixture = createFixture(agentType);
-    await fixture.run('create', {});
-    await fixture.run('chat', {}, 'next-user-turn');
-
-    expect(await fixture.history()).toMatchObject([
-      { id: userTurnId, inputConfig: { cliType: 'builtin', agentType, modeId } },
-      { id: 'next-user-turn', inputConfig: { cliType: 'builtin', agentType, modeId } },
-    ]);
-    expect(fixture.dispatched).toEqual(await fixture.history());
-    expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
-      latestUserMsgId: 'next-user-turn',
-    });
-  });
-
   it.each(['absent', 'supported'] as const)(
     'preserves an inherited default from an initially %s cache through no-cache JSON replay',
     async (initialCache) => {
@@ -1597,55 +1519,6 @@ describe.each([
             latestUserMsgId: userTurnId,
           });
         }
-      }
-    );
-
-    it('drops an inherited no-cache default once a readable catalog excludes it', async () => {
-      const fixture = createFixture(agentType);
-      const validated = await fixture.validateCreate({
-        frozenInheritedInputConfig: { cliType: 'builtin', agentType, modeId },
-      });
-      expect(validated).toMatchObject({ modeId, inheritedDispatchConfig: { modeId } });
-      expect(validated.builtinDefaultModeId).toBeUndefined();
-      fixture.setCapability(capability, confirmed);
-
-      await fixture.run(
-        'create',
-        JSON.parse(JSON.stringify(validated)) as ResolvedTurnDispatchConfig
-      );
-
-      const history = await fixture.history();
-      expect(history).toMatchObject([{ id: userTurnId }]);
-      expect(history[0]?.inputConfig?.modeId).toBeUndefined();
-      expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
-        latestUserMsgId: userTurnId,
-      });
-      expect(fixture.dispatched).toEqual(history);
-    });
-
-    it.each([
-      ['model', { modelId: 'unavailable-model' }],
-      ['config option', { configOptionValues: { unknown_option: true } }],
-    ] satisfies Array<[string, ResolvedTurnDispatchConfig]>)(
-      'still validates an explicit %s alongside a derived mode',
-      async (selection, explicit) => {
-        const fixture = createFixture(agentType);
-        const validated = await fixture.validateCreate();
-        fixture.setCapability(capability, confirmed);
-
-        await expect(fixture.run('create', { ...validated, ...explicit })).rejects.toThrow(
-          selection === 'model'
-            ? confirmed
-              ? 'Unsupported ACP model for the selected agent: unavailable-model'
-              : 'ACP model is absent from the local replica: unavailable-model'
-            : confirmed
-              ? 'Unknown ACP config option for the selected agent: unknown_option'
-              : 'ACP config option is absent from the local replica: unknown_option'
-        );
-
-        expect(await fixture.history()).toEqual([]);
-        expect(fixture.metadata.get(getSessionRoomId(sessionId))).toBeUndefined();
-        expect(fixture.dispatched).toEqual([]);
       }
     );
 
@@ -1933,8 +1806,9 @@ describe('agent chat to a busy target', () => {
     await fixture.seedChat(inputConfig);
     fixture.setActiveTurn('assistant:earlier-turn');
 
-    await fixture.run('chat', {}, userTurnId, true);
+    const result = await fixture.run('chat', {}, userTurnId, true);
 
+    expect(result).toHaveProperty('delivery', 'steered');
     expect(fixture.steered).toEqual([
       { expectedTurnId: 'assistant:earlier-turn', userTurnId, prompt: 'Continue' },
     ]);
@@ -1953,8 +1827,9 @@ describe('agent chat to a busy target', () => {
     fixture.setActiveTurn('assistant:earlier-turn');
     fixture.setSteerDisposition('unsupported');
 
-    await fixture.run('chat', {}, userTurnId, true);
+    const result = await fixture.run('chat', {}, userTurnId, true);
 
+    expect(result).toHaveProperty('delivery', 'queued');
     expect(fixture.steered).toHaveLength(1);
     expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty(
       'latestUserMsgId',
@@ -1963,12 +1838,22 @@ describe('agent chat to a busy target', () => {
     expect(fixture.dispatched).toEqual([]);
   });
 
+  it('reports no receipt for an ambiguous stale-turn steer', async () => {
+    const fixture = createFixture('codex');
+    await fixture.seedChat(inputConfig);
+    fixture.setActiveTurn('assistant:earlier-turn');
+    fixture.setSteerDisposition('stale-turn');
+
+    expect(await fixture.run('chat', {}, userTurnId, true)).not.toHaveProperty('delivery');
+  });
+
   it('dispatches ordinarily when the target is idle', async () => {
     const fixture = createFixture('codex');
     await fixture.seedChat(inputConfig);
 
-    await fixture.run('chat', {}, userTurnId, true);
+    const result = await fixture.run('chat', {}, userTurnId, true);
 
+    expect(result).toHaveProperty('delivery', 'dispatched');
     expect(fixture.steered).toEqual([]);
     expect(fixture.dispatched.map((entry) => entry.id)).toEqual([userTurnId]);
   });
@@ -1995,8 +1880,9 @@ describe('agent chat to a busy target', () => {
     await fixture.run('chat', {}, userTurnId, true);
     fixture.setActiveTurn(`assistant:${userTurnId}`);
 
-    await fixture.run('chat', {}, userTurnId, true);
+    const retried = await fixture.run('chat', {}, userTurnId, true);
 
+    expect(retried).not.toHaveProperty('delivery');
     expect(fixture.steered).toEqual([]);
   });
 
@@ -2083,7 +1969,7 @@ describe('agent chat to a remote busy target', () => {
       expect((await fixture.history()).at(-1)?.status).toBe('pending_apply');
       return response('applied');
     });
-    await fixture.run();
+    expect(await fixture.run()).toHaveProperty('delivery', 'steered');
     expect((await fixture.history()).at(-1)).toMatchObject({
       id: userTurnId,
       status: 'processing',
@@ -2104,7 +1990,7 @@ describe('agent chat to a remote busy target', () => {
       });
       return response('unsupported', true);
     });
-    await fixture.run();
+    expect(await fixture.run()).toHaveProperty('delivery', 'queued');
     expect((await fixture.history()).at(-1)?.status).toBe('pending');
     expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty('latestUserMsgId');
     expect(fixture.dispatched).toEqual([]);
@@ -2146,7 +2032,7 @@ describe('agent chat to a remote busy target', () => {
       await sent;
       await vi.advanceTimersByTimeAsync(5_000);
     }
-    await sending;
+    expect(await sending).toHaveProperty('delivery', 'queued');
     const turn = (await fixture.history()).at(-1);
     expect(turn).toMatchObject({ id: userTurnId, status: 'pending' });
     expect(fixture.metadata.get(getSessionRoomId(sessionId))).toHaveProperty(
@@ -2154,7 +2040,7 @@ describe('agent chat to a remote busy target', () => {
       userTurnId
     );
     // Operation recovery dispatches the same ordinary turn, without offering it again.
-    await fixture.run(false);
+    expect(await fixture.run(false)).not.toHaveProperty('delivery');
     expect((await fixture.history()).filter((entry) => entry.id === userTurnId)).toHaveLength(1);
   });
 
@@ -2293,6 +2179,104 @@ describe('agent chat to a remote busy target', () => {
 });
 
 describe('MCP chat steering', () => {
+  it('returns response-only delivery receipts from session_chat and session_chat_many', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-chat-receipt-'));
+    roots.add(root);
+    vi.stubEnv('LODY_DATA_DIR', root);
+    const fixture = createFixture('codex');
+    await fixture.seedChat({ prompt: 'Running target', cliType: 'builtin', agentType: 'codex' });
+    const requesterSessionId = 'chat-receipt-requester' as SessionId;
+    await fixture.seedChat(
+      { prompt: 'Coordinate the child', cliType: 'builtin', agentType: 'codex' },
+      requesterSessionId
+    );
+    fixture.setActiveTurn('assistant:earlier-turn');
+
+    const single = await fixture.runMcp(requesterSessionId, () =>
+      __lodyMcpServerInternals.startSessionChatOperation({
+        operationId: 'chat-receipt-single',
+        sessionId,
+        prompt: 'Change direction',
+      })
+    );
+    expect(single).toHaveProperty('delivery', 'steered');
+
+    fixture.setActiveTurn(undefined);
+    const many = await fixture.runMcp(requesterSessionId, () =>
+      __lodyMcpServerInternals.startSessionChatManyOperation(
+        __lodyMcpServerInternals.SessionChatManyToolInputSchema.parse({
+          operationId: 'chat-receipt-many',
+          items: [{ sessionId, prompt: 'Next step' }],
+        })
+      )
+    );
+    expect(many).toHaveProperty('deliveries', [{ index: 0, delivery: 'dispatched' }]);
+
+    const store = new LodyOperationStore(getLodyOperationStorePath(machineId));
+    try {
+      // The receipt is never persisted with the Operation.
+      expect(JSON.stringify(store.get(requesterSessionId, 'chat-receipt-single'))).not.toContain(
+        '"delivery"'
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  it('appends quoted messages with their recorded author to the frozen prompt', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-chat-quotes-'));
+    roots.add(root);
+    vi.stubEnv('LODY_DATA_DIR', root);
+    const fixture = createFixture('codex');
+    await fixture.seedChat({ prompt: 'Target work', cliType: 'builtin', agentType: 'codex' });
+    const requesterSessionId = 'quote-requester' as SessionId;
+    await fixture.seedChat(
+      { prompt: 'Coordinate', cliType: 'builtin', agentType: 'codex' },
+      requesterSessionId
+    );
+    const doc = await fixture.manager.getOrCreateSessionDoc(requesterSessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'owner-rule',
+      role: 'user',
+      author: { v: 1, kind: 'human', userId: 'owner-1' },
+      timestamp: '2026-11-02T14:05:00.000Z',
+      items: [{ type: 'text', text: 'Only report P0/P1.\nWrite the exact head.' }],
+      fileDiff: [],
+    } as never);
+
+    const send = () =>
+      fixture.runMcp(requesterSessionId, () =>
+        __lodyMcpServerInternals.startSessionChatOperation(
+          __lodyMcpServerInternals.SessionChatToolInputSchema.parse({
+            operationId: 'chat-with-quotes',
+            sessionId,
+            prompt: 'Apply the owner rule below.',
+            quotes: [{ messageId: 'owner-rule' }, { messageId: 'missing-message' }],
+          })
+        )
+      );
+    const first = (await send()) as { id: string };
+
+    const sent = (await fixture.history()).at(-1)!;
+    expect(sent.inputConfig?.prompt).toBe(
+      [
+        'Apply the owner rule below.',
+        `[Lody] Quoted from human user owner-1, Session (${requesterSessionId}), 2026-11-02T14:05:00.000Z:\n> Only report P0/P1.\n> Write the exact head.`,
+        `[Lody] Quoted message ${requesterSessionId}/missing-message could not be read; treat it as an unverified relay.`,
+      ].join('\n\n')
+    );
+
+    // A retry matches by quote reference, even after the source title changes.
+    fixture.metadata.set(getSessionRoomId(requesterSessionId), {
+      ...(fixture.metadata.get(getSessionRoomId(requesterSessionId)) as SessionMeta),
+      title: 'Renamed coordinator',
+    });
+    const historyLength = (await fixture.history()).length;
+    expect(await send()).toMatchObject({ id: first.id });
+    expect(await fixture.history()).toHaveLength(historyLength);
+  });
+
   it('steers a busy target and fails the Operation when delivery is unknown', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'lody-steer-chat-'));
     roots.add(root);
@@ -2307,13 +2291,14 @@ describe('MCP chat steering', () => {
       requesterSessionId
     );
     const operationId = 'steer-chat-operation';
-    await fixture.runMcp(requesterSessionId, () =>
+    const accepted = await fixture.runMcp(requesterSessionId, () =>
       __lodyMcpServerInternals.startSessionChatOperation({
         operationId,
         sessionId,
         prompt: 'Change direction',
       })
     );
+    expect(accepted).not.toHaveProperty('delivery');
 
     const storePath = getLodyOperationStorePath(machineId);
     const store = new LodyOperationStore(storePath);

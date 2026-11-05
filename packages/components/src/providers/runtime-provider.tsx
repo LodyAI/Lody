@@ -1,5 +1,6 @@
 import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
+import { onIpcEvent } from '@/lib/electron-ipc-client';
 import { useTranslation } from 'react-i18next';
 import { desktopWindowId } from '@/lib/desktop-window';
 import {
@@ -64,6 +65,7 @@ import { getCachedWorkspaceId } from '@/lib/local-storage-cache';
 import { recordClientError } from '@/lib/client-log';
 import { usePostHog } from '@posthog/react';
 import { createWorkspaceRuntime } from './create-workspace-runtime';
+import { reportWorkspaceCloseFailure } from './workspace-close-diagnostics';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
 import type { EagerSyncSurface } from './background-sync-coordinator';
 import { resolveEffectiveWorkspaceId } from './resolve-effective-workspace-id';
@@ -661,7 +663,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     };
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
     let disposal: Promise<void> | null = null;
-    let contentDisposal: Promise<PromiseSettledResult<void | undefined>[]> | undefined;
+    let contentDisposal: Promise<void> | undefined;
+    let contentClosed = false,
+      workspaceClosed = false;
+    const reportedCloseFailures = new Set<string>();
     const retirementOwners = retirements.current;
     let nativeResource: WorkspaceRuntimeResources['native'];
     let repoResource: WorkspaceRuntimeResources['repo'];
@@ -752,6 +757,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             });
         })
       : () => {};
+    // Main recorded a credential-confirmed loss for this workspace. Revocation keeps
+    // membership visible, so only this native refresh can surface the exact reason.
+    const unsubscribeAccessLost = onIpcEvent('e2ee.accessLost', ({ workspaceId }) => {
+      if (workspaceId === effectiveWorkspaceId) refreshNative();
+    });
     let encryptedAccess: ReturnType<typeof createE2eeContent> | null = null;
     const disposeRuntime = (): Promise<void> => {
       if (disposal) return disposal;
@@ -759,9 +769,36 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // Fence the native reader while independent renderer cleanup starts.
         // A stuck native call must reach its bounded close; awaiting the content
         // bridge first would hide that incomplete result behind the same call.
-        contentDisposal ??= initialization.then(() =>
-          Promise.allSettled([encryptedAccess?.close(), workspaceRuntime?.dispose()])
-        );
+        if (!contentDisposal) {
+          const contentAttempt = initialization.then(async () => {
+            const results = await Promise.allSettled([
+              contentClosed ? undefined : encryptedAccess?.close(),
+              workspaceClosed ? undefined : workspaceRuntime?.dispose(),
+            ]);
+            const failures: unknown[] = [];
+            for (const [index, result] of results.entries()) {
+              if (result.status === 'fulfilled') {
+                if (index === 0) contentClosed = true;
+                else workspaceClosed = true;
+              } else {
+                const stage = index === 0 ? 'content' : 'runtime';
+                if (!reportedCloseFailures.has(stage)) {
+                  reportedCloseFailures.add(stage);
+                  reportWorkspaceCloseFailure(stage, result.reason);
+                }
+                failures.push(result.reason);
+              }
+            }
+            if (failures.length)
+              throw new AggregateError(failures, 'Workspace content close incomplete');
+          });
+          contentDisposal = contentAttempt;
+          // Re-enter only the failed owners. Successful siblings stay closed.
+          void contentAttempt.catch(() => {
+            if (contentDisposal === contentAttempt) contentDisposal = undefined;
+          });
+        }
+        const contentAttempt = contentDisposal;
         if (nativeLease) {
           await encryptedRuntime!.close(nativeLease, accountId!, nativeReaderOwner);
           // A legacy host counts every settled open once per window; closing it
@@ -772,12 +809,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // Legacy hosts acquire their lease only after open settles. A capable
         // host was already fenced above; confirm its same pending/actual label.
         if (nativeLease) await encryptedRuntime!.close(nativeLease, accountId!, nativeReaderOwner);
-        const results = await contentDisposal;
-        const failures = results.flatMap((result) =>
-          result.status === 'rejected' ? [result.reason] : []
-        );
-        if (failures.length)
-          throw new AggregateError(failures, 'Workspace content close incomplete');
+        await contentAttempt;
         nativeLease = null;
         nativeReaderOwner = undefined;
         if (removed && removalScope)
@@ -1191,6 +1223,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('online', retryContentAdmission);
       window.removeEventListener('online', refreshNative);
       unsubscribeLedgerChange();
+      unsubscribeAccessLost();
       initializationAbort.abort();
       setRuntime(null);
       setControlConnectionState('idle');

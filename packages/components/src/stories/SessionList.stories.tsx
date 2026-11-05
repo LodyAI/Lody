@@ -574,6 +574,35 @@ function buildPrState(
   };
 }
 
+const MERGEABLE_ALIGNMENT_ARGS: SessionListProps = {
+  repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+  sessions: [
+    buildStateTask('align-open', 'Open PR', 'loro-dev/lody', 4, {
+      ...buildPrState('loro-dev/lody', 421, 'open'),
+    }),
+    buildStateTask('align-open-ready', 'Open PR · mergeable', 'loro-dev/lody', 6, {
+      ...buildPrState('loro-dev/lody', 422, 'open'),
+      prReadiness: 'y',
+    }),
+    buildStateTask('align-ci', 'Open PR · checks passed', 'loro-dev/lody', 8, {
+      ...buildPrState('loro-dev/lody', 423, 'open'),
+      prCiState: 's',
+    }),
+    buildStateTask('align-ci-ready', 'Open PR · checks passed · mergeable', 'loro-dev/lody', 10, {
+      ...buildPrState('loro-dev/lody', 424, 'open'),
+      prCiState: 's',
+      prReadiness: 'y',
+    }),
+  ],
+};
+
+/** The PR mark stays in the end slot's 20px reserve when Mergeable appears. */
+export const MergeablePrIconAlignment: Story = {
+  name: 'Mergeable PR icon alignment',
+  args: MERGEABLE_ALIGNMENT_ARGS,
+  render: (args) => <TaskListDemo {...args} />,
+};
+
 const ALL_DIFF_AND_PR_STATES_ARGS: SessionListProps = {
   selectedSessionId: 'state-open-mixed',
   repos: [

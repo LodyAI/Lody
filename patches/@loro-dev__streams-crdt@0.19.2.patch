@@ -11,6 +11,64 @@ index db300ce07001c51440db9663e6f2a74515eb6079..b9a2e779e74445275a3d36016808fe36
    /** Observation only; callback failures never affect synchronization. */
    readonly onDiagnostic?: (event: SnapshotDiagnosticEvent) => void;
    /** Master switch. Defaults to `true` when `snapshotUpload` is provided. */
+diff --git a/dist/flock.js b/dist/flock.js
+index 7e7ab56308116afe526e7c67ba33f96057818061..19f767e6587d15dc452384f34f76f4a35b4dcc8d 100644
+--- a/dist/flock.js
++++ b/dist/flock.js
+@@ -131,23 +131,38 @@ function createFlockAdapter(flock) {
+ 			};
+ 		},
+ 		subscribeLocalUpdates: (listener) => {
+-			return flock.subscribe((batch) => {
+-				if (batch.source !== "local") return;
+-				const drain = async () => {
+-					const batchPayload = await flock.exportJson({
+-						from: lastExportedVersion,
+-						peerId: flock.peerId()
+-					});
+-					if (!hasEntries(batchPayload)) return;
+-					const exportedVersion = extractVersionFromBundle(batchPayload);
+-					recordExportFrontier(exportedVersion);
+-					listener({
+-						updates: [new TextEncoder().encode(JSON.stringify(batchPayload))],
+-						version: exportedVersion
+-					});
+-				};
++			// Lody patch (remove once upstream streams-crdt coalesces local exports):
++			// one pending export per subscription covers every local commit made before
++			// it starts. The macrotask yield lets IPC, timers and sockets run between
++			// exports; the pending flag clears immediately before the synchronous Wasm
++			// export, so a commit during or after it schedules exactly one more export.
++			let exportPending = false;
++			let subscribed = true;
++			const drain = async () => {
++				await new Promise((resolve) => setTimeout(resolve, 0));
++				exportPending = false;
++				if (!subscribed) return;
++				const batchPayload = await flock.exportJson({
++					from: lastExportedVersion,
++					peerId: flock.peerId()
++				});
++				if (!subscribed || !hasEntries(batchPayload)) return;
++				const exportedVersion = extractVersionFromBundle(batchPayload);
++				recordExportFrontier(exportedVersion);
++				listener({
++					updates: [new TextEncoder().encode(JSON.stringify(batchPayload))],
++					version: exportedVersion
++				});
++			};
++			const unsubscribe = flock.subscribe((batch) => {
++				if (batch.source !== "local" || exportPending || !subscribed) return;
++				exportPending = true;
+ 				localExportQueue = localExportQueue.then(drain).catch(() => {});
+ 			});
++			return () => {
++				subscribed = false;
++				unsubscribe();
++			};
+ 		}
+ 	};
+ }
 diff --git a/dist/stream-id-CkYX5Gw_.js b/dist/stream-id-CkYX5Gw_.js
 index 6768860ab31b380e6e058a564439b779f6bfef89..43a3511703a58dd7ef3bfb43aa92eab9c1e21b12 100644
 --- a/dist/stream-id-CkYX5Gw_.js
@@ -350,3 +408,139 @@ index 6768860ab31b380e6e058a564439b779f6bfef89..43a3511703a58dd7ef3bfb43aa92eab9
  		return {
  			cursor: saved,
  			streamCursor: bootstrapCursor
+diff --git a/dist/zstd-core-nJ4Lg1a0.js b/dist/zstd-core-nJ4Lg1a0.js
+index 460bbb665e9dad4aa617a0b97c4eb3d650ef5c40..82a84eab0a85d41275993b2ee9417ee7099e3016 100644
+--- a/dist/zstd-core-nJ4Lg1a0.js
++++ b/dist/zstd-core-nJ4Lg1a0.js
+@@ -123,6 +123,7 @@ function init$1(filePathOrBuf) {
+ 	function instantiateAsync() {
+ 		if (filePathOrBuf && filePathOrBuf.byteLength > 0) return WebAssembly.instantiate(filePathOrBuf, info).then(receiveInstantiationResult, function(reason) {
+ 			err("wasm compile failed: " + reason);
++			throw reason;
+ 		});
+ 		else if (typeof WebAssembly.instantiateStreaming === "function" && typeof filePathOrBuf === "string" && typeof fetch === "function") return fetch(filePathOrBuf, { credentials: "same-origin" }).then(function(response) {
+ 			return WebAssembly.instantiateStreaming(response, info).then(receiveInstantiationResult, function(reason) {
+@@ -139,7 +140,13 @@ function init$1(filePathOrBuf) {
+ 		err("Module.instantiateWasm callback failed with error: " + e);
+ 		return false;
+ 	}
+-	instantiateAsync();
++	var ownedZstdAttempt = zstdRuntimeAttempt;
++	var instantiation = instantiateAsync();
++	if (instantiation != null && typeof instantiation.then === "function") {
++		instantiation.catch(function(reason) {
++			rejectOwnedZstdAttempt(ownedZstdAttempt, reason);
++		});
++	}
+ 	return {};
+ }
+ var ExitStatus = class {
+@@ -317,12 +324,38 @@ var __awaiter$1 = function(thisArg, _arguments, P, generator) {
+ 		step((generator = generator.apply(thisArg, _arguments || [])).next());
+ 	});
+ };
+-const initialized = new Promise((resolve) => {
+-	Module.onRuntimeInitialized = resolve;
+-});
+-const waitInitialized = () => __awaiter$1(void 0, void 0, void 0, function* () {
+-	yield initialized;
+-});
++let zstdRuntimeAttempt = null;
++function rejectOwnedZstdAttempt(attempt, reason) {
++	if (attempt == null || attempt.settled) return;
++	attempt.settled = true;
++	attempt.reject(reason instanceof Error ? reason : new Error(String(reason)));
++}
++function resolveOwnedZstdAttempt(attempt) {
++	if (attempt == null || attempt.settled) return;
++	attempt.settled = true;
++	attempt.resolve();
++}
++const ZSTD_INITIALIZATION_TIMEOUT_MS = 10000;
++function waitForZstdRuntime(attempt) {
++	let settled = false;
++	let timer;
++	const timeout = new Promise((resolve, reject) => {
++		timer = setTimeout(() => {
++			if (settled) return;
++			settled = true;
++			reject(new Error("zstd wasm initialization timed out"));
++		}, ZSTD_INITIALIZATION_TIMEOUT_MS);
++	});
++	return Promise.race([attempt.promise, timeout]).finally(() => {
++		settled = true;
++		clearTimeout(timer);
++	});
++}
++const waitInitialized = () => {
++	const attempt = zstdRuntimeAttempt;
++	if (attempt == null) return Promise.reject(new Error("zstd wasm initialization was not started"));
++	return attempt.promise;
++};
+ //#endregion
+ //#region ../../node_modules/.pnpm/@bokuweb+zstd-wasm@0.0.27/node_modules/@bokuweb/zstd-wasm/dist/web/errors/index.js
+ const isError = (code) => {
+@@ -501,8 +534,45 @@ var __awaiter = function(thisArg, _arguments, P, generator) {
+ };
+ const init = (path) => __awaiter(void 0, void 0, void 0, function* () {
+ 	const url = new URL(`./zstd.wasm`, import.meta.url).href;
+-	Module["init"](path !== null && path !== void 0 ? path : url);
+-	yield waitInitialized();
++	// calledRun means this Emscripten instance already started. A second init would
++	// not run onRuntimeInitialized again, so reuse the runtime that is already up.
++	if (calledRun) {
++		const running = zstdRuntimeAttempt;
++		if (running != null && !running.settled) {
++			if (ABORT) rejectOwnedZstdAttempt(running, new Error("zstd wasm runtime aborted"));
++			else resolveOwnedZstdAttempt(running);
++		}
++		if (zstdRuntimeAttempt != null) yield zstdRuntimeAttempt.promise;
++		return;
++	}
++	let attempt = zstdRuntimeAttempt;
++	// A waiter timeout does not settle this attempt. Callers that arrive while it is
++	// still in flight share it instead of starting another instantiate.
++	if (attempt == null || attempt.settled) {
++		// A failed attempt leaves Emscripten's run dependency incremented, so a later
++		// attempt would never reach onRuntimeInitialized. The runtime has not started.
++		runDependencies = 0;
++		let resolveAttempt;
++		let rejectAttempt;
++		const promise = new Promise((resolve, reject) => {
++			resolveAttempt = resolve;
++			rejectAttempt = reject;
++		});
++		void promise.then(() => {}, () => {});
++		attempt = {
++			settled: false,
++			promise,
++			resolve: resolveAttempt,
++			reject: rejectAttempt
++		};
++		zstdRuntimeAttempt = attempt;
++		const ownedAttempt = attempt;
++		Module.onRuntimeInitialized = () => {
++			resolveOwnedZstdAttempt(ownedAttempt);
++		};
++		Module["init"](path !== null && path !== void 0 ? path : url);
++	}
++	yield waitForZstdRuntime(attempt);
+ });
+ //#endregion
+ //#region src/zstd-core.ts
+@@ -532,7 +602,14 @@ async function loadZstdModule() {
+ 	}
+ }
+ async function getZstdModule() {
+-	return await (modulePromise ??= loadZstdModule());
++	if (modulePromise == null) {
++		const attempt = loadZstdModule();
++		modulePromise = attempt;
++		void attempt.then(() => {}, () => {
++			if (modulePromise === attempt) modulePromise = void 0;
++		});
++	}
++	return await modulePromise;
+ }
+ async function compressInCurrentThread(snapshot) {
+ 	return (await getZstdModule()).compress(snapshot);

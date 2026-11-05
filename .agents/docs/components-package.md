@@ -4,6 +4,11 @@ Scope: `packages/components`. The binding rules live in
 [that package's AGENTS.md](../../packages/components/AGENTS.md) and its child scopes;
 this page keeps the reasoning that would otherwise crowd them out.
 
+Native and opted-in browser notifications use the authenticated host operations
+in `lib/push-notifications.ts`; local Electron notifications remain host-owned.
+The [direct push client decision](../notes/implemented/architecture/2026-10-16-direct-push-client.md)
+explains registration ownership, logout fencing and the provider boundary.
+
 Workspace durable synchronization is composed by `providers/workspace-streams-transport.ts`.
 Its [content boundary](../../specs/workspace-streams-content.md) keeps ordinary SDK bytes
 and persistence intact while exposing protection and snapshot handling to future callers.
@@ -69,6 +74,11 @@ content readiness in RuntimeProvider. Control reads capture account and reader
 labels, fence preallocated cold opens and retain incomplete closes across route
 changes. Unknown-genesis cold readers block only the same account/workspace until
 their actual close finishes; independent workspaces remain usable.
+Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
+Recoverable renderer close failures retry only unfinished stages through the retained
+owner; retired runtimes stay fenced. A failed terminal Repo destroy is not retryable
+when the SDK only exposes a destroyed flag and a subsequent no-op, rather than a
+confirmed drain receipt. See the [close recovery decision](../notes/implemented/bug-fix/2026-11-03-workspace-close-retry.md).
 Retirement joins native acquisition and confirmed close, never the subsequent
 public describe/history refresh. Portable hosts close a preallocated label before
 and after settlement; Electron's readers are an unlabeled count per window and

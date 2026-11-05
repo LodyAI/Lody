@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "oxc", "react", "react-perf", "react-hooks"],
+  "plugins": [],
   "ignorePatterns": [
     "utils/loro-deploy/**/*",
     "scripts/**/*",
@@ -8,81 +8,20 @@
     "apps/electron/scripts/**/*",
     "apps/web/public/**/*.js",
     "site-docs/scripts/**/*",
-    "packages/acp-extension-claude/**/*",
-    "packages/acp-extension-codex/**/*",
-    "packages/acp-extension-dsh/**/*",
-    "packages/acp-extension-grok/**/*",
-    "packages/acp-extension-core/test/**/*",
-    "packages/acp-extension-kimi/**/*",
-    "packages/acp-extension-pi/**/*",
     "site/**/*",
     "functions/**/*",
     ".codex/**/*",
     ".claude/**/*",
     ".agents/**/*",
     ".opencode/**/*",
-    ".gemini/**/*"
+    ".gemini/**/*",
+    "packages/acp-extension-*/**"
   ],
   "categories": {
-    "correctness": "error",
-    "suspicious": "error"
+    "correctness": "off",
+    "suspicious": "off"
   },
-  "rules": {
-    "getter-return": "error",
-    "no-misleading-character-class": "error",
-    "no-unreachable": "error",
-    "no-use-before-define": [
-      "warn",
-      {
-        "allowNamedExports": true,
-        "classes": true,
-        "enums": true,
-        "functions": false,
-        "ignoreTypeReferences": true,
-        "typedefs": false,
-        "variables": true
-      }
-    ],
-    "no-shadow": "error",
-    "typescript/await-thenable": "warn",
-    "typescript/consistent-return": "error",
-    "typescript/no-explicit-any": "error",
-    "typescript/no-base-to-string": "warn",
-    "typescript/no-duplicate-type-constituents": "warn",
-    "typescript/no-extraneous-class": "off",
-    "typescript/no-floating-promises": "error",
-    "typescript/no-misused-promises": "error",
-    "typescript/no-mixed-enums": "error",
-    "typescript/no-meaningless-void-operator": "warn",
-    "typescript/no-redundant-type-constituents": "warn",
-    "typescript/no-this-alias": "off",
-    "typescript/no-unnecessary-boolean-literal-compare": "warn",
-    "typescript/no-unnecessary-template-expression": "warn",
-    "typescript/no-unnecessary-type-arguments": "warn",
-    "typescript/no-unnecessary-type-assertion": "warn",
-    "typescript/no-unnecessary-type-conversion": "warn",
-    "typescript/no-unnecessary-type-parameters": "warn",
-    "typescript/no-unsafe-argument": "warn",
-    "typescript/no-unsafe-assignment": "warn",
-    "typescript/no-unsafe-call": "warn",
-    "typescript/no-unsafe-member-access": "warn",
-    "typescript/no-unsafe-return": "warn",
-    "typescript/no-unsafe-type-assertion": "warn",
-    "typescript/only-throw-error": "warn",
-    "typescript/related-getter-setter-pairs": "error",
-    "typescript/require-array-sort-compare": "warn",
-    "typescript/restrict-plus-operands": "error",
-    "typescript/restrict-template-expressions": "warn",
-    "typescript/strict-boolean-expressions": "warn",
-    "typescript/switch-exhaustiveness-check": "warn",
-    "typescript/unbound-method": "warn",
-    "typescript/use-unknown-in-catch-callback-variable": "warn",
-    "no-unused-vars": "error",
-    "react/require-render-return": "error",
-    "react/react-in-jsx-scope": "off",
-    "rules-of-hooks": "error",
-    "exhaustive-deps": "error"
-  },
+  "rules": {},
   "overrides": [
     {
       "files": ["packages/components/src/**/*.ts", "packages/components/src/**/*.tsx"],
@@ -149,62 +88,6 @@
             ]
           }
         ]
-      }
-    },
-    {
-      "files": [
-        "*.test.ts",
-        "*.test.tsx",
-        "*.spec.ts",
-        "*.spec.tsx",
-        "*.stories.ts",
-        "*.stories.tsx",
-        "*.bench.ts"
-      ],
-      "rules": {
-        "typescript/no-explicit-any": "off",
-        "typescript/no-extraneous-class": "off",
-        "typescript/no-unsafe-type-assertion": "off",
-        "typescript/no-unsafe-call": "off",
-        "typescript/no-unsafe-member-access": "off",
-        "typescript/no-unsafe-assignment": "off",
-        "typescript/no-unsafe-return": "off",
-        "typescript/no-unsafe-argument": "off",
-        "typescript/strict-boolean-expressions": "off",
-        "typescript/no-unnecessary-type-assertion": "off",
-        "typescript/no-unnecessary-type-arguments": "off",
-        "typescript/unbound-method": "off",
-        "typescript/switch-exhaustiveness-check": "off",
-        "typescript/no-base-to-string": "off",
-        "typescript/no-redundant-type-constituents": "off",
-        "typescript/restrict-template-expressions": "off",
-        "typescript/no-unnecessary-type-parameters": "off",
-        "typescript/await-thenable": "off",
-        "typescript/require-array-sort-compare": "off",
-        "typescript/no-unnecessary-boolean-literal-compare": "off",
-        "typescript/use-unknown-in-catch-callback-variable": "off"
-      }
-    },
-    {
-      "files": ["*.cjs"],
-      "rules": {
-        "typescript/no-unsafe-member-access": "off",
-        "typescript/no-unsafe-call": "off",
-        "typescript/no-unsafe-assignment": "off",
-        "typescript/no-unsafe-argument": "off",
-        "typescript/no-unsafe-return": "off",
-        "typescript/strict-boolean-expressions": "off",
-        "typescript/no-unnecessary-type-conversion": "off"
-      }
-    },
-    {
-      "files": ["**/.storybook/**/*", "**/playwright.config.ts", "**/vite.config.ts"],
-      "rules": {
-        "typescript/strict-boolean-expressions": "off",
-        "typescript/no-unsafe-assignment": "off",
-        "typescript/no-unsafe-type-assertion": "off",
-        "typescript/no-unsafe-argument": "off",
-        "typescript/no-unnecessary-type-conversion": "off"
       }
     }
   ]

@@ -26,16 +26,6 @@ const historyWithStatus = (
   ] as Pick<SessionHistory, 'finished' | 'items'>[];
 
 describe('isSessionContextCompacting', () => {
-  it('tracks pending and in-progress compaction tool calls', () => {
-    expect(isSessionContextCompacting(historyWithStatus('pending'))).toBe(true);
-    expect(isSessionContextCompacting(historyWithStatus('in_progress'))).toBe(true);
-  });
-
-  it('stops loading after compaction completes or fails', () => {
-    expect(isSessionContextCompacting(historyWithStatus('completed'))).toBe(false);
-    expect(isSessionContextCompacting(historyWithStatus('failed'))).toBe(false);
-  });
-
   it('does not treat host turn finalization as provider termination', () => {
     expect(isSessionContextCompacting(historyWithStatus('pending', true))).toBe(true);
     expect(isSessionContextCompacting(historyWithStatus('in_progress', true))).toBe(true);

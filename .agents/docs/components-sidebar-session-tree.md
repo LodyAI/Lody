@@ -38,9 +38,13 @@ live outside it.
 
 ## Nesting inside one rendered list
 
-Nesting is resolved inside a single rendered list, which is what keeps section
-boundaries intact: a pinned opener and an unpinned opened Session are in different
-arrays, so both stay top-level. The tree never hides a Session — a missing,
+Desktop section membership is resolved before nesting: `getPinnedSessionTreeIds`
+keeps a pinned opener and its visible opened-by descendants together in Pinned.
+Workspace and Updated exclude that same set, so rows never appear twice. This
+does not change descendants' own pin flags: unpinning an opener returns its tree
+to the ordinary list, while an independently pinned descendant keeps its subtree
+in Pinned. Missing or filtered openers do not pull otherwise visible rows into Pinned.
+Nesting is then resolved inside each rendered list. The tree never hides a Session — a missing,
 cross-section, cycling, or deeper-than-one-level opener degrades to a top-level
 row — and the preview cap counts top-level rows so a bucket's visible size does not
 depend on how deeply it happens to nest.
@@ -53,7 +57,8 @@ moves each such row into the group of its topmost rendered ancestor, so the fan-
 stays legible. The row leaves its own group, keeping every Session in exactly one
 place for keyboard navigation and counts; it travels with its opener when that group
 is folded. Only rendered groups take part, so an opener in a hidden project, the
-Pinned section or the archive leaves the row where it was. A Local Project Session
+archive leaves the row where it was. Pinned trees have already been removed from
+Workspace groups before this placement. A Local Project Session
 joining a task group becomes a task row, and a local group's hover card names the
 moved row's own Machine rather than the project's. Two alternatives were rejected:
 making the remote Session a `parentSessionId` child, which would break the child

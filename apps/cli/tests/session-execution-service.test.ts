@@ -3322,7 +3322,7 @@ describe('SessionExecutionService', () => {
         memoryPressure: {} as never,
         ...(terminalBackfill
           ? {
-              onEncryptedMemberRemoved: async () => {
+              onEncryptedAccessLost: async () => {
                 await removalReleased.promise;
               },
             }
@@ -10548,6 +10548,130 @@ describe('SessionExecutionService', () => {
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-queued-cancel', {
       lastCanceledTurn: undefined,
     });
+  });
+
+  it('stops authentication when aborted while the launch config is loading', async () => {
+    let resolveConfig!: (value: ReturnType<typeof createLaunchConfig>) => void;
+    const config = new Promise<ReturnType<typeof createLaunchConfig>>((resolve) => {
+      resolveConfig = resolve;
+    });
+    const authenticate = vi.spyOn(AcpAuthenticationManager.prototype, 'authenticate');
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          getAgentConfigForMachineLaunch: () => config,
+        } as unknown as LoroDocumentManager,
+      })
+    );
+    const controller = new AbortController();
+    try {
+      const result = service.authenticateMachineAcp(
+        {
+          type: 'machine/acp-authenticate',
+          machineId: 'machine-1' as MachineId,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          requestId: 'cancel-loading',
+          action: 'start',
+          configId: capabilityConfigId,
+        },
+        { signal: controller.signal }
+      );
+      controller.abort();
+      resolveConfig(createLaunchConfig());
+      await expect(result).resolves.toMatchObject({ success: true, disposition: 'cancelled' });
+      expect(authenticate).not.toHaveBeenCalled();
+    } finally {
+      authenticate.mockRestore();
+    }
+  });
+
+  it('cancels a registered authentication when its signal aborts during registration', async () => {
+    const controller = new AbortController();
+    let finish!: (result: { success: true; disposition: 'cancelled' }) => void;
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockImplementation(() => {
+        controller.abort();
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      });
+    const cancel = vi.spyOn(AcpAuthenticationManager.prototype, 'cancel').mockImplementation(() => {
+      if (finish) finish({ success: true, disposition: 'cancelled' });
+      return { success: true, disposition: 'cancelled' };
+    });
+    const service = new SessionExecutionService(createBaseDeps({}));
+    try {
+      await expect(
+        service.authenticateMachineAcp(
+          {
+            type: 'machine/acp-authenticate',
+            machineId: 'machine-1' as MachineId,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            requestId: 'cancel-registration',
+            action: 'start',
+            configId: capabilityConfigId,
+          },
+          { signal: controller.signal }
+        )
+      ).resolves.toMatchObject({ disposition: 'cancelled' });
+    } finally {
+      authenticate.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
+  it('does not publish capability refresh after authentication is aborted', async () => {
+    const controller = new AbortController();
+    let started!: () => void;
+    const probeStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let finishProbe!: (value: never) => void;
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockResolvedValue({ success: true, disposition: 'authenticated' });
+    const updateAcpCapabilities = vi.fn(async () => {});
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        fetchAcpCapabilities: vi.fn(() => {
+          started();
+          return new Promise((resolve) => {
+            finishProbe = resolve;
+          });
+        }),
+        workspaceDocument: {
+          getAgentConfigForMachineLaunch: async () => createLaunchConfig(),
+          updateAcpCapabilities,
+        } as unknown as LoroDocumentManager,
+      })
+    );
+    try {
+      const result = service.authenticateMachineAcp(
+        {
+          type: 'machine/acp-authenticate',
+          machineId: 'machine-1' as MachineId,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          requestId: 'cancel-refresh',
+          action: 'start',
+          configId: capabilityConfigId,
+        },
+        { signal: controller.signal }
+      );
+      await probeStarted;
+      controller.abort();
+      finishProbe({
+        cliType: 'builtin',
+        agentType: 'kimi',
+        modes: [],
+        models: [],
+        configOptions: [],
+      } as never);
+      await expect(result).resolves.toMatchObject({ disposition: 'cancelled' });
+      expect(updateAcpCapabilities).not.toHaveBeenCalled();
+    } finally {
+      authenticate.mockRestore();
+    }
   });
 
   it('preserves authentication success and auth methods when the follow-up probe still needs auth', async () => {

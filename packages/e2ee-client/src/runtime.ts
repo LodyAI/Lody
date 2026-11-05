@@ -68,6 +68,8 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
   const setup = yield* Semaphore.make(1);
   let entry: { session: Session; closing: boolean; readers: Set<string> } | undefined;
   const pendingReaders = new Map<string, { closed: boolean }>();
+  /** Holders of the `account-approval` reader per lease; the last release closes it. */
+  const approvalHolds = new WeakMap<object, number>();
   let nextReader = 0;
   let opening: string | undefined,
     retired = false;
@@ -207,6 +209,67 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
   const runtime: E2eeWorkspaceRuntime = {
     readerLeases: 'preallocated-v1',
     account: (input) => run(account(input)),
+    /** Purpose-limited admission signing for account pairing: ensure one approved
+     * reader, then expose only this session's existing accountApproval operations.
+     * No private key, generic signer or ordinary execution capability is added. */
+    accountApproval: () =>
+      run(
+        Effect.gen(function* () {
+          yield* guard(workspaceId);
+          if (!entry || entry.closing || !entry.readers.size) {
+            yield* Effect.tryPromise({
+              try: () => runtime.open(workspaceId, undefined, accountId, 'account-approval'),
+              catch: (cause) => cause,
+            });
+          }
+          const lease = entry;
+          if (!lease || lease.closing) return yield* fail('closed');
+          const approval = lease.session.accountApproval;
+          // Only the `account-approval` reader is counted: a window's reader is never
+          // closed here. The last holder's release closes it, so the workspace drains.
+          const held = lease.readers.has('account-approval');
+          if (held) approvalHolds.set(lease, (approvalHolds.get(lease) ?? 0) + 1);
+          // Done only after the reader's close succeeded: a failed close rejects and
+          // stays retryable instead of leaving the reader open unnoticed.
+          let counted = held;
+          let released = !held;
+          const release = async () => {
+            if (released) return;
+            if (counted) {
+              counted = false;
+              approvalHolds.set(lease, (approvalHolds.get(lease) ?? 1) - 1);
+            }
+            // A close that failed earlier left the lease closing: retry that close.
+            if (
+              (approvalHolds.get(lease) ?? 0) > 0 ||
+              entry !== lease ||
+              !(lease.readers.has('account-approval') || lease.closing)
+            ) {
+              released = true;
+              return;
+            }
+            await runtime.close(workspaceId, accountId, 'account-approval');
+            released = true;
+          };
+          return {
+            release,
+            device: toHex(lease.session.binding.device.toBytes()),
+            sign: (row: {
+              signingPublicKey: Uint8Array;
+              encryptionPublicKey: Uint8Array;
+              possessionProof: Uint8Array;
+            }) => run(approval.sign(row)),
+            settle: (record: Uint8Array) => run(approval.settle(record)),
+            invitation: (record: Uint8Array) => run(approval.invitation(record)),
+            access: () => run(approval.access()),
+            refresh: () => run(Effect.asVoid(lease.session.refresh())),
+            // The session's existing key round, so an approver can send the device it
+            // just admitted the current epoch key. No key or credential leaves.
+            keyRound: () => run(Effect.asVoid(lease.session.keyRound())),
+            keyDeliveryEvidence: (device: string) => run(lease.session.keyDeliveryEvidence(device)),
+          };
+        })
+      ),
     open: (id, supplied, expected, requestedOwner) => {
       const observed = supplied ? { ...supplied } : undefined;
       const readerOwner = requestedOwner ?? `${ownerId}:${++nextReader}`;

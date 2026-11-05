@@ -126,6 +126,10 @@ export const TeamHistory: Story = {
     }),
   },
 };
+// A phone that just received its keys: the full team history, ready to open.
+export const TeamHistoryReadyToOpen: Story = {
+  args: { ...TeamHistory.args, onOpen: fn() },
+};
 // The final vector record declares unsupported capability 2.
 export const UpgradeRequired: Story = {
   args: {

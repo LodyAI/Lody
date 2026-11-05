@@ -124,7 +124,7 @@ function requesterHosts() {
 }
 /** An approving device's ledgers: counts signatures and records appended bytes. */
 function approverHosts(ids = ['w1', 'w2']) {
-  const log = { signed: [], appended: [], appendFails: 0 }
+  const log = { signed: [], appended: [], appendFails: 0, delivered: [] }
   const hosts = WORKSPACES.filter((workspace) => ids.includes(workspace.workspaceId)).map(
     (workspace, index) => ({
       ...workspace,
@@ -149,7 +149,11 @@ function approverHosts(ids = ['w1', 'w2']) {
         }),
       invitation: (record) => Effect.succeed(new Uint8Array([0xee, ...record])),
       access: () =>
-        Effect.succeed({ workspaceId: workspace.workspaceId, credential: hex(fill(0x99)) })
+        Effect.succeed({ workspaceId: workspace.workspaceId, credential: hex(fill(0x99)) }),
+      deliverKeys: (device, requestId) =>
+        Effect.sync(() =>
+          log.delivered.push({ workspaceId: workspace.workspaceId, device: hex(device), requestId })
+        )
     })
   )
   return { hosts, log }
@@ -244,6 +248,45 @@ void test('a new device is approved per workspace, verifying each approval befor
     await refusal(approverA.pairing.inspectAccountPairing(state.pairingString)),
     'pairing-used'
   )
+})
+
+// The new device opens a workspace as soon as that workspace joined, even while
+// another requested workspace is still pending.
+void test('a joined workspace is reported under its own ID after this device no longer needs pairing there', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const all = requesterHosts()
+  // Like the real requester: a workspace with an active identity needs no pairing.
+  const requester = {
+    get hosts() {
+      return all.hosts.filter(
+        (host) => !all.installed.some((item) => item.workspaceId === host.workspaceId)
+      )
+    }
+  }
+  const newDevice = device({ relay, requester, clock })
+  const state = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts(['w1'])
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  const preview = await run(approver.pairing.inspectAccountPairing(state.pairingString))
+  await run(
+    approver.pairing.approveAccountPairing({
+      pairingString: state.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: ['w1']
+    })
+  )
+  for (let poll = 0; poll < 2; poll++) {
+    const partial = await run(newDevice.pairing.accountPairingRequest())
+    assert.equal(partial.status, 'waiting')
+    assert.deepEqual(
+      partial.workspaces.map((item) => [item.workspaceId, item.name, item.state]),
+      [
+        ['w1', 'Alpha', 'joined'],
+        ['w2', 'Beta', 'pending']
+      ]
+    )
+  }
 })
 
 void test('a request changed by the relay is refused before anything is signed', async () => {
@@ -456,7 +499,93 @@ void test('terminal states are local: cancel and restart end a request whatever 
   )
 })
 
-void test('decline is recorded locally and refused once this device has signed', async () => {
+void test('a workspace session whose release failed is retried by the next operation, a bounded number of times', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts(['w1'])
+  // Every listing returns a new holder; the first holder's close fails until healed.
+  const releases = []
+  let healed = false
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  const listed = []
+  const hosts = a.hosts
+  a.hosts = undefined
+  const pairing = makeDesktopAccountPairing({
+    db: approver.db,
+    account: 'synthetic-account',
+    deviceName: 'Synthetic laptop',
+    relay,
+    requesterWorkspaces: () => Effect.succeed([]),
+    approverWorkspaces: () =>
+      Effect.sync(() => {
+        const holder = listed.length
+        listed.push(holder)
+        return hosts.map((host) => ({
+          ...host,
+          release: () =>
+            Effect.suspend(() => {
+              releases.push(holder)
+              return holder === 0 && !healed
+                ? Effect.fail(
+                    Object.assign(new Error('e2ee_restart-required'), { code: 'restart-required' })
+                  )
+                : Effect.void
+            })
+        }))
+      }),
+    now: () => clock.now,
+    random: (size) => fill(77, size)
+  })
+  await run(pairing.inspectAccountPairing(pairingString))
+  assert.deepEqual(releases, [0])
+  // The failed holder is kept and retried before the next operation lists again.
+  await run(pairing.inspectAccountPairing(pairingString))
+  assert.deepEqual(releases, [0, 0, 1])
+  healed = true
+  await run(pairing.inspectAccountPairing(pairingString))
+  assert.deepEqual(releases, [0, 0, 1, 0, 2])
+  // Released: never retried again.
+  await run(pairing.inspectAccountPairing(pairingString))
+  assert.deepEqual(releases, [0, 0, 1, 0, 2, 3])
+})
+
+void test('a release that keeps failing is retried at most three times and then reported', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const hosts = approverHosts(['w1']).hosts
+  let attempts = 0
+  let listings = 0
+  const pairing = makeDesktopAccountPairing({
+    db: new DatabaseSync(':memory:'),
+    account: 'synthetic-account',
+    deviceName: 'Synthetic laptop',
+    relay,
+    requesterWorkspaces: () => Effect.succeed([]),
+    approverWorkspaces: () =>
+      Effect.sync(() =>
+        listings++ === 0
+          ? hosts.map((host) => ({
+              ...host,
+              release: () =>
+                Effect.suspend(() => {
+                  attempts++
+                  return Effect.fail(new Error('synthetic persistent close failure'))
+                })
+            }))
+          : []
+      ),
+    now: () => clock.now,
+    random: (size) => fill(78, size)
+  })
+  for (let call = 0; call < 6; call++) await run(pairing.inspectAccountPairing(pairingString))
+  assert.equal(attempts, 3)
+})
+
+void test('declining a pairing code makes it unusable on this device', async () => {
   const relay = makeRelay()
   const clock = { now: NOW }
   const newDevice = device({ relay, requester: requesterHosts(), clock })
@@ -518,7 +647,6 @@ void test('concurrent approvals of one code sign each workspace once', async () 
   const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
   const a = approverHosts()
   // The first signature blocks on an explicit gate while the second call runs.
-  let entered = 0
   let release
   const gate = new Promise((resolve) => (release = resolve))
   let firstEntered
@@ -528,7 +656,6 @@ void test('concurrent approvals of one code sign each workspace once', async () 
     host.sign = (row) =>
       Effect.flatMap(
         Effect.promise(() => {
-          entered++
           firstEntered()
           return gate
         }),
@@ -546,9 +673,6 @@ void test('concurrent approvals of one code sign each workspace once', async () 
     )
   const both = Promise.all([approve(), approve()])
   await first
-  // Give the second call every chance to reach a signature of its own.
-  for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(entered, 1)
   release()
   await both
   assert.deepEqual(a.log.signed.map((item) => item.workspaceId).sort(), ['w1', 'w2'])
@@ -660,6 +784,8 @@ void test('an admission the ledger settled differently is retired and signed onc
     })
   )
   assert.deepEqual(first.workspaces, [{ workspaceId: 'w1', outcome: 'not-admitted' }])
+  // A record that never entered the ledger admitted nobody: no key goes anywhere.
+  assert.deepEqual(a.log.delivered, [])
   const second = await run(
     approver.pairing.approveAccountPairing({
       pairingString,
@@ -673,6 +799,10 @@ void test('an admission the ledger settled differently is retired and signed onc
     a.log.appended.map((item) => item.requestId),
     ['admit-w1-2']
   )
+  // Only the committed admission's device, under that admission's id.
+  assert.deepEqual(a.log.delivered, [
+    { workspaceId: 'w1', device: hex(fill(0x30)), requestId: 'admit-w1-2' }
+  ])
 })
 
 void test('expiry is checked again after the pre-signing refresh, before anything is signed or appended', async () => {

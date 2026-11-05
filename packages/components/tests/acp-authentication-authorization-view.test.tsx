@@ -1,14 +1,24 @@
 // @vitest-environment jsdom
 
 import { act } from 'react';
+import { Provider, createStore } from 'jotai';
+import { localProbeAttemptedAtom, localProbeResultAtom } from '../src/atoms/local-probe';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentConfigId, MachineId } from '@lody/shared';
+import {
+  getMachineRoomId,
+  type AgentConfigId,
+  type MachineAcpAuthenticateResponse,
+  type MachineId,
+} from '@lody/shared';
+import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
+import * as authenticationHook from '../src/hooks/use-machine-acp-authentication';
+import * as machineFlock from '../src/hooks/use-machine-flock-rows';
 
 import {
+  AcpAuthenticationPanel,
   AcpAuthenticationAuthorizationView,
   AcpAuthenticationInteractionView,
-  areAcpAuthenticationTargetsEqual,
   isAllowedAcpAuthorizationUrl,
 } from '../src/components/settings/acp-authentication-panel';
 import { initI18n } from '../src/i18n';
@@ -32,117 +42,175 @@ describe('AcpAuthenticationAuthorizationView', () => {
     vi.restoreAllMocks();
   });
 
-  it('allows only HTTP(S) authorization pages', () => {
-    expect(isAllowedAcpAuthorizationUrl('https://provider.example.test/oauth')).toBe(true);
-    expect(isAllowedAcpAuthorizationUrl('http://127.0.0.1:8787/callback')).toBe(true);
-    expect(isAllowedAcpAuthorizationUrl('javascript:alert(1)')).toBe(false);
-    expect(isAllowedAcpAuthorizationUrl('file:///tmp/credential')).toBe(false);
-    expect(isAllowedAcpAuthorizationUrl('not a url')).toBe(false);
-  });
-
-  it('identifies an authentication target only by machine and persisted config', () => {
-    const target = {
-      machineId: 'machine-1' as MachineId,
-      configId: 'config-1' as AgentConfigId,
+  it('shows remote guidance only for remote builtin Sorbet', async () => {
+    const store = createStore();
+    store.set(localProbeAttemptedAtom, true);
+    store.set(localProbeResultAtom, { ok: true, machineId: 'local' });
+    Object.defineProperty(window, '__LODY_ELECTRON__', { configurable: true, value: true });
+    const renderPanel = async (machineId: string, agentType: string) => {
+      await act(async () => {
+        root.render(
+          <Provider store={store}>
+            <AcpAuthenticationPanel
+              machineId={machineId as MachineId}
+              cliType="builtin"
+              agentType={agentType}
+            />
+          </Provider>
+        );
+      });
     };
-
-    expect(
-      areAcpAuthenticationTargetsEqual(target, {
-        ...target,
-      })
-    ).toBe(true);
-    expect(
-      areAcpAuthenticationTargetsEqual(target, {
-        ...target,
-        configId: 'config-2' as AgentConfigId,
-      })
-    ).toBe(false);
-    expect(
-      areAcpAuthenticationTargetsEqual(target, {
-        ...target,
-        machineId: 'machine-2' as MachineId,
-      })
-    ).toBe(false);
+    try {
+      await renderPanel('remote', 'sorbet');
+      expect(container.textContent).toContain('choose device sign-in');
+      expect(container.textContent).toContain('localhost callback points to the remote machine');
+      expect(container.textContent).toContain('Radius supports device sign-in');
+      await renderPanel('local', 'sorbet');
+      expect(container.textContent).not.toContain('choose device sign-in');
+      await renderPanel('remote', 'codex');
+      expect(container.textContent).not.toContain('choose device sign-in');
+    } finally {
+      Reflect.deleteProperty(window, '__LODY_ELECTRON__');
+    }
   });
 
-  it('shows and exposes the device authorization actions without terminal output', async () => {
-    const onOpenAuthorization = vi.fn();
-    const onCopyUserCode = vi.fn();
-
+  it.each([
+    { progress: true, verified: true },
+    { progress: true, verified: false },
+    { progress: false, verified: true },
+  ])('handles authentication progress=$progress and verification=$verified', async ({
+    progress,
+    verified,
+  }) => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    const store = createStore();
+    const machineId = 'local' as MachineId;
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId(machineId)]: {
+        id: machineId,
+        protocolCapabilities: { acpAuthenticationInteractions: 2 },
+      } as never,
+    });
+    let onProgress:
+      | NonNullable<authenticationHook.MachineAcpAuthenticationArgs['onProgress']>
+      | undefined;
+    let resolveResponse!: (response: MachineAcpAuthenticateResponse) => void;
+    const promise = new Promise<MachineAcpAuthenticateResponse>((resolve) => {
+      resolveResponse = resolve;
+    });
+    vi.spyOn(authenticationHook, 'useMachineAcpAuthentication').mockReturnValue({
+      startAuthentication: (args) => {
+        onProgress = args.onProgress;
+        return { requestId: 'auth-1', promise };
+      },
+      cancelAuthentication: vi.fn(),
+      submitAuthorizationCode: vi.fn(),
+      submitAuthenticationInput: vi.fn(),
+    });
+    vi.spyOn(machineFlock, 'resyncMachineFlockRows').mockResolvedValue(undefined as never);
+    const onAuthenticated = vi.fn();
     await act(async () => {
       root.render(
-        <AcpAuthenticationAuthorizationView
-          provider="ChatGPT"
-          authorization={{
-            authorizationUrl: 'https://auth.openai.com/codex/device',
-            userCode: 'DQGR-SB46E',
-            expiresInSeconds: 900,
-          }}
-          authorizationCode=""
-          authorizationCodeSubmitted={false}
-          submittingAuthorizationCode={false}
-          userCodeCopied={false}
-          onOpenAuthorization={onOpenAuthorization}
-          onCopyUserCode={onCopyUserCode}
-          onAuthorizationCodeChange={vi.fn()}
-          onSubmitAuthorizationCode={vi.fn()}
-        />
+        <Provider store={store}>
+          <AcpAuthenticationPanel
+            machineId={machineId}
+            configId={'provider-1' as AgentConfigId}
+            cliType="builtin"
+            agentType="codex"
+            onAuthenticated={onAuthenticated}
+          />
+        </Provider>
       );
     });
-
-    expect(container.textContent).toContain('Finish signing in to ChatGPT');
-    expect(container.textContent).toContain('DQGR-SB46E');
-    expect(container.textContent).toContain('15 minutes');
-    expect(container.querySelector('pre')).toBeNull();
-
-    const buttons = Array.from(container.querySelectorAll('button'));
-    const openButton = buttons.find((button) => button.textContent?.includes('Open authorization'));
-    const copyButton = buttons.find((button) => button.textContent?.includes('Copy code'));
-    expect(openButton).toBeDefined();
-    expect(copyButton).toBeDefined();
-
+    const start = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Sign in with')
+    );
+    expect(start?.disabled).toBe(false);
     await act(async () => {
-      openButton?.click();
-      copyButton?.click();
+      start?.click();
     });
-    expect(onOpenAuthorization).toHaveBeenCalledOnce();
-    expect(onCopyUserCode).toHaveBeenCalledOnce();
+    const base = {
+      type: 'machine/acp-authentication-progress' as const,
+      machineId,
+      requestId: 'auth-1',
+      agentType: 'codex',
+    };
+    await act(async () => {
+      onProgress?.({
+        ...base,
+        status: 'authorization',
+        authorizationUrl: 'https://example.test',
+        requiresAuthorizationConsent: true,
+        interactionId: 'consent-1',
+      });
+    });
+    expect(container.textContent).toContain('Finish signing in');
+    if (progress) {
+      await act(async () => {
+        onProgress?.({ ...base, status: 'authenticated' });
+      });
+      expect(container.textContent).toContain('Sign-in completed. Verifying provider');
+      expect(container.textContent).not.toContain('Waiting for');
+      expect(container.textContent).not.toContain('Finish signing in');
+      expect(container.textContent).toContain('Cancel');
+    } else {
+      expect(container.textContent).toContain('Waiting for');
+    }
+    expect(onAuthenticated).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveResponse({
+        type: 'machine/acp-authenticate_response',
+        machineId,
+        requestId: 'auth-1',
+        agentType: 'codex',
+        success: true,
+        disposition: 'authenticated',
+        capabilitiesRefreshed: verified,
+        ...(!verified ? { authRequired: true, error: 'Authentication required' } : {}),
+      });
+      await promise;
+    });
+    expect(container.textContent).not.toContain('Verifying provider');
+    if (verified) {
+      expect(container.textContent).toContain('sign-in completed');
+      expect(onAuthenticated).toHaveBeenCalledOnce();
+    } else {
+      expect(container.textContent).toContain('Authentication required');
+      expect(onAuthenticated).not.toHaveBeenCalled();
+    }
   });
 
-  it('submits the Claude browser-returned code from the Lody form', async () => {
-    const onSubmitAuthorizationCode = vi.fn();
-
+  it('explains the remote return value when a code can be submitted', async () => {
     await act(async () => {
       root.render(
         <AcpAuthenticationAuthorizationView
-          provider="Claude"
+          provider="Lody Agent"
           authorization={{
-            authorizationUrl: 'https://claude.com/cai/oauth/authorize?client_id=test',
+            authorizationUrl: 'https://example.test',
             acceptsAuthorizationCode: true,
           }}
-          authorizationCode="browser-returned-code"
+          authorizationCode=""
           authorizationCodeSubmitted={false}
           submittingAuthorizationCode={false}
           userCodeCopied={false}
           onOpenAuthorization={vi.fn()}
           onCopyUserCode={vi.fn()}
           onAuthorizationCodeChange={vi.fn()}
-          onSubmitAuthorizationCode={onSubmitAuthorizationCode}
+          onSubmitAuthorizationCode={vi.fn()}
+          remoteSorbet
         />
       );
     });
+    expect(container.textContent).toContain('Paste the code or return URL');
+    expect(container.textContent).not.toContain('returning automatically');
+  });
 
-    const input = container.querySelector<HTMLInputElement>('input');
-    expect(input?.value).toBe('browser-returned-code');
-    const continueButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Continue')
-    );
-    expect(continueButton).toBeDefined();
-
-    await act(async () => {
-      continueButton?.click();
-    });
-    expect(onSubmitAuthorizationCode).toHaveBeenCalledOnce();
+  it('allows only HTTP(S) authorization pages', () => {
+    expect(isAllowedAcpAuthorizationUrl('https://provider.example.test/oauth')).toBe(true);
+    expect(isAllowedAcpAuthorizationUrl('http://127.0.0.1:8787/callback')).toBe(true);
+    expect(isAllowedAcpAuthorizationUrl('javascript:alert(1)')).toBe(false);
+    expect(isAllowedAcpAuthorizationUrl('file:///tmp/credential')).toBe(false);
+    expect(isAllowedAcpAuthorizationUrl('not a url')).toBe(false);
   });
 
   it('renders ACP method selection and submits the selected method id', async () => {

@@ -8,6 +8,9 @@ import type {
   WorkspaceId,
 } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
+import { ACP_INPUT_OUTCOME_UNKNOWN } from '../providers/acp-interaction-client';
+
+export class AcpInputOutcomeUnknownError extends Error {}
 
 export type MachineAcpAuthenticationArgs = {
   machineId: MachineId;
@@ -176,7 +179,19 @@ export function useMachineAcpAuthentication(
         authorizationCode: args.authorizationCode,
       });
       const response = await responsePromise;
-      if (!response || !response.success || response.disposition !== 'input-accepted') {
+      if (
+        !response ||
+        response.error === ACP_INPUT_OUTCOME_UNKNOWN ||
+        response.disposition === 'not-running'
+      ) {
+        throw new AcpInputOutcomeUnknownError(
+          t(
+            'agents.authentication.inputOutcomeUnknown',
+            'The response may have been received. Wait for sign-in to finish or cancel and start again.'
+          )
+        );
+      }
+      if (!response.success || response.disposition !== 'input-accepted') {
         throw new Error(
           response?.error ??
             t(
@@ -211,7 +226,19 @@ export function useMachineAcpAuthentication(
         authenticationInput: JSON.stringify(args.input),
       });
       const response = await responsePromise;
-      if (!response || !response.success || response.disposition !== 'input-accepted') {
+      if (
+        !response ||
+        response.error === ACP_INPUT_OUTCOME_UNKNOWN ||
+        response.disposition === 'not-running'
+      ) {
+        throw new AcpInputOutcomeUnknownError(
+          t(
+            'agents.authentication.inputOutcomeUnknown',
+            'The response may have been received. Wait for sign-in to finish or cancel and start again.'
+          )
+        );
+      }
+      if (!response.success || response.disposition !== 'input-accepted') {
         throw new Error(
           response?.error ??
             t(

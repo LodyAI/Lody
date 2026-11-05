@@ -1,9 +1,18 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
+
 import type { CodeCollabAllChangesScope, MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { isSymbolFontFamily } from '@/lib/local-fonts';
 import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
+
+/** Automatically load external HTTPS images in GitHub review content on this device. */
+export const prRemoteImagesEnabledAtom = atomWithStorage<boolean>(
+  'lody-pr-remote-images-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
 
 export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 'en');
 
@@ -296,19 +305,6 @@ export const e2eeWorkspaceCreationFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(e2eeWorkspaceCreationEnabledAtom)
 );
 
-/** Shows account-wide personal device pairing where the host implements it. The
- * existing per-workspace pairing stays available either way. */
-export const e2eeAccountPairingEnabledAtom = atomWithStorage<boolean>(
-  'lody-e2ee-account-pairing-enabled',
-  false,
-  undefined,
-  { getOnInit: true }
-);
-
-export const e2eeAccountPairingFeatureEnabledAtom = atom(
-  (get) => get(developerModeEnabledAtom) && get(e2eeAccountPairingEnabledAtom)
-);
-
 export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
   'lody-semantic-shortcuts-beta-enabled',
   false,
@@ -350,4 +346,15 @@ export const roostHistoryExperimentEnabledAtom = atomWithStorage<boolean>(
 /** The single gate for selecting Roost when a new session is accepted. */
 export const roostHistoryFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(roostHistoryExperimentEnabledAtom)
+);
+
+export const lodyAgentBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-agent-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const lodyAgentFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(lodyAgentBetaEnabledAtom)
 );

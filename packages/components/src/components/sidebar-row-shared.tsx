@@ -404,8 +404,8 @@ export function SessionPrIcon({
           ? CircleDot
           : null;
 
-  if (verdict && (VerdictIcon || verdict === 'pending')) {
-    return (
+  const mark =
+    verdict && (VerdictIcon || verdict === 'pending') ? (
       <MaskedPrCiIcon
         BaseIcon={BaseIcon}
         VerdictIcon={VerdictIcon}
@@ -418,19 +418,32 @@ export function SessionPrIcon({
           className
         )}
       />
+    ) : (
+      <BaseIcon
+        className={cn(
+          compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
+          'shrink-0',
+          meta.iconColorClassName,
+          className
+        )}
+        strokeWidth={2.25}
+        aria-hidden="true"
+      />
     );
-  }
+
+  // Sidebar rows park this mark in `SidebarRowEndSlot`, which centers anything
+  // narrower than its 20px reserve (`min-w-5`, the archive target). A Mergeable
+  // pill widens that cluster past 20px, the centering inset disappears, and the
+  // mark slides to the trailing edge. Hold the compact mark in a box the same
+  // size as the reserve so the pill grows to the left and the mark stays put.
+  if (!compact) return mark;
   return (
-    <BaseIcon
-      className={cn(
-        compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
-        'shrink-0',
-        meta.iconColorClassName,
-        className
-      )}
-      strokeWidth={2.25}
-      aria-hidden="true"
-    />
+    <span
+      data-session-pr-icon-anchor=""
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center"
+    >
+      {mark}
+    </span>
   );
 }
 
@@ -657,8 +670,12 @@ export function SidebarRowArchiveButton({
 /**
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
  *
- * In a single-line row, activity replaces the resting content. When the PR
- * rests on a second line, activity occupies the title line independently.
+ * A working / waiting / unread session shows only its status mark here: the
+ * resting content (`Mergeable`, worktree glyph, PR icon, time) is
+ * dropped for as long as the status lasts. That is deliberate — the status is the
+ * fact the user is watching, the metrics are still one hover away in the desktop
+ * info card, and collapsing them keeps the right edge to a single 14px mark
+ * instead of a cluster that competes with it and eats the title.
  *
  * Archive is absolutely overlaid on hover, so a wide rest cluster never causes
  * layout movement. When the rest content is absent but Archive is available, it still
@@ -671,8 +688,6 @@ export function SidebarRowEndSlot({
   hasUnreadMessages,
   restIcon,
   archive,
-  interactiveRest = false,
-  restOnSecondLine = false,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
   fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
 }: {
@@ -686,21 +701,18 @@ export function SidebarRowEndSlot({
   hasUnreadMessages?: boolean;
   restIcon?: ReactNode;
   archive?: ReactNode;
-  interactiveRest?: boolean;
-  restOnSecondLine?: boolean;
   fadeClassName?: string;
 }) {
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
   const sendLabel = useSessionSendLabel(sendStatus);
-  const hasStatus = hasSessionRowStatus({
+  const restContent = hasSessionRowStatus({
     isWaitingPermission,
     isWorking: drawWorking,
     hasUnreadMessages,
     sendState: sendStatus?.state,
-  });
-  const statusContent = hasStatus ? (
+  }) ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
       isWorking={drawWorking}
@@ -709,9 +721,10 @@ export function SidebarRowEndSlot({
       sendProgress={sendStatus && sendStatus.totalBytes > 0 ? sendStatus.progress : undefined}
       sendLabel={sendLabel}
     />
-  ) : null;
-  const restContent = hasStatus ? statusContent : restIcon;
-  const hasRest = Boolean(restOnSecondLine ? restIcon || statusContent : restContent);
+  ) : (
+    restIcon
+  );
+  const hasRest = Boolean(restContent);
   // Reserve the action hit target whenever something can occupy it; otherwise the
   // slot sizes to its resting content (for example, a PR icon).
   const reserve = hasRest || Boolean(archive);
@@ -721,26 +734,15 @@ export function SidebarRowEndSlot({
     <div
       data-session-row-end-slot=""
       className={cn(
-        'relative flex shrink-0 justify-center pointer-events-none',
-        restOnSecondLine ? 'h-full items-end' : 'h-5 items-center',
-        reserve ? 'min-w-5' : 'w-0',
-        interactiveRest && archive && !restOnSecondLine && 'pr-5'
+        'relative flex h-5 shrink-0 items-center justify-center pointer-events-none',
+        reserve ? 'min-w-5' : 'w-0'
       )}
     >
-      {restOnSecondLine && statusContent ? (
-        <span className="pointer-events-none absolute right-0 top-0 flex h-5 items-center">
-          {statusContent}
-        </span>
-      ) : null}
-      {hasRest && (restOnSecondLine ? restIcon : restContent) ? (
+      {hasRest ? (
         <span
-          className={cn(
-            restOnSecondLine ? 'flex min-h-6 items-center' : 'flex',
-            interactiveRest && 'pointer-events-auto relative z-20',
-            archive && !interactiveRest && cn('transition-opacity duration-100', fadeClassName)
-          )}
+          className={cn('flex', archive && cn('transition-opacity duration-100', fadeClassName))}
         >
-          {restOnSecondLine ? restIcon : restContent}
+          {restContent}
         </span>
       ) : null}
       {archive}
@@ -1014,12 +1016,7 @@ export function SidebarBranchSegment({ branchName }: { branchName?: string | nul
   return (
     <span className="flex min-w-0 items-center gap-1">
       <GitBranch className="h-3 w-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-      <span className="flex min-w-0 overflow-hidden" title={branch}>
-        <span className="min-w-0 truncate">{branch.slice(0, Math.ceil(branch.length / 2))}</span>
-        <span className="min-w-0 truncate" style={{ direction: 'rtl', textAlign: 'left' }}>
-          {branch.slice(Math.ceil(branch.length / 2))}
-        </span>
-      </span>
+      <span className="min-w-0 truncate">{branch}</span>
     </span>
   );
 }

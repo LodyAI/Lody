@@ -17,6 +17,43 @@ const NO_TOKEN_STORAGE = {
   removeItem: () => {},
 };
 
+/**
+ * Settles with `work`, or rejects with the first abort reason. The caller abandons
+ * an uncancellable host call; its late result or rejection is handled and dropped.
+ */
+function untilAborted<A>(
+  work: Promise<A>,
+  signals: ReadonlyArray<AbortSignal | null | undefined>
+): Promise<A> {
+  const owned = signals.filter((signal): signal is AbortSignal => signal != null);
+  return new Promise<A>((resolve, reject) => {
+    const detach = () => {
+      for (const signal of owned) signal.removeEventListener('abort', onAbort);
+    };
+    function onAbort(this: AbortSignal) {
+      detach();
+      reject(this.reason);
+    }
+    const aborted = owned.find((signal) => signal.aborted);
+    if (aborted) {
+      work.catch(() => {});
+      reject(aborted.reason);
+      return;
+    }
+    for (const signal of owned) signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (value) => {
+        detach();
+        resolve(value);
+      },
+      (error) => {
+        detach();
+        reject(error);
+      }
+    );
+  });
+}
+
 /** Shared purpose-bound providers. Keys and credentials stay inside the injected host runtime. */
 export function createE2eeContent(input: {
   runtime: E2eeWorkspaceRuntime;
@@ -218,8 +255,11 @@ export function createE2eeContent(input: {
       // the host, and every mint re-checks the host's current admission.
       storage: NO_TOKEN_STORAGE,
       fetchImpl: async (_url, init) => {
-        // No native combined-signal API is needed: this adapter only checks
-        // cancellation before/after the owned host call, rather than passing it on.
+        // No native combined-signal API is needed (AbortSignal.any is optional).
+        // The host call is an Electron IPC invoke with no cancellation channel and
+        // can queue behind other account work longer than the token kernel's
+        // release bound. On abort this adapter therefore settles at once and
+        // abandons the host answer: no token, bucket or storage write leaves it.
         const assertActive = () => {
           assertOpen();
           signal.throwIfAborted();
@@ -229,8 +269,8 @@ export function createE2eeContent(input: {
         const request = LoroStreamsTokenRequestSchema.parse(JSON.parse(String(init?.body)));
         if (request.workspaceId !== input.workspaceId)
           throw new Error('e2ee_content_configuration');
-        const response = await (
-          rpcOnly
+        const response = await untilAborted(
+          (rpcOnly
             ? input.runtime.contentStreamsToken(
                 input.workspaceId,
                 request.rejectedToken,
@@ -238,10 +278,13 @@ export function createE2eeContent(input: {
                 true
               )
             : input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken)
-        ).catch((error) => {
-          observeRemoval(error);
-          throw error;
-        });
+          ).catch((error) => {
+            // Access loss stays observed even when this request was abandoned.
+            observeRemoval(error);
+            throw error;
+          }),
+          [signal, init?.signal]
+        );
         assertActive();
         if (
           !response.bucketId ||

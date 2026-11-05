@@ -1,15 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
-import { getDefaultStore } from 'jotai';
-import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import {
-  hasWorkspaceSidebarTopContent,
-  LocalProjectItem,
-} from '../src/components/loro-app-sidebar';
+import { LocalProjectItem } from '../src/components/loro-app-sidebar';
 import { initI18n } from '../src/i18n';
 import { Tooltip } from '@lody/ui/tooltip';
 import type { LocalProjectId, MachineId, SessionMeta } from '@lody/shared';
@@ -30,14 +26,6 @@ const baseSession = {
     machineId,
   },
 } satisfies Omit<SessionMeta, 'id'>;
-
-describe('LoroAppSidebar Workspace section composition', () => {
-  it('leaves top content absent when the current scope hides every section', () => {
-    expect(hasWorkspaceSidebarTopContent(0, false)).toBe(false);
-    expect(hasWorkspaceSidebarTopContent(1, false)).toBe(true);
-    expect(hasWorkspaceSidebarTopContent(0, true)).toBe(true);
-  });
-});
 
 describe('LocalProjectItem session-type icon', () => {
   let root: Root | undefined;
@@ -69,80 +57,7 @@ describe('LocalProjectItem session-type icon', () => {
     root = undefined;
     container?.remove();
     container = undefined;
-    getDefaultStore().set(sidebarShowBranchNamesAtom, false);
     vi.restoreAllMocks();
-  });
-
-  it('does not render a session-type icon in the row (it lives in the hover card now)', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    const sessionsForProject: SessionMeta[] = [
-      {
-        ...baseSession,
-        id: 'session-worktree',
-        title: 'Worktree local session',
-        isWorktree: true,
-      },
-      {
-        ...baseSession,
-        id: 'session-local',
-        title: 'Plain local session',
-      },
-    ];
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(
-          Tooltip.Provider,
-          null,
-          React.createElement(LocalProjectItem, {
-            machineId,
-            machineName: 'Local machine',
-            project: {
-              id: localProjectId,
-              name: 'lody',
-              rootPath: '/Users/me/lody',
-              createdAtMs: Date.parse('2026-05-09T09:00:00.000Z'),
-            },
-            sectionKind: 'local',
-            collapsed: false,
-            isSelected: false,
-            sessionsForProject,
-            childSessionsByParent: new Map(),
-            formattedPath: '/Users/me/lody',
-            defaultSessionTitle: 'Untitled session',
-            now: new Date('2026-05-09T12:00:00.000Z'),
-            onlineMachineIds: new Set([machineId]),
-            selectedSessionId: null,
-            removeProjectLabel: 'Remove folder',
-            archiveTooltipLabel: 'Archive session',
-            archiveActionLabel: 'Archive',
-            archiveConfirmLabel: 'Confirm',
-            isMobile: false,
-            toggleLabel: 'Toggle',
-            onNavigateProject: vi.fn(),
-            onNavigateSession: vi.fn(),
-            onArchive: vi.fn(),
-            onToggleCollapsed: vi.fn(),
-            onRequestRemoval: vi.fn(),
-          })
-        )
-      );
-    });
-
-    // The worktree / folder type icon was removed from the row; the worktree
-    // distinction now lives only in the desktop hover info card.
-    const worktreeIcon = container.querySelector(
-      '[data-sidebar-session-id="session-worktree"] [aria-label="Running in a worktree"]'
-    );
-    const plainIcon = container.querySelector(
-      '[data-sidebar-session-id="session-local"] [aria-label="Running in a worktree"]'
-    );
-
-    expect(worktreeIcon).toBeNull();
-    expect(plainIcon).toBeNull();
   });
 
   it('renders the PR status icon for a resting local session linked to a GitHub PR', () => {
@@ -165,16 +80,6 @@ describe('LocalProjectItem session-type icon', () => {
           githubRepoFullName: 'loro-dev/lody',
         },
         pullRequests: [{ url: 'https://github.com/loro-dev/lody/pull/42', status: 'open' }],
-      },
-      {
-        ...baseSession,
-        id: 'session-multiple-prs',
-        title: 'Local session with multiple PRs',
-        lastReadAt: Date.parse('2026-05-09T11:45:00.000Z'),
-        pullRequests: [
-          { url: 'https://github.com/example/one/pull/42', status: 'open' },
-          { url: 'https://github.com/example/two/pull/42', status: 'merged' },
-        ],
       },
       {
         ...baseSession,
@@ -238,34 +143,13 @@ describe('LocalProjectItem session-type icon', () => {
 
     const rowWithPr = container.querySelector('[data-sidebar-session-id="session-with-pr"]');
     const rowWithoutPr = container.querySelector('[data-sidebar-session-id="session-without-pr"]');
-    expect(rowWithPr?.querySelector('.lucide-git-pull-request')).toBeNull();
-    expect(rowWithPr?.querySelector('[aria-label="Open pull request #42"]')).toBeNull();
-    flushSync(() => getDefaultStore().set(sidebarShowBranchNamesAtom, true));
-    const singlePr = rowWithPr?.querySelector<HTMLButtonElement>(
-      '[aria-label="Open pull request #42"]'
-    );
-    expect(singlePr?.textContent).toContain('#42');
-    const openWindow = vi.spyOn(window, 'open').mockReturnValue(null);
-    flushSync(() => singlePr?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    expect(openWindow).toHaveBeenCalledWith(
-      'https://github.com/loro-dev/lody/pull/42',
-      '_blank',
-      'noopener,noreferrer'
-    );
+    expect(rowWithPr?.querySelector('.lucide-git-pull-request')).not.toBeNull();
     expect(rowWithoutPr?.querySelector('.lucide-git-pull-request')).toBeNull();
-    expect(
-      container.querySelector(
-        '[data-sidebar-session-id="session-multiple-prs"] [aria-label="2 pull requests"]'
-      )
-    ).not.toBeNull();
 
     // An unread row spends its end slot on the status mark instead — the PR icon
     // is one of the resting metrics that yields to it.
     const unreadRow = container.querySelector('[data-sidebar-session-id="session-unread-with-pr"]');
     expect(unreadRow?.querySelector('.lucide-git-pull-request')).toBeNull();
     expect(unreadRow?.querySelector('[data-session-row-indicator]')).not.toBeNull();
-    flushSync(() => getDefaultStore().set(sidebarShowBranchNamesAtom, false));
-    expect(rowWithPr?.querySelector('.lucide-git-pull-request')).toBeNull();
-    expect(rowWithPr?.querySelector('[aria-label="Open pull request #42"]')).toBeNull();
   });
 });

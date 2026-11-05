@@ -1,0 +1,118 @@
+name: E2EE acceptance
+
+# Run explicitly for E2EE changes or runtime/browser compatibility verification.
+# Ordinary package tests remain in CI; these additional acceptance jobs do not
+# run on PRs or main pushes and are not dependencies of the required Tests check.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2ee-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.23.4'
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+
+jobs:
+  e2ee-signature-vectors:
+    name: E2EE signatures (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Node 22 already runs these vectors in the ordinary package suite.
+        node: ['24.22.1', '26.12.1']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Set up workspace toolchain
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      # These fixed vectors use WebCrypto and pure TS only. No native SQLite
+      # build or product lifecycle scripts are needed on the additional runtime.
+      - name: Install signature-vector dependencies
+        run: pnpm --filter @lody/e2ee-core... install --frozen-lockfile --ignore-scripts
+      - name: Compare pure and native strict verification
+        run: pnpm --filter @lody/e2ee-core exec vitest run test/foundation.test.ts -t 'strict Ed25519 subgroup-edge vectors' --maxWorkers=2
+
+  e2ee-browser-crypto:
+    name: E2EE browser crypto
+    # Playwright 1.58.2 supports this image and installs both browser engines.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Set up workspace toolchain
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install crypto acceptance dependencies
+        run: pnpm --filter @lody/e2ee-core... install --frozen-lockfile --ignore-scripts
+      - name: Install Chromium and WebKit
+        run: pnpm --filter @lody/e2ee-core exec playwright install --with-deps chromium webkit
+      - name: Verify browser bundle and fixed crypto without native curves or WASM
+        run: pnpm --filter @lody/e2ee-core test:browser-crypto
+
+  e2ee-browser-idb:
+    name: E2EE browser IndexedDB
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Set up workspace toolchain
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install storage acceptance dependencies
+        run: pnpm --filter @lody/e2ee-core... install --frozen-lockfile --ignore-scripts
+      - name: Install Chromium and WebKit
+        run: pnpm --filter @lody/e2ee-core exec playwright install --with-deps chromium webkit
+      - name: Verify IndexedDB persistence, CAS and failure rollback
+        run: pnpm --filter @lody/e2ee-core test:browser-idb
+
+  e2ee-browser-custody:
+    name: E2EE browser custody
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Set up workspace toolchain
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install custody acceptance dependencies
+        # Cache/logout regression bundles the real component implementations.
+        run: pnpm --filter @lody/e2ee-client... --filter @lody/components... install --frozen-lockfile --ignore-scripts
+      - name: Install Chromium and WebKit
+        run: pnpm --filter @lody/e2ee-core exec playwright install --with-deps chromium webkit
+      - name: Verify persisted KEK, installation recovery, journals and exclusion
+        run: pnpm --filter @lody/e2ee-core test:browser-custody
+
+      - name: Build shared RPC schema dependencies
+        run: |
+          pnpm --filter acp-extension-core build
+          pnpm --filter acp-extension-dsh build
+
+      - name: Verify portable personal host and immutable client originals
+        run: pnpm --filter @lody/e2ee-client test:browser

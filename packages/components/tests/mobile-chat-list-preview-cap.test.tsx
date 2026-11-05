@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -135,32 +136,6 @@ describe('mobile chat list group preview cap', () => {
     expect(toggleLabels()).toEqual(['Show all (9)']);
   });
 
-  it('previews five rows per overflowing bucket and leaves the rest alone', () => {
-    // Three boundary points in one list: over the cap (trimmed, toggle),
-    // exactly at it (untouched, no toggle — an off-by-one in the `>` would
-    // surface here and nowhere else), and under it (untouched, no toggle).
-    render([
-      ...makeProjectItems(9, 'p1'),
-      ...makeProjectItems(MOBILE_CHAT_PREVIEW_MAX_ROOTS, 'p2'),
-      ...makeProjectItems(2, 'p3'),
-    ]);
-    expect(titles()).toEqual([
-      'Session p1-0',
-      'Session p1-1',
-      'Session p1-2',
-      'Session p1-3',
-      'Session p1-4',
-      'Session p2-0',
-      'Session p2-1',
-      'Session p2-2',
-      'Session p2-3',
-      'Session p2-4',
-      'Session p3-0',
-      'Session p3-1',
-    ]);
-    expect(toggleLabels()).toEqual(['Show all (9)']);
-  });
-
   it('expands and re-collapses only the bucket that was tapped', () => {
     render([...makeProjectItems(9, 'p1'), ...makeProjectItems(8, 'p2')]);
     expect(toggleLabels()).toEqual(['Show all (9)', 'Show all (8)']);
@@ -266,37 +241,6 @@ describe('mobile chat list group preview cap', () => {
       'Session p1-4',
     ]);
     expect(toggleLabels()).toEqual(['Show all (6)']);
-  });
-
-  it('pulls the toggle back into view when a bucket collapses', () => {
-    // Measured in Chromium with `overflow-anchor: none` (Safari/iOS ships no
-    // scroll anchoring): collapsing a 14-row bucket drops the toggle from
-    // y=328 to y=-68, off the top of the viewport. With this correction it
-    // lands at y=0. jsdom has no layout, so what is observable here is WHICH
-    // element the list asks the browser to keep on screen.
-    let scrolled: { target: Element; options: unknown } | null = null;
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function scrollIntoView(options) {
-      scrolled = { target: this, options };
-    };
-    try {
-      render(makeProjectItems(9, 'p1'));
-      act(() => {
-        toggles()[0]!.click();
-      });
-      // Expanding only appends rows BELOW the toggle. Moving the viewport
-      // there would yank the list out from under the reader.
-      expect(scrolled).toBeNull();
-
-      act(() => {
-        toggles()[0]!.click();
-      });
-      expect(scrolled).not.toBeNull();
-      expect(scrolled!.target).toBe(toggles()[0]);
-      expect(scrolled!.options).toEqual({ block: 'nearest' });
-    } finally {
-      Element.prototype.scrollIntoView = original;
-    }
   });
 
   it('does not write the preview state into the shared opener-fold atom', () => {

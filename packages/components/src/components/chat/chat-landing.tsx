@@ -6995,11 +6995,18 @@ function WorkspaceChatLanding({
             <MobileCreateWorkspaceSheet
               open={mobileCreateWorkspaceOpen}
               onOpenChange={setMobileCreateWorkspaceOpen}
-              onCreated={(createdSlug) => {
-                void navigate({
-                  to: '/$workspaceName/chat',
-                  params: { workspaceName: createdSlug },
-                });
+              onCreated={(createdSlug, createdWorkspaceId) => {
+                void navigate(
+                  createdWorkspaceId
+                    ? {
+                        to: '/workspace/e2ee/$workspaceId',
+                        params: { workspaceId: createdWorkspaceId },
+                      }
+                    : {
+                        to: '/$workspaceName/chat',
+                        params: { workspaceName: createdSlug },
+                      }
+                );
               }}
             />
           </>

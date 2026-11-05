@@ -8,6 +8,10 @@ import {
 } from '@lody/shared';
 import { getAndroidEmulatorViewerSecretContext } from './rpc-secret';
 import { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
+import {
+  SessionWithdrawInputResponseSchema,
+  type SessionWithdrawInputResponse,
+} from '@lody/shared/local-machine-rpc';
 import { isE2eeReadQuery, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
 import {
   SessionFileRootIdSchema,
@@ -301,6 +305,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'file/download-chunk',
   'session/cancel',
   'session/live-status',
+  'session/withdraw-input',
   'session/steer',
   'session/goal',
   'session/terminate',
@@ -347,7 +352,7 @@ const BaseRpcRequestSchema = z
 
 export const LoroMachineStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/status'),
-  params: z.object({}).strict(),
+  params: z.object({ includeDisk: z.literal(true).optional() }).strict(),
 }).strict();
 
 export const LoroMachinePreviewControlRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -615,6 +620,19 @@ export const LoroSessionLiveStatusRpcRequestSchema = BaseRpcRequestSchema.extend
   params: z
     .object({
       sessionId: z.string().trim().min(1),
+      includeActivity: z.literal(true).optional(),
+    })
+    .strict(),
+}).strict();
+
+export const LoroSessionWithdrawInputRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/withdraw-input'),
+  params: z
+    .object({
+      sessionId: z.string().trim().min(1),
+      userTurnId: z.string().trim().min(1),
+      requesterSessionId: z.string().trim().min(1),
+      userId: z.string().trim().min(1),
     })
     .strict(),
 }).strict();
@@ -848,6 +866,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroFileDownloadRpcRequestSchema,
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
+  LoroSessionWithdrawInputRpcRequestSchema,
   LoroSessionSteerRpcRequestSchema,
   LoroSessionGoalRpcRequestSchema,
   LoroSessionTerminateRpcRequestSchema,
@@ -971,6 +990,9 @@ export type LoroCodeCollabV2LspReferencesRpcRequest = z.infer<
 export type LoroFilePreviewRpcRequest = z.infer<typeof LoroFilePreviewRpcRequestSchema>;
 export type LoroSessionCancelRpcRequest = z.infer<typeof LoroSessionCancelRpcRequestSchema>;
 export type LoroSessionLiveStatusRpcRequest = z.infer<typeof LoroSessionLiveStatusRpcRequestSchema>;
+export type LoroSessionWithdrawInputRpcRequest = z.infer<
+  typeof LoroSessionWithdrawInputRpcRequestSchema
+>;
 export type LoroSessionTerminateRpcRequest = z.infer<typeof LoroSessionTerminateRpcRequestSchema>;
 export type LoroSessionForkRpcRequest = z.infer<typeof LoroSessionForkRpcRequestSchema>;
 export type LoroSessionEditAndResendRpcRequest = z.infer<
@@ -1699,6 +1721,7 @@ export type LoroMachineRpcResult =
   | MachineBugReportResponse
   | SessionCancelResponse
   | LoroSessionLiveStatusRpcResponse
+  | SessionWithdrawInputResponse
   | SessionSteerResponse
   | SessionGoalResponse
   | SessionTerminateResponse
@@ -1902,6 +1925,16 @@ const toLegacyRpcErrorResponse = (
       success: false,
       error: `${error.code}: ${error.message}`,
     };
+  }
+
+  if (method === 'session/withdraw-input') {
+    return {
+      type: 'session/withdraw-input_response',
+      sessionId: cancelContext?.sessionId ?? 'unknown',
+      userTurnId: 'unknown',
+      outcome: 'error',
+      error: `${error.code}: ${error.message}`,
+    } satisfies SessionWithdrawInputResponse;
   }
 
   if (method === 'session/live-status') {
@@ -2191,6 +2224,10 @@ const parseRpcSuccessResult = async (
   }
   if (response.method === 'session/live-status') {
     const parsed = LoroSessionLiveStatusRpcResponseSchema.safeParse(response.result);
+    return parsed.success ? parsed.data : null;
+  }
+  if (response.method === 'session/withdraw-input') {
+    const parsed = SessionWithdrawInputResponseSchema.safeParse(response.result);
     return parsed.success ? parsed.data : null;
   }
   if (response.method === 'session/steer') {
@@ -2931,11 +2968,13 @@ export class LoroStreamsMachineRpcClient {
 
   async requestMachineStatus(options?: {
     timeoutMs?: number;
+    /** Only for daemons advertising `machineDiskStatus`; older ones reject it. */
+    includeDisk?: boolean;
   }): Promise<MachineStatusResponse | null> {
     return (await this.sendRequest({
       method: 'machine/status',
       timeoutMs: options?.timeoutMs ?? 30_000,
-      params: {},
+      params: options?.includeDisk ? { includeDisk: true as const } : {},
     })) as MachineStatusResponse | null;
   }
 
@@ -3305,12 +3344,37 @@ export class LoroStreamsMachineRpcClient {
   async requestSessionLiveStatus(options: {
     sessionId: string;
     timeoutMs?: number;
+    /** Only for daemons advertising `sessionLiveActivity`; older ones reject it. */
+    includeActivity?: boolean;
   }): Promise<LoroSessionLiveStatusRpcResponse | null> {
     return (await this.sendRequest({
       method: 'session/live-status',
       timeoutMs: options.timeoutMs ?? 10_000,
-      params: { sessionId: options.sessionId },
+      params: {
+        sessionId: options.sessionId,
+        ...(options.includeActivity ? { includeActivity: true as const } : {}),
+      },
     })) as LoroSessionLiveStatusRpcResponse | null;
+  }
+
+  /** Only for daemons advertising `sessionInputWithdraw`. */
+  async requestSessionWithdrawInput(options: {
+    sessionId: string;
+    userTurnId: string;
+    requesterSessionId: string;
+    userId: string;
+    timeoutMs?: number;
+  }): Promise<SessionWithdrawInputResponse | null> {
+    return (await this.sendRequest({
+      method: 'session/withdraw-input',
+      timeoutMs: options.timeoutMs ?? 10_000,
+      params: {
+        sessionId: options.sessionId,
+        userTurnId: options.userTurnId,
+        requesterSessionId: options.requesterSessionId,
+        userId: options.userId,
+      },
+    })) as SessionWithdrawInputResponse | null;
   }
 
   async requestSessionSteer(options: {
@@ -3839,7 +3903,12 @@ export class LoroStreamsMachineRpcClient {
   private async sendRequest(
     args:
       | {
-          method: 'machine/status' | 'machine/preview-control' | 'machine/automation-control';
+          method: 'machine/status';
+          timeoutMs: number;
+          params: { includeDisk?: true };
+        }
+      | {
+          method: 'machine/preview-control' | 'machine/automation-control';
           timeoutMs: number;
           params: {};
         }
@@ -3951,6 +4020,16 @@ export class LoroStreamsMachineRpcClient {
           timeoutMs: number;
           params: {
             sessionId: string;
+          };
+        }
+      | {
+          method: 'session/withdraw-input';
+          timeoutMs: number;
+          params: {
+            sessionId: string;
+            userTurnId: string;
+            requesterSessionId: string;
+            userId: string;
           };
         }
       | {
@@ -4237,6 +4316,7 @@ export class LoroStreamsMachineRpcClient {
       cancelContext:
         args.method === 'session/cancel' ||
         args.method === 'session/live-status' ||
+        args.method === 'session/withdraw-input' ||
         args.method === 'session/terminate'
           ? { sessionId: args.params.sessionId }
           : undefined,
@@ -4351,6 +4431,13 @@ export class LoroStreamsMachineRpcClient {
       let request: LoroStreamsRpcRequest;
       switch (args.method) {
         case 'machine/status':
+          // Forward only the capability-gated flag; older daemons get the empty params.
+          request = {
+            ...envelope,
+            method: args.method,
+            params: args.params.includeDisk ? { includeDisk: true } : {},
+          };
+          break;
         case 'machine/preview-control':
         case 'machine/automation-control':
           request = { ...envelope, method: args.method, params: {} };
@@ -4390,6 +4477,9 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/live-status':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'session/withdraw-input':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/steer':

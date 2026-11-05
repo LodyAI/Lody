@@ -22,10 +22,12 @@ import {
 } from '@lody/shared';
 
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
+import { localMachineIdAtom, localProbeAttemptedAtom } from '@/atoms/local-probe';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { useAtomValue } from 'jotai';
 import {
+  AcpInputOutcomeUnknownError,
   useMachineAcpAuthentication,
   type MachineAcpAuthenticationArgs,
 } from '@/hooks/use-machine-acp-authentication';
@@ -126,7 +128,7 @@ const styles = stylex.create({
   methodDescription: { fontSize: '12px', lineHeight: 1.375, color: colors.secondaryLabel },
 });
 
-type AuthenticationPhase = 'idle' | 'running' | 'authenticated' | 'cancelled' | 'error';
+type AuthenticationPhase = 'idle' | 'running' | 'verifying' | 'authenticated' | 'cancelled' | 'error';
 export type AcpAuthorizationDetails = Pick<
   MachineAcpAuthenticationProgressMessage,
   | 'authorizationUrl'
@@ -224,6 +226,13 @@ export function AcpAuthenticationPanel({
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const machine = useAtomValue(getMachineMetaByIdAtomFamily(machineId ?? undefined));
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const localProbeAttempted = useAtomValue(localProbeAttemptedAtom);
+  const remoteSorbet =
+    cliType === 'builtin' &&
+    agentType === 'sorbet' &&
+    !!machineId &&
+    (!isElectronRenderer() || (localProbeAttempted && machineId !== localMachineId));
   const interactiveProtocolSupported =
     machineSupportsAcpAuthenticationInteractionsProtocol(machine);
   /** The agent's `initialize` response owns the list; a pick is only a hint. */
@@ -243,6 +252,7 @@ export function AcpAuthenticationPanel({
   const [submittingInteraction, setSubmittingInteraction] = useState(false);
   const [authorizationCode, setAuthorizationCode] = useState('');
   const [authorizationCodeSubmitted, setAuthorizationCodeSubmitted] = useState(false);
+  const [authorizationCodeUnknown, setAuthorizationCodeUnknown] = useState(false);
   const [submittingAuthorizationCode, setSubmittingAuthorizationCode] = useState(false);
   const [userCodeCopied, setUserCodeCopied] = useState(false);
   const [runtimeDownload, setRuntimeDownload] = useState<RuntimeDownloadProgress | null>(null);
@@ -298,7 +308,9 @@ export function AcpAuthenticationPanel({
   // Terminal methods need a real interactive terminal, and `env_var` is
   // deprecated: only agent-driven methods can run over Machine RPC.
   const advertisedMethods = useMemo(() => {
-    const methods: AcpAuthMethodSummary[] = discoveredAuthMethods ?? cachedAuthMethods ?? [];
+    // The capability row is written by every probe, including one that stops at
+    // authentication, so it is never older than a discovery held in this component.
+    const methods: AcpAuthMethodSummary[] = cachedAuthMethods ?? discoveredAuthMethods ?? [];
     return methods.filter(
       (method): method is AcpAuthMethodSummary & { id: string } =>
         method.type === 'agent' && !!method.id
@@ -351,6 +363,7 @@ export function AcpAuthenticationPanel({
     setSubmittingInteraction(false);
     setAuthorizationCode('');
     setAuthorizationCodeSubmitted(false);
+    setAuthorizationCodeUnknown(false);
     setSubmittingAuthorizationCode(false);
     discoveryTargetRef.current = null;
     setDiscoveredAuthMethods(undefined);
@@ -427,7 +440,7 @@ export function AcpAuthenticationPanel({
   };
 
   const startAuthenticationFromPersistedConfig = async (methodId?: string): Promise<void> => {
-    if (!authArgs || phase === 'running' || !interactiveProtocolSupported) {
+    if (!authArgs || phase === 'running' || phase === 'verifying' || !interactiveProtocolSupported) {
       return;
     }
     closePendingAuthorizationWindow();
@@ -449,6 +462,7 @@ export function AcpAuthenticationPanel({
     setSubmittingInteraction(false);
     setAuthorizationCode('');
     setAuthorizationCodeSubmitted(false);
+    setAuthorizationCodeUnknown(false);
     setSubmittingAuthorizationCode(false);
     setUserCodeCopied(false);
     setRuntimeDownload(null);
@@ -550,6 +564,16 @@ export function AcpAuthenticationPanel({
             )
           );
           setAuthorization(null);
+        } else if (progress.status === 'authenticated') {
+          closePendingAuthorizationWindow();
+          interactionIdRef.current = null;
+          setAuthorization(null);
+          setInteraction(null);
+          setFormValues({});
+          setAuthorizationCode('');
+          setRuntimeDownload(null);
+          setError(null);
+          setPhase('verifying');
         } else if (progress.status === 'cancelled') {
           closePendingAuthorizationWindow();
           interactionIdRef.current = null;
@@ -748,6 +772,11 @@ export function AcpAuthenticationPanel({
         activeAuthenticationRef.current?.requestId === active.requestId &&
         interactionIdRef.current === interactionId
       ) {
+        if (nextError instanceof AcpInputOutcomeUnknownError) {
+          interactionIdRef.current = null;
+          setInteraction(null);
+          setFormValues({});
+        }
         setError(nextError instanceof Error ? nextError.message : String(nextError));
       }
     } finally {
@@ -779,6 +808,10 @@ export function AcpAuthenticationPanel({
       }
     } catch (nextError) {
       if (activeAuthenticationRef.current?.requestId === active.requestId) {
+        if (nextError instanceof AcpInputOutcomeUnknownError) {
+          setAuthorizationCode('');
+          setAuthorizationCodeUnknown(true);
+        }
         setError(nextError instanceof Error ? nextError.message : String(nextError));
       }
     } finally {
@@ -817,20 +850,25 @@ export function AcpAuthenticationPanel({
   // action, so the reader picks the method instead of discovering the choice
   // only after a sign-in attempt has already started.
   const showAdvertisedMethods =
-    advertisedMethods.length > 0 && codexAuthMode !== 'api-key' && phase !== 'running';
+    advertisedMethods.length > 0 &&
+    codexAuthMode !== 'api-key' &&
+    phase !== 'running' &&
+    phase !== 'verifying';
 
   return (
     <div {...stylex.props(styles.root, !compact && surface.formBlock)}>
       <div {...stylex.props(styles.actions)}>
-        {phase === 'running' ? (
+        {phase === 'running' || phase === 'verifying' ? (
           <>
             <Button type="button" size="small" variant="secondary" disabled>
               <Spinner size="small" />
-              {codexAuthMode === 'api-key'
-                ? t('settings.agent.codex.verifyingKey', 'Verifying API Key')
-                : t('agents.authentication.waiting', 'Waiting for {{provider}} sign-in', {
-                    provider,
-                  })}
+              {phase === 'verifying'
+                ? t('agents.authentication.verifyingCapabilities', 'Sign-in completed. Verifying provider…')
+                : codexAuthMode === 'api-key'
+                  ? t('settings.agent.codex.verifyingKey', 'Verifying API Key')
+                  : t('agents.authentication.waiting', 'Waiting for {{provider}} sign-in', {
+                      provider,
+                    })}
             </Button>
             <Button type="button" size="small" variant="ghost" onClick={handleCancel}>
               <Square {...stylex.props(catalog.icon)} />
@@ -873,6 +911,14 @@ export function AcpAuthenticationPanel({
           )}
         </p>
       ) : null}
+      {remoteSorbet ? (
+        <p {...stylex.props(styles.hint)}>
+          {t(
+            'agents.authentication.remoteSorbetHelp',
+            'This Lody Agent runs on a remote machine. If offered, choose device sign-in or a method that lets you copy a code or return URL into Lody. A localhost callback points to the remote machine, not this device; it will not complete in your local browser. Radius supports device sign-in or a callback on the remote machine.'
+          )}
+        </p>
+      ) : null}
       {runtimeDownloadText ? (
         <p className="text-xs text-muted-foreground">{runtimeDownloadText}</p>
       ) : null}
@@ -898,6 +944,7 @@ export function AcpAuthenticationPanel({
           authorization={authorization}
           authorizationCode={authorizationCode}
           authorizationCodeSubmitted={authorizationCodeSubmitted}
+          authorizationCodeUnknown={authorizationCodeUnknown}
           submittingAuthorizationCode={submittingAuthorizationCode}
           userCodeCopied={userCodeCopied}
           onOpenAuthorization={() => void handleOpenAuthorization()}
@@ -905,6 +952,7 @@ export function AcpAuthenticationPanel({
           onAuthorizationCodeChange={setAuthorizationCode}
           onSubmitAuthorizationCode={() => void handleSubmitAuthorizationCode()}
           authorizationConsentPending={submittingInteraction}
+          remoteSorbet={remoteSorbet}
         />
       ) : null}
       {phase === 'running' && interaction ? (
@@ -926,6 +974,7 @@ export function AcpAuthenticationAuthorizationView({
   authorization,
   authorizationCode,
   authorizationCodeSubmitted,
+  authorizationCodeUnknown = false,
   submittingAuthorizationCode,
   userCodeCopied,
   onOpenAuthorization,
@@ -933,11 +982,13 @@ export function AcpAuthenticationAuthorizationView({
   onAuthorizationCodeChange,
   onSubmitAuthorizationCode,
   authorizationConsentPending = false,
+  remoteSorbet = false,
 }: {
   provider: string;
   authorization: AcpAuthorizationDetails;
   authorizationCode: string;
   authorizationCodeSubmitted: boolean;
+  authorizationCodeUnknown?: boolean;
   submittingAuthorizationCode: boolean;
   userCodeCopied: boolean;
   onOpenAuthorization: () => void;
@@ -945,6 +996,7 @@ export function AcpAuthenticationAuthorizationView({
   onAuthorizationCodeChange: (value: string) => void;
   onSubmitAuthorizationCode: () => void;
   authorizationConsentPending?: boolean;
+  remoteSorbet?: boolean;
 }) {
   const { t } = useTranslation();
   const authorizationCodeInputId = useId();
@@ -1033,7 +1085,7 @@ export function AcpAuthenticationAuthorizationView({
               <Input
                 id={authorizationCodeInputId}
                 value={authorizationCode}
-                disabled={authorizationCodeSubmitted}
+                disabled={authorizationCodeSubmitted || authorizationCodeUnknown}
                 autoComplete="one-time-code"
                 spellCheck={false}
                 placeholder={t(
@@ -1054,6 +1106,7 @@ export function AcpAuthenticationAuthorizationView({
               size="medium"
               disabled={
                 authorizationCodeSubmitted ||
+                authorizationCodeUnknown ||
                 submittingAuthorizationCode ||
                 !authorizationCode.trim()
               }
@@ -1070,10 +1123,15 @@ export function AcpAuthenticationAuthorizationView({
             </Button>
           </div>
           <p {...stylex.props(styles.hint)}>
-            {t(
-              'agents.authentication.authorizationCodeHelp',
-              'Only needed if the browser shows a code instead of returning automatically.'
-            )}
+            {remoteSorbet
+              ? t(
+                  'agents.authentication.remoteSorbetCodeHelp',
+                  'Paste the code or return URL provided by the sign-in page or requested by the agent.'
+                )
+              : t(
+                  'agents.authentication.authorizationCodeHelp',
+                  'Only needed if the browser shows a code instead of returning automatically.'
+                )}
           </p>
         </div>
       ) : null}

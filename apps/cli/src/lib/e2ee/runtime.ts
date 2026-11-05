@@ -150,6 +150,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const serial = yield* Semaphore.make(1);
   let closed = false;
   let executionGeneration = 0;
+  let executionAuthority = new AbortController();
 
   const db = yield* Effect.acquireRelease(
     sql(() => {
@@ -487,7 +488,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             )
           )
             return yield* failure('invalid-input');
-          executionGeneration++;
+          // A new suffix can revoke an active signer, so fence before any
+          // decoding or verification yields. Exact overlap and empty refreshes
+          // cannot advance the ledger; they are still checked below.
+          if (state.bootstrap || page.startIndex + page.recordsHex.length > start) {
+            executionGeneration++;
+            executionAuthority.abort();
+            executionAuthority = new AbortController();
+          }
           const records = yield* sql(() => page.recordsHex.map(unhex));
           const length = page.startIndex + records.length;
           if (
@@ -573,6 +581,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
         )
       ),
     executionGeneration: () => executionGeneration,
+    executionAuthoritySignal: () => executionAuthority.signal,
     readSharingEpochKey: (epoch: number) => history.read(epoch),
     binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number | 'current') =>
       makeStreamsUpdateBinding({

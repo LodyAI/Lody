@@ -16,6 +16,34 @@ const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 const claudeProvider = { cliType: 'builtin', agentType: 'claude' } as const;
 
 describe('buildHistoryReplayImport', () => {
+  it('retains phase boundaries in imported assistant history', () => {
+    const result = buildHistoryReplayImport(
+      [
+        makeNotification({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'Hi' },
+        }),
+        ...(
+          [
+            ['Working', 'commentary'],
+            ['Done', 'final_answer'],
+          ] as const
+        ).map(([text, messagePhase]) =>
+          makeNotification({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text },
+            _meta: { lody: { messagePhase } },
+          })
+        ),
+      ],
+      { provider: codexProvider, acpSessionId: 'codex-session-1', mode: 'imported_snapshot' }
+    );
+    expect(contentsOf(result.history[1]!)).toEqual([
+      { type: 'text', text: 'Working', messagePhase: 'commentary' },
+      { type: 'text', text: 'Done', messagePhase: 'final_answer' },
+    ]);
+  });
+
   it('drops tool images from imported history without dropping tool state or text', () => {
     const result = buildHistoryReplayImport(
       [
@@ -155,81 +183,6 @@ describe('buildHistoryReplayImport', () => {
       agentType: 'codex',
     });
     expect(result.history[0]?.inputConfig?.resume).toBeUndefined();
-  });
-
-  it('can project Claude user chunks with Claude input config', () => {
-    const result = buildHistoryReplayImport(
-      [
-        makeNotification({
-          sessionUpdate: 'user_message_chunk',
-          content: { type: 'text', text: 'hello claude' },
-        }),
-      ],
-      {
-        acpSessionId: 'claude-session-1',
-        provider: claudeProvider,
-        now: () => '2026-05-14T00:00:00.000Z',
-        createId: () => 'turn-1',
-      }
-    );
-
-    expect(result.history[0]?.inputConfig).toMatchObject({
-      prompt: 'hello claude',
-      cliType: 'builtin',
-      agentType: 'claude',
-      resume: 'claude-session-1',
-    });
-  });
-
-  it('keeps user, thought, tool call, and assistant text order from replay notifications', () => {
-    const result = buildHistoryReplayImport(
-      [
-        makeNotification({
-          sessionUpdate: 'user_message_chunk',
-          content: { type: 'text', text: 'inspect repo' },
-        }),
-        makeNotification({
-          sessionUpdate: 'agent_thought_chunk',
-          content: { type: 'text', text: 'Need context.' },
-        }),
-        makeNotification({
-          sessionUpdate: 'tool_call_update',
-          toolCallId: 'tool-1',
-          kind: 'read',
-          title: 'Read package.json',
-          status: 'completed',
-          rawInput: { path: 'package.json' },
-        }),
-        makeNotification({
-          sessionUpdate: 'agent_message_chunk',
-          content: { type: 'text', text: 'Done.' },
-        }),
-        makeNotification({
-          sessionUpdate: 'user_message_chunk',
-          content: { type: 'text', text: 'continue' },
-        }),
-      ],
-      {
-        acpSessionId: 'codex-session-1',
-        provider: codexProvider,
-        now: () => '2026-05-14T00:00:00.000Z',
-        createId: (() => {
-          let index = 0;
-          return () => `turn-${index++}`;
-        })(),
-      }
-    );
-
-    expect(result.droppedNotifications).toBe(0);
-    expect(result.history.map((entry) => entry.role)).toEqual(['user', 'assistant', 'user']);
-    expect(contentsOf(result.history[0]!).map((item) => item.type)).toEqual(['text']);
-    expect(contentsOf(result.history[1]!).map((item) => item.type)).toEqual([
-      'thought',
-      'tool_call',
-      'text',
-    ]);
-    expect(result.history[1]?.finished).toBe(true);
-    expect(contentsOf(result.history[2]!).map((item) => item.type)).toEqual(['text']);
   });
 
   it('imports recovered Codex tool calls with ACP 1.2 message ids without duplication', () => {

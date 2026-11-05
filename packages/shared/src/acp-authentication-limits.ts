@@ -2,7 +2,6 @@
 // Machine RPC. Per-item bounds prevent pathological dimensions, while the serialized
 // form budget prevents otherwise-valid dimensions from multiplying into a huge payload.
 // These are Lody transport/UI policy limits, not limits imposed by the ACP protocol.
-export const ACP_AUTH_METHOD_MAX_COUNT = 32;
 export const ACP_AUTH_FORM_FIELD_MAX_COUNT = 32;
 export const ACP_AUTH_SELECT_OPTION_MAX_COUNT = 256;
 export const ACP_AUTH_ID_MAX_LENGTH = 1024;

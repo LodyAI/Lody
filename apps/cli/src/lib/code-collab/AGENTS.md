@@ -39,6 +39,19 @@ File-by-file responsibilities: [README.md](README.md).
   sessions retain committed compare totals. The injected `observeWorkspaceGit` observer
   runs only on activation/explicit root refresh, never file watcher or terminal diff refresh;
   it must not gate file snapshots.
+- The whole published file index stays within `CODE_COLLAB_FILE_INDEX_LIMITS`
+  (1,000 rows, 100 KiB of estimated Flock JSON), applied after the tree and All
+  Changes are merged, never per input. Over-budget paths stay unloaded behind lazy
+  parents; only a change recording `del: true` may publish `deleted`. Publication
+  commits batches within that byte budget, separated by flush/sync. Package-manager
+  caches in `CODE_COLLAB_IGNORED_DIRECTORY_NAMES` filter watcher, FS and untracked
+  Git paths before any read, never tracked files. Filesystem scans prune
+  `.gitignore`d entries in-process (`createGitIgnoreScanFilter`, the `ignore`
+  package) before counting or descending; inside a worktree they keep entries that
+  hold tracked files. Watcher batches confined to `git check-ignore`d paths skip
+  the rescan; pathless dirt always rescans. Local Flock exports rely on the
+  coalescing streams-crdt patch.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-05-code-collab-file-index-budget.md).
 - A file-index row whose path key carries U+FFFD came from a byte stream decoded
   across a chunk boundary, not from a scan; it is its own LWW key, so a correct
   republish cannot overwrite it. The shared helpers hide it on read and delete it on

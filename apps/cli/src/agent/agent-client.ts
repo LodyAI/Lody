@@ -591,6 +591,8 @@ export interface AgentClientOptions {
    * adapter uses the native local runner; other agents default to true.
    */
   terminalEnabled?: boolean;
+  /** Capability probe only: discover authentication methods without authenticating. */
+  discoverAuthenticationMethods?: boolean;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
   onUpdateMessage(message: AcpSessionNotification): void;
   onRequestPermission(
@@ -2003,6 +2005,9 @@ export class AgentClient implements acp.Client {
               plan: {},
               auth: {
                 terminal: true,
+                ...(this.options.discoverAuthenticationMethods
+                  ? { _meta: { lody: { credentialForm: { version: 1 } } } }
+                  : {}),
               },
               session: {
                 configOptions: {
@@ -2020,6 +2025,7 @@ export class AgentClient implements acp.Client {
               // existing AskUserQuestion permission UI.
               elicitation: {
                 form: {},
+                ...(this.options.discoverAuthenticationMethods ? { url: {} } : {}),
               },
               _meta: {
                 ...devinClientCapabilitiesMeta,
