@@ -128,7 +128,7 @@ const styles = stylex.create({
   methodDescription: { fontSize: '12px', lineHeight: 1.375, color: colors.secondaryLabel },
 });
 
-type AuthenticationPhase = 'idle' | 'running' | 'authenticated' | 'cancelled' | 'error';
+type AuthenticationPhase = 'idle' | 'running' | 'verifying' | 'authenticated' | 'cancelled' | 'error';
 export type AcpAuthorizationDetails = Pick<
   MachineAcpAuthenticationProgressMessage,
   | 'authorizationUrl'
@@ -440,7 +440,7 @@ export function AcpAuthenticationPanel({
   };
 
   const startAuthenticationFromPersistedConfig = async (methodId?: string): Promise<void> => {
-    if (!authArgs || phase === 'running' || !interactiveProtocolSupported) {
+    if (!authArgs || phase === 'running' || phase === 'verifying' || !interactiveProtocolSupported) {
       return;
     }
     closePendingAuthorizationWindow();
@@ -564,6 +564,16 @@ export function AcpAuthenticationPanel({
             )
           );
           setAuthorization(null);
+        } else if (progress.status === 'authenticated') {
+          closePendingAuthorizationWindow();
+          interactionIdRef.current = null;
+          setAuthorization(null);
+          setInteraction(null);
+          setFormValues({});
+          setAuthorizationCode('');
+          setRuntimeDownload(null);
+          setError(null);
+          setPhase('verifying');
         } else if (progress.status === 'cancelled') {
           closePendingAuthorizationWindow();
           interactionIdRef.current = null;
@@ -840,20 +850,25 @@ export function AcpAuthenticationPanel({
   // action, so the reader picks the method instead of discovering the choice
   // only after a sign-in attempt has already started.
   const showAdvertisedMethods =
-    advertisedMethods.length > 0 && codexAuthMode !== 'api-key' && phase !== 'running';
+    advertisedMethods.length > 0 &&
+    codexAuthMode !== 'api-key' &&
+    phase !== 'running' &&
+    phase !== 'verifying';
 
   return (
     <div {...stylex.props(styles.root, !compact && surface.formBlock)}>
       <div {...stylex.props(styles.actions)}>
-        {phase === 'running' ? (
+        {phase === 'running' || phase === 'verifying' ? (
           <>
             <Button type="button" size="small" variant="secondary" disabled>
               <Spinner size="small" />
-              {codexAuthMode === 'api-key'
-                ? t('settings.agent.codex.verifyingKey', 'Verifying API Key')
-                : t('agents.authentication.waiting', 'Waiting for {{provider}} sign-in', {
-                    provider,
-                  })}
+              {phase === 'verifying'
+                ? t('agents.authentication.verifyingCapabilities', 'Sign-in completed. Verifying provider…')
+                : codexAuthMode === 'api-key'
+                  ? t('settings.agent.codex.verifyingKey', 'Verifying API Key')
+                  : t('agents.authentication.waiting', 'Waiting for {{provider}} sign-in', {
+                      provider,
+                    })}
             </Button>
             <Button type="button" size="small" variant="ghost" onClick={handleCancel}>
               <Square {...stylex.props(catalog.icon)} />

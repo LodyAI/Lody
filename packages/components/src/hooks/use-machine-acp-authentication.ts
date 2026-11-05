@@ -179,7 +179,11 @@ export function useMachineAcpAuthentication(
         authorizationCode: args.authorizationCode,
       });
       const response = await responsePromise;
-      if (!response || response.error === ACP_INPUT_OUTCOME_UNKNOWN) {
+      if (
+        !response ||
+        response.error === ACP_INPUT_OUTCOME_UNKNOWN ||
+        response.disposition === 'not-running'
+      ) {
         throw new AcpInputOutcomeUnknownError(
           t(
             'agents.authentication.inputOutcomeUnknown',
@@ -222,7 +226,11 @@ export function useMachineAcpAuthentication(
         authenticationInput: JSON.stringify(args.input),
       });
       const response = await responsePromise;
-      if (!response || response.error === ACP_INPUT_OUTCOME_UNKNOWN) {
+      if (
+        !response ||
+        response.error === ACP_INPUT_OUTCOME_UNKNOWN ||
+        response.disposition === 'not-running'
+      ) {
         throw new AcpInputOutcomeUnknownError(
           t(
             'agents.authentication.inputOutcomeUnknown',

@@ -84,6 +84,30 @@ describe('useMachineAcpAuthentication', () => {
     ).rejects.toBeInstanceOf(AcpInputOutcomeUnknownError);
   });
 
+  it('does not report a finished authentication as a failed submission', async () => {
+    const runtime = {
+      sendControl: vi.fn(),
+      waitForMachineAcpAuthenticateResponse: vi.fn(async () => ({
+        success: true,
+        disposition: 'not-running',
+      })),
+    } as unknown as WorkspaceRuntime;
+    let controller: AuthenticationController | undefined;
+    await act(async () => {
+      root?.render(createElement(Probe, {
+        runtime,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        onResult: (value) => { controller = value; },
+      }));
+    });
+    await expect(controller!.submitAuthenticationInput({
+      machineId: 'machine-1' as MachineId,
+      authenticationRequestId: 'request',
+      interactionId: 'question',
+      input: { action: 'accept' },
+    })).rejects.toBeInstanceOf(AcpInputOutcomeUnknownError);
+  });
+
   it('preserves a confirmed submit rejection', async () => {
     const runtime = {
       sendControl: vi.fn(),
