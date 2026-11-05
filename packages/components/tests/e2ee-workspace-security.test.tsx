@@ -317,6 +317,19 @@ describe('encrypted workspace settings', () => {
     expect(container.textContent).toContain('e2ee.security.complete');
     expect(container.querySelector('[role=status]')).not.toBeNull();
   });
+  it('shows an update another window is running as busy, not as an action that would refuse', async () => {
+    state = { ...state, updatePending: true, updateInProgress: true };
+    await render();
+    expect(container.textContent).toContain('e2ee.security.updating');
+    expect(container.textContent).not.toContain('e2ee.security.complete');
+    const buttons = [...container.querySelectorAll('button')];
+    const update = buttons.find((button) => button.textContent === 'e2ee.security.updating');
+    expect(update?.disabled).toBe(true);
+    const revoke = buttons.find((button) => button.textContent === 'e2ee.security.revoke');
+    expect(revoke?.disabled).toBe(true);
+    const refresh = buttons.find((button) => button.textContent === 'e2ee.security.refresh');
+    expect(refresh?.disabled).toBe(false);
+  });
   it('reuses the settings badge for a pending link request and clears it after approval', async () => {
     vi.useFakeTimers();
     try {

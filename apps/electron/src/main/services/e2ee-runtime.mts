@@ -1433,7 +1433,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return {
             epoch: state.epoch.number,
             rotationRequired: state.epoch.rotationRequired,
-            updatePending: Result.isFailure(continuation) || continuation.success,
+            // A command still before its first candidate write is an update too.
+            updatePending: !!managing || Result.isFailure(continuation) || continuation.success,
+            updateInProgress: !!managing,
             ...(Result.isFailure(continuation)
               ? { recoveryIssue: 'candidate-unavailable' as const }
               : {}),

@@ -120,6 +120,8 @@ export interface E2eeManagementState {
   readonly rotationRequired: boolean;
   readonly mayRotate: boolean;
   readonly updatePending: boolean;
+  /** A management command (rotate or revoke) is running on this device now. */
+  readonly updateInProgress?: boolean;
   readonly recoveryIssue?: 'candidate-unavailable';
   readonly devices: readonly {
     key: string;
