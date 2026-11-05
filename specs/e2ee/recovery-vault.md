@@ -1,9 +1,15 @@
 # Recovery vault
 
-Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration)
+Status: draft
 Translation: current
 
 [中文](recovery-vault.zh.md)
+
+This draft proposes [passkey unlock](#passkey-unlock-proposed) on macOS, iPhone and
+Web, which exceeds the [revision approved on 2026-10-31](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration).
+It awaits owner approval. Until then, that approved revision stays in force. Passages
+about passkeys and the service gap are the only intended changes; everything else
+keeps its approved meaning.
 
 ## Approved format boundaries
 
@@ -21,8 +27,10 @@ One canonical CBOR `vault-v1` recovery file opens an encrypted vault. Its fixed 
 vault unlock capability, not a seed from which future workspace identities can be
 regenerated. Missing cloud ciphertext cannot be recreated from this file.
 
-A second wrapping entry may wrap the same V only after an authenticated WebAuthn
-ceremony actually reports PRF `enabled: true` and a 32-byte `results.first` value.
+Further wrapping entries may wrap the same V, one per passkey, only after real
+WebAuthn ceremonies meet the [ceremony contract](#passkey-unlock-proposed): registration
+reports PRF `enabled: true`, and an authentication ceremony with user verification
+returns a 32-byte `results.first`.
 The portable core validates and owns that result; platform adapters authenticate
 the ceremony and credential. Ordinary passkey login and a structural object
 claiming to be a verified capability cannot unlock the vault. No PRF fallback is
@@ -154,23 +162,21 @@ is no forced R replacement, owner approval or cooldown. The notification informs
 the user; it is not a security control, and a hostile service can suppress it.
 The R-signed admission remains visible in the verified ledger.
 
-**Passkey PRF.** The PRF wrap uses a native macOS AuthenticationServices module on
-macOS 15 or newer. Prerequisites: a Lody RP domain serving an apple-app-site-association
-file, the `webcredentials:` associated-domains entitlement, a provisioning profile
-embedded in the signed app, and review of the native dependency. Only a real
-ceremony that reports PRF `enabled: true` with a 32-byte `results.first` may wrap or
-unlock V; there is no fallback. Other platforms and versions use the file.
+**Passkey PRF.** Desktop passkey support uses a native macOS AuthenticationServices
+module, as part of [passkey unlock](#passkey-unlock-proposed). Windows and Linux
+desktops use the file.
 
 **Package keys.** The owner accepted the exact 48-byte RFC 8410 PKCS#8 encodings for
 both private keys ([#2124](https://github.com/LodyAI/Lody/pull/2124)).
 
 **Service and current gap.** The service stores only opaque immutable entries and
 the index CAS declared in `packages/cloud-api`, isolated per account. CAS checks in
-the same transaction that every referenced entry exists. The private backend
-already has a `recovery` device kind, but it implements no `e2eeRecoveryVault`
-function, no Recovery credential registration, no R-authenticated mailbox read or
-append, and no restore notification. Until those exist, the desktop loop cannot run
-against the real service.
+the same transaction that every referenced entry exists. As inspected on 2026-11-05,
+the private backend implements this storage, R-authenticated mailbox read and R's
+admission append behind a default-off switch. It has no R read of committed staged
+envelopes and no restore notification. No shipped client calls the storage, and this
+repository cannot establish what is deployed. Until those gaps close, the loop cannot
+run against the real service.
 
 **Threat model.** Account access controls retrieval and the file controls
 decryption. Anyone holding both can read every recovered workspace and admit
@@ -179,6 +185,143 @@ The file alone grants nothing without the account's ciphertext. Loss of the file
 loses only that recovery path. On a desktop retaining V, malware that can obtain the
 user's presence approval can unlock V. The service can withhold or roll back
 ciphertext; local pins detect rollback only on a device that saw a newer revision.
+Passkey unlock adds the risks listed [below](#passkey-unlock-proposed).
+
+## Passkey unlock (proposed)
+
+**Scenario.** A user who lost every device still has a passkey in iCloud Keychain.
+On a new Mac, iPhone or supported browser they sign in, choose "Restore with passkey"
+and approve the system prompt. From the moment V is open, the path is the same as the
+file path: confirm the trust anchor, open R's envelope, check its commitment, have R
+admit a new personal device C, then notify. A passkey opens V for every workspace in
+the vault; it never replaces the anchor or the ledger checks.
+
+**Dependencies.** A passkey only wraps V, so it has nothing to unlock until a platform
+can run the file-based restore. The order is fixed: file create and check, per-workspace
+setup, restore with an anchor, and only then the passkey wrap. The recovery file is
+still created with every vault. It remains the fallback when a passkey is lost, the
+iCloud account is lost, or the platform has no PRF.
+
+**One RP on a dedicated host.** All platforms share one RP ID so a synced passkey works
+everywhere. The RP ID is a dedicated exact host, such as `vault.<lody-domain>`, and never
+the parent domain or the Web app's own host. A browser lets any page on the RP ID or its
+subdomains run a ceremony, so a parent-domain RP would put every subdomain and every
+script served from them inside the boundary. The RP ID cannot change later without
+orphaning every enrolled passkey. The host serves the apple-app-site-association file
+and, if approved, the Web surface below, and nothing else. A future login passkey must
+use a different RP, so a login prompt can never unlock V.
+
+**Ceremony contract.** These rules are the same on every platform:
+
+- Registration requires a discoverable credential, user verification, and PRF
+  `enabled: true`. `user.id` is the 32-byte vaultId, and the user name shown by the
+  system says this credential unlocks the Lody recovery vault. `excludeCredentials`
+  lists known passkeys, because a same-RP, same-`user.id` registration overwrites the
+  existing credential on that authenticator.
+- A wrap or an unlock requires a real authentication ceremony with
+  `userVerification: required`, reporting user verified, and a 32-byte `results.first`.
+  WebAuthn reports `enabled` only at registration and never at authentication, so the
+  authentication result is judged on `results.first` alone. A result returned at
+  registration is not used, because it is optional and enrollment must prove the path
+  that later unlocks use.
+- The PRF input is one fixed constant, `lody-e2ee/vault-v1/prf-input\0`, because a
+  new device does not know vaultId before its ceremony. The existing HKDF, salted by
+  vaultId with the `prf-wrap` purpose, separates vaults.
+- The credential ID string is its unpadded base64url encoding on every platform, so
+  each platform computes the same entryId.
+- A missing, disabled or wrong-length result stops with `prf-unavailable`. Nothing
+  derives a key from a passkey signature, a login session or a user handle.
+
+**Many passkeys, one V.** Each passkey has its own immutable `prf-wrap` entry holding
+the same V; adding one needs V open and changes no other entry. The encrypted index
+lists each passkey (entry ID, credential ID, label), and CAS references those entries,
+so the service refuses to delete a listed wrap as unreferenced. A vault holds at most
+eight passkeys. Enrollment wraps, uploads, reads back, decrypts, commits the index, and
+only then reports success. The index addition is a vault-side change made before any
+production vault exists. It does not change `formatVersion: 1`, the recovery file or
+any ledger record.
+
+**Opening without the file.** The ceremony sends an empty `allowCredentials`. The
+returned user handle gives vaultId and the credential ID gives entryId, so no new
+service API is needed. The service locator comes from the signed-in client. The user
+handle is an unauthenticated hint: only successful decryption, bound to vaultId by the
+HKDF salt and AAD, opens the vault.
+
+**macOS.** A native AuthenticationServices module on macOS 15 or newer, in the main
+process of the cloud-enabled desktop build. The local-only desktop has no vault and no
+RP entitlement. The module enrolls and unlocks. V stays in main, and the renderer never
+sees it or the PRF result.
+
+**iPhone.** iOS 18.4 or newer for this feature; the app's own minimum stays lower. A
+thin first-party Capacitor plugin calls AuthenticationServices natively; a WebView on
+a custom scheme cannot run WebAuthn itself, and a third-party plugin would put an
+unreviewed dependency on V's path. The API exists from iOS 18.0, but public reports
+describe data-loss bugs in cross-device PRF through iOS 18.3. The iPhone unlocks and
+restores in the first phase. V is never retained, and the app must not gain
+over-the-air JavaScript updates while this path exists, or it falls under the Web
+risk below.
+
+**Web.** PRF is judged by a real ceremony, not by a browser list. When a browser has no
+PRF, the user is told to use the recovery file or another device. There is no
+downgrade. The recommended design is unlock-only on an isolated surface hosted on the
+RP host: a separate minimal build with no third-party scripts or telemetry, a strict
+CSP, and its own deployment credentials. C lives on that origin, and the regular Web
+app or any other device then joins through ordinary pairing approved by C. V, R and
+the PRF result never reach the regular Web app. V is never stored in a browser.
+
+**Web risk.** Web code is delivered by the server, so tampered code at an origin allowed
+by the RP can request a ceremony, take the PRF result and fetch the wrap, which yields V
+and every R in the vault. Unlike a compromised browser device, which exposes only that
+browser's workspaces, this reaches all covered workspaces and lets the attacker admit
+devices until R is revoked. Three limits must be stated plainly:
+
+- *Unlock-only and in-page confirmation are product rules, not security boundaries.*
+  Tampered code ignores them and calls WebAuthn directly. Unlock-only is still useful,
+  because routine V use never happens on Web.
+- *The risk is not confined to Web users.* A passkey enrolled on a Mac syncs and can be
+  requested at the RP host from any browser, even if the user never uses Web. Native
+  code avoids server-delivered JavaScript, but the credential is not bound to the app.
+  An operator controlling the RP host can always try this, even with no Web surface.
+- *The real barrier is user approval plus isolation.* The system prompt names the RP
+  and the credential and cannot be drawn by page code. A dedicated host excludes
+  ordinary compromise of the Web app, its dependencies and its subdomains. It does not
+  exclude a hostile operator.
+
+**Other authenticators.** There is no allow-list and no attestation requirement: any
+provider works if its real ceremonies meet the contract. Lody promises only iCloud
+Keychain on macOS and iPhone. Other managers and hardware keys are not promised. The
+first native phase uses only the platform provider, so hardware keys can work only on
+Web, where the browser passes PRF through.
+
+**Removal and compromise.** Removing a passkey commits the index, then deletes its
+wrap. That stops future use only: a copied wrap plus the credential still opens V. A
+suspected passkey or sync-account compromise is treated like a leaked file: replace the
+vault and R, and revoke the old R. Sync means the provider account joins the trust base,
+so its takeover plus Lody account access can open V.
+
+**Unchanged.** Ledger records and `formatVersion: 1` are unchanged. A passkey grants
+R's existing authority and nothing more. Restore notifications, with no forced
+replacement, approval or cooldown, apply the same way and name the passkey path.
+Passkey unlock is outside the MVP and stays behind the same default-off gates.
+
+### Decisions needed from the owner
+
+Each carries a recommendation; none is decided by this draft.
+
+1. **RP ID.** Recommended: a dedicated exact host. This is the only choice that
+   cannot be reversed later.
+2. **Web.** Recommended: isolated unlock-only surface, shipped after macOS and iPhone.
+   The alternatives are unlock on the regular Web app, which is cheaper but exposes
+   every passkey to that app's whole delivery chain, or no Web, which accepts missing
+   the stated goal.
+3. **Web file restore.** Recommended: the same surface accepts the recovery file,
+   because this is what "fall back to the file" means on a browser.
+4. **iPhone floor.** Recommended: 18.4.
+5. **Other authenticators.** Recommended: unpromised, as above.
+6. **Trust anchor carrier.** Restore cannot finish without it, on any path, and the
+   carrier is still undecided.
+7. **Phase and gate.** Whether this stays outside the MVP gate, and whether iPhone
+   enrollment joins the first phase.
 
 ## Boundaries and validation
 
@@ -194,3 +337,28 @@ The [whitepaper](whitepaper.md), [permission ledger](permission-ledger.zh.md) an
 [host protection](../../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory) define the
 surrounding boundaries. Approval of this revision is not implementation, deployment
 or real-device acceptance; tests and translation do not enable product E2EE.
+
+## Evidence
+
+Intended behavior is the text above. Inspected on 2026-11-05 and not executed:
+
+- [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts) requires
+  `enabled: true` and `results.first` in one object. A real authentication result has no
+  `enabled`, so current code would reject it. The [Lab test](../../packages/e2ee-lab/test/recovery-vault.test.ts)
+  passes because it uses a synthetic object. This is a gap in code and in the earlier
+  wording, not a reduced guarantee.
+- [`vault.ts`](../../packages/e2ee-core/src/internal/recovery/vault.ts) already keys
+  one `prf-wrap` entry per credential, but needs vaultId and locator from its caller,
+  and leaves those entries outside index references.
+- No package outside core and the Lab consumes the vault. [#2125](https://github.com/LodyAI/Lody/pull/2125)
+  is an unmerged draft with conflicts.
+
+External sources: [WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) for `enabled`,
+optional registration results, the user-verified PRF, `user.id` overwrite and RP scope;
+[Apple](https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfassertioninput-swift.struct)
+for macOS 15 and iOS 18 and [associated domains](https://developer.apple.com/documentation/xcode/supporting-associated-domains)
+for HTTPS, no redirects and CDN fetching. Browser and provider coverage, including
+the iOS 18.0-18.3 reports, comes from secondary sources ([Yubico](https://developers.yubico.com/WebAuthn/Concepts/PRF_Extension/Developers_Guide_to_PRF.html),
+[Corbado](https://www.corbado.com/blog/passkeys-prf-webauthn)), which disagree on
+some versions. Nothing here was measured on a device, and whether associated domains
+work end to end in a Developer ID Electron build remains unproven.

@@ -1,9 +1,14 @@
 # 恢复 vault
 
-Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库桌面接入)
+Status: draft
 Translation: current
 
 [English](recovery-vault.md)
+
+本草案提议在 macOS、iPhone 和 Web 上支持 [passkey 解锁](#passkey-解锁提议)，超出了
+[2026-10-31 批准的修订](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库桌面接入)。
+本草案等待 owner 批准，在此之前该已批准修订继续有效。计划改动的只有 passkey 相关段落和服务端
+缺口说明，其余内容保持已批准的含义。
 
 ## 已批准的格式边界
 
@@ -20,8 +25,9 @@ Translation: current
 XChaCha20-Poly1305 包装 V。文件提供解锁能力，不是生成未来工作区身份的种子；
 文件无法重建已经丢失的云端密文。
 
-第二包装入口只在已认证的 WebAuthn ceremony 实际返回 PRF `enabled: true` 和
-32 字节 `results.first` 后创建，包装同一个 V。core 校验并拥有结果副本；平台
+其他包装入口可以包装同一个 V，每个 passkey 一个，前提是真实 WebAuthn ceremony 满足
+[ceremony 约定](#passkey-解锁提议)：注册返回 PRF `enabled: true`，并且一次带用户验证的
+认证 ceremony 返回 32 字节 `results.first`。core 校验并拥有结果副本；平台
 适配器负责认证 ceremony 和 credential。普通 passkey 登录、伪造的能力对象都不能
 解锁。禁止 PRF 降级。产品 E2EE 关闭时不自动调用硬件 ceremony。
 
@@ -111,23 +117,115 @@ salt 为 genesis 哈希，info 为 `lody-e2ee/recovery-credential/v1\0` 后接 R
 不强制更换 R，不加 owner 审批，也不设冷却期。通知只是告知用户，不是安全控制，恶意服务端可以
 扣下它；R 签署的接纳记录仍可在已验证账本中看到。
 
-**Passkey PRF。** PRF 包装使用 macOS 15 及以上的原生 AuthenticationServices 模块。前置条件：
-提供 apple-app-site-association 文件的 Lody RP 域名、`webcredentials:` 关联域 entitlement、
-内嵌于已签名应用的 provisioning profile，以及对该原生依赖的审查。只有真实 ceremony 报告
-PRF `enabled: true` 且 `results.first` 为 32 字节时，才能包装或解锁 V；没有降级。其他平台和版本使用恢复文件。
+**Passkey PRF。** 桌面 passkey 支持使用原生 macOS AuthenticationServices 模块，属于
+[passkey 解锁](#passkey-解锁提议)的一部分。Windows 和 Linux 桌面使用恢复文件。
 
 **恢复包私钥。** owner 已接受两个私钥均为 48 字节 RFC 8410 PKCS#8 精确编码
 （[#2124](https://github.com/LodyAI/Lody/pull/2124)）。
 
 **服务端与当前缺口。** 服务端只保存 `packages/cloud-api` 已声明的不透明不可变条目与索引 CAS，
-按账号隔离；CAS 在同一事务内检查所有被引用条目都存在。私有后端已有 `recovery` 设备类型，
-但还没有任何 `e2eeRecoveryVault` 函数、Recovery 凭据登记、以 R 身份认证的邮箱读取与追加，
-也没有恢复通知。这些就绪前，桌面闭环无法对接真实服务端。
+按账号隔离；CAS 在同一事务内检查所有被引用条目都存在。按 2026-11-05 的核查，私有后端已在
+默认关闭的开关后实现这套存储、以 R 身份认证的邮箱读取和 R 的接纳追加；还没有 R 读取已提交暂存
+信封的能力，也没有恢复通知。没有已发布的客户端调用这套存储，本仓库也无法确认实际部署情况。
+这些缺口补齐前，闭环无法对接真实服务端。
 
 **威胁模型。** 账号访问控制读取，文件控制解密。同时持有两者的人可读取所有已恢复工作区，并在 R
 被撤销前接纳设备；服务运营者加文件等同于此。单独的文件在没有账号密文时不授予任何能力。丢失文件
 只失去这条恢复路径。在保存了 V 的桌面上，能取得用户在场批准的恶意软件可以解锁 V。服务端可以扣留
 或回滚密文；本地 pin 只在见过更新版本的设备上能发现回滚。
+Passkey 解锁新增的风险见[下文](#passkey-解锁提议)。
+
+## Passkey 解锁（提议）
+
+**场景。** 用户丢失了所有设备，但 iCloud 钥匙串里还有 passkey。他们在新的 Mac、iPhone 或受支持的
+浏览器上登录，选择"用 passkey 恢复"并批准系统提示。V 打开之后的路径和恢复文件完全相同：确认可信锚，
+打开 R 的信封，核对承诺，由 R 接纳新的个人设备 C，然后发通知。passkey 会打开保险库里所有工作区的 V，
+但它不能代替可信锚和账本检查。
+
+**依赖顺序。** passkey 只包装 V，所以平台跑通基于文件的恢复之前，它没有东西可解锁。顺序固定：文件创建
+和检查、逐工作区设置、带可信锚的恢复，最后才是 passkey 包装。每个保险库仍然都会创建恢复文件。passkey
+丢失、iCloud 账号丢失或平台没有 PRF 时，文件仍是退路。
+
+**一个 RP，放在专用主机上。** 所有平台共用一个 RP ID，这样同步的 passkey 到处可用。RP ID 是一个专用的
+精确主机名，例如 `vault.<lody-domain>`，绝不用父域名或 Web 应用自身的主机名。浏览器允许 RP ID 及其子域名
+上的任何页面发起 ceremony，所以父域名 RP 会把所有子域名和它们下发的所有脚本都划进边界内。RP ID 以后
+无法更改，否则所有已注册的 passkey 都会失效。该主机只提供 apple-app-site-association 文件，以及获批时的
+下述 Web 界面，不放别的内容。将来的登录 passkey 必须使用另一个 RP，这样登录提示永远解不开 V。
+
+**Ceremony 约定。** 以下规则在所有平台上相同：
+
+- 注册要求可发现凭据、用户验证和 PRF `enabled: true`。`user.id` 是 32 字节 vaultId，系统显示的用户名
+  写明这个凭据用于解锁 Lody 恢复保险库。`excludeCredentials` 列出已知 passkey，因为在同一认证器上，
+  RP 和 `user.id` 都相同的注册会覆盖已有凭据。
+- 包装或解锁都要求一次真实认证 ceremony：`userVerification: required`，报告用户已验证，并返回 32 字节
+  `results.first`。WebAuthn 只在注册时报告 `enabled`，认证时从不报告，所以认证结果只看 `results.first`。
+  注册时返回的结果不使用：它是可选的，而且注册流程必须走通之后解锁用的同一条路径。
+- PRF 输入是固定常量 `lody-e2ee/vault-v1/prf-input\0`，因为新设备在 ceremony 之前还不知道 vaultId。
+  现有 HKDF 以 vaultId 为 salt、用途为 `prf-wrap`，由它区分不同保险库。
+- 凭据 ID 字符串在所有平台上都是无填充 base64url 编码，这样各平台算出同一个 entryId。
+- 结果缺失、未启用或长度不对时，以 `prf-unavailable` 停止。任何情况下都不从 passkey 签名、登录会话或
+  user handle 派生密钥。
+
+**多个 passkey，同一个 V。** 每个 passkey 有自己的不可变 `prf-wrap` 条目，保存同一个 V；添加时需要 V 已打开，
+不改动其他条目。加密索引列出每个 passkey（条目 ID、凭据 ID、标签），CAS 引用这些条目，所以服务端不会把
+已列出的包装当作未引用条目删除。一个保险库最多八个 passkey。注册依次包装、上传、回读、解密、提交索引，
+全部完成才报告成功。索引这项新增属于保险库侧改动，在任何生产保险库存在之前完成，不改变
+`formatVersion: 1`、恢复文件或任何账本记录。
+
+**没有文件时如何打开。** ceremony 发送空的 `allowCredentials`。返回的 user handle 给出 vaultId，凭据 ID
+给出 entryId，所以不需要新的服务端 API。服务定位符来自已登录的客户端。user handle 只是未经认证的线索：
+只有解密成功才打开保险库，而解密通过 HKDF salt 和 AAD 绑定了 vaultId。
+
+**macOS。** macOS 15 及以上的原生 AuthenticationServices 模块，运行在支持云服务的桌面构建的主进程中。
+仅本地的桌面版没有保险库，也没有 RP entitlement。该模块负责注册和解锁。V 留在主进程，渲染进程看不到
+V，也看不到 PRF 结果。
+
+**iPhone。** 此功能要求 iOS 18.4 及以上，应用自身的最低版本维持不变，比这个低。由一个很薄的自有 Capacitor 插件在原生层
+调用 AuthenticationServices：自定义 scheme 下的 WebView 自己跑不了 WebAuthn，第三方插件又会把未经审查的
+依赖放到 V 的路径上。API 从 iOS 18.0 起就有，但公开报告称 iOS 18.3 及更早版本的跨设备 PRF 存在数据丢失
+缺陷。第一阶段 iPhone 负责解锁和恢复。V 从不保留。只要这条路径存在，应用就不能引入 JavaScript 空中更新，
+否则它就落入下述 Web 风险。
+
+**Web。** PRF 是否可用由真实 ceremony 判断，不靠浏览器名单。浏览器没有 PRF 时，提示用户改用恢复文件或
+其他设备，不做降级。推荐设计是放在 RP 主机上的隔离界面，只解锁：独立的最小构建，没有第三方脚本和
+遥测，CSP 严格，部署凭据独立。C 留在这个源上，之后普通 Web 应用或其他设备通过 C 批准的普通配对加入。
+V、R 和 PRF 结果都不会进入普通 Web 应用。V 从不存进浏览器。
+
+**Web 风险。** Web 代码由服务端下发，所以 RP 允许的源上一旦下发了被篡改的代码，它就能发起 ceremony、
+拿走 PRF 结果并取回包装，从而得到 V 和保险库里所有的 R。被攻破的浏览器设备只暴露该浏览器上的工作区；
+这条路径则覆盖所有已纳入保险库的工作区，并让攻击者在 R 被撤销前可以接纳设备。有三点必须说清楚：
+
+- *只解锁和页面内确认是产品规则，不是安全边界。* 被篡改的代码会绕开它们，直接调用 WebAuthn。只解锁
+  仍然有用，因为这样 V 的日常使用不会发生在 Web 上。
+- *风险不限于 Web 用户。* 在 Mac 上注册的 passkey 会同步，任何浏览器都能在 RP 主机上请求它，即使用户从不
+  用 Web。原生代码避开了服务端下发的 JavaScript，但凭据并不绑定应用。控制 RP 主机的运营者总能尝试这样做，
+  即使没有 Web 界面也一样。
+- *真正的屏障是用户批准加隔离。* 系统提示会显示 RP 和凭据，页面代码画不出来。专用主机能排除对 Web 应用、
+  其依赖和其子域名的一般性攻破，但排除不了恶意运营者。
+
+**其他认证器。** 没有白名单，也不要求 attestation：任何提供方只要真实 ceremony 满足约定就能工作。Lody 只
+承诺 macOS 和 iPhone 上的 iCloud 钥匙串。其他密码管理器和硬件密钥不作承诺。第一阶段原生端只用平台提供方，
+所以硬件密钥只可能在 Web 上工作，前提是浏览器透传 PRF。
+
+**移除与泄露。** 移除 passkey 时先提交索引，再删除它的包装。这只能阻止今后的使用：复制下来的包装加上
+凭据仍能打开 V。怀疑 passkey 或同步账号泄露时，按恢复文件泄露处理：更换保险库和 R，并撤销旧 R。同步意味着
+提供方账号进入了信任基础，它被接管后再加上 Lody 账号访问，就能打开 V。
+
+**不变的部分。** 账本记录和 `formatVersion: 1` 不变。passkey 只授予 R 已有的权限，不多给。恢复通知照常适用，
+不强制更换、不审批、无冷却期，并写明走的是 passkey 路径。passkey 解锁不在 MVP 内，留在同样的默认关闭开关之后。
+
+### 需要 owner 决定的事项
+
+每项都带推荐，本草案不替 owner 作决定。
+
+1. **RP ID。** 推荐用专用精确主机名。这是唯一以后无法反悔的选择。
+2. **Web。** 推荐隔离的只解锁界面，在 macOS 和 iPhone 之后上线。其他选择：在普通 Web 应用上解锁，成本更低，
+   但把所有 passkey 暴露给该应用的整条下发链路；或者不做 Web，这等于放弃既定目标。
+3. **Web 文件恢复。** 推荐同一界面也接受恢复文件，这才是浏览器上"走恢复文件"的实际含义。
+4. **iPhone 下限。** 推荐 18.4。
+5. **其他认证器。** 推荐不作承诺，如上。
+6. **可信锚载体。** 任何路径的恢复都离不开它，而载体尚未决定。
+7. **阶段与门禁。** 是否继续留在 MVP 门禁之外，以及 iPhone 注册是否进入第一阶段。
 
 ## 边界与验证
 
@@ -139,3 +237,22 @@ Lab 合成保护不代表生产钥匙串。登录控制读取，恢复文件控�
 外围约束见[白皮书](whitepaper.zh.md)、[权限账本](permission-ledger.zh.md)及
 [保护边界](../../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory)。批准本修订不代表
 已实现、已部署或真机验收；测试通过及翻译完成都不启用产品 E2EE。
+
+## 证据
+
+预期行为见上文。以下是 2026-11-05 的代码核查结果，没有实际运行：
+
+- [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts) 要求同一对象里同时有 `enabled: true`
+  和 `results.first`。真实认证结果没有 `enabled`，所以现有代码会拒绝它。[Lab 测试](../../packages/e2ee-lab/test/recovery-vault.test.ts)
+  能通过，是因为用了合成对象。这是代码和旧措辞的缺口，不是保证的降低。
+- [`vault.ts`](../../packages/e2ee-core/src/internal/recovery/vault.ts) 已经为每个凭据建一个 `prf-wrap` 条目，
+  但 vaultId 和定位符要由调用方提供，这些条目也不在索引引用之内。
+- core 和 Lab 之外没有包使用保险库。[#2125](https://github.com/LodyAI/Lody/pull/2125) 是未合入的 draft PR，且有冲突。
+
+外部来源：[WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) 用于 `enabled`、注册结果可选、用户验证 PRF、
+`user.id` 覆盖和 RP 范围；[Apple](https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfassertioninput-swift.struct)
+用于 macOS 15 和 iOS 18，[关联域文档](https://developer.apple.com/documentation/xcode/supporting-associated-domains)
+用于 HTTPS、禁止重定向和 CDN 拉取。浏览器和提供方覆盖范围（包括 iOS 18.0–18.3 的报告）来自二手来源
+（[Yubico](https://developers.yubico.com/WebAuthn/Concepts/PRF_Extension/Developers_Guide_to_PRF.html)、
+[Corbado](https://www.corbado.com/blog/passkeys-prf-webauthn)），部分版本号互有出入。这里没有任何真机测量，
+关联域在 Developer ID 签名的 Electron 构建中能否端到端工作也尚未证实。
