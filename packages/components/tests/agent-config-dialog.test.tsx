@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { developerModeEnabledAtom, lodyAgentBetaEnabledAtom } from '@/atoms/settings';
+
 import { act, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -728,14 +730,15 @@ describe('AgentConfigDialog', () => {
         .slice(0, 7)
         .map((option) => option.textContent)
     ).toEqual([
-      expect.stringContaining('Lody Agent'),
       expect.stringContaining('Kimi Code'),
       expect.stringContaining('Devin'),
       expect.stringContaining('Grok'),
       expect.stringContaining('Claude'),
       expect.stringContaining('Codex'),
       expect.stringContaining('DeepSeek Harness'),
+      expect.stringContaining('Pi'),
     ]);
+    expect(getOptionButtons().some((option) => option.textContent?.includes('Lody Agent'))).toBe(false);
 
     await act(async () => {
       getOptionByText('Custom command').dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -750,6 +753,8 @@ describe('AgentConfigDialog', () => {
   });
 
   it('offers Lody Agent and creates its builtin configuration', async () => {
+    store.set(developerModeEnabledAtom, true);
+    store.set(lodyAgentBetaEnabledAtom, true);
     const onSubmit = vi.fn(async () => {});
     await renderDialog(
       { kind: 'create' },

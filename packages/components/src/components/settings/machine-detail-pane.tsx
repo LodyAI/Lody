@@ -1,3 +1,4 @@
+import { lodyAgentFeatureEnabledAtom } from '@/atoms/settings';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
@@ -1130,9 +1131,10 @@ function AvailableProviders({
   onAdd: (initialForm: Partial<AgentConfigFormData>) => void;
 }) {
   const { t } = useTranslation();
+  const lodyAgentEnabled = useAtomValue(lodyAgentFeatureEnabledAtom);
   const available = useMemo(
     () =>
-      listAddableProviders(t).filter(
+      listAddableProviders(t, lodyAgentEnabled).filter(
         (provider) =>
           !configs.some((config) => {
             const brandId = resolveAgentBrandId(config);
@@ -1143,7 +1145,7 @@ function AvailableProviders({
                   config.agentType === provider.agentType;
           })
       ),
-    [configs, t]
+    [configs, t, lodyAgentEnabled]
   );
   // An empty machine is shown what it could run: the onboarding wall of marks,
   // each opening the add dialog already on that agent.

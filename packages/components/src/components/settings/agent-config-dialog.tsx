@@ -1,3 +1,4 @@
+import { lodyAgentFeatureEnabledAtom } from '@/atoms/settings';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { useMachineRpcFeatureReason } from '@/hooks/use-workspace-feature';
 import {
@@ -1322,8 +1323,8 @@ export type AddableProvider = {
  * form that opens the dialog straight on it. Experimental runtimes, registry
  * agents and custom commands stay behind the dialog's own rail.
  */
-export function listAddableProviders(t: Translate): AddableProvider[] {
-  const builtins = BUILTIN_OPTIONS.filter((option) => !option.experimental).map((option) => ({
+export function listAddableProviders(t: Translate, lodyAgentEnabled = false): AddableProvider[] {
+  const builtins = BUILTIN_OPTIONS.filter((option) => !option.experimental && (option.agentType !== 'sorbet' || lodyAgentEnabled)).map((option) => ({
     key: option.value,
     label: getOptionLabel(t, option),
     description: getOptionDescription(t, option) ?? option.descriptionDefault,
@@ -1663,6 +1664,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     required?: string;
     error?: string;
   } | null>(null);
+  const lodyAgentEnabled = useAtomValue(lodyAgentFeatureEnabledAtom);
   const workspaceRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
   const liveBinaryState = useMachineAcpBinaryProgress(
     workspaceRuntime,
@@ -2594,9 +2596,10 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
 
   const filteredOptions = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return ALL_OPTIONS;
-    return ALL_OPTIONS.filter((o) => o.searchKeys.toLowerCase().includes(q));
-  }, [query]);
+    return ALL_OPTIONS.filter((o) =>
+      (o.agentType !== 'sorbet' || lodyAgentEnabled) && (!q || o.searchKeys.toLowerCase().includes(q))
+    );
+  }, [query, lodyAgentEnabled]);
 
   const groupedOptions = useMemo(() => {
     return {
