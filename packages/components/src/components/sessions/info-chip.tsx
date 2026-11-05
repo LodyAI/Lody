@@ -1,5 +1,6 @@
 import { useRef, useState, type ComponentType, type ReactNode, type SVGProps } from 'react';
 import { ArrowUpRight } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { cn } from '@/lib/utils';
 import { Popover } from '@lody/ui/popover';
 import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
@@ -79,6 +80,7 @@ export function PopoverActionChip({
   value,
   content,
   defaultOpen = false,
+  sizing = 'bar',
 }: {
   icon: InfoChipIcon;
   label: string;
@@ -88,6 +90,8 @@ export function PopoverActionChip({
   content: ReactNode | ((close: () => void) => ReactNode);
   /** Storybook/testing aid. */
   defaultOpen?: boolean;
+  /** Compact action menus size to their content and anchor to the chip. */
+  sizing?: 'bar' | 'content';
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -113,19 +117,29 @@ export function PopoverActionChip({
       <Popover.Content
         side="top"
         align="start"
-        // Anchor to the enclosing info-bar pill so the panel shares its edges.
+        // Detail panels share the bar's edges; compact menus follow their chip.
         anchor={() => {
           const button = buttonRef.current;
+          if (sizing === 'content') return button;
           return button?.closest('[data-info-bar-surface]') ?? button;
         }}
         aria-label={label}
-        className="w-[var(--anchor-width)] border-border/60 p-0 shadow-xl"
+        className={cn(
+          sizing === 'content'
+            ? stylex.props(styles.contentWidth).className
+            : 'w-[var(--anchor-width)]',
+          'border-border/60 p-0 shadow-xl'
+        )}
       >
         {typeof content === 'function' ? content(() => setOpen(false)) : content}
       </Popover.Content>
     </Popover.Root>
   );
 }
+
+const styles = stylex.create({
+  contentWidth: { width: 'max-content' },
+});
 
 /** Collapsed item in the cluster. Click promotes it onto the stage. */
 export function ClusterChip({

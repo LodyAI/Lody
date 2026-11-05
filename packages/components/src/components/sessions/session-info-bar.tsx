@@ -438,6 +438,7 @@ export function SessionInfoBar({
           ) : null}
           {onOpenIosSimulator && onOpenAndroidEmulator ? (
             <PopoverActionChip
+              sizing="content"
               icon={Smartphone}
               label={`${t('sessions.detailTabs.iosSimulator', 'iOS Simulator')} / ${t('sessions.detailTabs.androidEmulator', 'Android Emulator')}`}
               content={(close) => (
