@@ -644,6 +644,7 @@
   "agents.authentication.submitCode": "Continue",
   "agents.authentication.timeout": "Authentication timed out. Please try again.",
   "agents.authentication.unsafeAuthorizationUrl": "The Provider returned an unsafe authorization URL. Only HTTP and HTTPS pages can be opened.",
+  "agents.authentication.verifyingCapabilities": "Sign-in completed. Verifying provider…",
   "agents.authentication.waiting": "Waiting for {{provider}} sign-in",
   "agents.authentication.runtimeDownloading": "Downloading the {{runtime}} runtime…",
   "agents.authentication.runtimeDownloadingPercent": "Downloading the {{runtime}} runtime… {{percent}}%",

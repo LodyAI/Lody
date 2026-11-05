@@ -644,6 +644,7 @@
   "agents.authentication.submitCode": "继续",
   "agents.authentication.timeout": "登录超时，请重试。",
   "agents.authentication.unsafeAuthorizationUrl": "Provider 返回了不安全的授权 URL，仅可打开 HTTP 或 HTTPS 页面。",
+  "agents.authentication.verifyingCapabilities": "登录完成，正在验证 Provider…",
   "agents.authentication.waiting": "正在等待 {{provider}} 登录",
   "agents.authentication.runtimeDownloading": "正在下载 {{runtime}} 运行时…",
   "agents.authentication.runtimeDownloadingPercent": "正在下载 {{runtime}} 运行时… {{percent}}%",

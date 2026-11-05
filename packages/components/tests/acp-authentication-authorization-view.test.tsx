@@ -5,7 +5,15 @@ import { Provider, createStore } from 'jotai';
 import { localProbeAttemptedAtom, localProbeResultAtom } from '../src/atoms/local-probe';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineId } from '@lody/shared';
+import {
+  getMachineRoomId,
+  type AgentConfigId,
+  type MachineAcpAuthenticateResponse,
+  type MachineId,
+} from '@lody/shared';
+import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
+import * as authenticationHook from '../src/hooks/use-machine-acp-authentication';
+import * as machineFlock from '../src/hooks/use-machine-flock-rows';
 
 import {
   AcpAuthenticationPanel,
@@ -63,6 +71,112 @@ describe('AcpAuthenticationAuthorizationView', () => {
       expect(container.textContent).not.toContain('choose device sign-in');
     } finally {
       Reflect.deleteProperty(window, '__LODY_ELECTRON__');
+    }
+  });
+
+  it.each([
+    { progress: true, verified: true },
+    { progress: true, verified: false },
+    { progress: false, verified: true },
+  ])('handles authentication progress=$progress and verification=$verified', async ({
+    progress,
+    verified,
+  }) => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    const store = createStore();
+    const machineId = 'local' as MachineId;
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId(machineId)]: {
+        id: machineId,
+        protocolCapabilities: { acpAuthenticationInteractions: 2 },
+      } as never,
+    });
+    let onProgress:
+      | NonNullable<authenticationHook.MachineAcpAuthenticationArgs['onProgress']>
+      | undefined;
+    let resolveResponse!: (response: MachineAcpAuthenticateResponse) => void;
+    const promise = new Promise<MachineAcpAuthenticateResponse>((resolve) => {
+      resolveResponse = resolve;
+    });
+    vi.spyOn(authenticationHook, 'useMachineAcpAuthentication').mockReturnValue({
+      startAuthentication: (args) => {
+        onProgress = args.onProgress;
+        return { requestId: 'auth-1', promise };
+      },
+      cancelAuthentication: vi.fn(),
+      submitAuthorizationCode: vi.fn(),
+      submitAuthenticationInput: vi.fn(),
+    });
+    vi.spyOn(machineFlock, 'resyncMachineFlockRows').mockResolvedValue(undefined as never);
+    const onAuthenticated = vi.fn();
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <AcpAuthenticationPanel
+            machineId={machineId}
+            configId={'provider-1' as AgentConfigId}
+            cliType="builtin"
+            agentType="codex"
+            onAuthenticated={onAuthenticated}
+          />
+        </Provider>
+      );
+    });
+    const start = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Sign in with')
+    );
+    expect(start?.disabled).toBe(false);
+    await act(async () => {
+      start?.click();
+    });
+    const base = {
+      type: 'machine/acp-authentication-progress' as const,
+      machineId,
+      requestId: 'auth-1',
+      agentType: 'codex',
+    };
+    await act(async () => {
+      onProgress?.({
+        ...base,
+        status: 'authorization',
+        authorizationUrl: 'https://example.test',
+        requiresAuthorizationConsent: true,
+        interactionId: 'consent-1',
+      });
+    });
+    expect(container.textContent).toContain('Finish signing in');
+    if (progress) {
+      await act(async () => {
+        onProgress?.({ ...base, status: 'authenticated' });
+      });
+      expect(container.textContent).toContain('Sign-in completed. Verifying provider');
+      expect(container.textContent).not.toContain('Waiting for');
+      expect(container.textContent).not.toContain('Finish signing in');
+      expect(container.textContent).toContain('Cancel');
+    } else {
+      expect(container.textContent).toContain('Waiting for');
+    }
+    expect(onAuthenticated).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveResponse({
+        type: 'machine/acp-authenticate_response',
+        machineId,
+        requestId: 'auth-1',
+        agentType: 'codex',
+        success: true,
+        disposition: 'authenticated',
+        capabilitiesRefreshed: verified,
+        ...(!verified ? { authRequired: true, error: 'Authentication required' } : {}),
+      });
+      await promise;
+    });
+    expect(container.textContent).not.toContain('Verifying provider');
+    if (verified) {
+      expect(container.textContent).toContain('sign-in completed');
+      expect(onAuthenticated).toHaveBeenCalledOnce();
+    } else {
+      expect(container.textContent).toContain('Authentication required');
+      expect(onAuthenticated).not.toHaveBeenCalled();
     }
   });
 
