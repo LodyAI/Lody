@@ -1,4 +1,8 @@
-import { resolveSessionFilePath, isSafeProjectPath } from '@lody/shared';
+import {
+  CODE_COLLAB_FILE_INDEX_LIMITS,
+  resolveSessionFilePath,
+  isSafeProjectPath,
+} from '@lody/shared';
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -12,6 +16,7 @@ import type {
 import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { countTextLines } from './diff-line-counts';
+import { isInCodeCollabIgnoredDirectory } from './workspace-watch-path-policy';
 import { gitDiffBaseRefCandidates } from '../git/git-diff-base';
 
 // Pure Git-backed scanning + All Changes computation shared by the file-index
@@ -61,39 +66,47 @@ async function runGitLsFiles(
   cwd: string,
   signal?: AbortSignal
 ): Promise<{ readonly ok: true; readonly paths: readonly string[] } | { readonly ok: false }> {
-  // `runGit` never rejects, so both children are joined before either outcome is used.
+  // `runGit` never rejects, so all children are joined before either outcome is used.
   // Returning on the first failure left the sibling `git` unawaited; with Tinypool's
   // `Atomics.wait` idle worker it could stay unreaped as a daemon zombie on macOS.
   const results = await Promise.allSettled([
-    runGit(
-      cwd,
-      ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--deduplicate', '--', '.'],
-      signal
-    ),
+    runGit(cwd, ['ls-files', '-z', '--cached', '--deduplicate', '--', '.'], signal),
+    runGit(cwd, ['ls-files', '-z', '--others', '--exclude-standard', '--', '.'], signal),
     runGit(cwd, ['ls-files', '--deleted', '-z', '--', '.'], signal),
   ]);
   for (const result of results) {
     if (result.status === 'rejected') throw result.reason;
   }
-  const [listedResult, deletedResult] = results;
-  if (listedResult?.status !== 'fulfilled' || deletedResult?.status !== 'fulfilled') {
+  const [trackedResult, untrackedResult, deletedResult] = results;
+  if (
+    trackedResult?.status !== 'fulfilled' ||
+    untrackedResult?.status !== 'fulfilled' ||
+    deletedResult?.status !== 'fulfilled'
+  ) {
     throw new Error('Git listing did not settle');
   }
-  const listed = listedResult.value;
+  const tracked = trackedResult.value;
+  const untracked = untrackedResult.value;
   const deleted = deletedResult.value;
-  if (!listed.ok) {
+  if (!tracked.ok || !untracked.ok) {
     return { ok: false };
   }
   const deletedPaths = deleted.ok
     ? new Set(deleted.stdout.split('\0').map(normalizeGitPath).filter(isValidRelativeGitPath))
     : new Set<string>();
-  return {
-    ok: true,
-    paths: listed.stdout
-      .split('\0')
-      .map(normalizeGitPath)
-      .filter((filePath) => isValidRelativeGitPath(filePath) && !deletedPaths.has(filePath)),
-  };
+  const paths = new Set<string>();
+  for (const filePath of tracked.stdout.split('\0').map(normalizeGitPath)) {
+    if (isValidRelativeGitPath(filePath) && !deletedPaths.has(filePath)) paths.add(filePath);
+  }
+  // `.gitignore` only covers what the project declares; caches such as an
+  // in-project `.pnpm-store` also go through the product policy. Tracked files
+  // above stay visible even when they live under such a directory name.
+  for (const filePath of untracked.stdout.split('\0').map(normalizeGitPath)) {
+    if (isValidRelativeGitPath(filePath) && !isInCodeCollabIgnoredDirectory(filePath)) {
+      paths.add(filePath);
+    }
+  }
+  return { ok: true, paths: [...paths] };
 }
 
 export type ProjectGitMember = { readonly path: string; readonly base: string };
@@ -142,6 +155,8 @@ export async function computeAllChanges(
     readonly preferredBaseBranch?: string;
     readonly diffBase?: string;
     readonly signal?: AbortSignal;
+    /** Untracked files whose content may be read for line counts; later ones stay uncounted. */
+    readonly untrackedLineCountBudget?: number;
   } = {}
 ): Promise<CodeCollabV2AllChangesState> {
   const diffBase =
@@ -204,7 +219,8 @@ export async function computeAllChanges(
       if (!filePath) continue;
       const normalizedPath = normalizeGitPath(filePath);
       if (addRaw === '-' || delRaw === '-') {
-        changes[normalizedPath] = true;
+        // Binary: no line counts, but a deletion must stay a deletion.
+        changes[normalizedPath] = deletedPaths.has(normalizedPath) ? { del: true } : true;
         continue;
       }
       const add = Number(addRaw);
@@ -220,17 +236,27 @@ export async function computeAllChanges(
   }
 
   if (untracked.ok) {
+    // Filter and bound BEFORE reading: each counted file is a full read, and the
+    // published file index is bounded anyway (CODE_COLLAB_FILE_INDEX_LIMITS).
+    let remainingLineCounts = Math.max(
+      0,
+      options.untrackedLineCountBudget ?? CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries
+    );
     for (const filePath of untracked.stdout.split('\0')) {
       options.signal?.throwIfAborted();
       if (!filePath) continue;
       const normalizedPath = normalizeGitPath(filePath);
-      if (!(normalizedPath in changes)) {
-        changes[normalizedPath] = await lineStatsForUntrackedFile(
-          workspaceRoot,
-          normalizedPath,
-          options.signal
-        );
+      if (normalizedPath in changes || isInCodeCollabIgnoredDirectory(normalizedPath)) continue;
+      if (remainingLineCounts === 0) {
+        changes[normalizedPath] = true;
+        continue;
       }
+      remainingLineCounts -= 1;
+      changes[normalizedPath] = await lineStatsForUntrackedFile(
+        workspaceRoot,
+        normalizedPath,
+        options.signal
+      );
     }
   }
   return changes;

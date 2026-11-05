@@ -1,6 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { Flock } from '@loro-dev/flock-wasm';
+import { describe, expect, it } from 'vitest';
 
-import type { CodeCollabFileIndexWritableFlock } from '@lody/shared';
+import {
+  CODE_COLLAB_FILE_INDEX_LIMITS,
+  buildCodeCollabFileIndexState,
+  readCodeCollabFileIndexFromFlock,
+  type CodeCollabFileIndexWritableFlock,
+  type CodeCollabV2FileTreeState,
+} from '@lody/shared';
 import { publishCodeCollabFileIndexFlock } from './code-collab-flock-publish';
 
 function makeFlock(
@@ -77,4 +84,70 @@ describe('Code Collab Flock publication', () => {
     await pending;
     expect(local.snapshot()).toEqual({ 'old.ts': true });
   });
+
+  it('cleans an oversized legacy index in bounded commits and converges to the bounded state', async () => {
+    const flock = new Flock();
+    const legacy: CodeCollabV2FileTreeState = {};
+    // Synthetic store-like paths: long, multi-byte and JSON-escaped segments.
+    for (let index = 0; index < 4_000; index += 1) {
+      legacy[`.pnpm-store/v10/index/${String(index).padStart(6, '0')}-缓存-"q"\\name@1.0.0.json`] =
+        true;
+    }
+    for (const [key, value] of Object.entries(legacy)) flock.set([key], value);
+    flock.commit();
+
+    const tree: CodeCollabV2FileTreeState = { src: { kind: 'lazy' } };
+    for (let index = 0; index < 1_200; index += 1) tree[`src/file-${index}.ts`] = true;
+    const target = buildCodeCollabFileIndexState(tree, {
+      'src/file-1.ts': { diff: [2, 1] },
+      'src/removed.ts': { diff: [0, 4], del: true },
+    });
+
+    let exportedFrom = flock.version();
+    const exportedBundleBytes: number[] = [];
+    const recordExport = async () => {
+      const bundle = flock.exportJson(exportedFrom);
+      exportedFrom = flock.version();
+      exportedBundleBytes.push(new TextEncoder().encode(JSON.stringify(bundle)).byteLength);
+    };
+    const result = await publishCodeCollabFileIndexFlock({
+      repo: {
+        openFlockDoc: async () => ({ flock, syncOnce: recordExport }),
+        flush: async () => undefined,
+      },
+      flockDocId: 'workspace:fi:owner',
+      fileIndex: target,
+      updatedAtMs: 1_800_000_000_000,
+      reconcileRemote: false,
+    });
+
+    expect(result.changed).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(target);
+    expect(target['src/removed.ts']).toEqual({
+      kind: 'deleted',
+      change: { diff: [0, 4], del: true },
+    });
+    expect(exportedBundleBytes.length).toBeGreaterThan(1);
+    for (const bytes of exportedBundleBytes) {
+      expect(bytes).toBeLessThanOrEqual(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes);
+    }
+    // The complete published state also fits one bundle.
+    const full = new TextEncoder().encode(JSON.stringify(flock.exportJson())).byteLength;
+    expect(full - countTombstoneBytes(flock)).toBeLessThanOrEqual(
+      CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes
+    );
+  });
 });
+
+function countTombstoneBytes(flock: Flock): number {
+  const bundle = flock.exportJson() as { entries: Record<string, { d?: unknown }> };
+  let bytes = 0;
+  for (const [key, record] of Object.entries(bundle.entries)) {
+    if (record.d === undefined) {
+      bytes += new TextEncoder().encode(
+        `${JSON.stringify(key)}:${JSON.stringify(record)},`
+      ).byteLength;
+    }
+  }
+  return bytes;
+}

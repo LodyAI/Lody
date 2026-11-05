@@ -7,6 +7,9 @@ import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { CODE_COLLAB_FILE_INDEX_LIMITS, estimateCodeCollabFileIndexStateBytes } from '@lody/shared';
+
+import { computeAllChanges } from './file-index-scan-core';
 import fileIndexScanWorker from './file-index-scan-worker';
 
 const execFileAsync = promisify(execFile);
@@ -197,6 +200,87 @@ describe('fileIndexScanWorker', () => {
       expect(merged.fileIndex['avatar.txt']).toBe(true);
     });
   });
+  it('keeps an untracked in-project pnpm store out of the file index but shows tracked files there', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      // Tracked before the cache policy applies: must stay visible.
+      await mkdir(path.join(workspaceRoot, '.pnpm-store', 'pinned'), { recursive: true });
+      await writeFile(path.join(workspaceRoot, '.pnpm-store', 'pinned', 'tracked.json'), '{}\n');
+      await git(workspaceRoot, ['add', '.pnpm-store/pinned/tracked.json']);
+      await git(workspaceRoot, ['commit', '-m', 'tracked store file']);
+      await mkdir(path.join(workspaceRoot, '.pnpm-store', 'v10', 'index'), { recursive: true });
+      for (let index = 0; index < 20; index += 1) {
+        await writeFile(
+          path.join(workspaceRoot, '.pnpm-store', 'v10', 'index', `entry-${index}.json`),
+          '{"cache":true}\n'
+        );
+      }
+
+      const result = await fileIndexScanWorker({
+        kind: 'full-state',
+        workspaceRoot,
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+      });
+      if (result.kind !== 'full-state' || result.status !== 'ok') throw new Error('Missing state');
+
+      const paths = Object.keys(result.fileIndex);
+      expect(paths).toContain('.pnpm-store/pinned/tracked.json');
+      expect(paths).toContain('src/new.ts');
+      expect(paths.filter((file) => file.startsWith('.pnpm-store/v10'))).toEqual([]);
+      expect(
+        Object.keys(result.allChanges).filter((file) => file.startsWith('.pnpm-store'))
+      ).toEqual([]);
+    });
+  });
+
+  it('bounds the published index for a flood of untracked files without inventing deletions', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      const generated = path.join(workspaceRoot, 'generated-output', 'deeply', 'nested', 'chunks');
+      await mkdir(generated, { recursive: true });
+      for (let index = 0; index < 1_500; index += 1) {
+        await writeFile(path.join(generated, `chunk-${String(index).padStart(5, '0')}.txt`), 'x\n');
+      }
+
+      const result = await fileIndexScanWorker({
+        kind: 'full-state',
+        workspaceRoot,
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+      });
+      if (result.kind !== 'full-state' || result.status !== 'ok') throw new Error('Missing state');
+
+      expect(Object.keys(result.fileIndex).length).toBeLessThanOrEqual(
+        CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries
+      );
+      expect(estimateCodeCollabFileIndexStateBytes(result.fileIndex)).toBeLessThanOrEqual(
+        CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes
+      );
+      expect(result.omittedPaths).toBeGreaterThan(0);
+      // Over-budget paths are not loaded, not deleted.
+      expect(
+        Object.values(result.fileIndex).filter(
+          (value) => value !== true && value.kind === 'deleted'
+        )
+      ).toEqual([]);
+      // Root entries and the real source change survive the flood.
+      expect(result.fileIndex['README.md']).toBe(true);
+      expect(result.fileIndex['src/app.ts']).toEqual({ kind: 'file', change: { diff: [1, 0] } });
+      expect(result.fileIndex['generated-output']).toEqual({ kind: 'lazy' });
+    });
+  });
+
+  it('reads untracked files for line counts only within the budget', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, 'src', 'second.ts'), 'a\nb\nc\n');
+      const changes = await computeAllChanges(workspaceRoot, { untrackedLineCountBudget: 1 });
+      const untracked = [changes['src/new.ts'], changes['src/second.ts']];
+      expect(untracked.filter((value) => value === true)).toHaveLength(1);
+      expect(untracked.filter((value) => value !== true && value?.diff !== undefined)).toHaveLength(
+        1
+      );
+    });
+  });
+
   it('excludes paths deleted from the worktree from the Git scan', async () => {
     await withGitWorkspace(async (workspaceRoot) => {
       await unlink(path.join(workspaceRoot, 'README.md'));
