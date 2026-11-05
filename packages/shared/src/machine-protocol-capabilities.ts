@@ -71,7 +71,10 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
 
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
-export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
+// v1 serves identity providers (Nowledge Mem). v2 adds account providers
+// (EverMe): sign-in, install and agent connect/disconnect requests.
+export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 2;
+const MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_PROTOCOL_VERSION = 1;
@@ -137,6 +140,17 @@ export function machineSupportsProtocolCapability(
 }
 
 export function machineSupportsMemoryProviders(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.memoryProviders,
+    MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the daemon understands account providers' sign-in, install and connect requests. */
+export function machineSupportsAccountMemoryProviders(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
   return machineSupportsProtocolCapability(

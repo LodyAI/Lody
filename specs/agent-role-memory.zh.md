@@ -58,7 +58,15 @@ daemon 不会收到记忆 RPC。请求沿用现有本地/远程机器路由，�
 ACP 启动在环境组装完成后解析适配器，Nowledge Mem 注入 `NMEM_AGENT_ID=<memoryId>`。
 在 turn 之间切换身份时，沿用恢复路径重建 ACP 进程，因为运行中进程的环境不能修改。
 Fork 和恢复读取冻结的历史配置，不重新查询可变 Role。未知 Provider 明确失败。
-其他 Provider、自动安装或配置 Agent 端 Mem 插件不在本次范围内。
+更多 Provider，以及为 Nowledge Mem 安装 Agent 端插件，不在本次范围内。
+
+## EverMe
+
+EverMe 一个账号只有一份记忆，因此没有可创建、导入或选择的身份，Role 编辑器也不提供它。
+它改为按 Agent 逐个连接或断开：已连接的 Agent 通过自身配置读写该账号的记忆，ACP 启动时
+不为 EverMe 注入任何内容。登录、安装和连接 Agent 只能在这台机器上进行：设置页不会向其他
+机器发送这些请求，Daemon 也会拒绝经工作区中转或加密功能通道到达的此类请求，因为在别处
+完成的授权会把这台机器绑定到授权人的账号。
 
 ## 证据
 
@@ -66,6 +74,8 @@ Fork 和恢复读取冻结的历史配置，不重新查询可变 Role。未知 
 - [Daemon 适配器](../apps/cli/src/lib/memory-providers.ts)
 - [设置界面](../packages/components/src/components/settings/memory-setting.tsx)
 - [进程边界](../apps/cli/src/session/session.ts)
+- [EverMe 适配器](../apps/cli/src/lib/everme-provider.ts)
+- [EverMe 决策记录](../.agents/notes/implemented/feature/2026-11-03-everme-memory-provider.zh.md)
 
 记忆编辑器在整个窗口居中，桌面尺寸为紧凑的 900 × 600 px，并限制在 96dvw × 92dvh 内。
 创建表单要求名称非空，并将名称和 Agent ID 按顺序放在同一行，未手动修改 ID 时随名称转为全小写。
