@@ -3,7 +3,8 @@
 Status: implemented
 Translation: current
 
-PR: [#1939](https://github.com/LodyAI/Lody/pull/1939)
+PR: [#1939](https://github.com/LodyAI/Lody/pull/1939)；状态结构与未加入房间时的读取：本分支的 PR
+（`fix/streams-reconnect-presence-flap`）
 
 [English](2026-10-27-mcp-chat-machine-probe-timeout.md)
 
@@ -14,8 +15,9 @@ presence 显示在线的机器返回永久性的 `COMMAND_REJECTED: Machine … 
 unavailable.`；`session_status_many` 也会把同一台机器报为离线。现在移除了该探测的远端
 分支。会话的 create、chat、cancel 以及两个状态读取函数，只在 presence 明确判定离线时
 才把远端目标视为离线，并以带类型、可重试的 `MACHINE_OFFLINE` 报告。presence 未知时
-继续执行；状态读取中的 RPC 超时只让实时状态变为 stale。权限、所有权、归档和会话
-存在性检查保持不变。
+继续执行；状态读取中的 RPC 超时只让实时状态变为 stale；批量状态结构携带全部三种状态，
+因此未应答的 RPC 不会把未知变成离线。副本中已有的新鲜心跳即使在 presence room 未加入时
+也能证明在线。权限、所有权、归档和会话存在性检查保持不变。
 
 ## 原因
 
@@ -44,8 +46,18 @@ Streams 连接同一时刻重连耗时约 29 秒，而 presence 和稍后相同�
 
 对远端目标，它读取三态 presence，只有明确离线时才抛出 `MachineOfflineError`。
 
-对状态读取，由 presence 决定 `machineOnline`。presence 未知时，只有已应答的实时状态
-RPC 才算在线证据，因为状态的布尔结构没有第三种取值。
+对状态读取，由 presence 决定机器状态。presence 未知时，已应答的实时状态 RPC 把它提升为
+在线，未应答则保持未知。更正：批量读取最初返回布尔值 `machineOnline`，会把"presence 未知 +
+RPC 超时"变成离线，于是 `session_status_many` 仍对健康机器返回
+`temporarily_blocked / MACHINE_OFFLINE`。批量条目现在携带 `machinePresence`，MCP 报告
+`machine.state: unknown` 并允许 chat。单个 CLI `session status` 读取保留布尔值，含义是已证明在线。
+
+presence 本身也按同样方式读取。`getMachinePresenceView` 返回副本中带新鲜心跳的机器，以及
+`synced`（房间此刻是否已加入）。SDK（`streams-crdt` 0.19.2）对读写两个方向只报告一个状态：
+每次实时读取被回收、任何一次本地 POST 失败都会离开 `joined`，而已收到的心跳在过期前仍然有效。
+因此新鲜心跳无需已加入的房间即判在线；只有 `synced` 时缺失才算离线，符合 presence Spec 的要求。
+考虑过的替代方案：离开 `joined` 后设宽限期，被否决，因为它会在未同步的房间上报告离线；给
+SDK 打补丁暴露读端状态，暂缓，因为它改动锁定的依赖，而且并不能免去三态。
 
 在 MCP 中，接受之前 `MachineOfflineError` 保持其可重试的 `MACHINE_OFFLINE` 错误码，
 单个和批量 chat 都是如此。若在投递一个已接受的单个 chat 时出现该错误，工具会返回
@@ -59,5 +71,7 @@ RPC 才算在线证据，因为状态的布尔结构没有第三种取值。
 
 人类 CLI 的 `session create/chat/cancel` 现在只在 presence 离线时快速失败。presence
 在线但不可达的远端机器，会由 cancel RPC 或最终投递发现。MCP `session_create` 在接受
-前本来就跳过这项检查，保持不变。测试使用注入的 presence 和会拒绝的 RPC stub，没有
-端到端复现 Streams 变慢。
+前本来就跳过这项检查，保持不变。测试使用注入的 presence 和会拒绝的 RPC stub
+（`daemon-session-tools.test.ts` 固定了 `session_status_many` 的三种结果），没有端到端复现
+Streams 变慢。让 daemon 自己的房间数分钟保持未加入的触发原因尚未确定：在本分支把早期创建的
+scoped logger 绑定到 daemon 文件日志之前，它的 presence 诊断一直被丢弃。

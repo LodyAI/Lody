@@ -135,12 +135,15 @@ records the measurements and why subprocess/request isolation remains necessary.
 
 ## Machine presence
 
-- Machine liveness is THREE-state. `getOnlineMachineIds()` returning null means the presence room
-  could not be joined — status UNKNOWN, never offline. Block a dispatch or report `MACHINE_OFFLINE`
+- Machine liveness is THREE-state. A fresh heartbeat is online whether or not the presence room is
+  joined; without a joined room (`getMachinePresenceView().synced`), a Machine lacking one is
+  UNKNOWN, never offline. An unanswered Machine RPC adds no evidence of absence, so
+  `session_status_many` reports `machine.state: unknown` and allows chat. Block a dispatch or report `MACHINE_OFFLINE`
   only for a definite `offline`; an unknown Machine proceeds and fails against its own deadline,
   and a surface reporting liveness carries the state, not a boolean. Collapsing unknown to offline
   refused healthy Machines and silently emptied candidate lists during a cold start or reconnect
-  backoff. Contract: `specs/loro-ephemeral-presence-channel.md`.
+  backoff. Contract: `specs/loro-ephemeral-presence-channel.md`; rationale:
+  [presence decides offline](../../../../.agents/notes/implemented/bug-fix/2026-10-27-mcp-chat-machine-probe-timeout.md).
 
 ## Session placement guidance
 

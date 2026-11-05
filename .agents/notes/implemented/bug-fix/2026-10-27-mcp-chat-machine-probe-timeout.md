@@ -3,7 +3,8 @@
 Status: implemented
 Translation: current
 
-PR: [#1939](https://github.com/LodyAI/Lody/pull/1939)
+PR: [#1939](https://github.com/LodyAI/Lody/pull/1939); status shape and unjoined-room
+reads: this branch's PR (`fix/streams-reconnect-presence-flap`)
 
 [中文](2026-10-27-mcp-chat-machine-probe-timeout.zh.md)
 
@@ -16,8 +17,10 @@ Loro Streams status RPC timed out during a short transport slowdown;
 probe is removed. Session create, chat and cancel, and both status readers, now treat a
 remote target as offline only when presence definitively says so, and raise that
 case as a typed retryable `MACHINE_OFFLINE`. Unknown presence proceeds, and an RPC
-timeout during a status read only makes the live status stale. Permission, ownership,
-archive and existence checks are unchanged.
+timeout during a status read only makes the live status stale; the batch status shape
+carries all three states so an unanswered RPC cannot turn unknown into offline. A fresh
+heartbeat already in the replica proves online even while the presence room is not
+joined. Permission, ownership, archive and existence checks are unchanged.
 
 ## Cause
 
@@ -50,9 +53,23 @@ The probe guarded nothing that its callers needed:
 For remote targets it reads three-state presence and throws `MachineOfflineError`
 only for definite offline.
 
-For status reads, presence decides `machineOnline`. When presence is unknown, only an
-answered live-status RPC counts as online evidence, because the boolean status shape
-has no third state.
+For status reads, presence decides the Machine state. When presence is unknown, an
+answered live-status RPC upgrades it to online, and an unanswered one leaves it
+unknown. Correction: the batch reader first returned a `machineOnline` boolean, which
+turned unknown presence plus an RPC timeout into offline, so `session_status_many`
+still answered `temporarily_blocked / MACHINE_OFFLINE` for a healthy Machine. The batch
+item now carries `machinePresence`, and MCP reports `machine.state: unknown` with chat
+allowed. The single CLI `session status` reader keeps its boolean, meaning proven online.
+
+Presence itself is read the same way. `getMachinePresenceView` returns the Machines with
+a fresh heartbeat in the replica and `synced`, whether the room is joined now. The SDK
+(`streams-crdt` 0.19.2) reports one status for both directions: every live-read recycle
+and any failed local POST leaves `joined` while received heartbeats stay valid until
+they expire. A fresh heartbeat is therefore online without a joined room; absence is
+offline only when `synced`, as the presence Spec requires. Alternatives considered: a
+grace window after leaving `joined`, rejected because it would report offline from a
+room that is not synced; patching the SDK to expose the read-side status, deferred
+because it changes a pinned dependency and does not remove the need for three states.
 
 In MCP, `MachineOfflineError` keeps its retryable `MACHINE_OFFLINE` code before
 acceptance, in both single and batch chat. When it occurs while delivering an
@@ -69,5 +86,8 @@ already owns.
 Human CLI `session create/chat/cancel` now fail fast only on presence offline. A
 remote Machine that is online in presence but unreachable is discovered by the cancel
 RPC, or by eventual delivery. MCP `session_create` already skipped this check before
-acceptance, and is unchanged. Tests use injected presence and a rejecting RPC stub;
-no end-to-end reproduction of the Streams slowdown was run.
+acceptance, and is unchanged. Tests use injected presence and a rejecting RPC stub
+(`daemon-session-tools.test.ts` pins all three `session_status_many` outcomes); no
+end-to-end reproduction of the Streams slowdown was run. The trigger that keeps a daemon's
+own room unjoined for minutes is not established: its presence diagnostics were
+discarded until this branch bound early scoped loggers to the daemon file sink.

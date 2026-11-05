@@ -49,7 +49,10 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => {
       ) =>
         await fn({
           repo: { getDocMeta: mocks.getDocMeta },
-          getOnlineMachineIds: vi.fn(async () => new Set(['machine-id'])),
+          getMachinePresenceView: vi.fn(async () => ({
+            online: new Set(['machine-id']),
+            synced: true,
+          })),
           syncDocOrThrow: async () => undefined,
           getOrCreateSessionDoc: vi.fn(async () => ({ getMetaState: async () => ({}) })),
         })

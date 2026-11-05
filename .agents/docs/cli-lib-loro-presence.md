@@ -160,8 +160,14 @@ conditional. [Calibration decision](../notes/implemented/bug-fix/2026-10-17-pres
 
 Machine liveness is three-state, and the states are not interchangeable. A fresh
 heartbeat means online. The absence of one on a SYNCED transport means offline. An
-unsynced transport means unknown. `getOnlineMachineIds()` returning null means the
-presence room is not joined — status unknown, not offline.
+unsynced transport means unknown. `getMachinePresenceView()` returns the machines
+with a fresh heartbeat in the replica plus `synced`, whether the room is joined now.
+A received heartbeat stays valid evidence after the room leaves `joined`: the SDK
+reports one status for both directions, so every live-read recycle and every failed
+local POST leaves `joined` while remote heartbeats keep arriving or remain fresh.
+Absence from the set is offline only when `synced`. Why unknown is not offline:
+[presence channel budget](../notes/implemented/architecture/2026-09-20-ephemeral-presence-channel-budget.md)
+and [presence decides offline](../notes/implemented/bug-fix/2026-10-27-mcp-chat-machine-probe-timeout.md).
 
 Carry that distinction all the way to the consumer instead of flattening it. Only a
 definite offline may block work: the MCP dispatch guards refuse on `'offline'` alone,
@@ -211,6 +217,9 @@ Successful per-operation/heartbeat events use opt-in trace. SDK errors use debug
 bounded bootstrap/retry/stall diagnostics use warn. Unknown error text, payloads,
 tokens, URLs and Cause contents never enter structured fields. Effect annotations
 continue through the existing daemon file logger's allowlist; no telemetry sink is added.
+The `PresenceHost` sink is created at CLI import time, so it writes through a scoped
+logger that binds to the current root logger on every record; a logger bound at import
+kept the startup console sink and a daemon Worker discarded every presence diagnostic.
 
 `streams-crdt@0.17.0` with its `streams-client@0.10.0` dependency aborts owned I/O
 and retains raw work that ignores abort. Failed close forbids replacing that owner's

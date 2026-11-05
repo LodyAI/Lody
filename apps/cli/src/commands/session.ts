@@ -2495,7 +2495,7 @@ export async function ensureTargetMachineNotOffline(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
-  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>;
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'>;
 }): Promise<MachinePresence> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
@@ -4549,7 +4549,7 @@ async function readSessionLiveStatus(args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
   sessionId: SessionId;
-  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>;
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'>;
 }): Promise<{
   machineOnline: boolean;
   liveStatus: SessionStatusResult['liveStatus'];
@@ -4602,7 +4602,8 @@ async function readSessionLiveStatus(args: {
 
 export type SessionLiveStatusBatchItem = {
   sessionId: SessionId;
-  machineOnline: boolean;
+  /** Three-state; an unanswered RPC never turns unknown presence into offline. */
+  machinePresence: MachinePresence;
   state?: string;
   fresh: boolean;
   observedAt?: number;
@@ -4616,7 +4617,7 @@ export async function readSessionLiveStatusesMany(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   sessions: ReadonlyArray<Pick<SessionMeta, 'id' | 'machineId'>>;
-  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'> & {
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'> & {
     repo?: Pick<LoroDocumentManager['repo'], 'getDocMeta'>;
   };
 }): Promise<Map<SessionId, SessionLiveStatusBatchItem>> {
@@ -4630,7 +4631,7 @@ export async function readSessionLiveStatusesMany(args: {
           ? await environment.host.readLiveStatus(session.id)
           : {
               sessionId: session.id,
-              machineOnline: false,
+              machinePresence: 'offline',
               fresh: false,
               reason: 'Machine unavailable in local workspace',
             }
@@ -4652,10 +4653,16 @@ export async function readSessionLiveStatusesMany(args: {
         presence = await ensureTargetMachineNotOffline({ ...args, machineId });
       } catch (error) {
         const reason = formatErrorMessage(error);
+        // Definite presence absence, or this machine's own runtime being down, is offline;
+        // a presence read failure proves nothing about the target.
+        const failedPresence: MachinePresence =
+          error instanceof MachineOfflineError || machineId === args.auth.machineId
+            ? 'offline'
+            : 'unknown';
         for (const session of sessions) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: false,
+            machinePresence: failedPresence,
             fresh: false,
             reason,
           });
@@ -4691,7 +4698,7 @@ export async function readSessionLiveStatusesMany(args: {
         for (const { session, response } of responses) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: !unknownPresence || response !== null,
+            machinePresence: unknownPresence && response === null ? 'unknown' : 'online',
             fresh: response?.success === true,
             ...(response?.state ? { state: response.state } : {}),
             ...(response?.success === true && typeof response.observedAtMs === 'number'
@@ -4708,7 +4715,7 @@ export async function readSessionLiveStatusesMany(args: {
         for (const session of sessions) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: !unknownPresence,
+            machinePresence: presence,
             fresh: false,
             reason,
           });

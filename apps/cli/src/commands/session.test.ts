@@ -1848,8 +1848,9 @@ describe('target Machine availability from presence', () => {
     workspaceId: 'workspace-1' as WorkspaceId,
     machineId: 'target-machine' as MachineId,
   };
-  const presence = (online: MachineId[] | null) => ({
-    getOnlineMachineIds: async () => (online === null ? null : new Set(online)),
+  // `null` is a presence room that is not joined and holds no fresh heartbeat.
+  const presence = (online: MachineId[] | null, synced = online !== null) => ({
+    getMachinePresenceView: async () => ({ online: new Set(online ?? []), synced }),
   });
   // A Streams path slow enough that every one-shot Machine RPC times out.
   const rpcTimesOut = () =>
@@ -1885,7 +1886,17 @@ describe('target Machine availability from presence', () => {
     });
   });
 
-  it('reports a presence-online Machine as online but stale when live status RPC times out', async () => {
+  it('admits a fresh heartbeat as online while the presence room is not joined', async () => {
+    rpcTimesOut();
+    await expect(
+      ensureTargetMachineNotOffline({
+        ...target,
+        manager: presence([target.machineId], false),
+      })
+    ).resolves.toBe('online');
+  });
+
+  it('keeps presence three-state when live status RPC times out', async () => {
     rpcTimesOut();
     const online = await readSessionLiveStatusesMany({
       ...target,
@@ -1894,17 +1905,18 @@ describe('target Machine availability from presence', () => {
     });
     expect(online.get(sessionId)).toEqual({
       sessionId,
-      machineOnline: true,
+      machinePresence: 'online',
       fresh: false,
       reason: 'timeout: Machine status request timed out',
     });
 
+    // An unanswered RPC is no evidence of absence: unknown presence stays unknown.
     const unknown = await readSessionLiveStatusesMany({
       ...target,
       sessions,
       manager: presence(null),
     });
-    expect(unknown.get(sessionId)?.machineOnline).toBe(false);
+    expect(unknown.get(sessionId)?.machinePresence).toBe('unknown');
 
     const offline = await readSessionLiveStatusesMany({
       ...target,
@@ -1913,7 +1925,7 @@ describe('target Machine availability from presence', () => {
     });
     expect(offline.get(sessionId)).toEqual({
       sessionId,
-      machineOnline: false,
+      machinePresence: 'offline',
       fresh: false,
       reason: 'Target Machine is offline: target-machine',
     });

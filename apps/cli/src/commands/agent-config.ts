@@ -39,6 +39,7 @@ import {
   type CommonCommandOptions,
 } from '@/lib/command-runtime';
 import { toAgentConfigOutput, type AgentConfigOutput } from './agent-config-output';
+import { readMachinePresence } from './session-machine-presence';
 import { renderTerminalTable } from '@/lib/terminal-table';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -514,11 +515,10 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
             `Remote machine capability refresh is not implemented in CLI yet. Current machine: ${auth.machineId}`
           );
         }
-        // Presence-based liveness; a null snapshot (presence room unavailable)
-        // falls through to the local dispatch, which fails with its own error
-        // if the daemon is actually down.
-        const onlineMachineIds = await manager.getOnlineMachineIds();
-        if (onlineMachineIds && !onlineMachineIds.has(machine.id)) {
+        // Presence-based liveness; unknown (presence room not joined) falls
+        // through to the local dispatch, which fails with its own error if the
+        // daemon is actually down.
+        if ((await readMachinePresence(manager, machine.id)) === 'offline') {
           throw new Error(`Machine ${machine.id} appears offline. Run \`lody start\` first.`);
         }
 
@@ -851,8 +851,7 @@ const agentConfigImportMagpieCommand = new Command('import-magpie')
                 'Current machine is not registered in this workspace. Run lody start first.'
               );
             assertMagpieImportMachine(machine, request);
-            const online = await manager.getOnlineMachineIds();
-            if (online && !online.has(machine.id))
+            if ((await readMachinePresence(manager, machine.id)) === 'offline')
               throw new Error('Current machine is offline. Run lody start first.');
             if (
               !(await manager.syncMachineFlockDoc(machine.id, { reason: 'magpie-import:prewrite' }))

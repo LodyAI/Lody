@@ -7244,7 +7244,7 @@ export class MessageHandler {
             const activity = await this.readSessionLiveActivity(sessionId);
             return {
               sessionId,
-              machineOnline: true,
+              machinePresence: 'online',
               fresh: true,
               state: live.state,
               observedAt: getServerNow(),

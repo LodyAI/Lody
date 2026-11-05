@@ -9,7 +9,13 @@ import { lodyLoggerLayer } from '@/platform/logger';
 import type { Logger } from './logger';
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
-import { createFileTransport, createLogger, routeLoggerToStderr } from './logger';
+import {
+  createFileLogger,
+  createFileTransport,
+  createLogger,
+  getLogger,
+  routeLoggerToStderr,
+} from './logger';
 import { FILE_LOG_RETRY_INTERVAL_MS } from './resilient-file-transport';
 
 describe('WinstonLogger', () => {
@@ -126,6 +132,35 @@ describe('file sink level', () => {
       expect(content).not.toMatch(/secret|token|url/);
     }
   );
+});
+
+describe('scoped loggers created before the process sink', () => {
+  const logRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-log-early-'));
+
+  afterAll(() => {
+    fs.rmSync(logRoot, { recursive: true, force: true });
+  });
+
+  // The CLI entry creates module-level scoped loggers (presence diagnostics among
+  // them) before `lody start` installs the daemon file sink. Bound to the startup
+  // console logger, every such line was discarded with the Worker's stdout.
+  it('writes through the file sink installed after the logger was obtained', async () => {
+    const early = getLogger('early-scope');
+    const nested = early.child({ scope: 'nested' });
+    const dirname = fs.mkdtempSync(path.join(logRoot, 'sink-'));
+    const fileLogger = createFileLogger('early-%DATE%.log', dirname);
+    const sink = Reflect.get(fileLogger, 'winston') as winston.Logger;
+    const transport = sink.transports[0];
+    if (!transport) throw new Error('file logger has no transport');
+    await once(transport, 'new');
+    early.debug('presence diagnostic from an early logger');
+    nested.warn('nested diagnostic from an early logger');
+    await closeTransport(transport);
+    const logFile = fs.readdirSync(dirname).find((file) => file.endsWith('.log'));
+    const content = fs.readFileSync(path.join(dirname, logFile ?? ''), 'utf8');
+    expect(content).toContain('presence diagnostic from an early logger');
+    expect(content).toContain('nested diagnostic from an early logger');
+  });
 });
 
 const enospc = (): NodeJS.ErrnoException =>

@@ -82,8 +82,9 @@ distinct keys or in-flight writes; `(phase, detail)` dedupe is not a rate limit.
 Safe fields only; barriers are not exact heartbeat/peer receipts. Joined/close
 does not prove fresh delivery/POST cleanup. Never write periodic doc-meta lastSeen or
 lastRunningSeen; write meta timestamps only at status transitions. MachineMeta.lastSeen
-is retired even at registration. Online checks use presence; null from
-getOnlineMachineIds means unknown, never offline.
+is retired even at registration. Online checks use `getMachinePresenceView`: a fresh
+heartbeat is online without a joined room, and absence is offline only when `synced`,
+otherwise unknown.
 
 `session-active-presence.ts` owns native Turn leases, Clock heartbeats and latched
 stall signals. Only its lease release clears presence; incidental lifecycle clears

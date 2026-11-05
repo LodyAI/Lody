@@ -167,7 +167,7 @@ function createFixture(
       }),
       flush: async () => undefined,
     },
-    getOnlineMachineIds: async () => new Set([machineId]),
+    getMachinePresenceView: async () => ({ online: new Set([machineId]), synced: true }),
     getAgentConfigById: async () => agentConfig,
     syncMetaOrThrow: async () => undefined,
     syncDocOrThrow: async () => undefined,
