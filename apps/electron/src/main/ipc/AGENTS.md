@@ -5,7 +5,8 @@
 ## E2EE access loss
 
 Only parsed HTTP 560 codes `e2ee_member_removed`/`e2ee_device_revoked` from explicitly
-credential-bound endpoints (content-grant action: also HTTP 200) may produce
+credential-bound endpoints (content-grant action: also HTTP 200), or a fully verified
+ledger view that no longer contains this device or membership, may produce
 `E2eeMemberRemovedError`/`E2eeDeviceRevokedError`.
 JWT, transport, parsing and unrelated endpoint failures never authorize cleanup,
 even with matching codes or types. The account boundary projects typed results,

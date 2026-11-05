@@ -130,8 +130,19 @@ export function makeE2eeRpcClient(options: {
       opened.plaintext.fill(0);
     }
   });
+  const requesterLoss = (view: LedgerView) => {
+    const classification = view.classifyDevice?.(options.requesterDevice);
+    return classification === 'revoked'
+      ? new Error('e2ee_device_revoked')
+      : classification === 'member-removed'
+        ? new Error('e2ee_member_removed')
+        : undefined;
+  };
   const requireDispatchWriter = Effect.fnUntraced(function* () {
-    const state = (yield* options.ledger()).inspectState();
+    const view = yield* options.ledger();
+    const loss = requesterLoss(view);
+    if (loss) return yield* Effect.fail(loss);
+    const state = view.inspectState();
     const device = state.devices.get(options.requesterDevice);
     const member = device && state.members.get(hex(device.membershipId.toBytes()));
     if (!device || device.kind === 'recovery' || !member || member.role === 'guest')
@@ -143,7 +154,10 @@ export function makeE2eeRpcClient(options: {
   ) {
     if (!isE2eeReadQuery(input.request.method, input.request.params))
       return yield* requireDispatchWriter();
-    const state = (yield* options.ledger()).inspectState();
+    const view = yield* options.ledger();
+    const loss = requesterLoss(view);
+    if (loss) return yield* Effect.fail(loss);
+    const state = view.inspectState();
     const device = state.devices.get(options.requesterDevice);
     if (
       !device ||

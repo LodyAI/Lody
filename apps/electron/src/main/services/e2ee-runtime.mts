@@ -156,6 +156,10 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
     Effect.mapError((error) => {
       if (error instanceof DesktopE2eeRuntimeError) return error
       if (error instanceof MachineSharingError) return fail(error.code)
+      if (error instanceof Error && error.message === 'e2ee_device_revoked')
+        return fail('device_revoked')
+      if (error instanceof Error && error.message === 'e2ee_member_removed')
+        return fail('member_removed')
       if (
         error instanceof Error &&
         ['e2ee_machine_not_owned', 'e2ee_machine_not_shared'].includes(error.message)

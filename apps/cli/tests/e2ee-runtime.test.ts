@@ -6830,6 +6830,25 @@ describe('machine execution authorization freshness', () => {
           expect(
             readObservedAuthority(extraKey, hex(fixture.membershipId.toBytes()))
           ).toMatchObject({ devicePresent: false, memberPresent: true });
+          const revokedRpc = makeE2eeRpcNative({
+            workspaceId: 'workspace',
+            requesterDevice: extraKey,
+            originals: new E2eeRpcOriginals(join(directory, 'revoked-rpc.sqlite')),
+            ledger: runtime.executionLedger,
+            binding: () => Effect.die('revoked writer must not sign'),
+          });
+          const revokedPrepare = yield* revokedRpc
+            .prepareDispatch('synthetic-machine', {
+              sessionId: 'synthetic-session',
+              userTurnId: 'synthetic-turn',
+              userId: 'display-only',
+              timestamp: new Date(0).toISOString(),
+              inputConfig: { prompt: 'synthetic' },
+            })
+            .pipe(Effect.result);
+          expect(revokedPrepare._tag).toBe('Failure');
+          if (revokedPrepare._tag === 'Failure')
+            expect(revokedPrepare.failure.message).toBe('e2ee_device_revoked');
           io.offline = true;
           expect(yield* gate.authorizeExecution('workspace', extraKey)).toEqual({
             _tag: 'Denied',
@@ -6871,6 +6890,25 @@ describe('machine execution authorization freshness', () => {
             devicePresent: false,
             memberPresent: false,
           });
+          const removedRpc = makeE2eeRpcNative({
+            workspaceId: 'workspace',
+            requesterDevice: key,
+            originals: new E2eeRpcOriginals(join(directory, 'removed-rpc.sqlite')),
+            ledger: runtime.executionLedger,
+            binding: () => Effect.die('removed writer must not sign'),
+          });
+          const removedPrepare = yield* removedRpc
+            .prepareDispatch('synthetic-machine', {
+              sessionId: 'synthetic-session',
+              userTurnId: 'synthetic-turn',
+              userId: 'display-only',
+              timestamp: new Date(0).toISOString(),
+              inputConfig: { prompt: 'synthetic' },
+            })
+            .pipe(Effect.result);
+          expect(removedPrepare._tag).toBe('Failure');
+          if (removedPrepare._tag === 'Failure')
+            expect(removedPrepare.failure.message).toBe('e2ee_member_removed');
           expect(yield* gate.authorizeExecution('workspace', key)).toMatchObject({
             _tag: 'Denied',
           });
