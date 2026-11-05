@@ -1,6 +1,7 @@
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from '../lib/session-send-admission';
+import { sealEditedQueueItem } from '../lib/session-send-delivery';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
@@ -123,6 +124,7 @@ export function useSessionDoc(
       mq: [],
       humanInputReceipts: {},
       rpcDispatchOriginals: {},
+      queueDispatchOriginals: {},
       cancelRequest: undefined,
       forkOperation: undefined,
       notification: undefined,
@@ -403,10 +405,11 @@ export function useSessionDoc(
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      const sealed = await sealEditedQueueItem(runtime, sessionId, current, next);
       await runtime.writer.updateSessionMessage(
         sessionId,
         cid,
-        next as unknown as Record<string, unknown>
+        sealed as unknown as Record<string, unknown>
       );
     },
     [withStore, runtime, sessionId]

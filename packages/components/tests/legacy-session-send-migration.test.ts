@@ -5,6 +5,7 @@ import { LoroDoc } from 'loro-crdt';
 import {
   getSessionRoomId,
   type MachineId,
+  type MessageQueueItem,
   type SessionHistory,
   type SessionId,
 } from '@lody/shared';
@@ -15,7 +16,12 @@ import {
   migrateLegacySessionSends,
 } from '../src/lib/legacy-session-send-migration';
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
-import { dispatchUserTurn, writeUserTurn } from '../src/lib/session-send-delivery';
+import {
+  dispatchUserTurn,
+  sealEditedQueueItem,
+  writeUserTurn,
+} from '../src/lib/session-send-delivery';
+import { EncryptedPrepareTimeout } from '../src/lib/encrypted-dispatch-outcome';
 import { createEncryptedDispatchLegacy } from '../src/providers/encrypted-dispatch-legacy';
 import { SessionInputNotSentError } from '../src/lib/session-accepted-inputs';
 
@@ -117,6 +123,7 @@ function fixture() {
         if (sessionId === BROKEN) throw new Error('Session document unavailable');
         await open(sessionId).sessionData.commands.appendTurn(entry);
       },
+      enqueueSessionMessage: async () => {},
     },
     requestSessionDispatchTurn: async () => ({ accepted: true }),
   } as unknown as SessionSendRuntime;
@@ -354,6 +361,145 @@ const send = (f: ReturnType<typeof fixture>, input: SessionHistory) =>
   writeUserTurn(f.runtime, { sessionId: SESSION, entry: input, delivery: { kind: 'dispatch' } });
 const turnStatus = (f: ReturnType<typeof fixture>, id: string) =>
   f.turns().find((turn) => turn.id === id)?.status;
+
+const queueRow = (input: SessionHistory) => ({
+  task: 'queued',
+  userId: input.userId,
+  userTurnId: input.id,
+  timestamp: input.timestamp,
+  acpSessionConfig: input.inputConfig,
+  isEditing: false,
+});
+const queuedOriginal = (f: ReturnType<typeof fixture>, id: string) =>
+  f.sessionDocs.get(SESSION)?.getMap('queueDispatchOriginals').get(id);
+const preparedOriginal = (frameHex: string) => ({
+  original: {
+    requestId: '01'.repeat(16),
+    targetMachineId: MACHINE,
+    frameHex,
+    requesterDevice: '03'.repeat(32),
+    expiresAt: 1234,
+  },
+  send: async () => null,
+});
+
+it('stores the signed original before an encrypted queue row', async () => {
+  const f = fixture();
+  const input = entry('queued-human');
+  f.runtime.contentMode = 'e2ee';
+  const order: string[] = [];
+  const enqueue = f.runtime.writer.enqueueSessionMessage;
+  f.runtime.writer.enqueueSessionMessage = async (sessionId, item) => {
+    order.push(`row:${String(queuedOriginal(f, input.id))}`);
+    await enqueue(sessionId, item);
+  };
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('0a'.repeat(32));
+  await writeUserTurn(f.runtime, {
+    sessionId: SESSION,
+    entry: input,
+    delivery: { kind: 'queue' },
+    queue: queueRow(input),
+  });
+  expect(order).toEqual([`row:${'0a'.repeat(32)}`]);
+});
+
+it('waits for a slow host before writing an encrypted queue row', async () => {
+  const f = fixture();
+  const input = entry('queued-slow');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => {
+    throw new EncryptedPrepareTimeout(Promise.resolve(preparedOriginal('0b'.repeat(32))));
+  };
+  await writeUserTurn(f.runtime, {
+    sessionId: SESSION,
+    entry: input,
+    delivery: { kind: 'queue' },
+    queue: queueRow(input),
+  });
+  expect(queuedOriginal(f, input.id)).toBe('0b'.repeat(32));
+});
+
+it.each(['failed', 'unavailable'] as const)(
+  'does not write an encrypted queue row when preparation is %s',
+  async (mode) => {
+    const f = fixture();
+    const input = entry('queued-unsigned');
+    f.runtime.contentMode = 'e2ee';
+    let wrote = false;
+    f.runtime.writer.enqueueSessionMessage = async () => {
+      wrote = true;
+    };
+    f.runtime.prepareEncryptedDispatch =
+      mode === 'failed'
+        ? async () => {
+            throw new Error('synthetic host failure');
+          }
+        : undefined;
+    await expect(
+      writeUserTurn(f.runtime, {
+        sessionId: SESSION,
+        entry: input,
+        delivery: { kind: 'queue' },
+        queue: queueRow(input),
+      })
+    ).rejects.toBeInstanceOf(SessionInputNotSentError);
+    expect(wrote).toBe(false);
+  }
+);
+
+it('leaves an ordinary workspace queue row unsigned', async () => {
+  const f = fixture();
+  const input = entry('queued-plain');
+  let wrote = false;
+  f.runtime.writer.enqueueSessionMessage = async () => {
+    wrote = true;
+  };
+  await writeUserTurn(f.runtime, {
+    sessionId: SESSION,
+    entry: input,
+    delivery: { kind: 'queue' },
+    queue: queueRow(input),
+  });
+  expect(wrote).toBe(true);
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
+});
+
+it('gives an edited encrypted queue row a new Turn and its own original', async () => {
+  const f = fixture();
+  const input = entry('queued-before-edit');
+  f.runtime.contentMode = 'e2ee';
+  const prepared: { userTurnId: string; inputConfig: unknown }[] = [];
+  f.runtime.prepareEncryptedDispatch = async (_machine, args) => {
+    prepared.push(args);
+    return preparedOriginal('0c'.repeat(32));
+  };
+  const current = {
+    ...queueRow(input),
+    $cid: 'cid',
+    operationId: `queue:${input.id}`,
+  } as unknown as MessageQueueItem;
+  const edited = {
+    ...current,
+    task: 'changed',
+    acpSessionConfig: {
+      ...current.acpSessionConfig,
+      prompt: 'changed',
+      inputBlocks: [{ type: 'text', text: 'changed' }],
+    },
+  } as MessageQueueItem;
+  const sealed = await sealEditedQueueItem(f.runtime, SESSION, current, edited);
+  expect(sealed.userTurnId).not.toBe(input.id);
+  expect(sealed.operationId).toBe(`queue:${sealed.userTurnId}`);
+  expect(prepared).toHaveLength(1);
+  expect(prepared[0]).toMatchObject({
+    userTurnId: sealed.userTurnId,
+    inputConfig: { prompt: 'changed' },
+  });
+  expect(queuedOriginal(f, sealed.userTurnId!)).toBe('0c'.repeat(32));
+  const toggled = { ...current, isEditing: true } as MessageQueueItem;
+  expect(await sealEditedQueueItem(f.runtime, SESSION, current, toggled)).toBe(toggled);
+  expect(prepared).toHaveLength(1);
+});
 
 it('keeps a verified withdrawal after a later unverifiable prepare', async () => {
   const f = fixture();

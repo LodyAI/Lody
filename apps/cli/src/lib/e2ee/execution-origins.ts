@@ -1,6 +1,7 @@
 import {
   getSessionRoomId,
   getScheduleRoomId,
+  queuedInputEvidence,
   ScheduleAuthorizationRequestSchema,
   readScheduleAuthorization,
   captureScheduleAuthorization,
@@ -91,6 +92,7 @@ const projection = (map: LoroMap) => {
     items: read('items'),
     scheduleRun: read('scheduleRun'),
     derivedFrom: read('derivedFrom'),
+    queuedInput: read('queuedInput'),
   };
 };
 const derivedFromSchema = z
@@ -99,6 +101,13 @@ const derivedFromSchema = z
     userTurnId: z.string().trim().min(1).max(256),
   })
   .strict();
+
+type QueuedInput = {
+  sessionId: string;
+  userTurnId: string;
+  timestamp: unknown;
+  inputConfig: unknown;
+};
 
 type Opened = {
   plaintext: Uint8Array;
@@ -119,11 +128,50 @@ export class ExecutionOrigins {
       db.pragma('synchronous = FULL');
       db.exec(`CREATE TABLE IF NOT EXISTS frames(digest TEXT PRIMARY KEY, resource TEXT NOT NULL, sealed BLOB NOT NULL, aad BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS spans(resource TEXT NOT NULL, peer TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, digest TEXT NOT NULL,
-        PRIMARY KEY(resource, peer, start, end, digest));`);
+        PRIMARY KEY(resource, peer, start, end, digest));
+        CREATE TABLE IF NOT EXISTS queued_inputs(session TEXT NOT NULL, turn TEXT NOT NULL, digest TEXT NOT NULL,
+        PRIMARY KEY(session, turn, digest));`);
       return body(db);
     } finally {
       db.close();
     }
+  }
+
+  private queuedInputRow(input: QueuedInput) {
+    const evidence = queuedInputEvidence(input.inputConfig);
+    if (!evidence) throw new Error('e2ee_queued_input_invalid');
+    return [
+      input.sessionId,
+      input.userTurnId,
+      createHash('sha256')
+        .update(JSON.stringify([input.sessionId, input.userTurnId, input.timestamp, evidence]))
+        .digest('hex'),
+    ] as const;
+  }
+
+  /** Written by this machine before it queues its own input; never derived from a document. */
+  retainQueuedInput(input: QueuedInput): void {
+    const row = this.queuedInputRow(input);
+    this.database((db) =>
+      db.prepare('INSERT OR IGNORE INTO queued_inputs VALUES (?, ?, ?)').run(...row)
+    );
+  }
+
+  hasQueuedInput(input: QueuedInput): boolean {
+    const row = this.queuedInputRow(input);
+    return this.database(
+      (db) =>
+        db
+          .prepare('SELECT 1 FROM queued_inputs WHERE session=? AND turn=? AND digest=?')
+          .get(...row) !== undefined
+    );
+  }
+
+  /** The promoted row as this replica sees it now; carries no authorship. */
+  queuedTurn(doc: LoroDoc, userTurnId: string) {
+    const selected = findTurn(doc, userTurnId);
+    const current = selected && projection(selected.map);
+    return current?.queuedInput === true ? current : undefined;
   }
 
   /** Called only after signature AND AEAD verification; snapshot opens never call it. */
@@ -362,6 +410,7 @@ export class ExecutionOrigins {
               expiresAt: timestamp + windowMs,
               ...(schedule?.success ? { schedule: schedule.data } : {}),
               ...(derivedFrom?.success ? { derivedFrom: derivedFrom.data } : {}),
+              ...(current.queuedInput === true ? { queuedInput: true as const } : {}),
             };
             // Imported/forwarded operations cannot replace an earlier signer with
             // another device's authorization. Conflicting provenance is unknown.

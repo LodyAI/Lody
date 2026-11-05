@@ -32,6 +32,7 @@ import {
   type SessionMeta,
   type SessionQueuePromotionRecord,
   type WorkspaceId,
+  queuedInputEvidence,
 } from '@lody/shared';
 
 const createSilentLogger = (): Logger => ({
@@ -2036,9 +2037,16 @@ describe('SessionDispatchWatcher', () => {
         expect(work.watchedSessions.has(sessionId)).toBe(false);
         expect(dispatched).toEqual([]);
         if (automation) {
+          let receipted: { timestamp: unknown; inputConfig: unknown } | undefined;
           const adapter = new AutomationSessionActionsLegacy({
             lody: {
-              documentManager: { repo, getOrCreateSessionDoc: async () => doc },
+              documentManager: {
+                repo,
+                getOrCreateSessionDoc: async () => doc,
+                retainQueuedInput: (input: typeof receipted) => {
+                  receipted = input;
+                },
+              },
               getAutomationSessionAuthority: () => ({ acceptInput: async () => true }),
             },
           } as unknown as ConstructorParameters<typeof AutomationSessionActionsLegacy>[0]);
@@ -2070,6 +2078,14 @@ describe('SessionDispatchWatcher', () => {
             dispatched: ['late-queued-turn'],
             queued: [],
           });
+          // The local evidence must match the row promotion wrote, or encrypted starts refuse.
+          const promoted = await doc.sessionData.history.readTurn('late-queued-turn');
+          if (promoted.state !== 'ready') throw new Error('promoted turn missing');
+          expect(receipted?.timestamp).toBe(promoted.turn.timestamp);
+          expect(queuedInputEvidence(promoted.turn.inputConfig)).toBeDefined();
+          expect(queuedInputEvidence(receipted?.inputConfig)).toBe(
+            queuedInputEvidence(promoted.turn.inputConfig)
+          );
           return;
         }
         const sender = new SessionDocument(

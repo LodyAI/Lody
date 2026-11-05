@@ -51,6 +51,8 @@ export type VerifiedExecutionOriginal = {
   schedule?: ScheduleAuthorizationRequest;
   /** Present only on a machine-authored input derived from a shared member's Turn. */
   derivedFrom?: DerivationOrigin;
+  /** The row was promoted from a queue item, so its signer is not its author. */
+  queuedInput?: true;
 };
 export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
 export type ResolveVerifiedExecutionOriginal = (
