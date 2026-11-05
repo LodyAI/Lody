@@ -67,3 +67,5 @@ Component tests cover snapshot continuity across the watchdog and reconnect-loop
 paths, the terminal clear, both reconnect-loop wirings' `retainSnapshot` argument for
 cloud and dual modes, selection survival, the startup fallback and its return, and the
 send-blocking state. Not verified in a live desktop session with a real remote machine.
+
+PR: [#2342](https://github.com/LodyAI/Lody/pull/2342).
