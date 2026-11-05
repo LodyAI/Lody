@@ -1162,7 +1162,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           const provider = yield* binding(input.room)
           return yield* provider.open(input).pipe(
             Effect.catchIf(
-              (error) => error instanceof ContentError && error.code === 'missing-read-key',
+              (error): error is ContentError =>
+                error instanceof ContentError && error.code === 'missing-read-key',
               (error) => keyPending(input, error)
             )
           )
