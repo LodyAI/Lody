@@ -67,6 +67,7 @@ export function useSessionAllChangesDiffData({
   unavailableMessage: string | null;
   viewport: ReturnType<typeof useDiffViewport>;
   reload: () => void;
+  refreshing: boolean;
 } {
   const normalizedInputPaths = useMemo(
     () => Array.from(new Set(filePaths.filter(Boolean))).toSorted((a, b) => a.localeCompare(b)),
@@ -92,26 +93,16 @@ export function useSessionAllChangesDiffData({
     unavailableMessage: string | null;
   } | null>(null);
   const currentBatch =
-    batch !== null &&
-    batch.provider === fileProvider &&
-    batch.reloadSeq === reloadSeq &&
-    batch.pathsKey === normalizedPathsKey &&
-    batch.scope === scope
-      ? batch
-      : null;
-  const normalizedPaths = useMemo(
-    () =>
-      currentBatch !== null
-        ? [...currentBatch.entryPaths].sort((a, b) => a.localeCompare(b))
-        : normalizedInputPaths,
-    [currentBatch, normalizedInputPaths]
-  );
-  const unusedViewportRef = useRef<HTMLDivElement | null>(null);
+    batch !== null && batch.provider === fileProvider && batch.scope === scope ? batch : null;
+  const resultPathsKey = currentBatch
+    ? JSON.stringify([...currentBatch.entryPaths].sort((a, b) => a.localeCompare(b)))
+    : normalizedPathsKey;
+  const normalizedPaths = useMemo<string[]>(() => JSON.parse(resultPathsKey), [resultPathsKey]);
   const batchViewport = useDiffViewport({
     active: enabled && viewport !== undefined,
     paths: normalizedPaths,
     priorityPath: viewport?.priorityPath ?? focusPath ?? null,
-    scrollContainerRef: viewport?.scrollContainerRef ?? unusedViewportRef,
+    scrollContainer: viewport?.scrollContainer ?? null,
   });
   const deferredData = useSessionConversationDiffData({
     sessionId,
@@ -140,6 +131,9 @@ export function useSessionAllChangesDiffData({
           },
     [currentBatch, deferredData.resolvedByPath]
   );
+
+  const previousResults = useRef({ fileProvider, scope, resolvedByPath });
+  previousResults.current = { fileProvider, scope, resolvedByPath };
 
   // Keep focusPath out of the fetch deps (it only affects inline ordering, not the result set)
   // so changing the selected file does not re-fire the whole batch.
@@ -225,14 +219,30 @@ export function useSessionAllChangesDiffData({
         return;
       }
 
+      const previous = previousResults.current;
+      const reusable = (path: string, contentKey?: string): FileDiffData | undefined => {
+        const data =
+          previous.fileProvider === fileProvider && previous.scope === scope
+            ? previous.resolvedByPath[path]
+            : undefined;
+        return contentKey && data && 'contentKey' in data && data.contentKey === contentKey
+          ? data
+          : undefined;
+      };
       const deferredPaths: string[] = [];
       const next: Record<string, FileDiffData> = {};
       for (const entry of result.entries) {
         if (entry.diff.status === 'deferred') {
-          deferredPaths.push(entry.path);
+          const data = reusable(entry.path, entry.diff.contentKey);
+          // Keep verified unchanged content and its hydrated context mounted.
+          // A changed identity still gets a fresh loader under the new base.
+          if (data) next[entry.path] = data;
+          else deferredPaths.push(entry.path);
           continue;
         }
-        next[entry.path] = sessionFileProviderDiffResultToFileDiffData(entry.diff);
+        next[entry.path] =
+          reusable(entry.path, 'contentKey' in entry.diff ? entry.diff.contentKey : undefined) ??
+          sessionFileProviderDiffResultToFileDiffData(entry.diff);
       }
       // The machine's current file set is authoritative; the synced index is a hint.
       if (cancelled) return;
@@ -284,5 +294,10 @@ export function useSessionAllChangesDiffData({
     unavailableMessage,
     viewport: batchViewport,
     reload,
+    refreshing:
+      enabled &&
+      (currentBatch === null ||
+        currentBatch.reloadSeq !== reloadSeq ||
+        currentBatch.pathsKey !== normalizedPathsKey),
   };
 }

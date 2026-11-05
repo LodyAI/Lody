@@ -1402,7 +1402,14 @@ export class CodeCollabV2Service {
       const pinnedBase = rootId && rootId !== 'main' ? (page.rootBases?.[rootId] ?? page) : page;
       let entry: CodeCollabDiffManifestEntry;
       try {
-        entry = await service.describeDiffFile(request, resolved, pinnedBase, context);
+        try {
+          entry = await service.describeDiffFile(request, resolved, pinnedBase, context);
+        } catch (error) {
+          // Retry only this file, against the same pinned base. A failed file
+          // must neither restart independent entries nor lose bounded stale recovery.
+          if (!isCodeCollabV2ServiceError(error) || error.code !== 'stale') throw error;
+          entry = await service.describeDiffFile(request, resolved, pinnedBase, context);
+        }
       } catch (error) {
         if (error instanceof DiffManifestUnavailableError && request.path !== undefined)
           throw error;

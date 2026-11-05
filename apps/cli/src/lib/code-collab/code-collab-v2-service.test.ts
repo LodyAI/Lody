@@ -380,9 +380,13 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         describeDiffFile: (...args: unknown[]) => Promise<unknown>;
       };
       const describe = internal.describeDiffFile.bind(service);
-      let code: 'permission_denied' | 'invalid_path' = 'permission_denied';
+      let code: 'permission_denied' | 'invalid_path' | 'stale' = 'permission_denied';
+      let remainingFailures = Infinity;
       const fault = vi.spyOn(internal, 'describeDiffFile').mockImplementation((...args) => {
-        if ((args[1] as { workspacePath: string }).workspacePath === 'blocked.txt')
+        if (
+          (args[1] as { workspacePath: string }).workspacePath === 'blocked.txt' &&
+          remainingFailures-- > 0
+        )
           throw new CodeCollabV2ServiceError(code, 'Synthetic read refusal.');
         return describe(...args);
       });
@@ -412,6 +416,32 @@ describe('CodeCollabV2Service text RPC boundary', () => {
               status: 'ok',
               head: expect.any(Object),
             }),
+          ]),
+        });
+        code = 'stale';
+        remainingFailures = 1;
+        expect(await service.openDiffManifest({ sessionId: SESSION_ID })).toMatchObject({
+          status: 'ok',
+          entries: expect.arrayContaining([
+            expect.objectContaining({
+              path: 'blocked.txt',
+              status: 'ok',
+              base: expect.any(Object),
+              head: expect.any(Object),
+            }),
+            expect.objectContaining({ path: 'healthy.txt', status: 'ok' }),
+          ]),
+        });
+        remainingFailures = Infinity;
+        expect(await service.openDiffManifest({ sessionId: SESSION_ID })).toMatchObject({
+          status: 'ok',
+          entries: expect.arrayContaining([
+            expect.objectContaining({
+              path: 'blocked.txt',
+              status: 'unavailable',
+              error: expect.objectContaining({ code: 'stale' }),
+            }),
+            expect.objectContaining({ path: 'healthy.txt', status: 'ok' }),
           ]),
         });
         code = 'invalid_path';

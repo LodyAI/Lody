@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { act, useEffect, type ReactNode } from 'react';
+import { Provider, createStore } from 'jotai';
+import { useSessionDiffSummary } from '../src/components/sessions/use-session-diff-summary';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
@@ -34,6 +36,128 @@ afterEach(() => {
 });
 
 describe('useSessionConversationDiffData', () => {
+  it('updates the sidebar summary from a completed live Branch manifest without waiting for history', async () => {
+    let current = ['live.ts'];
+    const provider = new CodeCollabSessionFileProvider({
+      allChanges: { 'stale-index.ts': true },
+      runtime: {
+        sessionId: 'summary-test' as SessionId,
+        diffBlobTransportOptions: async () => ({
+          supported: true,
+          scope: 'synthetic',
+          persist: false,
+        }),
+        openDiffManifest: async ({ scope }: { scope?: string }) => ({
+          status: 'ok',
+          base: 'base',
+          entries: (scope === 'uncommitted' ? [] : current).map((path) => ({
+            path,
+            status: 'binary',
+            base: null,
+            head: null,
+            add: 1,
+            del: 0,
+          })),
+          nextCursor: null,
+        }),
+        readDiffBlob: async () => {
+          throw new Error('Metadata needs no body.');
+        },
+      } as unknown as CodeCollabSessionFileProviderRuntime,
+    });
+    let state: ReturnType<typeof useSessionDiffSummary> | undefined;
+    function Harness() {
+      const result = useSessionDiffSummary('summary-test' as SessionId, { fileProvider: provider });
+      useEffect(() => {
+        state = result;
+      }, [result]);
+      return null;
+    }
+    render(
+      <Provider store={createStore()}>
+        <Harness />
+      </Provider>
+    );
+    await flushMicrotasks();
+    expect(state?.summary.changeFilePaths).toEqual(['stale-index.ts']);
+    await act(async () => {
+      await provider.getAllChangesDiff();
+    });
+    expect(state?.summary.changeFilePaths).toEqual(['live.ts']);
+    await act(async () => {
+      await provider.getAllChangesDiff(undefined, 'uncommitted');
+    });
+    expect(state?.summary.changeFilePaths).toEqual(['live.ts']);
+    current = [];
+    await act(async () => {
+      await provider.getAllChangesDiff();
+    });
+    expect(state?.summary.changeFilePaths).toEqual([]);
+  });
+
+  it('retains the coherent old batch during refresh and reuses verified unchanged viewer data', async () => {
+    const paths = ['a.ts', 'b.ts'];
+    let release!: () => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let updated = false;
+    const provider = createDiffProvider(async (path) => ({
+      status: 'ready',
+      path,
+      contentKey: path,
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'new' },
+    }));
+    provider.getAllChangesDiff = async () => {
+      if (updated) {
+        started();
+        await next;
+      }
+      return {
+        status: 'ready',
+        base: updated ? 'new-base' : 'old-base',
+        truncated: false,
+        entries: paths.map((path) => ({ path, diff: { status: 'deferred', contentKey: path } })),
+      };
+    };
+    let state: ReturnType<typeof useSessionAllChangesDiffData> | undefined;
+    function Harness() {
+      const result = useSessionAllChangesDiffData({
+        sessionId: 'retain-test' as SessionId,
+        filePaths: paths,
+        loadFilePaths: paths,
+        fileProvider: provider,
+      });
+      useEffect(() => {
+        state = result;
+      }, [result]);
+      return null;
+    }
+    render(<Harness />);
+    await flushMicrotasks();
+    const first = state!.resolvedByPath['a.ts'];
+    expect(first?.status).toBe('ready');
+    updated = true;
+    act(() => state!.reload());
+    await entered;
+    expect(state!.refreshing).toBe(true);
+    expect(state!.base).toBe('old-base');
+    expect(state!.resolvedByPath['a.ts']).toBe(first);
+    await act(async () => {
+      release();
+      await next;
+    });
+    await flushMicrotasks();
+    expect(state!.base).toBe('new-base');
+    expect(state!.refreshing).toBe(false);
+    expect(state!.resolvedByPath['a.ts']).toBe(first);
+  });
+
   it('rebinds a historical partial diff to the current runtime after reopening a workspace', async () => {
     const paths = ['runtime-bound.ts'];
     const checkpoints = [

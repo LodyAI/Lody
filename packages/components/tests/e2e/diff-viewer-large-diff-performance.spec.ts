@@ -114,7 +114,72 @@ test('changed comparison during expansion refreshes the complete batch and its b
   await file.locator('[data-expand-button]').first().click();
   await expect(page.getByText('Branch base · 2222222', { exact: true })).toBeVisible();
   await expect(page.locator('[data-diff-path]')).toHaveCount(0);
-  await expect(page.getByText('No changes.', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Changed files')).toHaveText('None');
+  await expect(
+    page.getByText('This file has no changes against the branch base.', { exact: true })
+  ).toBeVisible();
+});
+
+test('refresh retains unrelated file expansion, hydrated context and reading position', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1280, height: 950 });
+  await page.goto(
+    '/iframe.html?id=sessions-conversationdiffpanel--remote-hunks-retained-state&viewMode=story'
+  );
+  const stable = page.locator('[data-diff-path="src/a-stable.ts"]');
+  const changed = page.locator('[data-diff-path="src/remote-large.ts"]');
+  const tail = page.locator('[data-diff-path="src/z-stable.ts"]');
+  await stable.waitFor({ state: 'attached', timeout: 60_000 });
+  await stable.getByRole('button', { name: 'Toggle section', exact: true }).click();
+  await expect(stable.locator('pre')).toContainText('editedA1000');
+  await stable.locator('[data-expand-button]').first().click();
+  await expect(stable.locator('pre')).toContainText('stableA996');
+  await stable.evaluate((node) =>
+    Promise.all(
+      node.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {}))
+    )
+  );
+  await tail.scrollIntoViewIfNeeded();
+  await tail.getByRole('button', { name: 'Toggle section', exact: true }).click();
+  await expect(tail.locator('pre')).toContainText('editedZ1000');
+  await tail.locator('[data-expand-button]').first().click();
+  await expect(tail.locator('pre')).toContainText('stableZ996');
+  await tail.evaluate((node) =>
+    Promise.all(
+      node.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {}))
+    )
+  );
+  await changed.scrollIntoViewIfNeeded();
+  await expect(changed.locator('pre')).toContainText('changed1000');
+  await page.getByRole('button', { name: 'Advance comparison', exact: true }).click();
+  const expand = changed.locator('[data-expand-button]').first();
+  await expand.scrollIntoViewIfNeeded();
+  // The first visible surviving card is the reading anchor. Removing a card
+  // below it necessarily moves later cards, so compare this anchor's position.
+  const stableVisible = await stable.evaluate(
+    (node) =>
+      new Promise<boolean>((resolve) => {
+        const observer = new IntersectionObserver(([entry]) => {
+          observer.disconnect();
+          resolve(entry!.isIntersecting);
+        });
+        observer.observe(node);
+      })
+  );
+  const readingAnchor = stableVisible ? stable : tail;
+  await expect(readingAnchor).toBeInViewport();
+  const before = await readingAnchor.evaluate((node) => node.getBoundingClientRect().top);
+  await expand.click();
+  await expect(page.getByText('Branch base · 2222222', { exact: true })).toBeVisible();
+  await expect(changed).toHaveCount(0);
+  await expect(page.getByLabel('Changed files')).toHaveText('src/a-stable.ts, src/z-stable.ts');
+  await expect(stable.locator('pre')).toContainText('stableA996');
+  await expect(tail.locator('pre')).toContainText('stableZ996');
+  await expect
+    .poll(() => readingAnchor.evaluate((node) => node.getBoundingClientRect().top))
+    .toBeCloseTo(before, 0);
 });
 
 test('provider-side preparsed large diff remains responsive while scrolling', async ({ page }) => {

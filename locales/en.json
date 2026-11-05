@@ -2174,6 +2174,7 @@
   "sessions.fileDiff.loadOnDemand": "Load this file when you need it.",
   "sessions.fileDiff.loading": "Loading diff…",
   "sessions.fileDiff.loadingChanges": "Loading changes…",
+  "sessions.fileDiff.focusNoBranchChanges": "This file has no changes against the branch base.",
   "sessions.fileDiff.noChanges": "No changes.",
   "sessions.fileDiff.noUncommittedChanges": "No uncommitted changes.",
   "sessions.fileDiff.preparingLargeDiff": "Preparing diff",

@@ -37,6 +37,9 @@ content exceeding the raw text cap becomes an unavailable/statistics entry.
 Non-regular files remain per-file binary entries, and operational errors in one file
 do not hide other files. Changed identities during deferred context loading refresh
 the complete comparison, including its base label; expansion failures offer retry.
+A completed Branch comparison supplies the same path set to the sidebar and panel;
+failed or incomplete reads cannot erase the last valid sidebar list. Refresh retains
+unaffected file expansion, hydrated context and the reader's viewport anchor.
 Older machines and clients retain their existing diff methods; support is negotiated by capability,
 never inferred from a CLI version.
 

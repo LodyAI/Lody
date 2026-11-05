@@ -40,6 +40,7 @@ import type {
   SessionFileAllChangesDiffEntry,
   SessionFileAllChangesDiffResult,
   SessionFileChangedFilesResult,
+  SessionFileChangeEntry,
   SessionFileDiffResult,
   SessionFileOpenResult,
   SessionFileProvider,
@@ -309,6 +310,9 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
   private readonly message?: string;
   private readonly files: readonly SessionFileProviderEntry[];
   private readonly allChanges: CodeCollabV2AllChangesState;
+  private branchChangeFiles?: readonly SessionFileChangeEntry[];
+  private branchChangesRequest = 0;
+  private readonly changedFileSubscribers = new Set<() => void>();
   private readonly openCache: CodeCollabSessionOpenTextCache;
   private readonly conflictCache: Map<string, SaveConflictCacheEntry>;
   private readonly textSubscribers: Map<string, Set<(text: string) => void>>;
@@ -915,7 +919,10 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
         return {
           status: 'unavailable',
           path,
-          reason: 'transient-io',
+          reason:
+            error instanceof DiffBlobReadError
+              ? errorCodeToUnavailableReason(error.code)
+              : 'transient-io',
           message: error instanceof Error ? error.message : String(error),
         };
       }
@@ -961,14 +968,29 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
             };
           base = result.base;
           for (const entry of result.entries) {
+            if (entry.status === 'not_changed' || entry.status === 'missing') continue;
             this.rememberDiffManifest(scopeKey, entry);
+            const indexedChange = this.allChanges[entry.path];
             entries.push({
               path: entry.path,
+              kind:
+                entry.head === null &&
+                (entry.base !== null || (indexedChange !== true && indexedChange?.del === true))
+                  ? 'deleted'
+                  : entry.status === 'binary'
+                    ? 'binary'
+                    : 'text',
               ...(entry.add === undefined ? {} : { add: entry.add }),
               ...(entry.del === undefined ? {} : { del: entry.del }),
               diff:
                 entry.status === 'ok'
-                  ? { status: 'deferred' }
+                  ? {
+                      status: 'deferred',
+                      contentKey: JSON.stringify([
+                        entry.base?.key ?? null,
+                        entry.head?.key ?? null,
+                      ]),
+                    }
                   : await manifestEntryToDiff(entry, async () => {
                       throw new Error('Unexpected body read.');
                     }),
@@ -987,7 +1009,10 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
         if (error instanceof DiffBlobReadError && error.code === 'stale' && attempt === 0) continue;
         return {
           status: 'unavailable',
-          reason: 'transient-io',
+          reason:
+            error instanceof DiffBlobReadError
+              ? errorCodeToUnavailableReason(error.code)
+              : 'transient-io',
           message: error instanceof Error ? error.message : String(error),
         };
       }
@@ -1038,6 +1063,7 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
   }
 
   async listChangedFiles(): Promise<SessionFileChangedFilesResult> {
+    if (this.branchChangeFiles) return { status: 'ready', files: this.branchChangeFiles };
     return {
       status: 'ready',
       files: Object.entries(this.allChanges)
@@ -1062,7 +1088,55 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     };
   }
 
+  subscribeChangedFiles(listener: () => void): () => void {
+    this.changedFileSubscribers.add(listener);
+    return () => {
+      this.changedFileSubscribers.delete(listener);
+    };
+  }
+
+  private publishBranchChanges(
+    entries: readonly SessionFileAllChangesDiffEntry[],
+    request: number
+  ): void {
+    if (request !== this.branchChangesRequest || this.diffCacheEpoch !== this.diffBlobCache.epoch)
+      return;
+    const files = entries
+      .map((entry): SessionFileChangeEntry => ({
+        path: entry.path,
+        fileId: entry.path,
+        sourceState: this.sourceState,
+        kind:
+          entry.kind ??
+          (entry.diff.status === 'ready' &&
+          entry.diff.newSnapshot.kind === 'unavailable' &&
+          entry.diff.newSnapshot.reason === 'deleted'
+            ? 'deleted'
+            : 'text'),
+        ...(entry.add === undefined ? {} : { add: entry.add }),
+        ...(entry.del === undefined ? {} : { del: entry.del }),
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    // A repeated manifest must not cause a sidebar -> panel -> manifest feedback loop.
+    if (JSON.stringify(files) === JSON.stringify(this.branchChangeFiles)) return;
+    this.branchChangeFiles = files;
+    for (const listener of this.changedFileSubscribers) listener();
+  }
+
   async getAllChangesDiff(
+    focusPath?: string,
+    scope?: CodeCollabAllChangesScope,
+    signal?: AbortSignal
+  ): Promise<SessionFileAllChangesDiffResult> {
+    const branchRequest =
+      scope === undefined || scope === 'branch' ? ++this.branchChangesRequest : undefined;
+    const result = await this.readAllChangesDiff(focusPath, scope, signal);
+    if (result.status === 'ready' && !signal?.aborted && branchRequest !== undefined)
+      this.publishBranchChanges(result.entries, branchRequest);
+    return result;
+  }
+
+  private async readAllChangesDiff(
     focusPath?: string,
     scope?: CodeCollabAllChangesScope,
     signal?: AbortSignal
@@ -1351,7 +1425,7 @@ async function decodeFilePreviewText(
 }
 
 function errorCodeToUnavailableReason(
-  code: CodeCollabV2Error['code']
+  code: string
 ): SessionFileOpenResult extends infer TResult
   ? TResult extends { status: 'unavailable'; reason: infer TReason }
     ? TReason

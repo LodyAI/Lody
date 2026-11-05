@@ -95,9 +95,12 @@ export type SessionFileChangedFilesResult =
 // batch (the caller fetches it on demand via `getDiff`).
 export type SessionFileAllChangesDiffEntry = {
   readonly path: string;
+  readonly kind?: CodeCollabFileKind;
   readonly add?: number;
   readonly del?: number;
-  readonly diff: SessionFileDiffResult | { readonly status: 'deferred' };
+  readonly diff:
+    | SessionFileDiffResult
+    | { readonly status: 'deferred'; readonly contentKey?: string };
 };
 
 export type SessionFileAllChangesDiffResult =
@@ -128,6 +131,8 @@ export interface SessionFileHistoryProvider {
     }
   ): Promise<SessionFileDiffResult>;
   listChangedFiles(turnId?: string): Promise<SessionFileChangedFilesResult>;
+  /** A successful live Branch read can replace the older index-derived change list. */
+  subscribeChangedFiles?(listener: () => void): () => void;
   // Batched "All Changes" (current disk vs base) diff. Optional: providers that cannot
   // batch simply omit it and callers fall back to per-file getDiff.
   getAllChangesDiff?(

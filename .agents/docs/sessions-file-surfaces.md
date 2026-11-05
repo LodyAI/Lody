@@ -216,7 +216,14 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   to full blobs. Expired context loaders renew once; changed identities refresh the
   entire comparison and base header. Other expansion failures offer retry. Unsupported
   non-regular files and operational errors stay local to their file; path/authorization
-  policy still rejects. Partial loaders stay out of the immutable turn cache.
+  policy still rejects. A descriptor capture retries single-file stale errors once;
+  permission refusals retain their category. Completed Branch manifests update the
+  provider's live Changes list and notify the sidebar summary without awaiting
+  history or writing shared Flock rows. Failed/partial/superseded results and other
+  scopes cannot replace that list. Comparison refresh retains the coherent old
+  batch until its manifest completes, reuses unchanged content/viewer context,
+  preserves card state and viewport anchoring, and remounts only a failed viewer
+  on retry. Partial loaders stay out of the immutable turn cache.
   Older machines keep the existing RPCs. See the
   [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md)
   and [protocol/privacy draft](../../specs/remote-diff-delivery.md).

@@ -29,8 +29,11 @@ for human review in the [draft Spec](../../../../specs/remote-diff-delivery.md).
 The manifest enumerates the existing turn/All Changes/single-path set, focus first,
 then smaller changes. It carries nullable base/head descriptors, stats, status,
 opaque version and optional hunks. Transport priority does not change the panel's
-alphabetical ordering. The returned file set is authoritative: stale index-only
-paths disappear; a completed empty Branch batch says “No changes.” Pages hold at most 64 paths and 512 KiB of encoded
+alphabetical ordering. A complete successful Branch manifest also replaces the
+provider's live Changes list, so the sidebar and panel use the same path set.
+A focused path absent from that set gets an explicit no-changes message. Empty
+batches say “No changes.” Partial, failed or superseded requests do not replace
+sidebar metadata; Uncommitted/turn reads do not overwrite Branch metadata. Pages hold at most 64 paths and 512 KiB of encoded
 remote response. Opaque cursors pin the scope, resolved Git/member bases and initial
 path set for ten minutes; additional file roots have their own bases and the focus never narrows the set; moved bases or evicted cursors fail with `stale`.
 
@@ -52,7 +55,10 @@ the session and checks that binding. Unsupported symlinks, directories and Gitli
 (including commits absent from the superproject) become per-file binary entries.
 Operational file failures become typed per-file unavailable entries; request/path
 authorization failures still reject the request. Removal/rename during a disk read
-returns `stale`, allowing bounded metadata refresh. Limits are 8,192 handles per requested session,
+returns `stale`, allowing bounded metadata refresh. Descriptor capture retries a
+single `stale` failure once against the same pinned base before isolating it as a
+per-file error. Client error mapping retains permission refusals rather than
+presenting them as temporary I/O failures. Limits are 8,192 handles per requested session,
 65,536 globally, LRU eviction and ten-minute idle expiry. A guessed global hash does
 not establish authority. Git/store reconstruction buffers are capped at 64 MiB total
 and 8,192 objects, and expire after 60 seconds idle; the passive registry owns no timers.
@@ -110,6 +116,16 @@ bodies. At most 128 pending descriptors are retained. The machine's returned fil
 set and its viewport are authoritative even when the index is stale. This trades extra metadata for
 correctness without retransmitting unchanged bodies.
 
+The provider owns the live Branch list and its listeners for that provider's
+lifetime. Successful complete comparisons notify the summary hook; a request-start
+sequence rejects older completions, and cancellation/cache disposal prevents late
+publication. The list is local presentation metadata, never a renderer write to the
+shared index. Provider replacement returns to the new index until its next live
+comparison completes. Live Changes remains available without the optional history
+reader; historical turn summaries still follow retained history. Keeping a separate
+stale sidebar after accepting a complete manifest was rejected because it presents
+two incompatible answers to the same comparison.
+
 Writer diff activity separately renews the existing `init-directory` publication
 workflow, at most once per five minutes (five seconds after failure), to preserve
 its ten-minute watch lifetime. Guest file reads skip this action; diff access remains writer-only in encrypted workspaces. Activation is observed
@@ -146,7 +162,13 @@ handles once. Only unchanged content identities may hydrate the original patch.
 If either file side or status changed, the panel reloads the whole comparison batch
 (including base header, file set and stats), or the active turn comparison. It never
 replaces old hunk coordinates in place under an old base header. Other expansion
-failures show a visible error and a Retry action. Reverted files retain readable descriptors even when marked
+failures show a visible error and a Retry action. During a reload, the previous
+coherent batch remains visible with a refreshing indicator until the new manifest
+completes. Unchanged content keys retain their viewer metadata, hydrated context
+and card state; changed files receive fresh loaders. The viewport keeps its anchor
+observer across path-list changes. Retry remounts only the failing viewer instead
+of every file. These state-preservation changes do not permit mixing content from
+different comparison identities. Reverted files retain readable descriptors even when marked
 `not_changed`. Runtime-bound partial loaders never enter the cross-workspace immutable
 turn cache; fully materialized turn snapshots can still be retained.
 

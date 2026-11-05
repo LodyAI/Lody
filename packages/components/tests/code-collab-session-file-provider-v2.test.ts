@@ -170,6 +170,111 @@ function createRuntime(
 }
 
 describe('Content-addressed diff transport', () => {
+  it('retains permission refusals for both single-file and All Changes blob reads', async () => {
+    const provider = new CodeCollabSessionFileProvider({
+      runtime: createRuntime({
+        diffBlobTransportOptions: async () => ({
+          supported: true,
+          scope: 'synthetic',
+          persist: false,
+        }),
+        openDiffManifest: async () => ({
+          status: 'error',
+          code: 'permission_denied',
+          message: 'Guest diff access is unavailable.',
+        }),
+        readDiffBlob: async () => {
+          throw new Error('A refused manifest must not read bodies.');
+        },
+      }),
+    });
+    expect(await provider.getDiff('a.ts')).toMatchObject({
+      status: 'unavailable',
+      reason: 'permission-denied',
+      message: 'Guest diff access is unavailable.',
+    });
+    expect(await provider.getAllChangesDiff()).toMatchObject({
+      status: 'unavailable',
+      reason: 'permission-denied',
+      message: 'Guest diff access is unavailable.',
+    });
+  });
+
+  it('publishes only a complete successful Branch list and fences late or failed comparisons', async () => {
+    let resolveOld: ((value: unknown) => void) | undefined;
+    let markEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
+    let request = 0;
+    let mode: 'ready' | 'failed' | 'partial-failure' = 'ready';
+    const provider = new CodeCollabSessionFileProvider({
+      allChanges: { 'stale-index.ts': { diff: [1, 1] } },
+      runtime: createRuntime({
+        diffBlobTransportOptions: async () => ({
+          supported: true,
+          scope: 'synthetic',
+          persist: false,
+        }),
+        openDiffManifest: async (input) => {
+          request++;
+          if (request === 1)
+            return (await new Promise((resolve) => {
+              resolveOld = resolve;
+              markEntered();
+            })) as never;
+          if (mode === 'partial-failure' && !input.cursor)
+            return { status: 'ok', entries: [], nextCursor: 'next-page' };
+          if (mode === 'failed' || mode === 'partial-failure')
+            return { status: 'error', code: 'permission_denied' };
+          return {
+            status: 'ok',
+            base: 'base',
+            entries:
+              input.scope === 'uncommitted'
+                ? []
+                : [{ path: 'live.ts', status: 'binary', base: null, head: null, add: 1, del: 0 }],
+            nextCursor: null,
+          };
+        },
+        readDiffBlob: async () => {
+          throw new Error('No bodies needed.');
+        },
+      }),
+    });
+    let observed: Awaited<ReturnType<typeof provider.listChangedFiles>> | undefined;
+    const unsubscribe = provider.subscribeChangedFiles(() => {
+      void provider.listChangedFiles().then((value) => {
+        observed = value;
+      });
+    });
+    expect(await provider.listChangedFiles()).toMatchObject({
+      files: [{ path: 'stale-index.ts' }],
+    });
+    const old = provider.getAllChangesDiff();
+    await entered;
+    expect(await provider.getAllChangesDiff()).toMatchObject({
+      status: 'ready',
+      entries: [{ path: 'live.ts' }],
+    });
+    expect(await provider.listChangedFiles()).toMatchObject({
+      files: [{ path: 'live.ts', add: 1, del: 0 }],
+    });
+    expect(observed).toMatchObject({ files: [{ path: 'live.ts' }] });
+    resolveOld!({ status: 'ok', entries: [], nextCursor: null });
+    await old;
+    expect(await provider.listChangedFiles()).toMatchObject({ files: [{ path: 'live.ts' }] });
+    await provider.getAllChangesDiff(undefined, 'uncommitted');
+    expect(await provider.listChangedFiles()).toMatchObject({ files: [{ path: 'live.ts' }] });
+    mode = 'partial-failure';
+    expect(await provider.getAllChangesDiff()).toMatchObject({ status: 'unavailable' });
+    expect(await provider.listChangedFiles()).toMatchObject({ files: [{ path: 'live.ts' }] });
+    mode = 'failed';
+    await provider.getAllChangesDiff();
+    expect(await provider.listChangedFiles()).toMatchObject({ files: [{ path: 'live.ts' }] });
+    unsubscribe();
+  });
+
   it.each(['expired', 'edited', 'reverted', 'base-changed'])(
     'renews hydration handles with consistent context after %s',
     async (mode) => {
