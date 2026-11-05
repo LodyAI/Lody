@@ -86,11 +86,19 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
   private displayGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly displaySyncStateListeners = new Set<(state: RoomSyncState) => void>();
   /**
-   * `start()` replaces the store, so its snapshot is empty until the new join
-   * bootstraps. Never let the display grace cover that: unlike an SSE recycle,
-   * it has no retained snapshot to speak for.
+   * `start()` replaces the store, so its state is unconfirmed until the new join
+   * bootstraps. Never let the display grace cover that: consumers keep the last
+   * delivered snapshot, but unlike an SSE recycle this room cannot speak for it.
    */
   private replacingStore = false;
+  /**
+   * A replacement store holds nothing but local writes until 'joined', and
+   * delivering it would tell every consumer that all machines vanished. The last
+   * delivered snapshot stands meanwhile; its entries still age out by `updatedAt`.
+   */
+  private awaitingJoinedSnapshot = false;
+  private consumersHoldSnapshot = false;
+  private retainSnapshotOnStop = false;
 
   /**
    * Presence health as the UI should read it. This equals the raw transport
@@ -112,6 +120,7 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
 
   override start(args: EphemeralRoomStartArgs): void {
     this.replacingStore = true;
+    this.awaitingJoinedSnapshot = this.consumersHoldSnapshot;
     try {
       super.start(args);
     } finally {
@@ -229,8 +238,19 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
     return toLodyPresenceStreamUrl(durableStreamUrl);
   }
 
+  /**
+   * `retainSnapshot` is for a stop that a restart follows immediately: consumers
+   * keep the last snapshot until the next room joins. Every other stop clears it.
+   */
+  override stop(options: { retainSnapshot?: boolean } = {}): Promise<void> {
+    this.retainSnapshotOnStop = options.retainSnapshot === true;
+    return super.stop();
+  }
+
   protected onStoreChange(store: PresenceStoreLike): void {
+    if (this.awaitingJoinedSnapshot) return;
     this.lastSnapshotAtMs = Date.now();
+    this.consumersHoldSnapshot = true;
     this.options.onSnapshot?.(
       parseLodyPresenceStates(store.getAllStates(), { minimal: this.options.minimal })
     );
@@ -247,6 +267,7 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
   protected override onJoined(store: PresenceStoreLike): void {
     // Local writes may have raced the join; re-assert once the room is live.
     this.writeViewingEntry();
+    this.awaitingJoinedSnapshot = false;
     super.onJoined(store);
   }
 
@@ -261,7 +282,12 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
 
   protected override onBeforeStop(): void {
     this.lastSnapshotAtMs = null;
-    this.options.onSnapshot?.({});
+    this.awaitingJoinedSnapshot = true;
+    if (!this.retainSnapshotOnStop) {
+      this.consumersHoldSnapshot = false;
+      this.options.onSnapshot?.({});
+    }
+    this.retainSnapshotOnStop = false;
   }
 
   private startViewingHeartbeat(): void {
