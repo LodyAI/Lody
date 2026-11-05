@@ -84,22 +84,25 @@ test('remote hunks render without bodies and hydrate full context only when expa
   await expect(file.locator('[data-error-wrapper]')).toHaveCount(0);
 });
 
-test('failed context expansion displays a retry action and recovers after reconnection', async ({
-  page,
-}) => {
-  await page.goto('/iframe.html?id=sessions-conversationdiffpanel--remote-hunks&viewMode=story');
-  const file = page.locator('[data-diff-path="src/remote-large.ts"]');
-  await expect(file.locator('pre')).toContainText('changed1000', { timeout: 30_000 });
-  await page.getByRole('button', { name: 'Simulate read failure', exact: true }).click();
-  await file.locator('[data-expand-button]').first().click();
-  await expect(file.getByRole('alert')).toContainText('Synthetic connection unavailable.');
-  await page.getByRole('button', { name: 'Restore reads', exact: true }).click();
-  await file.getByRole('button', { name: 'Retry', exact: true }).click();
-  await expect(file.getByRole('alert')).toHaveCount(0);
-  await expect(file.locator('pre')).toContainText('changed1000');
-  await file.locator('[data-expand-button]').first().click();
-  await expect(file.locator('pre')).toContainText('value996');
-});
+for (const story of ['remote-hunks', 'remote-hunks-changing-base']) {
+  test(`${story}: failed context expansion displays a retry action and recovers after reconnection`, async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await page.goto(`/iframe.html?id=sessions-conversationdiffpanel--${story}&viewMode=story`);
+    const file = page.locator('[data-diff-path="src/remote-large.ts"]');
+    await expect(file.locator('pre')).toContainText('changed1000', { timeout: 30_000 });
+    await page.getByRole('button', { name: 'Simulate read failure', exact: true }).click();
+    await file.locator('[data-expand-button]').first().click();
+    await expect(file.getByRole('alert')).toContainText('Synthetic connection unavailable.');
+    await page.getByRole('button', { name: 'Restore reads', exact: true }).click();
+    await file.getByRole('button', { name: 'Retry', exact: true }).click();
+    await expect(file.getByRole('alert')).toHaveCount(0);
+    await expect(file.locator('pre')).toContainText('changed1000');
+    await file.locator('[data-expand-button]').first().click();
+    await expect(file.locator('pre')).toContainText('value996');
+  });
+}
 
 test('changed comparison during expansion refreshes the complete batch and its base header', async ({
   page,

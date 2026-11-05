@@ -397,6 +397,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
   const [viewerRevision, setViewerRevision] = useState(0);
   useEffect(() => setOpen(defaultOpen), [defaultOpen]);
   const retry = useCallback(() => {
+    setHydrationError(null);
     setViewerRevision((value) => value + 1);
     onReload(filePath);
   }, [filePath, onReload]);
