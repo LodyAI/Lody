@@ -82,4 +82,10 @@ The owning test measures the critical path from the approval result with a warme
 - The cloud client reuses an unexpired Convex JWT within its owner and renews it 60 s before `exp`. The owner belongs to one account and closes on account change and sign-out, which drops the token. Any failed call drops it too, and so does a call ended by the 30 s deadline or a cancellation.
 - After the two-minute fast window the join page says the member is still waiting for an administrator's device, and Retry restarts the fast cadence.
 
-The receiver's repeated remote revision checks during installation (four `status` calls) are deliberate re-verification and remain.
+### Concurrent recipients (B on-site J07, 2026-11-05)
+
+J07/continue still missed the 60 s window at about 63 s: the approver's full key round took 47.7 s for 36 serial mailbox calls at about 1.3 s each under whole-host CPU contention. JWKS, the TLS proxy and Convex's concurrency limit were ruled out. The owner chose to cut serial calls in the product rather than enlarge the test machine or widen the window. On real hosts after a rotation with five recipients, the round was 28 calls, all serial. It is now 10 round trips on the critical path (26 calls):
+
+- `KeyDistributor` schedules and delivers different recipients concurrently, at most eight at once. Each recipient's hint, put, read-back and status stay in order. Outcomes are checked in the original target/page order; a blocked recipient never blocks the others; storage damage still fails the batch, after concurrently started siblings finish their idempotent step.
+- `KeyReceiver` asks the mailbox revision once per step, immediately before a report is queued or sent. This replaces the earlier note that kept all four installation `status` calls: the removed queries were each followed, with only local signing or a key read in between, by another revision query before the report was queued or sent. Every verified ledger check remains.
+- The owning test derives round trips from fiber fork/join structure, not wall-clock time. Recipients beyond eight, or a backend batch status call, are follow-ups only if a larger team needs them.
