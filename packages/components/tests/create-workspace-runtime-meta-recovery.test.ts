@@ -953,6 +953,39 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   );
 
   it.each(['cloud', 'dual'] as const)(
+    'keeps the presence snapshot through a wake restart but clears it at disposal (%s)',
+    async (syncMode) => {
+      if (syncMode === 'dual') enableElectronLocalDataPlane();
+      mocks.presenceShouldRestartOnExternalWake.mockReturnValue(true);
+      mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+      const runtime = await createWorkspaceRuntime({
+        content: { mode: 'plaintext' },
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        syncMode,
+      });
+      try {
+        await runtime.setAuthToken('auth-token');
+        await vi.advanceTimersByTimeAsync(0);
+        const startsBeforeWake = mocks.presenceStart.mock.calls.length;
+        expect(startsBeforeWake).toBeGreaterThan(0);
+        mocks.presenceStop.mockClear();
+
+        dispatchDocumentEvent('visibilitychange');
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(mocks.presenceStop.mock.calls).toEqual([[{ retainSnapshot: true }]]);
+        expect(mocks.presenceStart.mock.calls.length).toBe(startsBeforeWake + 1);
+      } finally {
+        mocks.presenceStop.mockClear();
+        await runtime.dispose();
+      }
+      expect(mocks.presenceStop.mock.calls.flat().filter(Boolean)).toEqual([]);
+    }
+  );
+
+  it.each(['cloud', 'dual'] as const)(
     'resumes ordinary synchronization on the same Repo after a failed mode read recovers (%s)',
     async (syncMode) => {
       if (syncMode === 'dual') enableElectronLocalDataPlane();

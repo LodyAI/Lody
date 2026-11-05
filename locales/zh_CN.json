@@ -1117,6 +1117,7 @@
   "chat.send": "发送",
   "chat.submitting": "启动中...",
   "chat.validation.goToSettings": "去配置",
+  "chat.validation.machineOffline": "所选机器已离线。",
   "chat.validation.missingAgent": "请选择一个 Agent。",
   "chat.validation.missingBranch": "开始前请先选择分支。",
   "chat.validation.missingContext": "工作区信息缺失，请重试。",

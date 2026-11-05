@@ -270,6 +270,28 @@ function MachineScopeShell() {
   );
 }
 
+function OfflineMachineScopeShell() {
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-background p-8">
+      {['build-machine', 'ubuntu-gpu-workstation-shanghai-02'].map((name) => (
+        <div key={name} className="flex items-center gap-2">
+          <DesktopMachineMenu
+            value={'machine-remote' as MachineId}
+            selectedLabel={name}
+            offline
+            options={[{ value: machineId, label: 'zx-macbook' }]}
+            onChange={fn()}
+            onAddMachine={fn()}
+          />
+          <div className="flex h-6 items-center rounded-md bg-foreground/[0.06] px-2 text-xs font-normal text-foreground/80">
+            lody
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function GrokConfigShell() {
   const store = useMemo(() => {
     const next = createStore();
@@ -460,6 +482,14 @@ export const DeepSeekModels: Story = {
 export const MachineScope: Story = {
   args: { isEmptyConversation: true },
   render: () => <MachineScopeShell />,
+};
+export const MachineScopeOffline: Story = {
+  args: { isEmptyConversation: true },
+  render: () => <OfflineMachineScopeShell />,
+};
+export const MachineScopeOfflineLight: Story = {
+  ...MachineScopeOffline,
+  globals: { theme: 'light' },
 };
 export const MachineScopeEmpty: Story = {
   args: { isEmptyConversation: true },

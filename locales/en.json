@@ -1117,6 +1117,7 @@
   "chat.send": "Send",
   "chat.submitting": "Starting...",
   "chat.validation.goToSettings": "Configure",
+  "chat.validation.machineOffline": "The selected machine is offline.",
   "chat.validation.missingAgent": "Choose an agent before starting.",
   "chat.validation.missingBranch": "Choose a branch before starting.",
   "chat.validation.missingContext": "Workspace context is missing, please retry.",
