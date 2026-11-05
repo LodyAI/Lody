@@ -34,8 +34,10 @@ import {
 } from '@lody/e2ee-core'
 import {
   Bytes,
+  ContentError,
   LedgerError,
   decodeRecord,
+  inspectContentFrame,
   exportVerifiedState,
   hashRecordBytes,
   ledgerStateDigest,
@@ -93,6 +95,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'corrupt'
     | 'snapshot-history-required'
     | 'key-update-required'
+    | 'key-pending'
     | 'local-evidence-conflict'
     | 'storage'
     | 'rotation_candidate_unavailable'
@@ -1157,7 +1160,49 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
             return yield* fail('invalid-input')
           const provider = yield* binding(input.room)
-          return yield* provider.open(input)
+          return yield* provider.open(input).pipe(
+            Effect.catchIf(
+              (error): error is ContentError =>
+                error instanceof ContentError && error.code === 'missing-read-key',
+              (error) => keyPending(input, error)
+            )
+          )
+        })
+        /**
+         * Retryable only when this device's own verified ledger proves the frame's
+         * epoch exists, this device is a current member device, and the installed
+         * key store genuinely lacks that epoch: a rotation it has not received yet.
+         * Unreadable keys, unknown epochs and access loss keep the original failure.
+         */
+        const keyPending = Effect.fnUntraced(function* (
+          input: E2eeContentOpen,
+          original: ContentError
+        ) {
+          const model = encryptedWorkspaceRoom(workspaceId, input.room).model
+          const snapshot = input.context?.kind === 'snapshot'
+          const metadata = inspectContentFrame(
+            input.sealed,
+            model === 'loro'
+              ? snapshot
+                ? 'doc-snapshot'
+                : 'doc-update'
+              : snapshot
+                ? 'flock-snapshot'
+                : 'flock-update'
+          )
+          if (Result.isFailure(metadata)) return yield* original
+          const state = (yield* verified.current()).inspectState()
+          const own = state.devices.get(hex(device.publicKey.toBytes()))
+          if (
+            metadata.success.epoch > state.epoch.number ||
+            !own ||
+            !state.members.has(hex(own.membershipId.toBytes()))
+          )
+            return yield* original
+          const checked = yield* Effect.result(keys.check(metadata.success.epoch))
+          return yield* Result.isFailure(checked) && checked.failure.reason === 'missing-key'
+            ? fail('key-pending')
+            : original
         })
         let upgradeRequiredAt: number | undefined
         let retainedWriteEpoch: number | undefined
@@ -1389,7 +1434,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return {
             epoch: state.epoch.number,
             rotationRequired: state.epoch.rotationRequired,
-            updatePending: Result.isFailure(continuation) || continuation.success,
+            // A command still before its first candidate write is an update too.
+            updatePending: !!managing || Result.isFailure(continuation) || continuation.success,
+            updateInProgress: !!managing,
             ...(Result.isFailure(continuation)
               ? { recoveryIssue: 'candidate-unavailable' as const }
               : {}),

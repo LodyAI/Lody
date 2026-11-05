@@ -45,6 +45,8 @@ export function E2eeSecurityPanel({
   const error =
     actionError ?? (state?.recoveryIssue ? 'e2ee_rotation_candidate_unavailable' : undefined);
   const needsUpdate = state?.rotationRequired || state?.updatePending;
+  // Another window's command is running: show it busy, not a button that would refuse.
+  const updating = busy || !!state?.updateInProgress;
   return (
     <div {...stylex.props(styles.panel)}>
       <SettingsPageLead>{t('e2ee.security.lead')}</SettingsPageLead>
@@ -62,8 +64,8 @@ export function E2eeSecurityPanel({
           </p>
           {needsUpdate &&
             (state?.mayRotate ? (
-              <Button disabled={busy} onClick={onUpdate}>
-                {t(busy ? 'e2ee.security.updating' : 'e2ee.security.complete')}
+              <Button disabled={updating} onClick={onUpdate}>
+                {t(updating ? 'e2ee.security.updating' : 'e2ee.security.complete')}
               </Button>
             ) : (
               <p>{t('e2ee.security.useManager')}</p>
@@ -118,7 +120,13 @@ export function E2eeSecurityPanel({
               }
             >
               {device.mayRevoke && (
-                <Button data-testid="e2ee-device-revoke" data-device-key={device.key} variant="secondary" disabled={busy} onClick={() => onRevoke(device.key)}>
+                <Button
+                  data-testid="e2ee-device-revoke"
+                  data-device-key={device.key}
+                  variant="secondary"
+                  disabled={updating}
+                  onClick={() => onRevoke(device.key)}
+                >
                   {t('e2ee.security.revoke')}
                 </Button>
               )}
