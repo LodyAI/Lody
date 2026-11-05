@@ -885,6 +885,107 @@ describe('LodyFleet encrypted access loss', () => {
     }
   });
 
+  // Waiting for pairing must also hold off startup retries and starts already in
+  // flight: the open path would reread the retained revoked device credential.
+  const revocableFleet = async (createRuntime: (options: unknown) => Promise<unknown>) => {
+    let accessLost: AccessLost | undefined;
+    let creates = 0;
+    const create = vi.spyOn(Lody, 'create').mockImplementation(async (options) => {
+      creates += 1;
+      accessLost ??= (options as unknown as { onEncryptedAccessLost?: AccessLost })
+        .onEncryptedAccessLost;
+      return (await createRuntime(options)) as never;
+    });
+    const reconcile = vi
+      .spyOn(projectMeta, 'reconcileMachineLocalProjectRootPaths')
+      .mockResolvedValue(undefined);
+    const schedules = vi.spyOn(scheduleWorkspace, 'createScheduleWorkspace').mockResolvedValue({
+      evaluate: async () => {},
+      dispose: async () => {},
+    });
+    const harness = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
+      { ...createTestCloudPort(), e2ee: {} as NonNullable<CloudPort['e2ee']> }
+    );
+    const fleet = harness.fleet as unknown as {
+      desiredWorkspaces: Map<string, unknown>;
+      runtimes: Map<string, { lody: unknown }>;
+      waitingForPairing: Set<string>;
+      retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+      startWorkspace(workspace: never): Promise<void>;
+      stopped: boolean;
+    };
+    delete (fleet as unknown as { startWorkspace?: unknown }).startWorkspace;
+    fleet.desiredWorkspaces.set(encrypted.id, encrypted);
+    const restore = () => {
+      fleet.stopped = true;
+      for (const timer of fleet.retryTimers.values()) clearTimeout(timer);
+      for (const spy of [create, reconcile, schedules]) spy.mockRestore();
+    };
+    return { fleet, creates: () => creates, accessLost: () => accessLost!, restore };
+  };
+
+  it('does not retry a failed startup with the revoked identity while waiting for pairing', async () => {
+    vi.useFakeTimers();
+    const failed = {
+      ...runtimeStub(),
+      start: async () => Promise.reject(new Error('startup failed')),
+    };
+    const { fleet, creates, accessLost, restore } = await revocableFleet(async () => failed);
+    try {
+      await fleet.startWorkspace(encrypted as never);
+      expect(fleet.retryTimers.has(encrypted.id)).toBe(true);
+
+      await accessLost()(failed, 'device-revoked');
+      expect(fleet.waitingForPairing.has(encrypted.id)).toBe(true);
+      expect(fleet.retryTimers.has(encrypted.id)).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(creates()).toBe(1);
+      expect(fleet.runtimes.has(encrypted.id)).toBe(false);
+    } finally {
+      restore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts a start in flight when its machine identity is revoked, never starting the old identity', async () => {
+    vi.useFakeTimers();
+    let release: () => void = () => {};
+    const opened = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stub = runtimeStub();
+    let started = false;
+    const inFlight = {
+      ...stub,
+      start: async () => {
+        started = true;
+      },
+    };
+    const { fleet, creates, accessLost, restore } = await revocableFleet(async () => {
+      await opened;
+      return inFlight;
+    });
+    try {
+      const start = fleet.startWorkspace(encrypted as never);
+      await vi.advanceTimersByTimeAsync(0);
+      await accessLost()(inFlight, 'device-revoked');
+      release();
+      await start;
+
+      expect(started).toBe(false);
+      expect(fleet.runtimes.has(encrypted.id)).toBe(false);
+      expect(fleet.waitingForPairing.has(encrypted.id)).toBe(true);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(creates()).toBe(1);
+      expect(fleet.retryTimers.has(encrypted.id)).toBe(false);
+    } finally {
+      restore();
+      vi.useRealTimers();
+    }
+  });
+
   it('still drops the workspace binding when the member is actually removed', async () => {
     const { fleet, first, accessLost, restore } = await startedEncryptedWorkspace();
     try {
@@ -1175,6 +1276,7 @@ it.each(['e2ee_pairing_required', 'e2ee_storage_failed'])(
     const fleet = harness.fleet as unknown as {
       desiredWorkspaces: Map<string, unknown>;
       retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+      waitingForPairing: Set<string>;
       startWorkspace(workspace: never): Promise<void>;
       stopped: boolean;
     };
@@ -1198,9 +1300,13 @@ it.each(['e2ee_pairing_required', 'e2ee_storage_failed'])(
       ).toBe(!waiting);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(fleet.retryTimers.has(workspace.id)).toBe(!waiting);
-      // Explicit activation can call the same start entry again; waiting isn't a fence.
+      // Waiting holds the workspace until explicit activation, which clears the wait
+      // and then calls the same start entry again (as dispatchLocalE2eePairing does).
       if (waiting) {
         create.mockRejectedValue(new Error('e2ee_storage_failed'));
+        await fleet.startWorkspace(workspace as never);
+        expect(fleet.retryTimers.has(workspace.id)).toBe(false);
+        fleet.waitingForPairing.delete(workspace.id);
         await fleet.startWorkspace(workspace as never);
         expect(fleet.retryTimers.has(workspace.id)).toBe(true);
       }
