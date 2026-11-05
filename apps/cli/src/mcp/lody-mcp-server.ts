@@ -2254,7 +2254,10 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
           };
         }
         const live = liveStatuses.get(sessionId);
-        const online = live?.machineOnline === true;
+        // Unknown liveness (presence not joined and no RPC answer) is not offline:
+        // chat proceeds and fails against its own deadline if the Machine is down.
+        const machineState = live?.machinePresence ?? 'unknown';
+        const online = machineState === 'online';
         const liveWorking = resolveSessionLiveWorkingFromSignals(session, {
           presence: findFreshSessionPresenceState(presence, sessionId, nowMs),
           viewed: viewed.has(sessionId),
@@ -2297,7 +2300,7 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
                   ? { activity: 'unknown' as const }
                   : {}),
             },
-            machine: { state: online ? ('online' as const) : ('offline' as const) },
+            machine: { state: machineState },
             observation: {
               quality: live?.fresh
                 ? ('fresh' as const)
@@ -2311,7 +2314,7 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
                   chat: 'forbidden' as const,
                   reason: makeLodyError('SESSION_ARCHIVED', 'Session is archived.', false),
                 }
-              : online
+              : machineState !== 'offline'
                 ? { chat: 'allowed' as const }
                 : {
                     chat: 'temporarily_blocked' as const,
@@ -2675,24 +2678,24 @@ const resolveInvokingTurnContext = async (
 /**
  * Machine liveness is THREE-state, and the states are not interchangeable.
  *
- * `getOnlineMachineIds()` returns null when the presence room could not be joined,
- * which means "status unknown", never "offline" (`lib/loro/AGENTS.md`). Collapsing
- * null to offline made every guard below refuse a healthy Machine with a false
- * reason whenever presence was merely unavailable — a cold daemon start or a
- * reconnect backoff is enough. Only a positive absence from a joined presence room
- * may block work; `commands/agent-config.ts` takes the same position.
+ * Without a joined presence room, a Machine lacking a fresh heartbeat is "status
+ * unknown", never "offline" (`lib/loro/AGENTS.md`). Collapsing that to offline made
+ * every guard below refuse a healthy Machine with a false reason whenever presence
+ * was merely unavailable — a cold daemon start or a reconnect backoff is enough.
+ * Only a positive absence from a joined presence room may block work;
+ * `commands/agent-config.ts` takes the same position.
  */
 const makeMachineLivenessLookupForMcp = (
   manager: LoroDocumentManager,
   ctx: ReturnType<typeof getSessionContext>
 ): ((machineId: MachineId) => Promise<MachinePresence>) => {
-  let onlineMachineIds: ReturnType<LoroDocumentManager['getOnlineMachineIds']> | undefined;
+  let presence: ReturnType<LoroDocumentManager['getMachinePresenceView']> | undefined;
   return async (machineId) => {
     if (machineId === (ctx.machineId as MachineId)) {
       return 'online';
     }
-    onlineMachineIds ??= manager.getOnlineMachineIds();
-    return classifyMachinePresence(await onlineMachineIds, machineId);
+    presence ??= manager.getMachinePresenceView();
+    return classifyMachinePresence(await presence, machineId);
   };
 };
 
@@ -2963,15 +2966,12 @@ const buildSessionCreateOptions = async (
         `Machine is absent from the local replica: ${machineIdToResolve}.`
       );
     }
-    // Null here is "presence unavailable", so liveness is UNKNOWN for every remote
-    // Machine; see makeMachineLivenessLookupForMcp. Treating that as offline used to
-    // drop healthy Machines out of the candidate list with no warning at all.
-    const onlineMachineIds = await manager.getOnlineMachineIds();
-    const machineLivenessOf = (machineId: MachineId): MachinePresence => {
-      if (machineId === auth.machineId) return 'online';
-      if (onlineMachineIds === null) return 'unknown';
-      return onlineMachineIds.has(machineId) ? 'online' : 'offline';
-    };
+    // Without a joined room, a remote Machine lacking a fresh heartbeat is UNKNOWN;
+    // see makeMachineLivenessLookupForMcp. Treating that as offline used to drop
+    // healthy Machines out of the candidate list with no warning at all.
+    const presence = await manager.getMachinePresenceView();
+    const machineLivenessOf = (machineId: MachineId): MachinePresence =>
+      machineId === auth.machineId ? 'online' : classifyMachinePresence(presence, machineId);
     const machineCandidates = selectMachineMetasForOptions(
       machineEntries.map((entry) => entry.meta),
       input.machineId

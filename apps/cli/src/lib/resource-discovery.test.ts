@@ -38,7 +38,7 @@ const source = (overrides: Partial<DiscoverySource> = {}): DiscoverySource => ({
   workspaceId: 'workspace',
   userId: 'user',
   machines: async () => [machine('one'), machine('two'), machine('hidden')],
-  onlineMachineIds: async () => new Set(['one'] as MachineId[]),
+  machinePresence: async () => ({ online: new Set(['one'] as MachineId[]), synced: true }),
   canAccess: async (id) => id !== 'hidden',
   configs: async (id) => (id === 'one' ? [config('agent')] : []),
   capabilities: async () => ({
@@ -121,7 +121,10 @@ describe('resource discovery across MCP and CLI', () => {
                 legacy: { limitId: 'legacy', usedPercent: 80, resetsAt: 1 } as never,
               }
             : Promise.reject(new Error('Synthetic flock read failure')),
-        onlineMachineIds: async () => new Set(['one', 'two'] as MachineId[]),
+        machinePresence: async () => ({
+          online: new Set(['one', 'two'] as MachineId[]),
+          synced: true,
+        }),
         machineResources: async (target) => {
           if (target.id === 'two') throw new Error('Synthetic RPC timeout');
           return { disk: { totalGB: 100, freeGB: 1, usedPercent: 99 } };
@@ -255,7 +258,7 @@ describe('resource discovery across MCP and CLI', () => {
       ['two', 'offline'],
     ]);
     const unknown = await new ResourceDiscovery(
-      source({ onlineMachineIds: async () => null })
+      source({ machinePresence: async () => ({ online: new Set<MachineId>(), synced: false }) })
     ).list('machine', { onlineStatus: 'unknown' });
     expect(unknown.items).toHaveLength(2);
     expect(unknown.items.every((row) => row.availability?.state === 'unknown')).toBe(true);
@@ -319,7 +322,10 @@ describe('resource discovery across MCP and CLI', () => {
     await expect(discovery.get('agent_role', 'private')).rejects.toThrow('RESOURCE_NOT_FOUND');
     await expect(discovery.get('agent_role', 'absent')).rejects.toThrow('RESOURCE_NOT_FOUND');
     const unknown = new ResourceDiscovery(
-      source({ roles: async () => [role('bound')], onlineMachineIds: async () => null })
+      source({
+        roles: async () => [role('bound')],
+        machinePresence: async () => ({ online: new Set<MachineId>(), synced: false }),
+      })
     );
     expect((await unknown.get('agent_role', 'bound')).item.availability).toEqual({
       state: 'unknown',

@@ -668,8 +668,11 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       }
     );
     try {
-      // No remote room means unknown, even though local entries are already authored.
-      expect(await manager.getOnlineMachineIds({ timeoutMs: 1 })).toBeNull();
+      // No remote room proves no absence, even though local entries are already authored.
+      expect(await manager.getMachinePresenceView({ timeoutMs: 1 })).toEqual({
+        online: new Set(),
+        synced: false,
+      });
       manager.publishSessionPresence(
         '01020304-1111-4222-8333-010203040507' as SessionId,
         '01020304-1111-4222-8333-010203040508' as MachineId,
@@ -691,7 +694,10 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       ]);
       await manager.attachRemoteStreamsTransport();
       // The real owner has joined; absent remote machine heartbeats now form a known empty set.
-      expect(await manager.getOnlineMachineIds({ timeoutMs: 100 })).toEqual(new Set());
+      expect(await manager.getMachinePresenceView({ timeoutMs: 100 })).toEqual({
+        online: new Set(),
+        synced: true,
+      });
       expect(repo.addTransport).toHaveBeenCalledWith('streams', expect.anything(), {
         ephemeral: true,
       });

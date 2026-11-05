@@ -1056,6 +1056,42 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
+  it('reports unknown, not offline, for a remote Machine when presence cannot prove absence', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const otherMachineId = 'synthetic-other-machine' as MachineId;
+    // The incident shape: presence room not joined, Machine RPC unanswered.
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockRejectedValue(
+      new Error('timeout: Machine status request timed out')
+    );
+    const presence = vi.spyOn(manager, 'getMachinePresenceView');
+    const statusOf = async () => {
+      const result = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      return JSON.parse(result.content[0]?.text ?? '{}').items[0].value;
+    };
+
+    presence.mockResolvedValue({ online: new Set(), synced: false });
+    expect(await statusOf()).toMatchObject({
+      machine: { state: 'unknown' },
+      actions: { chat: 'allowed' },
+    });
+
+    // A fresh heartbeat proves online even while the room recycles its live read.
+    presence.mockResolvedValue({ online: new Set([otherMachineId]), synced: false });
+    expect(await statusOf()).toMatchObject({
+      machine: { state: 'online' },
+      actions: { chat: 'allowed' },
+    });
+
+    // Only a joined room lacking the heartbeat blocks chat.
+    presence.mockResolvedValue({ online: new Set(), synced: true });
+    expect(await statusOf()).toMatchObject({
+      machine: { state: 'offline' },
+      actions: { chat: 'temporarily_blocked', reason: { code: 'MACHINE_OFFLINE' } },
+    });
+  });
+
   it('releases a retained remote room when this Machine adopts the Session doc', async () => {
     stubCreateOptionsReaders();
     const remoteSessionId = await createRemoteSession();

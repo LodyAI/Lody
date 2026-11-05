@@ -53,7 +53,10 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => {
               : undefined;
           },
         },
-        getOnlineMachineIds: async () => new Set(state.online ? ['machine-id'] : []),
+        getMachinePresenceView: async () => ({
+          online: new Set(state.online ? ['machine-id'] : []),
+          synced: true,
+        }),
         markMachineFlockDocDirty: () => {},
         syncMachineFlockDoc: async () => state.syncResults.shift() ?? true,
       }),

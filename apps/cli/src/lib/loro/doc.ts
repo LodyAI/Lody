@@ -340,6 +340,15 @@ type AcpModelSummary = {
   description?: string;
 };
 
+/**
+ * Machines with a fresh heartbeat, plus whether the presence room is joined now.
+ * Absence from `online` means offline only when `synced`; otherwise it is unknown.
+ */
+export type MachinePresenceView = {
+  readonly online: ReadonlySet<MachineId>;
+  readonly synced: boolean;
+};
+
 export interface LoroDocumentManagerOptions {
   repo: LoroRepo;
   workspaceId: WorkspaceId;
@@ -1982,18 +1991,24 @@ export class LoroDocumentManager {
   }
 
   /**
-   * Machine ids with a fresh presence heartbeat, read from the ephemeral
-   * presence room. Returns null when the presence room could not be joined in
-   * time — callers must treat that as "online status unknown", not "offline".
+   * Three-state machine liveness from the ephemeral presence replica.
+   *
+   * A fresh heartbeat proves online whenever it was received, so `online` is
+   * read even while the room is not joined: the SDK leaves `joined` for every
+   * live-read recycle and for any failed local POST, although remote heartbeats
+   * already received remain valid evidence until they expire. Only a joined
+   * room proves ABSENCE, so `synced` gates the offline verdict.
    */
-  async getOnlineMachineIds(options: { timeoutMs?: number } = {}): Promise<Set<MachineId> | null> {
-    if (!this.presenceRuntime) return null;
-    const joined = await this.presenceRuntime.waitUntilJoined(options.timeoutMs ?? 10_000);
-    if (!joined) return null;
-    return collectOnlineMachineIdsFromPresence(
-      this.presenceRuntime.getPresenceStates(),
-      getServerNow()
-    );
+  async getMachinePresenceView(options: { timeoutMs?: number } = {}): Promise<MachinePresenceView> {
+    if (!this.presenceRuntime) return { online: new Set(), synced: false };
+    const synced = await this.presenceRuntime.waitUntilJoined(options.timeoutMs ?? 10_000);
+    return {
+      online: collectOnlineMachineIdsFromPresence(
+        this.presenceRuntime.getPresenceStates(),
+        getServerNow()
+      ),
+      synced,
+    };
   }
 
   /**

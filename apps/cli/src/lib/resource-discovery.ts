@@ -17,6 +17,7 @@ import {
 } from '@lody/shared';
 import type { RateLimit } from 'acp-extension-core';
 import { mapWithConcurrency } from './bounded-concurrency';
+import type { MachinePresenceView } from './loro/doc';
 import {
   discoveryPage,
   matchesDiscoveryQuery,
@@ -61,7 +62,7 @@ export type DiscoverySource = {
     machines: ReadonlyMap<MachineId, boolean>;
   };
   machines(): Promise<MachineMeta[]>;
-  onlineMachineIds(): Promise<ReadonlySet<MachineId> | null>;
+  machinePresence(): Promise<MachinePresenceView>;
   canAccess(machineId: MachineId, projectId?: string): Promise<boolean>;
   configs(machineId: MachineId): Promise<AgentConfigMeta[]>;
   capabilities(machineId: MachineId): Promise<Record<string, AcpCapabilityCacheEntry>>;
@@ -171,7 +172,7 @@ export class ResourceDiscovery {
             )
         : [];
     const machines = await source.machines();
-    const online = await source.onlineMachineIds();
+    const presence = await source.machinePresence();
     const authorized: MachineMeta[] = [];
     // Bound machine I/O: no workspace-wide Promise.all fan-out.
     for (const machine of machines) {
@@ -180,8 +181,9 @@ export class ResourceDiscovery {
         continue;
       if (await source.canAccess(machine.id)) authorized.push(machine);
     }
+    // A fresh heartbeat is online even off a joined room; only a joined room proves absence.
     const status = (machineId: MachineId) =>
-      online === null ? 'unknown' : online.has(machineId) ? 'online' : 'offline';
+      presence.online.has(machineId) ? 'online' : presence.synced ? 'offline' : 'unknown';
     const availability = (machineId: MachineId): DiscoveryAvailability =>
       status(machineId) === 'online'
         ? { state: 'available' }

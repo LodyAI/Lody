@@ -1,23 +1,26 @@
 import { Data } from 'effect';
 import type { LodyError, MachineId } from '@lody/shared';
-import type { LoroDocumentManager } from '@/lib/loro/doc';
+import type { LoroDocumentManager, MachinePresenceView } from '@/lib/loro/doc';
 
 export type MachinePresence = 'online' | 'offline' | 'unknown';
 
-/** Three-state presence: `null` from the presence room means unknown, never offline. */
+/**
+ * Three-state presence: a fresh heartbeat is online even while the room is not
+ * joined; absence is offline only on a joined room and unknown otherwise.
+ */
 export function classifyMachinePresence(
-  onlineMachineIds: ReadonlySet<MachineId> | null,
+  view: MachinePresenceView,
   machineId: MachineId
 ): MachinePresence {
-  if (onlineMachineIds === null) return 'unknown';
-  return onlineMachineIds.has(machineId) ? 'online' : 'offline';
+  if (view.online.has(machineId)) return 'online';
+  return view.synced ? 'offline' : 'unknown';
 }
 
 export async function readMachinePresence(
-  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>,
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'>,
   machineId: MachineId
 ): Promise<MachinePresence> {
-  return classifyMachinePresence(await manager.getOnlineMachineIds(), machineId);
+  return classifyMachinePresence(await manager.getMachinePresenceView(), machineId);
 }
 
 /** Presence definitively reports the target Machine offline. */

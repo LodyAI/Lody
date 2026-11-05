@@ -341,11 +341,42 @@ export let rootLogger = getDefaultLogger();
 export const routeLoggerToStderr = (logger: Logger = rootLogger): (() => void) =>
   WinstonLogger.routeToStderr(logger);
 
+/**
+ * A scoped logger that binds to the CURRENT root on every write. Entry modules
+ * obtain loggers at import time, before a command installs the process sink
+ * (`createHybridLogger`/`createFileLogger`); a child captured then would keep
+ * writing to the startup console logger — for a daemon Worker, a discarded pipe.
+ */
+class ScopedLogger implements Logger {
+  private bound: { readonly root: Logger; readonly logger: Logger } | undefined;
+
+  constructor(private readonly meta: LogMeta) {}
+
+  private current(): Logger {
+    const root = rootLogger;
+    if (this.bound?.root !== root) {
+      this.bound = { root, logger: Object.keys(this.meta).length ? root.child(this.meta) : root };
+    }
+    return this.bound.logger;
+  }
+
+  info = (...args: unknown[]): void => this.current().info(...args);
+  warn = (...args: unknown[]): void => this.current().warn(...args);
+  error = (...args: unknown[]): void => this.current().error(...args);
+  success = (...args: unknown[]): void => this.current().success(...args);
+  debug = (...args: unknown[]): void => this.current().debug(...args);
+  trace = (...args: unknown[]): void => this.current().trace(...args);
+  setLevel = (level: LogLevel): void => this.current().setLevel(level);
+  setDebug = (enabled: boolean): void => this.current().setDebug(enabled);
+  child = (defaultMeta: LogMeta): Logger => new ScopedLogger({ ...this.meta, ...defaultMeta });
+  close = (): Promise<void> => this.current().close();
+}
+
 export const getLogger = (scope?: string, meta?: Record<string, unknown>): Logger => {
   if (!scope && !meta) {
     return rootLogger;
   }
-  return rootLogger.child({
+  return new ScopedLogger({
     ...(scope ? { scope } : {}),
     ...meta,
   });
