@@ -3121,6 +3121,7 @@ export class MessageHandler {
           fileIndex: state.fileIndex,
           updatedAtMs: state.updatedAtMs,
           reconcileRemote: state.reconcileRemote,
+          staleRows: state.staleRows,
         });
         state.signal?.throwIfAborted();
         if (state.persistAllChangesDiffStats && state.allChangesDiffStats) {

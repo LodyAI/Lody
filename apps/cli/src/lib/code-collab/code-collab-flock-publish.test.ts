@@ -2,7 +2,6 @@ import { Flock } from '@loro-dev/flock-wasm';
 import { describe, expect, it } from 'vitest';
 
 import {
-  CODE_COLLAB_FILE_INDEX_LIMITS,
   buildCodeCollabFileIndexState,
   readCodeCollabFileIndexFromFlock,
   type CodeCollabFileIndexWritableFlock,
@@ -75,6 +74,7 @@ describe('Code Collab Flock publication', () => {
       fileIndex: { 'stale.ts': true },
       updatedAtMs: 1,
       reconcileRemote: true,
+      staleRows: { allChanges: null, findMissingPaths: async () => new Set() },
     });
     const cancelled = expect(work).rejects.toThrow('cancelled');
     await started;
@@ -85,69 +85,57 @@ describe('Code Collab Flock publication', () => {
     expect(local.snapshot()).toEqual({ 'old.ts': true });
   });
 
-  it('cleans an oversized legacy index in bounded commits and converges to the bounded state', async () => {
+  it('writes no tombstones for rows that still exist, so a legacy index costs nothing extra', async () => {
     const flock = new Flock();
-    const legacy: CodeCollabV2FileTreeState = {};
-    // Synthetic store-like paths: long, multi-byte and JSON-escaped segments.
-    for (let index = 0; index < 4_000; index += 1) {
-      legacy[`.pnpm-store/v10/index/${String(index).padStart(6, '0')}-缓存-"q"\\name@1.0.0.json`] =
-        true;
+    // Synthetic legacy index: cache residue plus ordinary files beyond the budget.
+    for (let index = 0; index < 2_000; index += 1) {
+      flock.set([`.pnpm-store/v10/index/${String(index).padStart(6, '0')}.json`], true);
+      flock.set([`src/legacy-${index}.ts`], true);
     }
-    for (const [key, value] of Object.entries(legacy)) flock.set([key], value);
+    flock.set(['src/removed.ts'], true);
     flock.commit();
 
-    const tree: CodeCollabV2FileTreeState = { src: { kind: 'lazy' } };
-    for (let index = 0; index < 1_200; index += 1) tree[`src/file-${index}.ts`] = true;
-    const target = buildCodeCollabFileIndexState(tree, {
-      'src/file-1.ts': { diff: [2, 1] },
-      'src/removed.ts': { diff: [0, 4], del: true },
-    });
-
+    const target = buildCodeCollabFileIndexState({ 'README.md': true, src: { kind: 'lazy' } }, {});
     let exportedFrom = flock.version();
-    const exportedBundleBytes: number[] = [];
-    const recordExport = async () => {
-      const bundle = flock.exportJson(exportedFrom);
-      exportedFrom = flock.version();
-      exportedBundleBytes.push(new TextEncoder().encode(JSON.stringify(bundle)).byteLength);
-    };
+    const exportedKeys: string[][] = [];
+    const checkedPaths: string[] = [];
     const result = await publishCodeCollabFileIndexFlock({
       repo: {
-        openFlockDoc: async () => ({ flock, syncOnce: recordExport }),
+        openFlockDoc: async () => ({
+          flock,
+          syncOnce: async () => {
+            const bundle = flock.exportJson(exportedFrom) as { entries: Record<string, unknown> };
+            exportedFrom = flock.version();
+            exportedKeys.push(
+              Object.keys(bundle.entries)
+                .map((key) => (JSON.parse(key) as string[])[0] ?? '')
+                .sort()
+            );
+          },
+        }),
         flush: async () => undefined,
       },
       flockDocId: 'workspace:fi:owner',
       fileIndex: target,
       updatedAtMs: 1_800_000_000_000,
       reconcileRemote: false,
+      staleRows: {
+        allChanges: {},
+        findMissingPaths: async (paths) => {
+          checkedPaths.push(...paths);
+          return new Set(paths.filter((file) => file === 'src/removed.ts'));
+        },
+      },
     });
 
     expect(result.changed).toBe(true);
-    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(target);
-    expect(target['src/removed.ts']).toEqual({
-      kind: 'deleted',
-      change: { diff: [0, 4], del: true },
-    });
-    expect(exportedBundleBytes.length).toBeGreaterThan(1);
-    for (const bytes of exportedBundleBytes) {
-      expect(bytes).toBeLessThanOrEqual(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes);
-    }
-    // The complete published state also fits one bundle.
-    const full = new TextEncoder().encode(JSON.stringify(flock.exportJson())).byteLength;
-    expect(full - countTombstoneBytes(flock)).toBeLessThanOrEqual(
-      CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes
-    );
+    // One small append: the new rows and the one real deletion.
+    expect(exportedKeys).toEqual([['README.md', 'src', 'src/removed.ts'].sort()]);
+    // Residue is not even checked against the disk.
+    expect(checkedPaths.some((file) => file.startsWith('.pnpm-store/'))).toBe(false);
+    const rows = readCodeCollabFileIndexFromFlock(flock);
+    expect(rows['src/removed.ts']).toBeUndefined();
+    expect(rows['src/legacy-0.ts']).toBe(true);
+    expect(rows['.pnpm-store/v10/index/000000.json']).toBe(true);
   });
 });
-
-function countTombstoneBytes(flock: Flock): number {
-  const bundle = flock.exportJson() as { entries: Record<string, { d?: unknown }> };
-  let bytes = 0;
-  for (const [key, record] of Object.entries(bundle.entries)) {
-    if (record.d === undefined) {
-      bytes += new TextEncoder().encode(
-        `${JSON.stringify(key)}:${JSON.stringify(record)},`
-      ).byteLength;
-    }
-  }
-  return bytes;
-}

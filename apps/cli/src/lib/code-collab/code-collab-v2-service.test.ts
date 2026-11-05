@@ -156,6 +156,29 @@ it('reads encrypted file content without starting watchers or publishing an inde
   });
 });
 
+it('reports only paths that are really gone so the publisher tombstones nothing else', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    await writeFile(path.join(workspaceRoot, 'README.md'), '# test\n');
+    const publications: CodeCollabV2FileIndexPublication[] = [];
+    const service = new CodeCollabV2Service({
+      resolveWorkspace: makeResolver(workspaceRoot),
+      publishFileIndex: async (publication) => {
+        publications.push(publication);
+      },
+    });
+    try {
+      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
+      const staleRows = publications.at(-1)?.staleRows;
+      if (!staleRows) throw new Error('Expected a publication');
+      expect(
+        await staleRows.findMissingPaths(['README.md', 'gone.ts', 'README.md/child', '../outside'])
+      ).toEqual(new Set(['gone.ts', 'README.md/child']));
+    } finally {
+      await service.dispose();
+    }
+  });
+});
+
 it('does not rescan for watcher events confined to .gitignore paths', async () => {
   await withWorkspace(async (workspaceRoot) => {
     const git = (...args: string[]) => execFileAsync('git', args, { cwd: workspaceRoot });

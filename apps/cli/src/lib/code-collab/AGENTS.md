@@ -42,8 +42,10 @@ File-by-file responsibilities: [README.md](README.md).
 - The whole published file index stays within `CODE_COLLAB_FILE_INDEX_LIMITS`
   (1,000 rows, 100 KiB of estimated Flock JSON), applied after the tree and All
   Changes are merged, never per input. Over-budget paths stay unloaded behind lazy
-  parents; only a change recording `del: true` may publish `deleted`. Publication
-  commits batches within that byte budget, separated by flush/sync. Package-manager
+  parents; only a change recording `del: true` may publish `deleted`. Rows the
+  replica holds but the index omits are tombstoned only when `lstat` finds the file
+  gone; cache-directory residue is never touched, and a kept row's stale change is
+  reset. Never bulk-delete omitted rows: tombstones add history. Package-manager
   caches in `CODE_COLLAB_IGNORED_DIRECTORY_NAMES` filter watcher, FS and untracked
   Git paths before any read, never tracked files. Filesystem scans prune
   `.gitignore`d entries in-process (`createGitIgnoreScanFilter`, the `ignore`

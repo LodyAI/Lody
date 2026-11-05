@@ -38,6 +38,7 @@ import {
 } from '../src/code-collab';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
+const KEEP_STALE_ROWS = { missingPaths: new Set<string>(), allChanges: null };
 const bytesToHex = (value: Uint8Array): string =>
   Array.from(value)
     .map((byte) => byte.toString(16).padStart(2, '0'))
@@ -117,9 +118,9 @@ describe('Code Collab shared protocol helpers', () => {
 
     expect(readCodeCollabFileIndexFromFlock(flock)).toEqual({ 'README.md': { kind: 'text' } });
 
-    expect(writeCodeCollabFileIndexToFlock(flock, { 'README.md': { kind: 'text' } }, 123)).toBe(
-      true
-    );
+    expect(
+      writeCodeCollabFileIndexToFlock(flock, { 'README.md': { kind: 'text' } }, 123, KEEP_STALE_ROWS)
+    ).toBe(true);
     expect([...flock.rows.keys()]).toEqual(['README.md']);
 
     expect(
@@ -180,7 +181,8 @@ describe('Code Collab shared protocol helpers', () => {
             change: null,
           },
         } as unknown as CodeCollabV2FileIndexState,
-        456
+        456,
+        KEEP_STALE_ROWS
       )
     ).toBe(true);
     expect(flock.rows.get('README.md')).toEqual({
@@ -519,6 +521,45 @@ describe('Code Collab shared protocol helpers', () => {
 });
 
 describe('Code Collab file-index budget', () => {
+  it('tombstones only rows whose file is gone and keeps rows the index merely stopped publishing', () => {
+    const flock = new FakeFileIndexFlock();
+    flock.set(['gone.ts'], true);
+    flock.set(['over-budget.ts'], true);
+    flock.set(['.pnpm-store/v10/index/a.json'], { kind: 'deleted', change: { del: true } });
+    flock.set(['was-changed.ts'], { kind: 'file', change: { diff: [1, 0] } });
+    flock.set(['still-changed.ts'], { kind: 'file', change: { diff: [2, 0] } });
+    flock.set(['restored.ts'], { kind: 'deleted', change: { del: true } });
+
+    expect(
+      writeCodeCollabFileIndexToFlock(flock, { 'README.md': true }, 1, {
+        missingPaths: new Set(['gone.ts', '.pnpm-store/v10/index/a.json']),
+        allChanges: { 'still-changed.ts': { diff: [2, 0] } },
+        isResidue: (workspacePath) => workspacePath.startsWith('.pnpm-store/'),
+      })
+    ).toBe(true);
+    expect(Object.fromEntries(flock.rows)).toEqual({
+      'README.md': true,
+      'over-budget.ts': true,
+      // Residue is never touched, even when reported missing.
+      '.pnpm-store/v10/index/a.json': { kind: 'deleted', change: { del: true } },
+      // A kept row must not keep a change the workspace no longer has.
+      'was-changed.ts': true,
+      'still-changed.ts': { kind: 'file', change: { diff: [2, 0] } },
+      'restored.ts': true,
+    });
+    expect(flock.commits).toBe(1);
+
+    // Nothing new and nothing gone: no write at all.
+    expect(
+      writeCodeCollabFileIndexToFlock(flock, { 'README.md': true }, 2, {
+        missingPaths: new Set(),
+        allChanges: { 'still-changed.ts': { diff: [2, 0] } },
+        isResidue: (workspacePath) => workspacePath.startsWith('.pnpm-store/'),
+      })
+    ).toBe(false);
+  });
+
+
   it('marks only recorded deletions as deleted and loads other changed paths as files', () => {
     const { fileIndex, omittedPaths } = buildBoundedCodeCollabFileIndexState(
       { 'README.md': true },

@@ -16,8 +16,10 @@ The index itself had grown to an uncompressed 5.3 MB update: an in-project
 budget truncated were published as `deleted`. The fix coalesces local exports per
 subscription, filters package-manager caches, and bounds the whole published index
 to 1,000 rows and 100 KiB of estimated Flock JSON. Truncated paths are now not
-loaded rather than deleted. The trade-off is a shallower shared tree: rows past the
-budget are loaded on demand through their lazy parent.
+loaded rather than deleted. Rows the index stops publishing are deleted only when
+their file is gone, because a tombstone is new history, not a saving. The trade-offs
+are a shallower shared tree, with rows past the budget loaded on demand through
+their lazy parent, and residue: legacy cache rows stay in the replica.
 
 ## Problem
 
@@ -94,10 +96,16 @@ length are inferred, not observed.
 - **Deletion semantics.** Only a change recording `del: true` becomes `deleted`. Git
   binary deletions and diff-store missing files now record `del`. Any other changed
   path missing from the tree is an existing `file` row with `lazy` ancestors.
-- **Bounded commits.** The publisher plans the write as batches of at most 100 KiB
-  each, with sets before deletes. After every batch it runs flush plus sync, which
-  is the barrier that makes each batch its own Streams append. A failed batch goes
-  to the existing owner repair loop, which re-plans from the replica.
+- **No cleanup of rows that still exist (owner decision, 2026-11-05).** The writer
+  sets new and changed rows in one commit. A row in the replica that the new index
+  omits gets a tombstone only when `lstat` reports its file missing (ENOENT or
+  ENOTDIR; any other failure keeps it). Rows under cache directories are residue:
+  they are never checked or touched. A kept row that still records a change or
+  deletion the complete All Changes no longer has is reset to a plain file, so All
+  Changes shows no phantom entry; when All Changes is unknown, kept rows are left
+  alone. Multi-root sessions route each encoded key to its root's check, and a key
+  whose root left the session counts as missing. Aggregate `diffStats` come from the
+  complete All Changes, not the bounded index.
 
 ## Alternatives
 
@@ -106,6 +114,11 @@ length are inferred, not observed.
   Splitting transport packets alone does not fix index growth.
 - **Only add `.pnpm-store` to a repository `.gitignore`.** Code Collab serves
   arbitrary user projects, so the product needs its own cache policy.
+- **Delete every omitted row, in batches of at most 100 KiB separated by flush/sync.**
+  This shipped briefly and was withdrawn by the owner. Each tombstone is new
+  history, so clearing about 17,000 legacy rows added roughly 2–3 MB to the stream
+  without reducing anything. Budget evictions caused by browsing would also churn
+  tombstones and re-adds.
 - **Enable Flock debounce globally, or rely only on application batching.** Debounce
   changes commit semantics for other callers. Application batching cannot protect
   other Flock writers from the adapter's per-event exports.
@@ -118,8 +131,11 @@ length are inferred, not observed.
   re-runs `init-directory` even when some of its children are already present. When
   the root alone has more children than fit the budget, there is no row that can
   mark the truncation; it is only logged.
-- Clearing a legacy oversized index writes tombstones in bounded batches, one
-  network sync per batch. The tombstones stay in Flock history for the stream's TTL.
+- Legacy residue stays in the replica and in readers: the incident's `.pnpm-store`
+  rows, including their 11,229 `deleted` rows in All Changes, remain until the
+  stream expires or the files are rewritten. Rows evicted by the budget also stay
+  while their files exist, so the replica can hold more than 1,000 rows. That growth
+  comes only from rows published earlier, never from new writes.
 - All Changes diff statistics still count untracked files beyond the read budget,
   but without line totals.
 - A changed path whose old diff-store snapshot was `too_large` and which is now
@@ -139,10 +155,12 @@ length are inferred, not observed.
   directories from a recursive non-Git scan. `code-collab-v2-service.test.ts` tests that
   ignored-only watcher batches skip the rescan. `workspace-watch-coordinator.test.ts`
   tests the root-relative event paths.
-- `apps/cli/src/lib/code-collab/code-collab-flock-publish.test.ts` replaces a 4,000-row
-  legacy index of long, multi-byte, escaped paths in real Flock. Every exported
-  commit stays at or under 102,400 bytes, and the result equals the bounded state.
+- `apps/cli/src/lib/code-collab/code-collab-flock-publish.test.ts` publishes over a
+  4,000-row legacy index in real Flock. The only append holds the new rows and the
+  one file that is really gone; residue is never checked against the disk.
 - `packages/shared/tests/code-collab.test.ts` tests deletion semantics, priority
-  order, and the byte budget.
+  order, the byte budget, and the stale-row policy: tombstones only for missing
+  files, untouched residue, and reset of phantom changes. `code-collab-v2-service.test.ts`
+  tests that only ENOENT/ENOTDIR paths count as missing.
 - Not verified: packaged-Electron behaviour on the original machine, and remote
   convergence through a live Streams server.

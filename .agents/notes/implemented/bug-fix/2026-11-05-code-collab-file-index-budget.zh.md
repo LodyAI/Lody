@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-Nightly CLI 主线程持续约 100% CPU，本地 Supervisor 反复进入 reconnecting。原因是 Code Collab 文件索引重写发出了数千次单独的 Flock 提交，而 `@loro-dev/streams-crdt` 为每次提交都排队一次完整的 Wasm `exportJson`；即使第一次导出已经覆盖全部写入，后面的导出也照样执行。索引本身膨胀到一份 5.3 MB 的未压缩更新，原因有三：项目内的 `.pnpm-store` 没有被 gitignore；All Changes 没有预算；被扫描预算截断的路径被当作 `deleted` 发布。修复方案：按订阅合并本地导出，过滤包管理器缓存，并把完整的已发布索引限制在 1,000 行、估算 Flock JSON 100 KiB 以内。被截断的路径现在表示“未加载”，不再是“已删除”。代价是共享文件树变浅：超出预算的行通过 lazy 父目录按需加载。
+Nightly CLI 主线程持续约 100% CPU，本地 Supervisor 反复进入 reconnecting。原因是 Code Collab 文件索引重写发出了数千次单独的 Flock 提交，而 `@loro-dev/streams-crdt` 为每次提交都排队一次完整的 Wasm `exportJson`；即使第一次导出已经覆盖全部写入，后面的导出也照样执行。索引本身膨胀到一份 5.3 MB 的未压缩更新，原因有三：项目内的 `.pnpm-store` 没有被 gitignore；All Changes 没有预算；被扫描预算截断的路径被当作 `deleted` 发布。修复方案：按订阅合并本地导出，过滤包管理器缓存，并把完整的已发布索引限制在 1,000 行、估算 Flock JSON 100 KiB 以内。被截断的路径现在表示“未加载”，不再是“已删除”。新索引不再发布的行，只有在文件确实消失时才删除，因为删除标记是新增的历史，并不能节省空间。代价有两个：共享文件树变浅，超出预算的行通过 lazy 父目录按需加载；以及残留，旧的缓存行会留在副本里。
 
 ## 问题
 
@@ -34,19 +34,20 @@ Nightly CLI 主线程持续约 100% CPU，本地 Supervisor 反复进入 reconne
 - **全面遵守项目 `.gitignore`。** 递归的 Git 列表原本就使用 `--exclude-standard`。但在 Git 工作区里，有两种情况仍会走文件系统扫描：非递归的目录刷新（Turn 结束时按变更目录刷新就是这种），以及 `git ls-files` 失败时。这类扫描会列出 `coverage/`、`.env` 之类被忽略的产物。现在文件系统扫描在遍历过程中就剪枝：`createGitIgnoreScanFilter` 用 `ignore` 包在进程内判断规则。最深一层的 `.gitignore` 优先决定（按目录懒加载），然后依次是上层目录、`info/exclude` 和 `core.excludesFile`。被忽略的条目不会被分类，不占用预算，也不会进入其子目录。对每个含有被忽略条目的目录，执行一次 `git ls-files --cached`，以保留其中含有强制添加的已跟踪文件的条目。不在 Git 工作区时，扫描根目录下的 `.gitignore` 仍会为递归扫描剪枝，这正是不剪枝时遍历代价最大的情况。否决了“扫描后再用 `git check-ignore` 过滤”的做法：那样仍会遍历被忽略的目录树，并让它们占用条目预算。watcher 的 dirty 事件现在带上相对于根目录的路径：一个防抖窗口内的路径如果全部被 Git 忽略，就不重新扫描。没有路径的事件、非 `event` 原因、超过 256 条路径，或 Git 无法回答时，仍然重新扫描。
 - **全量预算（owner 于 2026-11-05 决定）。** `CODE_COLLAB_FILE_INDEX_LIMITS` 规定完整的可发布索引最多 1,000 行、估算 102,400 字节。估算计入转义后的 JSON 键、值，以及每行 113 字节的时钟与标点上界（已用真实 Flock 校准）。超出预算时按以下顺序保留：根目录子项、最近展开目录的子项、变更行（连同祖先目录），然后按广度优先。展开目录按 owner 在内存中保存最近 32 个。扫描预算同样降为 1,000。
 - **删除语义。** 只有记录了 `del: true` 的变更才成为 `deleted`。Git 二进制删除和 diff-store 中已缺失的文件现在都会记录 `del`。其他不在文件树中的变更路径，作为现存的 `file` 行发布，并补上 `lazy` 祖先目录。
-- **有界提交。** 发布器把写入规划成多个批次，每批不超过 100 KiB，先写 set 再写 delete。每批之后执行 flush 加 sync，以此作为屏障，让每批成为单独的一次 Streams 追加。某一批失败时进入现有的 owner 修复循环，修复循环会根据副本重新规划。
+- **不清理仍然存在的行（owner 于 2026-11-05 决定）。** 写入函数在一次提交中写入新增和变化的行。副本中存在、但新索引不再发布的行，只有在 `lstat` 报告文件不存在（ENOENT 或 ENOTDIR）时才写删除标记；其他任何错误都保留该行。缓存目录下的行是残留，从不检查也从不修改。保留下来的行如果还记着完整 All Changes 里已经没有的改动或删除，会被重置成普通文件，避免 All Changes 显示不存在的条目；All Changes 未知时，保留行一律不动。多根会话把每个编码后的 key 路由到对应根去检查；如果某个 key 所属的根已经离开会话，就视为文件已消失。汇总的 `diffStats` 从完整的 All Changes 计算，而不是从限额后的索引计算。
 
 ## 备选方案
 
 - **每次写入限制 100 KiB，总量上限约 5,000 行。** owner 否决：共享状态和每次首次同步都会保持在 MB 级。只拆分传输包不能解决索引膨胀。
 - **只在仓库 `.gitignore` 里加 `.pnpm-store`。** Code Collab 面向任意用户项目，产品必须有自己的缓存过滤策略。
+- **删除所有不再发布的行，每批不超过 100 KiB，批与批之间 flush/sync。** 这个做法曾短暂发布，后被 owner 撤回。每条删除标记都是新增的历史：清理约 1.7 万行旧数据会让流多出约 2–3 MB，什么也没减少。浏览目录导致的预算淘汰也会让删除标记和重新添加来回反复。
 - **全局开启 Flock debounce，或只依赖应用层批处理。** debounce 会改变其他调用方的提交语义；应用层批处理无法保护其他 Flock 写入方免受适配器逐事件导出的影响。
 - **只调低 `CODE_COLLAB_LIMITS.maxSupportedFiles`。** 它不在文件索引的发布路径上，调低它什么也不会改变。
 
 ## 影响
 
 - 共享文件树变浅。lazy 目录按需加载；即使部分子项已经存在，点击它也会重新执行 `init-directory`。如果根目录本身的子项就超出预算，没有可以标记截断的行，只会记录日志。
-- 清理旧的超大索引时，tombstone 按有界批次写入，每批一次网络同步。这些 tombstone 会在流的 TTL 期间留在 Flock 历史中。
+- 旧的残留会留在副本和读取端：现场的 `.pnpm-store` 行，包括它们在 All Changes 里的 11,229 条 `deleted` 行，会一直保留，直到流过期或文件被重新写入。被预算淘汰的行只要文件还在也会保留，所以副本里可能多于 1,000 行；但这些增长只来自以前发布过的行，不来自新的写入。
 - All Changes 的 diff 统计仍计入超出读取预算的未跟踪文件，但不含行数。
 - 旧 diff-store 快照为 `too_large`、如今已缺失的变更路径仍然没有 `del`，所以显示为文件。
 
@@ -55,6 +56,6 @@ Nightly CLI 主线程持续约 100% CPU，本地 Supervisor 反复进入 reconne
 - `apps/cli/tests/streams-crdt-flock-local-export.test.ts` 用真实 Flock 测试合并导出、定时器公平性、待导出期间的写入、失败重试和退订。它在未打补丁的适配器上会失败。
 - `apps/cli/src/lib/code-collab/file-index-scan-worker.test.ts` 测试缓存过滤与已跟踪文件、1,500 个未跟踪文件涌入时仍在预算内且不伪造删除，以及有界的行数读取。
 - `file-index-scan-worker.test.ts` 还测试：非递归扫描对 `.gitignore` 的处理，包括被强制添加的已跟踪文件；嵌套规则、`!` 反选、`info/exclude`、只匹配目录的规则和从子目录开始的扫描；以及非 Git 递归扫描中被忽略目录的剪枝。`code-collab-v2-service.test.ts` 测试只涉及被忽略路径的 watcher 批次不触发重新扫描；`workspace-watch-coordinator.test.ts` 测试事件路径相对于根目录。
-- `apps/cli/src/lib/code-collab/code-collab-flock-publish.test.ts` 在真实 Flock 中替换一份 4,000 行、包含长路径、多字节字符和需转义字符的旧索引：每次导出的提交都不超过 102,400 字节，结果等于有界状态。
-- `packages/shared/tests/code-collab.test.ts` 测试删除语义、优先顺序和字节预算。
+- `apps/cli/src/lib/code-collab/code-collab-flock-publish.test.ts` 在真实 Flock 中，基于一份 4,000 行的旧索引发布：唯一一次追加只包含新增的行和那个确实消失的文件；残留行从不去磁盘检查。
+- `packages/shared/tests/code-collab.test.ts` 测试删除语义、优先顺序、字节预算和旧行策略：只为已消失的文件写删除标记、残留不动、不存在的改动会被重置。`code-collab-v2-service.test.ts` 测试只有 ENOENT/ENOTDIR 的路径才算消失。
 - 未验证：原机器上打包版 Electron 的行为，以及经由真实 Streams 服务器的远端收敛。

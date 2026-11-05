@@ -17,8 +17,9 @@ export const CODE_COLLAB_LIMITS = {
  * Bound on the whole publishable file-index state (`<workspace>:fi:<owner>`
  * Flock): at most `maxEntries` rows and `maxBytes` of estimated Flock JSON
  * bundle bytes (UTF-8, path keys, clocks, values and punctuation; see
- * `estimateCodeCollabFileIndexRowBytes`). Every single Flock commit made by the
- * publisher, including tombstones, stays within `maxBytes` too.
+ * `estimateCodeCollabFileIndexRowBytes`). Rows the replica already holds but
+ * this state omits are kept unless their file is gone; see
+ * `CodeCollabFileIndexStaleRowPolicy`.
  */
 export const CODE_COLLAB_FILE_INDEX_LIMITS = {
   maxEntries: 1_000,
@@ -933,95 +934,87 @@ export function estimateCodeCollabFileIndexStateBytes(
   return total;
 }
 
-export type CodeCollabFileIndexFlockWriteBatch = {
-  readonly sets: ReadonlyArray<readonly [string, CodeCollabV2FileIndexValue]>;
-  readonly deletes: readonly string[];
+/**
+ * Rows the replica holds that `next` does not publish. They are not deleted by
+ * default: a tombstone is new history, so clearing a row the file index merely
+ * stopped publishing (over budget, newly excluded) costs bytes without shrinking
+ * anything. The publisher deletes only those confirmed gone from disk.
+ */
+export function listCodeCollabFileIndexFlockStalePaths(
+  flock: CodeCollabFileIndexReadableFlock,
+  next: CodeCollabV2FileIndexState
+): string[] {
+  const { fileIndex: previous } = scanCodeCollabFileIndexFlock(flock);
+  return Object.keys(previous).filter(
+    (workspacePath) => !Object.prototype.hasOwnProperty.call(next, workspacePath)
+  );
+}
+
+export type CodeCollabFileIndexStaleRowPolicy = {
+  /** Stale paths confirmed absent from disk; only these get tombstones. */
+  readonly missingPaths: ReadonlySet<string>;
+  /**
+   * The complete current All Changes. A kept row that still records a change
+   * (or a deletion) the workspace no longer has is reset to a plain file, so
+   * All Changes never keeps a phantom entry. `null` when unknown: kept rows are
+   * then left as they are.
+   */
+  readonly allChanges: CodeCollabV2AllChangesState | null;
+  /** Residue the product no longer indexes (cache directories): never touched. */
+  readonly isResidue?: (workspacePath: string) => boolean;
 };
 
 /**
- * Diffs `next` against the replica and splits the change into commits whose
- * estimated bundle stays within `maxBatchBytes`. New and changed rows come first,
- * so the current tree is visible before stale rows are cleared.
+ * One Flock commit: sets new and changed rows of `next`, deletes corrupted keys,
+ * and handles rows `next` omits per `staleRows`. Returns whether it wrote.
  */
-export function planCodeCollabFileIndexFlockWrite(
-  flock: CodeCollabFileIndexReadableFlock,
+export function writeCodeCollabFileIndexToFlock(
+  flock: CodeCollabFileIndexWritableFlock,
   next: CodeCollabV2FileIndexState,
-  options: { readonly maxBatchBytes?: number } = {}
-): CodeCollabFileIndexFlockWriteBatch[] {
-  const maxBatchBytes = options.maxBatchBytes ?? CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes;
+  nowMs: number,
+  staleRows: CodeCollabFileIndexStaleRowPolicy
+): boolean {
   const { fileIndex: previous, corruptedPaths } = scanCodeCollabFileIndexFlock(flock);
-  const batches: CodeCollabFileIndexFlockWriteBatch[] = [];
-  let sets: Array<readonly [string, CodeCollabV2FileIndexValue]> = [];
-  let deletes: string[] = [];
-  let batchBytes = CODE_COLLAB_FILE_INDEX_FLOCK_BUNDLE_OVERHEAD_BYTES;
-  const push = (rowBytes: number, add: () => void) => {
-    if (
-      (sets.length > 0 || deletes.length > 0) &&
-      batchBytes + rowBytes > maxBatchBytes
-    ) {
-      batches.push({ sets, deletes });
-      sets = [];
-      deletes = [];
-      batchBytes = CODE_COLLAB_FILE_INDEX_FLOCK_BUNDLE_OVERHEAD_BYTES;
+  let changed = false;
+
+  for (const workspacePath of corruptedPaths) {
+    flock.delete(codeCollabFileIndexKeyForWorkspacePath(workspacePath), nowMs);
+    changed = true;
+  }
+
+  for (const [workspacePath, value] of Object.entries(previous)) {
+    if (Object.prototype.hasOwnProperty.call(next, workspacePath)) continue;
+    if (staleRows.isResidue?.(workspacePath)) continue;
+    if (staleRows.missingPaths.has(workspacePath)) {
+      flock.delete(codeCollabFileIndexKeyForWorkspacePath(workspacePath), nowMs);
+      changed = true;
+      continue;
     }
-    batchBytes += rowBytes;
-    add();
-  };
+    const recordsChange =
+      value !== true && (value.kind === 'deleted' || codeCollabFileIndexValueChange(value));
+    if (
+      recordsChange &&
+      staleRows.allChanges !== null &&
+      staleRows.allChanges[workspacePath] === undefined
+    ) {
+      flock.set(codeCollabFileIndexKeyForWorkspacePath(workspacePath), true, nowMs);
+      changed = true;
+    }
+  }
 
   for (const [workspacePath, value] of Object.entries(next)) {
     const normalized = normalizeCodeCollabFileIndexValue(value);
     if (!normalized || codeCollabFileIndexValuesEqual(previous[workspacePath], normalized)) {
       continue;
     }
-    push(estimateCodeCollabFileIndexRowBytes(workspacePath, normalized), () =>
-      sets.push([workspacePath, normalized])
-    );
+    flock.set(codeCollabFileIndexKeyForWorkspacePath(workspacePath), normalized, nowMs);
+    changed = true;
   }
-  const stalePaths = [
-    ...corruptedPaths,
-    ...Object.keys(previous).filter(
-      (workspacePath) => !Object.prototype.hasOwnProperty.call(next, workspacePath)
-    ),
-  ];
-  for (const workspacePath of stalePaths) {
-    push(estimateCodeCollabFileIndexRowBytes(workspacePath), () => deletes.push(workspacePath));
-  }
-  if (sets.length > 0 || deletes.length > 0) {
-    batches.push({ sets, deletes });
-  }
-  return batches;
-}
 
-/** Applies one planned batch as exactly one Flock commit. */
-export function applyCodeCollabFileIndexFlockWriteBatch(
-  flock: CodeCollabFileIndexWritableFlock,
-  batch: CodeCollabFileIndexFlockWriteBatch,
-  nowMs: number
-): void {
-  for (const [workspacePath, value] of batch.sets) {
-    flock.set(codeCollabFileIndexKeyForWorkspacePath(workspacePath), value, nowMs);
+  if (changed) {
+    flock.commit();
   }
-  for (const workspacePath of batch.deletes) {
-    flock.delete(codeCollabFileIndexKeyForWorkspacePath(workspacePath), nowMs);
-  }
-  flock.commit();
-}
-
-/**
- * Synchronous whole write. It commits per planned batch, but without an async
- * boundary a live Streams adapter may still export the batches together; the
- * CLI publisher interleaves batches with flush/sync instead.
- */
-export function writeCodeCollabFileIndexToFlock(
-  flock: CodeCollabFileIndexWritableFlock,
-  next: CodeCollabV2FileIndexState,
-  nowMs: number
-): boolean {
-  const batches = planCodeCollabFileIndexFlockWrite(flock, next);
-  for (const batch of batches) {
-    applyCodeCollabFileIndexFlockWriteBatch(flock, batch, nowMs);
-  }
-  return batches.length > 0;
+  return changed;
 }
 
 export function applyCodeCollabFileIndexSignalFlockEvents(

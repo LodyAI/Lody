@@ -2,11 +2,14 @@ import { waitForCodeCollabTask } from './code-collab-task';
 import {
   readCodeCollabFileIndexSignalFromFlock,
   writeCodeCollabFileIndexSignalToFlock,
-  applyCodeCollabFileIndexFlockWriteBatch,
-  planCodeCollabFileIndexFlockWrite,
+  listCodeCollabFileIndexFlockStalePaths,
+  writeCodeCollabFileIndexToFlock,
   type CodeCollabFileIndexWritableFlock,
+  type CodeCollabV2AllChangesState,
   type CodeCollabV2FileIndexState,
 } from '@lody/shared';
+
+import { isInCodeCollabIgnoredDirectory } from './workspace-watch-path-policy';
 
 // Publication confirmation relies on `syncOnce()` THROWING on failure: the CLI
 // repo routes exactly one 'streams' transport, and loro-repo rethrows a
@@ -32,6 +35,14 @@ export type CodeCollabFlockRepo = {
   }) => Promise<unknown>;
 };
 
+/** What the publisher needs to decide about rows the new file index omits. */
+export type CodeCollabFileIndexStaleRowSource = {
+  /** The complete (unbounded) All Changes state of the owner; `null` when unknown. */
+  readonly allChanges: CodeCollabV2AllChangesState | null;
+  /** Subset of workspace paths that no longer exist on disk. */
+  readonly findMissingPaths: (workspacePaths: readonly string[]) => Promise<ReadonlySet<string>>;
+};
+
 export class CodeCollabFileIndexChangedPublishError extends Error {
   constructor(cause: unknown) {
     super('Code Collab file-index publication failed after changing local Flock state.', {
@@ -48,6 +59,7 @@ export async function publishCodeCollabFileIndexFlock(args: {
   readonly fileIndex: CodeCollabV2FileIndexState;
   readonly updatedAtMs: number;
   readonly reconcileRemote: boolean;
+  readonly staleRows: CodeCollabFileIndexStaleRowSource;
 }): Promise<{ readonly changed: boolean }> {
   args.signal?.throwIfAborted();
   const handle = await waitForCodeCollabTask(args.repo.openFlockDoc(args.flockDocId), args.signal);
@@ -55,23 +67,28 @@ export async function publishCodeCollabFileIndexFlock(args: {
     await syncFlock(args.repo, handle, args.flockDocId, args.signal);
   }
   args.signal?.throwIfAborted();
-  // Each batch is one Flock commit within CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes.
-  // Flush + sync between batches is the barrier that makes each commit its own
-  // Streams export, so cleaning up an oversized legacy index never becomes one
-  // multi-megabyte append. A failure mid-way leaves the new rows already written
-  // and the repair loop re-plans from the replica, finishing the cleanup.
-  const batches = planCodeCollabFileIndexFlockWrite(handle.flock, args.fileIndex);
-  if (batches.length === 0) {
+  // Only rows whose file is gone get tombstones; see CodeCollabFileIndexStaleRowPolicy.
+  // Cache-directory residue is never checked: it is kept untouched by policy.
+  const stalePaths = listCodeCollabFileIndexFlockStalePaths(handle.flock, args.fileIndex).filter(
+    (workspacePath) => !isInCodeCollabIgnoredDirectory(workspacePath)
+  );
+  const missingPaths =
+    stalePaths.length === 0
+      ? new Set<string>()
+      : await waitForCodeCollabTask(args.staleRows.findMissingPaths(stalePaths), args.signal);
+  args.signal?.throwIfAborted();
+  const changed = writeCodeCollabFileIndexToFlock(handle.flock, args.fileIndex, args.updatedAtMs, {
+    missingPaths,
+    allChanges: args.staleRows.allChanges,
+    isResidue: isInCodeCollabIgnoredDirectory,
+  });
+  if (!changed) {
     return { changed: false };
   }
   try {
-    for (const batch of batches) {
-      args.signal?.throwIfAborted();
-      applyCodeCollabFileIndexFlockWriteBatch(handle.flock, batch, args.updatedAtMs);
-      await waitForCodeCollabTask(args.repo.flush(), args.signal);
-      args.signal?.throwIfAborted();
-      await syncFlock(args.repo, handle, args.flockDocId, args.signal);
-    }
+    await waitForCodeCollabTask(args.repo.flush(), args.signal);
+    args.signal?.throwIfAborted();
+    await syncFlock(args.repo, handle, args.flockDocId, args.signal);
   } catch (error) {
     throw new CodeCollabFileIndexChangedPublishError(error);
   }

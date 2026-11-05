@@ -1911,7 +1911,10 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     const { writeCodeCollabFileIndexToFlock } = await import('@lody/shared');
     const flockId = 'workspace-1:fi:synthetic';
     const handle = await repo.openFlockDoc(flockId);
-    writeCodeCollabFileIndexToFlock(handle.flock, { 'private.ts': { kind: 'text' } }, 1000);
+    writeCodeCollabFileIndexToFlock(handle.flock, { 'private.ts': { kind: 'text' } }, 1000, {
+      missingPaths: new Set(),
+      allChanges: null,
+    });
     const runtime = await createWorkspaceRuntime({
       content: {
         mode: 'protected',

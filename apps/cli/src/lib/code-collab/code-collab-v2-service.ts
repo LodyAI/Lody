@@ -1,6 +1,11 @@
 import { resolveProjectFileTarget } from '@/session/worktree/project-member-access';
 import { encodeSessionFilePath, decodeSessionFilePath } from '@lody/shared';
-import { resolveSessionFilePath, type SessionProjectRun, type SessionFileRoot } from '@lody/shared';
+import {
+  isSafeProjectPath,
+  resolveSessionFilePath,
+  type SessionProjectRun,
+  type SessionFileRoot,
+} from '@lody/shared';
 import { toShared } from '@/platform/process-options';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -70,7 +75,10 @@ import {
   runCodeCollabTask,
   waitForCodeCollabTask,
 } from './code-collab-task';
-import { CodeCollabFileIndexChangedPublishError } from './code-collab-flock-publish';
+import {
+  CodeCollabFileIndexChangedPublishError,
+  type CodeCollabFileIndexStaleRowSource,
+} from './code-collab-flock-publish';
 import type { CodeCollabV2DiffStore } from './code-collab-v2-diff-store';
 import { computeLineCountsAsync } from './diff-line-count-pool';
 import { countTextLines } from './diff-line-counts';
@@ -104,6 +112,7 @@ const ROOT_DIRECTORY_REQUEST_PATH = '.';
 // A scan never needs more rows than the published file index can hold.
 const DEFAULT_FILE_TREE_SCAN_ENTRY_BUDGET = CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries;
 const MAX_TRACKED_EXPANDED_DIRECTORIES = 32;
+const MISSING_PATH_CHECK_CONCURRENCY = 16;
 // Past this many distinct event paths per debounce window, refresh without asking Git.
 const MAX_GIT_IGNORE_CHECKED_DIRTY_PATHS = 256;
 export const DEFAULT_CODE_COLLAB_WATCH_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -147,6 +156,8 @@ export type CodeCollabV2FileIndexPublication = {
   readonly persistAllChangesDiffStats: boolean;
   readonly updatedAtMs: number;
   readonly reconcileRemote: boolean;
+  /** For rows the replica holds but `fileIndex` omits; see `CodeCollabFileIndexStaleRowSource`. */
+  readonly staleRows: CodeCollabFileIndexStaleRowSource;
 };
 
 export type CodeCollabV2FileIndexPublishResult = {
@@ -231,6 +242,14 @@ type ResolvedPath = {
   readonly projectRun?: SessionProjectRun;
 };
 
+type RootFileIndexPublication = Pick<CodeCollabV2FileIndexPublication, 'fileIndex' | 'staleRows'>;
+
+/** Before a root has published, nothing is known to be missing or unchanged. */
+const NO_STALE_ROW_KNOWLEDGE: CodeCollabFileIndexStaleRowSource = {
+  allChanges: null,
+  findMissingPaths: async () => new Set(),
+};
+
 type OwnerSharedState = {
   fileTree: CodeCollabV2FileTreeState;
   allChanges: CodeCollabV2AllChangesState;
@@ -309,7 +328,7 @@ const FILE_INDEX_REPAIR_JITTER_FRACTION = 0.2;
 
 export class CodeCollabV2Service {
   private readonly servicesByRoot = new Map<string, CodeCollabV2Service>();
-  private readonly rootIndexes = new Map<SessionId, Map<string, CodeCollabV2FileIndexState>>();
+  private readonly rootIndexes = new Map<SessionId, Map<string, RootFileIndexPublication>>();
   private readonly rootPublishChains = new Map<
     SessionId,
     { readonly work: Promise<unknown>; readonly signal?: AbortSignal }
@@ -391,17 +410,52 @@ export class CodeCollabV2Service {
       previous ? settledOrAborted(previous.work, previous.signal) : Promise.resolve()
     ).then(async () => {
       const roots =
-        this.rootIndexes.get(state.ownerSessionId) ?? new Map<string, CodeCollabV2FileIndexState>();
-      roots.set(rootId, state.fileIndex);
+        this.rootIndexes.get(state.ownerSessionId) ?? new Map<string, RootFileIndexPublication>();
+      roots.set(rootId, { fileIndex: state.fileIndex, staleRows: state.staleRows });
       this.rootIndexes.set(state.ownerSessionId, roots);
       const fileIndex: CodeCollabV2FileIndexState = {};
-      for (const [id, entries] of roots)
-        for (const [relativePath, value] of Object.entries(entries))
+      // Unknown for any root makes the merged All Changes unknown.
+      let allChanges: CodeCollabV2AllChangesState | null = {};
+      for (const [id, root] of roots) {
+        for (const [relativePath, value] of Object.entries(root.fileIndex))
           fileIndex[encodeSessionFilePath({ rootId: id, relativePath })] = value;
+        if (root.staleRows.allChanges === null) allChanges = null;
+        for (const [relativePath, change] of Object.entries(root.staleRows.allChanges ?? {}))
+          if (allChanges) allChanges[encodeSessionFilePath({ rootId: id, relativePath })] = change;
+      }
       return publish({
         ...state,
         fileIndex,
-        allChangesDiffStats: summarizeFileIndexAllChanges(fileIndex),
+        allChangesDiffStats:
+          allChanges === null ? state.allChangesDiffStats : summarizeAllChanges(allChanges),
+        staleRows: {
+          allChanges,
+          // Route each encoded key to its root. A key whose root is no longer
+          // registered has left the session's file space: treat it as missing.
+          findMissingPaths: async (encodedPaths) => {
+            const missing = new Set<string>();
+            const byRoot = new Map<string, Map<string, string>>();
+            for (const encoded of encodedPaths) {
+              const decoded = decodeSessionFilePath(encoded);
+              if (!decoded) continue;
+              if (!roots.has(decoded.rootId)) {
+                missing.add(encoded);
+                continue;
+              }
+              const paths = byRoot.get(decoded.rootId) ?? new Map<string, string>();
+              paths.set(decoded.relativePath, encoded);
+              byRoot.set(decoded.rootId, paths);
+            }
+            for (const [id, paths] of byRoot) {
+              const found = await roots.get(id)?.staleRows.findMissingPaths([...paths.keys()]);
+              for (const relativePath of found ?? []) {
+                const encoded = paths.get(relativePath);
+                if (encoded !== undefined) missing.add(encoded);
+              }
+            }
+            return missing;
+          },
+        },
       });
     });
     const entry = { work, signal: state.signal };
@@ -428,13 +482,15 @@ export class CodeCollabV2Service {
         ? async (state) => {
             const indexes =
               this.rootIndexes.get(state.ownerSessionId) ??
-              new Map<string, CodeCollabV2FileIndexState>();
-            indexes.set(rootId, state.fileIndex);
+              new Map<string, RootFileIndexPublication>();
+            indexes.set(rootId, { fileIndex: state.fileIndex, staleRows: state.staleRows });
             this.rootIndexes.set(state.ownerSessionId, indexes);
             // Publish through the parent's existing owner chain, retaining its main snapshot.
+            const main = indexes.get('main');
             return this.deps.publishFileIndex!({
               ...state,
-              fileIndex: indexes.get('main') ?? {},
+              fileIndex: main?.fileIndex ?? {},
+              staleRows: main?.staleRows ?? NO_STALE_ROW_KNOWLEDGE,
               persistAllChangesDiffStats: false,
             });
           }
@@ -1679,6 +1735,37 @@ export class CodeCollabV2Service {
     return Buffer.from(text, 'utf8');
   }
 
+  /**
+   * Which workspace paths no longer exist. Only ENOENT/ENOTDIR count as missing:
+   * any other failure, or a path that is not a safe relative path, keeps the row.
+   */
+  private async findMissingWorkspacePaths(
+    ownerSessionId: SessionId,
+    workspacePaths: readonly string[],
+    signal?: AbortSignal
+  ): Promise<ReadonlySet<string>> {
+    const { workspaceRoot } = await this.resolveRequestDirectoryPath(
+      ownerSessionId,
+      ROOT_DIRECTORY_REQUEST_PATH
+    );
+    const missing = new Set<string>();
+    await mapWithConcurrency(
+      workspacePaths,
+      MISSING_PATH_CHECK_CONCURRENCY,
+      async (workspacePath) => {
+        signal?.throwIfAborted();
+        if (!isSafeProjectPath(workspacePath)) return;
+        try {
+          await lstat(path.join(workspaceRoot, ...workspacePath.split('/')));
+        } catch (error) {
+          const code = errorCode(error);
+          if (code === 'ENOENT' || code === 'ENOTDIR') missing.add(workspacePath);
+        }
+      }
+    );
+    return missing;
+  }
+
   private getOwnerState(ownerSessionId: SessionId): OwnerSharedState {
     const existing = this.stateByOwnerSessionId.get(ownerSessionId);
     if (existing) {
@@ -2539,10 +2626,16 @@ export class CodeCollabV2Service {
             signal: options.signal,
             ownerSessionId,
             fileIndex,
-            allChangesDiffStats: summarizeFileIndexAllChanges(fileIndex),
+            // The complete state, not the budget-bounded index.
+            allChangesDiffStats: summarizeAllChanges(this.getOwnerState(ownerSessionId).allChanges),
             persistAllChangesDiffStats: options.persistAllChangesDiffStats === true,
             updatedAtMs,
             reconcileRemote: options.forcePublish === true || previous === undefined,
+            staleRows: {
+              allChanges: this.getOwnerState(ownerSessionId).allChanges,
+              findMissingPaths: (workspacePaths) =>
+                this.findMissingWorkspacePaths(ownerSessionId, workspacePaths, options.signal),
+            },
           }),
           options.signal
         );
@@ -2738,16 +2831,10 @@ function cloneAllChangesState(state: CodeCollabV2AllChangesState): CodeCollabV2A
   return next;
 }
 
-function summarizeFileIndexAllChanges(
-  fileIndex: CodeCollabV2FileIndexState
-): SessionDiffStats | null {
+function summarizeAllChanges(allChanges: CodeCollabV2AllChangesState): SessionDiffStats | null {
   let add = 0;
   let del = 0;
-  for (const value of Object.values(fileIndex)) {
-    const change = value === true || !('change' in value) ? undefined : value.change;
-    if (change === undefined) {
-      continue;
-    }
+  for (const change of Object.values(allChanges)) {
     if (change === true || change.diff === undefined) {
       return null;
     }
