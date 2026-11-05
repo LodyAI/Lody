@@ -347,3 +347,14 @@ export const roostHistoryExperimentEnabledAtom = atomWithStorage<boolean>(
 export const roostHistoryFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(roostHistoryExperimentEnabledAtom)
 );
+
+export const lodyAgentBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-agent-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const lodyAgentFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(lodyAgentBetaEnabledAtom)
+);

@@ -5,6 +5,7 @@ import {
   developerModeEnabledAtom,
   e2eeWorkspaceCreationEnabledAtom,
   inboxBetaEnabledAtom,
+  lodyAgentBetaEnabledAtom,
   roostHistoryExperimentEnabledAtom,
   semanticShortcutsBetaEnabledAtom,
 } from '@/atoms/settings';
@@ -27,6 +28,7 @@ import { CompactRow, CompactSection } from './compact-layout';
 export function BetaFeaturesSection() {
   const { t } = useTranslation();
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
+  const [lodyAgentEnabled, setLodyAgentEnabled] = useAtom(lodyAgentBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
   const [e2eeCreationEnabled, setE2eeCreationEnabled] = useAtom(e2eeWorkspaceCreationEnabledAtom);
 
@@ -39,6 +41,16 @@ export function BetaFeaturesSection() {
 
   return (
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
+      <CompactRow
+        label={t('settings.beta.lodyAgent', 'Lody Agent')}
+        helper={t('settings.beta.lodyAgentHelper', 'Show Lody Agent when adding a provider.')}
+      >
+        <Switch
+          checked={lodyAgentEnabled}
+          onCheckedChange={setLodyAgentEnabled}
+          aria-label={t('settings.beta.lodyAgent', 'Lody Agent')}
+        />
+      </CompactRow>
       <CompactRow
         label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
         helper={t(

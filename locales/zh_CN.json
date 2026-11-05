@@ -3278,6 +3278,8 @@
   "settings.about.restartOnboardingHelper": "清除引导进度并重新打开引导流程。",
   "settings.about.restartOnboardingAction": "重新开始",
   "settings.about.restartOnboardingError": "无法重新开始引导。",
+  "settings.beta.lodyAgent": "Lody Agent",
+  "settings.beta.lodyAgentHelper": "添加提供商时显示 Lody Agent。",
   "settings.beta.title": "Beta 功能",
   "settings.beta.inbox": "收件箱",
   "settings.beta.inboxHelper": "显示尚未完成的移动端收件箱入口。开发中，可能有粗糙的地方。",
