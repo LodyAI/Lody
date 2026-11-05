@@ -112,3 +112,34 @@ export const AppleWatchUltra: Story = {
 };
 
 export const ScreenOnly: Story = { args: { bezel: false } };
+
+/** Synthetic artwork keeps native screen-edge coverage reviewable without Apple assets. */
+export const NativeScreenEdges: Story = {
+  render: (args) => (
+    <div style={{ height: 787.5, width: 423.5, display: 'flex' }}>
+      <IosSimulatorDeviceFrame
+        hardware={getIosSimulatorHardware(args.family, args.deviceType, args.name)}
+        exterior={{
+          geometry: {
+            width: 454,
+            height: 908,
+            screen: { x: 27, y: 18, width: 400, height: 872, radius: 62 },
+            buttons: [],
+          },
+          imageUrl: `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="454" height="908"><rect x="9" width="436" height="908" rx="80" fill="black"/></svg>')}`,
+        }}
+        screenAspect={400 / 872}
+        turns={args.turns}
+        bezel={args.bezel}
+        buttonLabel={(button) => button.id}
+      >
+        <iframe
+          title="Synthetic black simulator screen"
+          sandbox=""
+          srcDoc="<body style='margin:0;background:black'></body>"
+          style={{ display: 'block', width: '100%', height: '100%', border: 0 }}
+        />
+      </IosSimulatorDeviceFrame>
+    </div>
+  ),
+};
