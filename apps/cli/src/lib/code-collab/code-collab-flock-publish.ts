@@ -2,7 +2,8 @@ import { waitForCodeCollabTask } from './code-collab-task';
 import {
   readCodeCollabFileIndexSignalFromFlock,
   writeCodeCollabFileIndexSignalToFlock,
-  writeCodeCollabFileIndexToFlock,
+  applyCodeCollabFileIndexFlockWriteBatch,
+  planCodeCollabFileIndexFlockWrite,
   type CodeCollabFileIndexWritableFlock,
   type CodeCollabV2FileIndexState,
 } from '@lody/shared';
@@ -54,14 +55,23 @@ export async function publishCodeCollabFileIndexFlock(args: {
     await syncFlock(args.repo, handle, args.flockDocId, args.signal);
   }
   args.signal?.throwIfAborted();
-  const changed = writeCodeCollabFileIndexToFlock(handle.flock, args.fileIndex, args.updatedAtMs);
-  if (!changed) {
+  // Each batch is one Flock commit within CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes.
+  // Flush + sync between batches is the barrier that makes each commit its own
+  // Streams export, so cleaning up an oversized legacy index never becomes one
+  // multi-megabyte append. A failure mid-way leaves the new rows already written
+  // and the repair loop re-plans from the replica, finishing the cleanup.
+  const batches = planCodeCollabFileIndexFlockWrite(handle.flock, args.fileIndex);
+  if (batches.length === 0) {
     return { changed: false };
   }
   try {
-    await waitForCodeCollabTask(args.repo.flush(), args.signal);
-    args.signal?.throwIfAborted();
-    await syncFlock(args.repo, handle, args.flockDocId, args.signal);
+    for (const batch of batches) {
+      args.signal?.throwIfAborted();
+      applyCodeCollabFileIndexFlockWriteBatch(handle.flock, batch, args.updatedAtMs);
+      await waitForCodeCollabTask(args.repo.flush(), args.signal);
+      args.signal?.throwIfAborted();
+      await syncFlock(args.repo, handle, args.flockDocId, args.signal);
+    }
   } catch (error) {
     throw new CodeCollabFileIndexChangedPublishError(error);
   }

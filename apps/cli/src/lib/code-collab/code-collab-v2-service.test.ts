@@ -156,6 +156,59 @@ it('reads encrypted file content without starting watchers or publishing an inde
   });
 });
 
+it('does not rescan for watcher events confined to .gitignore paths', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const git = (...args: string[]) => execFileAsync('git', args, { cwd: workspaceRoot });
+    await git('-c', 'init.defaultBranch=main', 'init');
+    await git('config', 'user.email', 'test@example.com');
+    await git('config', 'user.name', 'Test User');
+    await writeFile(path.join(workspaceRoot, '.gitignore'), 'coverage/\n');
+    await writeFile(path.join(workspaceRoot, 'README.md'), '# test\n');
+    await git('add', '.');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-m', 'initial');
+    await mkdir(path.join(workspaceRoot, 'coverage'));
+
+    const publish = collectPublishedSharedStates();
+    const watch = makeWorkspaceWatchCoordinator();
+    const service = new CodeCollabV2Service({
+      resolveWorkspace: makeResolver(workspaceRoot),
+      workspaceWatchCoordinator: watch.coordinator,
+      ...publish,
+    });
+    // The debounced watcher refresh, awaited directly so its decision is settled.
+    const refreshWatched = (
+      service as unknown as {
+        refreshWatchedWorkspace: (
+          ownerSessionId: SessionId,
+          watchRoot: string,
+          dirtyPaths: ReadonlySet<string> | null
+        ) => Promise<void>;
+      }
+    ).refreshWatchedWorkspace.bind(service);
+    try {
+      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
+      const baseline = publish.published.length;
+      await writeFile(path.join(workspaceRoot, 'late.ts'), 'late\n');
+      await writeFile(path.join(workspaceRoot, 'coverage', 'lcov.info'), 'x\n');
+
+      await refreshWatched(SESSION_ID, workspaceRoot, new Set(['coverage/lcov.info']));
+      expect(publish.published).toHaveLength(baseline);
+
+      // One visible path in the batch is enough to rescan.
+      await refreshWatched(SESSION_ID, workspaceRoot, new Set(['coverage/lcov.info', 'late.ts']));
+      expect(publish.published).toHaveLength(baseline + 1);
+      expect(Object.keys(publish.published.at(-1)?.fileIndex ?? {})).toContain('late.ts');
+
+      // Dirt without a path (overflow, OS gave none) always rescans.
+      await writeFile(path.join(workspaceRoot, 'unreported.ts'), 'x\n');
+      await refreshWatched(SESSION_ID, workspaceRoot, null);
+      expect(Object.keys(publish.published.at(-1)?.fileIndex ?? {})).toContain('unreported.ts');
+    } finally {
+      await service.dispose();
+    }
+  });
+});
+
 describe('CodeCollabV2Service text RPC boundary', () => {
   it('uses the configured refresh deadline, cancels publication and lets a queued refresh publish newer files', async () => {
     await withWorkspace(async (workspaceRoot) => {

@@ -11,6 +11,64 @@ index db300ce07001c51440db9663e6f2a74515eb6079..b9a2e779e74445275a3d36016808fe36
    /** Observation only; callback failures never affect synchronization. */
    readonly onDiagnostic?: (event: SnapshotDiagnosticEvent) => void;
    /** Master switch. Defaults to `true` when `snapshotUpload` is provided. */
+diff --git a/dist/flock.js b/dist/flock.js
+index 7e7ab56308116afe526e7c67ba33f96057818061..19f767e6587d15dc452384f34f76f4a35b4dcc8d 100644
+--- a/dist/flock.js
++++ b/dist/flock.js
+@@ -131,23 +131,38 @@ function createFlockAdapter(flock) {
+ 			};
+ 		},
+ 		subscribeLocalUpdates: (listener) => {
+-			return flock.subscribe((batch) => {
+-				if (batch.source !== "local") return;
+-				const drain = async () => {
+-					const batchPayload = await flock.exportJson({
+-						from: lastExportedVersion,
+-						peerId: flock.peerId()
+-					});
+-					if (!hasEntries(batchPayload)) return;
+-					const exportedVersion = extractVersionFromBundle(batchPayload);
+-					recordExportFrontier(exportedVersion);
+-					listener({
+-						updates: [new TextEncoder().encode(JSON.stringify(batchPayload))],
+-						version: exportedVersion
+-					});
+-				};
++			// Lody patch (remove once upstream streams-crdt coalesces local exports):
++			// one pending export per subscription covers every local commit made before
++			// it starts. The macrotask yield lets IPC, timers and sockets run between
++			// exports; the pending flag clears immediately before the synchronous Wasm
++			// export, so a commit during or after it schedules exactly one more export.
++			let exportPending = false;
++			let subscribed = true;
++			const drain = async () => {
++				await new Promise((resolve) => setTimeout(resolve, 0));
++				exportPending = false;
++				if (!subscribed) return;
++				const batchPayload = await flock.exportJson({
++					from: lastExportedVersion,
++					peerId: flock.peerId()
++				});
++				if (!subscribed || !hasEntries(batchPayload)) return;
++				const exportedVersion = extractVersionFromBundle(batchPayload);
++				recordExportFrontier(exportedVersion);
++				listener({
++					updates: [new TextEncoder().encode(JSON.stringify(batchPayload))],
++					version: exportedVersion
++				});
++			};
++			const unsubscribe = flock.subscribe((batch) => {
++				if (batch.source !== "local" || exportPending || !subscribed) return;
++				exportPending = true;
+ 				localExportQueue = localExportQueue.then(drain).catch(() => {});
+ 			});
++			return () => {
++				subscribed = false;
++				unsubscribe();
++			};
+ 		}
+ 	};
+ }
 diff --git a/dist/stream-id-CkYX5Gw_.js b/dist/stream-id-CkYX5Gw_.js
 index 6768860ab31b380e6e058a564439b779f6bfef89..43a3511703a58dd7ef3bfb43aa92eab9c1e21b12 100644
 --- a/dist/stream-id-CkYX5Gw_.js
@@ -351,6 +409,7 @@ index 6768860ab31b380e6e058a564439b779f6bfef89..43a3511703a58dd7ef3bfb43aa92eab9
  			cursor: saved,
  			streamCursor: bootstrapCursor
 diff --git a/dist/zstd-core-nJ4Lg1a0.js b/dist/zstd-core-nJ4Lg1a0.js
+index 460bbb665e9dad4aa617a0b97c4eb3d650ef5c40..82a84eab0a85d41275993b2ee9417ee7099e3016 100644
 --- a/dist/zstd-core-nJ4Lg1a0.js
 +++ b/dist/zstd-core-nJ4Lg1a0.js
 @@ -123,6 +123,7 @@ function init$1(filePathOrBuf) {

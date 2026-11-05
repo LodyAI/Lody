@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CODE_COLLAB_FILE_INDEX_LIMITS,
   CODE_COLLAB_LIMITS,
   CodeCollabDomainErrorSchema,
+  buildBoundedCodeCollabFileIndexState,
+  estimateCodeCollabFileIndexStateBytes,
   applyCodeCollabFileIndexFlockEvents,
   CodeCollabFileEntrySchema,
   authorizeCodeCollabRoleRequest,
@@ -31,6 +34,7 @@ import {
   writeCodeCollabFileIndexToFlock,
   type CodeCollabFileEntry,
   type CodeCollabV2FileIndexState,
+  type CodeCollabV2FileTreeState,
 } from '../src/code-collab';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -513,3 +517,72 @@ describe('Code Collab shared protocol helpers', () => {
     ).toEqual({ ok: true, role: 'host' });
   });
 });
+
+describe('Code Collab file-index budget', () => {
+  it('marks only recorded deletions as deleted and loads other changed paths as files', () => {
+    const { fileIndex, omittedPaths } = buildBoundedCodeCollabFileIndexState(
+      { 'README.md': true },
+      {
+        'gone.ts': { diff: [0, 3], del: true },
+        'gone.bin': { del: true },
+        // Changed but outside the (truncated) tree: still a file on disk.
+        'pkg/deep/new.ts': { diff: [4, 0] },
+      }
+    );
+    expect(omittedPaths).toBe(0);
+    expect(fileIndex).toEqual({
+      'README.md': true,
+      'gone.ts': { kind: 'deleted', change: { diff: [0, 3], del: true } },
+      'gone.bin': { kind: 'deleted', change: { del: true } },
+      'pkg/deep/new.ts': { kind: 'file', change: { diff: [4, 0] } },
+      'pkg/deep': { kind: 'lazy' },
+      pkg: { kind: 'lazy' },
+    });
+  });
+
+  it('keeps root entries, expanded directories and changes ahead of breadth-first rows', () => {
+    const tree: CodeCollabV2FileTreeState = {
+      'README.md': true,
+      a: { kind: 'lazy' },
+      b: { kind: 'lazy' },
+      'b/expanded': { kind: 'lazy' },
+    };
+    for (let index = 0; index < 50; index += 1) {
+      tree[`a/filler-${String(index).padStart(2, '0')}.ts`] = true;
+      tree[`b/expanded/child-${String(index).padStart(2, '0')}.ts`] = true;
+    }
+    tree['a/z/changed.ts'] = true;
+    tree['a/z'] = { kind: 'lazy' };
+
+    const { fileIndex, omittedPaths } = buildBoundedCodeCollabFileIndexState(
+      tree,
+      { 'a/z/changed.ts': { diff: [1, 0] } },
+      { budget: { maxEntries: 60, maxBytes: 1024 * 1024 }, priorityDirectories: ['b/expanded'] }
+    );
+    const paths = Object.keys(fileIndex);
+    expect(paths).toHaveLength(60);
+    expect(omittedPaths).toBe(Object.keys(tree).length - 60);
+    expect(paths).toEqual(expect.arrayContaining(['README.md', 'a', 'b', 'b/expanded']));
+    expect(paths.filter((file) => file.startsWith('b/expanded/'))).toHaveLength(50);
+    // The changed row is kept together with its ancestors.
+    expect(fileIndex['a/z/changed.ts']).toEqual({ kind: 'file', change: { diff: [1, 0] } });
+    expect(fileIndex['a/z']).toEqual({ kind: 'lazy' });
+    // Omitted rows are not loaded, never deleted.
+    expect(Object.values(fileIndex).some((value) => value !== true && value.kind === 'deleted')).toBe(
+      false
+    );
+  });
+
+  it('enforces the byte budget for long multi-byte paths before the row count', () => {
+    const tree: CodeCollabV2FileTreeState = { dir: { kind: 'lazy' } };
+    for (let index = 0; index < CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries; index += 1) {
+      tree[`dir/${'长路径'.repeat(40)}-${index}.ts`] = true;
+    }
+    const { fileIndex, estimatedBytes } = buildBoundedCodeCollabFileIndexState(tree, {});
+    expect(Object.keys(fileIndex).length).toBeLessThan(CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries);
+    expect(estimatedBytes).toBe(estimateCodeCollabFileIndexStateBytes(fileIndex));
+    expect(estimatedBytes).toBeLessThanOrEqual(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes);
+    expect(estimatedBytes).toBeGreaterThan(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes - 1024);
+  });
+});
+
