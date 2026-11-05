@@ -39,6 +39,44 @@ type Account = {
   cloud?: E2eeCloudClient
   closeFailed?: boolean
   readers: Map<string, Map<number, number>>
+  fenceLoss: (
+    workspaceId: string,
+    reason: 'member_removed' | 'device_revoked',
+    generation: number
+  ) => RemovalFence
+}
+type RemovalFence = {
+  owner: Account
+  workspaceId: string
+  reason: 'member_removed' | 'device_revoked'
+  generation: number
+  completed: boolean
+  failure?: unknown
+}
+// Main-owned loss fences outlive a failed or slow cleanup; only verified erase
+// releases one. Never use a waiter deadline to admit a successor on this directory.
+const lossFences = new Map<string, RemovalFence>()
+function fenceLoss(
+  owner: Account,
+  workspaceId: string,
+  reason: RemovalFence['reason'],
+  generation: number
+): RemovalFence {
+  const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+  const existing = lossFences.get(owner.directory)
+  if (identity.userId !== owner.accountId || identity.generation !== generation)
+    throw accountFailure('account_mismatch')
+  if (existing?.owner === owner) return existing
+  if (
+    owners.get(owner.directory) !== owner ||
+    owner.scope.state._tag === 'Closed' ||
+    owner.closeFailed ||
+    identityDirectory(owner.accountId, workspaceId) !== owner.directory
+  )
+    throw accountFailure('host_operation_failed')
+  const fence: RemovalFence = { owner, workspaceId, reason, generation, completed: false }
+  lossFences.set(owner.directory, fence)
+  return fence
 }
 const CreationReceipt = z
   .object({
@@ -151,7 +189,8 @@ const closeCurrent = Effect.gen(function* () {
 export function withDesktopE2eeAccount<A>(
   work: (owner: Account) => Effect.Effect<A, unknown>,
   location?: IdentityLocation,
-  create = true
+  create = true,
+  retiring?: RemovalFence
 ): Promise<A> {
   observeIdentity()
   return Effect.runPromise(
@@ -170,6 +209,15 @@ export function withDesktopE2eeAccount<A>(
             yield* closeCurrent
           const accountId = identity.userId
           const directory = identityDirectory(accountId, location)
+          const loss = lossFences.get(directory)
+          if (loss && loss !== retiring) return yield* Effect.fail(accountFailure(loss.reason))
+          if (
+            retiring &&
+            (loss !== retiring ||
+              retiring.owner !== owners.get(directory) ||
+              identity.generation !== retiring.generation)
+          )
+            return yield* Effect.fail(accountFailure('account_mismatch'))
           if (removing.has(directory))
             return yield* Effect.fail(
               accountFailure(removingReasons.get(directory) ?? 'member_removed')
@@ -205,14 +253,17 @@ export function withDesktopE2eeAccount<A>(
                   custody,
                   bootstrap
                 })
-                return {
+                const owned: Account = {
                   accountId,
                   directory,
                   scope,
                   bootstrap,
                   host,
-                  readers: new Map<string, Map<number, number>>()
+                  readers: new Map<string, Map<number, number>>(),
+                  fenceLoss: (workspaceId, reason, generation) =>
+                    fenceLoss(owned, workspaceId, reason, generation)
                 }
+                return owned
               }).pipe(Scope.provide(scope))
             )
             if (Exit.isFailure(opened)) {
@@ -472,6 +523,12 @@ export function resetDesktopE2eeIdentity(input: { workspaceId?: string; resetId:
             const directory = workspaceId
               ? identityDirectory(accountId, workspaceId)
               : accountDirectory(accountId)
+            const lost = [...lossFences.values()].find((fence) =>
+              workspaceId
+                ? fence.owner.directory === directory
+                : fence.owner.accountId === accountId
+            )
+            if (lost) return yield* Effect.fail(accountFailure(lost.reason))
             const receipts = join(
               app.getPath('userData'),
               'e2ee-reset-receipts',
@@ -571,6 +628,13 @@ export function cleanupRemovedDesktopWorkspace(input: {
         )
         yield* serial.withPermit(
           Effect.gen(function* () {
+            const loss = lossFences.get(plan.directory)
+            if (loss) {
+              if (Exit.isSuccess(result) && result.value === true) {
+                loss.completed = true
+                lossFences.delete(plan.directory)
+              } else if (Exit.isFailure(result)) loss.failure = result.cause
+            }
             if (removing.get(plan.directory) === plan.done) {
               removing.delete(plan.directory)
               removingReasons.delete(plan.directory)
@@ -688,6 +752,16 @@ function publicE2eeFailure(error: unknown): Error {
     return projected
   }
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+  if (code === 'device_revoked') {
+    const projected = new Error('e2ee_device_revoked')
+    publicAccessLosses.set(projected, 'device_revoked')
+    return projected
+  }
+  if (code === 'member_removed') {
+    const projected = new Error('e2ee_member_removed')
+    publicAccessLosses.set(projected, 'member_removed')
+    return projected
+  }
   const allowed = new Set([
     'identity-busy',
     'permissions',

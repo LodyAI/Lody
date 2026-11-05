@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -14,7 +14,9 @@ import type { NodeProcessApi } from '@lody/shared/node/process';
 
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
+import { getLodyNpmCacheDir } from './npx-cache';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
+import { acquireSorbetCredentialMutation } from './sorbet-credential-mutation';
 import * as profileUsage from './codex-profile-process-usage';
 import { CodexProfileStore, getCodexProfileStore } from './codex-profile-store';
 import type { resolveBuiltinAuthenticationProcessLaunch } from './setting';
@@ -482,7 +484,167 @@ describe('AcpAuthenticationManager', () => {
     });
   });
 
-  it.each(['custom', 'devin'] as const)(
+  it('retries Sorbet login offline only after npm fails before ACP output', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'lody-sorbet-offline-auth-'));
+    vi.stubEnv('LODY_DATA_DIR', root);
+    const install = path.join(getLodyNpmCacheDir(), '_npx', 'aa11');
+    const pkg = path.join(install, 'node_modules', '@sorbetai', 'acp');
+    await mkdir(pkg, { recursive: true });
+    await writeFile(
+      path.join(install, 'package.json'),
+      JSON.stringify({ _npx: { packages: ['@sorbetai/acp@alpha'] } })
+    );
+    await writeFile(
+      path.join(pkg, 'package.json'),
+      JSON.stringify({ version: '0.1.0', bin: 'index.js' })
+    );
+    await writeFile(path.join(pkg, 'index.js'), '');
+    const attempts: string[][] = [];
+    let authenticated = 0;
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      resolveLoginShellEnv: async () => ({}),
+      nodeProcess: fakeNodeProcess(((_command: string, args: string[]) => {
+        attempts.push(args);
+        const child = createFakeChild();
+        const stdin = new PassThrough();
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        child.stdin = stdin;
+        child.stdout = stdout;
+        child.stderr = stderr;
+        if (attempts.length === 1) {
+          queueMicrotask(() => {
+            stderr.write('npm error code ENOTFOUND\n');
+            child.exitCode = 1;
+            child.emit('exit', 1, null);
+          });
+        } else {
+          const agent = acp
+            .agent({ name: 'fixture' })
+            .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+              protocolVersion: params.protocolVersion,
+              authMethods: [{ id: 'oauth', name: 'OAuth' }],
+            }))
+            .onRequest(acp.methods.agent.authenticate, async () => {
+              authenticated++;
+              return {};
+            });
+          agent.connect(
+            acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+          );
+        }
+        return child;
+      }) as never),
+    });
+    try {
+      expect(
+        await manager.authenticate({
+          requestId: 'offline-auth',
+          cliType: 'builtin',
+          agentType: 'sorbet',
+        })
+      ).toEqual({ success: true, disposition: 'authenticated' });
+      expect(attempts).toHaveLength(2);
+      expect(attempts[1]).toContain('--offline');
+      expect(authenticated).toBe(1);
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves the authentication failure and the cleanup failure while retaining the Sorbet lease', async () => {
+    vi.useFakeTimers();
+    const child = createFakeChild();
+    // Neither termination signal succeeds until the test explicitly confirms exit.
+    child.kill = vi.fn(() => true);
+    const spawned = createDeferred<void>();
+    const spawnProcess = vi.fn(() => {
+      spawned.resolve();
+      return child;
+    });
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      nodeProcess: fakeNodeProcess(spawnProcess),
+      resolveLoginShellEnv: async () => ({}),
+      terminationGraceMs: 2,
+    });
+    const result = manager.authenticate({
+      requestId: 'sorbet-cleanup-failure',
+      cliType: 'builtin',
+      agentType: 'sorbet',
+    });
+    await spawned.promise;
+    await vi.advanceTimersByTimeAsync(20);
+    await expect(result).resolves.toEqual({
+      success: false,
+      disposition: 'error',
+      error:
+        'sorbet ACP authentication streams are unavailable; Sorbet authentication process cleanup is unconfirmed',
+    });
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+    const retry = expect(acquireSorbetCredentialMutation()).rejects.toThrow(
+      'cleanup is unconfirmed'
+    );
+    await vi.advanceTimersByTimeAsync(20);
+    await retry;
+    child.exitCode = 0;
+    (await acquireSorbetCredentialMutation()).release();
+  });
+
+  it('keeps a replacement manager fenced after cleanup fails until the child exits', async () => {
+    vi.useFakeTimers();
+    const child = createFakeChild();
+    child.kill = vi.fn(() => true);
+    const spawned = createDeferred<void>();
+    const spawnProcess = vi.fn(() => {
+      spawned.resolve();
+      return child;
+    });
+    const options = {
+      nodeProcess: fakeNodeProcess(spawnProcess),
+      resolveLoginShellEnv: async () => ({}),
+      terminationGraceMs: 2,
+    };
+    const first = new AcpAuthenticationManager(createSilentLogger(), options);
+    const reopened = new AcpAuthenticationManager(createSilentLogger(), options);
+    const input = {
+      cliType: 'custom' as const,
+      agentType: 'unconfirmed-cleanup-fence',
+      customAcp: { command: '/synthetic/agent', args: [] },
+    };
+    try {
+      const original = first.authenticate({ ...input, requestId: 'original' });
+      await spawned.promise;
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(original).resolves.toMatchObject({
+        success: false,
+        disposition: 'error',
+        error: expect.stringContaining('process cleanup is unconfirmed'),
+      });
+      expect(child.exitCode).toBeNull();
+      await expect(
+        reopened.authenticate({ ...input, requestId: 'overlap' })
+      ).resolves.toMatchObject({
+        success: false,
+        error: expect.stringContaining('authentication is already running'),
+      });
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+
+      child.exitCode = 0;
+      child.emit('exit', 0, null);
+      const next = createFakeChild();
+      spawnProcess.mockImplementation(() => next);
+      const retry = reopened.authenticate({ ...input, requestId: 'after-exit' });
+      await vi.advanceTimersByTimeAsync(20);
+      await retry;
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+    } finally {
+      child.exitCode = 0;
+      child.emit('exit', 0, null);
+    }
+  });
+
+  it.each(['custom', 'devin', 'sorbet'] as const)(
     'bridges request-scoped ACP form elicitation for %s',
     async (provider) => {
       const child = createFakeChild();
@@ -494,10 +656,15 @@ describe('AcpAuthenticationManager', () => {
       const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
       const agent = acp
         .agent({ name: 'test-auth-agent' })
-        .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
-          protocolVersion: params.protocolVersion,
-          authMethods: [{ id: 'oauth', name: 'OAuth' }],
-        }))
+        .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+          expect(params.clientCapabilities?.auth?._meta).toEqual({
+            lody: { credentialForm: { version: 1 } },
+          });
+          return {
+            protocolVersion: params.protocolVersion,
+            authMethods: [{ id: 'oauth', name: 'OAuth' }],
+          };
+        })
         .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
           const reply = await client.request(acp.methods.client.elicitation.create, {
             mode: 'form',
@@ -536,8 +703,8 @@ describe('AcpAuthenticationManager', () => {
       });
       const authentication = manager.authenticate({
         requestId: 'auth-custom',
-        cliType: provider === 'devin' ? 'builtin' : 'custom',
-        agentType: provider === 'devin' ? 'devin' : 'custom-test',
+        cliType: provider === 'custom' ? 'custom' : 'builtin',
+        agentType: provider === 'custom' ? 'custom-test' : provider,
         runtimeOverrides: provider === 'devin' ? { devinPath: '/test/devin' } : undefined,
         customAcp: { command: '/test/custom-acp', args: [] },
         onProgress: (event) => {
@@ -565,6 +732,13 @@ describe('AcpAuthenticationManager', () => {
       expect(
         manager.submitAuthenticationInput(
           'auth-custom',
+          'stale-interaction',
+          JSON.stringify({ action: 'accept', content: { token: 'discarded' } })
+        )
+      ).toMatchObject({ success: false, disposition: 'error' });
+      expect(
+        manager.submitAuthenticationInput(
+          'auth-custom',
           interactionId,
           JSON.stringify({
             action: 'accept',
@@ -583,6 +757,83 @@ describe('AcpAuthenticationManager', () => {
     }
   );
 
+  it.each(['initialize', 'authenticate'] as const)(
+    'does not expose agent error text when ACP %s fails',
+    async (failingMethod) => {
+      const child = createFakeChild();
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = new PassThrough();
+      const progress: unknown[] = [];
+      const formReceived = createDeferred<string>();
+      const agent = acp
+        .agent({ name: 'test-auth-error-agent' })
+        .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+          if (failingMethod === 'initialize') {
+            throw new acp.RequestError(-32603, 'secret-from-agent');
+          }
+          return {
+            protocolVersion: params.protocolVersion,
+            authMethods: [{ id: 'login', name: 'Login' }],
+          };
+        })
+        .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+          const reply = await client.request(acp.methods.client.elicitation.create, {
+            mode: 'form',
+            requestId,
+            message: 'Enter token',
+            requestedSchema: {
+              type: 'object',
+              properties: { token: { type: 'string', title: 'Token', _meta: { secret: true } } },
+              required: ['token'],
+            },
+          });
+          if (reply.action !== 'accept') throw new Error('Expected accepted input');
+          throw new acp.RequestError(-32603, `secret-from-agent ${reply.content?.token}`);
+        });
+      agent.connect(
+        acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+      );
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        nodeProcess: fakeNodeProcess(vi.fn(() => child)),
+        resolveLoginShellEnv: async () => ({}),
+      });
+      const authentication = manager.authenticate({
+        requestId: 'auth-error',
+        cliType: 'custom',
+        agentType: 'custom-test',
+        customAcp: { command: '/test/custom-acp', args: [] },
+        onProgress: (event) => {
+          progress.push(event);
+          if (event.status === 'input-required') formReceived.resolve(event.interactionId);
+        },
+      });
+      if (failingMethod === 'authenticate') {
+        const interactionId = await formReceived.promise;
+        expect(
+          manager.submitAuthenticationInput(
+            'auth-error',
+            interactionId,
+            JSON.stringify({ action: 'accept', content: { token: 'submitted-secret' } })
+          )
+        ).toEqual({ success: true, disposition: 'input-accepted' });
+      }
+      const result = await authentication;
+      expect(result).toEqual({
+        success: false,
+        disposition: 'error',
+        error:
+          failingMethod === 'initialize'
+            ? 'custom-test ACP initialization failed. Check the agent configuration and try again.'
+            : 'custom-test ACP authentication failed. Check the sign-in details and try again.',
+      });
+      expect(JSON.stringify({ result, progress })).not.toContain('secret-from-agent');
+      expect(JSON.stringify({ result, progress })).not.toContain('submitted-secret');
+    }
+  );
+
   it('selects between advertised agent-driven authentication methods', async () => {
     const child = createFakeChild();
     const stdin = new PassThrough();
@@ -591,14 +842,15 @@ describe('AcpAuthenticationManager', () => {
     child.stdout = stdout;
     child.stderr = new PassThrough();
     const authenticatedWith = createDeferred<string>();
+    const methods = Array.from({ length: 46 }, (_, index) => ({
+      id: `provider-${index}`,
+      name: `Provider ${index}`,
+    }));
     const agent = acp
       .agent({ name: 'test-method-auth-agent' })
       .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
         protocolVersion: params.protocolVersion,
-        authMethods: [
-          { id: 'oauth', name: 'OAuth' },
-          { id: 'api-key', name: 'API key' },
-        ],
+        authMethods: methods,
       }))
       .onRequest(acp.methods.agent.authenticate, async ({ params }) => {
         authenticatedWith.resolve(params.methodId);
@@ -619,7 +871,9 @@ describe('AcpAuthenticationManager', () => {
       customAcp: { command: '/test/custom-acp', args: [] },
       onProgress: (event) => {
         if (event.status === 'auth-methods') {
-          expect(event.authMethods.map((method) => method.id)).toEqual(['oauth', 'api-key']);
+          expect(event.authMethods.map((method) => method.id)).toEqual(
+            methods.map((method) => method.id)
+          );
           methodsReceived.resolve({ interactionId: event.interactionId });
         }
       },
@@ -630,10 +884,10 @@ describe('AcpAuthenticationManager', () => {
       manager.submitAuthenticationInput(
         'auth-method-choice',
         interactionId,
-        JSON.stringify({ action: 'accept', methodId: 'api-key' })
+        JSON.stringify({ action: 'accept', methodId: 'provider-45' })
       )
     ).toEqual({ success: true, disposition: 'input-accepted' });
-    await expect(authenticatedWith.promise).resolves.toBe('api-key');
+    await expect(authenticatedWith.promise).resolves.toBe('provider-45');
     await expect(authentication).resolves.toEqual({
       success: true,
       disposition: 'authenticated',
@@ -997,7 +1251,7 @@ describe('AcpAuthenticationManager', () => {
           error: expect.stringContaining(expected),
         })
       );
-      expect(initialize.mock.calls[0]?.[0].params.clientCapabilities.auth).toEqual({
+      expect(initialize.mock.calls[0]?.[0].params.clientCapabilities.auth).toMatchObject({
         terminal: false,
       });
     }

@@ -771,6 +771,66 @@ describe('RuntimeProvider warm workspace preparation', () => {
     }
   );
 
+  it.each(['e2ee_member_removed', 'e2ee_device_revoked'] as const)(
+    'a main-process access-loss hint makes a still-member window confirm %s and retire its replica',
+    async (code) => {
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const pushes = new Map<string, (payload: unknown) => void>();
+      vi.stubGlobal('ipc', {
+        on: (channel: string, handler: (payload: unknown) => void) => {
+          pushes.set(channel, handler);
+          return () => pushes.delete(channel);
+        },
+      });
+      ordinaryCloud();
+      listEncrypted();
+      const status = {
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+        epoch: 0,
+        hasCurrentKey: true,
+        rotationRequired: false,
+      };
+      let lost = false;
+      let closed = false;
+      environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+      environment.e2eeWorkspaces!.runtime = {
+        open: async () => status,
+        status: async () => status,
+        close: async () => {
+          closed = true;
+        },
+        refresh: async () => {
+          if (lost) throw new Error(`Error invoking remote method 'e2ee.refresh': Error: ${code}`);
+          return status;
+        },
+      } as unknown as E2eeWorkspaceRuntime;
+      await render();
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      // Main recorded the loss; workspace membership lists have not changed.
+      lost = true;
+      await act(async () => pushes.get('e2ee.accessLost')?.({ workspaceId: 'local:other' }));
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      await act(async () => pushes.get('e2ee.accessLost')?.({ workspaceId: 'local:workspace' }));
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(prepared.disposed).toBe(true);
+      expect(closed).toBe(true);
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+        errorType: code,
+        workspaceId: 'local:workspace',
+      });
+      await resumeEncryptedWorkspaceCleanup({
+        accountId: 'local:user',
+        workspaceId: 'local:workspace',
+        windowId: 'test-window',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      });
+      vi.unstubAllGlobals();
+    }
+  );
+
   it.each([true, false])(
     'cold native removal uses only a saved exact locator: %s',
     async (saved) => {

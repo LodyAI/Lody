@@ -294,22 +294,34 @@ export const buildAssistantTurnRenderLayout = (
   const blocks = buildAssistantTurnRenderBlocksFromEntries(messageId, entries, separateThoughts);
   const ranges = buildSegmentBlockRanges(blocks);
 
-  // Nothing folds while the turn streams, but the segment shape does not depend
-  // on that — keep it stable so only the fold state changes at turn end.
   const segments: AssistantTurnRenderSegment[] = ranges.map((blockRange, segmentIndex) => {
     const key = `segment:${messageId}:${segmentIndex}`;
-    if (!isTurnFinished) {
-      return { key, blockRange, workBlockKeys: new Set<string>(), firstWorkBlockIndex: -1 };
-    }
 
-    // Only process folds. Prose is what the reader came for, and whether a text
-    // block is narration or the answer cannot be known from where it sits: a run
-    // may answer first and keep working. Folding by position buried that answer.
+    // Once stopped, commentary is safe to fold only with an explicit answer.
+    // While streaming, a reader may choose to fold it manually.
+    const hasFinalAnswer = blocks
+      .slice(blockRange[0], blockRange[1])
+      .some(
+        (block) =>
+          block.kind === 'content' &&
+          block.entry.content.type === 'text' &&
+          block.entry.content.messagePhase === 'final_answer' &&
+          block.entry.content.text.trim().length > 0
+      );
     const segmentWorkBlockKeys = new Set<string>();
     let firstWorkBlockIndex = -1;
     for (let index = blockRange[0]; index < blockRange[1]; index += 1) {
       const block = blocks[index];
-      if (block?.kind !== 'activity_group') continue;
+      if (
+        !block ||
+        (block.kind !== 'activity_group' &&
+          !(
+            (!isTurnFinished || hasFinalAnswer) &&
+            block.entry.content.type === 'text' &&
+            block.entry.content.messagePhase === 'commentary'
+          ))
+      )
+        continue;
       segmentWorkBlockKeys.add(block.key);
       if (firstWorkBlockIndex === -1) {
         firstWorkBlockIndex = index;

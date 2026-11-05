@@ -5,6 +5,18 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// The composer's mention sources read the authenticated workspace; the page under test is the
+// landing view and its dashboard, not mentions.
+vi.mock('../src/components/mentions/mention-session-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useSessionMentionItems: () => [],
+}));
+vi.mock('../src/components/mentions/mention-agent-role-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useAgentRoleMentionItems: () => [],
+}));
+
+import { ChatLandingView } from '../src/components/chat/chat-landing-view';
 import { HomeDashboard } from '../src/components/chat/home/home-dashboard';
 import { LandingStageContext, type LandingStage } from '../src/components/chat/landing-stage';
 import { initI18n } from '../src/i18n';
@@ -42,22 +54,21 @@ function nowRow(id: string, overrides: Partial<HomeNowRow> = {}): HomeNowRow {
   };
 }
 
-const usage = (resetsInHours = 2): HomeWeekUsage => ({
+const usage = (resetsInHours = 2, weekResetsInHours: number | null = 98): HomeWeekUsage => ({
   name: null,
-  windows: [
-    {
-      usedPercent: 38,
-      remainingPercent: 62,
-      windowDurationSeconds: 5 * 60 * 60,
-      resetsAtEpochSeconds: NOW_MS / 1000 + resetsInHours * 60 * 60,
-    },
-    {
-      usedPercent: 21,
-      remainingPercent: 79,
-      windowDurationSeconds: 7 * 24 * 60 * 60,
-      resetsAtEpochSeconds: null,
-    },
-  ],
+  window: {
+    usedPercent: 38,
+    remainingPercent: 62,
+    windowDurationSeconds: 5 * 60 * 60,
+    resetsAtEpochSeconds: NOW_MS / 1000 + resetsInHours * 60 * 60,
+  },
+  otherWindow: {
+    usedPercent: 21,
+    remainingPercent: 79,
+    windowDurationSeconds: 7 * 24 * 60 * 60,
+    resetsAtEpochSeconds:
+      weekResetsInHours == null ? null : NOW_MS / 1000 + weekResetsInHours * 60 * 60,
+  },
 });
 
 const CODEX: HomeWeekUsageSource = {
@@ -329,16 +340,41 @@ describe('HomeDashboard', () => {
   describe('plan usage', () => {
     const text = () => byTestId('home-now')?.textContent ?? '';
 
-    it('shows one window, the shortest, with how much is used and when it resets', () => {
-      render({ usage: usage(2) });
+    it('puts the plan’s two segments side by side, each with how much is used and its reset', () => {
+      render({ usage: usage(2, 98) });
       expect(text()).toContain('Plan usage');
-      expect(text()).toContain('5 hours');
-      expect(text()).toContain('38% used');
-      expect(text()).toContain('Resets in about 2 hours');
-      expect(text()).not.toContain('Weekly');
-      expect(container.querySelectorAll('[data-usage-fill]')).toHaveLength(1);
+      const meters = Array.from(
+        byTestId('home-week-usage')!.querySelectorAll('[data-usage-window]')
+      ).map((meter) => meter.textContent ?? '');
+      expect(meters).toHaveLength(2);
+      expect(meters[0]).toContain('5 hours');
+      expect(meters[0]).toContain('38% used');
+      expect(meters[0]).toContain('Resets in about 2 hours');
+      // The week behind the 5-hour segment: its own percent and its own reset, beside it.
+      expect(meters[1]).toContain('Weekly');
+      expect(meters[1]).toContain('21% used');
+      expect(meters[1]).toContain('Resets in 4 days');
+      expect(container.querySelectorAll('[data-usage-fill]')).toHaveLength(2);
       expect(byTestId('home-week-forecast')).toBeNull();
       expect(byTestId('home-week-usage')?.getAttribute('data-column')).toBe('1 / span 2');
+    });
+
+    it('shows one meter when the provider reports one window', () => {
+      render({ usage: { ...usage(), otherWindow: null } });
+      expect(container.querySelectorAll('[data-usage-window]')).toHaveLength(1);
+      expect(byTestId('home-week-usage-other-window')).toBeNull();
+      expect(text()).toContain('Plan usage');
+    });
+
+    it('keeps the week’s reset in a half tile as a countdown', () => {
+      render({
+        usage: usage(2, 20),
+        forecast: { title: 'Codex reset forecast', chancePercent: 65, when: 'Today 2:00 PM' },
+      });
+      // Beside the forecast the tile is half as wide: one meter, and the other window's reset in
+      // the head as a countdown rather than two columns of labels.
+      expect(container.querySelectorAll('[data-usage-window]')).toHaveLength(1);
+      expect(byTestId('home-week-usage-other-window')?.textContent).toBe('Weekly in 20h');
     });
 
     it('words a scheduled reset without a probability', () => {
@@ -425,6 +461,94 @@ describe('HomeDashboard', () => {
       expect(byTestId('home-now')).not.toBeNull();
       expect(boards).toEqual([null, 'week', null, 'week', 'now', null, 'now']);
       field.remove();
+    });
+  });
+
+  describe('under the composer', () => {
+    beforeEach(() => {
+      vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        dispatchEvent: () => false,
+      }));
+    });
+
+    const states: { name: string; rows: HomeNowRow[]; usage: HomeWeekUsage | null }[] = [
+      // A new account's first visit: no sessions yet, and no provider reporting usage.
+      { name: 'a new account', rows: [], usage: null },
+      { name: 'a quiet board beside the usage', rows: [], usage: usage() },
+      {
+        name: 'busy lists without usage',
+        rows: [nowRow('wait', { waiting: true }), nowRow('run', { working: true })],
+        usage: null,
+      },
+      {
+        name: 'busy lists beside the usage',
+        rows: [
+          ...Array.from({ length: 9 }, (_, index) => nowRow(`wait-${index}`, { waiting: true })),
+          ...Array.from({ length: 6 }, (_, index) => nowRow(`done-${index}`, { unread: true })),
+        ],
+        usage: usage(),
+      },
+    ];
+    const boards: (HomeBoard | null)[] = ['now', 'week', null];
+
+    it.each(states.flatMap((state) => boards.map((defaultBoard) => ({ ...state, defaultBoard }))))(
+      'keeps the prompt on the page for $name on board $defaultBoard',
+      (state) => {
+        act(() => {
+          root.render(
+            <ChatLandingView
+              tone="light"
+              title="New chat"
+              promptValue=""
+              onPromptChange={() => undefined}
+              submitLabel="Send"
+              ambient={
+                <HomeDashboard
+                  now={buildHomeNow({ rows: state.rows }, NOW_MS)}
+                  week={buildHomeWeek({ rows: [], activeDays: [] }, NOW)}
+                  agentLabel={label}
+                  nowMs={NOW_MS}
+                  animate={false}
+                  defaultBoard={state.defaultBoard}
+                  usage={state.usage}
+                />
+              }
+            />
+          );
+        });
+        expect(q('#chat-prompt')).not.toBeNull();
+        expect(byTestId('home-dashboard')).not.toBeNull();
+      }
+    );
+
+    it('keeps the prompt on the page when the dashboard fails to render', () => {
+      const BrokenDashboard = (): never => {
+        throw new TypeError("Cannot read properties of undefined (reading 'reduce')");
+      };
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      act(() => {
+        root.render(
+          <ChatLandingView
+            tone="light"
+            title="New chat"
+            promptValue=""
+            onPromptChange={() => undefined}
+            submitLabel="Send"
+            ambient={<BrokenDashboard />}
+          />
+        );
+      });
+      expect(q('#chat-prompt')).not.toBeNull();
+      const alert = q('[role="alert"]');
+      expect(alert?.textContent).toContain("This part couldn't be shown.");
+      expect(alert?.querySelector('[title]')?.getAttribute('title')).toContain('reduce');
     });
   });
 });

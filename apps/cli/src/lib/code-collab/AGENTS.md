@@ -2,8 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Ground truth for the rewrite: specs/code-collab-v2.md. The old v1
-host/runtime/CRDT capture implementation has been removed from this directory.
+Ground truth for the rewrite: specs/code-collab-v2.md.
 File-by-file responsibilities: [README.md](README.md).
 
 ## Invariants
@@ -39,10 +38,21 @@ File-by-file responsibilities: [README.md](README.md).
   sessions retain committed compare totals. The injected `observeWorkspaceGit` observer
   runs only on activation/explicit root refresh, never file watcher or terminal diff refresh;
   it must not gate file snapshots.
-- A file-index row whose path key carries U+FFFD came from a byte stream decoded
-  across a chunk boundary, not from a scan; it is its own LWW key, so a correct
-  republish cannot overwrite it. The shared helpers hide it on read and delete it on
-  the next write — do not "restore" such rows.
+- The whole published file index stays within `CODE_COLLAB_FILE_INDEX_LIMITS`
+  (1,000 rows, 100 KiB of estimated Flock JSON), applied after the tree and All
+  Changes are merged, never per input. Over-budget paths stay unloaded behind lazy
+  parents; only a change recording `del: true` may publish `deleted`. Publication
+  commits batches within that byte budget, separated by flush/sync. Package-manager
+  caches in `CODE_COLLAB_IGNORED_DIRECTORY_NAMES` filter watcher, FS and untracked
+  Git paths before any read, never tracked files. Filesystem scans prune
+  `.gitignore`d entries in-process (`createGitIgnoreScanFilter`, the `ignore`
+  package) before counting or descending; inside a worktree they keep entries that
+  hold tracked files. Watcher batches confined to `git check-ignore`d paths skip
+  the rescan; pathless dirt always rescans. Local Flock exports rely on the
+  coalescing streams-crdt patch.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-05-code-collab-file-index-budget.md).
+- Hide file-index paths containing U+FFFD on read and delete them on the next
+  write. They are corrupted keys, never valid scan paths; never restore them.
 - Only Code Collab RPC use extends `WorkspaceWatchCoordinator` idle ownership.
   Startup/restart/coverage gaps trigger authoritative full refresh; there is no
   per-directory fallback. Verify worker changes with the emitted
@@ -53,12 +63,10 @@ File-by-file responsibilities: [README.md](README.md).
   binary, or invalid UTF-8 it returns a `digest_mismatch` conflict (with the disk
   digest via streaming when the file is too large to read) instead of an error, so
   the guest's unsaved edits survive. See `readDiskStateForSave`.
-- In Git worktrees, scanning prefers `git ls-files` only for recursive scans and
-  synthesizes lazy parent directories; non-recursive directory refresh stays on FS
-  scanning because Git does not record empty directories. Fallback FS scanning is
-  path-only and must not read file contents to classify text/binary/size. Root
-  init/full/turn refresh should use the worker `full-state` path when available so
-  file listing and fileIndex building stay off the main thread.
+- Use `git ls-files` for recursive Git scans and synthesize lazy parents.
+  Non-recursive refreshes scan the filesystem. Classification stays path-only;
+  never read file contents. Root init/full/turn refreshes use the worker
+  `full-state` path when available to keep listing and index building off-thread.
 - Machine RPC is the integration boundary. Local/Electron direct transport can be
   added below that RPC abstraction, but file operations still route to the single CLI
   service. In particular, local `code-collab/get-file-index` scans/builds the initial
@@ -67,14 +75,13 @@ File-by-file responsibilities: [README.md](README.md).
   repairs a durable file-index Flock that became stale while the CLI was stopped;
   Flock remains the durable replication path for remote consumers and local renderer
   invalidation after that initial snapshot.
-- Non-Git All Changes reconstruction is bounded before SQLite decompresses a snapshot:
-  at most four paths run concurrently, one request retains at most 8 MiB of raw cached
-  snapshots by default, and over-limit paths are returned as deferred for single-file
-  loading. Never restore an unbounded candidate array or reconstruct deferred paths twice.
-- File RPCs canonicalize an absolute request path to a workspace-relative path only
-  when the target machine resolves it inside a registered session file root. Absolute
-  paths outside all roots remain `invalid_path`; never rely on frontend path stripping
-  as the filesystem access boundary.
+- Non-Git All Changes bounds SQLite decompression: at most four concurrent paths
+  and 8 MiB of cached raw snapshots per request by default. Over-limit paths stay
+  deferred for single-file loading. Never collect unbounded candidates or
+  reconstruct deferred paths twice.
+- File RPCs convert absolute paths to workspace-relative paths only inside the
+  target's registered session roots. Reject other paths as `invalid_path`;
+  frontend path stripping never grants filesystem access.
 - Native `fs.watch` handles must stay in `workspace-watch-worker-core.ts`; the main CLI
   Worker owns only subscriptions, refresh timers, scans, file-index/All Changes state,
   and Flock publication. The child receives canonical roots over private IPC only and
@@ -89,12 +96,9 @@ File-by-file responsibilities: [README.md](README.md).
   only for the affected owner, serialized with its local refresh publication and using
   the latest in-memory state. Keep a failed signal pending even when the FI repair already
   landed so the targeted repair cannot mistake the transaction for complete.
-- Machine RPC now dispatches handlers concurrently (see
-  `packages/loro-streams-rpc/AGENTS.md`), so handlers cannot assume serial execution.
-  `save-text` keeps its read-check-write atomic via `serializeByAbsolutePath`
-  (per-file write chain) so two concurrent saves to the same path can't both pass the
-  base-digest check and clobber each other; different paths still save in parallel.
-  Pure reads (open/refresh/diff) stay lock-free.
+- Machine RPC handlers run concurrently ([contract](../../../../../packages/loro-streams-rpc/AGENTS.md)).
+  `save-text` uses `serializeByAbsolutePath` for an atomic read-check-write per file;
+  different files stay parallel. Pure reads (open/refresh/diff) stay lock-free.
 
 - Root-scoped file state shares the owner publication and physical-file save chains. Watch subscriptions include root identity; wire keys must be decoded before filesystem access.
 

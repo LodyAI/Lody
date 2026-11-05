@@ -38,7 +38,9 @@ import {
   CODE_COLLAB_V2_ALL_CHANGES_DIFF_LIMITS,
   CODE_COLLAB_V2_TEXT_LIMITS,
   getServerNow,
+  buildBoundedCodeCollabFileIndexState,
   buildCodeCollabFileIndexState,
+  CODE_COLLAB_FILE_INDEX_LIMITS,
   codeCollabFileIndexStatesEqual,
   type CodeCollabV2AllChangesDiffEntry,
   type CodeCollabV2AllChangesState,
@@ -98,6 +100,9 @@ import {
   resolveProjectGitDirectory,
   resolveAllChangesDiffBase,
   scanGitDirectoryEntries,
+  createGitIgnoreScanFilter,
+  relativeScanDirectory,
+  listGitIgnoredPaths,
 } from './file-index-scan-core';
 import { closeDirectoryQuietly } from './directory-handle';
 import { CODE_COLLAB_IGNORED_DIRECTORY_NAMES } from './workspace-watch-path-policy';
@@ -112,7 +117,11 @@ import type {
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 const ROOT_DIRECTORY_REQUEST_PATH = '.';
-const DEFAULT_FILE_TREE_SCAN_ENTRY_BUDGET = 10_000;
+// A scan never needs more rows than the published file index can hold.
+const DEFAULT_FILE_TREE_SCAN_ENTRY_BUDGET = CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries;
+const MAX_TRACKED_EXPANDED_DIRECTORIES = 32;
+// Past this many distinct event paths per debounce window, refresh without asking Git.
+const MAX_GIT_IGNORE_CHECKED_DIRTY_PATHS = 256;
 export const DEFAULT_CODE_COLLAB_WATCH_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
 type WorkspaceResolution =
@@ -244,6 +253,8 @@ type ResolvedPath = {
 type OwnerSharedState = {
   fileTree: CodeCollabV2FileTreeState;
   allChanges: CodeCollabV2AllChangesState;
+  /** Explicitly initialized directories, most recent first; kept first under the FI budget. */
+  expandedDirectories: string[];
 };
 
 class DiffManifestUnavailableError extends Error {
@@ -278,6 +289,7 @@ type FullSharedStateWorkerPublishResult = {
   readonly workerMs: number;
   readonly changedPaths: number;
   readonly pathCount: number;
+  readonly omittedPaths: number;
 };
 
 type QueuedSharedStateRefresh = {
@@ -312,6 +324,8 @@ type OwnerWorkspaceWatchState = {
   subscription: WorkspaceWatchSubscription | null;
   refreshTimer: ReturnType<typeof setTimeout> | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /** Event paths since the last refresh; `null` once any dirt lacks a usable path. */
+  pendingDirtyPaths: Set<string> | null;
 };
 
 type OwnerFileIndexRepairState = {
@@ -655,7 +669,8 @@ export class CodeCollabV2Service {
       ownerSessionId: resolved.ownerSessionId,
       fileIndex: buildCodeCollabFileIndexState(
         cloneFileTreeState(state.fileTree),
-        cloneAllChangesState(state.allChanges)
+        cloneAllChangesState(state.allChanges),
+        { priorityDirectories: state.expandedDirectories }
       ),
       updatedAtMs: getServerNow(),
     };
@@ -829,6 +844,10 @@ export class CodeCollabV2Service {
           path: resolved.workspacePath,
         });
       }
+      state.expandedDirectories = [
+        resolved.workspacePath,
+        ...state.expandedDirectories.filter((directory) => directory !== resolved.workspacePath),
+      ].slice(0, MAX_TRACKED_EXPANDED_DIRECTORIES);
     }
     const stat = await lstat(resolved.absolutePath).catch((error: unknown) => {
       throw mapNodeReadError(error, resolved.workspacePath);
@@ -2321,7 +2340,7 @@ export class CodeCollabV2Service {
     if (existing) {
       return existing;
     }
-    const next: OwnerSharedState = { fileTree: {}, allChanges: {} };
+    const next: OwnerSharedState = { fileTree: {}, allChanges: {}, expandedDirectories: [] };
     this.stateByOwnerSessionId.set(ownerSessionId, next);
     return next;
   }
@@ -2352,7 +2371,7 @@ export class CodeCollabV2Service {
             workerResult.buildMs
           } workerMs=${workerResult.workerMs} source=${workerResult.allChangesSource} changedPaths=${
             workerResult.changedPaths
-          } paths=${workerResult.pathCount}`
+          } paths=${workerResult.pathCount} omittedPaths=${workerResult.omittedPaths}`
         );
         return workerResult.entries;
       }
@@ -2400,6 +2419,7 @@ export class CodeCollabV2Service {
       workspaceRoot: resolved.workspaceRoot,
       maxRawTextBytes: this.deps.maxRawTextBytes ?? CODE_COLLAB_V2_TEXT_LIMITS.maxRawTextBytes,
       entryBudget: this.deps.maxFileTreeEntries ?? DEFAULT_FILE_TREE_SCAN_ENTRY_BUDGET,
+      priorityDirectories: [...state.expandedDirectories],
       ...(resolved.allChangesBaseBranch === undefined
         ? {}
         : { preferredBaseBranch: resolved.allChangesBaseBranch }),
@@ -2453,6 +2473,7 @@ export class CodeCollabV2Service {
       workerMs,
       changedPaths: result.changedPaths,
       pathCount: result.pathCount,
+      omittedPaths: result.omittedPaths,
     };
   }
 
@@ -2707,7 +2728,9 @@ export class CodeCollabV2Service {
       const lineStats = await diffSnapshotLineStats(oldValue, current.snapshot);
       changes[workspacePath] =
         lineStats === undefined
-          ? true
+          ? current.snapshot.kind === 'missing'
+            ? { del: true }
+            : true
           : current.snapshot.kind === 'missing'
             ? { diff: [lineStats[0], lineStats[1]], del: true }
             : { diff: lineStats };
@@ -2768,6 +2791,7 @@ export class CodeCollabV2Service {
       subscription: null,
       refreshTimer: null,
       idleTimer: null,
+      pendingDirtyPaths: new Set(),
     };
     this.watchByOwnerSessionId.set(resolved.ownerSessionId, state);
     this.armWorkspaceWatchIdleTimer(state);
@@ -2777,7 +2801,11 @@ export class CodeCollabV2Service {
         ? `${resolved.ownerSessionId}:root:${this.deps.rootId}`
         : resolved.ownerSessionId,
       workspaceRoot,
-      onDirty: () => this.scheduleWatchedWorkspaceRefresh(resolved.ownerSessionId),
+      onDirty: (reason, dirtyPath) =>
+        this.scheduleWatchedWorkspaceRefresh(
+          resolved.ownerSessionId,
+          reason === 'event' ? dirtyPath : undefined
+        ),
     });
     if (this.watchByOwnerSessionId.get(resolved.ownerSessionId) !== state) {
       subscription?.release();
@@ -2786,10 +2814,19 @@ export class CodeCollabV2Service {
     state.subscription = subscription;
   }
 
-  private scheduleWatchedWorkspaceRefresh(ownerSessionId: SessionId): void {
+  private scheduleWatchedWorkspaceRefresh(ownerSessionId: SessionId, dirtyPath?: string): void {
     const state = this.watchByOwnerSessionId.get(ownerSessionId);
     if (!state) {
       return;
+    }
+    if (
+      dirtyPath === undefined ||
+      state.pendingDirtyPaths === null ||
+      state.pendingDirtyPaths.size >= MAX_GIT_IGNORE_CHECKED_DIRTY_PATHS
+    ) {
+      state.pendingDirtyPaths = null;
+    } else {
+      state.pendingDirtyPaths.add(dirtyPath);
     }
     if (state.refreshTimer) {
       this.deps.workspaceWatchCoordinator?.recordCoalescedRefresh?.();
@@ -2797,11 +2834,27 @@ export class CodeCollabV2Service {
     }
     state.refreshTimer = setTimeout(() => {
       state.refreshTimer = null;
-      void this.refreshWatchedWorkspace(ownerSessionId).catch(() => undefined);
+      const dirtyPaths = state.pendingDirtyPaths;
+      state.pendingDirtyPaths = new Set();
+      void this.refreshWatchedWorkspace(ownerSessionId, state.workspaceRoot, dirtyPaths).catch(
+        () => undefined
+      );
     }, 150);
   }
 
-  private async refreshWatchedWorkspace(ownerSessionId: SessionId): Promise<void> {
+  private async refreshWatchedWorkspace(
+    ownerSessionId: SessionId,
+    watchRoot: string,
+    dirtyPaths: ReadonlySet<string> | null
+  ): Promise<void> {
+    // Writes that land only in `.gitignore`d paths (build output, caches) cannot
+    // change the Git-based index, so they must not keep waking full rescans.
+    if (dirtyPaths !== null && dirtyPaths.size > 0) {
+      const ignored = await listGitIgnoredPaths(watchRoot, [...dirtyPaths]);
+      if (ignored !== null && [...dirtyPaths].every((dirtyPath) => ignored.has(dirtyPath))) {
+        return;
+      }
+    }
     const resolved = await this.resolveRequestDirectoryPath(
       ownerSessionId,
       ROOT_DIRECTORY_REQUEST_PATH
@@ -3037,8 +3090,19 @@ export class CodeCollabV2Service {
     const allChanges = cloneAllChangesState(state.allChanges);
     const cloneMs = Date.now() - cloneStartedAtMs;
     const buildStartedAtMs = Date.now();
-    const fileIndex = buildCodeCollabFileIndexState(fileTree, allChanges);
+    const { fileIndex, omittedPaths, estimatedBytes } = buildBoundedCodeCollabFileIndexState(
+      fileTree,
+      allChanges,
+      { priorityDirectories: state.expandedDirectories }
+    );
     const buildMs = Date.now() - buildStartedAtMs;
+    if (omittedPaths > 0) {
+      this.logger.debug(
+        `[code-collab] file-index budget omitted ownerSessionId=${ownerSessionId} omittedPaths=${omittedPaths} paths=${
+          Object.keys(fileIndex).length
+        } estimatedBytes=${estimatedBytes}`
+      );
+    }
     await this.publishPreparedOwnerFileIndexNow(ownerSessionId, fileIndex, options, {
       startedAtMs,
       cloneMs,
@@ -3756,6 +3820,11 @@ async function scanDirectoryEntries(options: {
     },
   ];
   let remainingEntries = Math.max(0, options.entryBudget);
+  // Prune `.gitignore`d entries before reading into them; null outside Git.
+  const ignoreFilter = await createGitIgnoreScanFilter(
+    options.directoryAbsolutePath,
+    options.signal
+  );
 
   while (queue.length > 0 && remainingEntries > 0) {
     options.signal?.throwIfAborted();
@@ -3776,8 +3845,21 @@ async function scanDirectoryEntries(options: {
     if (!directoryEntries) {
       continue;
     }
-    const collisionKeys = findDirectoryEntryCollisionKeys(directoryEntries);
-    for (const { entry, comparisonKey } of directoryEntries) {
+    const ignoredNames = ignoreFilter
+      ? await ignoreFilter.ignoredEntryNames(
+          relativeScanDirectory(options.directoryWorkspacePath, currentDirectory.workspacePath),
+          directoryEntries.map(({ entry }) => ({
+            name: entry.name,
+            isDirectory: entry.isDirectory(),
+          }))
+        )
+      : undefined;
+    const visibleEntries =
+      ignoredNames && ignoredNames.size > 0
+        ? directoryEntries.filter(({ entry }) => !ignoredNames.has(entry.name))
+        : directoryEntries;
+    const collisionKeys = findDirectoryEntryCollisionKeys(visibleEntries);
+    for (const { entry, comparisonKey } of visibleEntries) {
       if (remainingEntries <= 0) {
         break;
       }

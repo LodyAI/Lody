@@ -63,6 +63,8 @@ export interface LedgerView {
   /** First record position for which this view carries a verified hash. */
   readonly historyStart: number;
   inspectState(): LedgerState;
+  /** Verified current/historical classification of a signing key, for an exact local refusal. */
+  classifyDevice?: (key: string) => 'active' | 'revoked' | 'member-removed' | 'unknown';
 }
 // Closure-backed objects have no reflective constructor or exposed live state.
 const states = new WeakMap<object, InternalState>();
@@ -75,6 +77,18 @@ function viewOf(state: InternalState): LedgerView {
       verification: state.verification,
       historyStart: state.hashesOffset,
       inspectState: () => inspectState(state),
+      classifyDevice: (key: string) => {
+        const device = stateGet(state.devices, key);
+        if (device)
+          return HashMap.has(state.members, keyId(device.membershipId.toBytes()))
+            ? 'active'
+            : 'member-removed';
+        const historical = stateGet(state.deviceHistory, key);
+        if (!historical) return 'unknown';
+        return HashMap.has(state.members, keyId(historical.membershipId.toBytes()))
+          ? 'revoked'
+          : 'member-removed';
+      },
     })
   );
   states.set(view, state);

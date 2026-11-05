@@ -120,15 +120,5 @@ a bounded main-owned due timer and due polls ([delivery](../../../../.agents/not
 
 Removal erases `member_joins` and `personal_join_histories`. All three join installs
 clear the removed marker only after verifying a different retained signing key.
-Only parsed HTTP 560 codes `e2ee_member_removed`/`e2ee_device_revoked` from explicitly
-credential-bound endpoints may produce `E2eeMemberRemovedError`/`E2eeDeviceRevokedError`.
-JWT, transport, parsing and unrelated endpoint failures never authorize cleanup,
-even with matching codes or types. The account boundary projects typed results,
-including causes, to their exact codes with the `accessLoss` marker.
-Revocation uses the device-bound removal receipt and cleanup, records its reason,
-and remains terminal until re-pairing replaces the key. Failed local operations,
-including dispatch, confirm loss through this device's credential.
-Dispatch still requires its calling reader. Temporary status hosts drain outside
-the account lock on every exit, including failed identity rechecks, unless another
-reader owns them.
-[Decision](../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).
+Access-loss classification, refusal codes and dispatch confirmation follow the
+[IPC rules](ipc/AGENTS.md#e2ee-access-loss).

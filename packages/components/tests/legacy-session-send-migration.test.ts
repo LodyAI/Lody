@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import {
@@ -405,6 +406,179 @@ it('settles timed-out input that a late verified withdrawal reaches before any m
     vi.useRealTimers();
   }
 });
+
+it.each(['pending', 'seen', 'processing'] as const)(
+  'accelerates an activated %s turn once when credential confirmation outlasts 300ms',
+  async (status) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = fixture();
+    f.runtime.contentMode = 'e2ee';
+    const input = entry(`slow-host-${status}`);
+    const original = {
+      requestId: '04'.repeat(16),
+      targetMachineId: MACHINE,
+      frameHex: '05'.repeat(300),
+      requesterDevice: '06'.repeat(32),
+      expiresAt: 4_102_444_800_000,
+    };
+    const answered = Promise.withResolvers<void>();
+    const asked = Promise.withResolvers<void>();
+    const appended = Promise.withResolvers<string>();
+    const frames: string[] = [];
+    const activated = Promise.withResolvers<void>();
+    const upsert = f.runtime.writer.upsertDocMeta;
+    f.runtime.writer.upsertDocMeta = async (roomId, patch) => {
+      await upsert(roomId, patch);
+      if (patch.latestUserMsgId === input.id) activated.resolve();
+    };
+    // A host whose credential-confirmed preparation answers only after the renderer deadline.
+    const rpc = createEncryptedDispatchLegacy({
+      workspaceId: 'workspace',
+      prepare: async () => {
+        asked.resolve();
+        await answered.promise;
+        return original;
+      },
+      accept: async () => {
+        throw new Error('no response is delivered');
+      },
+      client: async () =>
+        ({
+          ensureJsonStream: async () => undefined,
+          readJsonLive: (
+            _stream: string,
+            _state: unknown,
+            _batch: unknown,
+            options: { signal: AbortSignal }
+          ) =>
+            new Promise<void>((resolve) =>
+              options.signal.addEventListener('abort', () => resolve())
+            ),
+          appendJson: async (_stream: string, value: { id: string }) => {
+            frames.push(value.id);
+            appended.resolve(value.id);
+          },
+        }) as unknown as LoroStreamsJsonStreamClient,
+    });
+    cleanup.push(() => rpc.close());
+    f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
+    let dispatched: Promise<void> | undefined;
+    try {
+      // Keep the pre-write probe and real Loro commit in this end-to-end send control.
+      const written = writeUserTurn(f.runtime, {
+        sessionId: SESSION,
+        entry: input,
+        delivery: { kind: 'history' },
+      });
+      await asked.promise;
+      await vi.advanceTimersByTimeAsync(200);
+      await written;
+      dispatched = dispatchUserTurn(f.runtime, SESSION, input.id);
+      await vi.advanceTimersByTimeAsync(200);
+      await activated.promise;
+      expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe(input.id);
+      expect(frames).toEqual([]);
+      // The daemon may claim the durable input before native preparation returns.
+      await f.runtime.sendResources.withSessionStore(SESSION, async (store) => {
+        await store.sessionData.commands.applyHistoryAction({
+          kind: 'user-status',
+          turnId: input.id,
+          status,
+        });
+      });
+      expect(turnStatus(f, input.id)).toBe(status);
+      await vi.advanceTimersByTimeAsync(101);
+      answered.resolve();
+      expect(
+        await Promise.race([appended.promise, dispatched.then(() => 'settled unaccelerated')])
+      ).toBe(original.requestId);
+      expect(f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id)).toBe(
+        original.frameHex
+      );
+      await rpc.close();
+      await dispatched;
+      expect(frames).toEqual([original.requestId]);
+    } finally {
+      vi.useRealTimers();
+      answered.resolve();
+      await rpc.close();
+      await dispatched;
+    }
+  }
+);
+
+it.each(['canceled', 'handled', 'failed'] as const)(
+  'drops a late encrypted preparation when the real persisted turn is %s',
+  async (status) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = fixture();
+    f.runtime.contentMode = 'e2ee';
+    const asked = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    const original = {
+      requestId: '07'.repeat(16),
+      targetMachineId: MACHINE,
+      frameHex: '08'.repeat(300),
+      requesterDevice: '09'.repeat(32),
+      expiresAt: 4_102_444_800_000,
+    };
+    const frames: unknown[] = [];
+    const appended = Promise.withResolvers<void>();
+    const rpc = createEncryptedDispatchLegacy({
+      workspaceId: 'workspace',
+      prepare: async () => {
+        asked.resolve();
+        await answer.promise;
+        return original;
+      },
+      accept: async () => {
+        throw new Error('unused');
+      },
+      client: async () =>
+        ({
+          ensureJsonStream: async () => undefined,
+          readJsonLive: (_s: string, _st: unknown, _b: unknown, options: { signal: AbortSignal }) =>
+            new Promise<void>((resolve) =>
+              options.signal.addEventListener('abort', () => resolve())
+            ),
+          appendJson: async (_s: string, value: unknown) => {
+            frames.push(value);
+            appended.resolve();
+          },
+        }) as unknown as LoroStreamsJsonStreamClient,
+    });
+    cleanup.push(() => rpc.close());
+    f.runtime.prepareEncryptedDispatch = (machine, input) => rpc.prepare(machine, input);
+    let dispatched: Promise<void> | undefined;
+    try {
+      await f.append(entry('canceled-late'));
+      dispatched = dispatchUserTurn(f.runtime, SESSION, 'canceled-late');
+      await asked.promise;
+      await vi.advanceTimersByTimeAsync(200);
+      await f.runtime.sendResources.withSessionStore(SESSION, async (store) => {
+        await store.sessionData.commands.applyHistoryAction({
+          kind: 'user-status',
+          turnId: 'canceled-late',
+          status,
+        });
+      });
+      expect(turnStatus(f, 'canceled-late')).toBe(status);
+      answer.resolve();
+      expect(
+        await Promise.race([dispatched.then(() => 'dropped'), appended.promise.then(() => 'sent')])
+      ).toBe('dropped');
+      expect(
+        f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get('canceled-late')
+      ).toBeUndefined();
+      expect(frames).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      answer.resolve();
+      await rpc.close();
+      await dispatched;
+    }
+  }
+);
 
 it('appends a saved dispatch record whose turn is absent, activates it and deletes the database', async () => {
   const f = fixture();

@@ -540,8 +540,9 @@ keyed 布局本身已在 P2 迁入引擎。
 - **P0。**用真实 hook 和真实 keyed Virtua 做的 A+B jsdom 复现，配合帧 harness
   `tests/support/scroll-frame-harness.ts`（按浏览器顺序投递 scroll 事件和 ResizeObserver）。小幅展开会自愈；
   十四行的展开会一直隐藏，屏幕上没有任何行被挂载，直到"回到最新"。
-- **P0.5。**CI 任务 *Conversation browser tests*：每当 components 测试组运行时，在单 worker 上运行水合 spec 和引擎 spec。
-  暂不属于必需的 *Tests* 检查。原生选区 spec 未纳入：其中的"finishing a selected turn keeps its prose mounted"在未改动的
+- **P0.5。***Conversation browser tests* 现在由 `conversation-acceptance.yml` 手动触发，不属于必需的 *Tests* 检查；
+  [PR 验证决策](../testing/2026-11-05-pr-ci-specialist-acceptance.zh.md)替代了原先的自动执行策略。
+  原生选区 spec 未纳入：其中的"finishing a selected turn keeps its prose mounted"在未改动的
   `main` 上同样失败（3 次中 3 次）；一个流式 spec 在负载下对时序敏感。
 - **契约小修。**视口声明 `overflow-anchor: none`；契约测试 `tests/conversation-viewport-contract.test.tsx` 对两种实现都断言这一点，
   并断言引擎从不隐藏视口、静态与流式代码块都不带 `content-visibility: auto`。

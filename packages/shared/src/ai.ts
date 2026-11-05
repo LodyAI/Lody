@@ -45,6 +45,7 @@ export const BUILTIN_AGENTS = [
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
   { agentType: 'bub', displayName: 'Bub' },
   { agentType: 'dimcode', displayName: 'Dimcode' },
+  { agentType: 'sorbet', displayName: 'Lody Agent' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
@@ -74,6 +75,7 @@ const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged'>
   // keeps running its isolated title agent.
   bub: 'none',
   dimcode: 'none',
+  sorbet: 'none',
 };
 
 const builtinAcpTitleOwnership = (
@@ -463,6 +465,27 @@ export const isAcpCapabilityCacheEntryCurrent = (
 ): entry is AcpCapabilityCacheEntry => entry?.cacheVersion === ACP_CAPABILITY_CACHE_VERSION;
 
 /**
+ * Prefix of the capability source version Lody stamps for builtin Sorbet; the build
+ * segment follows it, optionally suffixed with `+<probe capability>`.
+ */
+const SORBET_SOURCE_VERSION_PREFIX = 'builtin-sorbet:@sorbetai/acp@';
+
+/** Sorbet builds that could not discover sign-in methods, so their probe wrote none. */
+const SORBET_STALE_AUTH_DISCOVERY_VERSIONS: ReadonlySet<string> = new Set(['0.1.0-alpha.4']);
+
+/**
+ * The Sorbet build an entry came from: the installed version when the npx cache could
+ * name it, otherwise the dist-tag Lody launched through. `undefined` for other agents.
+ */
+const readSorbetBuildVersion = (entry: AcpCapabilityCacheEntry): string | undefined => {
+  if (entry.cliType !== 'builtin' || entry.agentType !== 'sorbet') return undefined;
+  const sourceVersion = entry.sourceVersion;
+  if (!sourceVersion?.startsWith(SORBET_SOURCE_VERSION_PREFIX)) return undefined;
+  const [build] = sourceVersion.slice(SORBET_SOURCE_VERSION_PREFIX.length).split('+', 1);
+  return build ? build : undefined;
+};
+
+/**
  * A parsed capability entry remains readable regardless of the producer's cache version.
  * `cacheVersion` is a refresh hint, not a data-compatibility gate: mixed-version clients
  * keep using fields they understand while a newer probe converges the stored entry.
@@ -472,6 +495,16 @@ export const getReadableAcpCapabilityCacheEntry = (
 ): AcpCapabilityCacheEntry | undefined => {
   if (!entry) {
     return undefined;
+  }
+  // Sorbet is on a floating dist-tag, so the build that wrote an entry is only knowable
+  // from the version stamped into `sourceVersion`. Drop the method list those early
+  // builds could not discover; every other entry keeps the list it reported.
+  if (
+    SORBET_STALE_AUTH_DISCOVERY_VERSIONS.has(readSorbetBuildVersion(entry) ?? '') &&
+    entry.authMethods !== undefined
+  ) {
+    const { authMethods: _staleAuthMethods, ...compatible } = entry;
+    entry = compatible;
   }
   if ((entry.cacheVersion ?? 0) < 11 && entry.availableCommands !== undefined) {
     const { availableCommands: _projectCommands, ...compatible } = entry;
@@ -672,7 +705,10 @@ export const isManagedBuiltinAgentType = (
  * Dimcode uses the same verification path with its npx-managed package.
  */
 export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
-  isManagedBuiltinAgentType(agentType) || agentType === 'bub' || agentType === 'dimcode';
+  isManagedBuiltinAgentType(agentType) ||
+  agentType === 'bub' ||
+  agentType === 'dimcode' ||
+  agentType === 'sorbet';
 
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string
@@ -1782,6 +1818,7 @@ export type MessageContent =
   | {
       type: 'text';
       text: string;
+      messagePhase?: 'commentary' | 'final_answer';
       /** Mention regions of `text`. See `message-text-spans.ts`. */
       spans?: MessageTextSpan[];
     }

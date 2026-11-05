@@ -26,8 +26,11 @@ See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-c
   publish even when the scan itself ran in a worker.
 - `file-index-scan-core.ts` — shared scan and Git merge-base resolution. Tracking
   lookup normalizes qualified local owner refs using `git/git-diff-base.ts`, also
-  consumed by committed summary stats. Batch diffs pin the resolved commit for
-  their list and inline snapshots; refreshed refs take effect on the next read.
+  consumed by committed summary stats. An owner without a recorded base (a direct
+  local checkout) compares against the remote default branch (`origin/HEAD`) before
+  `main`/`master`, so an abandoned `main` cannot turn repository history into session
+  changes. Batch diffs pin the resolved commit for their list and inline snapshots;
+  refreshed refs take effect on the next read.
 - `code-collab-v2-diff-store.ts` / `turn-diff-store-worker.ts` — CLI adapter and the
   mandatory production Worker for local ACP turn evidence. The adapter returns
   per-turn `FileDiff` and `getLatestText` heads; `message-handler.ts` passes the
@@ -57,3 +60,8 @@ activation and explicit root refresh. Watcher and terminal diff refreshes do not
 this work. MessageHandler connects the authorized workspace to
 [WorkspaceGitService](../../session/workspace-git-service.ts); see its
 [contract](../../../../../specs/workspace-branch-state.md).
+
+File-index paths containing U+FFFD are corrupted LWW keys from a byte stream
+that was decoded across a chunk boundary. A correct republish uses a different
+key and cannot overwrite them, so reads hide them and the next publication deletes
+them. Filesystem scanners do not produce these keys.

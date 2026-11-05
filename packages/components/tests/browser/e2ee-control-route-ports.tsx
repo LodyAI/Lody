@@ -81,6 +81,7 @@ export const E2eeTeamSettingsHost = () => null;
 export const E2eePersonalPairing = () => null;
 export const E2eeAccountPairingRequest = () => null;
 export const E2eeAccountPairingApprove = () => null;
+export const E2eeAccountPairingKeyRetry = () => null;
 // The approval guide replaces the full page only for devices that still need approval.
 export const E2eeDeviceApprovalGuide = () =>
   createElement('output', { 'data-approval-guide': true });

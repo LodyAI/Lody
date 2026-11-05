@@ -159,6 +159,59 @@ it('reads encrypted file content without starting watchers or publishing an inde
   });
 });
 
+it('does not rescan for watcher events confined to .gitignore paths', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const git = (...args: string[]) => execFileAsync('git', args, { cwd: workspaceRoot });
+    await git('-c', 'init.defaultBranch=main', 'init');
+    await git('config', 'user.email', 'test@example.com');
+    await git('config', 'user.name', 'Test User');
+    await writeFile(path.join(workspaceRoot, '.gitignore'), 'coverage/\n');
+    await writeFile(path.join(workspaceRoot, 'README.md'), '# test\n');
+    await git('add', '.');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-m', 'initial');
+    await mkdir(path.join(workspaceRoot, 'coverage'));
+
+    const publish = collectPublishedSharedStates();
+    const watch = makeWorkspaceWatchCoordinator();
+    const service = new CodeCollabV2Service({
+      resolveWorkspace: makeResolver(workspaceRoot),
+      workspaceWatchCoordinator: watch.coordinator,
+      ...publish,
+    });
+    // The debounced watcher refresh, awaited directly so its decision is settled.
+    const refreshWatched = (
+      service as unknown as {
+        refreshWatchedWorkspace: (
+          ownerSessionId: SessionId,
+          watchRoot: string,
+          dirtyPaths: ReadonlySet<string> | null
+        ) => Promise<void>;
+      }
+    ).refreshWatchedWorkspace.bind(service);
+    try {
+      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
+      const baseline = publish.published.length;
+      await writeFile(path.join(workspaceRoot, 'late.ts'), 'late\n');
+      await writeFile(path.join(workspaceRoot, 'coverage', 'lcov.info'), 'x\n');
+
+      await refreshWatched(SESSION_ID, workspaceRoot, new Set(['coverage/lcov.info']));
+      expect(publish.published).toHaveLength(baseline);
+
+      // One visible path in the batch is enough to rescan.
+      await refreshWatched(SESSION_ID, workspaceRoot, new Set(['coverage/lcov.info', 'late.ts']));
+      expect(publish.published).toHaveLength(baseline + 1);
+      expect(Object.keys(publish.published.at(-1)?.fileIndex ?? {})).toContain('late.ts');
+
+      // Dirt without a path (overflow, OS gave none) always rescans.
+      await writeFile(path.join(workspaceRoot, 'unreported.ts'), 'x\n');
+      await refreshWatched(SESSION_ID, workspaceRoot, null);
+      expect(Object.keys(publish.published.at(-1)?.fileIndex ?? {})).toContain('unreported.ts');
+    } finally {
+      await service.dispose();
+    }
+  });
+});
+
 describe('CodeCollabV2Service text RPC boundary', () => {
   it.each(['sha1', 'sha256'])(
     'serves verified %s Git and disk bytes by session-scoped handles',
@@ -1338,6 +1391,71 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         } finally {
           restarted.dispose();
         }
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('compares an unrecorded base against the remote default branch, not an abandoned main', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const git = async (...args: string[]) =>
+        (
+          await execFileAsync('git', ['-c', 'commit.gpgsign=false', ...args], {
+            cwd: workspaceRoot,
+          })
+        ).stdout.trim();
+      await git('-c', 'init.defaultBranch=main', 'init');
+      await git('config', 'user.email', 'test@example.com');
+      await git('config', 'user.name', 'Test User');
+      await writeFile(path.join(workspaceRoot, 'history.txt'), 'abandoned main\n');
+      await git('add', '.');
+      await git('commit', '-m', 'abandoned main');
+      const abandonedMain = await git('rev-parse', 'HEAD');
+      await git('update-ref', 'refs/remotes/origin/main', abandonedMain);
+      await git('checkout', '-b', 'develop');
+      await writeFile(path.join(workspaceRoot, 'history.txt'), 'years of develop\n');
+      await git('add', '.');
+      await git('commit', '-m', 'develop history');
+      const develop = await git('rev-parse', 'HEAD');
+      await git('update-ref', 'refs/remotes/origin/develop', develop);
+      await git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/develop');
+      await writeFile(path.join(workspaceRoot, 'session.txt'), 'session work\n');
+      const { published, publishFileIndex } = collectPublishedSharedStates();
+      // A direct local checkout records no base branch for its Session.
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: async () => ({ ok: true, ownerSessionId: SESSION_ID, workspaceRoot }),
+        publishFileIndex,
+      });
+      try {
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        expect(published.at(-1)?.allChanges).toEqual({ 'session.txt': { diff: [1, 0] } });
+        expect(published.at(-1)?.allChangesDiffStats).toEqual({ allChange: { add: 1, del: 0 } });
+        expect(await service.openAllChangesDiff({ sessionId: SESSION_ID })).toMatchObject({
+          status: 'ok',
+          base: develop,
+        });
+        expect(await getGitDiffStats((args) => git(...args))).toMatchObject({
+          baseRef: 'origin/HEAD',
+          mergeBase: develop,
+          baseDiffStats: { allChange: { add: 0, del: 0 } },
+        });
+
+        // A recorded base stays authoritative, even when it names the abandoned branch.
+        expect(
+          await getGitDiffStats((args) => git(...args), { preferredBaseBranch: 'main' })
+        ).toMatchObject({
+          mergeBase: abandonedMain,
+          baseDiffStats: { allChange: { add: 1, del: 1 } },
+        });
+
+        // Without a remote default, the conventional names remain the fallback.
+        await git('symbolic-ref', '--delete', 'refs/remotes/origin/HEAD');
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        expect(published.at(-1)?.allChanges).toEqual({
+          'history.txt': { diff: [1, 1] },
+          'session.txt': { diff: [1, 0] },
+        });
       } finally {
         service.dispose();
       }

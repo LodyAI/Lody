@@ -119,6 +119,7 @@ Bad keys allow ledger open; core repairs.
 Isolate verification/storage errors; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
 Conflicts refuse fallback. Failed close retains its fence; report restart-required.
+Opens join a still-closing workspace's drain once, outside the lock; never `closed`.
 Fixed cloud refs; auth/bound/abort; fence late disposed calls.
 Keep uncertain bytes; raw/SDK causes never leave main.
 Verified reads beat lost ACKs; cleanup retains admission.

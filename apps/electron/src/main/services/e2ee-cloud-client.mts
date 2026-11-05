@@ -290,7 +290,9 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     work: (client: ConvexHttpClient) => Promise<unknown>,
     schema: z.ZodType<T>,
     requestSignal?: AbortSignal,
-    credentialBound = false
+    credentialBound = false,
+    /** Convex streams an action's failure as an HTTP 200 error envelope. */
+    actionEnvelope = false
   ) {
     return Effect.suspend(() => {
       // Private to this evaluation: replays and concurrent calls cannot borrow authority.
@@ -336,7 +338,12 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
               })
               // Convex's function-failure status, only for an explicitly credential-bound
               // endpoint. JWT, transport and JSON exceptions never reach this assignment.
-              if (credentialBound && httpResponse.status === 560) {
+              // The content grant action may report the same envelope over HTTP 200;
+              // queries keep requiring 560, and a success body is returned untouched.
+              if (
+                credentialBound &&
+                (httpResponse.status === 560 || (actionEnvelope && httpResponse.status === 200))
+              ) {
                 const unread = httpResponse.clone()
                 const rejection = z
                   .object({
@@ -857,6 +864,7 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         (client) => client.action(api.e2eeContent.contentStreamsToken, { ...access }),
         contentToken,
         undefined,
+        true,
         true
       ),
     history: (requestInput: E2eeWorkspaceHistoryRequest, signal?: AbortSignal) => {

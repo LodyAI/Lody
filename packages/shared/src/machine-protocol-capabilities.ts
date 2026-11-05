@@ -19,12 +19,17 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   memoryProviders: 'memoryProviders',
   mcpToolDiscovery: 'mcpToolDiscovery',
   mcpLocalAuthentication: 'mcpLocalAuthentication',
+  sorbetCredentials: 'sorbetCredentials',
+  sorbetCredentialsRemote: 'sorbetCredentialsRemote',
+  sorbetProviders: 'sorbetProviders',
+  sorbetProvidersRemote: 'sorbetProvidersRemote',
   localProjectHistoryProvider: 'localProjectHistoryProvider',
   codexAuthProfiles: 'codexAuthProfiles',
   builtinPi: 'builtinPi',
   subagentCancellation: 'subagentCancellation',
   subagentEvents: 'subagentEvents',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
+  e2eeAcpInteraction: 'e2eeAcpInteraction',
   acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
@@ -70,8 +75,13 @@ export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
 export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
+export const SORBET_CREDENTIALS_PROTOCOL_VERSION = 1;
+export const SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION = 1;
+export const SORBET_PROVIDERS_PROTOCOL_VERSION = 1;
+export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
+export const E2EE_ACP_INTERACTION_PROTOCOL_VERSION = 1;
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
 /** `start` accepts the `methodId` the reader picked from the agent's advertised methods. */
 export const ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION = 1;

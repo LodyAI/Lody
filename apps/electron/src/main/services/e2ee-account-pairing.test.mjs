@@ -250,6 +250,45 @@ void test('a new device is approved per workspace, verifying each approval befor
   )
 })
 
+// The new device opens a workspace as soon as that workspace joined, even while
+// another requested workspace is still pending.
+void test('a joined workspace is reported under its own ID after this device no longer needs pairing there', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const all = requesterHosts()
+  // Like the real requester: a workspace with an active identity needs no pairing.
+  const requester = {
+    get hosts() {
+      return all.hosts.filter(
+        (host) => !all.installed.some((item) => item.workspaceId === host.workspaceId)
+      )
+    }
+  }
+  const newDevice = device({ relay, requester, clock })
+  const state = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts(['w1'])
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  const preview = await run(approver.pairing.inspectAccountPairing(state.pairingString))
+  await run(
+    approver.pairing.approveAccountPairing({
+      pairingString: state.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: ['w1']
+    })
+  )
+  for (let poll = 0; poll < 2; poll++) {
+    const partial = await run(newDevice.pairing.accountPairingRequest())
+    assert.equal(partial.status, 'waiting')
+    assert.deepEqual(
+      partial.workspaces.map((item) => [item.workspaceId, item.name, item.state]),
+      [
+        ['w1', 'Alpha', 'joined'],
+        ['w2', 'Beta', 'pending']
+      ]
+    )
+  }
+})
+
 void test('a request changed by the relay is refused before anything is signed', async () => {
   const relay = makeRelay()
   const clock = { now: NOW }

@@ -59,7 +59,10 @@ for (const story of ['all-changes', 'all-changes-stale-index']) {
   test(`${story} starts collapsed and opens deferred code on demand`, async ({ page }) => {
     await page.goto(`/iframe.html?id=sessions-conversationdiffpanel--${story}&viewMode=story`);
     const first = page.locator('[data-diff-path="src/file-000.ts"]');
-    await expect(first.getByRole('button', { name: 'Toggle section', exact: true })).toBeVisible();
+    // Storybook may import this panel cold; interaction assertions below keep their usual deadline.
+    await expect(first.getByRole('button', { name: 'Toggle section', exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(page.locator('diffs-container')).toHaveCount(0);
     await first.getByRole('button', { name: 'Toggle section', exact: true }).click();
     await expect(first.locator('pre')).toBeVisible();

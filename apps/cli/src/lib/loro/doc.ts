@@ -2072,6 +2072,18 @@ export class LoroDocumentManager {
     );
   }
 
+  async updateAcpAuthMethods(
+    machineId: MachineId,
+    configId: AgentConfigId,
+    authMethods: NonNullable<AcpCapabilityCacheEntry['authMethods']>
+  ): Promise<void> {
+    if (!this.machine) {
+      this.machine = this.createMachineDocument(machineId);
+      await this.machine.init();
+    }
+    await this.machine.updateAcpAuthMethods(configId, authMethods);
+  }
+
   async getAcpCapabilities(
     machineId: MachineId,
     configId: AgentConfigId
@@ -4048,6 +4060,38 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       }
     }
     return (capabilityUnchanged ? existing : undefined) ?? entry;
+  }
+
+  /**
+   * Records the sign-in methods an agent advertised, even when it then required
+   * authentication. A probe that stops at authentication never reaches the capability
+   * write, so without this the stored list keeps whatever an earlier probe wrote and a
+   * newly defined Provider never becomes a visible sign-in method.
+   */
+  async updateAcpAuthMethods(
+    configId: AgentConfigId,
+    authMethods: NonNullable<AcpCapabilityCacheEntry['authMethods']>
+  ): Promise<void> {
+    const handle = await this.openMachineFlockDoc();
+    const key = getAcpCapabilityCacheKey(configId);
+    const existing = getMachineFlockAcpCapabilities(
+      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    )[key];
+    // No row yet means no probe has described this Provider: the panel discovers it.
+    if (!existing) return;
+    if (JSON.stringify(existing.authMethods ?? []) === JSON.stringify(authMethods)) return;
+    const changed = writeMachineFlockRowToFlock(handle.flock, {
+      key: machineFlockKeys.acpCapability(configId),
+      // Every other field stays the earlier probe's; this call only knows the methods.
+      value: { ...existing, authMethods },
+    });
+    if (!changed) return;
+    await this.repo.flush();
+    if (this.markMachineFlockDirty) {
+      this.markMachineFlockDirty('acp-capability-update');
+    } else {
+      await handle.syncOnce().catch(() => undefined);
+    }
   }
 
   async getAcpCapabilities(configId: AgentConfigId): Promise<AcpCapabilityCacheEntry | undefined> {

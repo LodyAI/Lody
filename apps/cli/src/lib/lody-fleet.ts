@@ -364,7 +364,8 @@ export class LodyFleet {
           };
         }
       },
-      dispatchMachineRpc: async (message) => await this.dispatchLocalMachineRpc(message),
+      dispatchMachineRpc: async (message, signal) =>
+        await this.dispatchLocalMachineRpc(message, signal),
     };
     await traceAsync(this.logger, 'startup.local_ipc', undefined, async () => {
       await startLocalIpcSocketServers({
@@ -1661,7 +1662,8 @@ export class LodyFleet {
   }
 
   private async dispatchLocalMachineRpc(
-    message: import('@lody/shared').LocalMachineRpcRequestValidated
+    message: import('@lody/shared').LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<import('@lody/shared').LocalMachineRpcResponse> {
     const pendingStart = this.startInFlight.get(message.workspaceId);
     if (pendingStart) {
@@ -1673,7 +1675,7 @@ export class LodyFleet {
       return { ok: false, error: `workspace_runtime_unavailable:${message.workspaceId}` };
     }
 
-    return await runtime.lody.dispatchLocalMachineRpc(message);
+    return await runtime.lody.dispatchLocalMachineRpc(message, signal);
   }
 
   // Resolves the push-based data-plane engine for a workspace the CLI socket
@@ -2149,7 +2151,9 @@ export class LodyFleet {
     } = await import('./e2ee/workspace-legacy');
     if (this.e2eeResets.has(message.workspaceId)) throw new Error('e2ee_identity_busy');
     if (message.type === 'prepare') {
-      const material = await prepareCliE2eeMachineLegacy({ ...message });
+      // A machine revoked while its agent was stopped never received a revocation
+      // receipt; only this exact credential check lets it offer a fresh identity.
+      const material = await prepareCliE2eeMachineLegacy({ ...message, cloud: e2eeCloud });
       if ('superseded' in material)
         return {
           ok: true,

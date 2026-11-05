@@ -31,20 +31,20 @@ Ownership: [README.md](README.md).
 
 ## Turn Folding And Layout
 
-- Finished turns fold thoughts and tool calls into the work region; streaming
-  turns stay expanded.
-- Prose never folds. Every `text` item renders wherever it falls in the turn: a
-  run may answer and then keep working, and folding by position buried that
-  answer inside "Worked for …".
+- Work regions start expanded while streaming and may be folded by the reader.
+  Finished turns fold thoughts and tool calls; explicit `commentary` joins work
+  only when its segment has a nonempty `final_answer`. Final and unknown-phase
+  text remain visible. Interrupted work without a visible result stays expanded.
+  Expanded work stays in chronological order, with the header before its first item.
 - Plan approval cuts a live turn by ACP kind `switch_mode`, never title.
   `plan-surface.ts` prefers nonempty `rawInput.plan` over replaceable tool content.
   Keep `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility and expansion
   keys per segment. Only the last segment shows duration; earlier segments say
   "Finished working".
-- `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
-  final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
-  turn with no answer stays expanded; `message.finished` cannot prove
-  completion alone. A reused entry reopening upstream
+- A finished `shouldUseWorkedGroup` requires foldable work and visible final
+  content outside `workBlockKeys`. A cancelled/interrupted or tool-only turn
+  with no answer stays expanded; `message.finished` cannot prove completion
+  alone. A reused entry reopening upstream
   must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
 - Thought/tool timelines are compact, transparent, 13px and glyph-free; verbs label

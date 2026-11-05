@@ -12,7 +12,7 @@ import {
   resumeEncryptedWorkspaceCleanup,
 } from '@/lib/e2ee-member-removal';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
@@ -24,6 +24,7 @@ import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
 import {
   E2eeAccountPairingApprove,
+  E2eeAccountPairingKeyRetry,
   E2eeAccountPairingRequest,
 } from '@/components/pages/e2ee-account-pairing';
 import { isElectronRenderer } from '@/lib/electron';
@@ -62,6 +63,13 @@ export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
 
 // Retain actual incomplete reader owners across control-page unmounts.
 const retiredReaders = createWorkspaceRuntimeRetirements();
+
+// Account-pairing joins by account and workspace, across control-page remounts, so a
+// remount neither forgets the join nor asks the host for keys again. A failed key
+// request waits for the user's retry. Cleared when the account changes.
+type AccountPairingJoin = { request?: Promise<boolean>; failed?: boolean };
+const accountPairingJoins = new Map<string, AccountPairingJoin>();
+let accountPairingAccount: string | null | undefined;
 
 function WorkspaceControlRoute() {
   const { workspaceId } = Route.useParams();
@@ -491,6 +499,66 @@ function WorkspaceControlRoute() {
     }
   };
   const refresh = () => setGeneration((value) => value + 1);
+  // Account-wide pairing advances by itself: once this device joined, it opens the
+  // workspace when its credential and the current epoch key are installed. The host
+  // records a join even when its best-effort key round failed, so a join without the
+  // key asks the host to receive keys once.
+  const [, rerender] = useReducer((value: number) => value + 1, 0);
+  const observedKeyRequest = useRef<Promise<boolean> | null>(null);
+  const observeKeyRequest = (request: Promise<boolean>) => {
+    if (observedKeyRequest.current === request) return;
+    observedKeyRequest.current = request;
+    void request.then((installed) => {
+      if (observedKeyRequest.current !== request) return;
+      if (installed) refresh();
+      else rerender();
+    });
+  };
+  const requestAccountPairingKey = (join: AccountPairingJoin) => {
+    const runtime = port?.runtime;
+    if (!runtime) return;
+    join.failed = false;
+    join.request = runtime.refresh(workspaceId).then(
+      () => true,
+      (error: unknown) => {
+        const failure = classifyE2eeControlFailure(error);
+        console.error('E2EE account pairing key request failed', failure.kind, failure.code);
+        join.failed = true;
+        return false;
+      }
+    );
+    observeKeyRequest(join.request);
+  };
+  const onAccountPairingJoined = () => {
+    if (!accountPairingJoins.has(identity)) accountPairingJoins.set(identity, {});
+    refresh();
+  };
+  const retryAccountPairingKey = () => {
+    const join = accountPairingJoins.get(identity);
+    if (!join?.failed) return;
+    requestAccountPairingKey(join);
+    rerender();
+  };
+  const joinedCredential = canOpen && current?.nativeStatus?.hasDeviceCredential === true;
+  const joinedKey = joinedCredential && current?.nativeStatus?.hasCurrentKey === true;
+  const accountPairingKeyFailed =
+    joinedCredential && !joinedKey && accountPairingJoins.get(identity)?.failed === true;
+  useEffect(() => {
+    if (accountPairingAccount === accountId) return;
+    accountPairingAccount = accountId;
+    accountPairingJoins.clear();
+  }, [accountId]);
+  useEffect(() => {
+    const join = accountPairingJoins.get(identity);
+    if (!join || !joinedCredential || !workspaceSlug) return;
+    if (joinedKey) {
+      accountPairingJoins.delete(identity);
+      void navigate({ to: '/$workspaceName/chat', params: { workspaceName: workspaceSlug } });
+      return;
+    }
+    if (!join.request) requestAccountPairingKey(join);
+    else observeKeyRequest(join.request);
+  }, [identity, joinedCredential, joinedKey, workspaceSlug, navigate, port, workspaceId]);
   const manageMember = async (work: () => Promise<void>) => {
     const owner = readOwner.current;
     if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
@@ -563,9 +631,10 @@ function WorkspaceControlRoute() {
         <E2eeAccountPairingRequest
           key={identity + ':account-pairing'}
           runtime={port.runtime}
+          workspaceId={workspaceId}
           // Web asks first: a browser is often shared or public.
           autoStart={isElectronRenderer() || isNativeAppShell()}
-          onJoined={refresh}
+          onJoined={onAccountPairingJoined}
         />
         <E2eePersonalPairing
           key={identity}
@@ -585,6 +654,7 @@ function WorkspaceControlRoute() {
           {t('sessions.offline')}
         </p>
       )}
+      {accountPairingKeyFailed && <E2eeAccountPairingKeyRetry onRetry={retryAccountPairingKey} />}
       {port?.runtime &&
         (current?.custodyFailure || current?.failure?.kind === 'local-identity') && (
           <E2eeIdentityRecovery

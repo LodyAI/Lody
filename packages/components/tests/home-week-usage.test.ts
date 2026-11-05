@@ -26,7 +26,7 @@ const codex = (value: MachineRateLimits[string]): MachineRateLimits => ({
 });
 
 describe('buildHomeWeekUsage', () => {
-  it('shows the shortest window, with when it resets', () => {
+  it('meters the shortest window and keeps the week beside it, each with its reset time', () => {
     const usage = buildHomeWeekUsage({
       rateLimits: codex(
         limits([
@@ -36,13 +36,16 @@ describe('buildHomeWeekUsage', () => {
       ),
       agentType: 'codex',
     });
-    expect(
-      usage?.windows.map((window) => [window.usedPercent, window.resetsAtEpochSeconds])
-    ).toEqual([[25, 1_000_000]]);
+    expect([
+      usage?.window.usedPercent,
+      usage?.window.resetsAtEpochSeconds,
+      usage?.otherWindow?.usedPercent,
+      usage?.otherWindow?.resetsAtEpochSeconds,
+    ]).toEqual([25, 1_000_000, 40, 2_000_000]);
     expect(usage?.name).toBeNull();
   });
 
-  it('keeps one window: the shortest, and one of unknown length only when it is alone', () => {
+  it('keeps two windows at most: the week is the one behind the 5-hour segment', () => {
     const usage = buildHomeWeekUsage({
       rateLimits: codex(
         limits([
@@ -53,12 +56,13 @@ describe('buildHomeWeekUsage', () => {
       ),
       agentType: 'codex',
     });
-    expect(usage?.windows.map((window) => window.usedPercent)).toEqual([3]);
+    expect([usage?.window.usedPercent, usage?.otherWindow?.usedPercent]).toEqual([3, 2]);
 
     const alone = buildHomeWeekUsage({
       rateLimits: codex(limits([{ used: 1, seconds: null }])),
       agentType: 'codex',
     });
-    expect(alone?.windows.map((window) => window.usedPercent)).toEqual([1]);
+    expect(alone?.window.usedPercent).toBe(1);
+    expect(alone?.otherWindow).toBeNull();
   });
 });

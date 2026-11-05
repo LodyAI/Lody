@@ -1,3 +1,4 @@
+import { parseLodyMessagePhase } from './schema';
 import type { MessageContent, ModelInfo, SubagentRunItem } from '../ai';
 import { isLodySubagentEvent, type LodySubagentEvent } from 'acp-extension-core';
 import type { SessionHistoryInput, SessionPlanEntry } from '../schema';
@@ -774,7 +775,10 @@ const compactAdjacentTextAndThought = (items: MessageContent[]): MessageContent[
     if (
       last &&
       (nextItem.type === 'text' || nextItem.type === 'thought') &&
-      last.type === nextItem.type
+      last.type === nextItem.type &&
+      (last.type !== 'text' ||
+        nextItem.type !== 'text' ||
+        last.messagePhase === nextItem.messagePhase)
     ) {
       const existing = last as Extract<MessageContent, { type: 'text' | 'thought' }>;
       const next = nextItem as Extract<MessageContent, { type: 'text' | 'thought' }>;
@@ -1433,7 +1437,10 @@ export const buildMessageContentFromNotification = (
         case 'text':
           // Note: Claude Code streams <thinking> tags across multiple chunks.
           // We handle parsing in postProcessThinkingTags() after all chunks are merged.
-          return [{ type: 'text', text: update.content.text }];
+          const messagePhase = parseLodyMessagePhase(update._meta);
+          return [
+            { type: 'text', text: update.content.text, ...(messagePhase ? { messagePhase } : {}) },
+          ];
         case 'image':
         case 'audio':
         case 'resource_link':
@@ -1771,14 +1778,22 @@ class NotificationOnHistoryApplier {
         } else {
           const type = update.sessionUpdate === 'agent_message_chunk' ? 'text' : 'thought';
           const last = run.items.at(-1);
+          const messagePhase = type === 'text' ? parseLodyMessagePhase(update._meta) : undefined;
           // Normalized chunks are deltas; repeated text must not be heuristically deduplicated.
           if (
             last?.type === type &&
             last.nativeTurnId === identity.nativeTurnId &&
-            last.messageId === identity.messageId
+            last.messageId === identity.messageId &&
+            (last.type !== 'text' || last.messagePhase === messagePhase)
           )
             run.items[run.items.length - 1] = { ...last, text: last.text + update.content.text };
-          else run.items.push({ type, text: update.content.text, ...identity });
+          else
+            run.items.push({
+              type,
+              text: update.content.text,
+              ...identity,
+              ...(messagePhase ? { messagePhase } : {}),
+            });
         }
       } else {
         const index = run.items.findIndex(
@@ -1966,7 +1981,7 @@ class NotificationOnHistoryApplier {
         const text = sanitizeLodyInternalInstructions(message.text);
         if (!text) return;
         const entryIndex = this.ensureActiveAssistantEntry();
-        this.appendOrMergeAdjacentText(entryIndex, 'text', text);
+        this.appendOrMergeAdjacentText(entryIndex, 'text', text, message.messagePhase);
         return;
       }
       case 'thought': {
@@ -2051,13 +2066,18 @@ class NotificationOnHistoryApplier {
   private appendOrMergeAdjacentText(
     entryIndex: number,
     kind: Extract<MessageContent, { type: 'text' | 'thought' }>['type'],
-    delta: string
+    delta: string,
+    messagePhase?: 'commentary' | 'final_answer'
   ) {
     if (!delta) return;
     const items = this.ensureEntryItems(entryIndex);
 
     const last = items[items.length - 1];
-    if (last && last.type === kind) {
+    if (
+      last &&
+      last.type === kind &&
+      (last.type !== 'text' || last.messagePhase === messagePhase)
+    ) {
       const existing = last as Extract<MessageContent, { type: typeof kind }>;
       const merged = mergeStreamText(existing, delta);
       const text = merged.item.text;
@@ -2082,7 +2102,11 @@ class NotificationOnHistoryApplier {
       return;
     }
 
-    items.push({ type: kind, text: delta } as MessageContent);
+    items.push({
+      type: kind,
+      text: delta,
+      ...(messagePhase ? { messagePhase } : {}),
+    } as MessageContent);
     this.touchedAssistantEntryIndices.add(entryIndex);
     this.changed = true;
   }
@@ -2215,7 +2239,13 @@ class NotificationOnHistoryApplier {
           parsed[0]?.type !== 'text' ||
           (parsed[0]?.type === 'text' && parsed[0].text !== text)
         ) {
-          newItems.push(...parsed);
+          newItems.push(
+            ...parsed.map((part) =>
+              part.type === 'text' && item.messagePhase
+                ? { ...part, messagePhase: item.messagePhase }
+                : part
+            )
+          );
           modified = true;
         } else {
           newItems.push(item);
@@ -2439,7 +2469,8 @@ export const applyMessageContentsBatch = (
   const appendOrMergeAdjacentText = (
     entryIndex: number,
     kind: Extract<MessageContent, { type: 'text' | 'thought' }>['type'],
-    delta: string
+    delta: string,
+    messagePhase?: 'commentary' | 'final_answer'
   ) => {
     if (!delta) return;
     const state = entryStates[entryIndex];
@@ -2448,7 +2479,11 @@ export const applyMessageContentsBatch = (
     // Most ACP updates stream text/thought in many small deltas.
     // Keep the stored representation compact by merging adjacent deltas.
     const last = state.items[state.items.length - 1];
-    if (last && last.type === kind) {
+    if (
+      last &&
+      last.type === kind &&
+      (last.type !== 'text' || last.messagePhase === messagePhase)
+    ) {
       const existing = last as Extract<MessageContent, { type: typeof kind }>;
       const merged = mergeStreamText(existing, delta);
       const text = merged.item.text;
@@ -2466,7 +2501,11 @@ export const applyMessageContentsBatch = (
         state.items.pop();
       }
     } else {
-      state.items.push({ type: kind, text: delta } as MessageContent);
+      state.items.push({
+        type: kind,
+        text: delta,
+        ...(messagePhase ? { messagePhase } : {}),
+      } as MessageContent);
     }
     state.dirty = true;
   };
@@ -2567,7 +2606,7 @@ export const applyMessageContentsBatch = (
         const text = sanitizeLodyInternalInstructions(message.text);
         if (!text) break;
         const entryIndex = ensureActiveAssistantEntry();
-        appendOrMergeAdjacentText(entryIndex, 'text', text);
+        appendOrMergeAdjacentText(entryIndex, 'text', text, message.messagePhase);
         break;
       }
       case 'thought': {
@@ -2640,7 +2679,13 @@ export const applyMessageContentsBatch = (
         parsed[0]?.type !== 'text' ||
         (parsed[0]?.type === 'text' && parsed[0].text !== item.text)
       ) {
-        newItems.push(...parsed);
+        newItems.push(
+          ...parsed.map((part) =>
+            part.type === 'text' && item.messagePhase
+              ? { ...part, messagePhase: item.messagePhase }
+              : part
+          )
+        );
         modified = true;
       } else {
         newItems.push(item);

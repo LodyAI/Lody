@@ -126,15 +126,37 @@ export function createEncryptedDispatchLegacy(options: {
       );
     });
   const requestFeature = async (
-    request: LocalMachineRpcRequest
+    request: LocalMachineRpcRequest,
+    optionsForRequest: {
+      requestId?: string;
+      expectedDevice?: string;
+      onPrepared?: (requesterDevice: string) => void;
+      signal?: AbortSignal;
+    } = {}
   ): Promise<LocalMachineRpcResponse> => {
     if (closed || !options.prepareFeature || !options.acceptFeature)
       throw new Error('e2ee_rpc_unavailable');
-    const input = { requestId: crypto.randomUUID().replaceAll('-', ''), request };
+    if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
+    const input = {
+      requestId: optionsForRequest.requestId ?? crypto.randomUUID().replaceAll('-', ''),
+      request,
+    };
     const original = await options.prepareFeature(input);
+    if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
+    if (original.requestId !== input.requestId || original.targetMachineId !== request.machineId)
+      throw new Error('e2ee_rpc_request_binding');
+    if (
+      optionsForRequest.expectedDevice &&
+      original.requesterDevice !== optionsForRequest.expectedDevice
+    )
+      throw new Error('e2ee_rpc_signer_mismatch');
+    optionsForRequest.onPrepared?.(original.requesterDevice);
+    if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const client = yield* channel(original);
+        if (optionsForRequest.signal?.aborted)
+          return yield* Effect.fail(new Error('e2ee_rpc_aborted'));
         return yield* client.send(
           original,
           { kind: 'feature', input },
@@ -146,6 +168,29 @@ export function createEncryptedDispatchLegacy(options: {
       ? result
       : { ok: false, error: 'Encrypted machine request timed out.' };
   };
+  const prepared = (original: E2eePreparedDispatch, input: E2eeDispatchInput) => ({
+    original,
+    send: () => {
+      const send = () =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const client = yield* channel(original);
+            const result = yield* client.send(original, { kind: 'dispatch', input });
+            return result && 'type' in result ? result : null;
+          })
+        );
+      if (!effects) return send();
+      // A duplicate may settle before the original append. Retain its accounting
+      // until every sender settles, and count chunked requests only once.
+      const dispatch = dispatches.get(original.requestId) ?? { senders: 0, appended: false };
+      dispatches.set(original.requestId, dispatch);
+      dispatch.senders += 1;
+      return effects.track('dispatch', send).finally(() => {
+        dispatch.senders -= 1;
+        if (dispatch.senders === 0) dispatches.delete(original.requestId);
+      });
+    },
+  });
   return {
     prepare: async (machineId: string, input: E2eeDispatchInput) => {
       if (closed) throw new Error('e2ee_rpc_closed');
@@ -166,52 +211,32 @@ export function createEncryptedDispatchLegacy(options: {
             );
           }
         );
-      native.catch(() => undefined);
+      const ready = native.then((original) => {
+        if (closed) throw new Error('e2ee_rpc_closed');
+        console.debug('[e2ee-rpc-timing]', {
+          stage: 'send',
+          requestId: original.requestId,
+          userTurnId: input.userTurnId,
+          at: started,
+        });
+        return prepared(original, input);
+      });
+      ready.catch(() => undefined);
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const original = await Promise.race([
-        native,
+      return await Promise.race([
+        ready,
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(
             () =>
               reject(
                 withdrawn.has(machineId)
                   ? new Error(E2EE_MACHINE_NOT_SHARED)
-                  : new EncryptedPrepareTimeout(native)
+                  : new EncryptedPrepareTimeout(ready)
               ),
             PREPARE_DEADLINE_MS
           );
         }),
       ]).finally(() => clearTimeout(timer));
-      if (closed) throw new Error('e2ee_rpc_closed');
-      console.debug('[e2ee-rpc-timing]', {
-        stage: 'send',
-        requestId: original.requestId,
-        userTurnId: input.userTurnId,
-        at: started,
-      });
-      return {
-        original,
-        send: () => {
-          const send = () =>
-            Effect.runPromise(
-              Effect.gen(function* () {
-                const client = yield* channel(original);
-                const result = yield* client.send(original, { kind: 'dispatch', input });
-                return result && 'type' in result ? result : null;
-              })
-            );
-          if (!effects) return send();
-          // A duplicate may settle before the original append. Retain its accounting
-          // until every sender settles, and count chunked requests only once.
-          const dispatch = dispatches.get(original.requestId) ?? { senders: 0, appended: false };
-          dispatches.set(original.requestId, dispatch);
-          dispatch.senders += 1;
-          return effects.track('dispatch', send).finally(() => {
-            dispatch.senders -= 1;
-            if (dispatch.senders === 0) dispatches.delete(original.requestId);
-          });
-        },
-      };
     },
     requestFeature,
     query: (machineId: string, method: string, params: unknown, timeoutMs: number) =>

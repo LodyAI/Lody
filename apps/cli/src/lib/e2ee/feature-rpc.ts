@@ -11,7 +11,13 @@ import type { AuthorizeEncryptedExecution } from './agent-execution';
 import { RealtimeJournal, type RealtimeStartPermit } from './realtime-journal';
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
-export type EncryptedFeatureContext = { requestId: string; expiresAt: number; signal: AbortSignal };
+export type EncryptedFeatureContext = {
+  requestId: string;
+  requesterDevice: string;
+  expiresAt: number;
+  signal: AbortSignal;
+  authority?: { isCurrent(): boolean; signal: AbortSignal };
+};
 export type EncryptedFeatureHandler = (
   request: LocalMachineRpcRequest,
   context: EncryptedFeatureContext
@@ -27,6 +33,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
   journal: () => RealtimeJournal;
   authorize: AuthorizeEncryptedExecution;
   authorizeRead: AuthorizeEncryptedExecution;
+  authoritySignal?: () => AbortSignal;
   isOpen: () => boolean;
   handle: EncryptedFeatureHandler;
   client: LoroStreamsJsonStreamClient;
@@ -47,51 +54,64 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     if (active.has(envelope.id) || active.size >= 32) return true;
     active.add(envelope.id);
     const authorize = read ? options.authorizeRead : options.authorize;
-    const invoke = Effect.acquireUseRelease(
-      Effect.sync(() => ({
-        controller: new AbortController(),
-        raw: undefined as Promise<LocalMachineRpcResponse> | undefined,
-      })),
-      (owner) => {
-        const work = Effect.tryPromise({
-          try: () =>
-            (owner.raw = options.handle(opened.input.request, {
-              requestId: opened.requestId,
-              expiresAt: opened.expiresAt,
-              signal: owner.controller.signal,
-            })),
-          catch: (cause) => cause,
-        });
-        return read
-          ? Effect.gen(function* () {
-              const now = yield* Clock.currentTimeMillis;
-              return yield* work.pipe(
-                Effect.timeout(Math.min(45_000, Math.max(1, opened.expiresAt - now))),
-                Effect.catch(() =>
-                  Effect.succeed({
-                    ok: false,
-                    code: 'e2ee_query_failed',
-                    error: 'Query failed or exceeded its deadline.',
-                  } as const)
-                )
-              );
-            })
-          : work;
-      },
-      (owner) =>
-        Effect.promise(async () => {
-          owner.controller.abort();
-          await owner.raw?.catch(() => undefined);
-        })
-    );
+    const invoke = (authority: { isCurrent(): boolean; signal: AbortSignal } | undefined) =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => ({
+          controller: new AbortController(),
+          raw: undefined as Promise<LocalMachineRpcResponse> | undefined,
+        })),
+        (owner) => {
+          const work = Effect.tryPromise({
+            try: () =>
+              (owner.raw = options.handle(opened.input.request, {
+                requestId: opened.requestId,
+                requesterDevice: opened.requesterDevice,
+                expiresAt: opened.expiresAt,
+                signal: owner.controller.signal,
+                authority,
+              })),
+            catch: (cause) => cause,
+          });
+          return read
+            ? Effect.gen(function* () {
+                const now = yield* Clock.currentTimeMillis;
+                return yield* work.pipe(
+                  Effect.timeout(Math.min(45_000, Math.max(1, opened.expiresAt - now))),
+                  Effect.catch(() =>
+                    Effect.succeed({
+                      ok: false,
+                      code: 'e2ee_query_failed',
+                      error: 'Query failed or exceeded its deadline.',
+                    } as const)
+                  )
+                );
+              })
+            : work;
+        },
+        (owner) =>
+          Effect.promise(async () => {
+            owner.controller.abort();
+            await owner.raw?.catch(() => undefined);
+          })
+      );
     const task = Effect.gen(function* () {
       const authority = yield* authorize(options.workspaceId, opened.requesterDevice);
+      const authoritySignal = options.authoritySignal?.();
       if (
         authority._tag !== 'Authorized' ||
+        (opened.input.request.method === 'machine/acp-interaction' &&
+          (!authority.isCurrent ||
+            !authoritySignal ||
+            authoritySignal.aborted ||
+            !authority.isCurrent())) ||
         !options.isOpen() ||
         (yield* Clock.currentTimeMillis) >= opened.expiresAt
       )
         return yield* Effect.void;
+      const admittedAuthority =
+        authority.isCurrent && authoritySignal
+          ? { isCurrent: authority.isCurrent, signal: authoritySignal }
+          : undefined;
       yield* options.native.retainFeatureRequest(options.machineId, opened);
       let frames: Uint8Array[];
       if (read) {
@@ -100,7 +120,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           frames = yield* options.native.sealFeatureResult(
             options.machineId,
             opened,
-            yield* invoke
+            yield* invoke(admittedAuthority)
           );
       } else {
         const journal = yield* attempt(options.journal);
@@ -124,7 +144,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
             frames: yield* options.native.sealFeatureResult(
               options.machineId,
               opened,
-              yield* invoke
+              yield* invoke(admittedAuthority)
             ),
           };
           pending.set(opened.requestId, owned);

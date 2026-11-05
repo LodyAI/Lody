@@ -14,7 +14,13 @@ export type WorkspaceWatchChildMessage =
       revision: number;
       watchedRoots: string[];
     }
-  | { type: 'code-collab-watch/dirty'; generation: number; root: string }
+  | {
+      type: 'code-collab-watch/dirty';
+      generation: number;
+      root: string;
+      /** Root-relative POSIX path of the event; absent when the OS gave none. */
+      path?: string;
+    }
   | { type: 'code-collab-watch/error'; generation: number; root: string; code: string }
   | {
       type: 'code-collab-watch/stats';
@@ -72,7 +78,12 @@ export function parseWorkspaceWatchParentMessage(
 export function parseWorkspaceWatchChildMessage(value: unknown): WorkspaceWatchChildMessage | null {
   if (!isGenerationMessage(value)) return null;
   if (value.type === 'code-collab-watch/dirty' && typeof value.root === 'string') {
-    return { type: value.type, generation: value.generation, root: value.root };
+    return {
+      type: value.type,
+      generation: value.generation,
+      root: value.root,
+      ...(typeof value.path === 'string' && value.path.length > 0 ? { path: value.path } : {}),
+    };
   }
   if (
     value.type === 'code-collab-watch/error' &&

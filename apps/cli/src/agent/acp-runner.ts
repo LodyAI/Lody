@@ -1,5 +1,14 @@
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
+import {
+  createSorbetAcpCustomProvider,
+  deleteSorbetAcpCustomProvider,
+  listSorbetAcpCredentials,
+  listSorbetAcpCustomProviders,
+  logoutSorbetAcpCredential,
+  type SorbetAcpCredential,
+  type SorbetAcpCustomProvider,
+} from './sorbet-acp-credentials';
 import { platformLayer, toShared } from '@/platform/process-options';
 import { Effect } from 'effect';
 import { prepareDeepSeekNodeEnvironment } from './deepseek-system-node';
@@ -63,6 +72,7 @@ import type {
 } from '@lody/shared';
 
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
+import type { SorbetCustomProviderInput } from '@lody/shared/local-machine-rpc';
 import type {
   LodyPromptSuggestion,
   RateLimitsSnapshot,
@@ -114,6 +124,7 @@ export type CreateAcpClientOptions = {
    * adapter uses the native local runner; other agents default to true.
    */
   terminalEnabled?: boolean;
+  discoverAuthenticationMethods?: boolean;
   workspaceId?: WorkspaceId;
   machineId?: MachineId;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
@@ -122,7 +133,7 @@ export type CreateAcpClientOptions = {
     requestId: string,
     request: RequestPermissionRequest
   ): Promise<RequestPermissionResponse>;
-  onUsageUpdate?(usage: SessionUsageUpdate): void;
+  onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
   onRateLimitUpdate?(snapshot: RateLimitsSnapshot): void;
   onPromptSuggestion?(suggestion: LodyPromptSuggestion): void;
@@ -155,6 +166,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     resolveAdditionalDirectories: options.resolveAdditionalDirectories,
     launcher: options.launcher,
     terminalEnabled: options.terminalEnabled,
+    discoverAuthenticationMethods: options.discoverAuthenticationMethods,
     onStartupStage: options.onStartupStage,
     onUpdateMessage: options.onUpdateMessage,
     onRequestPermission: options.onRequestPermission,
@@ -287,6 +299,7 @@ export type StartLocalAcpAgentOptions = {
   terminalManager: TerminalManager;
   /** Set to false to disable terminal capability advertisement. Defaults to true. */
   terminalEnabled?: boolean;
+  discoverAuthenticationMethods?: boolean;
   onUpdateMessage(message: AcpSessionNotification): void;
   onRequestPermission(
     requestId: string,
@@ -384,6 +397,167 @@ export async function initializeAndReadAcpRateLimits(stream: Stream) {
   );
 }
 
+export type SorbetAcpOperation =
+  | { type: 'list' }
+  | { type: 'logout'; providerId: string }
+  | { type: 'providers-list' }
+  | { type: 'providers-create'; provider: SorbetCustomProviderInput }
+  | { type: 'providers-delete'; providerId: string };
+
+/** What one bounded Sorbet operation produced; the caller narrows by the operation it ran. */
+export type SorbetAcpOperationOutcome =
+  | { kind: 'credentials'; credentials: SorbetAcpCredential[] }
+  | { kind: 'providers'; providers: SorbetAcpCustomProvider[] }
+  | { kind: 'provider'; provider: SorbetAcpCustomProvider }
+  | { kind: 'none' };
+
+function openSorbetConnection(stream: Stream) {
+  return new ClientSideConnection(
+    () => ({
+      requestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
+      sessionUpdate: async () => {},
+    }),
+    stream
+  );
+}
+
+export async function initializeAndRunSorbetCredentials(
+  stream: Stream,
+  signal: AbortSignal,
+  operation: { type: 'list' } | { type: 'logout'; providerId: string },
+  onInitialized?: () => void
+) {
+  const connection = openSorbetConnection(stream);
+  const initialized = await connection.initialize({
+    protocolVersion: PROTOCOL_VERSION,
+    clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
+  });
+  onInitialized?.();
+  signal.throwIfAborted();
+  if (operation.type === 'list') {
+    return await listSorbetAcpCredentials(connection, initialized.agentCapabilities);
+  }
+  await logoutSorbetAcpCredential(connection, initialized.agentCapabilities, operation.providerId);
+  return [];
+}
+
+/** Custom Provider operations run on their own bounded connection, like credentials. */
+export async function initializeAndRunSorbetOperation(
+  stream: Stream,
+  signal: AbortSignal,
+  operation: SorbetAcpOperation,
+  onInitialized?: () => void
+): Promise<SorbetAcpOperationOutcome> {
+  if (operation.type === 'list' || operation.type === 'logout') {
+    const credentials = await initializeAndRunSorbetCredentials(
+      stream,
+      signal,
+      operation,
+      onInitialized
+    );
+    return { kind: 'credentials', credentials };
+  }
+  const connection = openSorbetConnection(stream);
+  const initialized = await connection.initialize({
+    protocolVersion: PROTOCOL_VERSION,
+    clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
+  });
+  onInitialized?.();
+  signal.throwIfAborted();
+  if (operation.type === 'providers-list') {
+    return {
+      kind: 'providers',
+      providers: await listSorbetAcpCustomProviders(connection, initialized.agentCapabilities),
+    };
+  }
+  if (operation.type === 'providers-create') {
+    return {
+      kind: 'provider',
+      provider: await createSorbetAcpCustomProvider(
+        connection,
+        initialized.agentCapabilities,
+        operation.provider
+      ),
+    };
+  }
+  await deleteSorbetAcpCustomProvider(
+    connection,
+    initialized.agentCapabilities,
+    operation.providerId
+  );
+  return { kind: 'none' };
+}
+
+/** A dedicated, bounded Sorbet process; no session, terminal, filesystem or MCP access. */
+export async function runLocalSorbetCredentials(
+  logger: Logger,
+  operation: SorbetAcpOperation,
+  requestSignal?: AbortSignal,
+  testOptions?: { spawnImpl?: NodeProcessApi['spawn'] }
+) {
+  const timeoutSignal = AbortSignal.timeout(25_000);
+  const signal = requestSignal ? AbortSignal.any([timeoutSignal, requestSignal]) : timeoutSignal;
+  signal.throwIfAborted();
+  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-sorbet-credentials-'));
+  let initialized = false;
+  try {
+    const started = await startLocalAcpProtocol(
+      {
+        cliType: 'builtin',
+        agentType: 'sorbet',
+        workdir,
+        logger,
+        signal,
+        spawnImpl: testOptions?.spawnImpl,
+        terminalEnabled: false,
+        terminalManager: {
+          createTerminal: async () => {
+            throw new Error('Terminal unavailable');
+          },
+          terminalOutput: async () => {
+            throw new Error('Terminal unavailable');
+          },
+          releaseTerminal: async () => {},
+          waitForTerminalExit: async () => ({ exitCode: null, signal: null }),
+          killTerminal: async () => {},
+        },
+        onUpdateMessage: () => {},
+        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      },
+      async ({ stream, startupAbort }) => {
+        return {
+          outcome: await Promise.race([
+            initializeAndRunSorbetOperation(stream, signal, operation, () => {
+              initialized = true;
+            }),
+            ...(startupAbort ? [startupAbort] : []),
+          ]),
+        };
+      },
+      true,
+      true,
+      () => !initialized && !signal.aborted
+    );
+    try {
+      await terminateAcpProcessTree(started.agentProcess, {
+        logger,
+        sessionLabel: 'sorbet-credentials',
+        exitTimeoutMs: 3000,
+      });
+    } catch (cause) {
+      throw new AcpQuotaCleanupError(started.agentProcess, cause);
+    }
+    signal.throwIfAborted();
+    return started.outcome;
+  } finally {
+    try {
+      fs.rmSync(workdir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 /** Read-only ACP initialization: no session, MCP servers, file access or prompts. */
 export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions) {
   const started = await startLocalAcpProtocol(
@@ -435,7 +609,9 @@ export async function prepareAcpProcessEnvironmentLegacy(
 async function startLocalAcpProtocol<T>(
   options: StartLocalAcpAgentOptions,
   startClient: (options: CreateAcpClientOptions) => Promise<T>,
-  retainCleanupFailure = false
+  retainCleanupFailure = false,
+  sensitiveOutput = false,
+  safeOfflineBeforeInitialization?: () => boolean
 ) {
   options.signal?.throwIfAborted();
   // Async resolve so registry agents distributed as a platform binary are
@@ -523,12 +699,14 @@ async function startLocalAcpProtocol<T>(
   // cleanly: the codex CODEX_HOME setup/cleanup lives inside, so a failed attempt's
   // teardown does not leak into the retry.
   let lastStderrTail = '';
+  let safeOfflineFailure = false;
   const attemptStart = async (
     attemptArgs: readonly string[],
     startupTimeouts?: AcpStartupTimeoutOptions
   ) => {
     options.signal?.throwIfAborted();
     lastStderrTail = '';
+    safeOfflineFailure = false;
     if (shouldUseWorkdirCodexHome) {
       fs.mkdirSync(env.CODEX_HOME!, { recursive: true });
       if (isTitleAgentCodexRun && localConfigPath && fs.existsSync(defaultConfigPath)) {
@@ -606,6 +784,12 @@ async function startLocalAcpProtocol<T>(
       `[acp-startup] spawned ACP process (cliType=${options.cliType} agentType=${options.agentType} workdir=${options.workdir})`
     );
 
+    let sawProtocolOutput = false;
+    if (safeOfflineBeforeInitialization) {
+      agentProcess.stdout?.on('data', () => {
+        sawProtocolOutput = true;
+      });
+    }
     const stderrStream = agentProcess.stderr;
     let stderrTail = '';
     if (stderrStream) {
@@ -614,6 +798,7 @@ async function startLocalAcpProtocol<T>(
         if (!chunk) return;
         stderrTail = appendStderrTail(stderrTail, chunk);
         lastStderrTail = stderrTail;
+        if (sensitiveOutput) return;
         options.logger.debug(
           `[acp-startup] stderr (${chunk.length} chars): ${truncateLogText(chunk, {
             maxChars: 1200,
@@ -643,7 +828,7 @@ async function startLocalAcpProtocol<T>(
         sessionId: 'acp-startup',
         command: launch.command,
         args: [...attemptArgs],
-        getStderrTail: () => stderrTail,
+        getStderrTail: () => (sensitiveOutput ? '' : stderrTail),
       }
     );
 
@@ -684,6 +869,7 @@ async function startLocalAcpProtocol<T>(
         },
         launcher,
         terminalEnabled: options.terminalEnabled,
+        discoverAuthenticationMethods: options.discoverAuthenticationMethods,
         onUpdateMessage: options.onUpdateMessage,
         onRequestPermission: options.onRequestPermission,
         startupTimeouts,
@@ -724,6 +910,14 @@ async function startLocalAcpProtocol<T>(
         );
       });
 
+      safeOfflineFailure =
+        safeOfflineBeforeInitialization?.() === true &&
+        !sawProtocolOutput &&
+        agentProcess.exitCode !== null &&
+        agentProcess.exitCode !== 0 &&
+        /npm (?:error|ERR!) code (?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH)/i.test(
+          stderrTail
+        );
       throw startupError;
     } finally {
       options.signal?.removeEventListener('abort', handleSignalAbort);
@@ -746,6 +940,9 @@ async function startLocalAcpProtocol<T>(
     async () =>
       await runNpxStartupWithRecovery({
         maxAttempts: retainCleanupFailure ? 1 : undefined,
+        canRetryOfflineAfterFailure: safeOfflineBeforeInitialization
+          ? () => safeOfflineFailure
+          : undefined,
         command: launch.command,
         args: launch.args,
         env: envWithAcpStartup,

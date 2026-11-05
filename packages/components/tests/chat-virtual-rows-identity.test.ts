@@ -125,7 +125,9 @@ describe('DSH thought visibility', () => {
     const after = buildChatVirtualRows(fixture(id, [thought, tool, nextThought]));
     expect(visibleContents(after)).toEqual([thought, nextThought]);
     expect(headers(after).map((header) => header.expanded)).toEqual([true, false, true]);
-    expect(after.slice(0, 2).map((row) => row.key)).toEqual(before.map((row) => row.key));
+    expect(after.slice(0, before.length).map((row) => row.key)).toEqual(
+      before.map((row) => row.key)
+    );
     expect(headers(after).map((header) => header.isThinking)).toEqual([false, false, true]);
   });
 

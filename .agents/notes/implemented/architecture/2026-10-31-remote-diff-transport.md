@@ -74,6 +74,11 @@ Older readers reject unknown fields in strict file rows, so generations use addi
 `[path, 'v'] -> { g: <random epoch>.<counter> }` siblings. Legacy scans skip these keys.
 Writes compare siblings separately, commit generation-only changes, delete orphan
 siblings with their file row and advance the existing signal after publication.
+Generation siblings count toward the [whole-index and publication budgets](../bug-fix/2026-11-05-code-collab-file-index-budget.md).
+Each changed path reserves a second row and up to 64 encoded token bytes. File rows,
+generation-only changes and orphan sibling cleanup use the same byte-bounded commit
+plan, with flush/sync after each batch. Older oversized tokens are renewed before
+publication rather than exceeding the reservation.
 No content hash enters the shared index: a hash would let any index reader confirm
 whether a guessed private file body exists, even without owner-scoped read access.
 

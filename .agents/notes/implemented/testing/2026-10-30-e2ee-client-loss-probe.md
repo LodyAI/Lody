@@ -54,11 +54,9 @@ strictly and attaches the scope from the sender and cached account.
 
 ## Limits and product gaps
 
-- The desktop maps the server's `e2ee_device_revoked` to a generic `unauthorized`
-  backend error and has no device-revocation fence. A J08/client run therefore cannot
-  find an authoritative `e2ee_device_revoked` row and stays
-  `removal_not_authoritatively_confirmed` until a product change types and fences
-  that code. The CLI already types it (`CloudE2eeDeviceRevoked`).
+- Refusals after the cut carry the exact recorded reason, and dispatch confirms the
+  device credential before returning a frame; see the
+  [live reader cut](../architecture/2026-10-30-e2ee-desktop-device-revocation.md#live-reader-cut).
 - `turnStarts` measures the client's appended turn dispatches, not ACP starts in a
   daemon process; daemon-side execution is guarded and tested in the CLI.
 - Packaged runs (`LODY_ACCEPT_CLIENT_LOSS=1` in the private harness) cannot use the

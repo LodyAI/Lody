@@ -404,8 +404,8 @@ export function SessionPrIcon({
           ? CircleDot
           : null;
 
-  if (verdict && (VerdictIcon || verdict === 'pending')) {
-    return (
+  const mark =
+    verdict && (VerdictIcon || verdict === 'pending') ? (
       <MaskedPrCiIcon
         BaseIcon={BaseIcon}
         VerdictIcon={VerdictIcon}
@@ -418,19 +418,32 @@ export function SessionPrIcon({
           className
         )}
       />
+    ) : (
+      <BaseIcon
+        className={cn(
+          compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
+          'shrink-0',
+          meta.iconColorClassName,
+          className
+        )}
+        strokeWidth={2.25}
+        aria-hidden="true"
+      />
     );
-  }
+
+  // Sidebar rows park this mark in `SidebarRowEndSlot`, which centers anything
+  // narrower than its 20px reserve (`min-w-5`, the archive target). A Mergeable
+  // pill widens that cluster past 20px, the centering inset disappears, and the
+  // mark slides to the trailing edge. Hold the compact mark in a box the same
+  // size as the reserve so the pill grows to the left and the mark stays put.
+  if (!compact) return mark;
   return (
-    <BaseIcon
-      className={cn(
-        compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
-        'shrink-0',
-        meta.iconColorClassName,
-        className
-      )}
-      strokeWidth={2.25}
-      aria-hidden="true"
-    />
+    <span
+      data-session-pr-icon-anchor=""
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center"
+    >
+      {mark}
+    </span>
   );
 }
 

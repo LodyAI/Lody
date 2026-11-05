@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   readCodeCollabFileGenerations,
+  CODE_COLLAB_FILE_GENERATION_MAX_BYTES,
   readCodeCollabFileIndexFromFlock,
   codeCollabFileIndexValuesEqual,
   type CodeCollabFileGenerations,
@@ -11,7 +12,8 @@ import { waitForCodeCollabTask } from './code-collab-task';
 import {
   readCodeCollabFileIndexSignalFromFlock,
   writeCodeCollabFileIndexSignalToFlock,
-  writeCodeCollabFileIndexToFlock,
+  applyCodeCollabFileIndexFlockWriteBatch,
+  planCodeCollabFileIndexFlockWrite,
   type CodeCollabFileIndexWritableFlock,
   type CodeCollabV2FileIndexState,
 } from '@lody/shared';
@@ -76,23 +78,27 @@ export async function publishCodeCollabFileIndexFlock(args: {
       !args.resetDiffGenerations &&
       !bumped.has(path) &&
       previousGenerations[path] &&
+      Buffer.byteLength(JSON.stringify(previousGenerations[path])) <=
+        CODE_COLLAB_FILE_GENERATION_MAX_BYTES + 2 &&
       codeCollabFileIndexValuesEqual(previous[path], value)
         ? previousGenerations[path]
         : `${diffGenerationEpoch}.${++diffGenerationCounter}`;
   }
-  const changed = writeCodeCollabFileIndexToFlock(
-    handle.flock,
-    args.fileIndex,
-    args.updatedAtMs,
-    generations
-  );
-  if (!changed) {
+  // File rows and generation siblings share the same bounded commit plan.
+  // Flush + sync keeps legacy cleanup and generation-only updates within the
+  // Streams append budget. Repair re-plans from the replica after a failed batch.
+  const batches = planCodeCollabFileIndexFlockWrite(handle.flock, args.fileIndex, { generations });
+  if (batches.length === 0) {
     return { changed: false, generations };
   }
   try {
-    await waitForCodeCollabTask(args.repo.flush(), args.signal);
-    args.signal?.throwIfAborted();
-    await syncFlock(args.repo, handle, args.flockDocId, args.signal);
+    for (const batch of batches) {
+      args.signal?.throwIfAborted();
+      applyCodeCollabFileIndexFlockWriteBatch(handle.flock, batch, args.updatedAtMs);
+      await waitForCodeCollabTask(args.repo.flush(), args.signal);
+      args.signal?.throwIfAborted();
+      await syncFlock(args.repo, handle, args.flockDocId, args.signal);
+    }
   } catch (error) {
     throw new CodeCollabFileIndexChangedPublishError(error);
   }

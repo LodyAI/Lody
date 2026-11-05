@@ -7,6 +7,9 @@ import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { CODE_COLLAB_FILE_INDEX_LIMITS, estimateCodeCollabFileIndexStateBytes } from '@lody/shared';
+
+import { computeAllChanges, createGitIgnoreScanFilter } from './file-index-scan-core';
 import fileIndexScanWorker from './file-index-scan-worker';
 
 const execFileAsync = promisify(execFile);
@@ -197,6 +200,196 @@ describe('fileIndexScanWorker', () => {
       expect(merged.fileIndex['avatar.txt']).toBe(true);
     });
   });
+  it('keeps an untracked in-project pnpm store out of the file index but shows tracked files there', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      // Tracked before the cache policy applies: must stay visible.
+      await mkdir(path.join(workspaceRoot, '.pnpm-store', 'pinned'), { recursive: true });
+      await writeFile(path.join(workspaceRoot, '.pnpm-store', 'pinned', 'tracked.json'), '{}\n');
+      await git(workspaceRoot, ['add', '.pnpm-store/pinned/tracked.json']);
+      await git(workspaceRoot, ['commit', '-m', 'tracked store file']);
+      await mkdir(path.join(workspaceRoot, '.pnpm-store', 'v10', 'index'), { recursive: true });
+      for (let index = 0; index < 20; index += 1) {
+        await writeFile(
+          path.join(workspaceRoot, '.pnpm-store', 'v10', 'index', `entry-${index}.json`),
+          '{"cache":true}\n'
+        );
+      }
+
+      const result = await fileIndexScanWorker({
+        kind: 'full-state',
+        workspaceRoot,
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+      });
+      if (result.kind !== 'full-state' || result.status !== 'ok') throw new Error('Missing state');
+
+      const paths = Object.keys(result.fileIndex);
+      expect(paths).toContain('.pnpm-store/pinned/tracked.json');
+      expect(paths).toContain('src/new.ts');
+      expect(paths.filter((file) => file.startsWith('.pnpm-store/v10'))).toEqual([]);
+      expect(
+        Object.keys(result.allChanges).filter((file) => file.startsWith('.pnpm-store'))
+      ).toEqual([]);
+    });
+  });
+
+  it('honours .gitignore in non-recursive filesystem refreshes but keeps tracked files', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, '.gitignore'), 'coverage/\n*.log\n.env\n');
+      await writeFile(path.join(workspaceRoot, 'forced.log'), 'tracked despite the rule\n');
+      await git(workspaceRoot, ['add', '.gitignore']);
+      await git(workspaceRoot, ['add', '-f', 'forced.log']);
+      await git(workspaceRoot, ['commit', '-m', 'ignore rules']);
+      await mkdir(path.join(workspaceRoot, 'coverage'));
+      await writeFile(path.join(workspaceRoot, 'coverage', 'lcov.info'), 'x\n');
+      await writeFile(path.join(workspaceRoot, 'debug.log'), 'x\n');
+      await writeFile(path.join(workspaceRoot, '.env'), 'SECRET=1\n');
+      await mkdir(path.join(workspaceRoot, 'src', 'coverage'));
+
+      const result = await fileIndexScanWorker({
+        directoryAbsolutePath: workspaceRoot,
+        directoryWorkspacePath: '',
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+        recursive: false,
+      });
+      const rootPaths = result.entries.map(([file]) => file);
+      expect(rootPaths).toEqual(expect.arrayContaining(['README.md', 'src', 'forced.log']));
+      expect(rootPaths).not.toContain('coverage');
+      expect(rootPaths).not.toContain('debug.log');
+      expect(rootPaths).not.toContain('.env');
+
+      const nested = await fileIndexScanWorker({
+        directoryAbsolutePath: path.join(workspaceRoot, 'src'),
+        directoryWorkspacePath: 'src',
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+        recursive: false,
+      });
+      // Rules from the repository root apply to a subdirectory scan.
+      expect(nested.entries.map(([file]) => file).sort()).toEqual(['src/app.ts', 'src/new.ts']);
+    });
+  });
+
+  it('evaluates nested gitignore rules in-process so scans can prune ignored directories', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, '.gitignore'), '*.log\nbuild-out/\n');
+      await writeFile(path.join(workspaceRoot, '.git', 'info', 'exclude'), 'local-only/\n');
+      await mkdir(path.join(workspaceRoot, 'pkg', 'generated'), { recursive: true });
+      await writeFile(path.join(workspaceRoot, 'pkg', '.gitignore'), '!keep.log\ngenerated/\n');
+      await writeFile(path.join(workspaceRoot, 'pkg', 'vendor.log'), 'tracked\n');
+      await git(workspaceRoot, ['add', '.gitignore', 'pkg/.gitignore']);
+      await git(workspaceRoot, ['add', '-f', 'pkg/vendor.log']);
+      await git(workspaceRoot, ['commit', '-m', 'rules']);
+
+      const filter = await createGitIgnoreScanFilter(workspaceRoot);
+      if (!filter) throw new Error('Expected a Git ignore filter inside the worktree');
+      expect(
+        [
+          ...(await filter.ignoredEntryNames('', [
+            { name: 'build-out', isDirectory: true },
+            { name: 'a.log', isDirectory: false },
+            { name: 'local-only', isDirectory: true },
+            { name: 'pkg', isDirectory: true },
+            { name: 'README.md', isDirectory: false },
+          ])),
+        ].sort()
+      ).toEqual(['a.log', 'build-out', 'local-only']);
+      // A directory-only rule does not hide a file of the same name.
+      expect(
+        await filter.ignoredEntryNames('', [{ name: 'build-out', isDirectory: false }])
+      ).toEqual(new Set());
+
+      const nested = [
+        { name: 'keep.log', isDirectory: false },
+        { name: 'other.log', isDirectory: false },
+        { name: 'generated', isDirectory: true },
+        { name: 'vendor.log', isDirectory: false },
+      ];
+      // Deeper rules win (`!keep.log`); a force-added tracked file stays visible.
+      expect([...(await filter.ignoredEntryNames('pkg', nested))].sort()).toEqual([
+        'generated',
+        'other.log',
+      ]);
+      // A scan rooted below the top level applies the same chain of rules.
+      const subdirectory = await createGitIgnoreScanFilter(path.join(workspaceRoot, 'pkg'));
+      expect([...((await subdirectory?.ignoredEntryNames('', nested)) ?? [])].sort()).toEqual([
+        'generated',
+        'other.log',
+      ]);
+    });
+  });
+
+  it('prunes .gitignore directories from a recursive filesystem scan', async () => {
+    await withPlainWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, '.gitignore'), 'out/\n');
+      await mkdir(path.join(workspaceRoot, 'out', 'nested'), { recursive: true });
+      for (let index = 0; index < 50; index += 1) {
+        await writeFile(path.join(workspaceRoot, 'out', 'nested', `bundle-${index}.js`), 'x');
+      }
+
+      const result = await fileIndexScanWorker({
+        directoryAbsolutePath: workspaceRoot,
+        directoryWorkspacePath: '',
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+        recursive: true,
+      });
+      const paths = result.entries.map(([file]) => file);
+      expect(paths).toEqual(expect.arrayContaining(['README.md', 'src', 'src/app.ts']));
+      // Neither the ignored directory nor anything below it is read or counted.
+      expect(paths.filter((file) => file === 'out' || file.startsWith('out/'))).toEqual([]);
+    });
+  });
+
+  it('bounds the published index for a flood of untracked files without inventing deletions', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      const generated = path.join(workspaceRoot, 'generated-output', 'deeply', 'nested', 'chunks');
+      await mkdir(generated, { recursive: true });
+      for (let index = 0; index < 1_500; index += 1) {
+        await writeFile(path.join(generated, `chunk-${String(index).padStart(5, '0')}.txt`), 'x\n');
+      }
+
+      const result = await fileIndexScanWorker({
+        kind: 'full-state',
+        workspaceRoot,
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+      });
+      if (result.kind !== 'full-state' || result.status !== 'ok') throw new Error('Missing state');
+
+      expect(Object.keys(result.fileIndex).length).toBeLessThanOrEqual(
+        CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries
+      );
+      expect(estimateCodeCollabFileIndexStateBytes(result.fileIndex)).toBeLessThanOrEqual(
+        CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes
+      );
+      expect(result.omittedPaths).toBeGreaterThan(0);
+      // Over-budget paths are not loaded, not deleted.
+      expect(
+        Object.values(result.fileIndex).filter(
+          (value) => value !== true && value.kind === 'deleted'
+        )
+      ).toEqual([]);
+      // Root entries and the real source change survive the flood.
+      expect(result.fileIndex['README.md']).toBe(true);
+      expect(result.fileIndex['src/app.ts']).toEqual({ kind: 'file', change: { diff: [1, 0] } });
+      expect(result.fileIndex['generated-output']).toEqual({ kind: 'lazy' });
+    });
+  });
+
+  it('reads untracked files for line counts only within the budget', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, 'src', 'second.ts'), 'a\nb\nc\n');
+      const changes = await computeAllChanges(workspaceRoot, { untrackedLineCountBudget: 1 });
+      const untracked = [changes['src/new.ts'], changes['src/second.ts']];
+      expect(untracked.filter((value) => value === true)).toHaveLength(1);
+      expect(untracked.filter((value) => value !== true && value?.diff !== undefined)).toHaveLength(
+        1
+      );
+    });
+  });
+
   it('excludes paths deleted from the worktree from the Git scan', async () => {
     await withGitWorkspace(async (workspaceRoot) => {
       await unlink(path.join(workspaceRoot, 'README.md'));

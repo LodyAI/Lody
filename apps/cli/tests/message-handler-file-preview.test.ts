@@ -25,6 +25,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { Flock } from '@loro-dev/flock-wasm';
+import { LocalControlHandler } from '../src/lib/local-control-handler';
+import { LOCAL_MACHINE_RPC_PATH } from '@lody/shared/local-machine-rpc';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { ISession, SessionManager } from '../src/session/session-manager';
@@ -626,6 +628,83 @@ describe('MessageHandler file preview workspace lifecycle', () => {
         })
       ).toEqual({ ok: false, error: 'Project group probe scope mismatch' });
     }
+  });
+
+  it('checks the Sorbet config before dispatching local credential requests', async () => {
+    const internals = handler as unknown as {
+      sorbetCredentials: {
+        list: (id: string) => Promise<Array<{ providerId: string; type: string }>>;
+        logout: (id: string, providerId: string) => Promise<void>;
+      };
+    };
+    const removed: string[] = [];
+    internals.sorbetCredentials = {
+      list: async () => [{ providerId: 'openai', type: 'oauth' }],
+      logout: async (_id, providerId) => {
+        removed.push(providerId);
+      },
+    };
+    const config = { id: 'config', machineId, cliType: 'builtin', agentType: 'sorbet' };
+    document.getAgentConfigById = async () => config as never;
+    const providerId = '提供商 / 账户';
+    const control = new LocalControlHandler({
+      machineId,
+      logger,
+      dispatchSession: async () => {
+        throw new Error('unexpected');
+      },
+      dispatchProject: async () => {
+        throw new Error('unexpected');
+      },
+      dispatchMachineRpc: (message) => handler.handleLocalMachineRpc(message),
+    });
+    const send = (message: unknown) =>
+      control.handle({
+        path: LOCAL_MACHINE_RPC_PATH,
+        rawBody: JSON.stringify(message),
+        requestId: 1,
+      });
+    const base = { machineId, workspaceId };
+    expect(
+      await send({ ...base, method: 'sorbet/credentials-list', params: { configId: 'config' } })
+    ).toMatchObject({
+      status: 200,
+      payload: {
+        ok: true,
+        result: {
+          type: 'sorbet/credentials-list',
+          credentials: [{ providerId: 'openai', type: 'oauth' }],
+        },
+      },
+    });
+    expect(
+      await send({
+        ...base,
+        method: 'sorbet/credentials-logout',
+        params: { configId: 'config', providerId },
+      })
+    ).toMatchObject({
+      status: 200,
+      payload: { ok: true, result: { type: 'sorbet/credentials-logout' } },
+    });
+    expect(removed).toEqual([providerId]);
+    expect(
+      await send({
+        ...base,
+        machineId: 'other',
+        method: 'sorbet/credentials-logout',
+        params: { configId: 'config', providerId },
+      })
+    ).toMatchObject({ status: 403 });
+    config.agentType = 'other';
+    expect(
+      await send({
+        ...base,
+        method: 'sorbet/credentials-logout',
+        params: { configId: 'config', providerId },
+      })
+    ).toMatchObject({ status: 200, payload: { ok: false } });
+    expect(removed).toEqual([providerId]);
   });
 
   function writeArtifact(id = sessionId, text = content) {
