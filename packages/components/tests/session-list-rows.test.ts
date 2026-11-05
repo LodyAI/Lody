@@ -47,6 +47,20 @@ function makeSession(overrides: Partial<SessionMeta> & { id: string }): SessionM
   } as SessionMeta;
 }
 
+test('names a sidebar row by its group title, independent of the root tab title', () => {
+  const rows = buildSessionListRows(
+    [
+      makeSession({ id: 'named', title: 'Root tab', groupTitle: 'Group name' }),
+      makeSession({ id: 'legacy', title: 'Root tab only' }),
+    ],
+    { scope: 'team', currentUserId: 'user-1', defaultTitle: 'Untitled' }
+  );
+  expect(Object.fromEntries(rows.map((row) => [row.sessionId, row.title]))).toEqual({
+    named: 'Group name',
+    legacy: 'Root tab only',
+  });
+});
+
 describe('buildSessionListRows child-time aggregation', () => {
   test("parent task's latestMessageAt reflects the most recent child activity", () => {
     const parent = makeSession({ id: 'parent', lastMessageAt: 1_000, title: 'Parent' });

@@ -21,6 +21,7 @@ import {
   type AgentRoleId,
   type MachineId,
   type SessionId,
+  type SessionMeta,
   type SessionTurnInputConfig,
   type WorkspaceId,
 } from '@lody/shared';
@@ -1436,7 +1437,7 @@ describe('session MCP input schemas', () => {
         [{ sessionId: 'current', title: 'Current title' }],
         createMcpContext()
       )
-    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title' }]);
+    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title', scope: 'tab' }]);
     expect(() =>
       resolveSessionRenameItems(
         [
@@ -1449,9 +1450,9 @@ describe('session MCP input schemas', () => {
 
     const results = await applySessionRenameItems(
       [
-        { sessionId: 'session-1' as SessionId, title: 'One' },
-        { sessionId: 'missing' as SessionId, title: 'Missing' },
-        { sessionId: 'session-3' as SessionId, title: 'Three' },
+        { sessionId: 'session-1' as SessionId, title: 'One', scope: 'tab' },
+        { sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' },
+        { sessionId: 'session-3' as SessionId, title: 'Three', scope: 'tab' },
       ],
       async ({ sessionId }) => {
         if (sessionId === 'missing') {
@@ -1465,7 +1466,7 @@ describe('session MCP input schemas', () => {
     );
 
     expect(results).toEqual([
-      { sessionId: 'session-1', ok: true, title: 'One' },
+      { sessionId: 'session-1', ok: true, title: 'One', scope: 'tab' },
       {
         sessionId: 'missing',
         ok: false,
@@ -1475,7 +1476,7 @@ describe('session MCP input schemas', () => {
           retryable: false,
         },
       },
-      { sessionId: 'session-3', ok: true, title: 'Three' },
+      { sessionId: 'session-3', ok: true, title: 'Three', scope: 'tab' },
     ]);
   });
 
@@ -1497,15 +1498,15 @@ describe('session MCP input schemas', () => {
     const results = await persistSessionRenameItems(
       manager,
       [
-        { sessionId: 'session-1' as SessionId, title: 'One' },
-        { sessionId: 'missing' as SessionId, title: 'Missing' },
-        { sessionId: 'session-3' as SessionId, title: 'Three' },
+        { sessionId: 'session-1' as SessionId, title: 'One', scope: 'tab' },
+        { sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' },
+        { sessionId: 'session-3' as SessionId, title: 'Three', scope: 'tab' },
       ],
       'mcp.session_rename_many:current-session-id'
     );
 
     expect(results).toEqual([
-      { sessionId: 'session-1', ok: true, title: 'One' },
+      { sessionId: 'session-1', ok: true, title: 'One', scope: 'tab' },
       {
         sessionId: 'missing',
         ok: false,
@@ -1515,7 +1516,7 @@ describe('session MCP input schemas', () => {
           retryable: false,
         },
       },
-      { sessionId: 'session-3', ok: true, title: 'Three' },
+      { sessionId: 'session-3', ok: true, title: 'Three', scope: 'tab' },
     ]);
     expect(upsertDocMeta.mock.calls).toEqual([
       [getSessionRoomId('session-1' as SessionId), { title: 'One', titleSource: 'user' }],
@@ -1526,6 +1527,60 @@ describe('session MCP input schemas', () => {
       reason: 'mcp.session_rename_many:current-session-id',
       timeoutMs: 30_000,
     });
+  });
+
+  it('renames a tab and its group sidebar title independently', async () => {
+    const rootId = 'root-session' as SessionId;
+    const childId = 'child-session' as SessionId;
+    const metas = new Map<string, Partial<SessionMeta>>([
+      [getSessionRoomId(rootId), { id: rootId, title: 'Generated root', titleSource: 'generated' }],
+      [getSessionRoomId(childId), { id: childId, title: 'Child', parentSessionId: rootId }],
+    ]);
+    const manager = {
+      repo: {
+        getDocMeta: vi.fn(async (roomId: string) => {
+          const meta = metas.get(roomId);
+          return meta ? { meta, exists: true } : undefined;
+        }),
+        upsertDocMeta: vi.fn(async (roomId: string, patch: Partial<SessionMeta>) => {
+          metas.set(roomId, { ...metas.get(roomId), ...patch });
+        }),
+      },
+      waitUntilMetaSynced: vi.fn(async () => true),
+    } as unknown as LoroDocumentManager;
+    const reason = 'mcp.session_rename_many:current-session-id';
+
+    await persistSessionRenameItems(
+      manager,
+      [{ sessionId: rootId, title: 'Root tab', scope: 'tab' }],
+      reason
+    );
+    // The sidebar keeps the name it showed before the tab was renamed.
+    expect(metas.get(getSessionRoomId(rootId))).toMatchObject({
+      title: 'Root tab',
+      titleSource: 'user',
+      groupTitle: 'Generated root',
+      groupTitleSource: 'generated',
+    });
+
+    await persistSessionRenameItems(
+      manager,
+      [{ sessionId: rootId, title: 'Sidebar name', scope: 'group' }],
+      reason
+    );
+    expect(metas.get(getSessionRoomId(rootId))).toMatchObject({
+      title: 'Root tab',
+      groupTitle: 'Sidebar name',
+      groupTitleSource: 'user',
+    });
+
+    const [rejected] = await persistSessionRenameItems(
+      manager,
+      [{ sessionId: childId, title: 'Not a group', scope: 'group' }],
+      reason
+    );
+    expect(rejected).toMatchObject({ ok: false, error: { code: 'COMMAND_REJECTED' } });
+    expect(metas.get(getSessionRoomId(childId))).not.toHaveProperty('groupTitle');
   });
 
   it('does not request write confirmation when every session is missing', async () => {
@@ -1541,7 +1596,7 @@ describe('session MCP input schemas', () => {
     await expect(
       persistSessionRenameItems(
         manager,
-        [{ sessionId: 'missing' as SessionId, title: 'Missing' }],
+        [{ sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' }],
         'mcp.session_rename_many:current-session-id'
       )
     ).resolves.toEqual([
