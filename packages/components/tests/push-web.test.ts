@@ -87,6 +87,7 @@ async function setup(permission = 'granted') {
   });
   const push = await import('../src/lib/push-notifications');
   const remove = push.installPushPort({
+    selfHostedEnabled: true,
     register: async (input) => {
       uploaded.set(input.installationId, input);
     },
@@ -126,13 +127,13 @@ describe('Web Push lifecycle', () => {
     expect(t.push.isPushSupported()).toBe(false);
     t.remove();
   });
-  it('does not ask permission or subscribe on login before explicit opt-in; retires only the vendor scope', async () => {
+  it('does not ask permission or subscribe on login before explicit opt-in; preserves the alternate provider scope for rollback', async () => {
     const t = await setup();
     await t.client.login('alice');
     expect(t.uploaded.size).toBe(0);
     expect(t.subscription()).toBeNull();
     expect(t.requestPermission).not.toHaveBeenCalled();
-    expect(t.legacy.unregister).toHaveBeenCalledOnce();
+    expect(t.legacy.unregister).not.toHaveBeenCalled();
     expect(t.unrelated.unregister).not.toHaveBeenCalled();
     await t.client.User.PushSubscription.optIn();
     expect([...t.uploaded.values()][0]).toMatchObject({
