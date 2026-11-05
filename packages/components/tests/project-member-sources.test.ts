@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   buildProjectMemberSourceOptions,
+  resolveProjectEditorSource,
   type ProjectMemberSourceOption,
 } from '@/lib/project-member-sources';
 
@@ -43,6 +44,26 @@ const byKey = new Map(options.map((option) => [option.key, option]));
 const keys = (items: readonly ProjectMemberSourceOption[]) => items.map((option) => option.key);
 
 describe('project member sources', () => {
+  it('editing a folder keeps the selected machine and exact copy even when its repository is merged', () => {
+    const sources = buildProjectMemberSourceOptions({
+      localProjects: [
+        local(here, 'same-id', 'acme/web'),
+        local(studio, 'same-id', 'acme/web', 1),
+        local(studio, 'newer-copy', 'acme/web', 9),
+      ],
+      githubRepositories: [],
+    });
+    expect(resolveProjectEditorSource(`local:${studio}:same-id`, sources[0]!)).toEqual({
+      kind: 'local',
+      machineId: 'machine-2',
+      localProjectId: 'same-id',
+    });
+    expect(resolveProjectEditorSource('github:acme/web', sources[0]!)).toEqual({
+      kind: 'github',
+      repoFullName: 'acme/web',
+      preferLocal: true,
+    });
+  });
   it('marks only repositories the GitHub integration lists as reachable on GitHub', () => {
     const sources = buildProjectMemberSourceOptions({
       localProjects: [local(here, 'web', 'acme/web'), local(here, 'tool', 'private/tool')],
