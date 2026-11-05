@@ -958,7 +958,7 @@ export class LodyFleet {
       });
 
       let lody: Lody | null = null;
-      let memberRemoved = false;
+      let accessLost = false;
       let stopSchedules: (() => Promise<void>) | undefined;
       let stopAutomations: (() => Promise<void>) | undefined;
       let partialPoller: PrPollerWorkspaceHandle | undefined;
@@ -979,10 +979,17 @@ export class LodyFleet {
               });
             else this.runtimeStateReporter.clearIssue(code);
           },
-          onEncryptedMemberRemoved: async (owner) => {
-            memberRemoved = true;
+          onEncryptedAccessLost: async (owner, reason) => {
+            // Either loss stops this owner and any start still in flight for it.
+            accessLost = true;
             const state = this.runtimes.get(workspace.id);
-            if (!state || state.lody === owner) this.desiredWorkspaces.delete(workspace.id);
+            if (!state || state.lody === owner) {
+              // Only a removed member loses the workspace. A revoked machine identity
+              // keeps the binding and waits for re-enrolment; it never restarts with
+              // the revoked identity.
+              if (reason === 'member-removed') this.desiredWorkspaces.delete(workspace.id);
+              else this.waitingForPairing.add(workspace.id);
+            }
             if (state?.lody === owner) await this.stopWorkspace(workspace.id);
             else await owner.cleanup();
           },
@@ -1051,14 +1058,14 @@ export class LodyFleet {
           workspaceWatchCoordinator: this.workspaceWatchCoordinator,
         });
 
-        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || memberRemoved) {
+        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || accessLost) {
           await lody.cleanup();
           return;
         }
 
         await lody.start();
 
-        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || memberRemoved) {
+        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || accessLost) {
           await lody.cleanup();
           return;
         }

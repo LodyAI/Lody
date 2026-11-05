@@ -768,6 +768,138 @@ describe('LodyFleet local E2EE pairing during startup', () => {
   });
 });
 
+// A revoked machine identity is not a removed member: the account keeps the
+// workspace and re-enrols this machine, while a real removal still drops it.
+describe('LodyFleet encrypted access loss', () => {
+  const genesisHash = 'ab'.repeat(32);
+  const encrypted = {
+    id: 'ws-revoked',
+    name: 'Private',
+    slug: 'private',
+    role: 'owner',
+    contentMode: 'e2ee',
+    genesisHash,
+  };
+  const runtimeStub = () => {
+    const stub = {
+      cleanups: 0,
+      start: async () => {},
+      cleanup: async () => {
+        stub.cleanups += 1;
+      },
+      documentManager: { repo: {} },
+      onSessionTerminated: () => () => {},
+      isControlPlaneReady: () => true,
+      isControlPlaneRecovering: () => false,
+      isRemoteBridgeAttached: () => false,
+      getActiveSessionCount: () => 0,
+      getConnectedRoomCount: () => 0,
+      confirmEncryptedWorkspacePairing: async () => false,
+    };
+    return stub;
+  };
+  type AccessLost = (owner: unknown, reason: 'member-removed' | 'device-revoked') => Promise<void>;
+
+  const startedEncryptedWorkspace = async () => {
+    const legacy = await import('../src/lib/e2ee/workspace-legacy');
+    const first = runtimeStub();
+    const second = runtimeStub();
+    const runtimes = [first, second];
+    let accessLost: AccessLost | undefined;
+    const create = vi.spyOn(Lody, 'create').mockImplementation(async (options) => {
+      accessLost ??= (options as unknown as { onEncryptedAccessLost?: AccessLost })
+        .onEncryptedAccessLost;
+      const next = runtimes.shift();
+      if (!next) throw new Error('unexpected extra runtime');
+      return next as never;
+    });
+    const validate = vi
+      .spyOn(legacy, 'validateCliE2eePairingIntentLegacy')
+      .mockResolvedValue(undefined as never);
+    const activate = vi
+      .spyOn(legacy, 'activateCliE2eeWorkspaceLegacy')
+      .mockResolvedValue(undefined as never);
+    const reconcile = vi
+      .spyOn(projectMeta, 'reconcileMachineLocalProjectRootPaths')
+      .mockResolvedValue(undefined);
+    const schedules = vi.spyOn(scheduleWorkspace, 'createScheduleWorkspace').mockResolvedValue({
+      evaluate: async () => {},
+      dispose: async () => {},
+    });
+    const harness = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
+      { ...createTestCloudPort(), e2ee: {} as NonNullable<CloudPort['e2ee']> }
+    );
+    const fleet = harness.fleet as unknown as {
+      desiredWorkspaces: Map<string, unknown>;
+      runtimes: Map<string, { lody: unknown }>;
+      waitingForPairing: Set<string>;
+      retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+      startWorkspace(workspace: never): Promise<void>;
+      dispatchLocalE2eePairing(message: unknown): Promise<unknown>;
+      stopped: boolean;
+    };
+    delete (fleet as unknown as { startWorkspace?: unknown }).startWorkspace;
+    fleet.desiredWorkspaces.set(encrypted.id, encrypted);
+    await fleet.startWorkspace(encrypted as never);
+    expect(fleet.runtimes.get(encrypted.id)?.lody).toBe(first);
+    const restore = () => {
+      fleet.stopped = true;
+      for (const timer of fleet.retryTimers.values()) clearTimeout(timer);
+      for (const spy of [create, validate, activate, reconcile, schedules]) spy.mockRestore();
+    };
+    return { fleet, first, second, activate, accessLost: () => accessLost!, restore };
+  };
+
+  it('keeps the workspace binding when only this machine identity is revoked, so the re-enrolled identity activates', async () => {
+    const { fleet, first, second, activate, accessLost, restore } =
+      await startedEncryptedWorkspace();
+    try {
+      await accessLost()(first, 'device-revoked');
+
+      // The revoked identity's runtime is retired, not kept executing.
+      expect(fleet.runtimes.has(encrypted.id)).toBe(false);
+      expect(first.cleanups).toBe(1);
+      // The account is still a member: the binding stays and waits for pairing,
+      // so no runtime restarts with the revoked identity.
+      expect(fleet.desiredWorkspaces.has(encrypted.id)).toBe(true);
+      expect(fleet.waitingForPairing.has(encrypted.id)).toBe(true);
+
+      await expect(
+        fleet.dispatchLocalE2eePairing({
+          type: 'activate',
+          machineId: 'machine-1',
+          accountId: 'user-1',
+          workspaceId: encrypted.id,
+          genesisHash,
+          pairingSessionId: 'ef'.repeat(16),
+          frontendSigningPublicKey: '12'.repeat(32),
+          signingPublicKey: 'de'.repeat(32),
+        })
+      ).resolves.toEqual({ ok: true, type: 'activate' });
+      expect(activate).toHaveBeenCalledOnce();
+      expect(fleet.runtimes.get(encrypted.id)?.lody).toBe(second);
+      expect(fleet.waitingForPairing.has(encrypted.id)).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('still drops the workspace binding when the member is actually removed', async () => {
+    const { fleet, first, accessLost, restore } = await startedEncryptedWorkspace();
+    try {
+      await accessLost()(first, 'member-removed');
+
+      expect(fleet.runtimes.has(encrypted.id)).toBe(false);
+      expect(first.cleanups).toBe(1);
+      expect(fleet.desiredWorkspaces.has(encrypted.id)).toBe(false);
+      expect(fleet.waitingForPairing.has(encrypted.id)).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe('LodyFleet shutdown ordering', () => {
   it('keeps the process Local Loro writer until workspace runtimes have released their writer owners', async () => {
     const { getProcessLocalLoroWriterLegacy } =

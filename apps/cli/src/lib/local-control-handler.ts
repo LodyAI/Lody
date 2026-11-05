@@ -3,6 +3,7 @@ import {
   LOCAL_E2EE_RESET_PATH,
   LocalE2eeResetRequestSchema,
   LocalE2eeResetResponseSchema,
+  LocalE2eePairingFailureSchema,
   LocalE2eeRecoveryFailureSchema,
   type LocalE2eeResetRequest,
   type LocalE2eeResetResponse,
@@ -399,13 +400,19 @@ export class LocalControlHandler {
         } catch (error) {
           const code =
             error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-          const safe = LocalE2eeRecoveryFailureSchema.safeParse({
+          const recovery = LocalE2eeRecoveryFailureSchema.safeParse({
             ok: false,
             error: `e2ee_${code}`,
           });
+          if (recovery.success) return handlerResponse(503, recovery.data);
+          // Fixed pairing refusals are thrown as their exact code; nothing else crosses IPC.
+          const refusal = LocalE2eePairingFailureSchema.safeParse({
+            ok: false,
+            error: error instanceof Error ? error.message : undefined,
+          });
           return handlerResponse(
             503,
-            safe.success ? safe.data : { ok: false, error: 'e2ee_pairing_unavailable' }
+            refusal.success ? refusal.data : { ok: false, error: 'e2ee_pairing_unavailable' }
           );
         }
       })();
