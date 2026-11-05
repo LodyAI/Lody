@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, useEffect, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +6,10 @@ import type { SessionId } from '@lody/shared';
 import { useSessionConversationDiffData } from '../src/components/sessions/use-session-conversation-diff-data';
 import type { SessionConversationDiffMode } from '../src/components/sessions/use-session-conversation-diff-data';
 import type { SessionFileProvider } from '../src/lib/session-file-provider';
+import {
+  CodeCollabSessionFileProvider,
+  type CodeCollabSessionFileProviderRuntime,
+} from '../src/lib/code-collab-session-file-provider';
 import { manifestEntryToDiff } from '../src/lib/diff-blob-client';
 import { useSessionAllChangesDiffData } from '../src/components/sessions/use-session-all-changes-diff-data';
 
@@ -88,6 +90,60 @@ describe('useSessionConversationDiffData', () => {
       newFile: { contents: 'after\n' },
     });
   });
+  it('keeps a legacy daemon result completed during scrolling instead of restarting it', async () => {
+    const held = createDeferred<unknown>();
+    const negotiated = createDeferred<{ supported: boolean; scope: string; persist: boolean }>();
+    let opened = 0;
+    const provider = new CodeCollabSessionFileProvider({
+      runtime: {
+        sessionId: 'session-1' as SessionId,
+        diffBlobTransportOptions: () => negotiated.promise,
+        openDiffManifest: async () => {
+          throw new Error('Legacy manifest called.');
+        },
+        readDiffBlob: async () => {
+          throw new Error('Legacy blob called.');
+        },
+        openCurrentDiff: async () => {
+          opened++;
+          return held.promise;
+        },
+      } as unknown as CodeCollabSessionFileProviderRuntime,
+    });
+    let state: ReturnType<typeof useSessionConversationDiffData> | undefined;
+    const onUpdate = (next: ReturnType<typeof useSessionConversationDiffData>) => {
+      state = next;
+    };
+    render(<DiffDataHarness fileProvider={provider} onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(provider.supportsCancellableDiffReads).toBe(true);
+    rerender(<DiffDataHarness fileProvider={provider} loadPaused onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    negotiated.resolve({ supported: false, scope: 'synthetic', persist: false });
+    await flushMicrotasks();
+    expect(provider.supportsCancellableDiffReads).toBe(false);
+    held.resolve({
+      status: 'ok',
+      path: 'README.md',
+      oldSnapshot: { kind: 'text', text: { encoding: 'plain', text: 'old\n', rawBytes: 4 } },
+      newSnapshot: { kind: 'text', text: { encoding: 'plain', text: 'new\n', rawBytes: 4 } },
+      add: 1,
+      del: 1,
+    });
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['README.md']).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'new\n' },
+    });
+    rerender(<DiffDataHarness fileProvider={provider} onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['README.md']).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'new\n' },
+    });
+    expect(opened).toBe(1);
+  });
+
   it('cancels hidden page sequences without publishing their late result and permits reopening', async () => {
     const held = createDeferred<Awaited<ReturnType<SessionFileProvider['getDiff']>>>();
     let signal: AbortSignal | undefined;
@@ -211,6 +267,7 @@ describe('useSessionConversationDiffData', () => {
     }
     render(<Harness visible={[paths[0]]} />);
     await flushMicrotasks();
+    expect(state?.normalizedPaths).toEqual(['deferred.ts', 'inline.ts']);
     expect(state?.resolvedByPath[paths[0]]).toMatchObject({
       status: 'ready',
       newSnapshot: { text: 'inline' },
@@ -325,12 +382,14 @@ function DiffDataHarness({
   filePaths = README_PATHS,
   loadFilePaths = README_PATHS,
   priorityFilePath = 'README.md',
+  loadPaused = false,
   fileDiffs,
   allChangesScope,
   onUpdate,
 }: {
   readonly fileProvider: SessionFileProvider;
   readonly enabled?: boolean;
+  readonly loadPaused?: boolean;
   readonly mode?: SessionConversationDiffMode;
   readonly filePaths?: string[];
   readonly loadFilePaths?: string[];
@@ -345,6 +404,7 @@ function DiffDataHarness({
     mode,
     filePaths,
     loadFilePaths,
+    loadPaused,
     priorityFilePath,
     fileDiffs,
     fileProvider,

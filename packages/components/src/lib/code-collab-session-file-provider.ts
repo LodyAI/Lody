@@ -290,7 +290,15 @@ function estimateOpenCacheEntryBytes(entry: CodeCollabSessionOpenTextCacheEntry)
 
 export class CodeCollabSessionFileProvider implements SessionFileProvider {
   readonly kind = 'code-collab';
-  readonly supportsCancellableDiffReads = true;
+  // The first negotiated blob read needs a signal. If negotiation selects the
+  // legacy RPC, the hook retains its valid in-flight result even after abort.
+  private blobReadsSupported = true;
+  get supportsCancellableDiffReads(): boolean {
+    return (
+      Boolean(this.runtime?.openDiffManifest && this.runtime?.readDiffBlob) &&
+      this.blobReadsSupported
+    );
+  }
   readonly supportsHistoricalDiffs: boolean;
   private readonly runtime?: CodeCollabSessionFileProviderRuntime;
   private readonly diffBlobCache: DiffBlobCache;
@@ -751,7 +759,24 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
       };
     }
     if (this.runtime.openDiffManifest && this.runtime.readDiffBlob) {
-      const config = await this.runtime.diffBlobTransportOptions?.();
+      let config:
+        | Awaited<
+            ReturnType<
+              NonNullable<CodeCollabSessionFileProviderRuntime['diffBlobTransportOptions']>
+            >
+          >
+        | undefined;
+      try {
+        config = await this.runtime.diffBlobTransportOptions?.();
+      } catch (error) {
+        return {
+          status: 'unavailable',
+          path,
+          reason: 'transient-io',
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+      this.blobReadsSupported = config?.supported === true;
       if (config?.supported)
         return await this.getBlobDiff(
           path,
@@ -1050,7 +1075,23 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
       };
     }
     if (this.runtime.openDiffManifest && this.runtime.readDiffBlob) {
-      const config = await this.runtime.diffBlobTransportOptions?.();
+      let config:
+        | Awaited<
+            ReturnType<
+              NonNullable<CodeCollabSessionFileProviderRuntime['diffBlobTransportOptions']>
+            >
+          >
+        | undefined;
+      try {
+        config = await this.runtime.diffBlobTransportOptions?.();
+      } catch (error) {
+        return {
+          status: 'unavailable',
+          reason: 'transient-io',
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+      this.blobReadsSupported = config?.supported === true;
       if (config?.supported) return await this.getBlobAllChanges(focusPath, scope, signal);
     }
     const response = await (scope === undefined

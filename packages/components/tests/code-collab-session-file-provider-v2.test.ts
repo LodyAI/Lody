@@ -170,7 +170,7 @@ function createRuntime(
 }
 
 describe('Content-addressed diff transport', () => {
-  it.each(['expired', 'edited', 'reverted'])(
+  it.each(['expired', 'edited', 'reverted', 'base-changed'])(
     'renews hydration handles with consistent context after %s',
     async (mode) => {
       const changed = mode === 'edited';
@@ -187,7 +187,7 @@ describe('Content-addressed diff transport', () => {
         };
         const before = Array.from({ length: 100 }, (_, i) => `line ${i}\n`).join('');
         let after = before.replace('line 50', 'first50');
-        const base = blob(before);
+        let base = blob(before);
         let head = blob(after);
         const authorized = new Set<CodeCollabDiffBlobKey>();
         const provider = new CodeCollabSessionFileProvider({
@@ -229,7 +229,10 @@ describe('Content-addressed diff transport', () => {
             },
           }),
         });
-        const partial = await provider.getDiff('a.ts', changed ? undefined : 'immutable-turn');
+        const partial = await provider.getDiff(
+          'a.ts',
+          mode === 'expired' ? 'immutable-turn' : undefined
+        );
         if (partial.status !== 'ready-parsed' || !partial.loadDiffFiles)
           throw new Error('Expected partial.');
         authorized.clear(); // Same effect as handle TTL expiry or a daemon restart.
@@ -237,21 +240,28 @@ describe('Content-addressed diff transport', () => {
           after = before.replace('line 80', 'later80');
           head = blob(after);
         }
+        if (mode === 'base-changed') base = blob(before.replace('line 80', 'baseline80'));
         if (mode === 'reverted') {
           after = before;
           head = base;
         }
-        const files = await partial.loadDiffFiles(partial.fileDiff);
-        hydratePartialDiff('merge', partial.fileDiff, files);
-        expect(files.newFile.contents).toBe(after);
-        expect(partial.fileDiff.additionLines.join('')).toBe(after);
-        const covers = (line: number) =>
-          partial.fileDiff.hunks.some(
-            (hunk) => hunk.additionStart <= line && hunk.additionStart + hunk.additionCount > line
-          );
-        if (mode === 'reverted') expect(partial.fileDiff.hunks).toHaveLength(0);
-        else expect(covers(changed ? 81 : 51)).toBe(true);
-        if (changed) expect(covers(51)).toBe(false);
+        if (mode !== 'expired') {
+          await expect(partial.loadDiffFiles(partial.fileDiff)).rejects.toMatchObject({
+            code: 'diff_changed',
+          });
+          // The originally displayed patch must keep its original coordinates.
+          expect(partial.fileDiff.hunks[0]?.additionStart).toBe(50);
+        } else {
+          const files = await partial.loadDiffFiles(partial.fileDiff);
+          hydratePartialDiff('merge', partial.fileDiff, files);
+          expect(files.newFile.contents).toBe(after);
+          expect(partial.fileDiff.additionLines.join('')).toBe(after);
+          expect(
+            partial.fileDiff.hunks.some(
+              (hunk) => hunk.additionStart <= 51 && hunk.additionStart + hunk.additionCount > 51
+            )
+          ).toBe(true);
+        }
         expect(await provider.getDiff('a.ts')).toMatchObject({
           status: mode === 'reverted' ? 'unavailable' : 'ready-parsed',
         });
@@ -279,6 +289,14 @@ describe('Content-addressed diff transport', () => {
       const entries = (): CodeCollabDiffManifestEntry[] => [
         { path: 'a.ts', status: 'ok', base: old, head: current, add: 1, del: 1 },
         { path: 'b.ts', status: 'ok', base: null, head: other, add: 1, del: 0 },
+        {
+          path: 'blocked.ts',
+          status: 'unavailable',
+          base: null,
+          head: null,
+          error: { status: 'error', code: 'permission_denied', message: 'Synthetic file refusal.' },
+        },
+        { path: 'link', status: 'binary', base: null, head: null },
       ];
       let sentBytes = 0;
       const manifestRequests: (string | undefined)[] = [];
@@ -329,6 +347,22 @@ describe('Content-addressed diff transport', () => {
         entries: [
           { path: 'a.ts', diff: { status: 'deferred' } },
           { path: 'b.ts', diff: { status: 'deferred' } },
+          {
+            path: 'blocked.ts',
+            diff: {
+              status: 'unavailable',
+              reason: 'permission-denied',
+              message: 'Synthetic file refusal.',
+            },
+          },
+          {
+            path: 'link',
+            diff: {
+              status: 'ready',
+              oldSnapshot: { kind: 'binary' },
+              newSnapshot: { kind: 'binary' },
+            },
+          },
         ],
       });
       expect(sentBytes).toBe(0);
@@ -347,7 +381,7 @@ describe('Content-addressed diff transport', () => {
       const refreshed = await next.getAllChangesDiff();
       expect(refreshed).toMatchObject({
         status: 'ready',
-        entries: [{ path: 'a.ts' }, { path: 'b.ts' }],
+        entries: [{ path: 'a.ts' }, { path: 'b.ts' }, { path: 'blocked.ts' }, { path: 'link' }],
       });
       expect(manifestRequests).toEqual([undefined, 'a.ts', undefined]);
       const changed = await next.getDiff('a.ts');

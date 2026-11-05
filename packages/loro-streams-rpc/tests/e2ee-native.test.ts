@@ -671,8 +671,8 @@ it('protects feature requests and chunked results with workspace signatures and 
   ).rejects.toThrow('intent_conflict');
 });
 
-it('allows a verified Guest to read diff manifests and blobs while refusing saves', async () => {
-  const f = encryptedRpcFixture({ guest: true });
+it.each([true, false])('retains diff manifest/blob writer authority (guest=%s)', async (guest) => {
+  const f = encryptedRpcFixture({ guest });
   fixtures.push(f);
   const requests = [
     {
@@ -694,6 +694,10 @@ it('allows a verified Guest to read diff manifests and blobs while refusing save
       requestId: (index + 40).toString(16).padStart(32, '0'),
       request: { workspaceId: f.workspaceId, machineId: f.machineId, ...request },
     };
+    if (guest) {
+      await expect(Effect.runPromise(f.sender.prepareFeature(input))).rejects.toThrow();
+      continue;
+    }
     const original = await Effect.runPromise(f.sender.prepareFeature(input));
     const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
     expect(opened?.input).toEqual(input);
@@ -720,25 +724,26 @@ it('allows a verified Guest to read diff manifests and blobs while refusing save
       )
     ).toEqual(outcome);
   }
-  await expect(
-    Effect.runPromise(
-      f.sender.prepareFeature({
-        requestId: 'ab'.repeat(16),
-        request: {
-          workspaceId: f.workspaceId,
-          machineId: f.machineId,
-          method: 'code-collab/save-text',
-          params: {
-            sessionId: f.input.sessionId,
-            requestedByUserId: 'guest',
-            path: 'private.ts',
-            baseDigest: `sha256:${'1'.repeat(64)}`,
-            text: { encoding: 'plain', text: 'write', rawBytes: 5 },
+  if (guest)
+    await expect(
+      Effect.runPromise(
+        f.sender.prepareFeature({
+          requestId: 'ab'.repeat(16),
+          request: {
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            method: 'code-collab/save-text',
+            params: {
+              sessionId: f.input.sessionId,
+              requestedByUserId: 'guest',
+              path: 'private.ts',
+              baseDigest: `sha256:${'1'.repeat(64)}`,
+              text: { encoding: 'plain', text: 'write', rawBytes: 5 },
+            },
           },
-        },
-      })
-    )
-  ).rejects.toThrow();
+        })
+      )
+    ).rejects.toThrow();
 });
 
 it('reassembles a large save from signed chunks and rejects a response from another request', async () => {

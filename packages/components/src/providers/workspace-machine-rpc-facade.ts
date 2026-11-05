@@ -623,7 +623,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       MACHINE_PROTOCOL_CAPABILITIES.codeCollabDiffBlobs
     ),
     scope: String(workspaceId),
-    persist: !deps.protectedContent && (await resolveMachineTargetPlane(machineId)) === 'cloud',
+    persist: !deps.protectedContent && targetRouter.getPlaneForMachine(machineId) === 'cloud',
   });
 
   const requestCodeCollabOpenDiffManifest = (

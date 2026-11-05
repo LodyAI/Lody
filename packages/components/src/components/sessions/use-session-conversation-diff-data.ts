@@ -542,7 +542,7 @@ export const useSessionConversationDiffData = ({
         const data = sessionFileProviderDiffResultToFileDiffData(
           await fileProvider.getDiff(...diffRequestArgs)
         );
-        if (controller?.signal.aborted) {
+        if (controller?.signal.aborted && fileProvider?.supportsCancellableDiffReads) {
           inFlightPathsRef.current.delete(filePath);
           return;
         }
@@ -600,7 +600,7 @@ export const useSessionConversationDiffData = ({
           );
         }
       } catch (error) {
-        if (controller?.signal.aborted) {
+        if (controller?.signal.aborted && fileProvider?.supportsCancellableDiffReads) {
           inFlightPathsRef.current.delete(filePath);
           return;
         }

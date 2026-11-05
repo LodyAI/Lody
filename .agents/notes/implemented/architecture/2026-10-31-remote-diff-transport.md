@@ -21,13 +21,16 @@ production latency improvements.
 
 The additive `codeCollabDiffBlobs` v1 capability gates `open-diff-manifest` and
 `read-blob`. Missing support retains the old APIs and their budgets. Both new
-methods use read authority, including encrypted Guests, without watches or execution
-claims. The read-authority, plaintext-cache and compatibility decisions are recorded
+methods do not start watches or mutate evidence. Encrypted calls retain existing
+write authority and execution claims; Guest diff access is deferred to a separate PR
+by the owner decision on #2316. The plaintext-cache and compatibility decisions are recorded
 for human review in the [draft Spec](../../../../specs/remote-diff-delivery.md).
 
 The manifest enumerates the existing turn/All Changes/single-path set, focus first,
 then smaller changes. It carries nullable base/head descriptors, stats, status,
-opaque version and optional hunks. Pages hold at most 64 paths and 512 KiB of encoded
+opaque version and optional hunks. Transport priority does not change the panel's
+alphabetical ordering. The returned file set is authoritative: stale index-only
+paths disappear; a completed empty Branch batch says “No changes.” Pages hold at most 64 paths and 512 KiB of encoded
 remote response. Opaque cursors pin the scope, resolved Git/member bases and initial
 path set for ten minutes; additional file roots have their own bases and the focus never narrows the set; moved bases or evicted cursors fail with `stale`.
 
@@ -45,7 +48,11 @@ its own complete-result and sealed-frame limits.
 
 A handle is issued only by an authorized manifest and keyed by requested session
 and content key, with resolved owner, workspace and source. Every page reauthorizes
-the session and checks that binding. Limits are 8,192 handles per requested session,
+the session and checks that binding. Unsupported symlinks, directories and Gitlinks
+(including commits absent from the superproject) become per-file binary entries.
+Operational file failures become typed per-file unavailable entries; request/path
+authorization failures still reject the request. Removal/rename during a disk read
+returns `stale`, allowing bounded metadata refresh. Limits are 8,192 handles per requested session,
 65,536 globally, LRU eviction and ten-minute idle expiry. A guessed global hash does
 not establish authority. Git/store reconstruction buffers are capped at 64 MiB total
 and 8,192 objects, and expire after 60 seconds idle; the passive registry owns no timers.
@@ -78,7 +85,12 @@ Generation siblings count toward the [whole-index and publication budgets](../bu
 Each changed path reserves a second row and up to 64 encoded token bytes. File rows,
 generation-only changes and orphan sibling cleanup use the same byte-bounded commit
 plan, with flush/sync after each batch. Older oversized tokens are renewed before
-publication rather than exceeding the reservation.
+publication rather than exceeding the reservation. This reduces file-index capacity:
+a changed path consumes two physical rows and its generation byte reservation.
+At the 1,000-row ceiling, at most 500 all-changed paths fit before byte/directory
+costs; a synthetic 500-file root that fit before retained 268 paths under 100 KiB.
+Pruned directories remain lazy-expandable; All Changes enumerates its full set via
+the manifest independently of this bounded tree/mention metadata.
 No content hash enters the shared index: a hash would let any index reader confirm
 whether a guessed private file body exists, even without owner-scoped read access.
 
@@ -100,11 +112,14 @@ correctness without retransmitting unchanged bodies.
 
 Writer diff activity separately renews the existing `init-directory` publication
 workflow, at most once per five minutes (five seconds after failure), to preserve
-its ten-minute watch lifetime. Guest reads skip this action. Activation is observed
+its ten-minute watch lifetime. Guest file reads skip this action; diff access remains writer-only in encrypted workspaces. Activation is observed
 background work and cannot gate content on a failed publisher; the two blob RPCs
 remain pure reads. In-flight activation is shared within the provider runtime;
 owner/root changes retire that runtime. Body RPC permits remain held through raw
-request settlement after cancellation.
+request settlement after cancellation. Only negotiated blob paging is cancellable:
+legacy in-flight results remain usable across scroll pauses, even when capability
+negotiation initially supplied a controller. Optional cache classification does not
+wait for unresolved machine routing; unknown routes use memory only.
 
 ### Caches and large remote files
 
@@ -127,9 +142,11 @@ also stop further page starts when their surface hides. No extra renderer or wor
 architecture was added.
 
 Hunks and hashes come from the same captured bytes. Deferred expansion renews expired
-handles once. If live content changed, its hunk coordinates are recomputed from the
-new verified full files before Pierre hydrates them; old coordinates must never be
-applied to new bodies. Reverted files retain readable descriptors even when marked
+handles once. Only unchanged content identities may hydrate the original patch.
+If either file side or status changed, the panel reloads the whole comparison batch
+(including base header, file set and stats), or the active turn comparison. It never
+replaces old hunk coordinates in place under an old base header. Other expansion
+failures show a visible error and a Retry action. Reverted files retain readable descriptors even when marked
 `not_changed`. Runtime-bound partial loaders never enter the cross-workspace immutable
 turn cache; fully materialized turn snapshots can still be retained.
 
@@ -167,8 +184,9 @@ pages, and rejected one additional byte. No live gateway limit probe was perform
   outside Code Collab's contract.
 - Content hashes in Flock are simpler invalidation but expose a confirmation oracle.
   Random generations preserve compatibility and avoid that disclosure.
-- Retaining write-role execution claims would charge every page as an action and
-  continue excluding encrypted read-only members who may already read file bodies.
+- Moving diff reads into Guest authority would change access to Git bases and retained
+  evidence. #2316 preserves the existing writer restriction; that feature is deferred
+  to an independently reviewed PR.
 - Encrypted IndexedDB plaintext has no established repository allowance. Memory-only
   caching is the implemented policy, not an unanswered prerequisite.
 - Server-persisted diff bodies would enable offline use but change ownership and are
@@ -196,19 +214,20 @@ Behavioral evidence lives in:
   legacy rows survive generation-only changes and deletion removes siblings.
 - `packages/loro-streams-rpc/tests/machine-rpc-server.test.ts` and
   `tests/e2ee-native.test.ts`: measured owner envelopes, wrong-owner refusal and real
-  signed Guest read authority while saves remain forbidden.
+  signed writer authority with Guest manifest/blob and save refusals.
 - `packages/components/tests/code-collab-session-file-provider-v2.test.ts`:
   initial metadata sends zero body bytes; the first open sends base plus head;
   repeat opens revalidate metadata but send zero additional body bytes; an edit with
   unchanged index generations fetches only its new head. It also checks corruption,
   cancellation,
   protected memory policy, IndexedDB retention/eviction and unavailable storage.
-  Deferred hydration covers expired handles, live edits and reverts, while runtime
+  Deferred hydration covers expired unchanged handles and comparison invalidation on live edits, reverts or changed bases, while runtime
   replacement exercises the real immutable-turn hook cache.
 - `packages/components/tests/e2e/diff-viewer-large-diff-performance.spec.ts`:
   the real panel/Pierre path renders partial hunks with zero blob traffic and
   hydrates full context on expansion; stale-index files remain visible and loadable
-  through the same viewport boundary.
+  through the same viewport boundary. Expansion failures expose retry, and a renewed
+  comparison refreshes the entire batch and base header.
 
 These are deterministic synthetic/local behavioral checks, not production bandwidth,
 latency, mobile device-memory or hosted deployment benchmarks. Existing diff methods

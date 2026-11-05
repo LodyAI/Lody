@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeCollabAllChangesScope, SessionId } from '@lody/shared';
 import { sessionFileProviderDiffResultToFileDiffData } from '@/lib/session-file-provider-diff';
 import type { SessionFileProvider } from '@/lib/session-file-provider';
@@ -66,6 +66,7 @@ export function useSessionAllChangesDiffData({
   unavailableScopeReason: 'not_a_git_worktree' | 'no_commits' | null;
   unavailableMessage: string | null;
   viewport: ReturnType<typeof useDiffViewport>;
+  reload: () => void;
 } {
   const normalizedInputPaths = useMemo(
     () => Array.from(new Set(filePaths.filter(Boolean))).toSorted((a, b) => a.localeCompare(b)),
@@ -76,7 +77,10 @@ export function useSessionAllChangesDiffData({
     [normalizedInputPaths]
   );
 
+  const [reloadSeq, setReloadSeq] = useState(0);
+  const reload = useCallback(() => setReloadSeq((value) => value + 1), []);
   const [batch, setBatch] = useState<{
+    reloadSeq: number;
     provider: SessionFileProvider;
     pathsKey: string;
     scope: CodeCollabAllChangesScope;
@@ -90,12 +94,16 @@ export function useSessionAllChangesDiffData({
   const currentBatch =
     batch !== null &&
     batch.provider === fileProvider &&
+    batch.reloadSeq === reloadSeq &&
     batch.pathsKey === normalizedPathsKey &&
     batch.scope === scope
       ? batch
       : null;
   const normalizedPaths = useMemo(
-    () => (currentBatch !== null ? currentBatch.entryPaths : normalizedInputPaths),
+    () =>
+      currentBatch !== null
+        ? [...currentBatch.entryPaths].sort((a, b) => a.localeCompare(b))
+        : normalizedInputPaths,
     [currentBatch, normalizedInputPaths]
   );
   const unusedViewportRef = useRef<HTMLDivElement | null>(null);
@@ -164,6 +172,7 @@ export function useSessionAllChangesDiffData({
       if (!cancelled)
         setBatch({
           provider: fileProvider,
+          reloadSeq,
           pathsKey: normalizedPathsKey,
           scope,
           inline,
@@ -249,7 +258,7 @@ export function useSessionAllChangesDiffData({
     // Refetch when the provider is rebuilt (file-index/list changed → D4), the path set or
     // the comparison scope changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, fileProvider, normalizedPathsKey, scope]);
+  }, [enabled, fileProvider, normalizedPathsKey, scope, reloadSeq]);
 
   const hasAllResolved = useMemo(
     () => normalizedPaths.every((path) => Boolean(resolvedByPath[path])),
@@ -274,5 +283,6 @@ export function useSessionAllChangesDiffData({
     unavailableScopeReason: currentBatch?.unavailableScopeReason ?? null,
     unavailableMessage,
     viewport: batchViewport,
+    reload,
   };
 }

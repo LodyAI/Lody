@@ -1400,7 +1400,36 @@ export class CodeCollabV2Service {
       );
       const rootId = decodeSessionFilePath(file.path)?.rootId;
       const pinnedBase = rootId && rootId !== 'main' ? (page.rootBases?.[rootId] ?? page) : page;
-      let entry = await service.describeDiffFile(request, resolved, pinnedBase, context);
+      let entry: CodeCollabDiffManifestEntry;
+      try {
+        entry = await service.describeDiffFile(request, resolved, pinnedBase, context);
+      } catch (error) {
+        if (error instanceof DiffManifestUnavailableError && request.path !== undefined)
+          throw error;
+        // Authorization/path resolution above remains request-wide. A readable
+        // root can still contain an unreadable file or missing turn evidence.
+        if (
+          isCodeCollabV2ServiceError(error) &&
+          ['invalid_path', 'session_not_found', 'workspace_root_unavailable'].includes(error.code)
+        )
+          throw error;
+        entry = {
+          path: file.path,
+          status: 'unavailable',
+          base: null,
+          head: null,
+          error: {
+            status: 'error',
+            code: isCodeCollabV2ServiceError(error) ? error.code : 'transient_io',
+            message:
+              error instanceof DiffManifestUnavailableError
+                ? error.reason
+                : isCodeCollabV2ServiceError(error)
+                  ? error.message
+                  : 'Could not read this file’s diff.',
+          },
+        };
+      }
       entry.path = file.path;
       entry = {
         ...entry,
@@ -1553,10 +1582,23 @@ export class CodeCollabV2Service {
           filePath = match.relativePath;
           base = page.memberBases?.[member.path] ?? 'HEAD';
         }
-        const object = await runGit(repository, ['rev-parse', '--verify', `${base}:${filePath}`]);
-        if (!object.ok) return { status: 'missing', blob: null };
-        const oid = object.stdout.trim();
-        if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(oid)) return { status: 'missing', blob: null };
+        const tree = await runGit(repository, [
+          '--literal-pathspecs',
+          'ls-tree',
+          '-z',
+          base,
+          '--',
+          filePath,
+        ]);
+        if (!tree.ok) throw new CodeCollabV2ServiceError('stale', 'Git tree is unavailable.');
+        const row = tree.stdout.split('\0').find((row) => row.endsWith(`\t${filePath}`));
+        if (!row) return { status: 'missing', blob: null };
+        const [mode, type, oid] = row.slice(0, row.indexOf('\t')).split(' ');
+        // Gitlinks may reference commits absent from the superproject. Symlinks
+        // and trees are also unsupported snapshots, regardless of their contents.
+        if (type !== 'blob' || mode === '120000') return { status: 'binary', blob: null };
+        if (!oid || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(oid))
+          throw new CodeCollabV2ServiceError('stale', 'Git blob is unavailable.');
         const size = await runGit(repository, ['cat-file', '-s', oid]);
         if (!size.ok) throw new CodeCollabV2ServiceError('stale', 'Git blob disappeared.');
         if (Number(size.stdout.trim()) > maxRawBytes) return { status: 'too_large', blob: null };
@@ -1577,6 +1619,11 @@ export class CodeCollabV2Service {
             return { status: 'missing', blob: null };
           if (isCodeCollabV2ServiceError(error) && error.code === 'too_large')
             return { status: 'too_large', blob: null };
+          if (
+            isCodeCollabV2ServiceError(error) &&
+            ['unsupported_binary', 'unsupported_skipped', 'decode_error'].includes(error.code)
+          )
+            return { status: 'binary', blob: null };
           throw error;
         }
         key = digestBytes(bytes);
@@ -1776,31 +1823,41 @@ export class CodeCollabV2Service {
   ): Promise<Buffer> {
     if (handle.source.kind !== 'disk')
       throw new CodeCollabV2ServiceError('stale', 'Expected a disk blob.');
-    const root = await realpath(handle.workspaceRoot);
-    const target = await realpath(handle.source.absolutePath);
-    if (!resolveSessionFilePath([{ id: 'main', absolutePath: root }], target))
-      throw new CodeCollabV2ServiceError('invalid_path', 'Blob path escapes workspace root.');
-    const fd = await open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
     try {
-      const before = await fd.stat();
-      const current = await realpath(handle.source.absolutePath);
-      if (!resolveSessionFilePath([{ id: 'main', absolutePath: root }], current))
+      const root = await realpath(handle.workspaceRoot);
+      const target = await realpath(handle.source.absolutePath);
+      if (!resolveSessionFilePath([{ id: 'main', absolutePath: root }], target))
         throw new CodeCollabV2ServiceError('invalid_path', 'Blob path escapes workspace root.');
-      const named = await lstat(current);
-      if (
-        !before.isFile() ||
-        before.dev !== named.dev ||
-        before.ino !== named.ino ||
-        before.size !== handle.rawBytes
-      )
-        throw new CodeCollabV2ServiceError('stale', 'Blob file changed.');
-      const bytes = Buffer.alloc(length);
-      const read = await fd.read(bytes, 0, length, offset);
-      if (read.bytesRead !== length)
-        throw new CodeCollabV2ServiceError('stale', 'Blob file changed during read.');
-      return bytes;
-    } finally {
-      await fd.close();
+      const fd = await open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      try {
+        const before = await fd.stat();
+        const current = await realpath(handle.source.absolutePath);
+        if (!resolveSessionFilePath([{ id: 'main', absolutePath: root }], current))
+          throw new CodeCollabV2ServiceError('invalid_path', 'Blob path escapes workspace root.');
+        const named = await lstat(current);
+        if (
+          !before.isFile() ||
+          before.dev !== named.dev ||
+          before.ino !== named.ino ||
+          before.size !== handle.rawBytes
+        )
+          throw new CodeCollabV2ServiceError('stale', 'Blob file changed.');
+        const bytes = Buffer.alloc(length);
+        const read = await fd.read(bytes, 0, length, offset);
+        if (read.bytesRead !== length)
+          throw new CodeCollabV2ServiceError('stale', 'Blob file changed during read.');
+        return bytes;
+      } finally {
+        await fd.close();
+      }
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR')
+        throw new CodeCollabV2ServiceError('stale', 'Blob file was removed or renamed.');
+      if (isCodeCollabV2ServiceError(error)) throw error;
+      throw mapNodeReadError(
+        error,
+        path.relative(handle.workspaceRoot, handle.source.absolutePath)
+      );
     }
   }
 

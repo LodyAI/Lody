@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { CodeCollabAllChangesScopeSchema, CodeCollabV2TextFormatSchema } from './code-collab';
+import {
+  CodeCollabAllChangesScopeSchema,
+  CodeCollabV2TextFormatSchema,
+  CodeCollabV2ErrorSchema,
+} from './code-collab';
 
 export const CODE_COLLAB_DIFF_BLOB_LIMITS = {
   pageBytes: 512 * 1024,
@@ -29,7 +33,8 @@ export const CodeCollabDiffManifestEntrySchema = z
     previousPath: z.string().min(1).optional(),
     add: z.number().int().nonnegative().optional(),
     del: z.number().int().nonnegative().optional(),
-    status: z.enum(['ok', 'binary', 'missing', 'too_large', 'not_changed']),
+    status: z.enum(['ok', 'binary', 'missing', 'too_large', 'not_changed', 'unavailable']),
+    error: CodeCollabV2ErrorSchema.optional(),
     base: CodeCollabDiffBlobSchema.nullable(),
     head: CodeCollabDiffBlobSchema.nullable(),
     version: z.string().min(1).optional(),

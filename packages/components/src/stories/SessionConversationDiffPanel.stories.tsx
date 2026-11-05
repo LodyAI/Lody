@@ -2,11 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useState, type ComponentProps } from 'react';
 import { gzipSync } from 'fflate';
 import { DiffBlobCache } from '@/lib/diff-blob-cache';
-import { manifestEntryToDiff, readDiffBlob } from '@/lib/diff-blob-client';
+import { DiffBlobReadError, manifestEntryToDiff, readDiffBlob } from '@/lib/diff-blob-client';
 import { useTranslation } from 'react-i18next';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
-import type { SessionId } from '@lody/shared';
+import type { CodeCollabDiffManifestEntry, SessionId } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import { SessionConversationDiffPanel } from '@/components/sessions/session-conversation-diff-panel';
@@ -149,6 +149,8 @@ function RemoteHunksHarness(args: ComponentProps<typeof SessionConversationDiffP
   const [transferred, setTransferred] = useState(0);
   const remoteProvider = useMemo(() => {
     const cache = new DiffBlobCache();
+    let failReads = false;
+    let advanced = false;
     const lines = Array.from(
       { length: 2000 },
       (_, i) => `export const value${i} = "${'x'.repeat(120)}";`
@@ -164,7 +166,7 @@ function RemoteHunksHarness(args: ComponentProps<typeof SessionConversationDiffP
         )
         .join('');
     const provider = createFakeSessionFileProvider({});
-    provider.getDiff = async (_path, _turn, _file, options) => {
+    const getDiff = async (signal?: AbortSignal) => {
       const bodies = new Map<string, Uint8Array>();
       const describe = async (text: string) => {
         const bytes = new TextEncoder().encode(text);
@@ -173,44 +175,72 @@ function RemoteHunksHarness(args: ComponentProps<typeof SessionConversationDiffP
         bodies.set(key, bytes);
         return { key, rawBytes: bytes.length, format: { encoding: 'utf8' as const } };
       };
-      const entry = {
+      const entry: CodeCollabDiffManifestEntry = {
         path: 'src/remote-large.ts',
         status: 'ok' as const,
         base: await describe(oldText),
         head: await describe(newText),
         hunks: patch,
       };
-      return manifestEntryToDiff(entry, (blob) =>
-        readDiffBlob({
-          blob,
-          cache,
-          scope: 'synthetic-remote',
-          persist: false,
-          signal: options?.signal,
-          read: async (key, offset, length) => {
-            const bytes = bodies.get(key);
-            if (!bytes) throw new Error('Synthetic blob missing.');
-            const chunk = bytes.subarray(offset, offset + length);
-            setTransferred((total) => total + chunk.length);
-            let binary = '';
-            for (const byte of gzipSync(chunk)) binary += String.fromCharCode(byte);
-            return {
-              offset,
-              length: chunk.length,
-              totalBytes: bytes.length,
-              encoding: 'gzip-base64',
-              data: btoa(binary),
-            };
-          },
-        })
+      return manifestEntryToDiff(
+        entry,
+        (blob, expansionSignal) =>
+          readDiffBlob({
+            blob,
+            cache,
+            scope: 'synthetic-remote',
+            persist: false,
+            signal: expansionSignal ?? signal,
+            read: async (key, offset, length) => {
+              if (failReads) throw new Error('Synthetic connection unavailable.');
+              if (advanced) throw new DiffBlobReadError('stale', 'Synthetic handles expired.');
+              const bytes = bodies.get(key);
+              if (!bytes) throw new Error('Synthetic blob missing.');
+              const chunk = bytes.subarray(offset, offset + length);
+              setTransferred((total) => total + chunk.length);
+              let binary = '';
+              for (const byte of gzipSync(chunk)) binary += String.fromCharCode(byte);
+              return {
+                offset,
+                length: chunk.length,
+                totalBytes: bytes.length,
+                encoding: 'gzip-base64',
+                data: btoa(binary),
+              };
+            },
+          }),
+        async () => (advanced ? { ...entry, status: 'not_changed', base: entry.head } : entry)
       );
     };
-    return provider;
+    provider.getDiff = (_path, _turn, _file, options) => getDiff(options?.signal);
+    provider.getAllChangesDiff = async () => ({
+      status: 'ready',
+      base: (advanced ? '2' : '1').repeat(40),
+      truncated: false,
+      entries: advanced
+        ? []
+        : [{ path: 'src/remote-large.ts', add: 1, del: 1, diff: await getDiff() }],
+    });
+    return {
+      provider,
+      fail: () => {
+        failReads = true;
+      },
+      restore: () => {
+        failReads = false;
+      },
+      advance: () => {
+        advanced = true;
+      },
+    };
   }, []);
   return (
     <>
       <output aria-label="Transferred blob bytes">{transferred}</output>
-      <SessionConversationDiffPanel {...args} fileProvider={remoteProvider} />
+      <Button onClick={remoteProvider.fail}>Simulate read failure</Button>
+      <Button onClick={remoteProvider.restore}>Restore reads</Button>
+      <Button onClick={remoteProvider.advance}>Advance comparison</Button>
+      <SessionConversationDiffPanel {...args} fileProvider={remoteProvider.provider} />
     </>
   );
 }
@@ -221,5 +251,10 @@ export const RemoteHunks: Story = {
     filePaths: ['src/remote-large.ts'],
     fileDiffs: [{ filePath: 'src/remote-large.ts', add: 1, del: 1 }],
   },
+  render: (args) => <RemoteHunksHarness {...args} />,
+};
+
+export const RemoteHunksChangingBase: Story = {
+  args: { ...RemoteHunks.args, mode: 'base', focusFilePath: 'src/remote-large.ts' },
   render: (args) => <RemoteHunksHarness {...args} />,
 };

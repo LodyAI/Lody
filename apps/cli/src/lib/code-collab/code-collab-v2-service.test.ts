@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   codeCollabFileIndexToSharedState,
+  CodeCollabOpenDiffManifestResponseSchema,
   type CodeCollabV2AllChangesState,
   type CodeCollabV2FileIndexState,
   type CodeCollabV2FileTreeState,
@@ -290,6 +291,171 @@ describe('CodeCollabV2Service text RPC boundary', () => {
       });
     }
   );
+
+  it('keeps symlinks, directories and fetched or unfetched gitlinks local to their own entry', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const git = async (...args: string[]) =>
+        (
+          await execFileAsync('git', ['-c', 'commit.gpgsign=false', ...args], {
+            cwd: workspaceRoot,
+          })
+        ).stdout.trim();
+      await initGitRepoWithCommit(workspaceRoot);
+      await writeFile(path.join(workspaceRoot, 'healthy.txt'), 'before\n');
+      await writeFile(path.join(workspaceRoot, 'directory.txt'), 'before\n');
+      await symlink('healthy.txt', path.join(workspaceRoot, 'link'));
+      await symlink('healthy.txt', path.join(workspaceRoot, 'deleted-link'));
+      await gitCommitAll(workspaceRoot, 'files');
+      const existingCommit = await git('rev-parse', 'HEAD');
+      for (const [name, oid] of [
+        ['fetched', existingCommit],
+        ['unfetched', '1'.repeat(40)],
+      ]) {
+        await git('update-index', '--add', '--cacheinfo', `160000,${oid},${name}`);
+        await mkdir(path.join(workspaceRoot, name));
+      }
+      await git('commit', '-m', 'gitlinks');
+      for (const name of ['fetched', 'unfetched'])
+        await git('update-index', '--cacheinfo', `160000,${'2'.repeat(40)},${name}`);
+      await writeFile(path.join(workspaceRoot, 'healthy.txt'), 'after\n');
+      await rm(path.join(workspaceRoot, 'link'));
+      await symlink('directory.txt', path.join(workspaceRoot, 'link'));
+      await rm(path.join(workspaceRoot, 'deleted-link'));
+      await rm(path.join(workspaceRoot, 'directory.txt'));
+      await mkdir(path.join(workspaceRoot, 'directory.txt'));
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        readOnly: true,
+      });
+      try {
+        const manifest = await service.openDiffManifest({ sessionId: SESSION_ID });
+        expect(manifest.status).toBe('ok');
+        if (manifest.status !== 'ok') throw new Error('Expected manifest.');
+        for (const unsupported of [
+          'link',
+          'deleted-link',
+          'directory.txt',
+          'fetched',
+          'unfetched',
+        ]) {
+          expect(manifest.entries.find((entry) => entry.path === unsupported)).toMatchObject({
+            status: 'binary',
+          });
+          expect(
+            await service.openDiffManifest({ sessionId: SESSION_ID, path: unsupported })
+          ).toMatchObject({ status: 'ok', entries: [{ status: 'binary' }] });
+        }
+        const healthy = manifest.entries.find((entry) => entry.path === 'healthy.txt');
+        expect(healthy?.status).toBe('ok');
+        if (!healthy?.head) throw new Error('Missing healthy blob.');
+        const page = await service.readBlob({
+          sessionId: SESSION_ID,
+          key: healthy.head.key,
+          offset: 0,
+          length: 100,
+        });
+        expect(gunzipSync(Buffer.from(page.data, 'base64')).toString()).toBe('after\n');
+        await expect(
+          service.openDiffManifest({ sessionId: SESSION_ID, path: '../outside' })
+        ).rejects.toMatchObject({ code: 'invalid_path' });
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('isolates an operational file failure without swallowing a path-policy refusal', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      for (const name of ['blocked.txt', 'healthy.txt'])
+        await writeFile(path.join(workspaceRoot, name), 'before\n');
+      await gitCommitAll(workspaceRoot, 'base');
+      for (const name of ['blocked.txt', 'healthy.txt'])
+        await writeFile(path.join(workspaceRoot, name), 'after\n');
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        readOnly: true,
+      });
+      const internal = service as unknown as {
+        describeDiffFile: (...args: unknown[]) => Promise<unknown>;
+      };
+      const describe = internal.describeDiffFile.bind(service);
+      let code: 'permission_denied' | 'invalid_path' = 'permission_denied';
+      const fault = vi.spyOn(internal, 'describeDiffFile').mockImplementation((...args) => {
+        if ((args[1] as { workspacePath: string }).workspacePath === 'blocked.txt')
+          throw new CodeCollabV2ServiceError(code, 'Synthetic read refusal.');
+        return describe(...args);
+      });
+      try {
+        expect(
+          CodeCollabOpenDiffManifestResponseSchema.parse(
+            await service.openDiffManifest({ sessionId: SESSION_ID })
+          )
+        ).toMatchObject({
+          status: 'ok',
+          entries: expect.arrayContaining([
+            {
+              path: 'blocked.txt',
+              status: 'unavailable',
+              base: null,
+              head: null,
+              error: {
+                status: 'error',
+                code: 'permission_denied',
+                message: 'Synthetic read refusal.',
+              },
+              add: 1,
+              del: 1,
+            },
+            expect.objectContaining({
+              path: 'healthy.txt',
+              status: 'ok',
+              head: expect.any(Object),
+            }),
+          ]),
+        });
+        code = 'invalid_path';
+        await expect(service.openDiffManifest({ sessionId: SESSION_ID })).rejects.toMatchObject({
+          code: 'invalid_path',
+        });
+      } finally {
+        fault.mockRestore();
+        service.dispose();
+      }
+    });
+  });
+
+  it('returns stale when a disk blob is deleted or replaced by a directory after its manifest', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      await writeFile(path.join(workspaceRoot, 'a.txt'), 'before\n');
+      await gitCommitAll(workspaceRoot, 'base');
+      await writeFile(path.join(workspaceRoot, 'a.txt'), 'after\n');
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        readOnly: true,
+      });
+      try {
+        const manifest = await service.openDiffManifest({ sessionId: SESSION_ID, path: 'a.txt' });
+        if (manifest.status !== 'ok' || !manifest.entries[0]?.head)
+          throw new Error('Expected disk blob.');
+        const key = manifest.entries[0].head.key;
+        await rm(path.join(workspaceRoot, 'a.txt'));
+        await expect(
+          service.readBlob({ sessionId: SESSION_ID, key, offset: 0, length: 10 })
+        ).rejects.toMatchObject({ code: 'stale' });
+        expect(
+          await service.openDiffManifest({ sessionId: SESSION_ID, path: 'a.txt' })
+        ).toMatchObject({ status: 'ok', entries: [{ head: null }] });
+        await mkdir(path.join(workspaceRoot, 'a.txt'));
+        await expect(
+          service.readBlob({ sessionId: SESSION_ID, key, offset: 0, length: 10 })
+        ).rejects.toMatchObject({ code: 'stale' });
+      } finally {
+        service.dispose();
+      }
+    });
+  });
 
   it('serves bounded remote hunks and full local blobs for the same large file', async () => {
     await withWorkspace(async (workspaceRoot) => {

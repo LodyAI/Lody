@@ -1,4 +1,4 @@
-import { parseDiffFromFile, parsePatchFiles } from '@pierre/diffs';
+import { parsePatchFiles } from '@pierre/diffs';
 import {
   CODE_COLLAB_DIFF_BLOB_LIMITS,
   type CodeCollabDiffBlob,
@@ -115,6 +115,13 @@ export async function manifestEntryToDiff(
   renew?: (signal?: AbortSignal) => Promise<CodeCollabDiffManifestEntry>
 ): Promise<SessionFileDiffResult> {
   const contentKey = JSON.stringify([entry.base?.key ?? null, entry.head?.key ?? null]);
+  if (entry.status === 'unavailable')
+    return {
+      status: 'unavailable',
+      path: entry.path,
+      reason: entry.error?.code === 'permission_denied' ? 'permission-denied' : 'transient-io',
+      message: entry.error?.message ?? 'Diff is unavailable for this file.',
+    };
   if (entry.status === 'not_changed' || entry.status === 'missing')
     return {
       status: 'unavailable',
@@ -143,7 +150,7 @@ export async function manifestEntryToDiff(
       contentKey,
       oldTextLength: entry.base?.rawBytes ?? 0,
       newTextLength: entry.head?.rawBytes ?? 0,
-      loadDiffFiles: async (diff, signal) => {
+      loadDiffFiles: async (_diff, signal) => {
         let selected = entry;
         for (let attempt = 0; ; attempt++) {
           try {
@@ -160,13 +167,6 @@ export async function manifestEntryToDiff(
               },
             };
             signal?.throwIfAborted();
-            if (selected.base?.key !== entry.base?.key || selected.head?.key !== entry.head?.key) {
-              // Pierre hydrates in place and preserves hunk coordinates. Replace those
-              // coordinates before it hydrates a newly observed version of the file.
-              Object.assign(diff, parseDiffFromFile(files.oldFile, files.newFile), {
-                isPartial: true,
-              });
-            }
             return files;
           } catch (error) {
             if (
@@ -178,8 +178,15 @@ export async function manifestEntryToDiff(
               throw error;
             signal?.throwIfAborted();
             selected = await renew(signal);
-            if (!['ok', 'not_changed', 'missing'].includes(selected.status))
-              throw new DiffBlobReadError(selected.status, 'Diff content is no longer text.');
+            if (
+              selected.status !== entry.status ||
+              selected.base?.key !== entry.base?.key ||
+              selected.head?.key !== entry.head?.key
+            )
+              throw new DiffBlobReadError(
+                'diff_changed',
+                'The file or comparison changed. Reloading the diff.'
+              );
           }
         }
       },
