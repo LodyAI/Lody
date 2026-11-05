@@ -80,6 +80,7 @@ results() / acknowledge(id)   已结束任务保留到确认为止
 - `fetchAndInstall` 在写入任何内容前复制并校验整页；任一安装失败时不返回 `next`。`MailboxInstallError` 指明失败的帧（发送者、`frameDigest`），由应用决定是否请求修复。
 - 邮箱页中的路由无法解析，或 sender/工作区/epoch/收件人提示与信封原件不一致时，仅跳过本次，不登记任务、不拒绝 digest；正常元数据恢复后仍可重试。同页后续信封继续通过完整验签、权限、HPKE、commitment 检查。`processed` 是扫描行数，不是已安装密钥数量；实际安装失败仍不返回 `next`。
 - 只有真实的账本变化才把任务结束为 `Obsolete` 或 `Revoked`。
+- 报告排队或发送前都会重新做账本检查；邮箱版本提示每一步只查询一次，紧挨在排队或发送之前。
 
 ## KeyRepair
 
@@ -101,7 +102,7 @@ resumePendingDeliveries()   使用 outbox 中的原始密文，或只加密一�
 results() / acknowledge()   已完成任务保留到确认为止
 ```
 
-每个接收者在每个纪元的第一份密文永久保留，并在每次重试时重新发送；版本号变化只触发重试，从不产生新密文。恢复设备可以接收密钥，但从不发送。`Observed` 表示邮箱返回了完全相同的字节，不表示接收者已安装。日志满时新任务以 `task-limit` 失败；确认会释放容量，但不删除历史。
+每个接收者在每个纪元的第一份密文永久保留，并在每次重试时重新发送；版本号变化只触发重试，从不产生新密文。恢复设备可以接收密钥，但从不发送。`Observed` 表示邮箱返回了完全相同的字节，不表示接收者已安装。日志满时新任务以 `task-limit` 失败；确认会释放容量，但不删除历史。不同接收者的排程与投递并发进行（最多同时八个），同一接收者的步骤保持顺序。结果仍按接收者/任务顺序逐个检查：一个接收者受阻不会阻塞其他接收者，存储损坏则整批失败。
 
 ## EpochPublisher
 
@@ -131,7 +132,6 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 `WorkspaceControl`（_需要 `DeviceIdentity`、`LedgerSubmission`、`LedgerSync`_）在刚刷新的视图上签名普通命令（接纳成员或设备、设置角色、吊销、转移 owner），每条只提交一次。存在待处理或未确认的提交时禁止新的签名；只有本地 feed 已包含提交时观察到的检查点，结果才会被确认。
 
 `runWorkspaceKeyRound(limit, cursors)`（_需要 `KeyRepair`、`KeyReceiver`、`KeyDistributor`_）是一轮有限的维护：发送修复、恢复安装、获取一页邮箱、发送报告、协调并投递、再次发送报告、列出结果。每个队列各自保留游标提示。
-
 
 收钥（包括已提交的暂存组）与发钥是分别尝试的有限阶段。收钥失败不能阻止协调和投递。
 `WorkspaceKeyRoundFailure` 分别保留 `receive`、`distribution` 的 Result、发钥后报告的 Result

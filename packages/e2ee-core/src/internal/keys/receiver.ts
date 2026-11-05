@@ -323,10 +323,15 @@ export class KeyReceiver extends Context.Service<
           return yield* fail('corrupt');
         return id;
       });
-      const check = Effect.fnUntraced(function* (task: Task) {
+      /**
+       * Verified ledger authority for `task`, and with `remoteRevision` the mailbox
+       * revision hint. Skip the hint only where a later check in the same step asks
+       * the mailbox again before anything is queued or sent.
+       */
+      const check = Effect.fnUntraced(function* (task: Task, remoteRevision = true) {
         const view = yield* current();
         yield* Effect.fromResult(Reports.checkInstallationContext(view, task.context));
-        yield* revision(task.context);
+        if (remoteRevision) yield* revision(task.context);
         return view;
       });
       const readInstalled = (epoch: number) =>
@@ -399,7 +404,8 @@ export class KeyReceiver extends Context.Service<
             }),
           (key) => Effect.sync(() => disposeEpochKey(key))
         );
-        yield* check(task);
+        // `latest` below asks the mailbox after signing, before the report is queued.
+        yield* check(task, false);
         const signed = yield* signVerified(signer, Reports.installationSigningBytes(task.body));
         const bytes = yield* Effect.fromResult(
           Reports.encodeInstallationReport(task.context, signed.toBytes())
@@ -431,7 +437,8 @@ export class KeyReceiver extends Context.Service<
         const task = yield* load(id);
         if (task.phase === 'Reported') return undefined;
         if (task.phase !== 'Report' || !task.report) return yield* fail('corrupt');
-        const view = yield* check(task);
+        // The check right before `report` asks the mailbox; this one is ledger-only.
+        const view = yield* check(task, false);
         const decoded = yield* Effect.fromResult(
           Reports.authenticateInstallationReport({
             view,
