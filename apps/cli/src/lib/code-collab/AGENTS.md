@@ -102,9 +102,10 @@ File-by-file responsibilities: [README.md](README.md).
 
 - Root-scoped file state shares the owner publication and physical-file save chains. Watch subscriptions include root identity; wire keys must be decoded before filesystem access.
 
-- Diff blob RPCs are capability-gated pure reads: they never start watches, initialize
-  or migrate a snapshot database, or claim execution. Reauthorize each page and serve
-  only session-issued handles; never resolve a caller's hash as global authority.
+- Diff blob handlers are capability-gated reads. They do not start watches, initialize
+  a snapshot database or migrate it. Encrypted calls retain writer authority and
+  execution claims. Reauthorize each page and serve only session-issued handles;
+  never resolve a caller's hash as global authority.
   Generation rows contain no content hashes. Disk identity and non-Git base metadata
   stay daemon-local and invalidate generations even when line counts are unchanged.
   [Decision](../../../../../.agents/notes/implemented/architecture/2026-10-31-remote-diff-transport.md).

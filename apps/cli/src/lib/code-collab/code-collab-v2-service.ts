@@ -1413,11 +1413,11 @@ export class CodeCollabV2Service {
       } catch (error) {
         if (error instanceof DiffManifestUnavailableError && request.path !== undefined)
           throw error;
-        // Authorization/path resolution above remains request-wide. A readable
-        // root can still contain an unreadable file or missing turn evidence.
+        // Session/workspace failures invalidate the comparison. A path refusal
+        // stays local to its file; containment checks still reject the unsafe read.
         if (
           isCodeCollabV2ServiceError(error) &&
-          ['invalid_path', 'session_not_found', 'workspace_root_unavailable'].includes(error.code)
+          ['session_not_found', 'workspace_root_unavailable'].includes(error.code)
         )
           throw error;
         entry = {

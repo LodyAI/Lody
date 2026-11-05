@@ -215,9 +215,10 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   renews index publication; encrypted diff calls retain writer authority and execution claims. Hunk-budget overflow falls back
   to full blobs. Expired context loaders renew once; changed identities refresh the
   entire comparison and base header. Other expansion failures offer retry. Unsupported
-  non-regular files and operational errors stay local to their file; path/authorization
-  policy still rejects. A descriptor capture retries single-file stale errors once;
-  permission refusals retain their category. Completed Branch manifests update the
+  non-regular files, operational errors and file-read containment refusals stay local
+  to their file; request authorization and validation still reject. A descriptor
+  capture retries single-file stale errors once; permission refusals retain their
+  category. Completed Branch manifests update the
   provider's live Changes list and notify the sidebar summary without awaiting
   history or writing shared Flock rows. Failed/partial/superseded results and other
   scopes cannot replace that list. Comparison refresh retains the coherent old

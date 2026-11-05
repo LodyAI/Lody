@@ -53,8 +53,10 @@ A handle is issued only by an authorized manifest and keyed by requested session
 and content key, with resolved owner, workspace and source. Every page reauthorizes
 the session and checks that binding. Unsupported symlinks, directories and Gitlinks
 (including commits absent from the superproject) become per-file binary entries.
-Operational file failures become typed per-file unavailable entries; request/path
-authorization failures still reject the request. Removal/rename during a disk read
+File-read failures, including workspace containment refusals, become typed per-file
+unavailable entries. Containment checks still reject the unsafe read; independent files
+remain readable. Request authorization and validation still reject the request.
+Removal/rename during a disk read
 returns `stale`, allowing bounded metadata refresh. Descriptor capture retries a
 single `stale` failure once against the same pinned base before isolating it as a
 per-file error. Client error mapping retains permission refusals rather than

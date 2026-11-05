@@ -364,7 +364,7 @@ describe('CodeCollabV2Service text RPC boundary', () => {
     });
   });
 
-  it('isolates an operational file failure without swallowing a path-policy refusal', async () => {
+  it('isolates file read failures and recovers a stale capture against the pinned base', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await initGitRepoWithCommit(workspaceRoot);
       for (const name of ['blocked.txt', 'healthy.txt'])
@@ -380,7 +380,7 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         describeDiffFile: (...args: unknown[]) => Promise<unknown>;
       };
       const describe = internal.describeDiffFile.bind(service);
-      let code: 'permission_denied' | 'invalid_path' | 'stale' = 'permission_denied';
+      let code: 'permission_denied' | 'stale' = 'permission_denied';
       let remainingFailures = Infinity;
       const fault = vi.spyOn(internal, 'describeDiffFile').mockImplementation((...args) => {
         if (
@@ -444,14 +444,80 @@ describe('CodeCollabV2Service text RPC boundary', () => {
             expect.objectContaining({ path: 'healthy.txt', status: 'ok' }),
           ]),
         });
-        code = 'invalid_path';
-        await expect(service.openDiffManifest({ sessionId: SESSION_ID })).rejects.toMatchObject({
-          code: 'invalid_path',
-        });
       } finally {
         fault.mockRestore();
         service.dispose();
       }
+    });
+  });
+
+  it('isolates an escaping parent path without granting file or request access', async () => {
+    await withWorkspace(async (outside) => {
+      await withWorkspace(async (workspaceRoot) => {
+        await initGitRepoWithCommit(workspaceRoot);
+        await mkdir(path.join(workspaceRoot, 'directory'));
+        await writeFile(path.join(workspaceRoot, 'directory', 'blocked.txt'), 'before\n');
+        await writeFile(path.join(workspaceRoot, 'healthy.txt'), 'before\n');
+        await gitCommitAll(workspaceRoot, 'base');
+        const outsideText = 'synthetic outside content\n';
+        await writeFile(path.join(outside, 'blocked.txt'), outsideText);
+        await rm(path.join(workspaceRoot, 'directory'), { recursive: true });
+        await symlink(outside, path.join(workspaceRoot, 'directory'));
+        await writeFile(path.join(workspaceRoot, 'healthy.txt'), 'after\n');
+        let authorized = true;
+        const service = new CodeCollabV2Service({
+          readOnly: true,
+          resolveWorkspace: async () =>
+            authorized
+              ? { ok: true, ownerSessionId: SESSION_ID, workspaceRoot }
+              : { ok: false, code: 'permission_denied', message: 'Synthetic request refusal.' },
+        });
+        try {
+          const result = CodeCollabOpenDiffManifestResponseSchema.parse(
+            await service.openDiffManifest({ sessionId: SESSION_ID })
+          );
+          expect(result).toMatchObject({
+            status: 'ok',
+            entries: expect.arrayContaining([
+              expect.objectContaining({
+                path: 'directory/blocked.txt',
+                status: 'unavailable',
+                base: null,
+                head: null,
+                error: expect.objectContaining({ code: 'invalid_path' }),
+              }),
+              expect.objectContaining({ path: 'healthy.txt', status: 'ok' }),
+            ]),
+          });
+          if (result.status !== 'ok') throw new Error('Expected a manifest.');
+          const healthy = result.entries.find((entry) => entry.path === 'healthy.txt');
+          if (!healthy?.head) throw new Error('Expected a readable healthy file.');
+          const body = await service.readBlob({
+            sessionId: SESSION_ID,
+            key: healthy.head.key,
+            offset: 0,
+            length: healthy.head.rawBytes,
+          });
+          expect(gunzipSync(Buffer.from(body.data, 'base64')).toString('utf8')).toBe('after\n');
+          await expect(
+            service.readBlob({
+              sessionId: SESSION_ID,
+              key: digestText(outsideText),
+              offset: 0,
+              length: 1,
+            })
+          ).rejects.toMatchObject({ code: 'stale' });
+          await expect(
+            service.openDiffManifest({ sessionId: SESSION_ID, path: '../blocked.txt' })
+          ).rejects.toMatchObject({ code: 'invalid_path' });
+          authorized = false;
+          await expect(service.openDiffManifest({ sessionId: SESSION_ID })).rejects.toMatchObject({
+            code: 'permission_denied',
+          });
+        } finally {
+          service.dispose();
+        }
+      });
     });
   });
 

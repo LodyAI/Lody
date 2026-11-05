@@ -52,8 +52,7 @@ export const E2eeFeatureInputSchema = z
   .strict();
 export type E2eeFeatureInput = { requestId: string; request: LocalMachineRpcRequest };
 
-/** Closed set of reads with no machine writes or execution claims. Diff reads may
- * run bounded Git reads and open an existing snapshot database read-only. */
+/** Closed set of reads with no machine writes or execution claims. */
 export const E2EE_READ_QUERY_METHODS = [
   'machine/status',
   'machine/ping',

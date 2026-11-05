@@ -26,8 +26,9 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   `[path, 'v']` generation siblings. Legacy file rows stay strict and unchanged;
   content hashes travel only through owner-scoped RPC, never the shared index.
 - Encrypted manifest/blob calls retain writer authority and execution claims; Guest
-  access is outside this capability. Operational manifest failures are per-file;
-  request/path authorization failures still reject the request.
+  access is outside this capability. Manifest file-read failures, including path
+  containment refusals, are per-file; request authorization and validation still reject
+  the request.
 - File-index generation siblings count toward whole-state row/byte limits and
   every publication batch budget. Reserve their space before selecting file paths.
   [Rationale](../../../.agents/notes/implemented/architecture/2026-10-31-remote-diff-transport.md).
