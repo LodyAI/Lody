@@ -207,6 +207,14 @@ export function createCloudE2eePort(
     expiresIn: z.number().int().positive().max(900),
     expiresAt: z.number().int().positive(),
   });
+  const classifyE2eeRejection = (cause: unknown): never => {
+    const rejected = z.object({ data: z.object({ code: z.string() }) }).safeParse(cause);
+    if (rejected.success && rejected.data.data.code === 'e2ee_member_removed')
+      throw new CloudE2eeMemberRemoved();
+    if (rejected.success && rejected.data.data.code === 'e2ee_device_revoked')
+      throw new CloudE2eeDeviceRevoked();
+    throw cause;
+  };
   const getContentToken = async (
     input: Parameters<CloudE2eePort['getContentToken']>[0],
     signal: AbortSignal
@@ -219,12 +227,7 @@ export function createCloudE2eePort(
         })
       );
     } catch (cause) {
-      const rejected = z.object({ data: z.object({ code: z.string() }) }).safeParse(cause);
-      if (rejected.success && rejected.data.data.code === 'e2ee_member_removed')
-        throw new CloudE2eeMemberRemoved();
-      if (rejected.success && rejected.data.data.code === 'e2ee_device_revoked')
-        throw new CloudE2eeDeviceRevoked();
-      throw cause;
+      return classifyE2eeRejection(cause);
     }
   };
   return {
@@ -296,13 +299,18 @@ export function createCloudE2eePort(
         atStart: result.result.atRetainedStart,
       };
     },
-    getHistory: async (input) =>
-      e2eeHistoryPageSchema.parse(
-        await client(AbortSignal.timeout(30_000)).action(api.e2eeWorkspaces.history, {
-          ...input,
-          ...(options.token === undefined ? {} : { cliToken: options.token }),
-        })
-      ),
+    getHistory: async (input) => {
+      try {
+        return e2eeHistoryPageSchema.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeWorkspaces.history, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        );
+      } catch (cause) {
+        return classifyE2eeRejection(cause);
+      }
+    },
     getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
     readEpochGroup: (input) =>
       client(AbortSignal.timeout(30_000)).query(api.e2eeEpochStaging.readGroup, {
