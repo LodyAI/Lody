@@ -19,7 +19,7 @@ Translation: current
 - 所有工作区窗口使用 localStorage 持久化 Composer 草稿。`windowStorage` 的逐窗口存储适用于导航和布局，不适用于工作区归属的草稿。
 - 不读取或复制旧的用户级草稿键。该数据没有 workspace 归属，自动迁移到当前窗口会在错误工作区泄露内容。
 
-此修复落实[桌面多窗口 Spec](../../../../specs/desktop-windows.zh.md)中工作区草稿隔离的要求，并补足[多窗口实现提案](../../proposed/feature/2026-09-10-desktop-windows.zh.md)未覆盖的 landing composer 状态。
+此修复落实[桌面多窗口 Spec](../../../../specs/desktop-windows.zh.md)中工作区草稿隔离的要求，并补足[多窗口实现提案](../feature/2026-09-10-desktop-windows.zh.md)未覆盖的 landing composer 状态。
 
 ## 验证
 

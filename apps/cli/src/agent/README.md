@@ -282,7 +282,7 @@ paths untouched, including same-version replacements. Status, installation and l
 selector: filter the base and all completed generations by current pins and host compatibility,
 then rank eligible candidates by installedAt and command. Best-effort cleanup conservatively retains corrupt originals and generation trees
 because the manager cannot prove their readers have exited. Downloads have a 60-second idle deadline;
-progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/proposed/bug-fix/2026-09-21-acp-auth-runtime-download.md).
+progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-21-acp-auth-runtime-download.md).
 
 Completed caches written before metadata schema v1 remain reusable through a separate strict
 legacy schema; their old `name`/`version`/`platform` fields are normalized in memory and only
