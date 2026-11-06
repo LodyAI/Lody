@@ -77,10 +77,14 @@ async function load(relative, dependencies, console = globalThis.console, env = 
                   ? { PersonalPairingOfferSchema }
                   : id === '../../services/e2ee-account-pairing-host.mjs'
                     ? { makeDesktopAccountPairingHost }
-                    : id === '../../services/e2ee-client-loss-probe'
-                      ? // Production default: the E2E probe is disabled and forwards work.
-                        { observeClientLossOperation: (_kind, _workspace, _sender, work) => work() }
-                      : require(id)
+                    : id === '../../services/e2ee-recovery-vault.mjs'
+                      ? {}
+                      : id === '../../services/e2ee-client-loss-probe'
+                        ? // Production default: the E2E probe is disabled and forwards work.
+                          {
+                            observeClientLossOperation: (_kind, _workspace, _sender, work) => work()
+                          }
+                        : require(id)
     }
   )
   return exports
