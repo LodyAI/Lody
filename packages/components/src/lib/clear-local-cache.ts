@@ -1,3 +1,4 @@
+import { DIFF_BLOB_CACHE_DB } from './diff-blob-cache';
 /**
  * "Clear cache" support shared by web, mobile (Capacitor), and desktop (Electron).
  *
@@ -66,6 +67,7 @@ export type PendingLocalClearMode = 'cache' | 'hard';
 
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
+  DIFF_BLOB_CACHE_DB,
   SESSION_INPUT_DATABASE,
   CLIENT_LOG_DATABASE,
   ROOST_HISTORY_CACHE_DB,

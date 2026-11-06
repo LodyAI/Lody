@@ -830,6 +830,8 @@ function WorkspaceChatLanding({
   const localProbeAttempted = useAtomValue(localProbeAttemptedAtom);
   const onlineMachineIds = useOnlineMachineIds();
   const presenceSynced = useAtomValue(lodyPresenceSyncStateAtom) === 'synced';
+  const presenceSyncedRef = useRef(presenceSynced);
+  presenceSyncedRef.current = presenceSynced;
   const onlineMachineIdsRef = useRef(onlineMachineIds);
   onlineMachineIdsRef.current = onlineMachineIds;
   const isPresenceMachineOnline = useCallback(
@@ -2635,6 +2637,7 @@ function WorkspaceChatLanding({
           projectMachineId: project.machineId,
           visibleLocalMachineId,
           targetMachine: machinesRef.current.get(project.machineId),
+          presenceSynced: presenceSyncedRef.current,
           isMachineOnline: (machineId) => onlineMachineIdsRef.current.has(machineId),
         })
       ) {
@@ -2710,9 +2713,16 @@ function WorkspaceChatLanding({
       projectMachineId: selectedLocalProjectMachineId,
       visibleLocalMachineId,
       targetMachine: machines.get(selectedLocalProjectMachineId),
+      presenceSynced,
       isMachineOnline: isPresenceMachineOnline,
     });
-  }, [isPresenceMachineOnline, machines, selectedLocalProjectMachineId, visibleLocalMachineId]);
+  }, [
+    isPresenceMachineOnline,
+    machines,
+    presenceSynced,
+    selectedLocalProjectMachineId,
+    visibleLocalMachineId,
+  ]);
   const localGitStateLoadKey = useMemo(
     () =>
       getLocalProjectGitStateLoadKey({

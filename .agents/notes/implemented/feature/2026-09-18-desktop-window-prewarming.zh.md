@@ -13,7 +13,7 @@ Provider 和鉴权完成后才显示内容，并可能出现空白或错误帧�
 IPC 绑定目标并做客户端导航，立即显示后立刻再预热一个替补。该选项默认关闭，普通
 路径仍是冷启动兜底。备用窗口预热的是应用外壳和共享 Provider，不是某个工作区的
 数据，代价是多一个隐藏渲染器进程。它建立在既有的桌面多窗口决策
-之上（[说明](../../proposed/feature/2026-09-10-desktop-windows.zh.md)、
+之上（[说明](2026-09-10-desktop-windows.zh.md)、
 [Spec](../../../../specs/desktop-windows.zh.md)）。
 
 ## 决策

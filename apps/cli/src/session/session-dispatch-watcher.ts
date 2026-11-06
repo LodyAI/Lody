@@ -73,6 +73,13 @@ type SessionUserResolverLike = Pick<SessionUserResolver, 'resolve' | 'clear'>;
 type SessionDispatchWatcherDeps = {
   /** Encrypted turn execution is admitted only by its verified-device gate. */
   encryptedWorkspace?: boolean;
+  /** Encrypted only: who this turn runs as. A row's `userId` stays display data. */
+  resolveEncryptedRequester?: (intent: {
+    workspaceId: string;
+    sessionId: string;
+    userTurnId: string;
+    inputConfig?: unknown;
+  }) => Promise<{ state: 'pending' | 'denied' } | { userId?: string }>;
   logger: Logger;
   machineId: MachineId;
   workspaceId: WorkspaceId;
@@ -760,7 +767,8 @@ export class SessionDispatchWatcher {
         return finish('error');
       }
 
-      if (offer.inputOrigin === 'human') {
+      // An encrypted offer's `userId` is a label; dispatch accepts it under the verified one.
+      if (offer.inputOrigin === 'human' && !this.deps.encryptedWorkspace) {
         await this.deps.executionService.acceptInboxHumanInput?.({
           sessionId,
           inputId: userTurnId,
@@ -1494,6 +1502,24 @@ export class SessionDispatchWatcher {
       const requesterUserId = nextUserTurn.userId ?? freshMeta.userId;
       const localProjectId =
         freshMeta.project?.kind === 'local' ? freshMeta.project.localProjectId : undefined;
+      const encryptedRequester = await this.deps.resolveEncryptedRequester?.({
+        workspaceId: this.deps.workspaceId,
+        sessionId,
+        userTurnId: nextUserTurn.id,
+        inputConfig: nextUserTurn.inputConfig,
+      });
+      ensureActive();
+      if (encryptedRequester && 'state' in encryptedRequester) {
+        if (encryptedRequester.state === 'pending') {
+          outcome = 'execution-deferred';
+          this.forkExecutionEvidenceRetry(sessionId, nextUserTurn.id);
+          return;
+        }
+      }
+      const verifiedRequesterUserId =
+        encryptedRequester && 'userId' in encryptedRequester
+          ? encryptedRequester.userId
+          : undefined;
 
       // A background verify-with-retry fiber already owns this turn (from a prior
       // indeterminate result). Don't re-verify on every mirror tick — the fiber
@@ -1553,7 +1579,8 @@ export class SessionDispatchWatcher {
                   turn.freshMeta,
                   turn.nextUserTurn,
                   launchConfig,
-                  user
+                  user,
+                  verifiedRequesterUserId
                 )
             ),
           };
@@ -1571,7 +1598,8 @@ export class SessionDispatchWatcher {
                 turn.freshMeta,
                 turn.nextUserTurn,
                 launchConfig,
-                user
+                user,
+                verifiedRequesterUserId
               )
           ),
         };
@@ -1668,7 +1696,7 @@ export class SessionDispatchWatcher {
             userTurnId: nextUserTurn.id,
             invocation: {
               sourceTurnId: nextUserTurn.id,
-              requesterUserId: nextUserTurn.userId,
+              requesterUserId: verifiedRequesterUserId ?? nextUserTurn.userId,
               inputConfig: nextUserTurn.inputConfig ?? {},
               notificationAudience:
                 dispatchSource === 'rpc'
@@ -2133,7 +2161,8 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     entry: SessionHistoryInput,
     launchConfig: SessionLaunchConfig | undefined,
-    user: SessionUserProfile
+    user: SessionUserProfile,
+    requesterUserId?: string
   ): Promise<SessionChatRequestValidated> {
     const project: ProjectRef | undefined = meta.project;
     const { inputBlocks, prompt } = this.resolveDispatchInput(entry);
@@ -2164,7 +2193,7 @@ export class SessionDispatchWatcher {
         resume: entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta),
       },
       userTurnId: entry.id,
-      userId: entry.userId ?? meta.userId,
+      userId: requesterUserId ?? entry.userId ?? meta.userId,
       userName: user.name,
       userEmail: user.email,
     };
@@ -2174,7 +2203,8 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     entry: SessionHistoryInput,
     launchConfig: SessionLaunchConfig | undefined,
-    user: SessionUserProfile
+    user: SessionUserProfile,
+    requesterUserId?: string
   ): Promise<SessionCreateRequestValidated> {
     const project: ProjectRef | undefined = meta.project;
     const { inputBlocks, prompt } = this.resolveDispatchInput(entry);
@@ -2213,7 +2243,7 @@ export class SessionDispatchWatcher {
       worktreeCleanup: launchConfig?.worktreeCleanup,
       env: launchConfig?.env,
       userTurnId: entry.id,
-      userId: entry.userId ?? meta.userId,
+      userId: requesterUserId ?? entry.userId ?? meta.userId,
       userName: user.name,
       userEmail: user.email,
       parentSessionId: meta.parentSessionId,
@@ -2288,6 +2318,7 @@ export class SessionDispatchWatcher {
           ...pendingEntry,
           id: queuedTurnId,
           ...(automation ? { author: { v: 1 as const, kind: 'system' as const } } : {}),
+          ...(this.deps.encryptedWorkspace ? { queuedInput: true as const } : {}),
         }
       : null;
   }

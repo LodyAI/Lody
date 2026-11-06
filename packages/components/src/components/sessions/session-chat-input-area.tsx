@@ -1028,7 +1028,12 @@ export const SessionChatInputArea = memo(
 
     const clearInput = useCallback(() => {
       setUserInput('');
-    }, [setUserInput]);
+      // Retire the accepted draft's hydration seed as well as its visible text.
+      mentionRangesRef.current = [];
+      setSessionMentionRanges(session.id, []);
+      setPersistedMentionRanges([]);
+      setDraftMentionRevision((revision) => revision + 1);
+    }, [session.id, setUserInput]);
 
     const quoteStorageWarning = useRef<string | null>(null);
     useEffect(() => {

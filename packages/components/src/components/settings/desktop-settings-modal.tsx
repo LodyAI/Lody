@@ -40,6 +40,7 @@ import { BillingSettingsComponent } from './billing-setting';
 import { StatsSettingsComponent } from './stats-setting';
 import { ProjectSettingsComponent } from './project-settings';
 import { MachineAgentSettings } from './machine-agent-settings';
+import { LodyAgentSetting } from './lody-agent-setting';
 import { IntegrationsSettingsComponent } from './integrations-setting';
 import { KeyboardShortcutsSetting } from './keyboard-shortcuts-setting';
 import { AboutSettingsComponent } from './about-setting';
@@ -579,6 +580,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
           onSelectedMachineChange={setSelectedMachineId}
         />
       );
+    case 'lody-agent':
+      return <LodyAgentSetting />;
     case 'memory':
       return <MemorySetting />;
     case 'agent-roles':

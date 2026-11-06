@@ -35,8 +35,8 @@ describe('Worked for … collapse gate (buildAssistantTurnRenderLayout)', () => 
     expect(hasVisibleFinalContent([toolCall(), toolCall(), text('all done')], true)).toBe(true);
   });
 
-  it('an answer followed by more tool work keeps the answer visible → collapse', () => {
-    expect(hasVisibleFinalContent([text('the answer'), toolCall()], true)).toBe(true);
+  it('text followed by unfinished tool work has no answer tail → do not collapse', () => {
+    expect(hasVisibleFinalContent([text('the answer'), toolCall()], true)).toBe(false);
   });
 
   it('streaming turn keeps its work region so the reader can fold it, with no visible tail', () => {

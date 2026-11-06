@@ -202,7 +202,32 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   rendered Markdown must opt into native selection through
   `data-native-selection-allow`.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
-  turn diff RPC: `specs/code-collab-v2.md`.
+  turn diff RPC: `packages/shared/src/code-collab.ts`.
+- Content-addressed diff transport is capability-gated by `codeCollabDiffBlobs` v1: paged manifests
+  identify immutable Git/store/disk bytes and leave All Changes bodies deferred
+  until visible. Reads assemble raw byte ranges, verify the full hash, then decode.
+  Remote large files start with bounded partial patches; Pierre's expand action
+  hydrates full files through the same verified cache. Ordinary remote blobs use
+  bounded IndexedDB; protected/local blobs stay in memory. Opaque file generations
+  invalidate individual entries even if line counts stay equal; comparison-base
+  changes and the first publication after restart invalidate changed paths. Opens
+  revalidate metadata even with unchanged index hints. Writer diff activity separately
+  renews index publication; encrypted diff calls retain writer authority and execution claims. Hunk-budget overflow falls back
+  to full blobs. Expired context loaders renew once; changed identities refresh the
+  entire comparison and base header. Other expansion failures offer retry. Unsupported
+  non-regular files, operational errors and file-read containment refusals stay local
+  to their file; request authorization and validation still reject. A descriptor
+  capture retries single-file stale errors once; permission refusals retain their
+  category. Completed Branch manifests update the
+  provider's live Changes list and notify the sidebar summary without awaiting
+  history or writing shared Flock rows. Failed/partial/superseded results and other
+  scopes cannot replace that list. Comparison refresh retains the coherent old
+  batch until its manifest completes, reuses unchanged content/viewer context,
+  preserves card state and viewport anchoring, and remounts only a failed viewer
+  on retry. Partial loaders stay out of the immutable turn cache.
+  Older machines keep the existing RPCs. See the
+  [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md)
+  and [protocol/privacy draft](../../specs/remote-diff-delivery.md).
 - DOCX, XLSX, and PPTX enter through the static `SessionFileOfficePreview` shell.
   An active preview schedules a bounded read at idle and then imports only that
   format's renderer and worker-backed engine. The local resource URL is read

@@ -5,6 +5,9 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 ## Sidebar and session rows
 
 - Sidebar rows represent Sessions, never Tasks.
+- Desktop project grouping shows only projects with session rows after pinned-tree
+  separation and opener placement. Hide empty machine sections, while retaining
+  machines with populated multi-repository projects.
 - Desktop Workspace, Local Project, Updated and Pinned rows support mention drag
   and Mark as unread (hide on unread). Use `lib/session-mention-drag.ts` for
   conversation/landing drops; parent tabs use HTML5 drag, child tabs dnd-kit.
@@ -113,7 +116,6 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   Project. Retried saves reuse registrations; source paths stay out of definitions.
 
 E2EE/terminals: read [rules](e2ee/AGENTS.md).
-
 
 ## Automation markers
 

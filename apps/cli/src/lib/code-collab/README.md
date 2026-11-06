@@ -60,3 +60,8 @@ activation and explicit root refresh. Watcher and terminal diff refreshes do not
 this work. MessageHandler connects the authorized workspace to
 [WorkspaceGitService](../../session/workspace-git-service.ts); see its
 [contract](../../../../../specs/workspace-branch-state.md).
+
+File-index paths containing U+FFFD are corrupted LWW keys from a byte stream
+that was decoded across a chunk boundary. A correct republish uses a different
+key and cannot overwrite them, so reads hide them and the next publication deletes
+them. Filesystem scanners do not produce these keys.

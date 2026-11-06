@@ -15,7 +15,7 @@ Translation: current
 
 反向应用提交 `385f1a727` 中相关实现的修改，保留之后的无关变更。
 保留原提案作为历史，将其[Spec](../../../../specs/composer-machine-owner.zh.md)
-标记为 outdated。本决定取代[归属提案](../../proposed/feature/2026-10-07-composer-machine-owner.zh.md)。
+标记为 outdated（更正：#1468 之后已把该 Spec 改回 draft，用于机器详情卡）。本决定取代[归属提案](../../rejected/feature/2026-10-07-composer-machine-owner.zh.md)。
 现有信息栏测试继续覆盖无上下文与同步状态。
 
 此检出未安装工作区依赖，无法运行定向 Vitest 测试（`vitest` 不可用）。

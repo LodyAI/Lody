@@ -1,4 +1,12 @@
 import {
+  CodeCollabOpenDiffManifestResponseSchema,
+  CodeCollabReadBlobResponseSchema,
+  type CodeCollabOpenDiffManifestRequest,
+  type CodeCollabOpenDiffManifestResponse,
+  type CodeCollabReadBlobRequest,
+  type CodeCollabReadBlobResponse,
+} from '@lody/shared';
+import {
   AndroidEmulatorRequestSchema,
   AndroidEmulatorResponseSchema,
   AndroidEmulatorRemoteResponseSchema,
@@ -293,6 +301,8 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'code-collab/open-text',
   'code-collab/refresh-text',
   'code-collab/save-text',
+  'code-collab/open-diff-manifest',
+  'code-collab/read-blob',
   'code-collab/open-current-diff',
   'code-collab/open-all-changes-diff',
   'code-collab/open-turn-diff',
@@ -528,6 +538,16 @@ export const LoroCodeCollabV2RefreshTextRpcRequestSchema = BaseRpcRequestSchema.
 
 export const LoroCodeCollabV2SaveTextRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('code-collab/save-text'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
+export const LoroCodeCollabOpenDiffManifestRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('code-collab/open-diff-manifest'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
+export const LoroCodeCollabReadBlobRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('code-collab/read-blob'),
   params: CodeCollabV2RpcContentEnvelopeSchema,
 }).strict();
 
@@ -856,6 +876,8 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroCodeCollabV2OpenTextRpcRequestSchema,
   LoroCodeCollabV2RefreshTextRpcRequestSchema,
   LoroCodeCollabV2SaveTextRpcRequestSchema,
+  LoroCodeCollabOpenDiffManifestRpcRequestSchema,
+  LoroCodeCollabReadBlobRpcRequestSchema,
   LoroCodeCollabV2OpenCurrentDiffRpcRequestSchema,
   LoroCodeCollabV2OpenAllChangesDiffRpcRequestSchema,
   LoroCodeCollabV2OpenTurnDiffRpcRequestSchema,
@@ -1697,6 +1719,8 @@ const base64UrlToBytes = (value: string): Uint8Array => {
 };
 
 export type LoroMachineRpcResult =
+  | CodeCollabOpenDiffManifestResponse
+  | CodeCollabReadBlobResponse
   | RemoteAutomationHandshake
   | RemoteAutomationRpcResult
   | RemoteAutomationEncryptedResponse
@@ -2290,6 +2314,19 @@ const parseRpcSuccessResult = async (
     if (response.method === 'file/preview') {
       const previewParsed = FilePreviewV3ResponseSchema.safeParse(decrypted);
       return previewParsed.success ? previewParsed.data : null;
+    }
+    if (
+      response.method === 'code-collab/open-diff-manifest' ||
+      response.method === 'code-collab/read-blob'
+    ) {
+      const schema =
+        response.method === 'code-collab/read-blob'
+          ? CodeCollabReadBlobResponseSchema
+          : CodeCollabOpenDiffManifestResponseSchema;
+      const parsed = schema.safeParse(decrypted);
+      if (parsed.success) return parsed.data;
+      const error = CodeCollabV2ErrorSchema.safeParse(decrypted);
+      return error.success ? error.data : null;
     }
     const parsed = CodeCollabV2RpcResponseSchema.safeParse(decrypted);
     return parsed.success ? parsed.data : null;
@@ -3613,6 +3650,30 @@ export class LoroStreamsMachineRpcClient {
     })) as CodeCollabV2SaveTextResponse | CodeCollabV2Error | null;
   }
 
+  async requestCodeCollabOpenDiffManifest(
+    options: CodeCollabOpenDiffManifestRequest & { ownerSessionId?: string; timeoutMs?: number }
+  ): Promise<CodeCollabOpenDiffManifestResponse | CodeCollabV2Error | null> {
+    const { ownerSessionId, timeoutMs, ...params } = options;
+    return (await this.sendRequest({
+      method: 'code-collab/open-diff-manifest',
+      ownerSessionId: ownerSessionId ?? options.sessionId,
+      params,
+      timeoutMs: timeoutMs ?? 30_000,
+    })) as CodeCollabOpenDiffManifestResponse | CodeCollabV2Error | null;
+  }
+
+  async requestCodeCollabReadBlob(
+    options: CodeCollabReadBlobRequest & { ownerSessionId?: string; timeoutMs?: number }
+  ): Promise<CodeCollabReadBlobResponse | CodeCollabV2Error | null> {
+    const { ownerSessionId, timeoutMs, ...params } = options;
+    return (await this.sendRequest({
+      method: 'code-collab/read-blob',
+      ownerSessionId: ownerSessionId ?? options.sessionId,
+      params,
+      timeoutMs: timeoutMs ?? 30_000,
+    })) as CodeCollabReadBlobResponse | CodeCollabV2Error | null;
+  }
+
   async requestCodeCollabOpenCurrentDiff(
     options: CodeCollabV2OpenCurrentDiffRequest & { ownerSessionId?: string; timeoutMs?: number }
   ): Promise<CodeCollabV2OpenCurrentDiffResponse | CodeCollabV2Error | null> {
@@ -4128,6 +4189,18 @@ export class LoroStreamsMachineRpcClient {
           params: CodeCollabV2SaveTextRequest;
         }
       | {
+          method: 'code-collab/open-diff-manifest';
+          params: CodeCollabOpenDiffManifestRequest;
+          ownerSessionId: string;
+          timeoutMs: number;
+        }
+      | {
+          method: 'code-collab/read-blob';
+          params: CodeCollabReadBlobRequest;
+          ownerSessionId: string;
+          timeoutMs: number;
+        }
+      | {
           method: 'code-collab/open-current-diff';
           timeoutMs: number;
           ownerSessionId: string;
@@ -4270,6 +4343,8 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'code-collab/open-text' ||
       args.method === 'code-collab/refresh-text' ||
       args.method === 'code-collab/save-text' ||
+      args.method === 'code-collab/open-diff-manifest' ||
+      args.method === 'code-collab/read-blob' ||
       args.method === 'code-collab/open-current-diff' ||
       args.method === 'code-collab/open-all-changes-diff' ||
       args.method === 'code-collab/open-turn-diff' ||
@@ -4536,6 +4611,8 @@ export class LoroStreamsMachineRpcClient {
             params: await encryptCodeCollabV2RpcPayload(args.ownerSessionId, args.params),
           };
           break;
+        case 'code-collab/open-diff-manifest':
+        case 'code-collab/read-blob':
         case 'code-collab/open-current-diff':
           request = {
             ...envelope,

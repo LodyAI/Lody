@@ -168,7 +168,7 @@ Intended behavior: [Shared UI primitives](../../../../specs/ui-primitives.md),
 which this change returns to `draft` with the menu family stated.
 
 Inspected implementation: `packages/ui/src/menu`, `packages/ui/src/popup`, and
-the deleted `packages/components/src/ui/menubar.tsx`.
+the deleted Radix `menubar.tsx` (now `packages/ui/src/menu/menubar.tsx`).
 
 Executed validation: `pnpm --filter @lody/ui typecheck` and
 `pnpm --filter @lody/ui test` (112 tests, 25 of them new in

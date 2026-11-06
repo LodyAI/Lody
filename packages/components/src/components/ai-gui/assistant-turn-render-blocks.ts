@@ -3,6 +3,7 @@ import {
   buildAssistantMessageRenderItems,
   type AssistantMessageRenderItem,
 } from './assistant-message-render-items';
+import { shouldCollapseAssistantMessageItem } from './message-copy';
 
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
 type ThoughtMessage = Extract<MessageContent, { type: 'thought' }>;
@@ -284,6 +285,23 @@ const buildSegmentBlockRanges = (
   return ranges.length > 0 ? ranges : [[0, blocks.length]];
 };
 
+const collectSegmentEntries = (
+  blocks: readonly AssistantTurnRenderBlock[],
+  [start, end]: readonly [number, number]
+): AssistantMessageRenderItem[] => {
+  const entries: AssistantMessageRenderItem[] = [];
+  for (let index = start; index < end; index += 1) {
+    const block = blocks[index];
+    if (!block) continue;
+    if (block.kind === 'content') {
+      entries.push(block.entry);
+    } else {
+      entries.push(...block.entries);
+    }
+  }
+  return entries;
+};
+
 export const buildAssistantTurnRenderLayout = (
   messageId: string,
   items: readonly MessageContent[],
@@ -297,29 +315,36 @@ export const buildAssistantTurnRenderLayout = (
   const segments: AssistantTurnRenderSegment[] = ranges.map((blockRange, segmentIndex) => {
     const key = `segment:${messageId}:${segmentIndex}`;
 
-    // Once stopped, commentary is safe to fold only with an explicit answer.
-    // While streaming, a reader may choose to fold it manually.
-    const hasFinalAnswer = blocks
-      .slice(blockRange[0], blockRange[1])
-      .some(
-        (block) =>
-          block.kind === 'content' &&
-          block.entry.content.type === 'text' &&
-          block.entry.content.messagePhase === 'final_answer' &&
-          block.entry.content.text.trim().length > 0
-      );
+    const collapsibleItemIndexes = new Set<number>();
+    if (isTurnFinished) {
+      const segmentEntries = collectSegmentEntries(blocks, blockRange);
+      const segmentContents = segmentEntries.map((entry) => entry.content);
+      segmentEntries.forEach((entry, index) => {
+        if (
+          shouldCollapseAssistantMessageItem({
+            content: entry.content,
+            index,
+            items: segmentContents,
+            isTurnFinished,
+          })
+        )
+          collapsibleItemIndexes.add(entry.itemIndex);
+      });
+    }
     const segmentWorkBlockKeys = new Set<string>();
     let firstWorkBlockIndex = -1;
     for (let index = blockRange[0]; index < blockRange[1]; index += 1) {
       const block = blocks[index];
+      if (!block) continue;
+      const isLiveCommentary =
+        !isTurnFinished &&
+        block.kind === 'content' &&
+        block.entry.content.type === 'text' &&
+        block.entry.content.messagePhase === 'commentary';
       if (
-        !block ||
-        (block.kind !== 'activity_group' &&
-          !(
-            (!isTurnFinished || hasFinalAnswer) &&
-            block.entry.content.type === 'text' &&
-            block.entry.content.messagePhase === 'commentary'
-          ))
+        block.kind !== 'activity_group' &&
+        !isLiveCommentary &&
+        !collapsibleItemIndexes.has(block.entry.itemIndex)
       )
         continue;
       segmentWorkBlockKeys.add(block.key);

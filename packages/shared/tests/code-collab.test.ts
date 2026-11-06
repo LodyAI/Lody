@@ -1,3 +1,4 @@
+import { readCodeCollabFileGenerations } from '../src/code-collab';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -34,6 +35,7 @@ import {
   writeCodeCollabFileIndexToFlock,
   type CodeCollabFileEntry,
   type CodeCollabV2FileIndexState,
+  type CodeCollabV2AllChangesState,
   type CodeCollabV2FileTreeState,
 } from '../src/code-collab';
 
@@ -52,20 +54,32 @@ const smallLimits = {
 
 class FakeFileIndexFlock {
   readonly rows = new Map<string, unknown>();
+  readonly extraRows = new Map<string, { key: readonly unknown[]; value: unknown }>();
   commits = 0;
 
   scan(): Iterable<{ readonly key: readonly unknown[]; readonly value: unknown }> {
-    return [...this.rows.entries()].map(([workspacePath, value]) => ({
-      key: [workspacePath],
-      value,
-    }));
+    return [
+      ...[...this.rows.entries()].map(([workspacePath, value]) => ({
+        key: [workspacePath],
+        value,
+      })),
+      ...this.extraRows.values(),
+    ];
   }
 
-  set(key: readonly [string], value: unknown): void {
+  set(key: readonly [string] | readonly [string, 'v'], value: unknown): void {
+    if (key.length === 2) {
+      this.extraRows.set(JSON.stringify(key), { key, value });
+      return;
+    }
     this.rows.set(key[0], value);
   }
 
-  delete(key: readonly [string]): void {
+  delete(key: readonly [string] | readonly [string, 'v']): void {
+    if (key.length === 2) {
+      this.extraRows.delete(JSON.stringify(key));
+      return;
+    }
     this.rows.delete(key[0]);
   }
 
@@ -75,6 +89,22 @@ class FakeFileIndexFlock {
 }
 
 describe('Code Collab shared protocol helpers', () => {
+  it('keeps generation rows invisible to legacy file readers and commits generation-only updates and removals', () => {
+    const flock = new FakeFileIndexFlock();
+    const files = {
+      'a.ts': { kind: 'text' as const, change: { diff: [1, 0] as [number, number] } },
+    };
+    expect(writeCodeCollabFileIndexToFlock(flock, files, 1, { 'a.ts': 'epoch.1' })).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(files);
+    expect(readCodeCollabFileGenerations(flock)).toEqual({ 'a.ts': 'epoch.1' });
+    expect(writeCodeCollabFileIndexToFlock(flock, files, 2, { 'a.ts': 'epoch.2' })).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(files);
+    expect(readCodeCollabFileGenerations(flock)).toEqual({ 'a.ts': 'epoch.2' });
+    expect(writeCodeCollabFileIndexToFlock(flock, {}, 3, {})).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual({});
+    expect(readCodeCollabFileGenerations(flock)).toEqual({});
+  });
+
   it('derives deterministic v2 content key material from the owner session id', () => {
     expect(bytesToHex(deriveCodeCollabV2ContentKeyBytes('session-1'))).toBe(
       '53fb8315402c9fb68170c10a6d20c7516b022abf995aa74ea5aa84a6de06e4a7'
@@ -560,17 +590,38 @@ describe('Code Collab file-index budget', () => {
       { budget: { maxEntries: 60, maxBytes: 1024 * 1024 }, priorityDirectories: ['b/expanded'] }
     );
     const paths = Object.keys(fileIndex);
-    expect(paths).toHaveLength(60);
-    expect(omittedPaths).toBe(Object.keys(tree).length - 60);
+    expect(paths).toHaveLength(59); // One row is reserved for the changed path generation.
+    expect(omittedPaths).toBe(Object.keys(tree).length - 59);
     expect(paths).toEqual(expect.arrayContaining(['README.md', 'a', 'b', 'b/expanded']));
     expect(paths.filter((file) => file.startsWith('b/expanded/'))).toHaveLength(50);
     // The changed row is kept together with its ancestors.
     expect(fileIndex['a/z/changed.ts']).toEqual({ kind: 'file', change: { diff: [1, 0] } });
     expect(fileIndex['a/z']).toEqual({ kind: 'lazy' });
     // Omitted rows are not loaded, never deleted.
-    expect(Object.values(fileIndex).some((value) => value !== true && value.kind === 'deleted')).toBe(
-      false
+    expect(
+      Object.values(fileIndex).some((value) => value !== true && value.kind === 'deleted')
+    ).toBe(false);
+  });
+
+  it('counts generation siblings in the whole-index row budget', () => {
+    const tree: CodeCollabV2FileTreeState = {};
+    const changes: CodeCollabV2AllChangesState = {};
+    for (let index = 0; index < 1_200; index += 1) {
+      const path = `changed-${index}.ts`;
+      tree[path] = true;
+      changes[path] = { diff: [1, 1] };
+    }
+    const { fileIndex, omittedPaths, estimatedBytes } = buildBoundedCodeCollabFileIndexState(
+      tree,
+      changes,
+      { budget: { maxEntries: CODE_COLLAB_FILE_INDEX_LIMITS.maxEntries, maxBytes: 1024 * 1024 } }
     );
+    expect(Object.keys(fileIndex)).toHaveLength(500);
+    expect(omittedPaths).toBe(700);
+    expect(Object.values(fileIndex).every((value) => value !== true && 'change' in value)).toBe(
+      true
+    );
+    expect(estimatedBytes).toBe(estimateCodeCollabFileIndexStateBytes(fileIndex));
   });
 
   it('enforces the byte budget for long multi-byte paths before the row count', () => {
@@ -585,4 +636,3 @@ describe('Code Collab file-index budget', () => {
     expect(estimatedBytes).toBeGreaterThan(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes - 1024);
   });
 });
-

@@ -1,3 +1,4 @@
+import { readEncryptedMachineAccess } from './session-command-environment';
 import {
   getMachineFlockDocId,
   isMachineDocRoomId,
@@ -46,7 +47,12 @@ const defaultDependencies: RemoteProjectListDependencies = {
     (await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId)).map((entry) => entry.meta),
   readProjects: readMachineLocalProjects,
   verifyAccess: async ({ auth, workspaceId, machineId, localProjectId }) =>
-    await readMachineAccessWithBoundedRetry({
+    (await readEncryptedMachineAccess({
+      machineId,
+      requesterUserId: auth.userId,
+      ...(localProjectId ? { localProjectId } : {}),
+    })) ??
+    (await readMachineAccessWithBoundedRetry({
       verify: async () =>
         await canRequestMachineForCliToken({
           token: auth.token,
@@ -61,7 +67,7 @@ const defaultDependencies: RemoteProjectListDependencies = {
             `(attempt=${attempt}/${maxAttempts} delayMs=${delayMs}): ${error}`
         );
       },
-    }),
+    })),
 };
 
 function formatMachineCandidates(machines: readonly MachineMeta[]): string {

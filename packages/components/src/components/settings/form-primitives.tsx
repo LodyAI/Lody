@@ -147,6 +147,7 @@ export function Section({
 
 export function Field({
   htmlFor,
+  labelId,
   label,
   hint,
   icon,
@@ -154,6 +155,8 @@ export function Field({
 }: {
   /** Associates the label with a control that owns an id; omit for a group. */
   htmlFor?: string;
+  /** Lets a group name itself by this label through `aria-labelledby`. */
+  labelId?: string;
   label: string;
   hint?: ReactNode;
   icon?: ReactNode;
@@ -163,7 +166,9 @@ export function Field({
     <div {...stylex.props(styles.field)}>
       <div {...stylex.props(styles.fieldHead)}>
         {icon ? <span {...stylex.props(styles.fieldIcon)}>{icon}</span> : null}
-        <UiField.Label htmlFor={htmlFor}>{label}</UiField.Label>
+        <UiField.Label id={labelId} htmlFor={htmlFor}>
+          {label}
+        </UiField.Label>
       </div>
       {children}
       {hint ? <p {...stylex.props(styles.fieldHint)}>{hint}</p> : null}

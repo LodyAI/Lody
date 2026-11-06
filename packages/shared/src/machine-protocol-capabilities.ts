@@ -56,6 +56,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
   providerRateLimitsRefresh: 'providerRateLimitsRefresh',
   codeCollabAllChangesScope: 'codeCollabAllChangesScope',
+  codeCollabDiffBlobs: 'codeCollabDiffBlobs',
   sessionHistory: 'sessionHistory',
   sessionHistoryIncremental: 'sessionHistoryIncremental',
   sessionHistoryWatch: 'sessionHistoryWatch',
@@ -107,6 +108,7 @@ export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 export const CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION = 1;
+export const CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION = 1;
 /** Native publication and watch are the history authority; no Loro cursor log. */
 export const SESSION_HISTORY_PROTOCOL_VERSION = 3;
 export const SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION = 1;
@@ -170,6 +172,7 @@ export const PROJECT_FILE_ROOTS_PROTOCOL_VERSION = 1;
 export const PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION = 1;
 
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.codeCollabDiffBlobs]: CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION,
   // `session/live-status` accepts `includeActivity` and may answer with `activity`.
   [MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity]: 1,
   // `machine/status` accepts `includeDisk` and may answer with `disk`.
