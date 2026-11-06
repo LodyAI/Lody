@@ -50,6 +50,7 @@ export type SessionTurn = {
   readonly derivedFrom?: unknown;
   readonly queuedInput?: boolean;
   readonly queuedBy?: string;
+  readonly queuedRow?: string;
   readonly fileDiff?: readonly unknown[];
   readonly status?: SessionTurnStatus;
   readonly cancellationReason?: 'user_stop';

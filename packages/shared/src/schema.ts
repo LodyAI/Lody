@@ -716,6 +716,8 @@ export const sessionHistorySchema = schema.LoroMap({
   queuedInput: schema.Boolean({ required: false }),
   /** The Loro peer that last named this Turn on its queue row. */
   queuedBy: schema.String({ required: false }),
+  /** The queue row this Turn was promoted from. */
+  queuedRow: schema.String({ required: false }),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**

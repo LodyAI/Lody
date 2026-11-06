@@ -2243,17 +2243,19 @@ export class SessionDispatchWatcher {
     return resolveDispatchTurnInput(entry);
   }
 
-  /** The Loro peer that last named this row's Turn; a later check maps it to a signer. */
-  private queueRowWriter(
-    sessionDoc: SessionDocumentHandle,
-    queuedItem: Awaited<ReturnType<SessionBackend['getMessageQueue']>>[number]
-  ): string | undefined {
-    const row = sessionDoc.handle?.doc.getContainerById(queuedItem.$cid as ContainerID);
-    return row?.kind() === 'Map' ? (row as LoroMap).getLastEditor('userTurnId') : undefined;
+  /** Names who last pointed the queue row at this Turn. It runs in the history write's own
+   * tick, so a later check cannot read a row an import changed after promotion began. */
+  private queueRowStamp(sessionDoc: SessionDocumentHandle) {
+    if (!this.deps.encryptedWorkspace) return undefined;
+    return (entry: SessionHistoryInput, item: { $cid: string }): SessionHistoryInput => {
+      const row = sessionDoc.handle?.doc.getContainerById(item.$cid as ContainerID);
+      const queuedBy =
+        row?.kind() === 'Map' ? (row as LoroMap).getLastEditor('userTurnId') : undefined;
+      return { ...entry, queuedRow: item.$cid, ...(queuedBy ? { queuedBy } : {}) };
+    };
   }
 
   private buildQueuedMessageEntry(
-    sessionDoc: SessionDocumentHandle,
     queuedItem: Awaited<ReturnType<SessionBackend['getMessageQueue']>>[number],
     meta: SessionMeta,
     queuedTurnId: string
@@ -2299,9 +2301,7 @@ export class SessionDispatchWatcher {
           ...pendingEntry,
           id: queuedTurnId,
           ...(automation ? { author: { v: 1 as const, kind: 'system' as const } } : {}),
-          ...(this.deps.encryptedWorkspace
-            ? { queuedInput: true as const, queuedBy: this.queueRowWriter(sessionDoc, queuedItem) }
-            : {}),
+          ...(this.deps.encryptedWorkspace ? { queuedInput: true as const } : {}),
         }
       : null;
   }
@@ -2422,10 +2422,10 @@ export class SessionDispatchWatcher {
         }
 
         const entry =
-          existingEntry ??
-          this.buildQueuedMessageEntry(sessionDoc, queuedItem, latestMeta, record.userTurnId);
+          existingEntry ?? this.buildQueuedMessageEntry(queuedItem, latestMeta, record.userTurnId);
         if (!entry) continue;
         await backend.promoteQueuedTurn({
+          stampEntry: this.queueRowStamp(sessionDoc),
           item: queuedItem,
           entry,
           operationId,
@@ -2466,7 +2466,7 @@ export class SessionDispatchWatcher {
 
       const queuedTurnId = queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`;
       if (this.deps.executionService.isInboxInputCanceled?.(meta.id, queuedTurnId)) {
-        const canceled = this.buildQueuedMessageEntry(sessionDoc, queuedItem, meta, queuedTurnId);
+        const canceled = this.buildQueuedMessageEntry(queuedItem, meta, queuedTurnId);
         if (canceled) {
           await backend.applyHistoryAction({
             kind: 'upsert-turn',
@@ -2512,6 +2512,7 @@ export class SessionDispatchWatcher {
             const pending = getPendingUserTurnActivationId(currentMeta);
             if (pending && pending !== queuedTurnId) return null;
             const promoted = await backend.promoteQueuedTurn({
+              stampEntry: this.queueRowStamp(sessionDoc),
               item: queuedItem,
               entry: existing,
               operationId,
@@ -2559,13 +2560,14 @@ export class SessionDispatchWatcher {
         return null;
       }
 
-      const entry = this.buildQueuedMessageEntry(sessionDoc, queuedItem, meta, queuedTurnId);
+      const entry = this.buildQueuedMessageEntry(queuedItem, meta, queuedTurnId);
       if (!entry) {
         this.deps.logger.debug(`[${meta.id}] Retaining invalid queued message ${queuedItem.$cid}`);
         return null;
       }
 
       const promoted = await backend.promoteQueuedTurn({
+        stampEntry: this.queueRowStamp(sessionDoc),
         item: queuedItem,
         entry,
         operationId,

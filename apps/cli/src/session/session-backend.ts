@@ -157,6 +157,8 @@ export const getSteerOperationId = (userTurnId: string): string => `steer:${user
 export type QueuePromotionInput = {
   item: MessageQueueItem;
   entry: SessionHistoryInput;
+  /** Applied in the same tick as the history write, after every earlier await. */
+  stampEntry?: (entry: SessionHistoryInput, item: MessageQueueItem) => SessionHistoryInput;
   operationId: string;
   /**
    * History evidence gathered by the caller's dispatch snapshot. Supplying it
@@ -470,15 +472,16 @@ class LoroSessionBackend implements SessionBackend {
       // Production uses the receipt-aware split writes. Legacy data-only
       // fixtures expose appendUserTurn, which preserves their old atomic
       // history-plus-activation behavior for tests and migration callers.
+      const stamped = input.stampEntry?.(entry, item) ?? entry;
       if (
         typeof this.queuePort.getQueuePromotionRecord === 'function' &&
         typeof this.queuePort.setQueuePromotionRecord === 'function'
       ) {
-        await this.sessionDoc.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
+        await this.sessionDoc.sessionData.commands.appendTurn(stamped as unknown as SessionTurn);
       } else if (this.queuePort.appendUserTurn) {
-        await this.queuePort.appendUserTurn(entry);
+        await this.queuePort.appendUserTurn(stamped);
       } else {
-        await this.sessionDoc.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
+        await this.sessionDoc.sessionData.commands.appendTurn(stamped as unknown as SessionTurn);
       }
       if (preparedReceiptError) throw preparedReceiptError;
       await this.setQueuePromotionRecord(operationId, {

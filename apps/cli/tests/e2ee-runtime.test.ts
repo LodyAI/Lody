@@ -64,6 +64,7 @@ import {
   Context,
   Clock,
   Effect,
+  Exit,
   Fiber,
   Layer,
   Result,
@@ -5653,6 +5654,20 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     });
   const memberRpc = sender('queued-member', member);
   const ownerRpc = sender('queued-owner', fixture.owner);
+  const secondCustody = yield* makeNodeE2eeCustody({
+    directory: join(directory, 'second'),
+    wrapper,
+  });
+  const secondDevice = yield* secondCustody.prepareDevice();
+  yield* append(
+    yield* prepareDeviceAdmission({
+      genesis: fixture.genesis,
+      membershipId: fixture.membershipId,
+      signer: secondDevice,
+      encryptionPublicKey: secondDevice.enc,
+      kind: 'personal',
+    })
+  );
 
   let meta = {
     id: queuedSessionId,
@@ -5789,6 +5804,22 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     doc.setPeerId(machinePeer);
     return result;
   });
+  /** A later frame that repackages operations this replica already has, as catch-up does. */
+  const forward = Effect.fnUntraced(function* (
+    signer: 'member' | 'second',
+    from: ReturnType<LoroDoc['version']>
+  ) {
+    const binding = yield* makeStreamsUpdateBinding({
+      genesis: fixture.genesis,
+      resource: `doc:${docId}`,
+      model: 'loro',
+      writeEpoch: 'current',
+      signer: signer === 'member' ? member : secondDevice,
+      ledger: runtime.executionLedger,
+      readEpochKey,
+    });
+    yield* retainSignedScheduleUpdate(origins, docId, doc, binding, from);
+  });
   /** The composer's order: signed original, then the queue row. */
   const send = Effect.fnUntraced(function* (
     turnId: string,
@@ -5799,8 +5830,19 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     if (rpc) yield* asClient(rpc, pushRow(turnId, userId));
     else yield* pushRow(turnId, userId);
   });
-  const promote = Effect.fnUntraced(function* () {
+  const promote = Effect.fnUntraced(function* (duringPromotion?: () => Promise<void>) {
     const from = doc.version();
+    if (duringPromotion) {
+      const record = session.setQueuePromotionRecord.bind(session);
+      let fired = false;
+      session.setQueuePromotionRecord = (async (...args: Parameters<typeof record>) => {
+        if (!fired) {
+          fired = true;
+          await duringPromotion();
+        }
+        return record(...args);
+      }) as typeof record;
+    }
     const promoted = yield* Effect.promise(() =>
       (
         watcher as unknown as {
@@ -5891,6 +5933,7 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     fixture,
     append,
     asClient,
+    forward,
     /** Another signer's work under the owner's Loro peer, which any writer may choose. */
     borrowOwnerPeer: <A, E, R>(work: Effect.Effect<A, E, R>) =>
       Effect.suspend(() => {
@@ -6278,6 +6321,48 @@ describe('encrypted queued input evidence', () => {
           h.borrowOwnerPeer(h.pushRow('borrowed-peer-turn', ownerAccount))
         );
         expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it.each(['second', 'member'] as const)(
+    'starts a queued input after a %s device repackaged the writer operations',
+    (signer) =>
+      run(true, (h) =>
+        Effect.gen(function* () {
+          const from = h.doc.version();
+          yield* h.send('before-forward', h.ownerRpc);
+          yield* h.forward(signer, from);
+          yield* h.promote();
+          yield* h.send('after-forward', h.ownerRpc);
+          expect(yield* h.claim(yield* h.promote())).toMatchObject({
+            state: 'claimed',
+            principal: 'owner',
+          });
+        })
+      )
+  );
+
+  it('does not start an original whose row changes during promotion', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('raced-turn', h.ownerRpc);
+        const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
+        if (!row) throw new Error('queue row missing');
+        const map = h.doc.getContainerById(row.$cid as never) as unknown as LoroMap;
+        const outcome = yield* h
+          .promote(() =>
+            Effect.runPromise(
+              Effect.scoped(
+                h.asClient(
+                  h.memberRpc,
+                  Effect.sync(() => map.set('userTurnId', 'other-turn'))
+                )
+              )
+            )
+          )
+          .pipe(Effect.exit);
+        if (Exit.isSuccess(outcome))
+          expect(yield* h.claim(outcome.value)).toEqual({ state: 'denied' });
       })
     ));
 
