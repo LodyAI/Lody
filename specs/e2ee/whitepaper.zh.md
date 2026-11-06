@@ -1,9 +1,9 @@
 # Lody 安全白皮书
 
-Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)
 Translation: current
 
-Approved revision: 2026-11-06 恢复 passkey 解锁与可信锚；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)。上一版：2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
+Approved revision: 2026-11-06 账本用户编号；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)。上一版：2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
@@ -33,7 +33,7 @@ Lody 让人、设备与远程机器共同协作。除了内容保密，系统还
 
 ## 1. 系统边界与威胁模型
 
-首版直接创建加密组织（Org），不引入 Team 层。每个加密 Org 独立管理成员、权限、签名账本和内容密钥，只有一名可转让的最高权限 Owner。服务端成员表或账单角色不授予解密和管理权；资格以该 Org 的可信权限状态为准（认证签名快照与已验证增量，或独立全量审计）。一个产品工作区 MUST 一对一绑定固定 Org 创世身份，不因名称变化或重新登录更换。新模式创建新的加密工作区，已有明文工作区不原地转换。加密用户编号独立于邮箱和云账号展示，管理权与付款责任分开。
+首版直接创建加密组织（Org），不引入 Team 层。每个加密 Org 独立管理成员、权限、签名账本和内容密钥，只有一名可转让的最高权限 Owner。服务端成员表或账单角色不授予解密和管理权；资格以该 Org 的可信权限状态为准（认证签名快照与已验证增量，或独立全量审计）。一个产品工作区 MUST 一对一绑定固定 Org 创世身份，不因名称变化或重新登录更换。新模式创建新的加密工作区，已有明文工作区不原地转换。账本中稳定的用户编号编码云账户 ID，因此独立于邮箱和账号展示；它只指明账户，不证明谁持有签名密钥。管理权与付款责任分开。
 
 Beta MUST 同时支持 macOS、Windows、Linux 桌面、Web、手机（iOS、Android）和 CLI；具体首发功能仍按已定范围逐项验收，未完成的附加功能不开放。设备及恢复私钥须受保护；本地正文、草稿、索引和缓存沿用现有存储，不增加应用层静态加密要求，也不以强制磁盘加密作为本次接入条件。离线草稿仍须可靠保存。
 

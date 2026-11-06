@@ -130,6 +130,25 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 
 账本记录和 `formatVersion: 1` 不变。批准只记录意图，不代表已实现、已部署或已通过真机验收。
 
+## 账本用户编号即账户 ID
+
+2026-11-06T19:47:07Z，owner（Lody 账号 `js7cxcb4nzj3dpht6gc9vq8n517xznbm`，消息 `ac3cc04f-be5d-4497-b9e6-e144bc7171f5`）经 E2EE 协调会话（`b12f1597`）转达，批准了 [PR #2365](https://github.com/LodyAI/Lody/pull/2365) 的 head `0d35850c1b4dd1d9ed50ed39f51222ad740c60cb`。原话是“批准 #2365，#2374 用别的办法”。本记录只覆盖 #2365 这部分。批准的文件如下：
+
+| 文件                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/permission-ledger.zh.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/permission-ledger.zh.md) | `30b77b2ccedfdb6ef8a744e4c9565e962f082c68` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/whitepaper.md)                     | `ca583dec691023aa7d8aa0a8226335b7422e83b6` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/whitepaper.zh.md)               | `ddd77ddccf0b83f6f89f927124cd101fe743a5c1` |
+
+后续提交对这些文件只改批准元数据。
+
+范围是白皮书和 `permission-ledger` 中关于账本用户编号的段落，以及[决定](2026-11-06-e2ee-ledger-user-id.zh.md)里的编码规则：
+
+- **含义。** 账本中稳定的用户编号编码账户 ID。它只指明账户，不证明谁持有签名密钥。
+- **编码。** 32 字节：首字节为字符数，其后是小写 Crockford base32 字符，每个 5 位、高位在前，其余位为 0。生产首次开放加密工作区创建时永久冻结。
+
+账本记录及其格式不变。批准只记录意图，不代表实现、部署或真机验收。
+
 ## 机器共享
 
 2026-11-02，owner Zixuan Chen（zxch3n）通过合入 [PR #2228](https://github.com/LodyAI/Lody/pull/2228)（merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`）批准[机器共享 Spec](../../../../specs/e2ee/machine-sharing.zh.md)。获批[英文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md)的 Git blob 为 `37ce21f8e5a3db433b38ac0d2701fcacf6408080`；获批[中文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md)的 Git blob 为 `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`。之后仅记录本次批准的修改属于编辑性修改。范围包括 owner 的决定：撤回后不能启动新任务、不能做需要授权的后续动作，但不强制终止已在运行的命令；以及 2026-10-28 接受的风险：服务端持续扣住更新策略时，撤回生效没有严格上限。批准只记录意图，不代表部署或双成员产品验收。
