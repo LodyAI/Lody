@@ -17,6 +17,7 @@ import { QueueSignalError } from '../lib/session-accepted-inputs';
 import type { WorkspaceWriter } from './workspace-writer';
 
 const QUEUE_SIGNAL_RETRY_DELAYS_MS = [250, 1_000];
+const QUEUE_SIGNAL_FAILURE = 'Queued input was written but its signal failed';
 
 // # WorkspaceWriter implementation
 //
@@ -82,7 +83,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     try {
       await bumpMessageQueueWatermark(sessionId, frontiers);
     } catch (cause) {
-      throw new QueueSignalError('Queued input was written but its signal failed', { cause });
+      throw new QueueSignalError(QUEUE_SIGNAL_FAILURE, { cause });
     }
   };
 
@@ -189,7 +190,8 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async enqueueSessionMessage(sessionId, item) {
-      const frontiers = await withSessionStore(sessionId, (store) => {
+      let written = false;
+      const row = withSessionStore(sessionId, (store) => {
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const userTurnId = item.userTurnId;
@@ -206,9 +208,17 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
             } as MessageQueueItem,
           ];
         });
+        written = true;
         // Capture before releasing the store or yielding to another queue edit.
         return store.doc.frontiers();
       });
+      let frontiers: ReturnType<LoroDoc['frontiers']>;
+      try {
+        frontiers = await row;
+      } catch (cause) {
+        if (written) throw new QueueSignalError(QUEUE_SIGNAL_FAILURE, { cause });
+        throw cause;
+      }
       await signalQueuedRow(sessionId, frontiers);
     },
 

@@ -572,6 +572,73 @@ const queueWriter = (fails: number) => {
   return { writer, attempts: () => attempts };
 };
 
+it.each(['frontiers', 'release'] as const)(
+  'classifies a %s failure after the row was written as a signal failure',
+  async (stage) => {
+    const state: { mq?: Record<string, unknown>[] } = {};
+    const writer = createDirectWorkspaceWriter({
+      repo: { upsertDocMeta: async () => {} } as never,
+      acquireSessionStore: async () =>
+        ({
+          setState: (update: (draft: typeof state) => void) => update(state),
+          doc: {
+            frontiers: () => {
+              if (stage === 'frontiers') throw new Error('synthetic frontiers failure');
+              return [];
+            },
+          },
+        }) as never,
+      releaseSessionStoreRef: () => {
+        if (stage === 'release') throw new Error('synthetic release failure');
+      },
+      acquirePreviewVisualCommentStore: async () => ({}) as never,
+      releasePreviewVisualCommentStoreRef: () => {},
+    });
+    await expect(
+      writer.enqueueSessionMessage(SESSION, { userTurnId: `written-${stage}` })
+    ).rejects.toBeInstanceOf(QueueSignalError);
+    expect(state.mq?.map((item) => item.userTurnId)).toEqual([`written-${stage}`]);
+  }
+);
+
+it('surfaces a write failure before the row exists unchanged', async () => {
+  const writer = createDirectWorkspaceWriter({
+    repo: { upsertDocMeta: async () => {} } as never,
+    acquireSessionStore: async () =>
+      ({
+        setState: () => {
+          throw new Error('synthetic commit failure');
+        },
+      }) as never,
+    releaseSessionStoreRef: () => {},
+    acquirePreviewVisualCommentStore: async () => ({}) as never,
+    releasePreviewVisualCommentStoreRef: () => {},
+  });
+  await expect(writer.enqueueSessionMessage(SESSION, { userTurnId: 'unwritten' })).rejects.toThrow(
+    'synthetic commit failure'
+  );
+});
+
+it('stops a queued send aborted after its original was stored', async () => {
+  const f = fixture();
+  const input = entry('queued-abort-before-row');
+  const abort = new AbortController();
+  let wrote = false;
+  f.runtime.writer.enqueueSessionMessage = async () => {
+    wrote = true;
+  };
+  const withSessionStore = f.runtime.sendResources.withSessionStore;
+  f.runtime.sendResources.withSessionStore = ((sessionId, work) =>
+    withSessionStore(sessionId, async (store, signal) => {
+      const result = await work(store, signal);
+      if (store.getState().queueDispatchOriginals?.[input.id]) abort.abort();
+      return result;
+    })) as typeof withSessionStore;
+  await expect(queuedSend(f, input, abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
+  expect(wrote).toBe(false);
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
+});
+
 it('retries the queue signal within its bound', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {

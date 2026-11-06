@@ -141,6 +141,7 @@ export async function writeUserTurn(
   if (queuedOriginal) {
     await storeQueuedOriginal(runtime, send.sessionId, send.entry.id, queuedOriginal);
     try {
+      throwIfSendAborted(signal);
       await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue!);
     } catch (error) {
       // A committed row can run, so a failed signal still means the send happened.

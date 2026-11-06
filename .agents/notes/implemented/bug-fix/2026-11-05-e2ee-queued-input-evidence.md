@@ -50,9 +50,10 @@ change.
 - **Sending.** An encrypted queue send waits past the 200 ms preparation deadline, up to
   `QUEUED_ORIGINAL_DEADLINE_MS` and the caller's signal, because it cannot proceed without the
   frame. If no frame arrives, the input is not sent and the sender sees that. The writer retries
-  the queue signal twice within about a second and then raises `QueueSignalError`, which alone
-  counts as a written send, because the row can run. Any other failure reaches the sender. An
-  abort after the row committed does not change the outcome.
+  the queue signal twice within about a second and then raises `QueueSignalError`, also for any
+  failure after the row was written. That alone counts as a written send, because the row can
+  run. Any other failure reaches the sender. An abort before the row is written stops the send
+  and removes its frame; an abort after it does not change the outcome.
 - **Editing and removal.** Originals are immutable per Turn, so an edit that changes the input
   takes a new `userTurnId`, `operationId` and timestamp. Toggling the editing flag does not. An
   edit, a removal and a failed queue write delete the Turn's stored frame, unless a queue row or
@@ -84,8 +85,8 @@ change.
 - An exhausted signal leaves the row unseen by an idle Session until something else checks it,
   such as a reconnect or the next send. There is no upper bound, but metadata writes here are
   local, so this needs a failing local store, and the row expires at its deadline.
-- An unclassified failure after the row committed is still reported as a failure. The frame is
-  kept, so that row can run.
+- Follow-up: the queue edit path has no such retry or typed signal failure, and no test runs a
+  real promoted row through this failure path.
 - Frames grow the Session document, as `rpcDispatchOriginals` already does; nothing is pruned.
 - A request signer unknown to a stale ledger is refused rather than retried.
 - A frame stays valid for its signer until its deadline, and deletion from a shared document
