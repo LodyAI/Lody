@@ -8,6 +8,8 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   verification and existing genuine-view proof/permission gates. Proof is consent,
   not account identity or admission. Producer genesis bytes do not prove publication,
   endpoint freshness, key durability or recovery backup.
+- A ledger user ID is the frozen `accountUserId` encoding of an account ID; never change its
+  layout. See [the decision](../../../../../.agents/notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.md).
 - Preserve nullable join expiry; no new strict deadline claim or ordinary tolerance
   change. Reject obsolete RemoveMember/tag2; tag8 retains Owner-personal atomic removal/rotation. Capability 1 declares tag10
   removal: Owner removes non-Owner; Admin removes only Member/Guest. Preserve epoch,
