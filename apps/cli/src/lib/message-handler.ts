@@ -2673,7 +2673,7 @@ export class MessageHandler {
 
     let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
     try {
-      access = await this.cloudPort.access.verifyMachineAccess({
+      access = await this.verifyRequesterMachineAccess({
         workspaceId: this.workspaceId,
         machineId: this.machineId,
         requesterUserId: args.requestedByUserId,
@@ -2720,6 +2720,32 @@ export class MessageHandler {
     }
   }
 
+  /** Encrypted machine access is decided here, from the verified ledger and sharing policy. */
+  private async verifyRequesterMachineAccess(
+    input: Parameters<CloudPort['access']['verifyMachineAccess']>[0]
+  ): ReturnType<CloudPort['access']['verifyMachineAccess']> {
+    const gate = this.encryptedExecution;
+    if (!gate) return await this.cloudPort.access.verifyMachineAccess(input);
+    return await Effect.runPromise(
+      gate.verifyRequesterAccess(input.requesterUserId, input.localProjectId)
+    );
+  }
+
+  /** See `DaemonWorkspace.checkEncryptedMachineAccess`. */
+  private async checkEncryptedMachineAccess(target: {
+    machineId: string;
+    requesterUserId: string;
+    localProjectId?: string;
+  }) {
+    const gate = this.encryptedExecution;
+    if (!gate) throw new Error('e2ee_access_unavailable');
+    return await Effect.runPromise(
+      target.machineId === this.machineId
+        ? gate.verifyRequesterAccess(target.requesterUserId, target.localProjectId)
+        : gate.verifyMachineTarget(target.requesterUserId, target.machineId)
+    );
+  }
+
   private async verifyMachineAccess(args: {
     requesterUserId: string;
     sessionId: SessionId;
@@ -2736,7 +2762,7 @@ export class MessageHandler {
       return { outcome: 'allowed' };
     }
     try {
-      const access = await this.cloudPort.access.verifyMachineAccess({
+      const access = await this.verifyRequesterMachineAccess({
         workspaceId: this.workspaceId,
         machineId: this.machineId,
         requesterUserId: args.requesterUserId,
@@ -3485,7 +3511,7 @@ export class MessageHandler {
           isLoroRepoDocDeleted(record) ||
           record.meta.isArchived ||
           record.meta.machineId !== this.machineId ||
-          record.meta.userId !== request.requestedByUserId
+          (!this.encryptedExecution && record.meta.userId !== request.requestedByUserId)
         ) {
           throw new Error('Simulator session access denied.');
         }
@@ -3503,7 +3529,7 @@ export class MessageHandler {
           parent.meta.isArchived ||
           parent.meta.parentSessionId ||
           parent.meta.machineId !== this.machineId ||
-          parent.meta.userId !== request.requestedByUserId
+          (!this.encryptedExecution && parent.meta.userId !== request.requestedByUserId)
         ) {
           throw new Error('Simulator parent session access denied.');
         }
@@ -3870,7 +3896,7 @@ export class MessageHandler {
           });
         },
         probeLocalProjectMember: async ({ localProjectId, requestedByUserId }) => {
-          const access = await this.cloudPort.access.verifyMachineAccess({
+          const access = await this.verifyRequesterMachineAccess({
             workspaceId: this.workspaceId,
             machineId: this.machineId,
             requesterUserId: requestedByUserId,
@@ -3917,6 +3943,16 @@ export class MessageHandler {
       executionService: this.executionService,
       accessPolicy: makeSessionAccessPolicy(this.localWorkspaceCatalog),
       canUseMachine: async (args) => await this.verifyMachineAccess(args),
+      ...(this.encryptedExecution
+        ? {
+            resolveEncryptedRequester: async (intent: {
+              workspaceId: string;
+              sessionId: string;
+              userTurnId: string;
+              inputConfig?: unknown;
+            }) => await Effect.runPromise(this.encryptedExecution!.resolveRequester(intent)),
+          }
+        : {}),
       // P5/D11 snapshot bookkeeping for the watcher's background owner
       // recheck. Only confirmed online verdicts reach this: an allow refreshes
       // the optimistic-allow snapshot (the sole writer of `verifiedAt`), a
@@ -7232,6 +7268,7 @@ export class MessageHandler {
             ? {
                 classifyEncryptedDerivation: (origin, target) =>
                   this.classifyEncryptedDerivation(origin, target),
+                checkEncryptedMachineAccess: (target) => this.checkEncryptedMachineAccess(target),
               }
             : {}),
         },
@@ -7479,6 +7516,19 @@ export class MessageHandler {
       observedAtMs: getServerNow(),
       ...(activity ? { activity } : {}),
     };
+  }
+
+  /** Encrypted: act as the turn's verified principal; a shared member controls only
+   * within that member's own rights for the turn's projects. */
+  private async agentDeviceControlAllowed(sessionId: SessionId): Promise<boolean> {
+    const gate = this.encryptedExecution;
+    if (!gate) return true;
+    const control = this.executionService.getEncryptedControlPrincipal(sessionId);
+    if (control?.kind === 'owner') return true;
+    if (control?.kind !== 'member') return false;
+    return await Effect.runPromise(
+      gate.authorizeAgentControl(control.requesterDevice, control.localProjectIds)
+    ).catch(() => false);
   }
 
   private async dispatchLocalMachineRpc(
@@ -7766,22 +7816,7 @@ export class MessageHandler {
       case 'ios-simulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        // Encrypted: act as the turn's verified principal; a shared member controls
-        // only within that member's own rights for the turn's projects.
-        const control = this.encryptedExecution
-          ? this.executionService.getEncryptedControlPrincipal(sessionId)
-          : ({ kind: 'owner' } as const);
-        const controlAllowed =
-          control?.kind === 'owner' ||
-          (control?.kind === 'member' &&
-            this.encryptedExecution !== undefined &&
-            (await Effect.runPromise(
-              this.encryptedExecution.authorizeAgentControl(
-                control.requesterDevice,
-                control.localProjectIds
-              )
-            ).catch(() => false)));
-        if (!invocation?.requesterUserId || !controlAllowed) {
+        if (!invocation?.requesterUserId || !(await this.agentDeviceControlAllowed(sessionId))) {
           return {
             type: 'ios-simulator/control_response' as const,
             sessionId,
@@ -7800,7 +7835,7 @@ export class MessageHandler {
       case 'android-emulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        if (!invocation?.requesterUserId) {
+        if (!invocation?.requesterUserId || !(await this.agentDeviceControlAllowed(sessionId))) {
           return {
             type: 'android-emulator/control_response' as const,
             sessionId,
@@ -10846,7 +10881,7 @@ export class MessageHandler {
   }): Promise<
     { ok: true; rootPath: string } | { ok: false; response: LocalProjectControlResponse }
   > {
-    const access = await this.cloudPort.access.verifyMachineAccess({
+    const access = await this.verifyRequesterMachineAccess({
       workspaceId: this.workspaceId,
       machineId: this.machineId,
       requesterUserId: args.requesterUserId,
@@ -11019,7 +11054,7 @@ export class MessageHandler {
     const { requesterUserId } = precheck;
 
     try {
-      const access = await this.cloudPort.access.verifyMachineAccess({
+      const access = await this.verifyRequesterMachineAccess({
         workspaceId: this.workspaceId,
         machineId: this.machineId,
         requesterUserId,

@@ -105,6 +105,12 @@ export interface DaemonWorkspace {
     origin: { sessionId: string; userTurnId: string },
     target: { machineId: string }
   ): Promise<'owner' | 'member'>;
+  /** Encrypted only: machine access decided locally, without the workspace service. */
+  checkEncryptedMachineAccess?(target: {
+    machineId: string;
+    requesterUserId: string;
+    localProjectId?: string;
+  }): Promise<MachineAccessCheckResult>;
 }
 
 const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();

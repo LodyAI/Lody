@@ -1454,6 +1454,53 @@ async function openWorkspaceOwned(
     authorizeScheduleExecutionLegacy: (request: ScheduleAuthorizationRequest, doc: LoroDoc) =>
       run(authorizeScheduleExecution(request, doc)),
     resolveVerifiedExecutionOriginal,
+    ledgerIdentity: {
+      ownsDevice: (device: string) =>
+        opened.runtime.executionLedger().pipe(
+          Effect.map((view) => {
+            const state = view.inspectState();
+            const own = state.devices.get(opened.signingPublicKey);
+            const entry = state.devices.get(device);
+            return !!own && !!entry && own.membershipId.equals(entry.membershipId);
+          })
+        ),
+      memberDevice: (cryptoUserId: string) =>
+        opened.runtime.executionLedger().pipe(
+          Effect.map((view) => {
+            const state = view.inspectState();
+            for (const [device, entry] of state.devices) {
+              const member = state.members.get(hex(entry.membershipId.toBytes()));
+              if (
+                entry.kind === 'personal' &&
+                member &&
+                hex(member.userId.toBytes()) === cryptoUserId
+              )
+                return device;
+            }
+            return undefined;
+          })
+        ),
+    },
+    authorizeMachineTarget: (machineId: string) =>
+      Effect.gen(function* () {
+        const state = (yield* opened.runtime.executionLedger()).inspectState();
+        const own = state.devices.get(opened.signingPublicKey);
+        for (const device of state.devices.values())
+          if (
+            device.kind === 'machine' &&
+            device.machineId === machineId &&
+            own?.membershipId.equals(device.membershipId)
+          )
+            return true;
+        if (!opened.sharingRemote) return false;
+        const result = yield* opened.sharing.authorize(
+          machineId,
+          opened.signingPublicKey,
+          undefined,
+          opened.sharingRemote
+        );
+        return result.allowed;
+      }),
     retainQueuedInput: (input: Parameters<ExecutionOrigins['retainQueuedInput']>[0]) =>
       executionOrigins.retainQueuedInput(input),
     startRpc: (
