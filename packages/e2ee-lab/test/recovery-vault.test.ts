@@ -159,7 +159,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
             }
             const unsupported = yield* Effect.result(
               verifiedPasskeyPrf({
-                credentialId: 'login-only',
+                credentialId: 'login-onlyA',
                 userVerified: true,
                 extension: { enabled: false },
               })
@@ -997,7 +997,7 @@ describe('passkey wrapping of one vault master key', () => {
       credentialId?: string;
       userVerified?: boolean;
       extension: unknown;
-    }) => verifiedPasskeyPrf({ credentialId: 'abc_-1', userVerified: true, ...input });
+    }) => verifiedPasskeyPrf({ credentialId: 'abc_-Q', userVerified: true, ...input });
 
     // A real authentication result has no `enabled`.
     await Effect.runPromise(assertion({ extension: { results: { first } } }));
@@ -1011,13 +1011,13 @@ describe('passkey wrapping of one vault master key', () => {
     expect(
       await rejected(assertion({ userVerified: false, extension: { results: { first } } }))
     ).toBe(true);
-    for (const credentialId of ['', 'padded==', 'not+base64url'])
+    for (const credentialId of ['', 'padded==', 'not+base64url', 'A', 'QR', 'QUF'])
       expect(await rejected(assertion({ credentialId, extension: { results: { first } } }))).toBe(
         true
       );
 
     const registration = (extension: unknown) =>
-      verifiedPasskeyRegistration({ credentialId: 'abc_-1', extension });
+      verifiedPasskeyRegistration({ credentialId: 'abc_-Q', extension });
     await Effect.runPromise(registration({ enabled: true }));
     expect(await rejected(registration({ enabled: false }))).toBe(true);
     expect(await rejected(registration({ results: { first } }))).toBe(true);

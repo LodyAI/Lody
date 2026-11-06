@@ -225,8 +225,15 @@ export const vaultIdFromPasskeyUserHandle = (userHandle: Uint8Array) =>
   });
 // Unpadded base64url of at most the 1023 raw bytes WebAuthn allows, so every platform
 // computes the same entryId for one credential.
-const validCredentialId = (value: string) =>
-  typeof value === 'string' && value.length <= 1364 && /^[A-Za-z0-9_-]+$/.test(value);
+const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const validCredentialId = (value: string) => {
+  if (typeof value !== 'string' || value.length > 1364 || !/^[A-Za-z0-9_-]+$/.test(value))
+    return false;
+  // A partial final group carries zero padding bits, so one credential has one spelling.
+  const remainder = value.length % 4,
+    last = BASE64URL.indexOf(value.at(-1)!);
+  return remainder === 0 || (remainder === 2 && !(last & 15)) || (remainder === 3 && !(last & 3));
+};
 /** A passkey whose registration reported PRF support; required to enroll it. */
 export type VerifiedPasskeyRegistration = { readonly credentialId: string };
 const registrations = new WeakSet<VerifiedPasskeyRegistration>();
