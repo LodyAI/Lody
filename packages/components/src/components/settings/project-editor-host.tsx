@@ -14,6 +14,7 @@ import {
   useWorkspaceProjects,
 } from '@/hooks/use-workspace-projects';
 import { addProjectGroupMember, EMPTY_PROJECT_GROUP_FORM_VALUE } from '@/lib/project-group-form';
+import { resolveProjectEditorSource } from '@/lib/project-member-sources';
 import {
   openProjectGroupEditorForCreate,
   openProjectGroupEditorForEdit,
@@ -57,8 +58,8 @@ export function ProjectEditorHost() {
       return;
     }
     const created = openProjectGroupEditorForCreate();
-    // A folder with a GitHub remote is listed under its repository, so its
-    // own key finds the repository row and the seed becomes a repository Member.
+    // A folder's catalog row may be merged with other machines' copies. Keep
+    // the entry point's exact folder identity when seeding the editor.
     const seed = request.seedSourceKey ? byKey.get(request.seedSourceKey) : undefined;
     setEditor(
       seed
@@ -66,7 +67,7 @@ export function ProjectEditorHost() {
             ...created,
             value: addProjectGroupMember(
               { ...EMPTY_PROJECT_GROUP_FORM_VALUE, name: request.seedName ?? seed.label },
-              seed.source,
+              resolveProjectEditorSource(request.seedSourceKey!, seed),
               seed.label
             ),
           }
