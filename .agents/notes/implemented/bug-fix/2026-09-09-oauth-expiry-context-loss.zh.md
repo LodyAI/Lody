@@ -35,7 +35,7 @@ fallback 也会拒绝启动一个没有上下文的会话，而不是无声降�
    **逐链接**执行的，而不是在展平后的文本上做一次：SDK 抛出的 `RequestError` 是
    `Error` 子类，而 `formatErrorWithCauses` 对嵌套 `Error` 只打印 message，会丢掉承载
    Provider 文案的 `data.details`。本修复的第一版是在展平文本上匹配的，在评审中被发现；
-   它的测试之所以通过，只是因为用了普通对象作为 `cause`，而 `JSON.stringify` 会完整
+   它的测试没有发现这个问题，只是因为用了普通对象作为 `cause`，而 `JSON.stringify` 会完整
    保留 `data`。现在的用例改用 SDK 类型。
 3. restore 的 fallback 过去对任何 resume 失败都会触发。凭据过期是可恢复的——
    transcript 仍在磁盘上，用户重新登录后 `loadSession` 就能工作——因此 fallback
@@ -53,11 +53,15 @@ fallback 也会拒绝启动一个没有上下文的会话，而不是无声降�
 原始 transcript。此处未采纳：那是一次线格式变更，而更收敛的认证修复已让它对本缺陷
 不再必要；历史已同步的真实 resume 失败仍会替换会话，这也仍然是正确结果。
 
-`create` 分发分支（`resolveSessionDispatchAction`）与 `restoreMissingSession` 不同，
-完全没有历史 replay。此处刻意不改：它只有在 `meta.acpSessionId` 从未写入时才可达，
-因此没有 Agent 上下文可丢；而把这些会话改走 `continue` 会跳过只有 create 路径才执行
-的 worktree 准备。该分支唯一可达的丢上下文场景是处于 `sync_conflict` 的导入会话，
-那属于本地项目历史特性，不属于本缺陷。
+`create` 分发分支（`resolveSessionDispatchAction`）也会在向新 Agent 发送 prompt 前
+恢复历史。缺少 `meta.acpSessionId` 不代表历史为空：第一条 turn 可能在进程启动期间、
+写入该 id 之前就失败。全新 turn 不读取历史；当 metadata 指针或导入 turn 数量证明存在
+更早的 turn 时，create 会先在有界的 mirror 订阅上等待，再打开 native session；若等不到
+可 replay 的内容，则在 `createSession` 之前失败。当前用户 turn 及其确定性的
+`assistant:<userTurnId>` entry 会被排除，避免重分发的 turn replay 自己的旧输出，或让空白
+assistant entry 冒充已同步的前序上下文。后续发送仍走 create，保留工作区准备步骤，同时
+把之前的输入作为上下文。把这些会话改走 `continue` 会跳过 create 独有的 worktree 准备。
+失败输入只是新请求的上下文，不会作为独立请求再次分发。
 
 replay 本身按设计仍是有损的：上限 10 万字符，先丢终端输出、再丢 thinking、最后截断
 最旧的 turn。本记录不改变这一点，只保证 fallback 不会在无话可说时被进入。
@@ -73,8 +77,9 @@ replay 本身按设计仍是有损的：上限 10 万字符，先丢终端输出
 同时拒绝无关的过期；因 `OAuth session expired` 失败的 turn 记录 `acp_auth_required`
 并以 `force = false` 终止；包装了认证原因的 resume 失败会停止且不再调用第二次
 `createSession`；未同步的历史会拒绝无上下文的 fallback；迟到的历史通过 mirror 订阅
-被等到并作为 replay 文本进入 prompt。迟到同步的测试用 microtask 驱动订阅，断言的是
-信号而非睡眠。
+被等到并作为 replay 文本进入 prompt；create 在读不到预期历史时不创建 native session。
+迟到同步的测试把当前 turn 的 assistant entry 也放进初始历史，并用 microtask 驱动订阅，
+断言等待的是前序历史而非当前 turn 的空壳，也不是睡眠。
 
 未验证：没有对活的适配器真实制造过期凭据，因此"哪些适配器会在 `SIGKILL` 时丢失
 transcript"——优雅关闭这一修复的前提——是依据 ACP 契约推断的，而非实测。15 秒的历史

@@ -111,6 +111,7 @@ import {
   getSessionRoomId,
   hasBuiltinRuntimeOverrideValues,
   hasRecentResumeNotice,
+  isReplayEntryExcluded,
   isSessionCollaborationStopped,
   type IssuePRMention,
   type LocalProjectId,
@@ -243,6 +244,17 @@ const CONTEXT_FREE_RESTORE_MESSAGE =
   'The agent session could not be resumed, and this machine has not synced the earlier ' +
   'conversation yet, so there was nothing to restore the context from. The turn was not ' +
   'started — retry once the session finishes syncing so the agent keeps its history.';
+
+/**
+ * Shown when create dispatch has evidence of earlier turns but this machine has
+ * not synced any of them. Starting a fresh agent would silently answer as if
+ * those turns never happened, so the turn is failed before a native session is
+ * created and the user can retry once history arrives.
+ */
+const CONTEXT_FREE_CREATE_MESSAGE =
+  'This session has earlier turns that have not synced to this machine yet, so the agent ' +
+  'would start without their context. The turn was not started — retry once the session ' +
+  'finishes syncing.';
 
 /**
  * Shown in chat when a turn ends with no agent output at all. It names the most
@@ -6113,6 +6125,55 @@ export class SessionExecutionService {
     return builder.finish();
   }
 
+  /**
+   * Create dispatch has no `meta.acpSessionId`, but that does not prove the
+   * conversation is empty: a first start can fail during process startup. Wait
+   * for the local mirror to carry earlier turns before creating a native
+   * session, because creating it first would persist an ACP id and make the
+   * next dispatch a `continue` that never builds this replay.
+   */
+  private hasPriorCreateHistory(
+    meta: SessionMeta | undefined,
+    userTurnId: string | undefined
+  ): boolean {
+    if (!meta) return false;
+    if ((meta.externalHistory?.importedTurnCount ?? 0) > 0) return true;
+    return [meta.lastHandledUserMsgId, meta.processingUserMsgId, meta.latestUserMsgId].some(
+      (turnId) => !!turnId && turnId !== userTurnId
+    );
+  }
+
+  private async buildCreateHistoryReplay(args: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    userTurnId?: string;
+    meta?: SessionMeta;
+  }): Promise<ReplayPromptResult | undefined> {
+    const { sessionId, sessionDoc, userTurnId, meta } = args;
+    if (!userTurnId || !this.hasPriorCreateHistory(meta, userTurnId)) {
+      return undefined;
+    }
+
+    const replayHistory = await this.waitForReplayableHistory({
+      sessionId,
+      sessionDoc,
+      excludeTurnId: userTurnId,
+    });
+    const hasReplayableEntry = replayHistory.some(
+      (entry) =>
+        !isReplayEntryExcluded(entry, userTurnId) &&
+        (entry.role === 'user' || entry.role === 'assistant')
+    );
+    if (!hasReplayableEntry) {
+      throw new Error(CONTEXT_FREE_CREATE_MESSAGE);
+    }
+    const replay = await this.buildHistoryReplay(sessionDoc, userTurnId);
+    if (replay.stats.messagesIncluded === 0) {
+      throw new Error(CONTEXT_FREE_CREATE_MESSAGE);
+    }
+    return replay;
+  }
+
   private async getSessionBackend(
     sessionDoc: SessionDocument,
     sessionId: SessionId
@@ -6148,7 +6209,8 @@ export class SessionExecutionService {
     ): boolean =>
       history.some(
         (entry) =>
-          entry.id !== args.excludeTurnId && (entry.role === 'user' || entry.role === 'assistant')
+          !isReplayEntryExcluded(entry, args.excludeTurnId) &&
+          (entry.role === 'user' || entry.role === 'assistant')
       );
 
     let latest = await this.getSessionHistoryQuery(args.sessionDoc);
@@ -7793,6 +7855,15 @@ export class SessionExecutionService {
           });
 
           yield* abortIfCancelled();
+          const replayPromptResult = yield* self.tryPromise(() =>
+            self.buildCreateHistoryReplay({
+              sessionId,
+              sessionDoc,
+              userTurnId,
+              meta: existingMeta,
+            })
+          );
+          yield* abortIfCancelled();
           if (project?.kind === 'local') {
             if (!workdir) {
               yield* Effect.fail(
@@ -7884,6 +7955,10 @@ export class SessionExecutionService {
                   workspaceId,
                   sessionId,
                   inputBlocks: sessionInputBlocks,
+                  replayPromptText:
+                    replayPromptResult && replayPromptResult.stats.messagesIncluded > 0
+                      ? replayPromptResult.promptText
+                      : undefined,
                 })
             );
           };
