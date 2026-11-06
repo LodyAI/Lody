@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MachineId, MachineMeta } from '@lody/shared';
 import {
   getLocalProjectWorktreeAvailability,
+  isLocalProjectMachineOffline,
   resolveLocalProjectBranchSelection,
 } from '../src/lib/chat-landing-git-state';
 
@@ -50,5 +51,26 @@ describe('local project Git selection', () => {
 
     expect(resolveLocalProjectBranchSelection(state, 'feature/selected')).toBe('feature/selected');
     expect(getLocalProjectWorktreeAvailability(state)).toBe(true);
+  });
+});
+
+describe('local project machine liveness', () => {
+  const remoteWithoutHeartbeat = {
+    projectMachineId: 'machine-target' as MachineId,
+    visibleLocalMachineId: 'machine-local' as MachineId,
+    targetMachine: machineMeta(),
+    isMachineOnline: () => false,
+  };
+
+  it('keeps an unsynced presence room unknown so the Git RPC decides on its own deadline', () => {
+    expect(isLocalProjectMachineOffline({ ...remoteWithoutHeartbeat, presenceSynced: false })).toBe(
+      false
+    );
+  });
+
+  it('reports a definite offline only from a synced presence room', () => {
+    expect(isLocalProjectMachineOffline({ ...remoteWithoutHeartbeat, presenceSynced: true })).toBe(
+      true
+    );
   });
 });

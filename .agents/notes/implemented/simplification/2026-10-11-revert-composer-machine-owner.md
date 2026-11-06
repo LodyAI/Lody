@@ -17,8 +17,9 @@ execution-machine ownership information.
 
 Reverse the relevant implementation hunks of commit `385f1a727`, preserving later
 unrelated changes. Retain the original proposal as history and mark its
-[Spec](../../../../specs/composer-machine-owner.md) outdated. This supersedes the
-[identity proposal](../../proposed/feature/2026-10-07-composer-machine-owner.md).
+[Spec](../../../../specs/composer-machine-owner.md) outdated (correction: #1468
+later returned that Spec to draft for the machine details card). This supersedes the
+[identity proposal](../../rejected/feature/2026-10-07-composer-machine-owner.md).
 The existing context-less/syncing cases remain in the owning info-bar suite.
 
 The focused Vitest suite could not run because this checkout has no installed

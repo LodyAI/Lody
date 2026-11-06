@@ -10,8 +10,8 @@ Translation: current
 Roost 接入会把 Lody 现有的会话生命周期接到异步历史 backend 后面。这份文档是两者边界的
 持续审查记录：只有能构造出明确交错、能得到错误持久化结果或用户可见错误的时序问题，才会
 进入结论列表。本轮确认了六个 P1 风险，分别涉及 worktree fork 的 backend 选择、权限截止时间、
-Turn 收尾身份、metadata ledger、steer 提交和冷启动 backend 身份。F5 已在当前工作树加入提交前栅栏，
-并通过确定性回归测试；其余开放问题仍需各自的栅栏和验证才能关闭。
+Turn 收尾身份、metadata ledger、steer 提交和冷启动 backend 身份。F5 已修复：`session-execution-service.ts` 的
+状态写入后检查会阻断 provider 提交。其余开放问题仍需各自的栅栏和验证才能关闭。
 
 ## 用途与审查标准
 
@@ -134,8 +134,8 @@ store。只补一个稍后的 metadata patch 不够，因为 store 创建后 bac
    也清掉。
 
 结果是旧 instance 的事件可以把新 Turn 标成 terminal，并清掉它的 ACP target。新 Turn 的输出可能
-   被提前结束、归错或丢失。`finished === true` 只避免重复盖写已结束 entry，不能保护刚打开的
-   replacement entry。
+被提前结束、归错或丢失。`finished === true` 只避免重复盖写已结束 entry，不能保护刚打开的
+replacement entry。
 
 **必须的栅栏：** lifecycle finalizer 必须携带精确 Turn 身份。没有身份的 teardown 只能执行不会触碰
 当前 Turn 的清理；`finish-assistant` 和 ACP state 清理都必须校验同一个身份。
@@ -167,7 +167,7 @@ value 时，单纯的顶层 patch API 不够。
 
 ### F5 — Stop 在 steer 的 durable `submitted` 状态写入期间仍可能让 provider 收到 steer
 
-**状态：** 已在当前工作树修复，待 commit/CI；transition 引入的异步 backend 写入扩大了窗口；用户可感知。
+**状态：** 已修复：`session-execution-service.ts` 在 durable `submitted` 写入之后、`steerPrompt` 之前重新检查提交资格（`postStatusRejection`）。transition 引入的异步 backend 写入扩大了窗口；用户可感知。
 
 **代码路径：**
 

@@ -28,6 +28,8 @@ Ownership: [README.md](README.md).
   target Turn and subscribe only to its title; `progressMessageId` prevents
   duplicates. Share a five-card scroller; retain full hydration.
   Keep concrete cards; hide contentless successes and their empty batch rows.
+- The scroll-to-latest control reveals its arrow during live work on hover or keyboard
+  focus through StyleX ancestor selectors; never add presence state for that swap.
 
 ## Turn Folding And Layout
 

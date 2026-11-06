@@ -4,6 +4,10 @@ Use this workflow for Lody's Roost integration and its matching Roost SDK/Native
 changes. It fixes setup, owning suites and comparison workloads so a new change
 does not require rediscovering them. Runtime contracts remain in
 [session rules](../../apps/cli/src/session/AGENTS.md) and the matching Roost source.
+New sessions default to Loro and use Roost only behind the Developer-mode
+[history feature gate](../notes/implemented/feature/2026-10-08-roost-history-feature-gate.md).
+Open transition-timing risks stay recorded in the
+[timing review](../notes/proposed/architecture/2026-10-02-roost-lody-transition-timing-review.md).
 Run expensive measurements manually; timing is never a CI assertion.
 
 For the current coordinated release, use the [PR stack integration review](../notes/proposed/testing/2026-10-22-roost-pr-stack-integration.md) for exact heads, dependency order and release gates.

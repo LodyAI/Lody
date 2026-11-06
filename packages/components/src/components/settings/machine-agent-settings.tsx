@@ -59,6 +59,7 @@ import {
 } from '@/lib/machine-lifecycle-api';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
+import { presumedOnlineMachineIdsAtom } from '@/atoms/presence';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
@@ -451,6 +452,7 @@ export function MachineAgentSettings({
   useMachineFlockAgentConfigsForMachineIds(visibleMachineIdsForAgentConfigs);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const onlineMachineIds = useOnlineMachineIds();
+  const presumedOnlineMachineIds = useAtomValue(presumedOnlineMachineIdsAtom);
 
   const allConfigs = useAtomValue(getAllAgentConfigAtom);
   const allSetups = useAtomValue(getAllProviderSetupsAtom);
@@ -852,7 +854,7 @@ export function MachineAgentSettings({
   const isLocal = !!resolvedSelectedMachine && resolvedSelectedMachine.id === localMachineId;
   const isOwn = resolvedSelectedMachine ? isOwnMachine(resolvedSelectedMachine) : false;
   const selectedIsOnline =
-    !!resolvedSelectedMachine && onlineMachineIds.has(resolvedSelectedMachine.id);
+    !!resolvedSelectedMachine && presumedOnlineMachineIds.has(resolvedSelectedMachine.id);
   const ownerName = resolvedSelectedMachine
     ? (machineOwnerMap.get(
         accessByMachineId.get(resolvedSelectedMachine.id)?.ownerUserId ??
