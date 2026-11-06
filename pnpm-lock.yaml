@@ -1909,9 +1909,6 @@ importers:
       srvx:
         specifier: ^0.11.9
         version: 0.11.22
-      tailwind-merge:
-        specifier: ^3.6.0
-        version: 3.6.0
       three:
         specifier: ^0.185.0
         version: 0.185.1
@@ -1952,9 +1949,6 @@ importers:
       tailwindcss:
         specifier: ^4.3.2
         version: 4.3.3
-      tw-animate-css:
-        specifier: ^1.3.5
-        version: 1.4.0
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -13207,9 +13201,6 @@ packages:
 
   tunnel-agent@0.6.0:
     resolution: {integrity: sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==}
-
-  tw-animate-css@1.4.0:
-    resolution: {integrity: sha512-7bziOlRqH0hJx80h/3mbicLW7o8qLsH5+RaLR2t+OHM3D0JlWGODQKQ4cxbK7WlvmUxpcj6Kgu6EKqjrGFe3QQ==}
 
   tweetnacl@0.14.5:
     resolution: {integrity: sha512-KXXFFdAbFXY4geFIwoyNK+f5Z1b7swfXABfL7HXCmoIWMKU3dmS26672A4EeQtDzLKy7SXmfBu51JolvEKwtGA==}
@@ -27300,8 +27291,6 @@ snapshots:
   tunnel-agent@0.6.0:
     dependencies:
       safe-buffer: 5.2.1
-
-  tw-animate-css@1.4.0: {}
 
   tweetnacl@0.14.5: {}
 

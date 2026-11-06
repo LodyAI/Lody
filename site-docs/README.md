@@ -71,8 +71,10 @@ development; production extraction targets the shared index stylesheet.
 Site-owned styles follow the utilities layer: Fumadocs prose defaults also live
 in that layer, so placing StyleX before it loses the original local overrides.
 Migrate a styled owner and its real callers together through typed composition.
-Tailwind remains for unmigrated callers and Fumadocs' stylesheet;
-converting a site component does not retire that external pipeline. Preserve the
+First-party utility classes, runtime Tailwind merging and authored `@apply`
+clauses are removed. Automatic source scanning is disabled; Tailwind remains
+only for Fumadocs' explicit safelist and typography plugin. Static theme defaults
+keep the CSS variables read by StyleX available to every page. Preserve the
 actual theme variables and static HTML rendering when migrating a page.
 
 ## Local development

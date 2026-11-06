@@ -34,7 +34,6 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "srvx": "^0.11.9",
-    "tailwind-merge": "^3.6.0",
     "three": "^0.185.0",
     "zod": "catalog:"
   },
@@ -50,7 +49,6 @@
     "@vitejs/plugin-react": "^6.0.3",
     "playwright-core": "1.58.2",
     "tailwindcss": "^4.3.2",
-    "tw-animate-css": "^1.3.5",
     "typescript": "catalog:",
     "vite": "^8.1.3",
     "yaml": "^2.8.2"

@@ -28,7 +28,369 @@ import {
   ShieldOff,
 } from 'lucide-react';
 import { cn } from './utils';
+import * as stylex from '@stylexjs/stylex';
 import type { ReplicaLocale, ReplicaPrStatus } from './types';
+
+const styles = stylex.create({
+  glassButton: {
+    position: 'relative',
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 11)',
+    width: 'calc(var(--spacing) * 11)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(infinity * 1px)',
+    color: {
+      default: '#1c1c1e',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionTimingFunction: 'var(--ease-out)',
+    transitionDuration: '200ms',
+  },
+  glassCanvas: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    translate: '-50% -50%',
+    borderRadius: 'calc(infinity * 1px)',
+  },
+  glassGlyph: {
+    position: 'relative',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'currentColor',
+    ':is(*) svg': {
+      color: 'currentColor',
+    },
+  },
+  sessionTabsGlyph: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    color: 'currentColor',
+  },
+  sessionHeader: {
+    position: 'absolute',
+    insetInline: 'calc(var(--spacing) * 0)',
+    top: 'calc(var(--spacing) * 0)',
+    zIndex: 30,
+    display: 'flex',
+    height: 'calc(var(--spacing) * 14)',
+    alignItems: 'center',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background)) 55%, transparent)',
+    paddingInline: {
+      default: 'calc(var(--spacing) * 3)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 4)',
+    },
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+  backButtonSlot: {
+    marginRight: 'calc(var(--spacing) * 2)',
+    flexShrink: 0,
+  },
+  backGlyph: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    color: 'currentColor',
+  },
+  headerTitle: {
+    minWidth: 0,
+    flex: '1',
+    fontSize: 'var(--text-base)',
+    lineHeight: 'var(--text-base--line-height)',
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+  titleStack: {
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    justifyContent: 'center',
+    lineHeight: '1.25',
+  },
+  titleLine: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  titleText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95rem',
+    fontWeight: 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground))',
+  },
+  subtitleLine: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  projectGlyphSlot: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  localProjectGlyph: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+  },
+  githubProjectGlyph: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+  },
+  subtitleText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  headerActions: {
+    marginLeft: 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: {
+      default: 'calc(var(--spacing) * 1)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 2)',
+    },
+  },
+  sessionControls: {
+    marginRight: 'calc(var(--spacing) * -2)',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+  },
+  overflowGlyph: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    color: 'currentColor',
+  },
+  pickerTrigger: {
+    display: 'flex',
+    width: '100%',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+    textAlign: 'left',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    transitionProperty: 'all',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--input)) 40%, transparent)',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 85%, transparent)',
+  },
+  pickerContent: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  pickerExpansion: {
+    width: '100%',
+  },
+  footerPickers: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+  },
+  modelSlot: {
+    minWidth: 0,
+  },
+  modelPicker: {
+    width: '100%',
+  },
+  modelText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  thinkingSlot: {
+    marginLeft: 'calc(var(--spacing) * 1)',
+    flexShrink: 0,
+  },
+  thinkingPicker: {
+    width: '100%',
+  },
+  thinkingText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  belowComposer: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  agentSlot: {
+    minWidth: 0,
+  },
+  agentText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  permissionSlot: {
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  permissionPicker: {
+    minWidth: 0,
+  },
+  permissionGlyph: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.8,
+  },
+  permissionText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  sheetRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'stretch',
+    gap: 'calc(var(--spacing) * 3)',
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'var(--color-card)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+    boxShadow: '0 0 0 1px color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+  },
+  sheetRowLabel: {
+    width: 'calc(var(--spacing) * 16)',
+    flexShrink: 0,
+    alignSelf: 'center',
+    fontSize: '0.72rem',
+    fontWeight: 'var(--font-weight-semibold)',
+    letterSpacing: '0.025em',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  sheetRowContent: {
+    minWidth: 0,
+    flex: '1',
+  },
+  sheet: {
+    display: 'flex',
+    minHeight: 0,
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background))',
+    color: 'hsl(var(--foreground))',
+  },
+  sheetHeader: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBottom: 'calc(var(--spacing) * 2)',
+    paddingTop: 'calc(var(--spacing) * 2)',
+  },
+  sheetTitle: {
+    marginInline: 'auto',
+    userSelect: 'none',
+    fontSize: '0.95rem',
+    fontWeight: 'var(--font-weight-semibold)',
+    letterSpacing: '-0.025em',
+  },
+  accessibleTitle: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  sheetScroll: {
+    minHeight: 0,
+    flex: '1',
+    overflowY: 'auto',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBottom:
+      'calc(12px + max(0px, var(--safe-area-bottom, 0px) - var(--native-keyboard-height, 0px)))',
+  },
+  contextRows: {
+    display: 'flex',
+    flexDirection: 'column',
+    paddingBottom: 'calc(var(--spacing) * 3)',
+    paddingTop: 'calc(var(--spacing) * 1)',
+  },
+  machineRow: {
+    paddingTop: {
+      default: 'calc(var(--spacing) * 1.5)',
+      ':first-child': 0,
+    },
+  },
+  machineLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  machineGlyph: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  typeRow: {
+    paddingTop: {
+      default: 'calc(var(--spacing) * 1.5)',
+      ':first-child': 0,
+    },
+  },
+  typeLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  typeGlyph: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  composerSlot: {
+    paddingTop: 'calc(var(--spacing) * 1)',
+  },
+  belowComposerSlot: {
+    paddingInline: 'calc(var(--spacing) * 1)',
+    paddingTop: 'calc(var(--spacing) * 2)',
+  },
+  modeGlyph: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  sheetChip: {
+    height: 'calc(var(--spacing) * 8)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+  backButtonInset: {
+    marginLeft: 'calc(var(--spacing) * -1)',
+  },
+});
 
 // ---- Copy ----------------------------------------------------------------------
 
@@ -219,12 +581,14 @@ export function ReplicaGlassIconButton({
   label,
   children,
   className,
+  xstyle,
   discSize = 36,
 }: {
   label: string;
   children: ReactNode;
   className?: string;
   discSize?: number;
+  xstyle?: stylex.StyleXStyles;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -262,22 +626,16 @@ export function ReplicaGlassIconButton({
       ref={buttonRef}
       type="button"
       aria-label={label}
-      className={cn(
-        'group relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full',
-        'text-[#1c1c1e] dark:text-foreground/90',
-        'transition-transform duration-200 ease-out',
-        className
-      )}
+      className={cn('group', stylex.props(styles.glassButton, xstyle).className, className)}
+      style={stylex.props(styles.glassButton, xstyle).style}
     >
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+        {...stylex.props(styles.glassCanvas)}
         style={{ width: discSize, height: discSize }}
       />
-      <span className="relative inline-flex items-center justify-center text-current [&_svg]:text-current">
-        {children}
-      </span>
+      <span {...stylex.props(styles.glassGlyph)}>{children}</span>
     </button>
   );
 }
@@ -304,7 +662,7 @@ function ChatsIcon(props: SVGProps<SVGSVGElement>) {
 export function ReplicaMobileSessionTabButton({ ariaLabel }: { ariaLabel: string }) {
   return (
     <ReplicaGlassIconButton label={ariaLabel}>
-      <ChatsIcon className="h-5 w-5 text-current" aria-hidden="true" />
+      <ChatsIcon {...stylex.props(styles.sessionTabsGlyph)} aria-hidden="true" />
     </ReplicaGlassIconButton>
   );
 }
@@ -336,38 +694,38 @@ export function ReplicaMobileSessionHeader({
   const showSubtitle = Boolean(title) && Boolean(projectLabel);
   return (
     <div
-      className="absolute inset-x-0 top-0 z-30 flex h-14 items-center bg-background/55 px-3 backdrop-blur-xl sm:px-4"
+      {...stylex.props(styles.sessionHeader)}
       style={{ height: MOBILE_SESSION_HEADER_INSET, paddingTop: 'var(--safe-area-top, 0px)' }}
     >
-      <div className="mr-2 shrink-0">
-        <ReplicaGlassIconButton label={labels.back} className="-ml-1">
-          <ChevronLeft className="h-5 w-5 text-current" strokeWidth={1.75} />
+      <div {...stylex.props(styles.backButtonSlot)}>
+        <ReplicaGlassIconButton label={labels.back} xstyle={styles.backButtonInset}>
+          <ChevronLeft {...stylex.props(styles.backGlyph)} strokeWidth={1.75} />
         </ReplicaGlassIconButton>
       </div>
-      <h2 className="min-w-0 flex-1 text-base font-semibold">
-        <span className="flex min-w-0 flex-col justify-center leading-tight">
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-[0.95rem] font-semibold text-foreground">{primary}</span>
+      <h2 {...stylex.props(styles.headerTitle)}>
+        <span {...stylex.props(styles.titleStack)}>
+          <span {...stylex.props(styles.titleLine)}>
+            <span {...stylex.props(styles.titleText)}>{primary}</span>
           </span>
           {showSubtitle ? (
-            <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-              <span className="inline-flex shrink-0 items-center">
+            <span {...stylex.props(styles.subtitleLine)}>
+              <span {...stylex.props(styles.projectGlyphSlot)}>
                 {projectKind === 'local' ? (
-                  <Folder className="h-3 w-3" />
+                  <Folder {...stylex.props(styles.localProjectGlyph)} />
                 ) : (
-                  <Github className="h-3 w-3" />
+                  <Github {...stylex.props(styles.githubProjectGlyph)} />
                 )}
               </span>
-              <span className="truncate">{projectLabel}</span>
+              <span {...stylex.props(styles.subtitleText)}>{projectLabel}</span>
             </span>
           ) : null}
         </span>
       </h2>
-      <div className="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
-        <div className="-mr-2 flex shrink-0 items-center gap-1">
+      <div {...stylex.props(styles.headerActions)}>
+        <div {...stylex.props(styles.sessionControls)}>
           <ReplicaMobileSessionTabButton ariaLabel={labels.sessionTabs} />
           <ReplicaGlassIconButton label={labels.moreActions}>
-            <Ellipsis className="h-5 w-5 text-current" strokeWidth={1.75} />
+            <Ellipsis {...stylex.props(styles.overflowGlyph)} strokeWidth={1.75} />
           </ReplicaGlassIconButton>
         </div>
       </div>
@@ -382,10 +740,12 @@ export function ReplicaMobilePickerTrigger({
   children,
   ariaLabel,
   className,
+  xstyle,
 }: {
   children: ReactNode;
   ariaLabel: string;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }) {
   return (
     <button
@@ -394,12 +754,13 @@ export function ReplicaMobilePickerTrigger({
       aria-expanded={false}
       aria-label={ariaLabel}
       className={cn(
-        'group/picker-trigger flex w-full select-none items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium transition-all',
-        'bg-input/40 text-foreground/85',
+        'group/picker-trigger',
+        stylex.props(styles.pickerTrigger, xstyle).className,
         className
       )}
+      style={stylex.props(styles.pickerTrigger, xstyle).style}
     >
-      <span className="flex min-w-0 flex-1 items-center gap-2">{children}</span>
+      <span {...stylex.props(styles.pickerContent)}>{children}</span>
     </button>
   );
 }
@@ -409,29 +770,25 @@ export function ReplicaMobilePickerRow({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      <div className="w-full" aria-hidden="true" />
+      <div {...stylex.props(styles.pickerExpansion)} aria-hidden="true" />
     </>
   );
 }
 
-const MODE_ICON_CLASS = 'h-3.5 w-3.5';
-
 function PermissionModeIcon({ mode }: { mode: ReplicaPermissionMode }) {
   switch (mode) {
     case 'plan':
-      return <Compass className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <Compass {...stylex.props(styles.modeGlyph)} strokeWidth={1.5} />;
     case 'acceptEdits':
-      return <PenLine className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <PenLine {...stylex.props(styles.modeGlyph)} strokeWidth={1.5} />;
     case 'dontAsk':
-      return <ShieldOff className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <ShieldOff {...stylex.props(styles.modeGlyph)} strokeWidth={1.5} />;
     case 'read-only':
-      return <Eye className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <Eye {...stylex.props(styles.modeGlyph)} strokeWidth={1.5} />;
     default:
-      return <ShieldCheck className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <ShieldCheck {...stylex.props(styles.modeGlyph)} strokeWidth={1.5} />;
   }
 }
-
-const SHEET_CHIP_CLASS = 'h-8 px-2 py-1 text-sm';
 
 /**
  * New-chat sheet COMPOSER FOOTER: model + thinking chips (chat-landing's
@@ -449,18 +806,18 @@ export function ReplicaMobileSheetFooterPickers({
 }) {
   const labels = MOBILE_LABELS[locale];
   return (
-    <div className="flex w-full min-w-0 items-center">
-      <div className="min-w-0">
-        <div className="w-full">
-          <ReplicaMobilePickerTrigger ariaLabel={labels.model} className={SHEET_CHIP_CLASS}>
-            <span className="truncate">{modelLabel}</span>
+    <div {...stylex.props(styles.footerPickers)}>
+      <div {...stylex.props(styles.modelSlot)}>
+        <div {...stylex.props(styles.modelPicker)}>
+          <ReplicaMobilePickerTrigger ariaLabel={labels.model} xstyle={styles.sheetChip}>
+            <span {...stylex.props(styles.modelText)}>{modelLabel}</span>
           </ReplicaMobilePickerTrigger>
         </div>
       </div>
-      <div className="ml-1 shrink-0">
-        <div className="w-full">
-          <ReplicaMobilePickerTrigger ariaLabel={labels.thinkLevel} className={SHEET_CHIP_CLASS}>
-            <span className="truncate">{thinkLabel}</span>
+      <div {...stylex.props(styles.thinkingSlot)}>
+        <div {...stylex.props(styles.thinkingPicker)}>
+          <ReplicaMobilePickerTrigger ariaLabel={labels.thinkLevel} xstyle={styles.sheetChip}>
+            <span {...stylex.props(styles.thinkingText)}>{thinkLabel}</span>
           </ReplicaMobilePickerTrigger>
         </div>
       </div>
@@ -486,22 +843,19 @@ function SheetBelowComposer({
   const labels = MOBILE_LABELS[locale];
   return (
     <ReplicaMobilePickerRow>
-      <div className="flex w-full items-start gap-2">
-        <div className="min-w-0">
-          <ReplicaMobilePickerTrigger ariaLabel={labels.agent} className={SHEET_CHIP_CLASS}>
-            <span className="truncate">{agentLabel}</span>
+      <div {...stylex.props(styles.belowComposer)}>
+        <div {...stylex.props(styles.agentSlot)}>
+          <ReplicaMobilePickerTrigger ariaLabel={labels.agent} xstyle={styles.sheetChip}>
+            <span {...stylex.props(styles.agentText)}>{agentLabel}</span>
           </ReplicaMobilePickerTrigger>
         </div>
-        <div className="ml-auto flex items-center gap-1.5">
-          <div className="min-w-0">
-            <ReplicaMobilePickerTrigger
-              ariaLabel={labels.permissionMode}
-              className={SHEET_CHIP_CLASS}
-            >
-              <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center opacity-80">
+        <div {...stylex.props(styles.permissionSlot)}>
+          <div {...stylex.props(styles.permissionPicker)}>
+            <ReplicaMobilePickerTrigger ariaLabel={labels.permissionMode} xstyle={styles.sheetChip}>
+              <span {...stylex.props(styles.permissionGlyph)}>
                 <PermissionModeIcon mode={permissionMode} />
               </span>
-              <span className="truncate">{permissionLabel}</span>
+              <span {...stylex.props(styles.permissionText)}>{permissionLabel}</span>
             </ReplicaMobilePickerTrigger>
           </div>
         </div>
@@ -515,11 +869,9 @@ function SheetBelowComposer({
 function SheetRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <ReplicaMobilePickerRow>
-      <div className="flex min-w-0 items-stretch gap-3 rounded-xl bg-card px-3 py-1.5 ring-1 ring-border/60">
-        <span className="w-16 shrink-0 self-center text-[0.72rem] font-semibold tracking-wide text-muted-foreground">
-          {label}
-        </span>
-        <div className="min-w-0 flex-1">{children}</div>
+      <div {...stylex.props(styles.sheetRow)}>
+        <span {...stylex.props(styles.sheetRowLabel)}>{label}</span>
+        <div {...stylex.props(styles.sheetRowContent)}>{children}</div>
       </div>
     </ReplicaMobilePickerRow>
   );
@@ -543,43 +895,36 @@ export function ReplicaMobileNewChatSheetContent({
 }) {
   const labels = MOBILE_LABELS[locale];
   return (
-    <div className="flex min-h-0 flex-col bg-background text-foreground">
-      <header className="relative flex items-center px-4 pb-2 pt-2">
-        <h2 className="mx-auto select-none text-[0.95rem] font-semibold tracking-tight">
-          {labels.sheetTitle}
-        </h2>
+    <div {...stylex.props(styles.sheet)}>
+      <header {...stylex.props(styles.sheetHeader)}>
+        <h2 {...stylex.props(styles.sheetTitle)}>{labels.sheetTitle}</h2>
       </header>
-      <p className="sr-only">{labels.sheetTitle}</p>
-      <div
-        className={cn(
-          'min-h-0 flex-1 overflow-y-auto px-4',
-          'pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px)))]'
-        )}
-      >
-        <div className="flex flex-col pb-3 pt-1">
-          <div className="pt-1.5 first:pt-0">
+      <p {...stylex.props(styles.accessibleTitle)}>{labels.sheetTitle}</p>
+      <div {...stylex.props(styles.sheetScroll)} data-landing-scroll-region="">
+        <div {...stylex.props(styles.contextRows)}>
+          <div {...stylex.props(styles.machineRow)}>
             <SheetRow label={labels.machine}>
               <ReplicaMobilePickerTrigger ariaLabel={labels.machine}>
-                <span className="flex items-center gap-1.5">
-                  <Monitor className="h-3.5 w-3.5" />
+                <span {...stylex.props(styles.machineLabel)}>
+                  <Monitor {...stylex.props(styles.machineGlyph)} />
                   {machineName}
                 </span>
               </ReplicaMobilePickerTrigger>
             </SheetRow>
           </div>
-          <div className="pt-1.5 first:pt-0">
+          <div {...stylex.props(styles.typeRow)}>
             <SheetRow label={labels.contextType}>
               <ReplicaMobilePickerTrigger ariaLabel={labels.contextType}>
-                <span className="flex items-center gap-1.5">
-                  <MessageCircle className="h-3.5 w-3.5" />
+                <span {...stylex.props(styles.typeLabel)}>
+                  <MessageCircle {...stylex.props(styles.typeGlyph)} />
                   {labels.chatType}
                 </span>
               </ReplicaMobilePickerTrigger>
             </SheetRow>
           </div>
         </div>
-        <div className="pt-1">{composer}</div>
-        <div className="px-1 pt-2">
+        <div {...stylex.props(styles.composerSlot)}>{composer}</div>
+        <div {...stylex.props(styles.belowComposerSlot)}>
           <SheetBelowComposer locale={locale} {...belowComposer} />
         </div>
       </div>

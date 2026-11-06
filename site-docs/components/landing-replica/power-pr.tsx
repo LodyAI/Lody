@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 /**
  * Display-only replica of the app's embedded `PrTabView` (landing "power"
  * section): slim header with the PR badge + green Squash split button, the PR
@@ -8,7 +9,447 @@
 import { CheckCircle2, ChevronDown, GitMerge, GitPullRequest } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from './button';
-import { cn } from './utils';
+const prBlockSpacing = stylex.create({
+  space1: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': '0',
+      'margin-block-end': 'calc(var(--spacing) * 1)',
+    },
+  },
+  space1_5: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': '0',
+      'margin-block-end': 'calc(var(--spacing) * 1.5)',
+    },
+  },
+});
+
+const prSpacing = stylex.create({
+  markdown: { maxWidth: 'none', color: 'hsl(var(--foreground))', lineHeight: '1.75' },
+  body: {
+    marginInline: 'auto',
+    width: '100%',
+    maxWidth: 'var(--container-3xl)',
+    paddingInline: 'calc(var(--spacing) * 5)',
+    paddingTop: 'calc(var(--spacing) * 5)',
+    paddingBottom: 'calc(var(--spacing) * 5)',
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 3.5)',
+    },
+  },
+  section: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 2)',
+    },
+  },
+  sectionLoose: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 3)',
+    },
+  },
+  list: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 2.5)',
+    },
+  },
+});
+const powerPrComposition = stylex.create({
+  part1: {
+    'border-radius': 'var(--radius-sm)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent)',
+    'padding-inline': 'var(--spacing)',
+    'padding-block': '1px',
+    'font-family': 'var(--font-mono)',
+    'font-size': '0.85em',
+    color: 'hsl(var(--foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000,  0 0 0 calc(0px + 0px) currentcolor, 0 0 #0000',
+    ':is(*):where(.dark, .dark *)': {
+      'background-color':
+        'color-mix(in oklab, hsl(var(--foreground)) 14.000000000000002%, transparent)',
+    },
+  },
+  part2: {
+    'max-width': 'none',
+    'line-height': '1.75',
+    color: 'hsl(var(--foreground))',
+  },
+  part3: {
+    'margin-top': 'calc(var(--spacing) * 5)',
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': '16px',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-tight)',
+    ':is(*):first-child': {
+      'margin-top': '0px',
+    },
+  },
+  part4: {
+    'margin-top': '0px',
+    'margin-bottom': 'calc(var(--spacing) * 3)',
+    ':is(*):last-child': {
+      'margin-bottom': '0px',
+    },
+  },
+  part5: {
+    'margin-block': 'calc(var(--spacing) * 2)',
+    'list-style-type': 'none',
+    'padding-left': '0px',
+  },
+  part6: {
+    position: 'relative',
+    'margin-block': '0px',
+    'padding-block': '0px',
+    'padding-left': 'calc(var(--spacing) * 6)',
+    ':is(*)::before': {
+      content: "''",
+      position: 'absolute',
+      top: '0.75em',
+      left: '10px',
+      width: 'var(--spacing)',
+      height: 'var(--spacing)',
+      translate: '0 calc(calc(1 / 2 * 100%) * -1)',
+      'border-radius': 'calc(infinity * 1px)',
+      'background-color': 'currentcolor',
+    },
+    ':is(*):not(:first-child)': {
+      'margin-top': 'var(--spacing)',
+    },
+  },
+  part7: {
+    position: 'relative',
+    display: 'flex',
+    'flex-shrink': '0',
+    overflow: 'hidden',
+    'border-radius': 'calc(infinity * 1px)',
+  },
+  part8: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+  part9: {
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+  },
+  part10: {
+    display: 'flex',
+    width: '100%',
+    height: '100%',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'hsl(var(--muted))',
+  },
+  part11: {
+    'font-size': '8px',
+  },
+  part12: {
+    'font-size': '0.8em',
+  },
+  part13: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 30%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  part14: {
+    'flex-wrap': 'wrap',
+  },
+});
+
+const powerPrStylesNative = stylex.create({
+  row: {
+    display: 'inline-flex',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 6%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    'padding-block': 'calc(var(--spacing) * 0.5)',
+    'font-size': '11px',
+    'font-weight': 'var(--font-weight-normal)',
+    color: 'hsl(var(--github-open))',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+  },
+});
+
+const powerPrStyles = stylex.create({
+  surface: {
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--background))',
+  },
+  label: {
+    'font-size': '0.9em',
+    'line-height': '1',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  label2: {
+    'font-size': '0.8em',
+    'line-height': '1',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  section: {
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  row: {
+    display: 'inline-flex',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'calc(infinity * 1px)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--status-success)) 40%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--status-success)) 10%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    'padding-block': 'calc(var(--spacing) * 0.5)',
+    'font-size': '0.75em',
+    'font-weight': 'var(--font-weight-medium)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--status-success))',
+    'text-transform': 'uppercase',
+  },
+  glyph: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+  },
+  stack: {
+    'container-type': 'inline-size',
+    'container-name': 'pr-tab',
+    display: 'flex',
+    height: '100%',
+    'min-height': '0px',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background))',
+  },
+  row2: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 12)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 5)',
+  },
+  row3: {
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  label3: {
+    'min-width': '0px',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': '0.9em',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  section2: {
+    'flex-shrink': '0',
+  },
+  row4: {
+    display: 'flex',
+    'align-items': 'stretch',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+  },
+  frame: {
+    position: 'relative',
+    'min-height': '0px',
+    flex: '1',
+    overflow: 'hidden',
+  },
+  frame2: {
+    height: '100%',
+    width: '100%',
+    'scrollbar-width': 'none',
+    'overflow-y': 'auto',
+    ':is(*)::-webkit-scrollbar': {
+      display: 'none',
+    },
+  },
+  caption: {
+    'font-size': '1em',
+    'line-height': 'var(--leading-snug)',
+    'font-weight': 'var(--font-weight-semibold)',
+    'text-wrap': 'pretty',
+  },
+  label4: {
+    'margin-left': 'calc(var(--spacing) * 2)',
+    'font-size': '0.9em',
+    'font-weight': 'var(--font-weight-normal)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  stack2: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'var(--spacing)',
+    'font-size': '0.8em',
+    color: 'hsl(var(--muted-foreground))',
+    '@container pr-tab (width >= 420px)': {
+      'flex-direction': 'row',
+      'flex-wrap': 'wrap',
+      'align-items': 'center',
+      'column-gap': 'calc(var(--spacing) * 2)',
+    },
+  },
+  row5: {
+    display: 'inline-flex',
+    'min-width': '0px',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    'column-gap': 'calc(var(--spacing) * 1.5)',
+    'row-gap': 'calc(var(--spacing) * 0.5)',
+  },
+  label5: {
+    'font-weight': 'var(--font-weight-normal)',
+    color: 'hsl(var(--foreground))',
+  },
+  row6: {
+    display: 'inline-flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'font-variant-numeric': '   tabular-nums ',
+  },
+  label6: {
+    color: 'hsl(var(--status-success))',
+  },
+  label7: {
+    color: 'hsl(var(--status-danger))',
+  },
+  caption2: {
+    'margin-top': 'var(--spacing)',
+    'font-size': '0.9em',
+    'line-height': 'var(--leading-relaxed)',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+  },
+  surface2: {
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+  },
+  row7: {
+    display: 'flex',
+    width: '100%',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    gap: 'calc(var(--spacing) * 2)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'text-align': 'left',
+  },
+  row8: {
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'font-size': '0.9em',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  glyph2: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    color: 'hsl(var(--status-success))',
+  },
+  label8: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  row9: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'font-size': '0.8em',
+    color: 'hsl(var(--muted-foreground))',
+    'font-variant-numeric': '   tabular-nums ',
+  },
+  glyph3: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  row10: {
+    display: 'flex',
+    'min-height': '72px',
+    width: '100%',
+    resize: 'none',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--input-border))',
+    'background-color': 'hsl(var(--background))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--input-foreground))',
+    ':is(*)::placeholder': {
+      color: 'hsl(var(--input-placeholder))',
+    },
+  },
+  row11: {
+    display: 'flex',
+    'justify-content': 'flex-end',
+  },
+});
+
+const buttonStyles = stylex.create({
+  action: {
+    height: 'calc(var(--spacing) * 7)',
+    gap: 'calc(var(--spacing) * 1.5)',
+    paddingInline: 'calc(var(--spacing) * 2.5)',
+    fontSize: '.9em',
+  },
+  green: {
+    backgroundColor: {
+      default: 'hsl(var(--status-success))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab,hsl(var(--status-success)) 90%,transparent)',
+      },
+    },
+    color: { default: 'var(--color-white)', ':where(.dark, .dark *)': 'hsl(var(--background))' },
+  },
+  merge: { borderTopRightRadius: 0, borderBottomRightRadius: 0, borderColor: 'transparent' },
+  split: {
+    height: 'calc(var(--spacing) * 7)',
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    paddingInline: 'calc(var(--spacing) * 1.5)',
+    borderLeftWidth: 1,
+    borderLeftStyle: 'solid',
+    borderLeftColor: {
+      default: 'color-mix(in oklab,var(--color-white) 25%,transparent)',
+      ':where(.dark, .dark *)': 'color-mix(in oklab,var(--color-black) 25%,transparent)',
+    },
+  },
+  compactGap: { gap: 'calc(var(--spacing) * 1)' },
+});
 
 export type PowerPrLabels = {
   mergeShortSquash: string;
@@ -59,20 +500,13 @@ export type PowerPrViewProps = {
   intlLocale: string;
 };
 
-const PR_ACTION_BTN = 'h-7 gap-1.5 px-2.5 text-[0.9em]';
-const PR_MERGE_BTN_GREEN =
-  'bg-status-success text-white hover:bg-status-success/90 dark:text-background';
-const PR_SPLIT_DIVIDER = 'border-l border-white/25 dark:border-black/25';
-
 /** Same classes MarkdownRenderer applies (size "sm" = 14px body, 16px h2). */
-const MD_ROOT = 'markdown-renderer max-w-none text-foreground leading-[1.75]';
-const MD_H2 = 'mt-5 mb-2 text-[16px] font-semibold tracking-tight first:mt-0';
-const MD_P = 'mt-0 mb-3 last:mb-0';
-const MD_UL = 'my-2 list-none pl-0';
-const MD_LI =
-  "relative my-0 py-0 pl-6 [&:not(:first-child)]:mt-1 before:absolute before:left-[10px] before:top-[0.75em] before:size-1 before:-translate-y-1/2 before:rounded-full before:bg-current before:content-['']";
-const MD_CODE =
-  'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]';
+const MD_ROOT = ['markdown-renderer', stylex.props(prSpacing.markdown).className].join(' ');
+const MD_H2 = powerPrComposition.part3;
+const MD_P = powerPrComposition.part4;
+const MD_UL = powerPrComposition.part5;
+const MD_LI = powerPrComposition.part6;
+const MD_CODE = powerPrComposition.part1;
 
 function formatDate(iso: string, intlLocale: string): string {
   return new Intl.DateTimeFormat(intlLocale, {
@@ -90,7 +524,7 @@ function Inline({ runs }: { runs: readonly PowerPrInline[] }) {
         typeof run === 'string' ? (
           <span key={index}>{run}</span>
         ) : (
-          <code key={index} className={MD_CODE}>
+          <code key={index} {...stylex.props(MD_CODE)}>
             {run.code}
           </code>
         )
@@ -105,22 +539,22 @@ function Markdown({ blocks }: { blocks: readonly PowerPrBodyBlock[] }) {
       {blocks.map((block, index) => {
         if (block.kind === 'heading') {
           return (
-            <h2 key={index} className={MD_H2}>
+            <h2 key={index} {...stylex.props(MD_H2)}>
               {block.text}
             </h2>
           );
         }
         if (block.kind === 'paragraph') {
           return (
-            <p key={index} className={MD_P}>
+            <p key={index} {...stylex.props(MD_P)}>
               <Inline runs={block.runs} />
             </p>
           );
         }
         return (
-          <ul key={index} className={MD_UL}>
+          <ul key={index} {...stylex.props(MD_UL)}>
             {block.items.map((item, itemIndex) => (
-              <li key={itemIndex} className={MD_LI}>
+              <li key={itemIndex} {...stylex.props(MD_LI)}>
                 <Inline runs={item} />
               </li>
             ))}
@@ -134,7 +568,7 @@ function Markdown({ blocks }: { blocks: readonly PowerPrBodyBlock[] }) {
 function PlainMarkdown({ body }: { body: string }) {
   return (
     <div className={MD_ROOT} style={{ fontSize: '14px' }}>
-      <p className={MD_P}>{body}</p>
+      <p {...stylex.props(MD_P)}>{body}</p>
     </div>
   );
 }
@@ -143,17 +577,17 @@ function UserAvatar({ login, size = 'md' }: { login: string; size?: 'xs' | 'md' 
   return (
     <span
       data-slot="avatar"
-      className={cn(
-        'relative flex shrink-0 overflow-hidden rounded-full',
-        size === 'xs' ? 'h-4 w-4' : 'h-6 w-6'
-      )}
+      {...stylex.props([
+        powerPrComposition.part7,
+        size === 'xs' ? powerPrComposition.part8 : powerPrComposition.part9,
+      ])}
     >
       <span
         data-slot="avatar-fallback"
-        className={cn(
-          'bg-muted flex size-full items-center justify-center rounded-full',
-          size === 'xs' ? 'text-[8px]' : 'text-[0.8em]'
-        )}
+        {...stylex.props([
+          powerPrComposition.part10,
+          size === 'xs' ? powerPrComposition.part11 : powerPrComposition.part12,
+        ])}
       >
         {login.slice(0, 2).toUpperCase()}
       </span>
@@ -163,12 +597,7 @@ function UserAvatar({ login, size = 'md' }: { login: string; size?: 'xs' | 'md' 
 
 function CardHeader({ children, wrap }: { children: ReactNode; wrap?: boolean }) {
   return (
-    <header
-      className={cn(
-        'flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2',
-        wrap && 'flex-wrap'
-      )}
-    >
+    <header {...stylex.props([powerPrComposition.part13, wrap && powerPrComposition.part14])}>
       {children}
     </header>
   );
@@ -185,34 +614,34 @@ function ConversationCard({
 }) {
   if (item.kind === 'comment') {
     return (
-      <article className="overflow-hidden rounded-md border border-border bg-background">
+      <article {...stylex.props(powerPrStyles.surface)}>
         <CardHeader>
           <UserAvatar login={item.author} />
-          <span className="text-[0.9em] font-medium leading-none">{item.author}</span>
-          <span className="text-[0.8em] text-muted-foreground leading-none">
+          <span {...stylex.props(powerPrStyles.label)}>{item.author}</span>
+          <span {...stylex.props(powerPrStyles.label2)}>
             {labels.commented} · {formatDate(item.createdAt, intlLocale)}
           </span>
         </CardHeader>
-        <div className="px-3 py-2">
+        <div {...stylex.props(powerPrStyles.section)}>
           <PlainMarkdown body={item.body} />
         </div>
       </article>
     );
   }
   return (
-    <article className="overflow-hidden rounded-md border border-border bg-background">
+    <article {...stylex.props(powerPrStyles.surface)}>
       <CardHeader wrap>
         <UserAvatar login={item.author} />
-        <span className="text-[0.9em] font-medium leading-none">{item.author}</span>
-        <span className="inline-flex items-center gap-1 rounded-full border border-status-success/40 bg-status-success/10 px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wide text-status-success">
-          <CheckCircle2 className="h-3 w-3" />
+        <span {...stylex.props(powerPrStyles.label)}>{item.author}</span>
+        <span {...stylex.props(powerPrStyles.row)}>
+          <CheckCircle2 {...stylex.props(powerPrStyles.glyph)} />
           {labels.reviewApproved}
         </span>
-        <span className="text-[0.8em] leading-none text-muted-foreground">
+        <span {...stylex.props(powerPrStyles.label2)}>
           {formatDate(item.submittedAt, intlLocale)}
         </span>
       </CardHeader>
-      <div className="px-3 py-2">
+      <div {...stylex.props(powerPrStyles.section)}>
         <PlainMarkdown body={item.body} />
       </div>
     </article>
@@ -221,34 +650,34 @@ function ConversationCard({
 
 export function PowerPrView({ data, labels, intlLocale }: PowerPrViewProps) {
   return (
-    <div className="@container/pr-tab flex h-full min-h-0 flex-col bg-background">
-      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded-md font-normal transition px-1.5 py-0.5 text-[11px] bg-foreground/[0.06] text-github-open">
-            <GitPullRequest className="h-3 w-3" strokeWidth={2.25} />
+    <div data-power-demo-layout="inset-fill" {...stylex.props(powerPrStyles.stack)}>
+      <div {...stylex.props(powerPrStyles.row2)}>
+        <div {...stylex.props(powerPrStyles.row3)}>
+          <span {...stylex.props(powerPrStylesNative.row)}>
+            <GitPullRequest {...stylex.props(powerPrStyles.glyph)} strokeWidth={2.25} />
             <span>#{data.number}</span>
           </span>
-          <span className="min-w-0 truncate text-[0.9em] font-medium text-muted-foreground">
-            {data.repoFullName}
-          </span>
+          <span {...stylex.props(powerPrStyles.label3)}>{data.repoFullName}</span>
         </div>
-        <div className="shrink-0">
-          <div data-pr-merge-action="" className="flex items-stretch overflow-hidden rounded-md">
+        <div {...stylex.props(powerPrStyles.section2)}>
+          <div data-pr-merge-action="" {...stylex.props(powerPrStyles.row4)}>
             <Button
               size="sm"
               tabIndex={-1}
-              className={cn(PR_ACTION_BTN, PR_MERGE_BTN_GREEN, 'rounded-r-none border-transparent')}
+              xstyle={[buttonStyles.action, buttonStyles.green, buttonStyles.merge]}
+              iconSize="calc(var(--spacing) * 3.5)"
             >
-              <GitMerge className="h-3.5 w-3.5" />
+              <GitMerge />
               {labels.mergeShortSquash}
             </Button>
             <Button
               size="sm"
               tabIndex={-1}
               aria-label={labels.moreActions}
-              className={cn('h-7 rounded-l-none px-1.5', PR_MERGE_BTN_GREEN, PR_SPLIT_DIVIDER)}
+              xstyle={[buttonStyles.split, buttonStyles.green]}
+              iconSize="calc(var(--spacing) * 3.5)"
             >
-              <ChevronDown className="h-3.5 w-3.5" />
+              <ChevronDown />
             </Button>
           </div>
         </div>
@@ -256,70 +685,70 @@ export function PowerPrView({ data, labels, intlLocale }: PowerPrViewProps) {
 
       {/* The landing power section drives this viewport's scrollTop from page
           scroll; it looks it up by `data-power-scrollport`. */}
-      <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div {...stylex.props(powerPrStyles.frame)}>
         <div
           data-power-scrollport=""
-          className="h-full w-full overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          data-landing-scroll-region
+          {...stylex.props(powerPrStyles.frame2)}
         >
-          <div className="mx-auto w-full max-w-3xl space-y-3.5 px-5 pt-5 pb-5">
-            <section className="space-y-1">
-              <h2 className="font-semibold leading-snug text-pretty text-[1em]">
+          <div {...stylex.props(prSpacing.body)}>
+            <section {...stylex.props(prBlockSpacing.space1)}>
+              <h2 {...stylex.props(powerPrStyles.caption)}>
                 {data.title}
-                <span className="ml-2 font-normal text-muted-foreground text-[0.9em]">
-                  #{data.number}
-                </span>
+                <span {...stylex.props(powerPrStyles.label4)}>#{data.number}</span>
               </h2>
-              <div className="flex flex-col gap-1 text-[0.8em] text-muted-foreground @min-[420px]/pr-tab:flex-row @min-[420px]/pr-tab:flex-wrap @min-[420px]/pr-tab:items-center @min-[420px]/pr-tab:gap-x-2">
-                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              <div {...stylex.props(powerPrStyles.stack2)}>
+                <span {...stylex.props(powerPrStyles.row5)}>
                   <UserAvatar login={data.author} size="xs" />
-                  <span className="font-normal text-foreground">{data.author}</span>
+                  <span {...stylex.props(powerPrStyles.label5)}>{data.author}</span>
                   <span>{labels.opened(formatDate(data.createdAt, intlLocale))}</span>
                   <span aria-hidden>·</span>
                   <span>{labels.commits(data.commits)}</span>
                 </span>
-                <span className="inline-flex items-center gap-1.5 tabular-nums">
-                  <span className="text-status-success">+{data.additions}</span>
-                  <span className="text-status-danger">-{data.deletions}</span>
+                <span {...stylex.props(powerPrStyles.row6)}>
+                  <span {...stylex.props(powerPrStyles.label6)}>+{data.additions}</span>
+                  <span {...stylex.props(powerPrStyles.label7)}>-{data.deletions}</span>
                   <span aria-hidden>·</span>
                   <span>{labels.files(data.changedFiles)}</span>
                 </span>
               </div>
-              <div className="mt-1 text-[0.9em] leading-relaxed text-foreground/90">
+              <div {...stylex.props(powerPrStyles.caption2)}>
                 <Markdown blocks={data.body} />
               </div>
             </section>
 
-            <section className="overflow-hidden rounded-md border border-border">
-              <div className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left">
-                <span className="flex min-w-0 items-center gap-2 text-[0.9em] font-medium">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-status-success" />
-                  <span className="truncate">{labels.checksPassed}</span>
+            <section {...stylex.props(powerPrStyles.surface2)}>
+              <div {...stylex.props(powerPrStyles.row7)}>
+                <span {...stylex.props(powerPrStyles.row8)}>
+                  <CheckCircle2 {...stylex.props(powerPrStyles.glyph2)} />
+                  <span {...stylex.props(powerPrStyles.label8)}>{labels.checksPassed}</span>
                 </span>
-                <span className="flex shrink-0 items-center gap-1.5 text-[0.8em] tabular-nums text-muted-foreground">
+                <span {...stylex.props(powerPrStyles.row9)}>
                   {labels.checksCount(data.checksTotal)}
-                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                  <ChevronDown {...stylex.props(powerPrStyles.glyph3)} aria-hidden />
                 </span>
               </div>
             </section>
 
-            <section className="space-y-2">
-              <ul className="space-y-1.5">
+            <section {...stylex.props(prSpacing.section)}>
+              <ul {...stylex.props(prBlockSpacing.space1_5)}>
                 {data.conversation.map((item) => (
                   <li key={item.id}>
                     <ConversationCard item={item} labels={labels} intlLocale={intlLocale} />
                   </li>
                 ))}
               </ul>
-              <div className="space-y-2">
+              <div {...stylex.props(prSpacing.section)}>
                 <textarea
                   readOnly
                   tabIndex={-1}
                   rows={3}
                   placeholder={labels.composerPlaceholder}
-                  className="flex w-full rounded-md border border-input-border px-3 py-2 text-sm text-input-foreground placeholder:text-input-placeholder min-h-[72px] resize-none overflow-hidden bg-background"
+                  data-landing-compact-composer
+                  {...stylex.props(powerPrStyles.row10)}
                 />
-                <div className="flex justify-end">
-                  <Button size="sm" disabled tabIndex={-1} className="gap-1">
+                <div {...stylex.props(powerPrStyles.row11)}>
+                  <Button size="sm" disabled tabIndex={-1} xstyle={buttonStyles.compactGap}>
                     {labels.composerSubmit}
                   </Button>
                 </div>

@@ -368,7 +368,7 @@ async function navigation() {
               `${prefix}/docs/session-handoff`
             );
             await page.goto(origin + prefix + '/blog');
-            const article = page.locator(`main a[href^="${prefix}/blog/"]`).first();
+            const article = page.locator(`main a:is(.blog-lead, .blog-row)[href^="${prefix}/blog/"]`).first();
             const target = normalize(new URL(await article.getAttribute('href'), origin).pathname);
             await clickTo(page, article, target);
             await page.screenshot({

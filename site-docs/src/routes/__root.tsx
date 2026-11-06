@@ -77,7 +77,7 @@ function RootDocument() {
       <head>
         <HeadContent />
       </head>
-      <body {...stylex.props(styles.body)}>
+      <body data-site-body {...stylex.props(styles.body)}>
         <SiteRootProvider>
           <Outlet />
         </SiteRootProvider>

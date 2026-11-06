@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowUp,
@@ -24,17 +25,575 @@ import {
 } from 'lucide-react';
 import { ReplicaRunConfigTrigger } from '../landing-replica/composer-controls';
 import type { ReplicaLocale } from '../landing-replica/types';
-import { cn } from '../landing-replica/utils';
+const previewStyles = stylex.create({
+  section: {
+    'margin-block': 'calc(var(--spacing) * 6)',
+  },
+  text: {
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--background))',
+    color: 'hsl(var(--foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+  },
+  section2: {
+    padding: 'calc(var(--spacing) * 4)',
+    '@media (width >= 40rem)': {
+      padding: 'calc(var(--spacing) * 6)',
+    },
+  },
+  frame: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': '320px',
+  },
+  text2: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-base)',
+    'line-height': 'var(--text-base--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-tight)',
+    '@media (width >= 40rem)': {
+      'font-size': 'var(--text-lg)',
+      'line-height': 'var(--text-lg--line-height)',
+    },
+  },
+  section3: {
+    position: 'relative',
+  },
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 11)',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--input-border))',
+    'background-color': 'hsl(var(--card))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-base)',
+    'line-height': 'var(--text-base--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-xs)',
+  },
+  text3: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  section4: {
+    'margin-top': 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--popover))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-lg)',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    'background-color': 'hsl(var(--selection))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+    'font-size': 'var(--text-base)',
+    'line-height': 'var(--text-base--line-height)',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+  text4: {
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+    'font-size': 'var(--text-base)',
+    'line-height': 'var(--text-base--line-height)',
+  },
+  text5: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    'text-align': 'center',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  frame3: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': 'var(--container-3xl)',
+  },
+  row3: {
+    'margin-bottom': 'calc(var(--spacing) * 3)',
+    display: 'flex',
+    'align-items': 'flex-end',
+    'justify-content': 'space-between',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  text6: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  text7: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  text8: {
+    'border-radius': 'calc(infinity * 1px)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'var(--spacing)',
+    'font-size': '10px',
+    'font-weight': 'var(--font-weight-medium)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--muted-foreground))',
+    'text-transform': 'uppercase',
+  },
+  grid: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 2)',
+    '@media (width >= 40rem)': {
+      'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
+    },
+  },
+  row4: {
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    gap: 'calc(var(--spacing) * 3)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    'background-color': 'hsl(var(--card))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+  },
+  row5: {
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+  },
+  row6: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--muted))',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  text9: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  text10: {
+    'flex-shrink': '0',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--muted))',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'var(--spacing)',
+    'font-size': '10px',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--muted-foreground))',
+    'text-transform': 'uppercase',
+  },
+  frame4: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': 'var(--container-2xl)',
+  },
+  row7: {
+    display: 'flex',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--card))',
+    padding: 'calc(var(--spacing) * 2)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+  },
+  frame5: {
+    height: 'calc(var(--spacing) * 4)',
+    width: '1px',
+    'background-color': 'hsl(var(--border))',
+  },
+  row8: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 7)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': '4px',
+    'background-color': 'color-mix(in oklab, hsl(var(--status-success)) 10%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': '0.9em',
+    'line-height': 'var(--leading-tight)',
+    color: 'hsl(var(--status-success))',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  frame6: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+  },
+  text11: {
+    'border-radius': '0.25rem',
+    'background-color': 'color-mix(in oklab, hsl(var(--status-success)) 15%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    'padding-block': 'calc(var(--spacing) * 0.5)',
+    'font-size': '10px',
+    'font-weight': 'var(--font-weight-semibold)',
+    'text-transform': 'uppercase',
+  },
+  row9: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--status-success)) 20%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--status-success)) 6%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  text12: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    'flex-shrink': '0',
+    color: 'hsl(var(--status-success))',
+  },
+  text13: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--leading-relaxed)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  text14: {
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--foreground))',
+  },
+  stack: {
+    display: 'flex',
+    'min-width': '0px',
+    'flex-direction': 'column',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--card))',
+    padding: 'calc(var(--spacing) * 4)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+  },
+  text15: {
+    width: 'fit-content',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'hsl(var(--muted))',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 0.5)',
+    'font-size': '10px',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--muted-foreground))',
+    'text-transform': 'uppercase',
+  },
+  text16: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-base)',
+    'line-height': 'var(--leading-snug)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  stack2: {
+    'margin-top': 'calc(var(--spacing) * 3)',
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  row10: {
+    display: 'flex',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 3)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  section5: {
+    'border-color': 'color-mix(in oklab, hsl(var(--primary)) 35%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--primary)) 4%, transparent)',
+  },
+  section6: {
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+  },
+  row11: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    display: 'flex',
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-style': 'solid',
+    'border-width': '1px',
+  },
+  section7: {
+    'border-radius': '3px',
+  },
+  section8: {
+    'border-radius': 'calc(infinity * 1px)',
+  },
+  text17: {
+    'border-color': 'hsl(var(--primary))',
+    'background-color': 'hsl(var(--primary))',
+    color: 'hsl(var(--primary-foreground))',
+  },
+  section9: {
+    'border-color': 'hsl(var(--input-border))',
+    'background-color': 'hsl(var(--background))',
+  },
+  frame7: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+  },
+  frame8: {
+    width: 'calc(var(--spacing) * 1.5)',
+    height: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'hsl(var(--primary-foreground))',
+  },
+  section10: {
+    'min-width': '0px',
+  },
+  text18: {
+    display: 'block',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  text19: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    display: 'block',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--leading-relaxed)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  row12: {
+    'margin-top': 'calc(var(--spacing) * 3)',
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--input-border))',
+    'background-color': 'hsl(var(--background))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  text20: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--input-placeholder))',
+  },
+  row13: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 6)',
+    height: 'calc(var(--spacing) * 6)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--muted))',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  frame9: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  section11: {
+    'pointer-events': 'none',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+    padding: 'calc(var(--spacing) * 4)',
+    '@media (width >= 40rem)': {
+      padding: 'calc(var(--spacing) * 6)',
+    },
+  },
+  grid2: {
+    'margin-inline': 'auto',
+    display: 'grid',
+    width: '100%',
+    'max-width': 'var(--container-3xl)',
+    gap: 'calc(var(--spacing) * 4)',
+    '@media (width >= 48rem)': {
+      'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
+    },
+  },
+  row14: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 7)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  text21: {
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--card))',
+    color: 'hsl(var(--foreground))',
+  },
+  text22: {
+    'border-color': 'color-mix(in oklab, hsl(var(--status-success)) 35%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--status-success)) 10%, transparent)',
+    color: 'hsl(var(--status-success))',
+  },
+  text23: {
+    'border-color': 'color-mix(in oklab, hsl(var(--destructive)) 30%, transparent)',
+    'background-color': 'hsl(var(--background))',
+    color: 'hsl(var(--destructive))',
+  },
+  section12: {
+    opacity: '45%',
+  },
+  section13: {
+    'background-color': 'color-mix(in oklab, hsl(var(--status-info)) 10%, transparent)',
+  },
+  row15: {
+    display: 'flex',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--status-info)) 30%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  row16: {
+    display: 'flex',
+    'min-width': '0px',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  text24: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    color: 'hsl(var(--status-info))',
+  },
+  text25: {
+    'font-size': '11px',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--status-info))',
+    'text-transform': 'uppercase',
+  },
+  row17: {
+    display: 'inline-flex',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'calc(infinity * 1px)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--status-info)) 30%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--background)) 70%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 0.5)',
+    'font-size': '10px',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--status-info))',
+    'text-transform': 'uppercase',
+  },
+  row18: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  section14: {
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-top': 'calc(var(--spacing) * 2)',
+    'padding-bottom': 'calc(var(--spacing) * 3)',
+  },
+  text26: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--leading-snug)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  row19: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    'column-gap': 'calc(var(--spacing) * 3)',
+    'row-gap': 'var(--spacing)',
+    'font-size': '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  row20: {
+    display: 'inline-flex',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+  },
+  frame10: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    height: 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'color-mix(in oklab, hsl(var(--background)) 80%, transparent)',
+  },
+  frame11: {
+    height: '100%',
+    width: 'calc(1 / 4 * 100%)',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'hsl(var(--status-info))',
+  },
+});
 
 /* Display-only previews for the docs' runtime reference and Claude/Codex
    capability pages. They replace static screenshots with synthetic data and
    intentionally reuse only site-docs relative primitives plus lucide-react.
    Source markup/copy was copied from the app files named on each component;
    none of these previews import the app, @lody/*, Convex, jotai, or i18next. */
-
-const PREVIEW_SHELL =
-  'lody-app-preview overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-sm';
-const CAPTION_CLASS = 'mt-2 text-center text-xs text-muted-foreground';
 
 type PreviewProps = { locale?: ReplicaLocale };
 
@@ -69,26 +628,32 @@ const AGENT_CONFIG_COPY: Record<ReplicaLocale, AgentConfigCopy> = {
 export function AgentConfigPreview({ locale = 'en' }: PreviewProps) {
   const copy = AGENT_CONFIG_COPY[locale];
   return (
-    <div className="my-6">
-      <div aria-hidden="true" className={cn(PREVIEW_SHELL, 'p-4 sm:p-6')}>
-        <div className="mx-auto w-full max-w-[320px]">
-          <div className="mb-2 text-base font-semibold tracking-tight sm:text-lg">{copy.title}</div>
-          <div className="relative">
-            <div className="flex h-11 items-center justify-between rounded-lg border border-input-border bg-card px-3 text-base font-medium shadow-xs">
+    <div {...stylex.props(previewStyles.section)}>
+      <div
+        aria-hidden="true"
+        className={[
+          'lody-app-preview',
+          stylex.props(previewStyles.text, previewStyles.section2).className,
+        ].join(' ')}
+      >
+        <div {...stylex.props(previewStyles.frame)}>
+          <div {...stylex.props(previewStyles.text2)}>{copy.title}</div>
+          <div {...stylex.props(previewStyles.section3)}>
+            <div {...stylex.props(previewStyles.row)}>
               <span>{copy.claude}</span>
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              <ChevronDown {...stylex.props(previewStyles.text3)} />
             </div>
-            <div className="mt-1.5 overflow-hidden rounded-lg border border-border bg-popover shadow-lg">
-              <div className="flex items-center justify-between bg-selection px-3 py-2.5 text-base">
+            <div {...stylex.props(previewStyles.section4)}>
+              <div {...stylex.props(previewStyles.row2)}>
                 <span>{copy.claude}</span>
-                <Check className="h-4 w-4" strokeWidth={2.5} />
+                <Check {...stylex.props(previewStyles.frame2)} strokeWidth={2.5} />
               </div>
-              <div className="px-3 py-2.5 text-base">{copy.codex}</div>
+              <div {...stylex.props(previewStyles.text4)}>{copy.codex}</div>
             </div>
           </div>
         </div>
       </div>
-      <p className={CAPTION_CLASS}>{copy.caption}</p>
+      <p {...stylex.props(previewStyles.text5)}>{copy.caption}</p>
     </div>
   );
 }
@@ -144,39 +709,38 @@ const CLI_RUNTIME_COPY: Record<ReplicaLocale, CliRuntimeCopy> = {
 export function CliRuntimePreview({ locale = 'en' }: PreviewProps) {
   const copy = CLI_RUNTIME_COPY[locale];
   return (
-    <div className="my-6">
-      <div aria-hidden="true" className={cn(PREVIEW_SHELL, 'p-4 sm:p-6')}>
-        <div className="mx-auto w-full max-w-3xl">
-          <div className="mb-3 flex items-end justify-between gap-3">
+    <div {...stylex.props(previewStyles.section)}>
+      <div
+        aria-hidden="true"
+        className={[
+          'lody-app-preview',
+          stylex.props(previewStyles.text, previewStyles.section2).className,
+        ].join(' ')}
+      >
+        <div {...stylex.props(previewStyles.frame3)}>
+          <div {...stylex.props(previewStyles.row3)}>
             <div>
-              <div className="text-sm font-semibold">{copy.title}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">{copy.subtitle}</div>
+              <div {...stylex.props(previewStyles.text6)}>{copy.title}</div>
+              <div {...stylex.props(previewStyles.text7)}>{copy.subtitle}</div>
             </div>
-            <span className="rounded-full border border-border px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              ACP
-            </span>
+            <span {...stylex.props(previewStyles.text8)}>ACP</span>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div {...stylex.props(previewStyles.grid)}>
             {REGISTRY_RUNTIMES.map(({ name, icon: Icon }) => (
-              <div
-                key={name}
-                className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5"
-              >
-                <span className="flex min-w-0 items-center gap-2.5">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                    <Icon className="h-4 w-4" aria-hidden="true" />
+              <div key={name} {...stylex.props(previewStyles.row4)}>
+                <span {...stylex.props(previewStyles.row5)}>
+                  <span {...stylex.props(previewStyles.row6)}>
+                    <Icon {...stylex.props(previewStyles.frame2)} aria-hidden="true" />
                   </span>
-                  <span className="truncate text-sm font-medium">{name}</span>
+                  <span {...stylex.props(previewStyles.text9)}>{name}</span>
                 </span>
-                <span className="shrink-0 rounded-md bg-muted px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {copy.experimental}
-                </span>
+                <span {...stylex.props(previewStyles.text10)}>{copy.experimental}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
-      <p className={CAPTION_CLASS}>{copy.caption}</p>
+      <p {...stylex.props(previewStyles.text5)}>{copy.caption}</p>
     </div>
   );
 }
@@ -218,28 +782,32 @@ const FAST_MODE_COPY: Record<ReplicaLocale, FastModeCopy> = {
 export function FastModePreview({ locale = 'en' }: PreviewProps) {
   const copy = FAST_MODE_COPY[locale];
   return (
-    <div className="my-6">
-      <div aria-hidden="true" className={cn(PREVIEW_SHELL, 'p-4 sm:p-6')}>
-        <div className="mx-auto w-full max-w-2xl">
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-sm">
+    <div {...stylex.props(previewStyles.section)}>
+      <div
+        aria-hidden="true"
+        className={[
+          'lody-app-preview',
+          stylex.props(previewStyles.text, previewStyles.section2).className,
+        ].join(' ')}
+      >
+        <div {...stylex.props(previewStyles.frame4)}>
+          <div {...stylex.props(previewStyles.row7)}>
             <ReplicaRunConfigTrigger
               agent="codex"
               modelLabel={copy.model}
               thinkLabel={copy.thinking}
             />
-            <span aria-hidden="true" className="h-4 w-px bg-border" />
-            <span className="inline-flex h-7 shrink-0 select-none items-center gap-1.5 rounded-[4px] bg-status-success/10 px-2 text-[0.9em] leading-tight text-status-success">
-              <Zap className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+            <span aria-hidden="true" {...stylex.props(previewStyles.frame5)} />
+            <span {...stylex.props(previewStyles.row8)}>
+              <Zap {...stylex.props(previewStyles.frame6)} strokeWidth={1.8} aria-hidden="true" />
               <span>{copy.fast}</span>
-              <span className="rounded bg-status-success/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase">
-                {copy.on}
-              </span>
+              <span {...stylex.props(previewStyles.text11)}>{copy.on}</span>
             </span>
           </div>
-          <div className="mt-2 flex items-start gap-2 rounded-lg border border-status-success/20 bg-status-success/[0.06] px-3 py-2">
-            <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-success" aria-hidden="true" />
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              <span className="font-medium text-foreground">{copy.tradeoff}</span> {copy.caption}
+          <div {...stylex.props(previewStyles.row9)}>
+            <Zap {...stylex.props(previewStyles.text12)} aria-hidden="true" />
+            <p {...stylex.props(previewStyles.text13)}>
+              <span {...stylex.props(previewStyles.text14)}>{copy.tradeoff}</span> {copy.caption}
             </p>
           </div>
         </div>
@@ -377,53 +945,45 @@ function AskQuestionCard({
   multiSelect: boolean;
 }) {
   return (
-    <div className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-4 shadow-sm">
-      <span className="w-fit rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {question.badge}
-      </span>
-      <h3 className="mt-2 text-base font-semibold leading-snug">{question.question}</h3>
-      <div className="mt-3 flex flex-col gap-1.5">
+    <div {...stylex.props(previewStyles.stack)}>
+      <span {...stylex.props(previewStyles.text15)}>{question.badge}</span>
+      <h3 {...stylex.props(previewStyles.text16)}>{question.question}</h3>
+      <div {...stylex.props(previewStyles.stack2)}>
         {question.options.map((option) => (
           <div
             key={option.label}
-            className={cn(
-              'flex items-start gap-3 rounded-lg border px-3 py-2',
-              option.selected ? 'border-primary/35 bg-primary/[0.04]' : 'border-border/70'
+            {...stylex.props(
+              previewStyles.row10,
+              option.selected ? previewStyles.section5 : previewStyles.section6
             )}
           >
             <span
-              className={cn(
-                'mt-0.5 flex size-4 shrink-0 items-center justify-center border',
-                multiSelect ? 'rounded-[3px]' : 'rounded-full',
-                option.selected
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-input-border bg-background'
+              {...stylex.props(
+                previewStyles.row11,
+                multiSelect ? previewStyles.section7 : previewStyles.section8,
+                option.selected ? previewStyles.text17 : previewStyles.section9
               )}
             >
               {option.selected ? (
                 multiSelect ? (
-                  <Check className="h-3 w-3" strokeWidth={3} />
+                  <Check {...stylex.props(previewStyles.frame7)} strokeWidth={3} />
                 ) : (
-                  <span className="size-1.5 rounded-full bg-primary-foreground" />
+                  <span {...stylex.props(previewStyles.frame8)} />
                 )
               ) : null}
             </span>
-            <span className="min-w-0">
-              <span className="block text-sm font-medium">{option.label}</span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                {option.description}
-              </span>
+            <span {...stylex.props(previewStyles.section10)}>
+              <span {...stylex.props(previewStyles.text18)}>{option.label}</span>
+              <span {...stylex.props(previewStyles.text19)}>{option.description}</span>
             </span>
           </div>
         ))}
       </div>
       {question.customPlaceholder ? (
-        <div className="mt-3 flex items-center gap-2 rounded-lg border border-input-border bg-background px-3 py-2">
-          <span className="min-w-0 flex-1 truncate text-xs text-input-placeholder">
-            {question.customPlaceholder}
-          </span>
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-            <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
+        <div {...stylex.props(previewStyles.row12)}>
+          <span {...stylex.props(previewStyles.text20)}>{question.customPlaceholder}</span>
+          <span {...stylex.props(previewStyles.row13)}>
+            <ArrowUp {...stylex.props(previewStyles.frame9)} aria-hidden="true" />
           </span>
         </div>
       ) : null}
@@ -435,17 +995,20 @@ function AskQuestionCard({
 export function AskQuestionPreview({ locale = 'en' }: PreviewProps) {
   const copy = ASK_QUESTION_COPY[locale];
   return (
-    <div className="my-6">
+    <div {...stylex.props(previewStyles.section)}>
       <div
         aria-hidden="true"
-        className={cn(PREVIEW_SHELL, 'pointer-events-none bg-muted/20 p-4 sm:p-6')}
+        className={[
+          'lody-app-preview',
+          stylex.props(previewStyles.text, previewStyles.section11).className,
+        ].join(' ')}
       >
-        <div className="mx-auto grid w-full max-w-3xl gap-4 md:grid-cols-2">
+        <div {...stylex.props(previewStyles.grid2)}>
           <AskQuestionCard question={copy.single} multiSelect={false} />
           <AskQuestionCard question={copy.multi} multiSelect />
         </div>
       </div>
-      <p className={CAPTION_CLASS}>{copy.caption}</p>
+      <p {...stylex.props(previewStyles.text5)}>{copy.caption}</p>
     </div>
   );
 }
@@ -518,15 +1081,15 @@ function GoalAction({
 }) {
   return (
     <span
-      className={cn(
-        'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs font-medium',
-        tone === 'neutral' && 'border-border bg-card text-foreground',
-        tone === 'success' && 'border-status-success/35 bg-status-success/10 text-status-success',
-        tone === 'danger' && 'border-destructive/30 bg-background text-destructive',
-        muted && 'opacity-45'
+      {...stylex.props(
+        previewStyles.row14,
+        tone === 'neutral' && previewStyles.text21,
+        tone === 'success' && previewStyles.text22,
+        tone === 'danger' && previewStyles.text23,
+        muted && previewStyles.section12
       )}
     >
-      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+      <Icon {...stylex.props(previewStyles.frame9)} aria-hidden="true" />
       <span>{label}</span>
     </span>
   );
@@ -536,47 +1099,51 @@ function GoalAction({
 export function GoalPreview({ locale = 'en' }: PreviewProps) {
   const copy = GOAL_COPY[locale];
   return (
-    <div className="my-6">
-      <div aria-hidden="true" className={cn(PREVIEW_SHELL, 'bg-status-info/10')}>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-status-info/30 px-3 py-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Target className="h-4 w-4 shrink-0 text-status-info" aria-hidden="true" />
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-status-info">
-              {copy.label}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full border border-status-info/30 bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-status-info">
-              <LoaderCircle className="h-3 w-3" aria-hidden="true" />
+    <div {...stylex.props(previewStyles.section)}>
+      <div
+        aria-hidden="true"
+        className={[
+          'lody-app-preview',
+          stylex.props(previewStyles.text, previewStyles.section13).className,
+        ].join(' ')}
+      >
+        <div {...stylex.props(previewStyles.row15)}>
+          <div {...stylex.props(previewStyles.row16)}>
+            <Target {...stylex.props(previewStyles.text24)} aria-hidden="true" />
+            <span {...stylex.props(previewStyles.text25)}>{copy.label}</span>
+            <span {...stylex.props(previewStyles.row17)}>
+              <LoaderCircle {...stylex.props(previewStyles.frame7)} aria-hidden="true" />
               {copy.status}
             </span>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          <div {...stylex.props(previewStyles.row18)}>
             <GoalAction icon={Pause} label={copy.pause} />
             <GoalAction icon={Play} label={copy.resume} tone="success" muted />
             <GoalAction icon={X} label={copy.clear} tone="danger" />
           </div>
         </div>
-        <div className="px-3 pb-3 pt-2">
-          <p className="text-sm font-medium leading-snug">{copy.objective}</p>
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <Clock className="h-3 w-3" aria-hidden="true" />
+        <div {...stylex.props(previewStyles.section14)}>
+          <p {...stylex.props(previewStyles.text26)}>{copy.objective}</p>
+          <div {...stylex.props(previewStyles.row19)}>
+            <span {...stylex.props(previewStyles.row20)}>
+              <Clock {...stylex.props(previewStyles.frame7)} aria-hidden="true" />
               {copy.elapsed} {copy.elapsedValue}
             </span>
-            <span className="inline-flex items-center gap-1">
-              <Coins className="h-3 w-3" aria-hidden="true" />
+            <span {...stylex.props(previewStyles.row20)}>
+              <Coins {...stylex.props(previewStyles.frame7)} aria-hidden="true" />
               {copy.tokens} {copy.tokensValue}
             </span>
-            <span className="inline-flex items-center gap-1">
-              <Gauge className="h-3 w-3" aria-hidden="true" />
+            <span {...stylex.props(previewStyles.row20)}>
+              <Gauge {...stylex.props(previewStyles.frame7)} aria-hidden="true" />
               {copy.progress} {copy.progressValue}
             </span>
           </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-background/80">
-            <div className="h-full w-1/4 rounded-full bg-status-info" />
+          <div {...stylex.props(previewStyles.frame10)}>
+            <div {...stylex.props(previewStyles.frame11)} />
           </div>
         </div>
       </div>
-      <p className={CAPTION_CLASS}>{copy.caption}</p>
+      <p {...stylex.props(previewStyles.text5)}>{copy.caption}</p>
     </div>
   );
 }

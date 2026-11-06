@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { Copy } from 'lucide-react';
 import { FileIcon } from './icons';
 import { cn } from './utils';
+import * as stylex from '@stylexjs/stylex';
 
 /* Display-only replica of the app's ai-gui `MarkdownRenderer` (Streamdown) for the
    subset the landing demo copy uses: paragraphs, `- ` bullet lists, `**bold**`,
@@ -9,17 +10,96 @@ import { cn } from './utils';
    a character-level streaming prefix, so unclosed `**` / `` ` `` render like
    Streamdown's `remend` closes them. */
 
-// The app's MARKDOWN_BASE_CLASSNAME, trimmed to the elements this parser emits.
-const MARKDOWN_BASE_CLASSNAME =
-  'markdown-renderer max-w-none text-foreground leading-[1.75] ' +
-  '[&_p]:!mt-0 [&_p]:!mb-3 [&_p:has(+ul)]:!mb-2 [&_p:last-child]:!mb-0 [&_p:first-child]:!mt-0 ' +
-  '[&_ul]:!my-2 [&_ul]:pl-3 [&_ul]:list-disc ' +
-  '[&_ul:not(.contains-task-list)]:pl-0 [&_ul:not(.contains-task-list)]:list-none ' +
-  '[&_ul:not(.contains-task-list)>li]:relative [&_ul:not(.contains-task-list)>li]:pl-6 ' +
-  "[&_ul:not(.contains-task-list)>li]:before:absolute [&_ul:not(.contains-task-list)>li]:before:left-[10px] [&_ul:not(.contains-task-list)>li]:before:top-[0.75em] [&_ul:not(.contains-task-list)>li]:before:size-1 [&_ul:not(.contains-task-list)>li]:before:-translate-y-1/2 [&_ul:not(.contains-task-list)>li]:before:rounded-full [&_ul:not(.contains-task-list)>li]:before:bg-current [&_ul:not(.contains-task-list)>li]:before:content-[''] " +
-  '[&_li]:!my-0 [&_li]:!py-0 [&_li:not(:first-child)]:!mt-2 [&_ul>li:not(:first-child)]:!mt-1 ' +
-  '[&_a]:text-markdown-link ' +
-  '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-current/35 [&_a:hover]:decoration-current/70';
+const styles = stylex.create({
+  root: { maxWidth: 'none', color: 'hsl(var(--foreground))', lineHeight: '1.75' },
+  stream: { whiteSpace: 'normal' },
+  paragraph: { marginTop: '0 !important', marginBottom: 'calc(var(--spacing) * 3) !important' },
+  paragraphBeforeList: { marginBottom: 'calc(var(--spacing) * 2) !important' },
+  lastParagraph: { marginBottom: '0 !important' },
+  list: {
+    marginBlock: 'calc(var(--spacing) * 2) !important',
+    paddingLeft: 0,
+    listStyleType: 'none',
+    listStylePosition: 'inside',
+    whiteSpace: 'normal',
+  },
+  item: {
+    position: 'relative',
+    paddingBlock: '0 !important',
+    paddingLeft: 'calc(var(--spacing) * 6)',
+    marginTop: '0 !important',
+    marginBottom: '0 !important',
+    '::before': {
+      position: 'absolute',
+      left: '10px',
+      top: '0.75em',
+      width: 'calc(var(--spacing) * 1)',
+      height: 'calc(var(--spacing) * 1)',
+      translate: '0 -50%',
+      borderRadius: 'calc(infinity * 1px)',
+      backgroundColor: 'currentColor',
+      content: '""',
+    },
+  },
+  followingItem: { marginTop: 'calc(var(--spacing) * 1) !important' },
+  fileChip: {
+    margin: 0,
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'baseline',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'var(--radius-sm)',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    padding: 0,
+    verticalAlign: 'baseline',
+    fontFamily: 'inherit',
+    lineHeight: 'inherit',
+    textDecorationLine: { default: 'none', '@media (hover: hover)': { ':hover': 'underline' } },
+    textUnderlineOffset: '2px',
+    boxShadow: { default: 'none', ':focus-visible': '0 0 0 2px #fff, 0 0 0 4px hsl(var(--ring))' },
+    outlineStyle: { default: null, ':focus-visible': 'solid' },
+    outlineWidth: { default: null, ':focus-visible': '2px' },
+    outlineColor: { default: null, ':focus-visible': 'transparent' },
+    outlineOffset: { default: null, ':focus-visible': '2px' },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+  },
+  fileGlyph: {
+    width: '1.38em',
+    height: '1.38em',
+    flexShrink: 0,
+    alignSelf: 'center',
+    ':is(*) path[fill]': { fill: 'currentColor' },
+    ':is(*) path[stroke]': { stroke: 'currentColor' },
+  },
+  fileName: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  copyGlyph: { width: '0.85em', height: '0.85em', flexShrink: 0, alignSelf: 'center' },
+  inlineCode: {
+    borderRadius: 'var(--radius-sm)',
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent)',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, hsl(var(--foreground)) 14%, transparent)',
+    },
+    paddingInline: 'calc(var(--spacing) * 1)',
+    paddingBlock: '1px',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.85em',
+    color: 'hsl(var(--foreground))',
+    boxShadow: 'none',
+  },
+  strong: { fontWeight: 'var(--font-weight-semibold)' },
+  link: {
+    textDecorationLine: 'underline',
+    textUnderlineOffset: '2px',
+    textDecorationColor: {
+      default: 'color-mix(in oklab, currentColor 35%, transparent)',
+      ':hover': 'color-mix(in oklab, currentColor 70%, transparent)',
+    },
+  },
+});
 
 // markdownFontSizeStyle(DEFAULT_CONVERSATION_FONT_SIZE = 14).
 const MARKDOWN_FONT_SIZE_STYLE = {
@@ -97,7 +177,13 @@ function linkify(text: string, key: string): ReactNode[] {
     if (!/^https?:\/\/./.test(url)) continue;
     if (start > cursor) nodes.push(text.slice(cursor, start));
     nodes.push(
-      <a key={`${key}-a${start}`} href={url} target="_blank" rel="noopener noreferrer">
+      <a
+        {...stylex.props(styles.link)}
+        key={`${key}-a${start}`}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
         {url}
       </a>
     );
@@ -110,21 +196,11 @@ function linkify(text: string, key: string): ReactNode[] {
 // AgentFileLink with no open handler: icon + name + copy glyph.
 function FileChip({ path }: { path: string }) {
   return (
-    <button
-      type="button"
-      title={path}
-      className={cn(
-        'm-0 inline-flex max-w-full items-baseline gap-1 rounded-sm border-0 bg-transparent p-0 align-baseline font-[inherit] leading-[inherit] text-markdown-link no-underline shadow-none transition-colors',
-        'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-      )}
-    >
+    <button type="button" title={path} {...stylex.props(styles.fileChip)}>
       {/* The app masks the file icon with `bg-current` (MonochromeFileIcon). */}
-      <FileIcon
-        path={path}
-        className="h-[1.38em] w-[1.38em] shrink-0 self-center [&_path[fill]]:fill-current [&_path[stroke]]:stroke-current"
-      />
-      <span className="min-w-0 truncate">{path}</span>
-      <Copy className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
+      <FileIcon path={path} xstyle={styles.fileGlyph} />
+      <span {...stylex.props(styles.fileName)}>{path}</span>
+      <Copy {...stylex.props(styles.copyGlyph)} />
     </button>
   );
 }
@@ -132,11 +208,7 @@ function FileChip({ path }: { path: string }) {
 function InlineCode({ value }: { value: string }) {
   const path = matchWholeFilePath(value);
   if (path) return <FileChip path={path} />;
-  return (
-    <code className="rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]">
-      {value}
-    </code>
-  );
+  return <code {...stylex.props(styles.inlineCode)}>{value}</code>;
 }
 
 function renderInline(text: string, key = 'i'): ReactNode[] {
@@ -163,7 +235,7 @@ function renderInline(text: string, key = 'i'): ReactNode[] {
       flush(index);
       if (inner) {
         nodes.push(
-          <span key={`${key}-s${index}`} className="font-semibold" data-streamdown="strong">
+          <span key={`${key}-s${index}`} {...stylex.props(styles.strong)} data-streamdown="strong">
             {renderInline(inner, `${key}-s${index}`)}
           </span>
         );
@@ -180,22 +252,43 @@ function renderInline(text: string, key = 'i'): ReactNode[] {
   return nodes;
 }
 
-export function ReplicaMarkdown({ text, className }: { text: string; className?: string }) {
+export function ReplicaMarkdown({
+  text,
+  className,
+  xstyle,
+}: {
+  text: string;
+  className?: string;
+  xstyle?: stylex.StyleXStyles;
+}) {
+  const blocks = parseBlocks(text);
+  const sx = stylex.props(styles.root, xstyle);
   return (
-    <div className={cn(MARKDOWN_BASE_CLASSNAME, className)} style={MARKDOWN_FONT_SIZE_STYLE}>
-      {/* Streamdown's root, with the app's `className="space-y-0"` swap. */}
-      <div className="space-y-0 whitespace-normal [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-        {parseBlocks(text).map((block, blockIndex) =>
+    <div
+      className={cn('markdown-renderer', sx.className, className)}
+      style={{ ...sx.style, ...MARKDOWN_FONT_SIZE_STYLE }}
+    >
+      <div {...stylex.props(styles.stream)}>
+        {blocks.map((block, blockIndex) =>
           block.type === 'p' ? (
-            <p key={blockIndex}>{renderInline(block.text, `b${blockIndex}`)}</p>
-          ) : (
-            <ul
+            <p
               key={blockIndex}
-              className="list-inside list-disc whitespace-normal [li_&]:pl-6"
-              data-streamdown="unordered-list"
+              {...stylex.props(
+                styles.paragraph,
+                blocks[blockIndex + 1]?.type === 'ul' && styles.paragraphBeforeList,
+                blockIndex === blocks.length - 1 && styles.lastParagraph
+              )}
             >
+              {renderInline(block.text, `b${blockIndex}`)}
+            </p>
+          ) : (
+            <ul key={blockIndex} {...stylex.props(styles.list)} data-streamdown="unordered-list">
               {block.items.map((item, itemIndex) => (
-                <li key={itemIndex} className="py-1 [&>p]:inline" data-streamdown="list-item">
+                <li
+                  key={itemIndex}
+                  {...stylex.props(styles.item, itemIndex > 0 && styles.followingItem)}
+                  data-streamdown="list-item"
+                >
                   {renderInline(item, `b${blockIndex}-${itemIndex}`)}
                 </li>
               ))}
