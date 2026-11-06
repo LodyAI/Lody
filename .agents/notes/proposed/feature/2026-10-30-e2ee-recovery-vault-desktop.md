@@ -36,7 +36,7 @@ device survives, but only `packages/e2ee-core` and the Lab consume it. The
 [open contracts note](../architecture/2026-10-15-e2ee-open-contracts.md) lists the vault
 as implemented in core only. [#2125](https://github.com/LodyAI/Lody/pull/2125) adds a
 default-off desktop loop: create the account vault and its file, then check a file. It
-remains a draft until it follows decisions 2 and 3.
+neither retains V nor admits R, so decisions 2 and 3 apply only to later work.
 
 ## Decisions and rejected options
 
