@@ -51,9 +51,7 @@ import type { Mention, MentionChip, MentionChipResolver } from '@/ui/mention/ind
 const CHIP_PAD = '\u2007';
 const styles = stylex.create({
   quote: {
-    // Theme palettes can make selectedFill translucent. The cover must stay
-    // opaque so neither the raw brackets nor the background mirror leaks through.
-    '--mention-chip-surface': `color-mix(in srgb, ${colors.label} 8%, ${colors.elevatedBackground})`,
+    backgroundColor: `color-mix(in srgb, ${colors.label} 8%, ${colors.elevatedBackground})`,
     borderRadius: radius.mini,
     color: colors.label,
     boxDecorationBreak: 'clone',

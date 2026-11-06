@@ -56,9 +56,6 @@ import {
 } from './surface';
 import { settingsType as type } from './type.stylex';
 
-/** The well's ink without its alpha, for the chip cover below. */
-const WELL_INK = `rgb(from ${colors.wellBackground} r g b)`;
-
 const styles = stylex.create({
   /** The row's body is two columns that wrap, so its glyph sits on the first line. */
   rowMainTop: { alignItems: 'flex-start', paddingBlock: '10px' },
@@ -118,12 +115,6 @@ const styles = stylex.create({
    * The prompt field is the composer's mention textarea, so it is given the
    * well by hand: the recess, and the ring on `:focus-within` because the
    * element that takes focus is the textarea inside it.
-   *
-   * A mention chip covers the textarea's glyphs with `--mention-chip-surface`,
-   * which has to be opaque and equal to what shows through the well. The well is
-   * translucent ink over the dialog, so the cover is that ink mixed into the
-   * page at the well's own strength — close in both palettes, where a raw
-   * surface colour would leave a faint box under every chip.
    */
   promptWell: {
     boxSizing: 'border-box',
@@ -137,7 +128,6 @@ const styles = stylex.create({
     },
     borderRadius: radius.medium,
     cornerShape: corner.round,
-    '--mention-chip-surface': `color-mix(in srgb, ${colors.background} 95%, ${WELL_INK})`,
   },
   promptInput: {
     minHeight: '112px',

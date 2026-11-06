@@ -870,26 +870,12 @@ export function ChatComposer({
 
   const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
 
-  /**
-   * The colour a mention decoration paints to hide the textarea's own glyphs
-   * before redrawing them in the mention colour. It has to equal whatever this
-   * composer paints behind the textarea, or the "invisible" cover shows up as a
-   * rectangle — which is exactly what `--input` did here, since this surface is
-   * deliberately `--composer` rather than the muddy `bg-input`.
-   *
-   * KEEP IN SYNC with the `bg-*` classes below. CSS cannot read an ancestor's
-   * background, so this is a copy, and a copy can drift.
-   */
-  const mentionSurfaceClassName =
-    '[--mention-chip-surface:hsl(var(--composer))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]';
-
   // Light surface: near-white composer on the gray canvas + 1px border.
   // Avoid heavy bg-input fills that read as muddy gray on cool-white themes.
   const mentionContainerClassName = !isLanding
     ? cn(
         'w-full focus-within:outline-hidden',
-        'rounded-2xl border border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/70 dark:bg-input/90',
-        mentionSurfaceClassName
+        'rounded-2xl border border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/70 dark:bg-input/90'
       )
     : undefined;
 
@@ -920,18 +906,14 @@ export function ChatComposer({
     '@container/composer-box flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3',
     'border-foreground/[0.10] bg-[hsl(var(--composer))]',
     COMPOSER_ELEVATION_CLASS,
-    'dark:border-input-border/60 dark:bg-input/90',
-    mentionSurfaceClassName
+    'dark:border-input-border/60 dark:bg-input/90'
   );
 
-  const sessionContainerClassName = cn(COMPOSER_SESSION_SURFACE_CLASS, mentionSurfaceClassName);
+  const sessionContainerClassName = COMPOSER_SESSION_SURFACE_CLASS;
 
   /* Sheet: the composer is the page, not a card floating on it. The writing
      surface runs edge to edge; only the footer draws a separator. */
-  const sheetContainerClassName = cn(
-    'flex h-full min-h-0 flex-col px-0 py-0',
-    mentionSurfaceClassName
-  );
+  const sheetContainerClassName = 'flex h-full min-h-0 flex-col px-0 py-0';
   const boxContainerClassName = isSheet
     ? sheetContainerClassName
     : isLanding
@@ -1472,7 +1454,7 @@ export function ChatComposer({
               containerClassName={mentionContainerClassName}
               className={dialogTextareaClassName}
               data-testid="composer-input"
-                  data-keyboard-nav="composer"
+              data-keyboard-nav="composer"
             />
 
             {statusMessage ? (

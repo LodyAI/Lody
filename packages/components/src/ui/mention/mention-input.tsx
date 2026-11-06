@@ -1,6 +1,7 @@
 import { composeEventHandlers, Primitive, useComposedRefs } from '@diceui/shared';
 import type { VirtualElement } from '@floating-ui/react';
 import * as React from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { getPlatform } from '@/lib/commands/platform';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -19,6 +20,14 @@ import { findTriggerCandidates, isMentionNavigationPrefix } from './mention-trig
 import { type Mention, useMentionContext } from './mention-root';
 
 const INPUT_NAME = 'MentionInput';
+
+const styles = stylex.create({
+  mirroredInput: {
+    // The native control owns editing and the caret, never visible text.
+    WebkitTextFillColor: 'transparent',
+    '::selection': { backgroundColor: 'transparent', color: 'transparent' },
+  },
+});
 
 type InputElement = React.ElementRef<typeof Primitive.textarea>;
 
@@ -112,9 +121,8 @@ function isPointInsideMentionHighlight(
 
 /**
  * Mention ranges are atomic editing units. Keep a collapsed caret out of the
- * range so the chip mirror cannot cover the native caret and a following edit
- * cannot accidentally split the range. Text selections that span a mention are
- * left alone so the browser can still select/copy ordinary text naturally.
+ * range so a following edit cannot accidentally split its identity. Selections
+ * spanning a mention stay native so the browser can still select/copy ordinary text naturally.
  */
 function constrainCaretToMentionBoundary(input: InputElement, mentions: readonly Mention[]) {
   const selectionStart = input.selectionStart ?? 0;
@@ -152,7 +160,6 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   // during composition, and sync the final value after composition ends.
   const isComposingRef = React.useRef(false);
   const [compositionRenderValue, setCompositionRenderValue] = React.useState<string | null>(null);
-  const [caretAtMentionBoundary, setCaretAtMentionBoundary] = React.useState(false);
 
   const normalizedPropValue = React.useMemo(
     () => normalizeTextareaValue(inputProps.value),
@@ -179,41 +186,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     return applyTextEditToMentions(context.mentions, diff.start, diff.prevEnd, diff.delta);
   }, [compositionRenderValue, context.inputValue, context.mentions]);
 
-  const updateCaretLayer = React.useCallback(
-    (input: InputElement | null = inputRef.current) => {
-      if (!input || document.activeElement !== input) {
-        setCaretAtMentionBoundary(false);
-        return;
-      }
-
-      const selectionStart = input.selectionStart;
-      const selectionEnd = input.selectionEnd;
-      const atMentionBoundary =
-        selectionStart !== null &&
-        selectionStart === selectionEnd &&
-        mentionRenderMentions.some(
-          (mention) => selectionStart === mention.start || selectionStart === mention.end
-        );
-      setCaretAtMentionBoundary((previous) =>
-        previous === atMentionBoundary ? previous : atMentionBoundary
-      );
-    },
-    [inputRef, mentionRenderMentions]
-  );
-
-  // A chip must cover the textarea glyphs to recolour them, but that same
-  // cover would hide the native caret at a mention edge. Raise the textarea
-  // only at that edge and let the background mirror carry its text while the
-  // caret remains native. This avoids painting a second, synthetic caret.
-  React.useLayoutEffect(() => {
-    const read = () => updateCaretLayer();
-    read();
-    document.addEventListener('selectionchange', read);
-    return () => document.removeEventListener('selectionchange', read);
-  }, [updateCaretLayer]);
-
-  const showNativeCaretAboveChip =
-    !!context.getMentionChip && mentionRenderMentions.length > 0 && caretAtMentionBoundary;
+  const mirrorText = !!context.getMentionChip;
+  // An empty control paints only its native placeholder. WebKit inherits the
+  // transparent fill into that pseudo-element even with a ::placeholder reset.
+  const hideNativeText = mirrorText && mentionRenderValue.length > 0;
 
   const queueSelectionRestore = React.useCallback(
     (start: number, end: number = start, expectedValue?: string) => {
@@ -545,9 +521,8 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       // The value at compositionEnd should be the final committed text.
       syncInputValue(input);
       onMentionUpdate(input);
-      updateCaretLayer(input);
     },
-    [context, onMentionUpdate, syncInputValue, updateCaretLayer]
+    [context, onMentionUpdate, syncInputValue]
   );
 
   const onClick = React.useCallback(
@@ -564,7 +539,6 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           : undefined;
 
       constrainCaretToMentionBoundary(input, context.mentions);
-      updateCaretLayer(input);
       onMentionUpdate(input);
 
       if (!context.onMentionClick) return;
@@ -577,7 +551,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         context.onMentionClick(mentionAtClick);
       }
     },
-    [context, onMentionUpdate, updateCaretLayer]
+    [context, onMentionUpdate]
   );
 
   const onFocus = React.useCallback(
@@ -585,10 +559,9 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       if (!isComposingRef.current) {
         constrainCaretToMentionBoundary(event.currentTarget, context.mentions);
       }
-      updateCaretLayer(event.currentTarget);
       onMentionUpdate(event.currentTarget);
     },
-    [context, onMentionUpdate, updateCaretLayer]
+    [context, onMentionUpdate]
   );
 
   const onKeyDown = React.useCallback(
@@ -904,19 +877,12 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     const inputElement = context.inputRef.current;
     if (!inputElement) return;
     constrainCaretToMentionBoundary(inputElement, context.mentions);
-    updateCaretLayer(inputElement);
     if (context.readonly) return;
     onMentionUpdate(inputElement);
-  }, [context, onMentionUpdate, updateCaretLayer]);
+  }, [context, onMentionUpdate]);
 
   return (
     <div className={cn('relative', containerClassName)}>
-      <MentionHighlighter
-        className={highlighterClassName}
-        renderValue={mentionRenderValue}
-        renderMentions={mentionRenderMentions}
-        showText={showNativeCaretAboveChip}
-      />
       <Primitive.textarea
         role="combobox"
         id={context.inputId}
@@ -936,15 +902,14 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         value={renderedInputValue}
         className={cn(
           'relative',
-          showNativeCaretAboveChip ? 'z-30' : 'z-10',
+          'z-10',
+          hideNativeText && stylex.props(styles.mirroredInput).className,
           inputProps.className,
           'bg-transparent'
         )}
-        style={
-          showNativeCaretAboveChip
-            ? { ...inputProps.style, WebkitTextFillColor: 'transparent' }
-            : inputProps.style
-        }
+        style={inputProps.style}
+        // Native spelling decorations can repaint glyphs above the mirror.
+        spellCheck={mirrorText ? false : inputProps.spellCheck}
         onBeforeInput={composeEventHandlers(inputProps.onBeforeInput, onBeforeInput)}
         onChange={composeEventHandlers(inputProps.onChange, onChange)}
         onClick={composeEventHandlers(inputProps.onClick, onClick)}
@@ -954,21 +919,12 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         onCompositionEnd={composeEventHandlers(inputProps.onCompositionEnd, onCompositionEnd)}
         onSelect={composeEventHandlers(inputProps.onSelect, onSelect)}
       />
-      {/*
-        The chip mirror is a second full copy of the draft, re-split into
-        segments on every keystroke and measuring the textarea's computed style
-        of its own. Its text is `transparent` while the textarea is the visible
-        source; only at a mention boundary does the background mirror carry the
-        text so the raised textarea can expose its native caret.
-      */}
-      {context.getMentionChip && mentionRenderMentions.length > 0 ? (
-        <MentionHighlighter
-          layer="chip"
-          className={highlighterClassName}
-          renderValue={mentionRenderValue}
-          renderMentions={mentionRenderMentions}
-        />
-      ) : null}
+      <MentionHighlighter
+        className={highlighterClassName}
+        renderValue={mentionRenderValue}
+        renderMentions={mentionRenderMentions}
+        showText={mirrorText}
+      />
     </div>
   );
 });
