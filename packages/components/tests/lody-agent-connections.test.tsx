@@ -104,7 +104,7 @@ describe('LodyAgentConnections', () => {
     expect(rows).toEqual(['anthropic', 'openrouter', 'acme', 'local']);
     expect(row('anthropic').textContent).toContain('Signed in');
     expect(row('openrouter').textContent).toContain('API key');
-    expect(row('Acme Gateway').textContent).toContain('Custom endpoint, 2 models');
+    expect(row('Acme Gateway').textContent).toContain('Custom endpoint');
     expect(row('Local gateway').textContent).toContain('Needs an API key');
     expect(container.textContent).not.toContain('oauth');
   });
@@ -179,14 +179,12 @@ describe('LodyAgentConnections', () => {
     )!;
     await click(anthropic.querySelector<HTMLElement>('[role="radio"]')!);
     await typeInto(field('Base URL'), ' https://gateway.acme.dev ');
-    await typeInto(field('Models'), 'acme-large\nacme-small, acme-tiny');
     const dialog = document.querySelector('[role="dialog"]')!;
     await click(button('Add endpoint', dialog));
     expect(props.onCreate).toHaveBeenCalledWith({
       name: 'Acme Gateway',
       protocol: 'anthropic-messages',
       baseUrl: 'https://gateway.acme.dev',
-      models: [{ id: 'acme-large' }, { id: 'acme-small' }, { id: 'acme-tiny' }],
     });
     expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('Could not add');
     expect(field('Name').value).toBe('Acme Gateway');

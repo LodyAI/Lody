@@ -331,6 +331,83 @@ describe('AcpAuthenticationAuthorizationView', () => {
     expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
   });
 
+  it('starts the selected custom endpoint API key method', async () => {
+    const store = createStore();
+    const machineId = 'local' as MachineId;
+    const configId = 'lody-agent' as AgentConfigId;
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId(machineId)]: {
+        id: machineId,
+        protocolCapabilities: {
+          acpAuthenticationInteractions: 2,
+          acpAuthenticationMethodSelection: 1,
+        },
+        acpCapabilities: {
+          [configId]: {
+            cliType: 'builtin',
+            agentType: 'sorbet',
+            cacheVersion: 12,
+            modes: [],
+            models: [],
+            authMethods: [
+              { id: 'sorbet:gateway:api_key', name: 'Gateway API key', type: 'agent' },
+              { id: 'sorbet:other:api_key', name: 'Other API key', type: 'agent' },
+            ],
+          },
+        },
+      } as never,
+    });
+    const started: (string | undefined)[] = [];
+    let onProgress: authenticationHook.MachineAcpAuthenticationArgs['onProgress'];
+    vi.spyOn(authenticationHook, 'useMachineAcpAuthentication').mockReturnValue({
+      startAuthentication: (args) => {
+        started.push(args.methodId);
+        onProgress = args.onProgress;
+        return {
+          requestId: 'auth-1',
+          promise: new Promise<MachineAcpAuthenticateResponse>(() => {}),
+        };
+      },
+      cancelAuthentication: vi.fn(),
+      submitAuthorizationCode: vi.fn(),
+      submitAuthenticationInput: vi.fn(),
+    });
+    await act(async () =>
+      root.render(
+        <Provider store={store}>
+          <AcpAuthenticationPanel
+            machineId={machineId}
+            configId={configId}
+            cliType="builtin"
+            agentType="sorbet"
+            layout="action"
+            onlyMethodId="sorbet:gateway:api_key"
+          />
+        </Provider>
+      )
+    );
+    const action = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Enter API key'
+    );
+    expect(action?.disabled).toBe(false);
+    await act(async () => action?.click());
+    expect(started).toEqual(['sorbet:gateway:api_key']);
+    expect(document.body.querySelector('[role="dialog"] [role="status"]')).not.toBeNull();
+    await act(async () =>
+      onProgress?.({
+        type: 'machine/acp-authentication-progress',
+        machineId,
+        requestId: 'auth-1',
+        agentType: 'sorbet',
+        status: 'input-required',
+        interactionId: 'key-form',
+        message: 'Enter your API key',
+        form: { fields: [{ id: 'key', type: 'secret', label: 'API key', required: true }] },
+      })
+    );
+    expect(document.body.querySelector('[role="dialog"] input[type="password"]')).not.toBeNull();
+  });
+
   it('explains the remote return value when a code can be submitted', async () => {
     await act(async () => {
       root.render(

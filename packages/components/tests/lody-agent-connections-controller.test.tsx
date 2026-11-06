@@ -145,7 +145,6 @@ describe('LodyAgentConnectionsController', () => {
     await click(button('Add endpoint'));
     await typeInto(field('Name'), 'Acme Gateway');
     await typeInto(field('Base URL'), 'https://gateway.acme.dev/v1');
-    await typeInto(field('Models'), 'large');
     await click(button('Add endpoint', document.querySelector('[role="dialog"]')!));
 
     // The definition alone changes nothing a person can act on: the agent only

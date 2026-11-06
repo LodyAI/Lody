@@ -25,6 +25,8 @@ const configId = 'settings-story-lody-agent' as AgentConfigId;
 const userId = 'settings-story-user';
 
 const authMethods = [
+  { id: 'sorbet:prov_gateway:api_key', type: 'agent' as const, name: 'Acme Gateway API key' },
+  { id: 'sorbet:prov_local:api_key', type: 'agent' as const, name: 'Local gateway API key' },
   {
     id: 'sorbet:anthropic:oauth',
     type: 'agent' as const,
@@ -142,20 +144,18 @@ function Hydrate({
   supported: boolean;
   configured: boolean;
 }) {
-  useHydrateAtoms(
+  useHydrateAtoms([
+    [developerModeEnabledAtom, true],
+    [lodyAgentBetaEnabledAtom, true],
+    [userAtom, { id: userId, name: 'Zixuan Chen', email: 'zixuan@example.com' }],
+    [machineMetaCacheAtom, { [getMachineRoomId(machineId)]: machine(supported) }],
     [
-      [developerModeEnabledAtom, true],
-      [lodyAgentBetaEnabledAtom, true],
-      [userAtom, { id: userId, name: 'Zixuan Chen', email: 'zixuan@example.com' }],
-      [machineMetaCacheAtom, { [getMachineRoomId(machineId)]: machine(supported) }],
-      [
-        agentConfigMetaCacheAtom,
-        configured ? { [getAgentConfigRoomId(configId)]: config as never } : {},
-      ],
-      [currentWorkspaceIdAtom, workspaceId],
-      [runtimeAtom, storyRuntime],
-    ] as never
-  );
+      agentConfigMetaCacheAtom,
+      configured ? { [getAgentConfigRoomId(configId)]: config as never } : {},
+    ],
+    [currentWorkspaceIdAtom, workspaceId],
+    [runtimeAtom, storyRuntime],
+  ] as never);
   return <>{children}</>;
 }
 

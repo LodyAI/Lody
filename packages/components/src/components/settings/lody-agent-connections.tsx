@@ -6,7 +6,6 @@ import { Button } from '@lody/ui/button';
 import { Dialog } from '@lody/ui/dialog';
 import { Input } from '@lody/ui/input';
 import { Radio, RadioGroup } from '@lody/ui/radio';
-import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { AlertDialog } from '@/ui/dialog';
@@ -37,7 +36,6 @@ export interface LodyAgentCustomProviderDraft {
   name: string;
   protocol: LodyAgentProviderProtocol;
   baseUrl: string;
-  models: readonly { id: string }[];
 }
 
 /**
@@ -59,6 +57,7 @@ export interface LodyAgentConnectionsProps {
   onCreate?: (draft: LodyAgentCustomProviderDraft) => Promise<void>;
   /** The agent's sign-in methods, drawn as the last lines of the same card. */
   signIn?: ReactNode;
+  endpointSignIn?: (providerId: string) => ReactNode;
 }
 
 type Connection = LodyAgentConnectionRef & { name: string; meta: string; attention: boolean };
@@ -119,6 +118,7 @@ export function LodyAgentConnections({
   onRemove,
   onCreate,
   signIn,
+  endpointSignIn,
 }: LodyAgentConnectionsProps) {
   const { t } = useTranslation();
   const [confirming, setConfirming] = useState<Connection | null>(null);
@@ -135,7 +135,7 @@ export function LodyAgentConnections({
         meta:
           credential.type === 'oauth'
             ? t('lodyAgentConnections.signedIn')
-            : credential.type === 'api-key'
+            : credential.type === 'api_key' || credential.type === 'api-key'
               ? t('lodyAgentConnections.apiKey')
               : t('lodyAgentConnections.savedCredential'),
         attention: false,
@@ -145,7 +145,7 @@ export function LodyAgentConnections({
       id: provider.id,
       name: provider.name,
       meta: keyed.has(provider.id)
-        ? t('lodyAgentConnections.endpoint', { count: provider.models.length })
+        ? t('lodyAgentConnections.endpoint')
         : t('lodyAgentConnections.needsKey'),
       attention: !keyed.has(provider.id),
     })),
@@ -189,6 +189,9 @@ export function LodyAgentConnections({
                 </span>
               </div>
               <div {...stylex.props(catalog.actions)}>
+                {connection.kind === 'endpoint' && !uncertain.has(connection.id)
+                  ? endpointSignIn?.(connection.id)
+                  : null}
                 {uncertain.has(connection.id) ? (
                   <Button size="small" variant="secondary" disabled={busy} onClick={onRetry}>
                     {t('lodyAgentConnections.checkAgain')}
@@ -231,6 +234,7 @@ export function LodyAgentConnections({
         <CompactSection
           boxed
           title={t('lodyAgentConnections.title')}
+          headerRightUnclipped
           headerRight={
             onCreate ? (
               <Button
@@ -316,14 +320,9 @@ function EndpointForm({
   const [name, setName] = useState('');
   const [protocol, setProtocol] = useState<LodyAgentProviderProtocol>('openai-completions');
   const [baseUrl, setBaseUrl] = useState('');
-  const [models, setModels] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [failed, setFailed] = useState(false);
-  const modelIds = models
-    .split(/[\s,]+/)
-    .map((model) => model.trim())
-    .filter((model) => model.length > 0);
-  const complete = name.trim().length > 0 && baseUrl.trim().length > 0 && modelIds.length > 0;
+  const complete = name.trim().length > 0 && baseUrl.trim().length > 0;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -335,7 +334,6 @@ function EndpointForm({
         name: name.trim(),
         protocol,
         baseUrl: baseUrl.trim(),
-        models: modelIds.map((model) => ({ id: model })),
       });
     } catch {
       setFailed(true);
@@ -381,16 +379,6 @@ function EndpointForm({
             placeholder={t('lodyAgentConnections.baseUrlPlaceholder')}
             value={baseUrl}
             onChange={(event) => setBaseUrl(event.target.value)}
-          />
-        </Field>
-        <Field htmlFor={`${id}-models`} label={t('lodyAgentConnections.modelsLabel')}>
-          <Textarea
-            id={`${id}-models`}
-            rows={3}
-            resize="none"
-            placeholder={t('lodyAgentConnections.modelsPlaceholder')}
-            value={models}
-            onChange={(event) => setModels(event.target.value)}
           />
         </Field>
         {failed ? (

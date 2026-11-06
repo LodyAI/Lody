@@ -216,7 +216,7 @@ function LodyAgentMachine({ machine }: { machine: MachineViewMeta }) {
           machineSupportsProtocolCapability(machine, 'sorbetCredentialsRemote', 1)
         }
         refreshVersion={connectionsVersion}
-        signIn={
+        signIn={(providerIds) => (
           <AcpAuthenticationPanel
             machineId={machine.id}
             configId={config.id}
@@ -227,9 +227,23 @@ function LodyAgentMachine({ machine }: { machine: MachineViewMeta }) {
             env={config.env}
             compact
             layout="rows"
+            excludedMethodIds={providerIds.map((id) => `sorbet:${id}:api_key`)}
             onAuthenticated={() => setConnectionsVersion((version) => version + 1)}
           />
-        }
+        )}
+        endpointSignIn={(providerId) => (
+          <AcpAuthenticationPanel
+            machineId={machine.id}
+            configId={config.id}
+            cliType={config.cliType}
+            agentType={config.agentType}
+            providerName={config.name}
+            compact
+            layout="action"
+            onlyMethodId={`sorbet:${providerId}:api_key`}
+            onAuthenticated={() => setConnectionsVersion((version) => version + 1)}
+          />
+        )}
         onProvidersChanged={async () => {
           const response = await refreshCapabilities({
             machineId: machine.id,

@@ -33,6 +33,7 @@ import {
 } from '@/hooks/use-machine-acp-authentication';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { Button } from '@lody/ui/button';
+import { Dialog } from '@lody/ui/dialog';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Select } from '@lody/ui/select';
@@ -255,6 +256,8 @@ export function AcpAuthenticationPanel({
   customAcp,
   compact = false,
   layout = 'default',
+  onlyMethodId,
+  excludedMethodIds,
   reauthentication = false,
   providerName,
   onBeforeStart,
@@ -273,7 +276,9 @@ export function AcpAuthenticationPanel({
    * `rows` draws each advertised method as a record row whose own action becomes the
    * wait, for a surface that lists sign-ins beside what is already connected.
    */
-  layout?: 'default' | 'rows';
+  layout?: 'default' | 'rows' | 'action';
+  onlyMethodId?: string;
+  excludedMethodIds?: readonly string[];
   reauthentication?: boolean;
   /**
    * Fallback label for agents Lody has no pinned account name for. A pinned
@@ -308,6 +313,7 @@ export function AcpAuthenticationPanel({
     submitAuthenticationInput,
   } = useMachineAcpAuthentication(runtime, workspaceId);
   const [phase, setPhase] = useState<AuthenticationPhase>('idle');
+  const [actionOpen, setActionOpen] = useState(false);
   const [runningSince, setRunningSince] = useState<number | null>(null);
   const [runningMethodId, setRunningMethodId] = useState<string | null>(null);
   const waiting = phase === 'running' || phase === 'verifying';
@@ -380,9 +386,12 @@ export function AcpAuthenticationPanel({
     const methods: AcpAuthMethodSummary[] = cachedAuthMethods ?? discoveredAuthMethods ?? [];
     return methods.filter(
       (method): method is AcpAuthMethodSummary & { id: string } =>
-        method.type === 'agent' && !!method.id
+        method.type === 'agent' &&
+        !!method.id &&
+        (!onlyMethodId || method.id === onlyMethodId) &&
+        !excludedMethodIds?.includes(method.id)
     );
-  }, [cachedAuthMethods, discoveredAuthMethods]);
+  }, [cachedAuthMethods, discoveredAuthMethods, onlyMethodId, excludedMethodIds]);
 
   const closePendingAuthorizationWindow = (): void => {
     const pendingWindow = pendingAuthorizationWindowRef.current;
@@ -442,6 +451,7 @@ export function AcpAuthenticationPanel({
   // which only a probe can read. A cached capability entry already answers for
   // this Provider, so the probe runs at most once per target per mount.
   useEffect(() => {
+    if (layout === 'action') return undefined;
     if (!runtime || workspaceId == null || !machineId || !configId) return undefined;
     if (!protocolAuthProvider || !interactiveProtocolSupported) return undefined;
     if (discoveredAuthMethods !== undefined || cachedAuthMethods !== undefined) return undefined;
@@ -474,6 +484,7 @@ export function AcpAuthenticationPanel({
     configId,
     discoveredAuthMethods,
     interactiveProtocolSupported,
+    layout,
     machineId,
     protocolAuthProvider,
     runtime,
@@ -517,7 +528,7 @@ export function AcpAuthenticationPanel({
     }
     closePendingAuthorizationWindow();
     pendingAuthorizationWindowRef.current =
-      cliType === 'builtin'
+      cliType === 'builtin' && layout !== 'action'
         ? prepareAuthorizationWindow(
             t('agents.authentication.preparingBrowser', 'Preparing {{provider}} sign-in…', {
               provider,
@@ -953,6 +964,115 @@ export function AcpAuthenticationPanel({
     </>
   );
 
+  const details = (
+    <div {...stylex.props(methodRows ? styles.rowsDetail : styles.detail)}>
+      {methodRows && phase === 'authenticated' ? (
+        <span {...stylex.props(styles.success)}>
+          {t('agents.authentication.succeeded', '{{provider}} sign-in completed', { provider })}
+        </span>
+      ) : null}
+      {methodRows || layout === 'action' ? null : (
+        <div {...stylex.props(styles.actions)}>
+          {waiting ? (
+            waitingStatus
+          ) : showAdvertisedMethods ? null : (
+            <Button
+              type="button"
+              size="small"
+              variant="secondary"
+              disabled={!authArgs || !interactiveProtocolSupported}
+              onClick={handleStart}
+            >
+              <LogIn {...stylex.props(catalog.icon)} />
+              {codexAuthMode === 'api-key'
+                ? reauthentication || phase === 'authenticated'
+                  ? t('settings.agent.codex.updateKey', 'Update API Key')
+                  : t('settings.agent.codex.enterKey', 'Enter API Key')
+                : phase === 'error' || phase === 'cancelled'
+                  ? t('agents.authentication.retry', 'Retry {{provider}} sign-in', { provider })
+                  : phase === 'authenticated' || reauthentication
+                    ? t('agents.authentication.signInAgain', 'Sign in again')
+                    : t('agents.authentication.signIn', 'Sign in with {{provider}}', {
+                        provider,
+                      })}
+            </Button>
+          )}
+          {phase === 'authenticated' ? (
+            <span {...stylex.props(styles.success)}>
+              {t('agents.authentication.succeeded', '{{provider}} sign-in completed', {
+                provider,
+              })}
+            </span>
+          ) : null}
+        </div>
+      )}
+      {!interactiveProtocolSupported ? (
+        <p {...stylex.props(styles.hint)}>
+          {t(
+            'agents.authentication.machineUpgradeRequired',
+            'Update the target Machine to use interactive authentication for this Provider.'
+          )}
+        </p>
+      ) : null}
+      {remoteSorbet && layout !== 'action' ? (
+        <p {...stylex.props(styles.hint)}>
+          {t(
+            'agents.authentication.remoteSorbetHelp',
+            'This Lody Agent runs on a remote machine. If offered, choose device sign-in or a method that lets you copy a code or return URL into Lody. A localhost callback points to the remote machine, not this device; it will not complete in your local browser. Radius supports device sign-in or a callback on the remote machine.'
+          )}
+        </p>
+      ) : null}
+      {runtimeDownloadText ? (
+        <p className="text-xs text-muted-foreground">{runtimeDownloadText}</p>
+      ) : null}
+      {showAdvertisedMethods && !methodRows && layout !== 'action' ? (
+        <AcpAuthenticationInteractionView
+          interaction={{
+            type: 'methods',
+            interactionId: 'advertised-methods',
+            methods: advertisedMethods,
+          }}
+          values={EMPTY_FORM_VALUES}
+          submitting={false}
+          onValuesChange={() => {}}
+          onSubmit={(input) => {
+            if (input.action === 'accept')
+              void startAuthenticationFromPersistedConfig(input.methodId);
+          }}
+        />
+      ) : null}
+      {phase === 'running' && authorization ? (
+        <AcpAuthenticationAuthorizationView
+          provider={provider}
+          authorization={authorization}
+          authorizationCode={authorizationCode}
+          authorizationCodeSubmitted={authorizationCodeSubmitted}
+          authorizationCodeUnknown={authorizationCodeUnknown}
+          submittingAuthorizationCode={submittingAuthorizationCode}
+          userCodeCopied={userCodeCopied}
+          onOpenAuthorization={() => void handleOpenAuthorization()}
+          onCopyUserCode={() => void handleCopyUserCode()}
+          onAuthorizationCodeChange={setAuthorizationCode}
+          onSubmitAuthorizationCode={() => void handleSubmitAuthorizationCode()}
+          authorizationConsentPending={submittingInteraction}
+          remoteSorbet={remoteSorbet}
+        />
+      ) : null}
+      {phase === 'running' && interaction ? (
+        <AcpAuthenticationInteractionView
+          interaction={interaction}
+          values={formValues}
+          submitting={submittingInteraction}
+          onValuesChange={setFormValues}
+          onSubmit={(input) => void handleSubmitInteraction(interaction.interactionId, input)}
+        />
+      ) : null}
+      {error ? <p {...stylex.props(styles.error)}>{error}</p> : null}
+    </div>
+  );
+
+  if (layout === 'action' && advertisedMethods.length === 0) return null;
+
   return (
     <div
       {...stylex.props(
@@ -961,7 +1081,20 @@ export function AcpAuthenticationPanel({
         layout === 'rows' && !methodRows && styles.rowsFallback
       )}
     >
-      {methodRows ? (
+      {layout === 'action' ? (
+        <Button
+          type="button"
+          size="small"
+          variant="secondary"
+          disabled={waiting || !authArgs || !interactiveProtocolSupported || !canSelectAuthMethod}
+          onClick={() => {
+            setActionOpen(true);
+            void startAuthenticationFromPersistedConfig(advertisedMethods[0].id);
+          }}
+        >
+          {t('lodyAgentConnections.enterKey')}
+        </Button>
+      ) : methodRows ? (
         <div {...stylex.props(styles.methodRows)}>
           {advertisedMethods.map((method, index) => (
             <div
@@ -997,110 +1130,25 @@ export function AcpAuthenticationPanel({
           ))}
         </div>
       ) : null}
-      <div {...stylex.props(methodRows ? styles.rowsDetail : styles.detail)}>
-        {methodRows && phase === 'authenticated' ? (
-          <span {...stylex.props(styles.success)}>
-            {t('agents.authentication.succeeded', '{{provider}} sign-in completed', { provider })}
-          </span>
-        ) : null}
-        {methodRows ? null : (
-          <div {...stylex.props(styles.actions)}>
-            {waiting ? (
-              waitingStatus
-            ) : showAdvertisedMethods ? null : (
-              <Button
-                type="button"
-                size="small"
-                variant="secondary"
-                disabled={!authArgs || !interactiveProtocolSupported}
-                onClick={handleStart}
-              >
-                <LogIn {...stylex.props(catalog.icon)} />
-                {codexAuthMode === 'api-key'
-                  ? reauthentication || phase === 'authenticated'
-                    ? t('settings.agent.codex.updateKey', 'Update API Key')
-                    : t('settings.agent.codex.enterKey', 'Enter API Key')
-                  : phase === 'error' || phase === 'cancelled'
-                    ? t('agents.authentication.retry', 'Retry {{provider}} sign-in', { provider })
-                    : phase === 'authenticated' || reauthentication
-                      ? t('agents.authentication.signInAgain', 'Sign in again')
-                      : t('agents.authentication.signIn', 'Sign in with {{provider}}', {
-                          provider,
-                        })}
-              </Button>
-            )}
-            {phase === 'authenticated' ? (
-              <span {...stylex.props(styles.success)}>
-                {t('agents.authentication.succeeded', '{{provider}} sign-in completed', {
-                  provider,
-                })}
-              </span>
-            ) : null}
-          </div>
-        )}
-        {!interactiveProtocolSupported ? (
-          <p {...stylex.props(styles.hint)}>
-            {t(
-              'agents.authentication.machineUpgradeRequired',
-              'Update the target Machine to use interactive authentication for this Provider.'
-            )}
-          </p>
-        ) : null}
-        {remoteSorbet ? (
-          <p {...stylex.props(styles.hint)}>
-            {t(
-              'agents.authentication.remoteSorbetHelp',
-              'This Lody Agent runs on a remote machine. If offered, choose device sign-in or a method that lets you copy a code or return URL into Lody. A localhost callback points to the remote machine, not this device; it will not complete in your local browser. Radius supports device sign-in or a callback on the remote machine.'
-            )}
-          </p>
-        ) : null}
-        {runtimeDownloadText ? (
-          <p className="text-xs text-muted-foreground">{runtimeDownloadText}</p>
-        ) : null}
-        {showAdvertisedMethods && !methodRows ? (
-          <AcpAuthenticationInteractionView
-            interaction={{
-              type: 'methods',
-              interactionId: 'advertised-methods',
-              methods: advertisedMethods,
-            }}
-            values={EMPTY_FORM_VALUES}
-            submitting={false}
-            onValuesChange={() => {}}
-            onSubmit={(input) => {
-              if (input.action === 'accept')
-                void startAuthenticationFromPersistedConfig(input.methodId);
-            }}
-          />
-        ) : null}
-        {phase === 'running' && authorization ? (
-          <AcpAuthenticationAuthorizationView
-            provider={provider}
-            authorization={authorization}
-            authorizationCode={authorizationCode}
-            authorizationCodeSubmitted={authorizationCodeSubmitted}
-            authorizationCodeUnknown={authorizationCodeUnknown}
-            submittingAuthorizationCode={submittingAuthorizationCode}
-            userCodeCopied={userCodeCopied}
-            onOpenAuthorization={() => void handleOpenAuthorization()}
-            onCopyUserCode={() => void handleCopyUserCode()}
-            onAuthorizationCodeChange={setAuthorizationCode}
-            onSubmitAuthorizationCode={() => void handleSubmitAuthorizationCode()}
-            authorizationConsentPending={submittingInteraction}
-            remoteSorbet={remoteSorbet}
-          />
-        ) : null}
-        {phase === 'running' && interaction ? (
-          <AcpAuthenticationInteractionView
-            interaction={interaction}
-            values={formValues}
-            submitting={submittingInteraction}
-            onValuesChange={setFormValues}
-            onSubmit={(input) => void handleSubmitInteraction(interaction.interactionId, input)}
-          />
-        ) : null}
-        {error ? <p {...stylex.props(styles.error)}>{error}</p> : null}
-      </div>
+      {layout === 'action' ? (
+        <Dialog.Root
+          open={actionOpen}
+          onOpenChange={(open) => {
+            setActionOpen(open);
+            if (!open && waiting) handleCancel();
+          }}
+        >
+          <Dialog.Content>
+            <Dialog.Header>
+              <Dialog.Title>{t('lodyAgentConnections.enterKey')}</Dialog.Title>
+            </Dialog.Header>
+            {waiting ? waitingStatus : null}
+            {details}
+          </Dialog.Content>
+        </Dialog.Root>
+      ) : (
+        details
+      )}
     </div>
   );
 }

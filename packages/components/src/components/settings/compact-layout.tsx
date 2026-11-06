@@ -27,6 +27,7 @@ interface CompactSectionProps {
   /** Free-form content on the right of the header (rendered as-is, unlike
    * `actions` which are coerced into icon buttons). */
   headerRight?: ReactNode;
+  headerRightUnclipped?: boolean;
   /** A group that destroys something — leave, transfer, delete — says so on its card. */
   tone?: 'default' | 'danger';
   /** A collection of records rather than preferences keeps its card on a flat page. */
@@ -58,6 +59,7 @@ export function CompactSection({
   description,
   actions,
   headerRight,
+  headerRightUnclipped = false,
   tone = 'default',
   boxed = false,
   children,
@@ -91,7 +93,16 @@ export function CompactSection({
               <p {...stylex.props(surface.sectionDescription)}>{description}</p>
             ) : null}
           </div>
-          {headerRight ? <div {...stylex.props(surface.sectionAside)}>{headerRight}</div> : null}
+          {headerRight ? (
+            <div
+              {...stylex.props(
+                surface.sectionAside,
+                headerRightUnclipped && surface.sectionAsideUnclipped
+              )}
+            >
+              {headerRight}
+            </div>
+          ) : null}
           {actions ? (
             <div {...stylex.props(surface.sectionActions)}>
               {React.Children.map(actions, (child) => {

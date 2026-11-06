@@ -153,7 +153,7 @@ export type SorbetCredentialsResult = z.infer<typeof SorbetCredentialsResultSche
 
 /**
  * A custom Provider Sorbet hosts on the Client's behalf. Its identity, protocol and model
- * list come from Lody; Sorbet assigns and owns `id`. Models are `{ id, name? }` on the wire.
+ * list can come from Lody; Sorbet assigns and owns `id` and can discover models.
  */
 export const SorbetCustomProviderProtocolSchema = z.enum([
   'anthropic-messages',
@@ -172,10 +172,7 @@ export const SorbetCustomProviderInputSchema = z
     name: z.string().trim().min(1).max(200),
     protocol: SorbetCustomProviderProtocolSchema,
     baseUrl: z.string().trim().min(1).max(2048),
-    models: z
-      .array(SorbetCustomProviderModelSchema)
-      .min(1)
-      .max(SORBET_CUSTOM_PROVIDER_MODELS_MAX_COUNT),
+    models: z.array(SorbetCustomProviderModelSchema).max(SORBET_CUSTOM_PROVIDER_MODELS_MAX_COUNT),
   })
   .strict();
 export const SorbetCustomProviderSchema = SorbetCustomProviderInputSchema.extend({

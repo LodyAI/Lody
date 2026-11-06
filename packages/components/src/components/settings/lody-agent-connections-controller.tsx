@@ -42,6 +42,7 @@ export function LodyAgentConnectionsController({
   refreshVersion,
   onProvidersChanged,
   signIn,
+  endpointSignIn,
 }: {
   machineId: MachineId;
   configId: AgentConfigId;
@@ -53,7 +54,8 @@ export function LodyAgentConnectionsController({
    */
   onProvidersChanged?: () => Promise<void>;
   /** Sign-in methods drawn inside the connections card. */
-  signIn?: ReactNode;
+  signIn?: (providerIds: readonly string[]) => ReactNode;
+  endpointSignIn?: (providerId: string) => ReactNode;
 }) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const { t } = useTranslation();
@@ -190,8 +192,7 @@ export function LodyAgentConnectionsController({
           name: draft.name,
           protocol: draft.protocol,
           baseUrl: draft.baseUrl,
-          // The form keeps a readonly list; the wire type is a plain array.
-          models: draft.models.map((model) => ({ id: model.id })),
+          models: [],
         },
       },
     });
@@ -220,7 +221,8 @@ export function LodyAgentConnectionsController({
         onRetry={() => void read()}
         onRemove={(connection) => void remove(connection)}
         onCreate={create}
-        signIn={signIn}
+        signIn={signIn?.(state.providers.map((provider) => provider.id))}
+        endpointSignIn={endpointSignIn}
       />
       {signInStale ? (
         <FormMessage tone="warning">{t('lodyAgentConnections.signInRefreshFailed')}</FormMessage>
