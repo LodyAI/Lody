@@ -20,7 +20,7 @@ const intentSchema = z.object({
   workspaceId: z.string().min(1),
   sessionId: z.string().min(1),
   userTurnId: z.string().min(1),
-  /** Display metadata only; execution identity comes from the verified signer. */
+  /** Never grants authority: execution identity comes from the verified signer. */
   requesterUserId: z.string().optional(),
   inputConfig: z.unknown().optional(),
   /** Every local project this machine resolved for the turn; empty means projectless. */
@@ -51,6 +51,8 @@ export type VerifiedExecutionOriginal = {
   schedule?: ScheduleAuthorizationRequest;
   /** Present only on a machine-authored input derived from a shared member's Turn. */
   derivedFrom?: DerivationOrigin;
+  /** The signed row's content when it is marked as promoted from a queue item. */
+  queued?: { timestamp: unknown; inputConfig: unknown; userId: unknown };
 };
 export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
 export type ResolveVerifiedExecutionOriginal = (
@@ -88,6 +90,9 @@ export function makeEncryptedAgentExecution(options: {
   resolveVerifiedOriginal: ResolveVerifiedExecutionOriginal;
   /** This machine's own signing key (hex): the only author of derived inputs. */
   selfDevice?: string;
+  /** This machine's account. Host-scoped credentials and identity follow it, so only
+   * its owner principal may run a turn that names it as requester. */
+  machineUserId: string;
   /** Observation only, after the committed actual-start claim. */
   onClaim?: (userTurnId: string) => void;
 }) {
@@ -159,6 +164,16 @@ export function makeEncryptedAgentExecution(options: {
           Effect.map((result) => result._tag === 'Authorized' && result.isCurrent?.() !== false)
         )
       : Effect.succeed(false);
+  /** Automation admission spends an owner's rule, so it needs this machine's own input. */
+  const automationEvidence = Effect.fnUntraced(function* (
+    input: EncryptedExecutionIntent
+  ): Effect.fn.Return<'verified' | 'pending' | 'denied', unknown> {
+    const verified = yield* options.resolveVerifiedOriginal(
+      yield* attempt(() => intentSchema.parse(input))
+    );
+    if (verified && 'state' in verified) return 'pending';
+    return verified?.requesterDevice === options.selfDevice ? 'verified' : 'denied';
+  });
   const claim = Effect.fnUntraced(function* (
     input: EncryptedExecutionIntent
   ): Effect.fn.Return<EncryptedExecutionClaim, unknown> {
@@ -206,6 +221,9 @@ export function makeEncryptedAgentExecution(options: {
       !Number.isSafeInteger(verified.expiresAt) ||
       verified.expiresAt < 0
     )
+      return { state: 'denied' };
+    const config = intent.inputConfig as { _lodyAutomation?: unknown } | undefined;
+    if (config?._lodyAutomation !== undefined && verified.requesterDevice !== options.selfDevice)
       return { state: 'denied' };
     const authorizeExecution = options.authorizeExecution;
     if (!authorizeExecution) return { state: 'denied' };
@@ -293,6 +311,8 @@ export function makeEncryptedAgentExecution(options: {
       : authorization.principal === 'owner'
         ? ('owner' as const)
         : ('member' as const);
+    if (principal !== 'owner' && intent.requesterUserId === options.machineUserId)
+      return { state: 'denied' };
     return yield* attempt(() => {
       // No await between the terminal lifecycle fence and the durable start.
       if (
@@ -327,7 +347,7 @@ export function makeEncryptedAgentExecution(options: {
     attempt(() => {
       options.journal().finish(permit, Buffer.from('{"state":"settled"}'));
     });
-  return { claim, complete, classifyOrigin, authorizeAgentControl };
+  return { claim, complete, classifyOrigin, authorizeAgentControl, automationEvidence };
 }
 export type EncryptedAgentExecution = ReturnType<typeof makeEncryptedAgentExecution>;
 

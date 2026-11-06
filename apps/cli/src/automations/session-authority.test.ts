@@ -77,6 +77,7 @@ function groupFixture() {
   const docs = new Map<SessionId, SessionDocument>();
   const manager = {
     repo,
+    retainQueuedInput: () => {},
     getOrCreateSessionDoc: async (id: SessionId) => {
       let doc = docs.get(id);
       if (!doc) {

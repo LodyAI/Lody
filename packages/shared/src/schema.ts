@@ -711,6 +711,9 @@ export const sessionHistorySchema = schema.LoroMap({
     { sessionId: schema.String(), userTurnId: schema.String() },
     { required: false }
   ),
+  /** Encrypted only: this machine wrote the row by promoting a queue item. The row's
+   * signer is then not its author, so the start needs the input's own evidence. */
+  queuedInput: schema.Boolean({ required: false }),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**
@@ -1442,6 +1445,9 @@ export const sessionDocSchema = schema({
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
   /** Exact purpose-8 originals keyed by business turn; encrypted durable fallback, never authority. */
   rpcDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
+  /** Exact purpose-8 originals of queued input, written before the queue row. Separate from
+   * `rpcDispatchOriginals` because promotion adds `resume` to the input it signed. */
+  queueDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
   /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
   humanInputReceipts: schema
@@ -1546,9 +1552,13 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history' | 'rpcDispatchOriginals'> & {
+export type SessionDocMeta = Omit<
+  SessionDoc,
+  '$cid' | 'history' | 'rpcDispatchOriginals' | 'queueDispatchOriginals'
+> & {
   /** Omitted by control-only readers; execution reads the selected original from the document. */
   rpcDispatchOriginals?: Record<string, string>;
+  queueDispatchOriginals?: Record<string, string>;
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];

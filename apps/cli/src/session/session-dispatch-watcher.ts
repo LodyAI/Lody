@@ -2288,6 +2288,7 @@ export class SessionDispatchWatcher {
           ...pendingEntry,
           id: queuedTurnId,
           ...(automation ? { author: { v: 1 as const, kind: 'system' as const } } : {}),
+          ...(this.deps.encryptedWorkspace ? { queuedInput: true as const } : {}),
         }
       : null;
   }

@@ -4643,14 +4643,33 @@ export class SessionExecutionService {
     const invocation = options.invocation;
     if (invocation?.inputConfig._lodyAutomation) {
       try {
+        const gate = this.deps.encryptedExecution;
+        const evidence = gate
+          ? await Effect.runPromise(
+              gate.automationEvidence({
+                workspaceId: this.deps.workspaceId,
+                sessionId,
+                userTurnId: invocation.sourceTurnId,
+                requesterUserId: invocation.requesterUserId,
+                inputConfig: invocation.inputConfig,
+              })
+            )
+          : 'verified';
+        if (evidence === 'pending') {
+          releaseConflict();
+          span.end({ outcome: 'execution-deferred' });
+          return 'execution-deferred';
+        }
+        // Unverified input never reaches a rule; the start claim refuses it visibly.
         if (
-          !invocation.requesterUserId ||
-          !(await this.acceptAutomationInput({
-            sessionId,
-            turnId: invocation.sourceTurnId,
-            userId: invocation.requesterUserId,
-            config: invocation.inputConfig,
-          }))
+          evidence === 'verified' &&
+          (!invocation.requesterUserId ||
+            !(await this.acceptAutomationInput({
+              sessionId,
+              turnId: invocation.sourceTurnId,
+              userId: invocation.requesterUserId,
+              config: invocation.inputConfig,
+            })))
         ) {
           releaseConflict();
           span.end({ outcome: 'automation-admission-blocked' });

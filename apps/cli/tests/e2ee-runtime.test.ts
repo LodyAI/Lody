@@ -32,7 +32,9 @@ import {
 } from '../src/lib/schedules/schedule-run-preparation';
 import {
   getSessionRoomId,
+  normalizeSessionTurnInputConfig,
   type SessionId,
+  type SessionMeta,
   type MachineMeta,
   type AgentConfigMeta,
 } from '@lody/shared';
@@ -42,6 +44,7 @@ import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee
 import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { makeExecutionOriginRecovery } from '../src/lib/e2ee/execution-origin-recovery';
 import { ExecutionOrigins } from '../src/lib/e2ee/execution-origins';
+import { makeVerifiedExecutionOriginal } from '../src/lib/e2ee/verified-execution-original';
 import { makeEncryptedAgentExecution, lazyExecutionJournal } from '../src/lib/e2ee/agent-execution';
 import {
   createCliSqliteRepoStore,
@@ -911,6 +914,7 @@ describe('machine E2EE local runtime', () => {
           replica.commit();
           const checkedDevices: string[] = [];
           const gate = makeEncryptedAgentExecution({
+            machineUserId: 'synthetic-machine-account',
             genesis: hex(signed.genesis.toBytes()),
             workspaceId: 'workspace',
             targetMachineId: 'machine',
@@ -5542,6 +5546,836 @@ const retainSignedScheduleUpdate = Effect.fnUntraced(function* (
   return request;
 });
 
+const queuedTimestamp = '2026-10-30T20:00:00.000Z';
+const queuedSessionId = 'queued-session' as SessionId;
+const queuedConfig = (prompt: string) => ({
+  prompt,
+  inputBlocks: [{ type: 'text' as const, text: prompt }],
+  cliType: 'builtin' as const,
+  agentType: 'codex',
+  // A composer's cached value; promotion replaces it from the Session's metadata.
+  resume: 'composer-acp-session',
+});
+const ownerAccount = 'owner-account';
+const memberAccount = 'member-account';
+const automationOrigin = {
+  invocationId: 'invocation',
+  ruleId: 'rule',
+  ruleRevision: 1,
+  eventRef: 'event',
+  authorizationUserId: ownerAccount,
+};
+
+/** Real ledger, signed dispatch originals, watcher promotion and start claim. */
+const queuedInputHarness = Effect.fnUntraced(function* (directory: string, shared: boolean) {
+  const { fixture, runtime, makeGate, device } = yield* executionFixture(directory);
+  const custody = yield* makeNodeE2eeCustody({ directory: join(directory, 'member'), wrapper });
+  const member = yield* custody.prepareDevice();
+  const membershipId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(71)));
+  let current = fixture.current;
+  const append = Effect.fnUntraced(function* (
+    command: Parameters<typeof prepareLedgerCommand>[2],
+    signer: Parameters<typeof signLedgerRecord>[1] = fixture.owner
+  ) {
+    const record = yield* signLedgerRecord(
+      Result.getOrThrow(prepareLedgerCommand(current, signer.publicKey, command)),
+      signer
+    );
+    fixture.records.push(record);
+    current = Result.getOrThrow(
+      extendLedger(current, [record], {
+        length: fixture.records.length,
+        head: hashRecordBytes(record),
+      })
+    );
+    yield* runtime.ingest(page(fixture.records));
+  });
+  yield* append({
+    _tag: 'AdmitMember',
+    membershipId,
+    request: yield* prepareJoinRequest({
+      genesis: fixture.genesis,
+      requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(72))),
+      userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(73))),
+      encryptionPublicKey: member.enc,
+      expiresAt: null,
+      signer: member,
+    }),
+  });
+  const gate = yield* makeGate(
+    shared ? () => Effect.succeed({ allowed: true, isCurrent: () => true }) : undefined
+  );
+  const { makeRealtimeContentBinding } = yield* Effect.promise(
+    () => import('@lody/e2ee-core/adapters/loro-streams')
+  );
+  const { RealtimeJournal } = yield* Effect.promise(
+    () => import('../src/lib/e2ee/realtime-journal')
+  );
+  const { SessionDispatchWatcher } = yield* Effect.promise(
+    () => import('../src/session/session-dispatch-watcher')
+  );
+  const { composeTestSessionDoc } = yield* Effect.promise(() => import('./session-doc-fixture'));
+  const readEpochKey = () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20)));
+  const rpcBinding =
+    (signer: Parameters<typeof makeRealtimeContentBinding>[0]['signer']) => (resource: string) =>
+      makeRealtimeContentBinding({
+        genesis: fixture.genesis,
+        resource,
+        signer,
+        ledger: runtime.executionLedger,
+        readEpochKey,
+      });
+  const machineKey = hex(device.publicKey.toBytes());
+  const receiver = makeE2eeRpcNative({
+    workspaceId: 'workspace',
+    requesterDevice: machineKey,
+    originals: new E2eeRpcOriginals(join(directory, 'queued-receiver.sqlite')),
+    ledger: runtime.executionLedger,
+    binding: rpcBinding(device),
+  });
+  const sender = (
+    name: string,
+    signer: Parameters<typeof makeRealtimeContentBinding>[0]['signer']
+  ) =>
+    makeE2eeRpcNative({
+      workspaceId: 'workspace',
+      requesterDevice: hex(signer.publicKey.toBytes()),
+      authorizeTarget: () => Effect.succeed(true),
+      originals: new E2eeRpcOriginals(join(directory, `${name}.sqlite`)),
+      ledger: runtime.executionLedger,
+      binding: rpcBinding(signer),
+    });
+  const memberRpc = sender('queued-member', member);
+  const ownerRpc = sender('queued-owner', fixture.owner);
+  const secondCustody = yield* makeNodeE2eeCustody({
+    directory: join(directory, 'second'),
+    wrapper,
+  });
+  const secondDevice = yield* secondCustody.prepareDevice();
+  yield* append(
+    yield* prepareDeviceAdmission({
+      genesis: fixture.genesis,
+      membershipId: fixture.membershipId,
+      signer: secondDevice,
+      encryptionPublicKey: secondDevice.enc,
+      kind: 'personal',
+    })
+  );
+  const secondRpc = sender('queued-second', secondDevice);
+
+  let meta = {
+    id: queuedSessionId,
+    machineId: 'machine',
+    userId: ownerAccount,
+    cliType: 'builtin',
+    agentType: 'codex',
+    acpSessionId: 'machine-acp-session',
+    createdAt: queuedTimestamp,
+    status: { type: 'idle' },
+  } as SessionMeta;
+  const repo = {
+    getDocMeta: async () => ({ meta }),
+    upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    },
+    flush: async () => {},
+  };
+  const logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    child: () => logger,
+  };
+  const session = new SessionDocument(
+    repo as never,
+    queuedSessionId,
+    async () => {},
+    logger as never
+  );
+  const doc = new LoroDoc();
+  composeTestSessionDoc(session, { doc });
+  const watcher = new SessionDispatchWatcher({
+    userResolver: { clear: () => {} } as never,
+    encryptedWorkspace: true,
+    logger,
+    machineId: 'machine',
+    workspaceId: 'workspace',
+    workspaceDocument: { repo },
+    executionService: { tryAcquireSessionRewriteConflictLease: () => () => {} },
+    canUseMachine: async () => ({ outcome: 'allowed' as const }),
+  } as never);
+  const docId = getSessionRoomId(queuedSessionId);
+  const origins = new ExecutionOrigins(join(directory, 'queued-origins.sqlite'));
+  const contentBinding = yield* makeStreamsUpdateBinding({
+    genesis: fixture.genesis,
+    resource: `doc:${docId}`,
+    model: 'loro',
+    writeEpoch: 'current',
+    signer: device,
+    ledger: runtime.executionLedger,
+    readEpochKey,
+  });
+  const resolve = makeVerifiedExecutionOriginal({
+    workspaceId: 'workspace',
+    selfDevice: machineKey,
+    isClosed: () => false,
+    origins,
+    readIncoming: (intent) => receiver.readIncoming(intent),
+    openDispatch: receiver.openDispatch,
+    ledger: runtime.executionLedger,
+    openContent: (_intent, request) => contentBinding.openAuthenticated(request),
+  });
+  const journal = RealtimeJournal.create(
+    join(directory, 'queued-journal.sqlite'),
+    () => Date.parse(queuedTimestamp) + 1_000
+  );
+  const execution = makeEncryptedAgentExecution({
+    genesis: hex(fixture.genesis.toBytes()),
+    workspaceId: 'workspace',
+    targetMachineId: 'machine',
+    journal: () => journal,
+    authorizeExecution: gate.authorizeExecution,
+    resolveVerifiedOriginal: (intent, lookup) => resolve(intent, doc, lookup),
+    selfDevice: machineKey,
+    machineUserId: ownerAccount,
+  });
+  const clientConfig = (turnId: string, config: object = queuedConfig(turnId)) =>
+    normalizeSessionTurnInputConfig({ ...config, mcpServerIds: [] });
+  const prepareOriginal = Effect.fnUntraced(function* (
+    rpc: typeof memberRpc,
+    turnId: string,
+    userId: string,
+    inputConfig: unknown = clientConfig(turnId)
+  ) {
+    const prepared = yield* rpc.prepareDispatch('machine', {
+      sessionId: queuedSessionId,
+      userTurnId: turnId,
+      userId,
+      timestamp: queuedTimestamp,
+      inputConfig,
+    });
+    doc.getMap('queueDispatchOriginals').set(turnId, prepared.frameHex);
+    doc.commit();
+  });
+  const pushRow = (turnId: string, userId: string, config: object = queuedConfig(turnId)) =>
+    Effect.promise(() =>
+      session.pushMessageQueue({
+        userTurnId: turnId,
+        task: turnId,
+        userId,
+        timestamp: queuedTimestamp,
+        acpSessionConfig: { ...config, mcpServerIds: [] },
+      } as never)
+    );
+  const machinePeer = doc.peerIdStr;
+  const contentBindings = new Map<string, typeof contentBinding>();
+  /** One client's edit: its own Loro peer, sealed and retained under its own device. */
+  const asClient = Effect.fnUntraced(function* <A, E, R>(
+    rpc: typeof memberRpc,
+    work: Effect.Effect<A, E, R>
+  ) {
+    const owner = rpc === ownerRpc;
+    let binding = contentBindings.get(owner ? 'owner' : 'member');
+    if (!binding) {
+      binding = yield* makeStreamsUpdateBinding({
+        genesis: fixture.genesis,
+        resource: `doc:${docId}`,
+        model: 'loro',
+        writeEpoch: 'current',
+        signer: owner ? fixture.owner : member,
+        ledger: runtime.executionLedger,
+        readEpochKey,
+      });
+      contentBindings.set(owner ? 'owner' : 'member', binding);
+    }
+    doc.commit();
+    const from = doc.version();
+    doc.setPeerId(owner ? '101' : '202');
+    const result = yield* work;
+    doc.commit();
+    yield* retainSignedScheduleUpdate(origins, docId, doc, binding, from);
+    doc.setPeerId(machinePeer);
+    return result;
+  });
+  /** A later frame that repackages operations this replica already has, as catch-up does. */
+  const forward = Effect.fnUntraced(function* (
+    signer: 'member' | 'second',
+    from: ReturnType<LoroDoc['version']>
+  ) {
+    const binding = yield* makeStreamsUpdateBinding({
+      genesis: fixture.genesis,
+      resource: `doc:${docId}`,
+      model: 'loro',
+      writeEpoch: 'current',
+      signer: signer === 'member' ? member : secondDevice,
+      ledger: runtime.executionLedger,
+      readEpochKey,
+    });
+    yield* retainSignedScheduleUpdate(origins, docId, doc, binding, from);
+  });
+  /** The composer's order: signed original, then the queue row. */
+  const send = Effect.fnUntraced(function* (
+    turnId: string,
+    rpc?: typeof memberRpc,
+    userId = rpc === ownerRpc || rpc === secondRpc ? ownerAccount : memberAccount
+  ) {
+    if (rpc) yield* prepareOriginal(rpc, turnId, userId);
+    if (rpc === memberRpc || rpc === ownerRpc) yield* asClient(rpc, pushRow(turnId, userId));
+    else yield* pushRow(turnId, userId);
+  });
+  const promote = Effect.fnUntraced(function* () {
+    const from = doc.version();
+    const promoted = yield* Effect.promise(() =>
+      (
+        watcher as unknown as {
+          promoteNextQueuedMessage: (
+            sessionDoc: SessionDocument,
+            currentMeta: SessionMeta,
+            history: never[]
+          ) => Promise<{ id: string; inputConfig?: unknown; userId?: string } | null>;
+        }
+      ).promoteNextQueuedMessage(session, meta, [])
+    );
+    if (!promoted) throw new Error('queue promotion failed');
+    doc.commit();
+    yield* retainSignedScheduleUpdate(origins, docId, doc, contentBinding, from);
+    return promoted;
+  });
+  const claim = (turn: { id: string; inputConfig?: unknown; userId?: string }) =>
+    execution.claim({
+      workspaceId: 'workspace',
+      sessionId: queuedSessionId,
+      userTurnId: turn.id,
+      inputConfig: turn.inputConfig,
+      requesterUserId: turn.userId,
+      localProjectIds: [],
+    });
+  const historyRow = (turnId: string) => {
+    const list = doc.getList('history');
+    for (let index = 0; index < list.length; index += 1) {
+      const row = list.get(index) as LoroMap;
+      if (row.get('id') === turnId) return row;
+    }
+    throw new Error('history row missing');
+  };
+  /** Another writer's update to the live row; the signed row keeps its original bytes. */
+  const rewriteRow = (turnId: string, change: (config: Record<string, unknown>) => void) => {
+    const row = historyRow(turnId);
+    const stored: unknown = row.get('inputConfig');
+    const config = (
+      stored && typeof stored === 'object' && 'toJSON' in stored
+        ? (stored as LoroMap).toJSON()
+        : stored
+    ) as Record<string, unknown>;
+    change(config);
+    row.set('inputConfig', config);
+    doc.commit();
+    return normalizeSessionTurnInputConfig(config);
+  };
+  const memberContent = yield* makeStreamsUpdateBinding({
+    genesis: fixture.genesis,
+    resource: `doc:${docId}`,
+    model: 'loro',
+    writeEpoch: 'current',
+    signer: member,
+    ledger: runtime.executionLedger,
+    readEpochKey,
+  });
+  /** A history row the member writes and signs directly, never promoted by this machine. */
+  const writeMemberRow = Effect.fnUntraced(function* (
+    turnId: string,
+    userId: string,
+    extra: object = {}
+  ) {
+    const from = doc.version();
+    const inputConfig = normalizeSessionTurnInputConfig({
+      ...queuedConfig(turnId),
+      ...extra,
+      resume: undefined,
+      mcpServerIds: [],
+    });
+    yield* Effect.promise(() =>
+      session.sessionData.commands.appendTurn({
+        id: turnId,
+        role: 'user',
+        userId,
+        timestamp: queuedTimestamp,
+        status: 'pending',
+        queuedInput: true,
+        items: [{ type: 'text', text: turnId }],
+        inputConfig,
+        fileDiff: [],
+      } as never)
+    );
+    doc.commit();
+    yield* retainSignedScheduleUpdate(origins, docId, doc, memberContent, from);
+    return { id: turnId, inputConfig, userId };
+  });
+  return {
+    fixture,
+    append,
+    asClient,
+    forward,
+    secondRpc,
+    pushRowAsPeer: (peer: `${number}`, turnId: string, userId: string) =>
+      Effect.gen(function* () {
+        doc.commit();
+        doc.setPeerId(peer);
+        yield* pushRow(turnId, userId);
+        doc.commit();
+        doc.setPeerId(machinePeer);
+      }),
+    claim,
+    doc,
+    historyRow,
+    prepareOriginal,
+    pushRow,
+    rewriteRow,
+    writeMemberRow,
+    execution,
+    machineKey,
+    member,
+    memberRpc,
+    membershipId,
+    origins,
+    ownerRpc,
+    promote,
+    send,
+    session,
+    clientConfig,
+    dispose: Effect.sync(() => {
+      watcher.stop();
+      session.mirror.dispose();
+    }),
+  };
+});
+
+describe('encrypted queued input evidence', () => {
+  const run = (
+    shared: boolean,
+    body: (
+      harness: Effect.Success<ReturnType<typeof queuedInputHarness>>
+    ) => Effect.Effect<void, unknown, Scope.Scope>
+  ) =>
+    execute(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), 'queued-input-'))),
+          (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+        );
+        const harness = yield* queuedInputHarness(directory, shared);
+        yield* Effect.ensuring(body(harness), harness.dispose);
+      })
+    );
+
+  it('starts a shared member queued input as that member', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('member-turn', h.memberRpc);
+        const claimed = yield* h.claim(yield* h.promote());
+        expect(claimed).toMatchObject({
+          state: 'claimed',
+          principal: 'member',
+          origin: { requesterDevice: hex(h.member.publicKey.toBytes()) },
+        });
+      })
+    ));
+
+  it('starts an owner device queued input as the owner', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('owner-turn', h.ownerRpc);
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+      })
+    ));
+
+  it('applies the original signer authorization to a queued input', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('unshared-turn', h.memberRpc);
+        expect(yield* h.claim(yield* h.promote())).toEqual({
+          state: 'denied',
+          reason: 'e2ee_machine_not_shared',
+        });
+      })
+    ));
+
+  it('rechecks membership for a queued input written before removal', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('removed-turn', h.memberRpc);
+        const turn = yield* h.promote();
+        yield* h.append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+        yield* h.append({ _tag: 'RemoveMember', membershipId: h.membershipId });
+        expect(yield* h.claim(turn)).toMatchObject({ state: 'denied' });
+      })
+    ));
+
+  it('rechecks device state for a queued input written before revocation', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('revoked-turn', h.memberRpc);
+        const turn = yield* h.promote();
+        yield* h.append({ _tag: 'RevokeDevice', target: h.member.publicKey }, h.member);
+        expect(yield* h.claim(turn)).toMatchObject({ state: 'denied' });
+      })
+    ));
+
+  it('does not start a queued input with no original', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('bare-turn');
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('does not start a queued input that differs from its original', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('changed-turn', h.memberRpc);
+        const turn = yield* h.promote();
+        const changed = { ...(turn.inputConfig as object), prompt: 'different' };
+        expect(yield* h.claim({ ...turn, inputConfig: changed })).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('starts a machine-authored queued input from its local receipt', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'automation-turn',
+          timestamp: queuedTimestamp,
+          userId: memberAccount,
+          inputConfig: h.clientConfig('automation-turn'),
+        });
+        yield* h.send('automation-turn');
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+      })
+    ));
+
+  it('does not start a machine-authored queued input after its row changes', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'edited-automation',
+          timestamp: queuedTimestamp,
+          userId: memberAccount,
+          inputConfig: h.clientConfig('receipted-config'),
+        });
+        yield* h.send('edited-automation');
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('carries the machine resume target through a signed queued input', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('resume-turn', h.memberRpc);
+        const turn = yield* h.promote();
+        expect(turn.inputConfig).toMatchObject({ resume: 'machine-acp-session' });
+        expect(yield* h.claim(turn)).toMatchObject({ state: 'claimed', principal: 'member' });
+      })
+    ));
+
+  it('does not start a promoted row changed after promotion', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('rewritten-turn', h.ownerRpc);
+        const turn = yield* h.promote();
+        const live = h.rewriteRow('rewritten-turn', (config) => {
+          config.resume = 'other-acp-session';
+        });
+        expect(yield* h.claim({ ...turn, inputConfig: live })).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('does not start a promoted row whose requester changed after promotion', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('relabelled-turn', h.memberRpc);
+        const turn = yield* h.promote();
+        h.historyRow('relabelled-turn').set('userId', 'other-account');
+        h.doc.commit();
+        expect(yield* h.claim({ ...turn, userId: 'other-account' })).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('requires the local receipt for an automation row even with an original', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const config = { ...queuedConfig('automation-row'), _lodyAutomation: automationOrigin };
+        yield* h.prepareOriginal(
+          h.memberRpc,
+          'automation-row',
+          ownerAccount,
+          h.clientConfig('automation-row', config)
+        );
+        yield* h.pushRow('automation-row', ownerAccount, config);
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('binds an automation receipt to the signed row content', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const config = { ...queuedConfig('automation-signed'), _lodyAutomation: automationOrigin };
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'automation-signed',
+          timestamp: queuedTimestamp,
+          userId: ownerAccount,
+          inputConfig: h.clientConfig('automation-signed', config),
+        });
+        yield* h.pushRow('automation-signed', ownerAccount, config);
+        const turn = yield* h.promote();
+        expect(turn.inputConfig).toMatchObject({ _lodyAutomation: automationOrigin });
+        expect(yield* h.claim(turn)).toMatchObject({ state: 'claimed', principal: 'owner' });
+      })
+    ));
+
+  it('does not accept a receipt for different automation provenance', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const receipted = {
+          ...queuedConfig('automation-other'),
+          _lodyAutomation: automationOrigin,
+        };
+        const row = {
+          ...receipted,
+          _lodyAutomation: { ...automationOrigin, ruleId: 'other-rule' },
+        };
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'automation-other',
+          timestamp: queuedTimestamp,
+          userId: ownerAccount,
+          inputConfig: h.clientConfig('automation-other', receipted),
+        });
+        yield* h.pushRow('automation-other', ownerAccount, row);
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('treats a client-written queued marker as that client own input', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const turn = yield* h.writeMemberRow('marked-turn', memberAccount);
+        yield* h.prepareOriginal(h.ownerRpc, 'marked-turn', ownerAccount, turn.inputConfig);
+        expect(yield* h.claim(turn)).toMatchObject({
+          state: 'claimed',
+          principal: 'member',
+          origin: { requesterDevice: hex(h.member.publicKey.toBytes()) },
+        });
+      })
+    ));
+
+  it.each([
+    ['a queued original', true],
+    ['a directly written row', false],
+  ] as const)('refuses the machine account as requester of %s from a member', (_name, queued) =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        if (queued) {
+          yield* h.send('labelled-turn', h.memberRpc, ownerAccount);
+          expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+        } else {
+          expect(yield* h.claim(yield* h.writeMemberRow('labelled-turn', ownerAccount))).toEqual({
+            state: 'denied',
+          });
+        }
+      })
+    )
+  );
+
+  it('refuses automation provenance on an input this machine did not write', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const turn = yield* h.writeMemberRow('member-automation', 'session-owner-account', {
+          _lodyAutomation: automationOrigin,
+        });
+        const intent = {
+          workspaceId: 'workspace',
+          sessionId: queuedSessionId,
+          userTurnId: turn.id,
+          inputConfig: turn.inputConfig,
+          requesterUserId: turn.userId,
+        };
+        expect(yield* h.claim(turn)).toEqual({ state: 'denied' });
+        expect(yield* h.execution.automationEvidence(intent)).toBe('denied');
+      })
+    ));
+
+  it('accepts automation evidence for a receipted row this machine promoted', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const config = {
+          ...queuedConfig('automation-admitted'),
+          _lodyAutomation: automationOrigin,
+        };
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'automation-admitted',
+          timestamp: queuedTimestamp,
+          userId: ownerAccount,
+          inputConfig: h.clientConfig('automation-admitted', config),
+        });
+        yield* h.pushRow('automation-admitted', ownerAccount, config);
+        const turn = yield* h.promote();
+        expect(
+          yield* h.execution.automationEvidence({
+            workspaceId: 'workspace',
+            sessionId: queuedSessionId,
+            userTurnId: turn.id,
+            inputConfig: turn.inputConfig,
+            requesterUserId: turn.userId,
+          })
+        ).toBe('verified');
+      })
+    ));
+
+  it('binds a machine receipt to the requester on the queue row', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const config = { ...queuedConfig('relabelled-receipt'), _lodyAutomation: automationOrigin };
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'relabelled-receipt',
+          timestamp: queuedTimestamp,
+          userId: 'session-owner-account',
+          inputConfig: h.clientConfig('relabelled-receipt', config),
+        });
+        yield* h.pushRow('relabelled-receipt', ownerAccount, config);
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it.each(['second', 'member'] as const)(
+    'starts a queued input after a %s device repackaged the writer operations',
+    (signer) =>
+      run(true, (h) =>
+        Effect.gen(function* () {
+          const from = h.doc.version();
+          yield* h.send('before-forward', h.ownerRpc);
+          yield* h.forward(signer, from);
+          yield* h.promote();
+          yield* h.send('after-forward', h.ownerRpc);
+          expect(yield* h.claim(yield* h.promote())).toMatchObject({
+            state: 'claimed',
+            principal: 'owner',
+          });
+        })
+      )
+  );
+
+  it('starts a queued input whose row reached this machine in a snapshot', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        // Original and row come from the member, but no update frame was ever retained.
+        yield* h.prepareOriginal(h.memberRpc, 'snapshot-turn', memberAccount);
+        yield* h.pushRowAsPeer('303', 'snapshot-turn', memberAccount);
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'member',
+        });
+      })
+    ));
+
+  it('starts a queued input when only a repackaged frame of its row is retained', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const from = h.doc.version();
+        yield* h.prepareOriginal(h.ownerRpc, 'catch-up-turn', ownerAccount);
+        yield* h.pushRowAsPeer('101', 'catch-up-turn', ownerAccount);
+        yield* h.forward('second', from);
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+      })
+    ));
+
+  it('starts queued inputs from two devices of one member', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('first-device-turn', h.ownerRpc);
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+        yield* h.send('second-device-turn', h.secondRpc);
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+      })
+    ));
+
+  it('starts an edited queued input under its new Turn and original', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('before-edit-turn', h.ownerRpc);
+        const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
+        if (!row) throw new Error('queue row missing');
+        const config = queuedConfig('after-edit-turn');
+        yield* h.prepareOriginal(
+          h.ownerRpc,
+          'after-edit-turn',
+          ownerAccount,
+          h.clientConfig('after-edit-turn', config)
+        );
+        yield* h.asClient(
+          h.ownerRpc,
+          Effect.promise(() => h.session.removeMessageQueueItem(row.$cid))
+        );
+        yield* h.asClient(h.ownerRpc, h.pushRow('after-edit-turn', ownerAccount, config));
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+      })
+    ));
+
+  it('does not start a queued input whose row names another requester than its original', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.prepareOriginal(h.ownerRpc, 'mismatched-turn', ownerAccount);
+        yield* h.pushRow('mismatched-turn', memberAccount);
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('classifies a derivation origin by the queued input signer', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('origin-member', h.memberRpc);
+        yield* h.promote();
+        expect(
+          yield* h.execution.classifyOrigin({
+            sessionId: queuedSessionId,
+            userTurnId: 'origin-member',
+          })
+        ).toBe('member');
+        yield* h.send('origin-bare');
+        yield* h.promote();
+        expect(
+          yield* h.execution.classifyOrigin({
+            sessionId: queuedSessionId,
+            userTurnId: 'origin-bare',
+          })
+        ).toBe('denied');
+      })
+    ));
+});
+
 describe('machine execution authorization freshness', () => {
   effectIt.effect.each([
     'valid',
@@ -5800,6 +6634,7 @@ describe('machine execution authorization freshness', () => {
           };
           const makeExecution = () =>
             makeEncryptedAgentExecution({
+              machineUserId: 'synthetic-machine-account',
               genesis: hex(fixture.genesis.toBytes()),
               workspaceId: 'workspace',
               targetMachineId: 'machine',
