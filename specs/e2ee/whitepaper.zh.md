@@ -1,11 +1,9 @@
 # Lody 安全白皮书
 
-Status: draft · [上次批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#whitepaper-2026-10-31-修订)
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)
 Translation: current
 
-待 owner 批准：仅恢复可信锚，见[恢复保险库](recovery-vault.zh.md#可信锚)。其余内容保持已批准的含义。
-
-Approved revision: 2026-11-01 账号级配对；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账号级个人设备配对)。上一版：2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
+Approved revision: 2026-11-06 恢复 passkey 解锁与可信锚；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)。上一版：2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
@@ -159,7 +157,7 @@ Owner/Admin 仍可主动换代。新成员、新设备、角色调整与 Owner �
 
 ## 6. 备份与恢复
 
-恢复保险库不在 MVP 内。其设计以 2026-10-31 整体批准的[恢复保险库 Spec](recovery-vault.zh.md)为准：每个账号一个保险库和恢复文件；桌面只能在每次使用都须用户在场时保存 V；R 的服务凭据以 HKDF 派生并随 R 的登记提交；恢复包使用 `formatVersion: 1` 与 48 字节 RFC 8410 PKCS#8 精确编码私钥；passkey PRF 使用原生模块；恢复后通知该账号。本节与该 Spec 对齐，不代表恢复功能已部署：桌面恢复入口、V 的用户在场保管、原生 PRF 与恢复通知尚未接入产品。
+恢复保险库不在 MVP 内。其设计以 2026-10-31 整体批准、2026-11-06 修订的[恢复保险库 Spec](recovery-vault.zh.md)为准：每个账号一个保险库和恢复文件；桌面只能在每次使用都须用户在场时保存 V；R 的服务凭据以 HKDF 派生并随 R 的登记提交；恢复包使用 `formatVersion: 1` 与 48 字节 RFC 8410 PKCS#8 精确编码私钥；passkey PRF 在 macOS 和 iPhone 上使用原生模块；通过认证的恢复包里的 genesis 就是可信锚；恢复后通知该账号。本节与该 Spec 对齐，不代表恢复功能已部署：桌面恢复入口、V 的用户在场保管、原生 PRF 与恢复通知尚未接入产品。
 
 **一份恢复文件打开一个云端加密恢复库；每个用户在每个工作区有独立的恢复设备 R。** R 是已登记、平时不运行的设备，有独立签名与加密密钥对，绑定该工作区中的当前成员实例。它接收该工作区各代密钥信封，并能授权本人的新个人设备；不能直接写内容、执行命令、管理工作区或替其他设备发钥。它是设备类型，不是 Guest 角色。
 
@@ -178,7 +176,7 @@ Owner/Admin 仍可主动换代。新成员、新设备、角色调整与 Owner �
 
 恢复时，用户在新设备打开恢复库，解出目标工作区 R，验证可信账本及其当前资格，领取并解开当前代信封，再沿历史包恢复旧钥。新设备生成独立密钥 C，由 R 授权入账，之后使用 C 并清理 R 的临时秘密。仅当 R 有效且所需密文已保存，才无需管理员此刻在线；缺失的新钥不能凭空恢复。C 按用户当前角色取得权限，恢复不扩大角色。
 
-**Passkey。** 仅在实际支持 [WebAuthn PRF](https://www.w3.org/TR/webauthn-3/#prf-extension) 且验证恢复成功时，才可作为同一恢复库的另一解锁入口。普通 Passkey 登录不等于解密。vault-v1 包装格式见上文。已批准的 PRF 路径是 macOS 15+ 原生 AuthenticationServices 模块，必须报告真实的 32 字节 PRF 结果，没有降级；其他平台使用恢复文件。这不恢复“所有工作区共用 R”的旧方案。
+**Passkey。** 仅在实际支持 [WebAuthn PRF](https://www.w3.org/TR/webauthn-3/#prf-extension) 且验证恢复成功时，才可作为同一恢复库的另一解锁入口。普通 Passkey 登录不等于解密。vault-v1 包装格式见上文。已批准的 PRF 路径是 macOS 15+ 和 iOS 18.4+ 上的原生 AuthenticationServices 模块，之后是 `vault.lody.ai` 上隔离的只解锁 Web 界面。每条路径都必须报告真实的 32 字节 PRF 结果，没有降级，也不设白名单；Lody 只承诺并测试 iCloud 钥匙串。Windows 和 Linux 桌面应用使用恢复文件。这不恢复“所有工作区共用 R”的旧方案。
 
 **手机与引导。** 获准手机本身可批准新设备，不必常驻 R 私钥。所有端及 Owner 都可确认风险后跳过恢复设置；加入时提醒，并逐工作区显示未设置、待验证或已验证等实际进度。配对完成、曾收到信封和已能恢复是不同状态。
 

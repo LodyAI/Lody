@@ -1,14 +1,9 @@
 # 恢复 vault
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)
 Translation: current
 
 [English](recovery-vault.md)
-
-本草案提议在 macOS、iPhone 和 Web 上支持 [passkey 解锁](#passkey-解锁提议)，并[以恢复包为可信锚](#可信锚)，超出了
-[2026-10-31 批准的修订](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库桌面接入)。
-本草案等待 owner 批准，在此之前该已批准修订继续有效。计划改动的只有 passkey、可信锚相关段落和服务端
-缺口说明，其余内容保持已批准的含义。
 
 ## 已批准的格式边界
 
@@ -26,7 +21,7 @@ XChaCha20-Poly1305 包装 V。文件提供解锁能力，不是生成未来工�
 文件无法重建已经丢失的云端密文。
 
 其他包装入口可以包装同一个 V，每个 passkey 一个，前提是真实 WebAuthn ceremony 满足
-[ceremony 约定](#passkey-解锁提议)：注册返回 PRF `enabled: true`，并且一次带用户验证的
+[ceremony 约定](#passkey-解锁)：注册返回 PRF `enabled: true`，并且一次带用户验证的
 认证 ceremony 返回 32 字节 `results.first`。core 校验并拥有结果副本；平台
 适配器负责认证 ceremony 和 credential。普通 passkey 登录、伪造的能力对象都不能
 解锁。禁止 PRF 降级。产品 E2EE 关闭时不自动调用硬件 ceremony。
@@ -118,7 +113,7 @@ salt 为 genesis 哈希，info 为 `lody-e2ee/recovery-credential/v1\0` 后接 R
 扣下它；R 签署的接纳记录仍可在已验证账本中看到。
 
 **Passkey PRF。** 桌面 passkey 支持使用原生 macOS AuthenticationServices 模块，属于
-[passkey 解锁](#passkey-解锁提议)的一部分。Windows 和 Linux 桌面使用恢复文件。
+[passkey 解锁](#passkey-解锁)的一部分。Windows 和 Linux 桌面使用恢复文件。
 
 **恢复包私钥。** owner 已接受两个私钥均为 48 字节 RFC 8410 PKCS#8 精确编码
 （[#2124](https://github.com/LodyAI/Lody/pull/2124)）。
@@ -133,9 +128,9 @@ salt 为 genesis 哈希，info 为 `lody-e2ee/recovery-credential/v1\0` 后接 R
 被撤销前接纳设备；服务运营者加文件等同于此。单独的文件在没有账号密文时不授予任何能力。丢失文件
 只失去这条恢复路径。在保存了 V 的桌面上，能取得用户在场批准的恶意软件可以解锁 V。服务端可以扣留
 或回滚密文；本地 pin 只在见过更新版本的设备上能发现回滚。
-Passkey 解锁新增的风险见[下文](#passkey-解锁提议)。
+Passkey 解锁新增的风险见[下文](#passkey-解锁)。
 
-## Passkey 解锁（提议）
+## Passkey 解锁
 
 **场景。** 用户丢失了所有设备，但 iCloud 钥匙串里还有 passkey。他们在新的 Mac、iPhone 或受支持的
 浏览器上登录，选择"用 passkey 恢复"并批准系统提示。V 打开之后的路径和恢复文件完全相同：验证账本，
@@ -220,7 +215,7 @@ macOS 和 iPhone 上的 iCloud 钥匙串。其他密码管理器和硬件密钥�
 2026-11-06 已决定：RP 主机是 `vault.lody.ai`；Web 是隔离的只解锁界面，晚于 macOS 和 iPhone，其他设备通过普通配对接入；
 该界面也接受恢复文件；passkey 功能要求 iOS 18.4；恢复和 passkey 现在并行开发。
 
-同日 owner 又决定了两项。认证器使用标准 WebAuthn 加 PRF，不设白名单，见[上文](#passkey-解锁提议)。
+同日 owner 又决定了两项。认证器使用标准 WebAuthn 加 PRF，不设白名单，见[上文](#passkey-解锁)。
 可信锚是通过认证的恢复包里的 genesis，见[下文](#可信锚)。
 
 ## 可信锚

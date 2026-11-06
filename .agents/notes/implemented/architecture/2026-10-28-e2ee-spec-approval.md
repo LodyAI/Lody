@@ -72,16 +72,16 @@ Machine sharing plan A is outside this revision. Approval records intent, not im
 
 On 2026-11-01, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, explicitly approved the account-wide personal device pairing increments of [PR #2182](https://github.com/LodyAI/Lody/pull/2182) at revision `65db7d694a6979a0dc8e380815ca033eeddb958c`.
 
-| File | Approved Git blob |
-| --- | --- |
-| [`specs/e2ee-foundations.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.md) | `e43047a7ff7c05de6b256f7fb3a5b43318bfbdde` |
-| [`specs/e2ee-foundations.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.zh.md) | `01f22d4d70465eb6604452b397eed51f97e6a2d9` |
-| [`specs/e2ee/desktop-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.md) | `2c37197221c7cdb962592c84f8e107b6f8a26840` |
+| File                                                                                                                                                | Approved Git blob                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee-foundations.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.md)               | `e43047a7ff7c05de6b256f7fb3a5b43318bfbdde` |
+| [`specs/e2ee-foundations.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.zh.md)         | `01f22d4d70465eb6604452b397eed51f97e6a2d9` |
+| [`specs/e2ee/desktop-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.md)       | `2c37197221c7cdb962592c84f8e107b6f8a26840` |
 | [`specs/e2ee/desktop-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.zh.md) | `c4b74bd01d78df7b1f01a43e114c7435d20c358d` |
-| [`specs/e2ee/client-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.md) | `422a7ffd3b25e4ecc4c04849c1746526d77257d8` |
-| [`specs/e2ee/client-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.zh.md) | `7f0ce06045376377a086d821f70bfcc8625ca03b` |
-| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.md) | `3b15f26057a3b4616d22ca172853faba1e80ece8` |
-| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.zh.md) | `dddb0b50c023d3b9474d88afccbef4f94e84a83e` |
+| [`specs/e2ee/client-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.md)         | `422a7ffd3b25e4ecc4c04849c1746526d77257d8` |
+| [`specs/e2ee/client-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.zh.md)   | `7f0ce06045376377a086d821f70bfcc8625ca03b` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.md)                 | `3b15f26057a3b4616d22ca172853faba1e80ece8` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.zh.md)           | `dddb0b50c023d3b9474d88afccbef4f94e84a83e` |
 
 The approved revision is `65db7d69`. Later commits change only approval metadata in these files: increment headings and status lines, the whitepaper's approved-revision line, approval links, and the section anchors that follow the renamed headings. They do not change the approved requirements.
 
@@ -105,6 +105,30 @@ The scope covers these points:
 - **Client custody.** Mobile may start automatically and Web requires explicit confirmation. Any personal device may approve.
 
 Approval records intent only, not implementation, deployment or real-device acceptance. Revocation and removal semantics are unchanged.
+
+## Recovery vault passkey unlock and trust anchor
+
+On 2026-11-06, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, approved [PR #2343](https://github.com/LodyAI/Lody/pull/2343) at head `dec61678ac7b63ebf7768a6986c1844b5f278ce9`. Their words were "批准 2343" (approve 2343). The approved files are:
+
+| File                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/recovery-vault.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/recovery-vault.md)             | `adc4a96b31fc9eef0f0935d9f7a4001ec01145fb` |
+| [`specs/e2ee/recovery-vault.zh.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/recovery-vault.zh.md)       | `7709935680e641a5537168b5b3c326cdf7fd0af0` |
+| [`specs/e2ee/permission-ledger.zh.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/permission-ledger.zh.md) | `211f81d09c67da2dd8e78586aab0e7ce2c273948` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/whitepaper.md)                     | `b7834f7922281ca5901cd98740294126fc346647` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/whitepaper.zh.md)               | `83fca1fe454e4c9bc8ef0c6bdd86be302b79ecae` |
+
+Later commits change only approval metadata in these files, and align the whitepaper's passkey wording and the client custody status line with the approved recovery vault text.
+
+The scope covers these points:
+
+- **Passkey unlock** on macOS, iPhone and Web. The RP host is `vault.lody.ai`; Web is an isolated unlock-only surface after macOS and iPhone, and it also accepts the recovery file; the feature requires iOS 18.4.
+- **Authenticators.** Standard WebAuthn with PRF and no allow-list. A registration that reports no PRF is refused with a plain message and a pointer to the recovery file. Lody promises and tests only iCloud Keychain.
+- **Trust anchor.** The genesis inside an authenticated recovery package is the anchor, and the user saves nothing extra. This replaces independent confirmation. Ledger verification and the current-epoch commitment check stay.
+- **Accepted residual risk.** A hostile operator or a Lody account takeover, plus a user tricked into a file or passkey the attacker made, can present a fake workspace. It never reaches the real keys.
+- **Timing.** Recovery and passkey work proceed in parallel, behind default-off gates.
+
+Ledger records and `formatVersion: 1` do not change. Approval records intent only, not implementation, deployment or real-device acceptance.
 
 ## Machine sharing
 

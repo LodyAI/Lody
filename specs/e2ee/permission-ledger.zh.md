@@ -1,9 +1,7 @@
 # 加密 Org：权限账本与加入流程
 
-Status: draft · [上次批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)
 Translation: pending
-
-待 owner 批准的改动只有恢复可信锚，见[恢复保险库](recovery-vault.zh.md#可信锚)；其余内容保持已批准的含义。
 
 本文保留固定来源的设计意图。文中的独立包实现指来源原型，不表示本公共仓已完成；实际迁移与未定协议见[迁移指南](../../.agents/docs/e2ee-migration.zh.md)。生产 E2EE 入口未开放。
 

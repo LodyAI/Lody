@@ -1,16 +1,9 @@
 # Recovery vault
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)
 Translation: current
 
 [中文](recovery-vault.zh.md)
-
-This draft proposes [passkey unlock](#passkey-unlock-proposed) on macOS, iPhone and
-Web and a [trust anchor taken from the package](#trust-anchor),
-which exceed the [revision approved on 2026-10-31](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration).
-It awaits owner approval. Until then, that approved revision stays in force. Passages
-about passkeys, the trust anchor and the service gap are the only intended changes;
-everything else keeps its approved meaning.
 
 ## Approved format boundaries
 
@@ -29,7 +22,7 @@ vault unlock capability, not a seed from which future workspace identities can b
 regenerated. Missing cloud ciphertext cannot be recreated from this file.
 
 Further wrapping entries may wrap the same V, one per passkey, only after real
-WebAuthn ceremonies meet the [ceremony contract](#passkey-unlock-proposed): registration
+WebAuthn ceremonies meet the [ceremony contract](#passkey-unlock): registration
 reports PRF `enabled: true`, and an authentication ceremony with user verification
 returns a 32-byte `results.first`.
 The portable core validates and owns that result; platform adapters authenticate
@@ -164,7 +157,7 @@ the user; it is not a security control, and a hostile service can suppress it.
 The R-signed admission remains visible in the verified ledger.
 
 **Passkey PRF.** Desktop passkey support uses a native macOS AuthenticationServices
-module, as part of [passkey unlock](#passkey-unlock-proposed). Windows and Linux
+module, as part of [passkey unlock](#passkey-unlock). Windows and Linux
 desktops use the file.
 
 **Package keys.** The owner accepted the exact 48-byte RFC 8410 PKCS#8 encodings for
@@ -186,9 +179,9 @@ The file alone grants nothing without the account's ciphertext. Loss of the file
 loses only that recovery path. On a desktop retaining V, malware that can obtain the
 user's presence approval can unlock V. The service can withhold or roll back
 ciphertext; local pins detect rollback only on a device that saw a newer revision.
-Passkey unlock adds the risks listed [below](#passkey-unlock-proposed).
+Passkey unlock adds the risks listed [below](#passkey-unlock).
 
-## Passkey unlock (proposed)
+## Passkey unlock
 
 **Scenario.** A user who lost every device still has a passkey in iCloud Keychain.
 On a new Mac, iPhone or supported browser they sign in, choose "Restore with passkey"
@@ -318,7 +311,7 @@ surface also accepts the recovery file; the passkey feature requires iOS 18.4; a
 recovery and passkey work run now, in parallel.
 
 On the same date the owner decided two more. Authenticators use standard WebAuthn with
-PRF and no allow-list, as [described above](#passkey-unlock-proposed). The trust anchor
+PRF and no allow-list, as [described above](#passkey-unlock). The trust anchor
 is the genesis inside the authenticated package, as [described below](#trust-anchor).
 
 ## Trust anchor

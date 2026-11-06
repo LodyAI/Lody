@@ -1,11 +1,9 @@
 # Lody Security Whitepaper
 
-Status: draft · [last approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#whitepaper-2026-10-31-revision)
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)
 Translation: current
 
-Awaiting owner approval: only the recovery trust anchor, as in the [recovery vault](recovery-vault.md#trust-anchor). Everything else keeps its approved meaning.
-
-Approved revision: 2026-11-01 account-wide pairing; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#account-wide-personal-device-pairing). Previous: 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
+Approved revision: 2026-11-06 recovery passkey unlock and trust anchor; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor). Previous: 2026-11-01 account-wide pairing, 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
@@ -17,7 +15,7 @@ End-to-End Encryption, Device Trust, and Organization Collaboration
 
 Version 0.19 · 2026-10-31 · [中文](whitepaper.zh.md)
 
-> E2EE documentation · 22 accepted decisions. These choices are reflected here. The [recovery vault](recovery-vault.md) (approved as a whole on 2026-10-31) and [desktop custody](desktop-custody.md) Specs are approved; approval is not implementation, deployment or real-device acceptance, and the recovery vault remains outside the MVP. This paper describes a proposed security architecture, not current product guarantees or an independent security audit. The [permission-ledger draft (Chinese)](permission-ledger.zh.md) distinguishes confirmed roles and interactions from proposals and open choices. Implementation status remains in the checklist.
+> E2EE documentation · 22 accepted decisions. These choices are reflected here. The [recovery vault](recovery-vault.md) (approved as a whole on 2026-10-31, revised on 2026-11-06) and [desktop custody](desktop-custody.md) Specs are approved; approval is not implementation, deployment or real-device acceptance, and the recovery vault remains outside the MVP. This paper describes a proposed security architecture, not current product guarantees or an independent security audit. The [permission-ledger draft (Chinese)](permission-ledger.zh.md) distinguishes confirmed roles and interactions from proposals and open choices. Implementation status remains in the checklist.
 
 ## Abstract
 
@@ -163,7 +161,7 @@ The current Owner unilaterally signs a transfer through an active management-cap
 
 ## 6. Backup and Recovery
 
-The recovery vault is outside the MVP. Its design is the [recovery vault Spec](recovery-vault.md), approved as a whole on 2026-10-31: one vault and recovery file per account; a desktop may retain V only behind per-use user presence; R's service credential is derived with HKDF and registered with R's admission; packages use `formatVersion: 1` with exact 48-byte RFC 8410 PKCS#8 keys; passkey PRF uses a native module; and a restore notifies the account. This section follows that Spec and does not establish a deployed recovery feature: the desktop recovery entry, user-presence retention of V, native PRF and restore notification are not yet integrated into the product.
+The recovery vault is outside the MVP. Its design is the [recovery vault Spec](recovery-vault.md), approved as a whole on 2026-10-31 and revised on 2026-11-06: one vault and recovery file per account; a desktop may retain V only behind per-use user presence; R's service credential is derived with HKDF and registered with R's admission; packages use `formatVersion: 1` with exact 48-byte RFC 8410 PKCS#8 keys; passkey PRF uses native modules on macOS and iPhone; the genesis in an authenticated package is the trust anchor; and a restore notifies the account. This section follows that Spec and does not establish a deployed recovery feature: the desktop recovery entry, user-presence retention of V, native PRF and restore notification are not yet integrated into the product.
 
 **One recovery file opens a cloud-hosted encrypted recovery vault. Each user has a separate recovery device R in each workspace.** R has independent signing and encryption key pairs and is bound to the current membership in that workspace. Normally inactive, it receives epoch-key envelopes and can authorize that user's new personal devices. It cannot directly write content, execute commands, administer the workspace or forward keys to other devices. Recovery is a device kind, not the Guest role.
 
@@ -182,7 +180,7 @@ Ordinary epoch rotation uses **R's public key** to encrypt and upload a new enve
 
 Recovery opens the vault on the new device, decrypts the target workspace's R, verifies trusted ledger state and current eligibility, opens the current envelope and follows history packages. The new personal device generates independent keys C, is enrolled by R, then uses C and clears temporary R secrets. No administrator needs to be online only if R is active and the required ciphertext is stored. Missing new keys cannot be reconstructed. C inherits the user's current role; recovery never expands it.
 
-**Passkeys.** Only actual [WebAuthn PRF](https://www.w3.org/TR/webauthn-3/#prf-extension) support with a verified recovery path can provide another entry to the same vault. Ordinary passkey login is not decryption. The vault-v1 wrapping format is specified above. The approved PRF path is a native macOS 15+ AuthenticationServices module that must report a real 32-byte PRF result, with no fallback; other platforms use the file. This does not restore the former shared-R-across-workspaces design.
+**Passkeys.** Only actual [WebAuthn PRF](https://www.w3.org/TR/webauthn-3/#prf-extension) support with a verified recovery path can provide another entry to the same vault. Ordinary passkey login is not decryption. The vault-v1 wrapping format is specified above. Approved PRF paths are native AuthenticationServices modules on macOS 15+ and iOS 18.4+, then an isolated unlock-only Web surface on `vault.lody.ai`. Each must report a real 32-byte PRF result, with no fallback and no allow-list; Lody promises and tests only iCloud Keychain. Windows and Linux desktop apps use the file. This does not restore the former shared-R-across-workspaces design.
 
 **Phones and onboarding.** An authorized phone can approve a new device without keeping R private keys resident. Every platform and the Owner may skip recovery setup after acknowledging the risk. Remind users on joining and show per-workspace setup and verification progress. Pairing, envelope receipt and actual recoverability are distinct states.
 
