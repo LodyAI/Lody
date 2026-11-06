@@ -90,4 +90,4 @@ polling loop per view. Product-cloud requests remain forbidden in local mode.
 - [Reconciler boundaries](../apps/cli/src/lib/pr-poller/AGENTS.md)
 - [Workspace Git observer](../apps/cli/src/session/workspace-git-service.ts)
 - [Decision](../.agents/notes/implemented/feature/2026-09-24-local-github-pr-observation.md)
-- [Hosted publication correction](../.agents/notes/proposed/bug-fix/2026-10-01-pr-observation-association.md)
+- [Hosted publication correction](../.agents/notes/implemented/bug-fix/2026-10-01-pr-observation-association.md)

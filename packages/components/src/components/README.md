@@ -226,6 +226,12 @@ companion `useSessionShareStatus` answering the header's "already shared?".
 and the "…" menu open. Rationale:
 [header share control](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
 
+## Terminal colors
+
+`terminal/terminal-theme.ts` resolves CSS colors synchronously through a disposable
+probe with transitions disabled, so the global reduced-motion rule cannot blank a
+terminal. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-terminal-reduced-motion-colors.md).
+
 ## PR auto-archive
 
 `auto-archive-pr-watcher.tsx` keeps observed PR transitions separate from unfinished

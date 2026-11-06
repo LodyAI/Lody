@@ -71,6 +71,11 @@ deadline, because a truthful slow failure beats a fast wrong one. A surface that
 carries the state itself rather than a boolean, so a caller can tell "we checked and it is down"
 from "we could not check".
 
+Role availability and machine deletion need a yes/no answer, so they resolve unknown instead of
+carrying it: a machine this client saw online within the last ten minutes counts as online, and
+any other machine counts as offline. This is the one exception to reporting unknown; it applies
+only to those two surfaces and never to dispatch.
+
 ## Evidence
 
 Channel constants, payload schemas and the freshness predicate are in

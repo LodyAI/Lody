@@ -48,6 +48,7 @@
   `updateCopies`: the last copy gates guarded writes, settled copies never regress,
   and any started or settled copy vetoes a requeue. `onlyAwaitingStart` settles only
   while every copy is still pending or seen.
+  [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-27-duplicate-turn-copy-writes-and-queue-guard.md).
 - Legacy inline rows and unchanged unknown fields survive updates. Never rewrite
   history while opening or reading. Auto-seen is a separately attached CLI policy
   with a commit-time guard against regressing an advanced execution status.

@@ -2321,7 +2321,7 @@ export function LoroAppSidebar({
     [closeMobileDrawer, router, workspaceSlug]
   );
 
-  const localProjectSections = useMemo(() => {
+  const catalogLocalProjectSections = useMemo(() => {
     if (sessionsListLoading) return [];
 
     const localMachineMeta = localMachineId ? machineMetaMap.get(localMachineId) : undefined;
@@ -2457,7 +2457,7 @@ export function LoroAppSidebar({
     const prevOrder = localProjectOrderRef.current;
     const known = new Set(prevOrder);
     const discovered: string[] = [];
-    for (const section of localProjectSections) {
+    for (const section of catalogLocalProjectSections) {
       if (!section.machineId) continue;
       for (const project of section.projects) {
         const key = `${section.machineId}:${project.id}`;
@@ -2467,7 +2467,7 @@ export function LoroAppSidebar({
       }
     }
     if (discovered.length > 0) setLocalProjectOrder([...prevOrder, ...discovered]);
-  }, [localProjectSections, sessionsListLoading, setLocalProjectOrder]);
+  }, [catalogLocalProjectSections, sessionsListLoading, setLocalProjectOrder]);
 
   const handleMoveLocalProject = useCallback(
     (sectionProjectKeys: readonly string[], event: DragEndEvent) => {
@@ -2594,7 +2594,7 @@ export function LoroAppSidebar({
       });
     }
 
-    for (const section of localProjectSections) {
+    for (const section of catalogLocalProjectSections) {
       const machineId = section.machineId;
       if (!machineId) continue;
       for (const project of section.projects) {
@@ -2656,7 +2656,7 @@ export function LoroAppSidebar({
     chatSessions,
     childSessionsByParent,
     defaultSessionTitle,
-    localProjectSections,
+    catalogLocalProjectSections,
     localProjectSessionsByKey,
     liveSessionStatuses,
     onlineMachineIds,
@@ -2877,7 +2877,11 @@ export function LoroAppSidebar({
     const rank = new Map(projectGroupOrder.map((id, index) => [id, index]));
     const collapsedOf = (projectId: string) =>
       repoCollapseState[getProjectGroupSessionGroupKey(projectId)] ?? false;
+    const activeProjectIds = new Set(
+      projectGroupSessions.map((session) => session.projectGroup?.id)
+    );
     const defined = workspaceProjects
+      .filter((project) => activeProjectIds.has(project.id))
       .map((project, index) => ({ project, index }))
       .sort(
         (left, right) =>
@@ -2915,10 +2919,33 @@ export function LoroAppSidebar({
         states: projectGroupStates,
         sessions: projectGroupSessions,
         listedMachineIds: new Set(
-          localProjectSections.flatMap((section) => (section.machineId ? [section.machineId] : []))
+          catalogLocalProjectSections.flatMap((section) =>
+            section.machineId ? [section.machineId] : []
+          )
         ),
       }),
-    [localProjectSections, projectGroupSessions, projectGroupStates, workspaceProjects]
+    [catalogLocalProjectSections, projectGroupSessions, projectGroupStates, workspaceProjects]
+  );
+  // Filter after pinned trees and opened-by placement have assigned each row
+  // its final group. Keep the catalog above for Updated/Pinned and saved order.
+  const localProjectSections = useMemo(
+    () =>
+      catalogLocalProjectSections
+        .map((section) => ({
+          ...section,
+          projects: section.projects.filter(
+            (project) =>
+              (workspaceLocalProjectSessionsByKey.get(`${section.machineId}:${project.id}`)
+                ?.length ?? 0) > 0
+          ),
+        }))
+        .filter(
+          (section) =>
+            section.projects.length > 0 ||
+            (section.machineId &&
+              (projectGroupPlacement.byMachine.get(section.machineId)?.sessions.length ?? 0) > 0)
+        ),
+    [catalogLocalProjectSections, projectGroupPlacement, workspaceLocalProjectSessionsByKey]
   );
   const showGithubWorktrees =
     sessionsListLoading ||

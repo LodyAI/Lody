@@ -16,7 +16,7 @@ import {
 import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { machineFlockRowsByWorkspaceAtom } from '@/atoms/machine-flock';
-import { onlineMachineIdsAtom } from '@/atoms/presence';
+import { presumedOnlineMachineIdsAtom } from '@/atoms/presence';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
@@ -87,7 +87,7 @@ export function useAgentRoleAvailability(
   useMachineFlockAgentConfigsForMachineIds(roleMachineIds);
 
   const { machines } = useVisibleMachineMetas();
-  const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
+  const onlineMachineIds = useAtomValue(presumedOnlineMachineIdsAtom);
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
 
