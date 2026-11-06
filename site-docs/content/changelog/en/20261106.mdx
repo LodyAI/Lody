@@ -1,0 +1,25 @@
+---
+title: '20261106'
+version: 0.111.0
+date: 2026-11-06
+description: Unified Lody Agent connections, on-demand MCP command help, and improvements to remote diffs, machine selection, conversation quotes, encrypted sessions, and Android push notifications.
+---
+
+Version 0.111.0
+
+### ✨ New Features
+
+- Manage Lody Agent accounts and custom model service connections together in Settings, including endpoint URLs, protocols, and API keys.
+- Lody MCP now provides on-demand command help, so agents can look up usage and parameters without repeating detailed instructions in the tool list.
+
+### 🐛 Fixes & Improvements
+
+- Improved remote code diff loading with fewer repeated transfers and on-demand loading for large files. Refreshing preserves your reading position and expanded sections.
+- Fixed the selected remote machine unexpectedly changing when connection status refreshes, and improved offline status display.
+- Fixed project editing losing the selected machine, and hid empty project groups on desktop.
+- Improved conversation quotes: select consecutive passages within the same response while preserving formatting such as links, lists, and code.
+- Restored folding for the trailing content of completed responses.
+- Fixed the sidebar not updating promptly after renaming a conversation group.
+- Improved mention display in the composer, fixing incorrect colors at caret boundaries and leftover mention state after sending.
+- Improved queued-message validation in encrypted sessions, fixed messages being incorrectly blocked while sharing permissions are still loading, and clarified CLI pairing and key-state messages.
+- Fixed Android packages potentially missing push configuration, which could prevent notifications from arriving.
