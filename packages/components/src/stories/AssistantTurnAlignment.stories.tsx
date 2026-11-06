@@ -815,11 +815,15 @@ export const DesktopScrollToLatestWorking: Story = {
   ),
   play: async ({ canvasElement }) => {
     const { button, viewport } = await releaseScrollToLatest(canvasElement);
-    await expect(button.querySelector('.animate-spin')).not.toBeNull();
+    await expect(
+      button.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')
+    ).not.toBeNull();
     await button.click();
     await expectAtRealBottom(viewport);
     const visibleButton = await leaveScrollToLatestVisible(canvasElement, viewport);
-    await expect(visibleButton.querySelector('.animate-spin')).not.toBeNull();
+    await expect(
+      visibleButton.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')
+    ).not.toBeNull();
   },
 };
 

@@ -65,8 +65,10 @@ tuning shortcut are in [`README.md`](README.md).
   is guaranteed.
 - `vite.config.ts` is the build integration point. Keep TanStack Start, Fumadocs
   MDX, React and the `@site` alias there. Site-owned styles use local
-  `stylex-options.ts` and typed owner composition; no utility classes. Tailwind
-  serves only Fumadocs safelists with source scanning off. `build.modulePreload`
+  `stylex-options.ts` and typed owner composition; no utility classes or Tailwind
+  compiler. [Docs skins](components/docs-ui/README.md) preserve public Fumadocs /
+  Base UI context, keyboard behavior and ancestor dimension writers. Do not add
+  class-string parsing or utility stylesheets. Reading CSS precedes StyleX. `build.modulePreload`
   filters HTML hosts only; JS hosts keep extracted route CSS so client nav to
   `/price` or legal is not unstyled. `finalize-prerender-html.mjs` strips leftover
   HTML preloads and inlines first-paint CSS on landing so the H1 is not waiting

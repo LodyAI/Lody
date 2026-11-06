@@ -9,7 +9,7 @@ export const siteStylexOptions = {
   cssInjectionTarget: (fileName: string) => /(^|\/)index-[^/]+\.css$/.test(fileName),
   useCSSLayers: {
     prefix: 'site-stylex',
-    before: ['theme', 'base', 'components', 'utilities'],
+    before: ['theme', 'base', 'components', 'reading'],
     after: [],
   },
 };

@@ -1,5 +1,4 @@
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
-import tailwindcss from '@tailwindcss/vite';
 import stylex from '@stylexjs/unplugin';
 import { siteStylexOptions } from './stylex-options';
 import react from '@vitejs/plugin-react';
@@ -94,7 +93,6 @@ export default defineConfig(({ command }) => ({
     }),
     installStartDevServerMiddleware(),
     mdx(),
-    tailwindcss(),
     command === 'build'
       ? perEnvironmentPlugin('site-stylex', () => stylex.vite(siteStylexOptions))
       : stylex.vite(siteStylexOptions),

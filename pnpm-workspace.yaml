@@ -259,6 +259,9 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  # The site owns its StyleX skin; the patched Fumadocs runtime only joins class names.
+  '@fumadocs/base-ui@16.8.12>@fumadocs/tailwind': '-'
+  '@fumadocs/base-ui@16.8.12>tailwind-merge': '-'
   # GHSA-xjj6-f33q-929c: patch each affected major without crossing API/runtime floors.
   'undici@>=6.23.0 <6.29.1': 6.29.1
   'undici@>=7.18.0 <7.30.1': 7.30.1
@@ -277,6 +280,9 @@ overrides:
   zod: 4.3.6
 
 packageExtensions:
+  '@fumadocs/base-ui@16.8.12':
+    dependencies:
+      clsx: 2.1.1
   konsta@4.0.1:
     peerDependencies:
       react: '*'
@@ -284,6 +290,7 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
+  '@fumadocs/base-ui@16.8.12': patches/@fumadocs__base-ui@16.8.12.patch
   '@loro-dev/sqlite-riverrun@0.3.0': patches/@loro-dev__sqlite-riverrun@0.3.0.patch
   pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch

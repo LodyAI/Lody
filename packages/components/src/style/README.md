@@ -1,9 +1,9 @@
 # Product style layer
 
-The Tailwind → StyleX migration's shared vocabulary. A migrated surface reads
-its colours from `theme-colors.stylex.ts` and its sizes from
-`theme-scale.stylex.ts`. Values preserve the existing theme contract; browser
-comparisons verify their computed behavior. The migration is incomplete.
+The product's shared StyleX vocabulary. Surfaces read their colours from
+`theme-colors.stylex.ts` and sizes from `theme-scale.stylex.ts`. These values
+preserve the existing theme contract; browser comparisons verify their
+computed behavior.
 
 | Part                                                       | Responsibility                                                        |
 | ---------------------------------------------------------- | --------------------------------------------------------------------- |
@@ -16,7 +16,7 @@ comparisons verify their computed behavior. The migration is incomplete.
 The declaration bridge, its Tailwind-dependent profile and the Electron Tailwind
 plugin have been removed. Browser normalization and ordinary theme defaults live
 in `../tailwind/{reset,theme-defaults}.css`; the product stylesheet has no utility
-compiler input. Storybook retains its own temporary input for unmigrated fixtures.
+compiler input. Storybook also uses local StyleX without a utility compiler.
 Components use local StyleX directly; primitive overrides compose through typed
 `xstyle` props. The [migration guide](MIGRATION.md) describes the remaining
 transition and verification rules.
@@ -69,7 +69,7 @@ The sidebar's own tokens (`sidebar.tokens.stylex.ts`) stay where they are.
 
 ### Alpha
 
-Preserve the exact original declaration. The locked Tailwind 4.3 compiler uses
+Preserve the exact original declaration. The retired Tailwind 4.3 compiler used
 `color-mix` in `oklab` for these opacity modifiers:
 
 ```ts
@@ -84,8 +84,8 @@ color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)';
 An existing direct `hsl(var(--token) / alpha)` declaration stays direct HSL.
 Do not interchange it with a mix based on the same percentage: the Diff Viewer
 path comparison exposed different computed colors and glyph-edge pixels. Inspect
-the installed compiler's output for each utility rather than inferring its
-expression from the preset or a previous migration.
+the retained compiler-output evidence for each legacy utility rather than
+inferring its expression from the preset or another migration.
 
 Do **not** mint a token per alpha step (`muted60`, `border60`, …). There is no
 semantic behind most of those numbers, and a token would freeze a value the
@@ -118,22 +118,22 @@ Some radius and weight tokens retain literal legacy defaults; they cannot
 replace a runtime variable merely because the default screenshot matches.
 
 Spacing tokens read `--spacing`, the theme's one spacing unit, at their definition
-scope. Root theme changes keep them coupled to Tailwind; descendant overrides
+scope. Root theme changes keep them coupled to the spacing scale; descendant overrides
 need the [local variable contract](MIGRATION.md#preserve-the-computed-contract)
-because an inherited StyleX alias has already resolved its dependencies. Type sizes stay on Tailwind's rem scale: the
+because an inherited StyleX alias has already resolved its dependencies. Type sizes retain the original rem scale: the
 interface-font-size tiers (`--ui-font-size`) resized the body copy only, and a
 migrated surface must not start following them.
 
 ## Cascade
 
-The stylesheet declares `@layer theme, base, stylex, components, utilities`, so
-a Tailwind utility beats a StyleX style on the same property. While both are
-present, remove the Tailwind class you replaced — leaving it makes the Tailwind
-class the winner and the migration invisible.
+The stylesheet retains `@layer theme, base, stylex, components, utilities` for
+ordinary native CSS and StyleX extraction. There is no utility compiler input.
+Remove retired selectors when their last real consumer has migrated; preserve
+active integration hooks, browser resets and theme variables.
 
-`className` stays available on a migrated component for layout and interaction
-constraints from a caller. It is not a place to re-state the component's own
-visual design.
+Primitive overrides compose through typed `xstyle` props inside the owner's
+`stylex.props` call. `className` remains available for ordinary integration hooks;
+combining opaque atomic class strings does not establish caller precedence.
 
 [`message-action-button.stylex.ts`](message-action-button.stylex.ts) owns the
 local palette for the reviewed message action Buttons. Its complete typed

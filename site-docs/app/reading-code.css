@@ -1,0 +1,122 @@
+/* Shiki token integration adapted from Fumadocs 16.8.12, MIT; see ../components/docs-ui/LICENSE.fumadocs. */
+.shiki:not(.not-fumadocs-codeblock *) {
+  --padding-left: calc(var(--spacing) * 4);
+  --padding-right: calc(var(--spacing) * 4);
+
+  code span {
+    color: var(--shiki-light);
+    font-style: var(--shiki-light-font-style);
+  }
+
+  .line {
+    position: relative;
+    padding-left: var(--padding-left);
+    padding-right: var(--padding-right);
+  }
+
+  .line:empty {
+    height: 1lh;
+  }
+
+  &.has-focused .line:not(.focused) {
+    filter: blur(2px);
+    transition: filter 200ms;
+  }
+
+  &.has-focused:hover .line:not(.focused) {
+    filter: blur(0);
+  }
+
+  .diff::before {
+    position: absolute;
+    left: calc(var(--spacing) * 1.5);
+  }
+
+  .diff.remove {
+    opacity: 0.7;
+    --fd-counter-color: var(--color-fd-diff-remove-symbol);
+    background-color: var(--color-fd-diff-remove);
+  }
+
+  .diff.remove::before {
+    content: '-';
+    color: var(--color-fd-diff-remove-symbol);
+  }
+
+  .diff.add {
+    --fd-counter-color: var(--color-fd-diff-add-symbol);
+    background-color: var(--color-fd-diff-add);
+  }
+
+  .diff.add::before {
+    content: '+';
+    color: var(--color-fd-diff-add-symbol);
+  }
+
+  .highlighted {
+    --fd-counter-color: var(--color-fd-primary);
+    background-color: color-mix(in oklab, var(--color-fd-primary) 10%, transparent);
+  }
+
+  .highlighted::after {
+    position: absolute;
+    content: '';
+    inset-block: 0px;
+    left: 0px;
+    border-left-style: solid;
+    border-left-width: 2px;
+    border-color: color-mix(in oklab, var(--color-fd-primary) 50%, transparent);
+  }
+
+  .highlighted-word {
+    padding: 1px;
+    margin-block: -1px;
+    border-radius: var(--radius-md);
+    border-style: solid;
+    border-width: 1px;
+    border-color: color-mix(in oklab, var(--color-fd-primary) 30%, transparent);
+    background-color: color-mix(in oklab, var(--color-fd-primary) 10%, transparent);
+    font-weight: var(--font-weight-medium);
+  }
+
+  &[data-line-numbers] .twoslash-meta-line {
+    padding-left: calc(var(--padding-left) + 7 * var(--spacing));
+  }
+
+  &[data-line-numbers] .line {
+    counter-increment: line;
+    padding-left: calc(var(--padding-left) + 7 * var(--spacing));
+  }
+
+  &[data-line-numbers] .line::after {
+    position: absolute;
+    content: counter(line);
+    color: color-mix(
+      in oklab,
+      var(--fd-counter-color, var(--color-fd-muted-foreground)) 60%,
+      transparent
+    );
+    inset-block: 0px;
+    left: 0px;
+    width: calc(var(--spacing) * 7);
+    text-align: right;
+  }
+}
+
+.dark .shiki:not(.not-fumadocs-codeblock *) {
+  code span {
+    color: var(--shiki-dark);
+    font-style: var(--shiki-dark-font-style);
+  }
+}
+
+/* inline code */
+code.shiki:not(.not-fumadocs-code *) span {
+  color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style);
+}
+
+.dark code.shiki:not(.not-fumadocs-code *) span {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style);
+}

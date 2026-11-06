@@ -9,7 +9,7 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875)（草稿）
 
 ## 摘要
 
-Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥。Electron renderer 与独立 review helper 不再使用 Tailwind 构建插件和运行时 class 合并依赖。组件通过必要的 typed 入口组合实际调用方样式，保留有效布局、主题和交互状态。Storybook 示例也已迁移，临时编译输入、共享 preset 和组件包剩余编译依赖均已移除；真实截图差异和未访问状态继续保持开放。构建成功或字面量归零不代表迁移完成。
+Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥。Electron renderer 与独立 review helper 不再使用 Tailwind 构建插件和运行时 class 合并依赖。组件通过必要的 typed 入口组合实际调用方样式，保留有效布局、主题和交互状态。Storybook 示例与公共网站也已迁移，其 Tailwind 编译输入和直接构建依赖均已移除。站点以本地 StyleX 皮肤和语义阅读 CSS 组合公开 Fumadocs 行为 API；真实截图差异和未访问状态继续保持开放。构建成功或字面量归零不代表迁移完成。
 
 ## 所有权与组合
 
@@ -45,19 +45,22 @@ Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥
 
 比较来源也是验收的一部分。独立审计发现两份早期 controls 汇总在两侧都读了 Before 相对路径，其 36 对引用为 INVALID。原图和错误汇总保留，修正比较分别读取各自 manifest、PNG 和真实浏览器记录。来源有效不代表不同的图像通过。当前自包含 `direct-stylex-acceptance.html` 和 `direct-*` 证据位于 `packages/components/artifacts/visual/`；历史报告及其中 OPEN 原样保留。
 
-## 后续工作
+## 网站迁移与后续验收
 
-产品最终 v3 编译快照扫描 1,795 份源码，识别 utility 为零，另有 744 处未解析表达式；之后退役扫描器、测试及编译依赖，精确输入和 JSON 保存在 ignored 产物。网站使用自己锁定的编译器，149 份自有文件（组件 70、路由／页面 47、lib 32）识别 utility 为零，组件另有 39 处未解析表达式。39 处表达式的实际 producer 已追查，均为 StyleX 输出、普通 CSS 状态或语义 hook，未发现站内动态 Tailwind。这些仍是静态下界，不是视觉或任意外部运行时字符串覆盖。
+产品最终 v3 编译快照扫描 1,795 份源码，识别 utility 为零，另有 744 处未解析表达式；之后退役扫描器、测试及编译依赖，精确输入和 JSON 保存在 ignored 产物。网站退役前的编译快照中，149 份自有文件（组件 70、路由／页面 47、lib 32）识别 utility 为零，组件另有 39 处未解析表达式。39 处实际 producer 已追查，均为 StyleX 输出、普通 CSS 状态或语义 hook，未发现站内动态 Tailwind。这些快照仍是静态下界，不是视觉或任意外部运行时字符串覆盖。
 
-网站自有 primitive 与真实调用方已组合本地 StyleX，运行时 Tailwind 合并和动画工具依赖已移除。旧语义样式表的 111 个 `@apply` 改为原选择器下的普通声明；首屏 body、预览滚动锁、布局 inset 与热图圆点改用明确 data hook。自动源码扫描已关闭，静态主题默认值保留 StyleX 读取的 CSS 变量。
+网站 primitive 与真实调用方组合本地 StyleX。旧语义样式表的 111 个 `@apply` 改为原选择器下的普通声明；首屏 body、预览滚动锁、布局 inset 与热图圆点改用明确 data hook。站点同时替换 Fumadocs preset、safelist 和 typography 编译器：[本地文档皮肤](../../../../site-docs/components/docs-ui/README.md)提供 layout／page slots、导航、搜索和 MDX 部件。状态及交互继续使用公开 Fumadocs contexts、框架链接、scrollspy、TOC 测量轨道和 Base UI 行为。布局尺寸根据实际语义部件写在祖先上，不把变量错误声明在子节点。布局拥有语义 `fd-page-tree-item-name` marker 的物理皮肤。
 
-站点拥有独立插件配置，不引产品 UI。SSR 开发文档绕过 Vite HTML transform，需要显式加载官方 virtual CSS／runtime；生产按 Vite environment 创建独立插件实例，并提取到共享 index CSS。复用 SSR／client 实例曾留下过期资源引用，该产物保持拒绝。CSSOM 证实 Fumadocs prose 默认值也在 utilities 层，因此站点 StyleX 位于其后；真实 owner 与调用方一并迁移，不承诺任意 opaque caller 优先级。
+阅读排版与 Shiki token／行集成采用语义普通 CSS；`reading` 层位于组件 StyleX 之前。`DocsBody` 将标题相邻及正文首尾子元素的 margin 结构保留在 StyleX；移入更低的 typography 层曾改变原本对 Tabs 间距的优先级。主题默认值、浏览器 normalization 和文档 palette 保留有效变量及 MIT 许可，不包含 utility 规则。站点不再使用 Tailwind 构建插件、preset 导入或直接编译依赖。精确版本的 [Fumadocs patch](../../../../patches/@fumadocs__base-ui@16.8.12.patch)只将 `dist/utils/cn.js` 从 `twMerge` 改为 `clsx`；workspace 规则移除该版本的 `tailwind-merge`／`@fumadocs/tailwind` 依赖边，并提供 `clsx@2.1.1`。补丁保留 class 拼接，不保留 utility 冲突解析，因此物理样式覆盖应在本地 owner 组合。定向 offline frozen install 已通过，实际安装的 `cn` 模块导入 `clsx`；根锁文件没有 Tailwind 包节点。这些依赖检查不证明视觉全等。
 
-| 遗留边界 | 位置 | 后续方案 |
-| --- | --- | --- |
-| Fumadocs 皮肤及 typography 编译器 | `site-docs/app/global.css`、`site-docs/package.json` 中两个 Tailwind 构建依赖 | 上游 `fumadocs-ui/css/preset.css` 仍声明明确 safelist 和 typography 插件，删除编译器会破坏文档 UI。应单独迁移第三方皮肤或使用上游预编译样式，不能复制全局 utility 库冒充 StyleX。 |
+站点拥有独立插件配置，不引产品 UI。SSR 开发文档绕过 Vite HTML transform，需要显式加载官方 virtual CSS／runtime；生产按 Vite environment 创建独立插件实例，并提取到共享 index CSS。复用 SSR／client 实例曾留下过期资源引用，该产物保持拒绝。最终层顺序为 `theme`、`base`、`components`、`reading`、`site-stylex`，不承诺任意 opaque caller 优先级。
+
+| 遗留边界           | 位置                                                                                      | 后续方案                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | 尚未通过的视觉状态 | ignored 产物中的 `direct-stylex-acceptance.html`、`site-stylex-migration.html` 及来源记录 | 保留源码检查点、失败候选和 OPEN 差异；成功子集不能关闭无关失败。 |
 
-整合网站构建生成 272 份静态 HTML，所有 CSS 引用有效；类型检查和既有静态导航九项通过。原移动端测试错误选中隐藏导航链接，失败记录保留，定位器修为实际博客内容链接。网站报告内嵌 21 对分检查点截图；此前开发环境 404 三对像素及记录布局一致，Legal 只有 After 检查。缺 CSS、列表间距、外部边框、language-open、Spinner 时钟及异步 Diff 帧继续保留，不能用源码迁完替换其状态。
+无编译器的文档皮肤构建生成 272 份静态 HTML，样式表引用全部有效，没有 Tailwind 生成标记或私有状态。站点类型、lint、30 项 owning 测试及九项生产静态导航检查通过。真实浏览器三对截图覆盖桌面深色 First Session、桌面浅色 Quickstart、移动中文深色 First Session：858 个节点矩形全部一致，两张 First Session 图像像素全等；Quickstart 的 32 个原始差异像素仍为 OPEN，未证明栅格原因。已实际操作搜索键盘选择／导航、语言切换、移动 TOC 链接及关闭。`docs-stylex-skin-acceptance.html` 内嵌这三对及拒绝候选；这一有限覆盖不代表每个文档组件状态均已验收。
+
+已有的编译器退役前网站构建生成 272 份静态 HTML，所有 CSS 引用有效；该检查点的类型检查和既有静态导航九项通过。原移动端测试错误选中隐藏导航链接，失败记录保留，定位器修为实际博客内容链接。网站报告内嵌 21 对分检查点截图；此前开发环境 404 三对像素及记录布局一致，Legal 只有 After 检查。缺 CSS、列表间距、外部边框、language-open、Spinner 时钟及异步 Diff 帧继续保留。这些结果不能验收后续每个本地文档皮肤，也不能证明最终视觉全等；源码迁完不替换其状态。
 
 这不代表整个 monorepo 无 Tailwind 依赖，也不代表所有迁移状态通过视觉验收。隔离 ACP demo／编辑器应用仍在本任务之外，无需子模块操作。早期计数与拒绝实验保存在冻结产物及[先前已提交 Note](https://github.com/LodyAI/Lody/blob/11390b40320b01a8f5807850de65a011253cedda/.agents/notes/implemented/architecture/2026-10-22-tailwind-to-stylex-migration.zh.md)。

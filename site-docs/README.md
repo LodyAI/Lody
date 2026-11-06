@@ -46,6 +46,9 @@ builds to `site-docs/out/client`. Binding rules live in
   hosted once by `components/site-root-provider.tsx`; its GLSL (single-pass and
   split field, temporal blend) is in `components/marketing-atmosphere-shaders.ts`.
 - `components/pricing-page.tsx` — pricing table, plans, and FAQ.
+- [`components/docs-ui/`](components/docs-ui/README.md) — local StyleX skins for
+  docs layout, navigation, search and MDX parts; public Fumadocs and Base UI
+  primitives retain their behavior.
 
 Demo sequencing and screenshot notes live in
 [context/landing-demos.md](context/landing-demos.md). Measurements, history, and
@@ -64,18 +67,29 @@ Chromium. There is no second legacy site tree.
 
 ## Styling
 
-Site-owned components migrate to local `stylex.create` declarations through
+Site-owned components use local `stylex.create` declarations through
 [site-local options](stylex-options.ts), without importing product UI or its build
-configuration. The SSR document loads StyleX's virtual CSS/HMR runtime only in
-development; production extraction targets the shared index stylesheet.
-Site-owned styles follow the utilities layer: Fumadocs prose defaults also live
-in that layer, so placing StyleX before it loses the original local overrides.
-Migrate a styled owner and its real callers together through typed composition.
-First-party utility classes, runtime Tailwind merging and authored `@apply`
-clauses are removed. Automatic source scanning is disabled; Tailwind remains
-only for Fumadocs' explicit safelist and typography plugin. Static theme defaults
-keep the CSS variables read by StyleX available to every page. Preserve the
-actual theme variables and static HTML rendering when migrating a page.
+configuration. Migrate a styled owner and its real callers together through typed
+composition. The SSR document loads StyleX's official virtual CSS/HMR runtime in
+development; production creates a plugin instance per Vite environment and extracts
+to the shared index stylesheet.
+
+The site has no Tailwind build plugin, utility safelist or typography compiler.
+The layer order is `theme`, `base`, `components`, `reading`, then `site-stylex`.
+Ordinary [theme defaults](app/theme-defaults.css), [normalization](app/reset.css)
+and [docs palette](app/docs-palette.css) preserve the variables and browser baseline.
+[Reading prose](app/reading-prose.css) and [Shiki integration](app/reading-code.css)
+use semantic content selectors; component StyleX follows prose defaults.
+`DocsBody` keeps structural article margin rules in StyleX so the layer split
+preserves their original precedence over component spacing.
+
+[Docs UI ownership](components/docs-ui/README.md) explains the local skins,
+upstream behavior boundaries and MIT attribution. Fumadocs still owns content,
+providers and selected behavior primitives. Its remaining utility class strings
+are not compiled or interpreted as styling inputs. Class joining uses plain
+`clsx`; physical overrides compose at their owner instead of relying on runtime
+Tailwind conflict resolution. Preserve static HTML, effective theme readers and
+interaction behavior when changing these boundaries.
 
 ## Local development
 

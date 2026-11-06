@@ -1,11 +1,19 @@
-import * as AccordionComponents from 'fumadocs-ui/components/accordion';
-import { Callout } from 'fumadocs-ui/components/callout';
-import * as FilesComponents from 'fumadocs-ui/components/files';
-import * as InlineTocComponents from 'fumadocs-ui/components/inline-toc';
-import * as StepsComponents from 'fumadocs-ui/components/steps';
-import * as TabsComponents from 'fumadocs-ui/components/tabs';
-import * as TypeTableComponents from 'fumadocs-ui/components/type-table';
-import defaultMdxComponents from 'fumadocs-ui/mdx';
+import * as AccordionComponents from './docs-ui/accordion';
+import { Callout, CalloutContainer, CalloutTitle, CalloutDescription } from './docs-ui/callout';
+import { Card, Cards } from './docs-ui/card';
+import * as StepsComponents from './docs-ui/steps';
+import * as TabsComponents from './docs-ui/tabs';
+import Link from 'fumadocs-core/link';
+import { Heading } from './docs-ui/heading';
+import {
+  CodeBlock,
+  Pre,
+  CodeBlockTab,
+  CodeBlockTabs,
+  CodeBlockTabsList,
+  CodeBlockTabsTrigger,
+} from './docs-ui/codeblock';
+import { Table } from './docs-ui/table';
 import type { MDXComponents } from 'mdx/types';
 import type { ComponentProps } from 'react';
 import { MentionPreview, SlashCommandsPreview } from './docs-replica/command-reference-previews';
@@ -67,14 +75,31 @@ function normalizeImageProps(
 
 export function getMDXComponents(components?: MDXComponents) {
   return {
-    ...defaultMdxComponents,
+    a: Link,
+    h2: (props) => <Heading as="h2" {...props} />,
+    h3: (props) => <Heading as="h3" {...props} />,
+    h4: (props) => <Heading as="h4" {...props} />,
+    h5: (props) => <Heading as="h5" {...props} />,
+    h6: (props) => <Heading as="h6" {...props} />,
+    table: Table,
+    pre: (props) => (
+      <CodeBlock {...props}>
+        <Pre>{props.children}</Pre>
+      </CodeBlock>
+    ),
+    CodeBlockTab,
+    CodeBlockTabs,
+    CodeBlockTabsList,
+    CodeBlockTabsTrigger,
     ...AccordionComponents,
     Callout,
-    ...FilesComponents,
-    ...InlineTocComponents,
+    CalloutContainer,
+    CalloutTitle,
+    CalloutDescription,
+    Card,
+    Cards,
     ...StepsComponents,
     ...TabsComponents,
-    ...TypeTableComponents,
     // Site-owned product previews rendered from mock data; see
     // `components/docs-replica/`. Long-form docs pass a `locale` so the mock
     // copy follows the page language.
