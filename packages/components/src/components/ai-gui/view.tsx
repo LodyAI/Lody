@@ -1171,6 +1171,17 @@ type AssistantTurnRowsCacheEntry = {
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
 
+/**
+ * Thought prose is shown only for builtin providers whose ACP adapter is known to
+ * forward model reasoning as `thought` chunks. Custom/registry launch specs can
+ * reuse these agent types with any executable, so they keep thoughts hidden.
+ */
+const THOUGHT_VISIBLE_BUILTIN_AGENTS: ReadonlySet<string> = new Set(['deepseek', 'pi']);
+
+export const providerShowsThoughts = (
+  meta: Pick<SessionMeta, 'cliType' | 'agentType'> | undefined
+): boolean => meta?.cliType === 'builtin' && THOUGHT_VISIBLE_BUILTIN_AGENTS.has(meta.agentType);
+
 // Exported for tests only (chat-virtual-rows-identity.test.ts).
 export const buildChatVirtualRows = ({
   items,
@@ -1831,11 +1842,7 @@ export const SessionChatStreamView = forwardRef<
     ref
   ) => {
     const thoughtVisibilityAtom = useMemo(
-      () =>
-        selectAtom(
-          sessionMetaAtomFamily(getSessionRoomId(sessionId)),
-          (meta) => meta?.cliType === 'builtin' && meta.agentType === 'deepseek'
-        ),
+      () => selectAtom(sessionMetaAtomFamily(getSessionRoomId(sessionId)), providerShowsThoughts),
       [sessionId]
     );
     const showThoughts = useAtomValue(thoughtVisibilityAtom);

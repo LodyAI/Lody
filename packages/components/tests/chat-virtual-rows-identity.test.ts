@@ -4,7 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 import { getMessageItemPrefix } from '../src/lib/session-chat-search';
-import { buildChatVirtualRows, type ChatStreamItem } from '../src/components/ai-gui/view';
+import {
+  buildChatVirtualRows,
+  providerShowsThoughts,
+  type ChatStreamItem,
+} from '../src/components/ai-gui/view';
 
 // Guards the per-turn row cache behind view.tsx `buildChatVirtualRows`: rows for
 // unchanged turns must be reference-stable across rebuilds, or the shallow-compare
@@ -231,6 +235,17 @@ describe('DSH thought visibility', () => {
       other.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
     ).toBe(true);
     expect(buildChatVirtualRows(expandedArgs)).toEqual(dsh);
+  });
+
+  it('shows thoughts only for builtin DeepSeek Harness and builtin Pi sessions', () => {
+    expect(providerShowsThoughts({ cliType: 'builtin', agentType: 'deepseek' })).toBe(true);
+    // Pi forwards the routed model's reasoning (e.g. DeepSeek) as ACP thought chunks.
+    expect(providerShowsThoughts({ cliType: 'builtin', agentType: 'pi' })).toBe(true);
+    // A custom launch spec can point at any executable reusing the `pi` agent type.
+    expect(providerShowsThoughts({ cliType: 'custom', agentType: 'pi' })).toBe(false);
+    expect(providerShowsThoughts({ cliType: 'registry', agentType: 'deepseek' })).toBe(false);
+    expect(providerShowsThoughts({ cliType: 'builtin', agentType: 'claude' })).toBe(false);
+    expect(providerShowsThoughts(undefined)).toBe(false);
   });
 
   it('keeps interrupted thoughts readable without exposing them for other providers', () => {
