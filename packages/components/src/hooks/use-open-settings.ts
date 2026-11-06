@@ -103,6 +103,9 @@ export function useOpenSettings() {
         case 'agent-roles':
           void router.navigate({ to: '/$workspaceName/settings/agent-roles', params });
           return;
+        case 'lody-agent':
+          void router.navigate({ to: '/$workspaceName/settings/lody-agent', params });
+          return;
         case 'github':
           void router.navigate({ to: '/$workspaceName/settings/github', params });
           return;
