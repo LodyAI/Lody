@@ -5,7 +5,7 @@ import {
   syncMcpCatalog,
   waitForMcpDefaultCatalog,
 } from '@/lib/workspace-mcp-store';
-import { getDaemonWorkspace } from '@/lib/session-command-environment';
+import { getDaemonWorkspace, readEncryptedMachineAccess } from '@/lib/session-command-environment';
 import type { SessionSteerResponse } from '@lody/shared';
 import {
   buildSessionGroupRenamePatch,
@@ -2601,13 +2601,12 @@ async function readResolvedSessionMachineAccess(args: {
   requester: ResolvedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
-  const daemon = getDaemonWorkspace();
-  if (daemon?.checkEncryptedMachineAccess)
-    return await daemon.checkEncryptedMachineAccess({
-      machineId: args.machineId,
-      requesterUserId: args.requester.userId,
-      ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
-    });
+  const encrypted = await readEncryptedMachineAccess({
+    machineId: args.machineId,
+    requesterUserId: args.requester.userId,
+    ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+  });
+  if (encrypted) return encrypted;
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (args.auth !== environment.auth) throw new Error('Session command identity mismatch');

@@ -1,4 +1,7 @@
-import { runWithDaemonWorkspace } from '../lib/session-command-environment';
+import {
+  runWithDaemonWorkspace,
+  runWithEncryptedCommandAccess,
+} from '../lib/session-command-environment';
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
 import * as commandRuntime from '@/lib/command-runtime';
@@ -2459,6 +2462,27 @@ describe('session command output boundary', () => {
       flush.mockRestore();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('encrypted one-shot machine access', () => {
+  it('answers from the command replica', async () => {
+    const asked: unknown[] = [];
+    const result = await runWithEncryptedCommandAccess(
+      async (target) => {
+        asked.push(target);
+        return { allowed: false, reason: 'not_visible' };
+      },
+      () =>
+        readSessionMachineAccess({
+          // A service call with this token would reject before any answer.
+          auth: { token: '', userId: 'machine-account', machineId: 'machine' } as never,
+          workspaceId: 'workspace' as never,
+          machineId: 'other-machine' as never,
+        })
+    );
+    expect(result).toEqual({ allowed: false, reason: 'not_visible' });
+    expect(asked).toEqual([{ machineId: 'other-machine', requesterUserId: 'machine-account' }]);
   });
 });
 
