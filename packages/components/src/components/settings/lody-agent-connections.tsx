@@ -12,6 +12,7 @@ import { AlertDialog } from '@/ui/dialog';
 import { CompactSection } from './compact-layout';
 import { Field, FormMessage } from './form-primitives';
 import { settingsCatalog as catalog } from './surface';
+import { SorbetProviderIcon } from './sorbet-provider-icon';
 
 export interface LodyAgentCredential {
   providerId: string;
@@ -172,7 +173,11 @@ export function LodyAgentConnections({
                 {connection.kind === 'endpoint' ? (
                   <Server {...stylex.props(catalog.icon)} />
                 ) : (
-                  <KeyRound {...stylex.props(catalog.icon)} />
+                  <SorbetProviderIcon
+                    providerId={connection.id}
+                    className={stylex.props(catalog.icon).className}
+                    fallback={<KeyRound {...stylex.props(catalog.icon)} />}
+                  />
                 )}
               </span>
               <div {...stylex.props(catalog.body)}>

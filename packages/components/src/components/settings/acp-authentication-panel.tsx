@@ -44,6 +44,7 @@ import { isElectronRenderer } from '@/lib/electron';
 import { openExternalUrl } from '@/lib/native-browser';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+import { SorbetProviderIcon, sorbetAuthProviderId } from './sorbet-provider-icon';
 
 const SM = '@media (min-width: 640px)';
 
@@ -1108,7 +1109,15 @@ export function AcpAuthenticationPanel({
               {...stylex.props(surface.line, index > 0 && surface.lineRuled, styles.methodRow)}
             >
               <span {...stylex.props(catalog.glyph)} aria-hidden="true">
-                <LogIn {...stylex.props(catalog.icon)} />
+                {agentType === 'sorbet' && sorbetAuthProviderId(method.id) ? (
+                  <SorbetProviderIcon
+                    providerId={sorbetAuthProviderId(method.id)!}
+                    className={stylex.props(catalog.icon).className}
+                    fallback={<LogIn {...stylex.props(catalog.icon)} />}
+                  />
+                ) : (
+                  <LogIn {...stylex.props(catalog.icon)} />
+                )}
               </span>
               <div {...stylex.props(catalog.body)}>
                 <span {...stylex.props(catalog.name)}>{method.name ?? method.id}</span>
