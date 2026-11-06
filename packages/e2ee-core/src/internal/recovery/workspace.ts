@@ -570,6 +570,78 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
       })
     );
   });
+  const RevokeIntentSchema = Schema.Struct({
+    target: Schema.String,
+    record: Schema.Uint8Array,
+    position: Schema.Number,
+  });
+  /** Whole-vault replacement: with this vault's R proven, revoke every other active
+   * recovery device of this membership. It needs no V from any older vault, because
+   * the verified ledger names them. Each original is journaled and never re-signed. */
+  const revokeOtherRecoveryDevices = Effect.fnUntraced(function* () {
+    const status = yield* checkedStatus();
+    if (!status.recoverable) return yield* vaultError('pending');
+    const prefix = `${key}/revoke-other/`,
+      reference = (yield* load()).value?.reference;
+    if (!reference) return yield* vaultError('missing');
+    return yield* useIdentity(reference, (identity) =>
+      Effect.gen(function* () {
+        const self = hex(identity.publicKey.toBytes()),
+          view = yield* current(),
+          others = [...view.inspectState().devices]
+            .filter(
+              ([id, device]) =>
+                id !== self && device.kind === 'recovery' && device.membershipId.equals(membership)
+            )
+            .map(([id]) => id),
+          journaled = (yield* local.list(prefix)).map((row) => row.key.slice(prefix.length));
+        for (const target of new Set([...journaled, ...others])) {
+          const journalKey = `${prefix}${target}`,
+            before = yield* local.read(journalKey);
+          let intent: typeof RevokeIntentSchema.Type;
+          if (before)
+            intent = yield* attempt(() =>
+              Result.getOrThrow(
+                Schema.decodeUnknownResult(RevokeIntentSchema)(parseCanonical(before))
+              )
+            );
+          else {
+            const latest = yield* current(),
+              targetKey = yield* Effect.fromResult(Bytes.signingPublicKey(fromHex(target))),
+              proposal = yield* Effect.fromResult(
+                prepareLedgerCommand(latest, personalSigner.publicKey, {
+                  _tag: 'RevokeDevice',
+                  target: targetKey,
+                })
+              );
+            intent = {
+              target,
+              record: yield* signLedgerRecord(proposal, personalSigner),
+              position: latest.length + 1,
+            };
+            if ((yield* local.compareAndSwap(journalKey, null, canonical(intent))) !== 'Committed')
+              return yield* vaultError('conflict');
+          }
+          const outcome = yield* submit(new Uint8Array(intent.record), null);
+          if (!bytesEqual(outcome.record, intent.record))
+            return yield* vaultError('authentication');
+          if (outcome.outcome !== 'Committed') return { outcome: outcome.outcome };
+          const after = yield* current();
+          if (
+            after.inspectState().devices.has(target) ||
+            !(yield* Effect.fromResult(
+              hasVerifiedCheckpoint(after, {
+                head: hashRecordBytes(intent.record),
+                length: intent.position,
+              })
+            ))
+          )
+            return yield* vaultError('authentication');
+        }
+        return { outcome: 'Committed' as const };
+      })
+    );
+  });
   const replacementSchema = Schema.Struct({
     old: RefSchema,
     candidateId: Schema.String,
@@ -730,6 +802,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
   });
   return Object.freeze({
     replace: (request: Parameters<typeof replace>[0]) => own(replace(request)),
+    revokeOtherRecoveryDevices: () => own(revokeOtherRecoveryDevices()),
     setup: () => own(setup()),
     test: () => own(runTest()),
     status: () => own(checkedStatus()),

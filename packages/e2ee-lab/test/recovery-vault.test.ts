@@ -6,7 +6,8 @@ import { Context, Effect, Layer, Result } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { Bytes } from '@lody/e2ee-core';
 import { encodeCbor } from '@lody/e2ee-core/protocol';
-import { makeWorkspaceRecovery } from '@lody/e2ee-core';
+import { makeWorkspaceRecovery, type RecoveryVault } from '@lody/e2ee-core';
+import { replaceAccountVault } from '@lody/e2ee-client/vault-replacement';
 import { type RecoveryVaultLocalStore } from '@lody/e2ee-core/services';
 import {
   verifiedPasskeyPrf,
@@ -673,6 +674,141 @@ describe('encrypted recovery vault and genuine workflow', () => {
             );
             expect(refused).toMatchObject({ _tag: 'Failure', failure: { code: 'authentication' } });
             expect(f.records).toHaveLength(before);
+          })
+        )
+      );
+    }));
+  it('replaces the whole vault without the old V: new R proves itself, then old R is revoked', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* fixture(),
+              storage = yield* makeLabRecoveryVaultStore({
+                path: join(dir, 'vault.sqlite'),
+                mode: 'create',
+              }),
+              journal = yield* Layer.build(
+                sqliteSubmissionJournal({ path: join(dir, 'p09.sqlite') })
+              ).pipe(Effect.map((context) => Context.get(context, SubmissionJournal))),
+              installed = yield* makeSqliteProtectedEpochKeys({
+                path: join(dir, 'keys.sqlite'),
+                mode: 'create',
+                genesis: f.initial.genesis,
+                recipient: f.owner.publicKey,
+                ledger: () => Effect.sync(f.view),
+                protector: labSyntheticProtector,
+              });
+            const submit = (record: Uint8Array) =>
+              Effect.gen(function* () {
+                const result = yield* submitRecord(f.initial.genesis, record).pipe(
+                  Effect.provideService(SubmissionJournal, journal),
+                  Effect.provideService(LedgerLog, f.remote)
+                );
+                yield* acknowledgeSubmission(f.initial.genesis, result).pipe(
+                  Effect.provideService(SubmissionJournal, journal),
+                  Effect.provideService(LedgerLog, f.remote)
+                );
+                return result;
+              });
+            let envelopeFails = false;
+            const owner = (vault: RecoveryVault) =>
+              makeWorkspaceRecovery({
+                vault,
+                local: storage.local,
+                genesis: f.initial.genesis,
+                membershipId: f.membership,
+                personalSigner: f.owner,
+                ledger: () => Effect.sync(f.view),
+                submitOriginal: submit,
+                installed,
+                trust: {
+                  source: 'synthetic device that verified the workspace',
+                  genesisRecord: f.initial.record,
+                  head: hex(f.view().head.toBytes()),
+                  length: f.records.length,
+                },
+                fetchCurrentEnvelope: (recipient, epoch) =>
+                  Effect.gen(function* () {
+                    if (envelopeFails)
+                      return yield* Effect.fail(new Error('synthetic no envelope'));
+                    return {
+                      sender: f.owner.publicKey,
+                      frame: yield* prepareEpochEnvelope({
+                        context: {
+                          genesis: f.initial.genesis,
+                          epoch: ok(Bytes.epochNumber(epoch)),
+                          sender: f.owner.publicKey,
+                          recipient,
+                        },
+                        key: f.epochKey,
+                        signer: f.owner,
+                        ledger: () => Effect.sync(f.view),
+                      }),
+                    };
+                  }),
+              });
+            const recoveryDevices = () =>
+              [...f.view().inspectState().devices]
+                .filter(([, device]) => device.kind === 'recovery')
+                .map(([id]) => id);
+            const oldVault = yield* createRecoveryVault({
+              locator: 'https://synthetic.invalid/vault',
+              ...storage,
+            });
+            const oldOwner = yield* owner(oldVault.vault);
+            yield* oldOwner.setup();
+            const [oldR] = recoveryDevices();
+            const newVault = yield* createRecoveryVault({
+              locator: 'https://synthetic.invalid/vault',
+              ...storage,
+            });
+            const newOwner = yield* owner(newVault.vault);
+            let finished = 0;
+            const run = () =>
+              Effect.gen(function* () {
+                return yield* replaceAccountVault({
+                  workspaces: [
+                    {
+                      name: 'synthetic workspace',
+                      setup: newOwner.setup,
+                      revokeOtherRecoveryDevices: newOwner.revokeOtherRecoveryDevices,
+                    },
+                  ],
+                  finish: () =>
+                    Effect.sync(() => {
+                      finished += 1;
+                    }),
+                });
+              });
+            // A failed envelope test revokes nothing and retires nothing.
+            envelopeFails = true;
+            expect(Result.isFailure(yield* Effect.result(run()))).toBe(true);
+            expect(recoveryDevices()).toContain(oldR);
+            expect(finished).toBe(0);
+            envelopeFails = false;
+            expect(yield* run()).toEqual({ outcome: 'Committed' });
+            expect(finished).toBe(1);
+            const remaining = recoveryDevices();
+            expect(remaining).toHaveLength(1);
+            expect(remaining).not.toContain(oldR);
+            // The revoked R stops an old-file restore at the existing active-R check.
+            const refused = yield* Effect.result(
+              oldOwner.restoreFromRecovery({
+                personal: { ...f.personal, encryptionPublicKey: f.personal.enc },
+                submitOriginalAsRecovery: (record) => submit(record),
+              })
+            );
+            expect(refused).toMatchObject({ _tag: 'Failure', failure: { code: 'unauthorized' } });
+            // Rerunning after completion signs nothing new.
+            const before = f.records.length;
+            expect(yield* run()).toEqual({ outcome: 'Committed' });
+            expect(f.records).toHaveLength(before);
+            const restored = yield* newOwner.restoreFromRecovery({
+              personal: { ...f.personal, encryptionPublicKey: f.personal.enc },
+              submitOriginalAsRecovery: (record) => submit(record),
+            });
+            expect(restored.outcome).toBe('Committed');
           })
         )
       );

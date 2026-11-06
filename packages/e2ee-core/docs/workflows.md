@@ -235,7 +235,9 @@ opens the new personal device's workspace with the recovered keys installed.
 `RecoveryVaults` (_requires `RecoveryVaultStore`, `RecoveryVaultLocalStore`_)
 creates and unlocks vault-v1 vaults: a recovery file kept offline, or a
 passkey PRF. `makeWorkspaceRecovery` keeps one workspace's recovery entry
-current (setup, test, replace, skip) and performs a restore. A restore stops unless the
+current (setup, test, replace, skip) and performs a restore. `revokeOtherRecoveryDevices`
+revokes every other recovery device of the membership from the verified ledger, for
+whole-vault replacement. A restore stops unless the
 ledger contains the package's `head` and `length` checkpoint. A recovery device
 admits a new personal device, then that device installs every epoch key.
 Each private package is canonical CBOR with `formatVersion: 1`; a missing or
