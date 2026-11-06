@@ -73,7 +73,7 @@ assistant history 条目可带 `tokenUsage`（输入、输出、缓存读/写、
 - [DSH 测试](../packages/acp-extension-dsh/src/usage.test.ts)
 - [Grok 测试](../packages/acp-extension-grok/test/proxy.test.js)
 - [投递测试](../apps/cli/src/lib/usage/usage-tracking-service.test.ts)
-- [范围决策](../.agents/notes/proposed/bug-fix/2026-09-25-usage-accounting-scopes.zh.md)
+- [范围决策](../.agents/notes/implemented/bug-fix/2026-09-25-usage-accounting-scopes.zh.md)
 - [调查更正](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.zh.md)
 
 先发布 Core 0.1.5，再构建/发布依赖累加器的 adapters，之后更新消费端 gitlink/

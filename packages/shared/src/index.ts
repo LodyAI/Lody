@@ -125,6 +125,7 @@ export * from './workspace-slugs';
 export * from './workspace-route';
 export * from './layout';
 export * from './code-collab';
+export * from './code-collab-diff';
 export * from './file-preview';
 export * from './file-download';
 export * from './machine-flock';

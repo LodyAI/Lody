@@ -7,6 +7,7 @@ import {
   getChatLandingInitialDataLoading,
   getChatLandingLocalProjectAvailability,
   getChatLandingProjectRecency,
+  getChatLandingSelectedMachineState,
   getChatLandingSubmitDisabled,
   getChatLandingVisibleComposerStatus,
   getSharingReviewSourcesReady,
@@ -539,5 +540,31 @@ describe('chat landing machine online state', () => {
         isMachineOnline,
       })
     ).toBe(true);
+  });
+});
+
+describe('getChatLandingSelectedMachineState', () => {
+  const machines = new Map([['remote-machine', { id: 'remote-machine' }]]);
+  const stateFor = (onlineStatus: 'online' | 'offline' | 'unknown', machineId = 'remote-machine') =>
+    getChatLandingSelectedMachineState({
+      machineId,
+      localMachineId: 'local-machine',
+      machines,
+      isMachineOnline: () => onlineStatus === 'online',
+      onlineStatus,
+    });
+
+  it('blocks only a definite offline, never an unanswered presence room', () => {
+    expect(stateFor('online')).toBe('available');
+    expect(stateFor('offline')).toBe('offline');
+    expect(stateFor('unknown')).toBe('unknown');
+  });
+
+  it('treats the local machine as available whatever presence says', () => {
+    expect(stateFor('offline', 'local-machine')).toBe('available');
+  });
+
+  it('reports no selection for a machine this workspace no longer shows', () => {
+    expect(stateFor('offline', 'deleted-machine')).toBe('none');
   });
 });

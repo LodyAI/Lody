@@ -868,6 +868,8 @@ and the two Base UI gaps they close are recorded in the
 overflow measurement and cleanup. Its transparent track and rounded thumb use
 the neutral gray ramp, shared by Menu, Select, Textarea, Table and Drawer native
 scroll regions. The component's tokens own width, inset and interaction colors.
+Why one native scrollbar treatment and no second scroll controller:
+[UI scroll area note](../../.agents/notes/implemented/feature/2026-10-21-ui-scroll-area.md).
 
 ```tsx
 import { ScrollArea } from '@lody/ui/scroll-area';

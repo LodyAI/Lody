@@ -523,12 +523,20 @@ export class AutomationSessionActionsLegacy {
       }))
     )
       return { state: 'blocked', reason: 'session_admission_blocked' };
+    const timestamp = new Date(receipt.createdAt).toISOString();
+    this.manager.retainQueuedInput({
+      sessionId,
+      userTurnId: receipt.turnId,
+      timestamp,
+      userId: receipt.rule.ownerUserId,
+      inputConfig: config,
+    });
     await doc.pushMessageQueue({
       task: config.prompt,
       userId: receipt.rule.ownerUserId,
       userTurnId: receipt.turnId,
       operationId: receipt.id,
-      timestamp: new Date(receipt.createdAt).toISOString(),
+      timestamp,
       isEditing: false,
       editingStartedAt: undefined,
       project: (preparedInput?.meta.project ?? receipt.prepared?.project) as SessionMeta['project'],

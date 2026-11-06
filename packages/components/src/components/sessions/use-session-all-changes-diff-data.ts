@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeCollabAllChangesScope, SessionId } from '@lody/shared';
 import { sessionFileProviderDiffResultToFileDiffData } from '@/lib/session-file-provider-diff';
 import type { SessionFileProvider } from '@/lib/session-file-provider';
@@ -8,6 +8,7 @@ import {
   useSessionConversationDiffData,
 } from './use-session-conversation-diff-data';
 import { getSessionDiffErrorMessage } from '@/lib/session-diff-diagnostics';
+import { useDiffViewport } from './use-diff-viewport';
 
 const RETRY_DELAY_MS = 800;
 const EMPTY_PATHS: string[] = [];
@@ -42,6 +43,7 @@ export function useSessionAllChangesDiffData({
   fileProviderPending = false,
   enabled = true,
   scope = 'branch',
+  viewport,
 }: {
   sessionId: SessionId;
   filePaths: string[];
@@ -51,6 +53,7 @@ export function useSessionAllChangesDiffData({
   fileProviderPending?: boolean;
   enabled?: boolean;
   scope?: CodeCollabAllChangesScope;
+  viewport?: Omit<Parameters<typeof useDiffViewport>[0], 'active' | 'paths'>;
 }): {
   cacheKey: string | null;
   normalizedPaths: string[];
@@ -62,6 +65,9 @@ export function useSessionAllChangesDiffData({
   base: string | null;
   unavailableScopeReason: 'not_a_git_worktree' | 'no_commits' | null;
   unavailableMessage: string | null;
+  viewport: ReturnType<typeof useDiffViewport>;
+  reload: () => void;
+  refreshing: boolean;
 } {
   const normalizedInputPaths = useMemo(
     () => Array.from(new Set(filePaths.filter(Boolean))).toSorted((a, b) => a.localeCompare(b)),
@@ -72,7 +78,10 @@ export function useSessionAllChangesDiffData({
     [normalizedInputPaths]
   );
 
+  const [reloadSeq, setReloadSeq] = useState(0);
+  const reload = useCallback(() => setReloadSeq((value) => value + 1), []);
   const [batch, setBatch] = useState<{
+    reloadSeq: number;
     provider: SessionFileProvider;
     pathsKey: string;
     scope: CodeCollabAllChangesScope;
@@ -84,24 +93,22 @@ export function useSessionAllChangesDiffData({
     unavailableMessage: string | null;
   } | null>(null);
   const currentBatch =
-    batch !== null &&
-    batch.provider === fileProvider &&
-    batch.pathsKey === normalizedPathsKey &&
-    batch.scope === scope
-      ? batch
-      : null;
-  const normalizedPaths = useMemo(
-    () =>
-      scope === 'uncommitted' && currentBatch !== null
-        ? currentBatch.entryPaths
-        : normalizedInputPaths,
-    [currentBatch, normalizedInputPaths, scope]
-  );
+    batch !== null && batch.provider === fileProvider && batch.scope === scope ? batch : null;
+  const resultPathsKey = currentBatch
+    ? JSON.stringify([...currentBatch.entryPaths].sort((a, b) => a.localeCompare(b)))
+    : normalizedPathsKey;
+  const normalizedPaths = useMemo<string[]>(() => JSON.parse(resultPathsKey), [resultPathsKey]);
+  const batchViewport = useDiffViewport({
+    active: enabled && viewport !== undefined,
+    paths: normalizedPaths,
+    priorityPath: viewport?.priorityPath ?? focusPath ?? null,
+    scrollContainer: viewport?.scrollContainer ?? null,
+  });
   const deferredData = useSessionConversationDiffData({
     sessionId,
     mode: 'base',
     filePaths: currentBatch?.deferred ?? EMPTY_PATHS,
-    loadFilePaths,
+    loadFilePaths: viewport ? batchViewport.loadPaths : loadFilePaths,
     priorityFilePath: focusPath,
     fileProvider,
     fileProviderPending,
@@ -125,6 +132,9 @@ export function useSessionAllChangesDiffData({
     [currentBatch, deferredData.resolvedByPath]
   );
 
+  const previousResults = useRef({ fileProvider, scope, resolvedByPath });
+  previousResults.current = { fileProvider, scope, resolvedByPath };
+
   // Keep focusPath out of the fetch deps (it only affects inline ordering, not the result set)
   // so changing the selected file does not re-fire the whole batch.
   const focusPathRef = useRef(focusPath);
@@ -139,6 +149,9 @@ export function useSessionAllChangesDiffData({
       return undefined;
     }
     let cancelled = false;
+    const controller = fileProvider.supportsCancellableDiffReads
+      ? new AbortController()
+      : undefined;
     const getAllChangesDiff = fileProvider.getAllChangesDiff.bind(fileProvider);
 
     const publish = (
@@ -153,6 +166,7 @@ export function useSessionAllChangesDiffData({
       if (!cancelled)
         setBatch({
           provider: fileProvider,
+          reloadSeq,
           pathsKey: normalizedPathsKey,
           scope,
           inline,
@@ -167,7 +181,9 @@ export function useSessionAllChangesDiffData({
     const run = async (): Promise<void> => {
       const focus = focusPathRef.current ?? undefined;
       const requestScope = scope === 'branch' ? undefined : scope;
-      let result = await getAllChangesDiff(focus, requestScope);
+      let result = await (controller
+        ? getAllChangesDiff(focus, requestScope, controller.signal)
+        : getAllChangesDiff(focus, requestScope));
       if (
         !cancelled &&
         result.status === 'unavailable' &&
@@ -175,7 +191,9 @@ export function useSessionAllChangesDiffData({
       ) {
         await delay(RETRY_DELAY_MS);
         if (cancelled) return;
-        result = await getAllChangesDiff(focus, requestScope);
+        result = await (controller
+          ? getAllChangesDiff(focus, requestScope, controller.signal)
+          : getAllChangesDiff(focus, requestScope));
       }
       if (cancelled) return;
 
@@ -201,31 +219,32 @@ export function useSessionAllChangesDiffData({
         return;
       }
 
-      const entryPathSet = new Set(result.entries.map((entry) => entry.path));
+      const previous = previousResults.current;
+      const reusable = (path: string, contentKey?: string): FileDiffData | undefined => {
+        const data =
+          previous.fileProvider === fileProvider && previous.scope === scope
+            ? previous.resolvedByPath[path]
+            : undefined;
+        return contentKey && data && 'contentKey' in data && data.contentKey === contentKey
+          ? data
+          : undefined;
+      };
       const deferredPaths: string[] = [];
       const next: Record<string, FileDiffData> = {};
       for (const entry of result.entries) {
         if (entry.diff.status === 'deferred') {
-          deferredPaths.push(entry.path);
+          const data = reusable(entry.path, entry.diff.contentKey);
+          // Keep verified unchanged content and its hydrated context mounted.
+          // A changed identity still gets a fresh loader under the new base.
+          if (data) next[entry.path] = data;
+          else deferredPaths.push(entry.path);
           continue;
         }
-        next[entry.path] = sessionFileProviderDiffResultToFileDiffData(entry.diff);
+        next[entry.path] =
+          reusable(entry.path, 'contentKey' in entry.diff ? entry.diff.contentKey : undefined) ??
+          sessionFileProviderDiffResultToFileDiffData(entry.diff);
       }
-      // Branch mode reconciles expected paths the batch did not mention so `hasAllResolved`
-      // can complete (the list can briefly disagree with git). Uncommitted mode renders the
-      // batch's own file set, so committed-only paths must not be added.
-      if (scope === 'branch') {
-        for (const path of normalizedInputPaths) {
-          if (next[path] !== undefined || entryPathSet.has(path)) {
-            continue;
-          }
-          next[path] = sessionFileProviderDiffResultToFileDiffData({
-            status: 'unavailable',
-            path,
-            reason: 'metadata-only',
-          });
-        }
-      }
+      // The machine's current file set is authoritative; the synced index is a hint.
       if (cancelled) return;
       publish(next, deferredPaths, { base: result.base });
     };
@@ -244,11 +263,12 @@ export function useSessionAllChangesDiffData({
     });
     return () => {
       cancelled = true;
+      controller?.abort();
     };
     // Refetch when the provider is rebuilt (file-index/list changed → D4), the path set or
     // the comparison scope changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, fileProvider, normalizedPathsKey, scope]);
+  }, [enabled, fileProvider, normalizedPathsKey, scope, reloadSeq]);
 
   const hasAllResolved = useMemo(
     () => normalizedPaths.every((path) => Boolean(resolvedByPath[path])),
@@ -272,5 +292,12 @@ export function useSessionAllChangesDiffData({
     base: currentBatch?.base ?? null,
     unavailableScopeReason: currentBatch?.unavailableScopeReason ?? null,
     unavailableMessage,
+    viewport: batchViewport,
+    reload,
+    refreshing:
+      enabled &&
+      (currentBatch === null ||
+        currentBatch.reloadSeq !== reloadSeq ||
+        currentBatch.pathsKey !== normalizedPathsKey),
   };
 }

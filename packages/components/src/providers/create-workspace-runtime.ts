@@ -2106,6 +2106,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,
     requestCodeCollabSaveText,
+    getDiffBlobTransportOptions,
+    requestCodeCollabOpenDiffManifest,
+    requestCodeCollabReadBlob,
     requestCodeCollabOpenCurrentDiff,
     requestCodeCollabOpenAllChangesDiff,
     requestCodeCollabOpenTurnDiff,
@@ -4578,7 +4581,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           }
         );
         await Promise.all([
-          presenceTransport.stop(),
+          presenceTransport.stop({ retainSnapshot: true }),
           machineMonitorTransport.stop(),
           promptSuggestions.stop(),
         ]);
@@ -4685,7 +4688,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           streamsTokenProvider
         ) {
           await Promise.all([
-            presenceTransport.stop(),
+            presenceTransport.stop({ retainSnapshot: true }),
             machineMonitorTransport.stop(),
             promptSuggestions.stop(),
           ]);
@@ -6286,6 +6289,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,
     requestCodeCollabSaveText,
+    getDiffBlobTransportOptions,
+    requestCodeCollabOpenDiffManifest,
+    requestCodeCollabReadBlob,
     requestCodeCollabOpenCurrentDiff,
     requestCodeCollabOpenAllChangesDiff,
     requestCodeCollabOpenTurnDiff,

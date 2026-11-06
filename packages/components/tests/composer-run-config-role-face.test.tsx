@@ -17,7 +17,10 @@ import {
 // passes `availableAgentConfigs` instead, so the pool is not what is under test.
 vi.mock('../src/hooks/use-online-machines', () => ({ useOnlineMachines: () => [] }));
 
-import { DesktopRunConfigMenu } from '../src/components/sessions/desktop-run-config-menu';
+import {
+  DesktopMachineMenu,
+  DesktopRunConfigMenu,
+} from '../src/components/sessions/desktop-run-config-menu';
 import { MobileSessionRunConfig } from '../src/components/mobile/mobile-session-run-config';
 import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { initI18n } from '../src/i18n';
@@ -279,5 +282,52 @@ describe('DesktopRunConfigMenu role face', () => {
     const actualSelection = view.querySelector<HTMLElement>('[data-run-config-trigger]');
     expect(actualSelection?.dataset.agentConfigId).toBe(second.id);
     expect(actualSelection?.dataset.machineId).toBe(second.machineId);
+  });
+});
+
+describe('DesktopMachineMenu offline selection', () => {
+  const longName = 'ubuntu-gpu-workstation-shanghai-02';
+  let view: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(async () => {
+    await initI18n();
+    view = document.createElement('div');
+    document.body.append(view);
+    root = createRoot(view);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    view.remove();
+  });
+
+  const renderTrigger = (offline: boolean) => {
+    act(() =>
+      root.render(
+        <DesktopMachineMenu
+          value={machineId}
+          selectedLabel={longName}
+          offline={offline}
+          options={[]}
+          onChange={() => {}}
+        />
+      )
+    );
+    return view.querySelector<HTMLElement>('[data-testid="chat-machine-trigger"]');
+  };
+
+  it('keeps the offline mark outside the machine name that truncates', () => {
+    const trigger = renderTrigger(true);
+    const name = Array.from(trigger?.querySelectorAll('span') ?? []).find((element) =>
+      element.textContent?.startsWith(longName)
+    );
+
+    expect(name?.textContent).toBe(longName);
+    expect(trigger?.textContent).toContain('Offline');
+  });
+
+  it('shows no offline mark for an available machine', () => {
+    expect(renderTrigger(false)?.textContent).not.toContain('Offline');
   });
 });

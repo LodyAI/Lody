@@ -14,6 +14,10 @@ import type {
   RecordTurnDiffInput,
   RecordTurnDiffResult,
   SnapshotPathInput,
+  SnapshotDescriptorInput,
+  SnapshotDescriptor,
+  SnapshotBytesInput,
+  SnapshotBytes,
   TurnDiffGcResult,
   TurnDiffFileSummary,
   TurnDiffSnapshot,
@@ -59,6 +63,7 @@ export class TurnDiffStore implements TurnDiffStoreApi {
   constructor(options: TurnDiffStoreClientOptions) {
     this.storeOptions = {
       dbPath: options.dbPath,
+      ...(options.readOnly === undefined ? {} : { readOnly: options.readOnly }),
       ...(options.retentionDays === undefined ? {} : { retentionDays: options.retentionDays }),
       ...(options.maxStorageBytes === undefined
         ? {}
@@ -82,6 +87,20 @@ export class TurnDiffStore implements TurnDiffStoreApi {
         capturedAtMs: input.capturedAtMs ?? recordedAtMs,
         recordedAtMs,
       },
+    });
+  }
+
+  async getSnapshotDescriptor(input: SnapshotDescriptorInput): Promise<SnapshotDescriptor> {
+    return await this.request({
+      kind: 'snapshot-descriptor',
+      input: { ...input, nowMs: input.nowMs ?? this.now() },
+    });
+  }
+
+  async getSnapshotBytes(input: SnapshotBytesInput): Promise<SnapshotBytes> {
+    return await this.request({
+      kind: 'snapshot-bytes',
+      input: { ...input, nowMs: input.nowMs ?? this.now() },
     });
   }
 

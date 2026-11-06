@@ -1,4 +1,13 @@
 import {
+  CodeCollabOpenDiffManifestRequestSchema,
+  CodeCollabReadBlobRequestSchema,
+  type CodeCollabDiffReadContext,
+  type CodeCollabOpenDiffManifestRequest,
+  type CodeCollabOpenDiffManifestResponse,
+  type CodeCollabReadBlobRequest,
+  type CodeCollabReadBlobResponse,
+} from '@lody/shared';
+import {
   AndroidEmulatorRemoteResponseSchema,
   type AndroidEmulatorRequest,
   type AndroidEmulatorResponse,
@@ -546,6 +555,14 @@ type RpcServerDeps = {
     args: CodeCollabV2RefreshTextRequest
   ) => Promise<CodeCollabV2RefreshTextResponse>;
   saveCodeCollabText?: (args: CodeCollabV2SaveTextRequest) => Promise<CodeCollabV2SaveTextResponse>;
+  openCodeCollabDiffManifest?: (
+    args: CodeCollabOpenDiffManifestRequest,
+    context: CodeCollabDiffReadContext
+  ) => Promise<CodeCollabOpenDiffManifestResponse>;
+  readCodeCollabBlob?: (
+    args: CodeCollabReadBlobRequest,
+    context: CodeCollabDiffReadContext
+  ) => Promise<CodeCollabReadBlobResponse>;
   openCodeCollabCurrentDiff?: (
     args: CodeCollabV2OpenCurrentDiffRequest
   ) => Promise<CodeCollabV2OpenCurrentDiffResponse>;
@@ -1925,6 +1942,74 @@ export class LoroStreamsMachineRpcServer {
           });
           return;
         }
+        case 'code-collab/open-diff-manifest': {
+          const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
+          codeCollabOwnerSessionId = decoded.ownerSessionId;
+          const params = CodeCollabOpenDiffManifestRequestSchema.parse(decoded.payload);
+          await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
+          const handler = this.deps.openCodeCollabDiffManifest;
+          if (!handler) {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Diff blob transport is unavailable.',
+            });
+            return;
+          }
+          const response = await handler(params, {
+            plane: 'remote',
+            measureResponse: async (value) => {
+              const result = await encryptCodeCollabV2RpcPayload(decoded.ownerSessionId, value);
+              return new TextEncoder().encode(
+                JSON.stringify({
+                  jsonrpc: JSON_RPC_VERSION,
+                  id: request.id,
+                  method: request.method,
+                  rpcVersion: this.deps.rpcVersion ?? LORO_STREAMS_RPC_VERSION,
+                  machineId: this.deps.machineId,
+                  result,
+                })
+              ).byteLength;
+            },
+          });
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
+            codeCollabOwnerSessionId: decoded.ownerSessionId,
+          });
+          return;
+        }
+        case 'code-collab/read-blob': {
+          const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
+          codeCollabOwnerSessionId = decoded.ownerSessionId;
+          const params = CodeCollabReadBlobRequestSchema.parse(decoded.payload);
+          await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
+          const handler = this.deps.readCodeCollabBlob;
+          if (!handler) {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Diff blob transport is unavailable.',
+            });
+            return;
+          }
+          const response = await handler(params, {
+            plane: 'remote',
+            measureResponse: async (value) => {
+              const result = await encryptCodeCollabV2RpcPayload(decoded.ownerSessionId, value);
+              return new TextEncoder().encode(
+                JSON.stringify({
+                  jsonrpc: JSON_RPC_VERSION,
+                  id: request.id,
+                  method: request.method,
+                  rpcVersion: this.deps.rpcVersion ?? LORO_STREAMS_RPC_VERSION,
+                  machineId: this.deps.machineId,
+                  result,
+                })
+              ).byteLength;
+            },
+          });
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
+            codeCollabOwnerSessionId: decoded.ownerSessionId,
+          });
+          return;
+        }
         case 'code-collab/open-current-diff': {
           const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
           codeCollabOwnerSessionId = decoded.ownerSessionId;
@@ -2429,6 +2514,8 @@ export class LoroStreamsMachineRpcServer {
       | CodeCollabV2OpenTextOk
       | CodeCollabV2RefreshTextResponse
       | CodeCollabV2SaveTextResponse
+      | CodeCollabOpenDiffManifestResponse
+      | CodeCollabReadBlobResponse
       | CodeCollabV2OpenCurrentDiffResponse
       | CodeCollabV2OpenAllChangesDiffResponse
       | CodeCollabV2OpenTurnDiffResponse

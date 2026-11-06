@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { isDeepStrictEqual } from 'node:util';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
 import { projectRunMetaPatch } from '@/session/project-run-state';
@@ -369,7 +370,14 @@ export interface LoroDocumentManagerOptions {
   remoteStreamsAttached?: boolean;
   encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
+    | 'content'
+    | 'bucketId'
+    | 'refresh'
+    | 'close'
+    | 'repositoryDirectory'
+    | 'attachmentToken'
+    | 'retainQueuedInput'
+    | 'authorizeMachineTarget'
   >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
@@ -428,7 +436,14 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
+    | 'content'
+    | 'bucketId'
+    | 'refresh'
+    | 'close'
+    | 'repositoryDirectory'
+    | 'attachmentToken'
+    | 'retainQueuedInput'
+    | 'authorizeMachineTarget'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -439,6 +454,18 @@ export class LoroDocumentManager {
   /** Reader interest belongs to the daemon, never to a discovery request. */
   isEncryptedWorkspace(): boolean {
     return this.encryptedWorkspace !== undefined;
+  }
+
+  /** Encrypted workspaces: a one-shot command's machine access, from this process's ledger. */
+  async authorizeEncryptedMachine(machineId: string, localProjectId?: string): Promise<boolean> {
+    const e2ee = this.encryptedWorkspace;
+    if (!e2ee) throw new Error('e2ee_access_unavailable');
+    return await Effect.runPromise(e2ee.authorizeMachineTarget(machineId, localProjectId));
+  }
+
+  /** Encrypted workspaces: this machine's own queue write needs local evidence first. */
+  retainQueuedInput(input: Parameters<CliE2eeWorkspaceLegacy['retainQueuedInput']>[0]): void {
+    this.encryptedWorkspace?.retainQueuedInput(input);
   }
 
   async getEncryptedAttachmentToken(): Promise<string> {
@@ -485,7 +512,14 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       encryptedWorkspace?: Pick<
         CliE2eeWorkspaceLegacy,
-        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
+        | 'content'
+        | 'bucketId'
+        | 'refresh'
+        | 'close'
+        | 'repositoryDirectory'
+        | 'attachmentToken'
+        | 'retainQueuedInput'
+        | 'authorizeMachineTarget'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;

@@ -241,6 +241,7 @@ describe('phased text in finished turns', () => {
       'worked_group_header',
       'content:text',
       'content:text',
+      'content:text',
     ]);
     const rows = buildRows(items, true, true);
     const ordered = rows.flatMap((row) => {
@@ -292,7 +293,7 @@ describe('phased text in finished turns', () => {
     ).toEqual(['worked_group_header', 'content:text', 'content:text']);
   });
 
-  it('keeps commentary visible while streaming and when no explicit answer exists', () => {
+  it('keeps interrupted work open and folds it when an unphased answer arrives', () => {
     const items = [phased('Inspecting', 'commentary'), tool('read', 'read')];
     expect(visibleContentKinds(buildRows(items, false), true)).toEqual([
       'worked_group_header',
@@ -304,8 +305,7 @@ describe('phased text in finished turns', () => {
       'activity_group_header',
     ]);
     expect(visibleContentKinds(buildRows([...items, answerText('Unknown phase')], true))).toEqual([
-      'content:text',
-      'activity_group_header',
+      'worked_group_header',
       'content:text',
     ]);
   });

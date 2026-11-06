@@ -57,6 +57,12 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
 
 ## Invariants
 
+- A landing selection follows the machine the user chose, not presence. Liveness may
+  replace a restored selection only once per landing mount, when a synced room first
+  reports its machine offline; that fallback stays out of stored defaults and returns
+  to the remembered target when it comes back. Afterwards an offline selection stays
+  selected and marked, only a definite `offline` blocks send, and `unknown` proceeds.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-05-landing-selection-presence-churn.md).
 - The chat-route URL declares selection, never one-shot event nonces. Once it names
   a selection, mirror composer steering through desktop `onSelectionUrlSync` using
   replace (incomplete selection → empty search). Plain `/chat` stays plain; restored

@@ -7,6 +7,7 @@ import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import {
   getSessionRoomId,
+  encodeSessionFilePath,
   getCodeCollabFileIndexFlockDocId,
   codeCollabFileIndexToSharedState,
   type CodeCollabAllChangesScope,
@@ -28,6 +29,7 @@ import {
   getSessionFileRootMountsKey,
   remapSessionFileRecord,
   toSessionFileRequestPath,
+  toSessionFileDisplayPath,
   type SessionFileRootMounts,
 } from '@/lib/session-file-root-mounts';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
@@ -94,6 +96,7 @@ const disabledResult: UseCodeCollabSessionFileProviderResult = {
 export type CodeCollabV2MaterializedSharedState = {
   readonly fileTree: CodeCollabV2FileTreeState;
   readonly allChanges: CodeCollabV2AllChangesState;
+  readonly generations?: Readonly<Record<string, string>>;
   readonly files: readonly SessionFileProviderEntry[];
   readonly filesByPath: ReadonlyMap<string, SessionFileProviderEntry>;
   readonly version: number;
@@ -117,6 +120,7 @@ function sortedEntriesFromMap(
 }
 
 export function materializeCodeCollabV2FileIndexForFileProvider(args: {
+  readonly generations?: Readonly<Record<string, string>>;
   readonly fileIndex?: CodeCollabV2FileIndexState | null;
   readonly revision: number;
   readonly updatedAtMs?: number;
@@ -148,6 +152,7 @@ export function materializeCodeCollabV2FileIndexForFileProvider(args: {
   return {
     fileTree,
     allChanges,
+    generations: args.generations ? remapSessionFileRecord(args.generations, mounts) : undefined,
     files,
     filesByPath,
     version: args.revision,
@@ -403,6 +408,17 @@ export function useCodeCollabSessionFileProvider(
     };
   }
   const providerTextState = textStateRef.current.state;
+  useEffect(
+    () => () => {
+      providerTextState.diffBlobCache.clear();
+    },
+    [providerTextState]
+  );
+  useEffect(() => {
+    if (options.enabled === false || !indexAllowed) {
+      providerTextState.diffBlobCache.clear();
+    }
+  }, [providerTextState, options.enabled, indexAllowed]);
   const role = options.requestedRole ?? 'write';
   const sourceState = resolveCodeCollabSessionFileProviderSourceState(role);
   const prepareFileIndexTarget = useMemo(
@@ -443,6 +459,7 @@ export function useCodeCollabSessionFileProvider(
       ? sharedStateRef.current.state
       : null;
   const materializedSharedState = materializeCodeCollabV2FileIndexForFileProvider({
+    generations: fileIndexSnapshot?.generations,
     fileIndex: fileIndexSnapshot?.fileIndex ?? null,
     revision: fileIndexSnapshot?.revision ?? 0,
     updatedAtMs: fileIndexSnapshot?.updatedAtMs,
@@ -465,8 +482,115 @@ export function useCodeCollabSessionFileProvider(
         ? { path: request.path }
         : { path: request.path, rootId: request.rootId };
     };
+    let nextIndexActivation = 0;
+    let indexActivation: Promise<void> | undefined;
+    const activateDiffIndex = async () => {
+      // Index publication is an existing writer action, separate from pure blob reads.
+      // Repeated diff activity renews its ten-minute watch without scanning per file.
+      if (role === 'read' || Date.now() < nextIndexActivation) return;
+      if (!indexActivation) {
+        nextIndexActivation = Date.now() + 5_000;
+        indexActivation = (async () => {
+          const roots = [undefined, ...mounts.map((mount) => mount.rootId)];
+          const results = await Promise.allSettled(
+            roots.map((rootId) =>
+              runtime.requestCodeCollabInitDirectory(
+                machineId,
+                { sessionId, path: '.', ...(rootId ? { rootId } : {}) },
+                { ownerSessionId }
+              )
+            )
+          );
+          if (
+            results.every(
+              (result) => result.status === 'fulfilled' && result.value?.status === 'ok'
+            )
+          )
+            nextIndexActivation = Date.now() + 5 * 60_000;
+          else
+            warnCodeCollab('diff-index-activation', {
+              sessionId,
+              message: 'Index activation failed.',
+            });
+        })().finally(() => {
+          nextIndexActivation = Math.max(nextIndexActivation, Date.now() + 5_000);
+          indexActivation = undefined;
+        });
+      }
+      await indexActivation;
+    };
     return {
       sessionId,
+      diffBlobTransportOptions: async () => {
+        const config = await runtime.getDiffBlobTransportOptions(machineId);
+        if (config.supported)
+          void activateDiffIndex().catch((error: unknown) =>
+            warnCodeCollab('diff-index-activation', {
+              sessionId,
+              ...describeCodeCollabError(error),
+            })
+          );
+        return config;
+      },
+      openDiffManifest: async (request) => {
+        const selected = request.path ?? request.focusPath;
+        const target = selected === undefined ? undefined : at(selected);
+        const result = await runtime.requestCodeCollabOpenDiffManifest(
+          machineId,
+          {
+            sessionId,
+            ...request,
+            ...(target === undefined
+              ? {}
+              : {
+                  rootId:
+                    request.path !== undefined && 'rootId' in target ? target.rootId : undefined,
+                  ...(request.path === undefined
+                    ? {
+                        focusPath:
+                          'rootId' in target && target.rootId
+                            ? encodeSessionFilePath({
+                                rootId: target.rootId,
+                                relativePath: target.path,
+                              })
+                            : target.path,
+                      }
+                    : { path: target.path }),
+                }),
+          },
+          { ownerSessionId }
+        );
+        if (result?.status === 'ok')
+          return {
+            ...result,
+            entries: result.entries.map((entry) => ({
+              ...entry,
+              path: toSessionFileDisplayPath(
+                entry.path.startsWith('\0')
+                  ? entry.path
+                  : request.path !== undefined && target && 'rootId' in target && target.rootId
+                    ? encodeSessionFilePath({ rootId: target.rootId, relativePath: entry.path })
+                    : entry.path,
+                mounts
+              ),
+            })),
+          };
+        return result;
+      },
+      readDiffBlob: async (key, offset, length, filePath) => {
+        const target = at(filePath);
+        return await runtime.requestCodeCollabReadBlob(
+          machineId,
+          {
+            sessionId,
+            key,
+            offset,
+            length,
+            ...('rootId' in target ? { rootId: target.rootId } : {}),
+          },
+          { ownerSessionId }
+        );
+      },
       downloadFile: (path, signal) =>
         collectFileDownload(
           (range) =>
@@ -568,6 +692,7 @@ export function useCodeCollabSessionFileProvider(
     machineId,
     mounts,
     options.requestedByUserId,
+    role,
     ownerSessionId,
     runtime,
     sessionId,
@@ -587,6 +712,7 @@ export function useCodeCollabSessionFileProvider(
       allChanges: sharedState?.allChanges ?? {},
       updatedAtMs: sharedState?.updatedAtMs,
       textState: providerTextState,
+      generations: sharedState?.generations,
     });
   }, [
     indexAllowed,

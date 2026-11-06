@@ -93,7 +93,7 @@ const isReadyFileDiffData = (
 export const isCacheableResolvedFileDiffData = (
   data: FileDiffData
 ): data is Extract<FileDiffData, { status: 'ready' | 'ready-parsed' }> =>
-  data.status === 'ready' || data.status === 'ready-parsed';
+  data.status === 'ready' || (data.status === 'ready-parsed' && !data.loadDiffFiles);
 
 const waitForDiffLoadSlot = async (): Promise<void> => {
   if (typeof window === 'undefined') {
@@ -309,13 +309,27 @@ export const useSessionConversationDiffData = ({
   );
   const loadContextRef = useRef(loadContext);
   loadContextRef.current = loadContext;
+  const readControllers = useRef(new Map<AbortController, typeof loadContext>());
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      for (const controller of readControllers.current.keys()) controller.abort();
     };
   }, []);
+
+  useEffect(
+    () => () => {
+      for (const [controller, context] of readControllers.current)
+        if (context === loadContext) controller.abort();
+    },
+    [loadContext]
+  );
+  useEffect(() => {
+    if (!enabled || loadPaused)
+      for (const controller of readControllers.current.keys()) controller.abort();
+  }, [enabled, loadPaused]);
 
   const [resolvedByPath, setResolvedByPath] = useState<Record<string, FileDiffData>>({});
   const [loadSettlements, setLoadSettlements] = useState(0);
@@ -495,6 +509,10 @@ export const useSessionConversationDiffData = ({
         return;
       }
 
+      const controller = fileProvider?.supportsCancellableDiffReads
+        ? new AbortController()
+        : undefined;
+      if (controller) readControllers.current.set(controller, loadContext);
       try {
         const readStartedAt = getDiffPerfNow();
         if (!fileProvider) {
@@ -513,12 +531,21 @@ export const useSessionConversationDiffData = ({
           mode === 'base' ? undefined : turnId,
           matchedFileDiff,
         ];
-        if (mode === 'base' && allChangesScope !== undefined) {
+        if (controller)
+          diffRequestArgs.push({
+            ...(mode === 'base' && allChangesScope !== undefined ? { allChangesScope } : {}),
+            signal: controller.signal,
+          });
+        else if (mode === 'base' && allChangesScope !== undefined) {
           diffRequestArgs.push({ allChangesScope });
         }
         const data = sessionFileProviderDiffResultToFileDiffData(
           await fileProvider.getDiff(...diffRequestArgs)
         );
+        if (controller?.signal.aborted && fileProvider?.supportsCancellableDiffReads) {
+          inFlightPathsRef.current.delete(filePath);
+          return;
+        }
         if (!isCurrentLoad()) {
           if (data.status === 'ready-text-source') data.source.dispose?.();
           return;
@@ -573,6 +600,10 @@ export const useSessionConversationDiffData = ({
           );
         }
       } catch (error) {
+        if (controller?.signal.aborted && fileProvider?.supportsCancellableDiffReads) {
+          inFlightPathsRef.current.delete(filePath);
+          return;
+        }
         if (!isCurrentLoad()) return;
         const message = getSessionDiffErrorMessage(error);
         const attempts = (retryAttemptsRef.current.get(filePath) ?? 0) + 1;
@@ -629,6 +660,7 @@ export const useSessionConversationDiffData = ({
           }
         }
       } finally {
+        if (controller) readControllers.current.delete(controller);
         inFlightPaths.delete(filePath);
         if (mounted.current) setLoadSettlements((version) => version + 1);
       }

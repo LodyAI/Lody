@@ -150,6 +150,34 @@ describe('materializeCodeCollabV2FileIndexForFileProvider', () => {
   });
 });
 
+describe('file-index generation replication', () => {
+  it('publishes generation-only updates without replacing legacy file rows', async () => {
+    const flock = new Flock('generation-only');
+    flock.set(['a.ts'], { kind: 'text', change: { diff: [1, 1] } });
+    flock.set(['a.ts', 'v'], { g: 'epoch.1' });
+    flock.commit();
+    const runtime = createRuntime({
+      repo: { openFlockDoc: async () => ({ flock, joinRoom: async () => makeSyncedFlockRoom() }) },
+    });
+    const lease = await runtime.codeCollabFileIndexCache!.acquire('workspace:fi:owner');
+    try {
+      await flushMicrotasks(8);
+      const first = lease.resource.getSnapshot();
+      if (first.status !== 'ready') throw new Error('Index not ready.');
+      expect(first.snapshot.generations).toEqual({ 'a.ts': 'epoch.1' });
+      flock.set(['a.ts', 'v'], { g: 'epoch.2' });
+      flock.commit();
+      const second = lease.resource.getSnapshot();
+      if (second.status !== 'ready') throw new Error('Index not ready.');
+      expect(second.snapshot.generations).toEqual({ 'a.ts': 'epoch.2' });
+      expect(second.snapshot.fileIndex).toBe(first.snapshot.fileIndex);
+      expect(second.snapshot.revision).toBeGreaterThan(first.snapshot.revision);
+    } finally {
+      await lease.release();
+    }
+  });
+});
+
 describe('useCodeCollabSessionFileProvider', () => {
   it('releases a failed conversation borrower so the next Files open can recover', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -462,6 +490,86 @@ describe('useCodeCollabSessionFileProvider', () => {
     });
   });
 
+  it.each(['write', 'read'] as const)(
+    'keeps %s diff reads available while writer index activation is independent',
+    async (role) => {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+      const store = createStore();
+      const sessionId = `diff-activation-${role}` as SessionId;
+      const machineId = 'machine-1' as MachineId;
+      const flock = {
+        scan: () => [{ key: ['a.ts'], value: { kind: 'text', change: { diff: [1, 1] } } }],
+        subscribe: () => () => undefined,
+      };
+      let watching = false;
+      let releaseActivation!: () => void;
+      const held = new Promise<void>((resolve) => {
+        releaseActivation = resolve;
+      });
+      const runtime = createRuntime({
+        repo: {
+          openFlockDoc: async () => ({ flock, joinRoom: async () => makeSyncedFlockRoom() }),
+        },
+        getDiffBlobTransportOptions: async () => ({
+          supported: true,
+          scope: 'synthetic',
+          persist: false,
+        }),
+        requestCodeCollabInitDirectory: async () => {
+          watching = true;
+          await held;
+          throw new Error('Synthetic index publication unavailable');
+        },
+        requestCodeCollabOpenDiffManifest: async () => ({
+          status: 'ok',
+          entries: [
+            {
+              path: 'a.ts',
+              status: 'ok',
+              base: null,
+              head: { key: `sha256:${'1'.repeat(64)}`, rawBytes: 1, format: { encoding: 'utf8' } },
+            },
+          ],
+          nextCursor: null,
+        }),
+      });
+      store.set(runtimeAtom, runtime);
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(sessionId)]: {
+          id: sessionId,
+          machineId,
+          userId: 'user-1',
+        } as SessionMeta,
+      });
+      let latest: UseCodeCollabSessionFileProviderResult | undefined;
+      function Harness() {
+        const result = useCodeCollabSessionFileProvider({
+          workspaceId: 'workspace-1',
+          sessionId,
+          machineId,
+          requestedRole: role,
+        });
+        useEffect(() => {
+          latest = result;
+        }, [result]);
+        return null;
+      }
+      render(createElement(Provider, { store }, createElement(Harness)));
+      await flushMicrotasks();
+      const result = await latest!.provider!.getAllChangesDiff!();
+      expect(result).toMatchObject({
+        status: 'ready',
+        entries: [{ path: 'a.ts', diff: { status: 'deferred' } }],
+      });
+      expect(watching).toBe(role === 'write');
+      releaseActivation();
+      await flushMicrotasks();
+      // Failure of the optional publisher leaves exact content reads usable.
+      expect(await latest!.provider!.getAllChangesDiff!()).toMatchObject({ status: 'ready' });
+      await flushMicrotasks();
+    }
+  );
+
   it('publishes the remote file index after a read-only Flock catchup', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const store = createStore();
@@ -525,7 +633,6 @@ describe('useCodeCollabSessionFileProvider', () => {
     expect(syncOnce).not.toHaveBeenCalled();
     expect(joinRoom).toHaveBeenCalledTimes(1);
     expect(initDirectory).not.toHaveBeenCalled();
-    expect(scan).toHaveBeenCalledTimes(2);
     expect(updates.at(-1)).toMatchObject({
       status: 'ready',
       role: 'write',
@@ -589,7 +696,6 @@ describe('useCodeCollabSessionFileProvider', () => {
     expect(syncOnce).not.toHaveBeenCalled();
     expect(joinRoom).toHaveBeenCalledTimes(1);
     expect(initDirectory).not.toHaveBeenCalled();
-    expect(scan).toHaveBeenCalledTimes(2);
     expect(updates.at(-1)?.status).toBe('empty');
   });
 

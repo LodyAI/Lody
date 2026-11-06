@@ -32,6 +32,7 @@ import {
   type SessionMeta,
   type SessionQueuePromotionRecord,
   type WorkspaceId,
+  queuedInputEvidence,
 } from '@lody/shared';
 
 const createSilentLogger = (): Logger => ({
@@ -2036,9 +2037,16 @@ describe('SessionDispatchWatcher', () => {
         expect(work.watchedSessions.has(sessionId)).toBe(false);
         expect(dispatched).toEqual([]);
         if (automation) {
+          let receipted: { timestamp: unknown; userId: unknown; inputConfig: unknown } | undefined;
           const adapter = new AutomationSessionActionsLegacy({
             lody: {
-              documentManager: { repo, getOrCreateSessionDoc: async () => doc },
+              documentManager: {
+                repo,
+                getOrCreateSessionDoc: async () => doc,
+                retainQueuedInput: (input: typeof receipted) => {
+                  receipted = input;
+                },
+              },
               getAutomationSessionAuthority: () => ({ acceptInput: async () => true }),
             },
           } as unknown as ConstructorParameters<typeof AutomationSessionActionsLegacy>[0]);
@@ -2070,6 +2078,15 @@ describe('SessionDispatchWatcher', () => {
             dispatched: ['late-queued-turn'],
             queued: [],
           });
+          // The local evidence must match the row promotion wrote, or encrypted starts refuse.
+          const promoted = await doc.sessionData.history.readTurn('late-queued-turn');
+          if (promoted.state !== 'ready') throw new Error('promoted turn missing');
+          expect(receipted?.timestamp).toBe(promoted.turn.timestamp);
+          expect(receipted?.userId).toBe(promoted.turn.userId);
+          expect(queuedInputEvidence(promoted.turn.inputConfig)).toBeDefined();
+          expect(queuedInputEvidence(receipted?.inputConfig)).toBe(
+            queuedInputEvidence(promoted.turn.inputConfig)
+          );
           return;
         }
         const sender = new SessionDocument(
@@ -2788,6 +2805,44 @@ describe('SessionDispatchWatcher', () => {
       doc.mirror.dispose();
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('builds an encrypted turn request under the verified requester', async () => {
+    const id = 'encrypted-requester' as SessionId;
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {} as never,
+      executionService: {} as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+      encryptedWorkspace: true,
+      resolveEncryptedRequester: async () => ({ userId: 'e2ee-member:verified' }),
+    });
+    const request = await (
+      watcher as unknown as {
+        buildChatRequestFromHistoryEntry: (
+          meta: SessionMeta,
+          entry: SessionHistoryInput,
+          launch: undefined,
+          user: { name: string; email: string },
+          requesterUserId?: string
+        ) => Promise<{ userId: string; userName: string }>;
+      }
+    ).buildChatRequestFromHistoryEntry(
+      { id, userId: 'label', cliType: 'builtin', agentType: 'codex' } as SessionMeta,
+      {
+        id: 'turn',
+        role: 'user',
+        userId: 'label',
+        items: [{ type: 'text', text: 'hello' }],
+        timestamp: '2026-11-06T00:00:00.000Z',
+      } as SessionHistoryInput,
+      undefined,
+      { name: 'Label Name', email: 'label@example.com' },
+      'e2ee-member:verified'
+    );
+    expect(request).toMatchObject({ userId: 'e2ee-member:verified', userName: 'Label Name' });
   });
 
   it('leaves no pending activation once a promoted queue turn is handled', async () => {

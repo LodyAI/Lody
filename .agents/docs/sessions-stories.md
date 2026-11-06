@@ -46,7 +46,7 @@ this page is the full text of the rules summarised there.
 tests/e2e/session-info-bar-observation.spec.ts --workers=1` for its browser
   regression and ignored screenshot output. The optional `B08_SCREENSHOT_FIXTURES`
   directory supplies scheduler-captured `before.json` / `after.json` for comparison;
-  see the [observation decision](../notes/proposed/bug-fix/2026-10-01-pr-observation-association.md)
+  see the [observation decision](../notes/implemented/bug-fix/2026-10-01-pr-observation-association.md)
   for evidence and acceptance limits.
 - Browser Preview has `States` (`SessionBrowserPreview.stories.tsx`) for deterministic
   presentation and `Controller` (`SessionBrowserPanel.stories.tsx`) for real Enter and

@@ -190,4 +190,4 @@ PR 合入主分支之前的产品版 macOS arm64 快照编译及打包成功，�
 相关决策：[增量恢复](2026-10-16-roost-incremental-history.zh.md)、
 [写入放大](2026-10-16-roost-storage-write-amplification.zh.md)、
 [Native 运行时](../../proposed/architecture/2026-10-09-roost-native-runtime.zh.md)、
-[新会话功能门](../../proposed/feature/2026-10-08-roost-history-feature-gate.zh.md)。
+[新会话功能门](../feature/2026-10-08-roost-history-feature-gate.zh.md)。

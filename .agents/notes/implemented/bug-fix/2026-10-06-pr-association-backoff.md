@@ -33,7 +33,7 @@ pretending rejection succeeded would suppress needed linkage recovery. Repositor
 scoping prevents many sessions for one unavailable repository from multiplying
 requests; distinct workspaces and repositories retain independent gates.
 
-This extends the [observation/association separation decision](../../proposed/bug-fix/2026-10-01-pr-observation-association.md).
+This extends the [observation/association separation decision](2026-10-01-pr-observation-association.md).
 The [observation Spec](../../../../specs/local-github-pr-observation.md) remains draft.
 
 ## Verification

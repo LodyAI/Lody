@@ -46,6 +46,27 @@ describe('local Machine RPC', () => {
       }).success
     ).toBe(false);
   });
+  it('accepts custom endpoints that discover models from the server', () => {
+    const provider = {
+      name: 'Gateway',
+      protocol: 'openai-completions',
+      baseUrl: 'https://example.test/v1',
+      models: [],
+    };
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'sorbet/providers-create',
+      params: { configId: 'config', provider },
+    };
+    expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+    const response = {
+      ok: true,
+      result: { type: 'sorbet/providers-create', provider: { ...provider, id: 'endpoint' } },
+    };
+    expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
+  });
+
   it('retains selected roots across file RPC parsing and defaults legacy requests to main at dispatch', () => {
     for (const [method, params] of [
       ['code-collab/get-file-index', { sessionId: 's' }],

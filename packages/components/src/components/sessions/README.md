@@ -75,8 +75,8 @@ or a compact icon button on mobile. Tap/click (also hover on desktop) opens its
 owner, device and connection details. A machine-only info bar has no raised
 background. The
 [draft Spec](../../../../../specs/composer-machine-owner.md) and
-[proposal](../../../../../.agents/notes/proposed/feature/2026-10-11-composer-machine-info-card.md)
-record the presentation decision awaiting visual review.
+[decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-composer-machine-info-card.md)
+record the presentation, which still awaits visual review.
 In narrow mobile bars the private-access badge keeps its lock and sharing action,
 with the full access description in its accessible name/title.
 

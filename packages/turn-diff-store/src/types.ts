@@ -5,6 +5,8 @@ export const DEFAULT_GC_TARGET_BYTES = 900 * 1024 ** 2;
 export type TurnDiffCompression = 'zstd' | 'gzip';
 
 export interface TurnDiffStoreOptions {
+  /** Existing current-schema database only; never initialize, migrate or collect. */
+  readonly readOnly?: boolean;
   readonly dbPath: string;
   readonly retentionDays?: number;
   readonly maxStorageBytes?: number;
@@ -125,11 +127,35 @@ export interface TurnSnapshotInput extends SnapshotPathInput {
   readonly turnId: string;
 }
 
+/** Without turnId, select the earliest retained old side for this owner's path. */
+export interface SnapshotDescriptorInput extends SnapshotPathInput {
+  readonly turnId?: string;
+  readonly side?: 'old' | 'new';
+}
+
+export type SnapshotDescriptor =
+  | {
+      readonly status: 'ready';
+      readonly snapshot: { readonly hash: string; readonly rawBytes: number } | null;
+    }
+  | { readonly status: 'too_large'; readonly rawBytes: number }
+  | { readonly status: 'unavailable' };
+
+export interface SnapshotBytesInput extends SnapshotDescriptorInput {
+  readonly hash: string;
+}
+export type SnapshotBytes =
+  | { readonly status: 'ready'; readonly bytes: Uint8Array }
+  | { readonly status: 'too_large'; readonly rawBytes: number }
+  | { readonly status: 'unavailable' };
+
 export interface ListTurnFilesInput extends ListChangedPathsInput {
   readonly turnId: string;
 }
 
 export interface TurnDiffStoreApi {
+  getSnapshotDescriptor(input: SnapshotDescriptorInput): Promise<SnapshotDescriptor>;
+  getSnapshotBytes(input: SnapshotBytesInput): Promise<SnapshotBytes>;
   allocateHeadProof(): Promise<number>;
   recordTurn(input: RecordTurnDiffInput): Promise<RecordTurnDiffResult>;
   listChangedPaths(input: ListChangedPathsInput): Promise<readonly string[]>;

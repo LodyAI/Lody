@@ -59,7 +59,12 @@ import {
 } from '@/lib/cloud-cli-port';
 import { getCliPlatformKind } from '@/lib/cli-platform';
 import type { CloudSessionSharingPort } from '@lody/platform';
-import { getDaemonWorkspace, getSessionCommandEnvironment } from './session-command-environment';
+import {
+  getDaemonWorkspace,
+  getSessionCommandEnvironment,
+  runWithEncryptedCommandAccess,
+  type EncryptedCommandAccess,
+} from './session-command-environment';
 import { makeWorkspaceCommandManagers } from './workspace-command-manager';
 import {
   makeLocalWorkspaceCatalog,
@@ -425,6 +430,30 @@ export function createCommandSessionHistoryFactory(
 
 const withCommandManager = makeWorkspaceCommandManagers<LoroDocumentManager>();
 
+/** Command access is local and grants nothing by itself: the machine's start claim decides. */
+export async function checkEncryptedCommandAccess(
+  manager: Pick<LoroDocumentManager, 'authorizeEncryptedMachine'>,
+  commandUserId: string,
+  target: Parameters<EncryptedCommandAccess>[0]
+): ReturnType<EncryptedCommandAccess> {
+  if (target.requesterUserId !== commandUserId)
+    return { allowed: false, reason: 'requester_not_member' };
+  return (await manager.authorizeEncryptedMachine(target.machineId, target.localProjectId))
+    ? { allowed: true }
+    : { allowed: false, reason: target.localProjectId ? 'project_not_shared' : 'not_visible' };
+}
+
+/** This machine has no usable local ledger for the workspace, so the command cannot proceed. */
+export function describeEncryptedCommandFailure(workspaceId: string, error: unknown): Error {
+  const code = error instanceof Error ? error.message : '';
+  if (code !== 'e2ee_pairing_required' && code !== 'e2ee_waiting_for_key')
+    return error instanceof Error ? error : new Error(String(error));
+  return new Error(
+    `This machine cannot open encrypted workspace ${workspaceId} (${code}). Pair this machine with the workspace, or wait for its key, then retry.`,
+    { cause: error }
+  );
+}
+
 export async function withWorkspaceManager<T>(
   auth: AuthContext,
   workspace: WorkspaceSummary,
@@ -481,16 +510,20 @@ export async function withWorkspaceManager<T>(
         workspace.contentMode === 'e2ee'
           ? await (
               await import('./e2ee/workspace-legacy')
-            ).openCliE2eeWorkspaceLegacy({
-              accountId: commandAuth.userId,
-              workspaceId: workspace.id,
-              genesisHash: workspace.genesisHash ?? '',
-              cloud: createCloudE2eePort({ token: commandAuth.token, authBaseUrl, logger }),
-              onUnavailable: () => logger.debug('e2ee_background_unavailable'),
-              onRemoved: async () => {
-                await (await removalOwner)?.cleanUp();
-              },
-            })
+            )
+              .openCliE2eeWorkspaceLegacy({
+                accountId: commandAuth.userId,
+                workspaceId: workspace.id,
+                genesisHash: workspace.genesisHash ?? '',
+                cloud: createCloudE2eePort({ token: commandAuth.token, authBaseUrl, logger }),
+                onUnavailable: () => logger.debug('e2ee_background_unavailable'),
+                onRemoved: async () => {
+                  await (await removalOwner)?.cleanUp();
+                },
+              })
+              .catch((error: unknown) => {
+                throw describeEncryptedCommandFailure(workspace.id, error);
+              })
           : undefined;
       manager = await LoroDocumentManager.create(
         workspace.id as WorkspaceId,
@@ -531,7 +564,13 @@ export async function withWorkspaceManager<T>(
           .catch(() => logger.debug('e2ee_background_unavailable'));
       return manager;
     },
-    fn,
+    (manager) =>
+      manager.isEncryptedWorkspace()
+        ? runWithEncryptedCommandAccess(
+            (target) => checkEncryptedCommandAccess(manager, commandAuth.userId, target),
+            () => fn(manager)
+          )
+        : fn(manager),
     (error) => {
       getLogger(loggerName).debug(
         `Failed to clean up workspace manager for ${workspace.id}: ${formatErrorMessage(error)}`

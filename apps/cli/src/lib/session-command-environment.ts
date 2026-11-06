@@ -105,11 +105,29 @@ export interface DaemonWorkspace {
     origin: { sessionId: string; userTurnId: string },
     target: { machineId: string }
   ): Promise<'owner' | 'member'>;
+  /** Encrypted only: machine access decided locally, without the workspace service. */
+  checkEncryptedMachineAccess?(target: {
+    machineId: string;
+    requesterUserId: string;
+    localProjectId?: string;
+  }): Promise<MachineAccessCheckResult>;
 }
+
+/** A one-shot command's own encrypted replica decides machine access for that command. */
+export type EncryptedCommandAccess = NonNullable<DaemonWorkspace['checkEncryptedMachineAccess']>;
+const encryptedCommandAccess = new AsyncLocalStorage<EncryptedCommandAccess>();
+export const runWithEncryptedCommandAccess = <T>(access: EncryptedCommandAccess, run: () => T): T =>
+  encryptedCommandAccess.run(access, run);
 
 const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();
 export const runWithDaemonWorkspace = <T>(workspace: DaemonWorkspace, run: () => T): T =>
   daemonWorkspaces.run(workspace, run);
+/** Encrypted machine access from this process's own ledger, in a daemon or a one-shot command. */
+export const readEncryptedMachineAccess = (target: Parameters<EncryptedCommandAccess>[0]) =>
+  (getDaemonWorkspace()?.checkEncryptedMachineAccess ?? encryptedCommandAccess.getStore())?.(
+    target
+  );
+
 /** A local environment is itself a daemon workspace. */
 export const getDaemonWorkspace = (): DaemonWorkspace | undefined => {
   const environment = environments.getStore();

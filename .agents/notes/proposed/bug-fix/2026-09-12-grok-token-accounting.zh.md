@@ -168,7 +168,7 @@ Prettier。定向格式化、文档检查、公共/平台边界检查通过。
 `rawResponse/completed` 用量。适配器现在把这些事件归到已解析的 thread/turn 模型，
 只把 thread 总量中未被覆盖的余量留在 `codex:unattributed`；`$CODEX_HOME` sidecar
 会在 resume 时恢复模型账本，fork 会话排除源历史。详见
-[Codex 分模型用量归因](2026-09-15-codex-per-model-attribution.zh.md)。
+[Codex 分模型用量归因](../../implemented/bug-fix/2026-09-15-codex-per-model-attribution.zh.md)。
 消费端持久 accounting identity 仍未解决。
 
 ## 取舍与限制

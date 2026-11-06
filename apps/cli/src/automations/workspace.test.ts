@@ -106,6 +106,7 @@ async function workspaceFixture(
     lody: {
       documentManager: {
         repo,
+        retainQueuedInput: () => {},
         getOrCreateSessionDoc: async () => doc,
         getAgentConfigForMachineLaunch: async () => quota?.config,
       },

@@ -16,7 +16,7 @@ primes a replacement. The option is off by default, so the cold path remains
 the ordinary fallback. The spare warms the application shell and shared
 providers, not a specific workspace's data, and it costs one extra hidden
 renderer process. It builds on the earlier desktop
-multi-window decision ([note](../../proposed/feature/2026-09-10-desktop-windows.md),
+multi-window decision ([note](2026-09-10-desktop-windows.md),
 [Spec](../../../../specs/desktop-windows.zh.md)).
 
 ## Decision

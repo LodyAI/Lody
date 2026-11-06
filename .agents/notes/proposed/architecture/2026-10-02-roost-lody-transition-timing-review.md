@@ -13,8 +13,8 @@ that boundary: a finding is recorded only when a concrete interleaving reaches a
 wrong durable result or a user-visible turn result. The current review confirms
 six P1 risks involving worktree fork backend selection, permission deadlines,
 turn finalization identity, metadata ledgers, steer submission, and cold-start
-backend identity. F5 now has a pre-submission fence in the working tree and a
-deterministic regression test; the other open findings still require their own
+backend identity. F5 is fixed: a post-status check in `session-execution-service.ts`
+fences provider submission. The other open findings still require their own
 fences and verification.
 
 ## Purpose and review rule
@@ -220,8 +220,9 @@ JSON value.
 
 ### F5 — Stop can still submit a steer while its durable `submitted` state is being written
 
-**Status:** fixed in the working tree, pending commit/CI; the asynchronous
-backend write introduced by the transition widens the window; user-visible.
+**Status:** fixed: `session-execution-service.ts` re-checks provider submission
+(`postStatusRejection`) after the durable `submitted` write and before `steerPrompt`.
+The asynchronous backend write introduced by the transition widened the window; user-visible.
 
 **Code path:**
 
