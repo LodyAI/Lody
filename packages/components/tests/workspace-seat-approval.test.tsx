@@ -72,7 +72,7 @@ it('shows the deferred fee before approving membership', async () => {
   await act(async () =>
     (document.querySelector('button[aria-label="Approve"]') as HTMLButtonElement).click()
   );
-  expect(refresh).toHaveBeenCalledOnce();
+  expect(refresh).not.toHaveBeenCalled();
   expect(approve).not.toHaveBeenCalled();
   expect(document.body.textContent).toContain('$57.41');
   expect(document.body.textContent).toContain('They get access right away');
@@ -80,5 +80,6 @@ it('shows the deferred fee before approving membership', async () => {
     (button) => button.textContent === 'Approve'
   )!;
   await act(async () => confirm.click());
+  expect(refresh).toHaveBeenCalledOnce();
   expect(approve).toHaveBeenCalledWith({ requestId: 'request', decision: 'approved' });
 });
