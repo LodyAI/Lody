@@ -4,12 +4,12 @@ This directory owns the public site's docs presentation in local StyleX. The
 route adapter in [`docs.tsx`](../../src/site-pages/docs.tsx) supplies its layout
 and page slots; [`mdx.tsx`](../mdx.tsx) supplies the article components.
 
-| Area                  | Owner                                                                                                        | Behavior boundary                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| Layout and navigation | `layout-*`, `page-container`, `page-breadcrumb`, `page-footer`                                               | Public layout/tree contexts, sidebar primitives and framework links retain navigation and state. |
-| Contents and search   | `page-toc`, `search-parts`                                                                                   | Core scrollspy, measured TOC tracks, search contexts and keyboard-list behavior remain upstream. |
-| Article components    | `page-text`, `heading`, `codeblock`, `tabs`, `accordion`, `card`, `callout`, `steps`, `table`                | Local presentation composes with public Fumadocs or Base UI behavior primitives where needed.    |
-| Reading foundation    | [`app/reading-prose.css`](../../app/reading-prose.css), [`app/reading-code.css`](../../app/reading-code.css) | Semantic article typography and Shiki token/line integration.                                    |
+| Area                  | Owner                                                                                                        | Behavior boundary                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Layout and navigation | `layout-*`, `page-container`, `page-breadcrumb`, `page-footer`                                               | Public layout/tree contexts, sidebar primitives and framework links retain navigation and state.                         |
+| Contents and search   | `page-toc`, `search-parts`                                                                                   | Core scrollspy/item navigation, search contexts and keyboard-list behavior remain upstream; normal track state is local. |
+| Article components    | `page-text`, `heading`, `codeblock`, `tabs`, `accordion`, `card`, `callout`, `steps`, `table`                | Local presentation composes with public Fumadocs or Base UI behavior primitives where needed.                            |
+| Reading foundation    | [`app/reading-prose.css`](../../app/reading-prose.css), [`app/reading-code.css`](../../app/reading-code.css) | Semantic article typography and Shiki token/line integration.                                                            |
 
 The site does not load Fumadocs' utility safelist or typography compiler. Each
 styled part is owned here, either as a native element or as scoped styles on a
@@ -24,6 +24,12 @@ cannot size the ancestor's grid. Preserve the provider, root, trigger and hook
 together when changing the sidebar slot object, and preserve existing base slots
 when adding a local slot. The layout also owns the physical skin of the semantic
 `fd-page-tree-item-name` marker; it is not a retained utility hook.
+
+The normal TOC track subscribes to the public core snapshot through
+`useSyncExternalStore`, which rechecks updates between render and subscription.
+Its local ResizeObserver retains the original item-offset and padding formula.
+An effect-only listener could miss the initial active state and leave the track
+invisible indefinitely. Clerk mode retains its upstream measurement behavior.
 
 Article defaults use `reading-prose`; the `not-prose` integration hook excludes
 component subtrees. Their `reading` layer precedes `site-stylex`, so a local card,

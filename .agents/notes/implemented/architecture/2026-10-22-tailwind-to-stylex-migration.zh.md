@@ -30,6 +30,7 @@ Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥
 - 颜色保留原 HSL／color-mix 表达式和局部变量读取；字体也包括连字行为。主题别名在声明位置解析，局部 palette／spacing 覆盖必须位于真实 scope。部分 `createTheme` 会安装不相关默认值；[主题／字体决策](2026-11-03-stylex-font-writer-pair.md)与迁移指南保留已观察到的边界。
 - 小写 JSX 节点也可能是 primitive 的 Slot／`render` 子元素。将它的 utility 改成 opaque StyleX class，可能丢失原调用方优先级。应迁移真实父级组合入口，并核对禁用、选中、hover 和静止状态。一次性源码转换工具必须先拒绝这些入口，解析真实调用方后再处理；逐声明相等不能证明组合结果相等。
 - 隐藏 label 也有有效盒子。剩余 Storybook `sr-only` 清除了新 StyleX label 的原 padding，把 4×12 改为 1×1。应迁移调用方到 typed 样式，不把原本失效的 padding0 顺便变成有效声明。
+- 静态构建重复采集暴露 normal TOC 的真实初始化竞争：链接已 active，轨道变量却一直未设置，产生 52 像素缺线。本地 normal 轨道用 `useSyncExternalStore` 读取公开 core store，消除 render／subscribe 窗口，保留原 ResizeObserver offset／padding 公式、item 导航、scroll provider 和 DOM。就绪检查核对真实轨道，不注入状态或接受缺线；Clerk 行为不变。
 
 首次 renderer smoke 虽完成导航，仍未通过视觉验收：根布局的 `h-svh` marker 只有旧浏览器 fallback，现代 Electron 因而坍缩到内容高度。根布局现直接用 StyleX 声明 `100svh`，语义 `workspace-viewport` hook 服务 native fallback 与 devbar；真实 smoke 同时校验视口几何。拒绝截图与修正后的七个页面／状态截图分开保留。
 
@@ -45,11 +46,15 @@ Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥
 
 比较来源也是验收的一部分。独立审计发现两份早期 controls 汇总在两侧都读了 Before 相对路径，其 36 对引用为 INVALID。原图和错误汇总保留，修正比较分别读取各自 manifest、PNG 和真实浏览器记录。来源有效不代表不同的图像通过。当前自包含 `direct-stylex-acceptance.html` 和 `direct-*` 证据位于 `packages/components/artifacts/visual/`；历史报告及其中 OPEN 原样保留。
 
+[确定性验收门禁](../../../../packages/components/tests/visual/README.md#deterministic-static-build-gate)从不可变静态构建生成独立 baseline／verify 证据，锁定浏览器环境、profile 和明确的动画端点，要求两份独立采集能够复现。raw 像素非零或几何／内容变化均失败，不使用 mask 或阈值。文档 profile 覆盖 24 个响应式／主题／页面及真实键盘搜索、TOC、语言状态；可选 analytics 请求明确中止并记录，意外外部请求继续失败。新门禁通过不能替换历史 OPEN，动画端点截图也不能证明动效全过程等价。
+
+含 TOC 修复的静态检查点已通过 24 场景 baseline 和同构建 verify，两次各含 48 份独立采集；重复与跨次比较均为零 raw 像素、零几何／内容差异。这证明可复现性及新流程可用；原 Tailwind 等价性仍由其独立比较证据验收。被拒绝的基线尝试和诊断原图继续保留。
+
 ## 网站迁移与后续验收
 
 产品最终 v3 编译快照扫描 1,795 份源码，识别 utility 为零，另有 744 处未解析表达式；之后退役扫描器、测试及编译依赖，精确输入和 JSON 保存在 ignored 产物。网站退役前的编译快照中，149 份自有文件（组件 70、路由／页面 47、lib 32）识别 utility 为零，组件另有 39 处未解析表达式。39 处实际 producer 已追查，均为 StyleX 输出、普通 CSS 状态或语义 hook，未发现站内动态 Tailwind。这些快照仍是静态下界，不是视觉或任意外部运行时字符串覆盖。
 
-网站 primitive 与真实调用方组合本地 StyleX。旧语义样式表的 111 个 `@apply` 改为原选择器下的普通声明；首屏 body、预览滚动锁、布局 inset 与热图圆点改用明确 data hook。站点同时替换 Fumadocs preset、safelist 和 typography 编译器：[本地文档皮肤](../../../../site-docs/components/docs-ui/README.md)提供 layout／page slots、导航、搜索和 MDX 部件。状态及交互继续使用公开 Fumadocs contexts、框架链接、scrollspy、TOC 测量轨道和 Base UI 行为。布局尺寸根据实际语义部件写在祖先上，不把变量错误声明在子节点。布局拥有语义 `fd-page-tree-item-name` marker 的物理皮肤。
+网站 primitive 与真实调用方组合本地 StyleX。旧语义样式表的 111 个 `@apply` 改为原选择器下的普通声明；首屏 body、预览滚动锁、布局 inset 与热图圆点改用明确 data hook。站点同时替换 Fumadocs preset、safelist 和 typography 编译器：[本地文档皮肤](../../../../site-docs/components/docs-ui/README.md)提供 layout／page slots、导航、搜索和 MDX 部件。状态及交互继续使用公开 Fumadocs contexts、框架链接、scrollspy、TOC item 导航和 Base UI 行为；normal TOC 的轨道测量／状态由本地拥有，Clerk 保留上游行为。布局尺寸根据实际语义部件写在祖先上，不把变量错误声明在子节点。布局拥有语义 `fd-page-tree-item-name` marker 的物理皮肤。
 
 阅读排版与 Shiki token／行集成采用语义普通 CSS；`reading` 层位于组件 StyleX 之前。`DocsBody` 将标题相邻及正文首尾子元素的 margin 结构保留在 StyleX；移入更低的 typography 层曾改变原本对 Tabs 间距的优先级。主题默认值、浏览器 normalization 和文档 palette 保留有效变量及 MIT 许可，不包含 utility 规则。站点不再使用 Tailwind 构建插件、preset 导入或直接编译依赖。精确版本的 [Fumadocs patch](../../../../patches/@fumadocs__base-ui@16.8.12.patch)只将 `dist/utils/cn.js` 从 `twMerge` 改为 `clsx`；workspace 规则移除该版本的 `tailwind-merge`／`@fumadocs/tailwind` 依赖边，并提供 `clsx@2.1.1`。补丁保留 class 拼接，不保留 utility 冲突解析，因此物理样式覆盖应在本地 owner 组合。定向 offline frozen install 已通过，实际安装的 `cn` 模块导入 `clsx`；根锁文件没有 Tailwind 包节点。这些依赖检查不证明视觉全等。
 

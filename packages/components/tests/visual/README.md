@@ -4,17 +4,72 @@ Capture production components in a real Chromium browser, compare their pixels
 and computed geometry, and generate a self-contained HTML report. Screenshot
 evidence is separate from behavior tests and from the real Electron smoke run.
 
-| Entry                   | Responsibility                                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `visual-regression.mjs` | Capture, assemble and compare immutable screenshot phases.                                                    |
-| `serve.mjs`             | Serve a fixed Storybook build or report directory on loopback; missing files return 404 when no index exists. |
-| `*-targets.json`        | Story, viewport, theme and interaction-state coverage.                                                        |
-| `electron-smoke.mts`    | Launch the actual built OSS desktop through the existing isolated E2E harness.                                |
+| Entry                     | Responsibility                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `accept.mjs`              | Strict deterministic baseline/verify gate for immutable static builds.                                        |
+| `profiles/components.mjs` | Composer, sidebar, mobile drawers, Markdown, settings and loading/disabled/hover/focus states.                |
+| `profiles/docs.mjs`       | Docs pages, themes, responsive layouts and real search/TOC/language states.                                   |
+| `visual-regression.mjs`   | Capture, assemble and compare immutable screenshot phases.                                                    |
+| `serve.mjs`               | Serve a fixed Storybook build or report directory on loopback; missing files return 404 when no index exists. |
+| `*-targets.json`          | Story, viewport, theme and interaction-state coverage.                                                        |
+| `electron-smoke.mts`      | Launch the actual built OSS desktop through the existing isolated E2E harness.                                |
 
 The legacy report's `identical` status uses threshold/layout checks, and
 `changedPixels: 0` does not prove byte equality or zero raw RGBA differences.
 Inspect `pngIdentical` and retain independent raw-pixel counts. A nonzero raw
 comparison stays OPEN even when its threshold count is zero.
+
+## Deterministic static-build gate
+
+Use `accept.mjs` for a new baseline and strict verification. From
+`packages/components`, pass immutable static build directories and the same
+Chromium executable, profile, OS and Node runtime on both sides:
+
+```sh
+node tests/visual/accept.mjs baseline \
+  --build /tmp/site-before \
+  --profile tests/visual/profiles/docs.mjs \
+  --out /tmp/docs-baseline --browser /path/to/chromium
+node tests/visual/accept.mjs verify \
+  --build /tmp/site-after --baseline /tmp/docs-baseline \
+  --profile tests/visual/profiles/docs.mjs \
+  --out /tmp/docs-verification --browser /path/to/chromium
+```
+
+For Storybook builds, use `--profile tests/visual/profiles/components.mjs` with the same commands. It contains 16 scenarios. `pnpm run test:visual:harness` exercises the gate itself with real browser positive and negative controls.
+
+Both commands refuse an existing output directory. `verify` never creates or
+updates a baseline, and accepts only a successful baseline with matching profile,
+environment and policy. Build and profile hashes are checked again after capture.
+Open the self-contained `report.html` in the new output directory; `manifest.json`
+and the original PNG/geometry records preserve failures as well as successes.
+
+Each case runs twice in independent browser contexts. A baseline must reproduce
+itself; verification must reproduce itself and match the baseline with **zero raw
+RGBA pixel differences and equal recorded geometry/content**. Computed CSS
+serialization differences are recorded separately. No pixel tolerance, masks or
+automatic baseline updates can turn a difference into a pass. This gate creates
+new evidence; it does not relabel older reports or close their OPEN differences.
+
+The fixed environment is `en-US`, UTC, 2026-01-01T12:00:00Z, DPR 1, sRGB and
+reduced motion. Capture explicitly finishes finite animations, pauses infinite
+animations and SVG SMIL at zero, and hides the caret. These are declared animation
+endpoints, not motion-sequence equivalence. Full-page PNGs include portals; each
+scenario's `root` limits its geometry snapshot. Readiness uses actual DOM states,
+font/image completion and animation-frame geometry stability, without sleeps.
+
+The docs profile contains 24 cases: Introduction, Quick Start and Sessions in
+light/dark at 390×844 and 1440×1000, plus keyboard search selection, mobile TOC
+expansion/desktop TOC focus, and language popovers at both sizes. Search waits for
+real index results and verifies ArrowDown selects the second result while focus
+stays in the input. An active scrollspy item establishes client readiness; the
+desktop track variables and clipping must also match all active anchors.
+
+All off-origin requests fail capture except two explicitly declared nonvisual
+analytics prefixes: `https://www.clarity.ms/tag/` and
+`https://www.googletagmanager.com/gtag/js?`. The runner aborts and records those
+requests; it sends no analytics traffic and does not rewrite application source.
+Other network failures remain failures, including unexpected external assets.
 
 ## Capture a component batch
 

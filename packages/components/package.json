@@ -68,6 +68,8 @@
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:visual": "node tests/visual/accept.mjs",
+    "test:visual:harness": "node --test tests/visual/accept.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "storybook": "storybook dev --host 127.0.0.1 -p 6006",

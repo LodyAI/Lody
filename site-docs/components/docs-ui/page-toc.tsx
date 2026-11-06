@@ -1,7 +1,7 @@
 'use client';
 
-// Popover presentation adapted from Fumadocs 16.8.12, copyright (c) 2023 Fuma.
-// SPDX-License-Identifier: MIT. Scrollspy and track geometry remain in Fumadocs.
+// TOC presentation adapted from Fumadocs 16.8.12, copyright (c) 2023 Fuma.
+// SPDX-License-Identifier: MIT. Scrollspy remains in Fumadocs; normal track state is local.
 import { Collapsible } from '@base-ui/react/collapsible';
 import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
@@ -14,7 +14,17 @@ import { useTreePath } from 'fumadocs-ui/contexts/tree';
 import { useDocsLayout } from 'fumadocs-ui/layouts/docs';
 import type { TOCProps, TOCPopoverProps } from 'fumadocs-ui/layouts/docs/page/slots/toc';
 import { ChevronDown, Text } from 'lucide-react';
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 
 const layoutStyles = stylex.create({
   dimensions: {
@@ -63,18 +73,16 @@ const styles = stylex.create({
       'linear-gradient(to bottom, transparent, white 16px, white calc(100% - 16px), transparent)',
     paddingBlock: 'calc(var(--spacing) * 3)',
   },
-  normalScroll: {
-    ':is(*) > div': { position: 'relative' },
-    ':is(*) > div > div:first-child:not(:only-child)': {
-      position: 'absolute',
-      insetBlock: 0,
-      insetInlineStart: 0,
-      backgroundColor: 'var(--color-fd-primary)',
-      width: '1px',
-      transitionProperty: 'clip-path',
-      transitionDuration: 'var(--default-transition-duration, 150ms)',
-      transitionTimingFunction: 'var(--default-transition-timing-function)',
-    },
+  normalItemsRoot: { position: 'relative' },
+  normalTrack: {
+    position: 'absolute',
+    insetBlock: 0,
+    insetInlineStart: 0,
+    backgroundColor: 'var(--color-fd-primary)',
+    width: '1px',
+    transitionProperty: 'clip-path',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
   },
   normalList: {
     display: 'flex',
@@ -295,10 +303,10 @@ const styles = stylex.create({
   },
 });
 
-function ScrollViewport({ children, mode }: { children: ReactNode; mode: 'normal' | 'clerk' }) {
+function ScrollViewport({ children }: { children: ReactNode }) {
   const viewRef = useRef<HTMLDivElement>(null);
   return (
-    <div ref={viewRef} {...stylex.props(styles.scroll, mode === 'normal' && styles.normalScroll)}>
+    <div ref={viewRef} {...stylex.props(styles.scroll)}>
       <CoreTOC.ScrollProvider containerRef={viewRef}>{children}</CoreTOC.ScrollProvider>
     </div>
   );
@@ -307,6 +315,88 @@ function ScrollViewport({ children, mode }: { children: ReactNode; mode: 'normal
 function EmptyTOC() {
   const { text } = useI18n();
   return <div {...stylex.props(styles.empty)}>{text.tocNoHeadings}</div>;
+}
+
+function NormalTOCItems({ ref, className, style, children, ...props }: ComponentProps<'div'>) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const items = useTOCItems();
+  const toc = CoreTOC.useTOC();
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      toc.listen(notify);
+      return () => toc.unlisten(notify);
+    },
+    [toc]
+  );
+  // Recheck the public snapshot after subscribing: an initial observer update
+  // can otherwise occur between rendering the track and installing its listener.
+  const observed = useSyncExternalStore(subscribe, toc.get, toc.get);
+  const [positions, setPositions] = useState<[number, number][] | null>(null);
+  const mergedRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      containerRef.current = node;
+      if (typeof ref === 'function') {
+        const cleanup = ref(node);
+        if (typeof cleanup === 'function')
+          return () => {
+            containerRef.current = null;
+            cleanup();
+          };
+      } else if (ref) ref.current = node;
+    },
+    [ref]
+  );
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const compute = () => {
+      if (items.length === 0) return setPositions(null);
+      const next: [number, number][] = [];
+      for (const item of items) {
+        const element = container.querySelector<HTMLAnchorElement>(`a[href="${item.url}"]`);
+        if (!element) continue;
+        const computed = getComputedStyle(element);
+        next.push([
+          element.offsetTop + parseFloat(computed.paddingTop),
+          element.offsetTop + element.clientHeight - parseFloat(computed.paddingBottom),
+        ]);
+      }
+      setPositions(next);
+    };
+    const observer = new ResizeObserver(compute);
+    observer.observe(container);
+    compute();
+    return () => observer.disconnect();
+  }, [items]);
+
+  const trackStyle: CSSProperties & { '--track-top'?: string; '--track-bottom'?: string } = {
+    clipPath:
+      'polygon(0 var(--track-top,0), 100% var(--track-top,0), 100% var(--track-bottom,0), 0 var(--track-bottom,0))',
+  };
+  const firstActive = observed.findIndex((item) => item.active);
+  let lastActive = firstActive;
+  for (let index = firstActive + 1; index < observed.length; index++) {
+    if (observed[index].active) lastActive = index;
+  }
+  if (firstActive !== -1 && positions?.[firstActive] && positions[lastActive]) {
+    trackStyle['--track-top'] = `${positions[firstActive][0]}px`;
+    trackStyle['--track-bottom'] = `${positions[lastActive][1]}px`;
+  }
+  const sx = stylex.props(styles.normalList);
+  return (
+    <div {...stylex.props(styles.normalItemsRoot)}>
+      {positions && <div {...stylex.props(styles.normalTrack)} style={trackStyle} />}
+      <div
+        {...props}
+        ref={mergedRef}
+        className={clsx(sx.className, className)}
+        style={{ ...sx.style, ...style }}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function TOCList({
@@ -352,10 +442,7 @@ function TOCList({
   }
   const { className, ...props } = list ?? {};
   return (
-    <NormalTOC.TOCItems
-      {...props}
-      className={clsx(stylex.props(styles.normalList).className, className)}
-    >
+    <NormalTOCItems {...props} className={className}>
       {items.length === 0 && <EmptyTOC />}
       {items.map((item) => (
         <NormalTOC.TOCItem
@@ -374,7 +461,7 @@ function TOCList({
           }
         />
       ))}
-    </NormalTOC.TOCItems>
+    </NormalTOCItems>
   );
 }
 
@@ -393,7 +480,7 @@ export function DocsPageTOC({ container, header, footer, style = 'normal', list 
         <Text {...stylex.props(styles.glyph)} />
         {text.toc}
       </h3>
-      <ScrollViewport mode={style}>
+      <ScrollViewport>
         <TOCList mode={style} list={list} />
       </ScrollViewport>
       {footer}
@@ -519,7 +606,7 @@ export function DocsPageTOCPopover({
         >
           <div {...stylex.props(styles.panelBody)}>
             {header}
-            <ScrollViewport mode={style}>
+            <ScrollViewport>
               <TOCList mode={style} list={list} onClickItem={() => setOpen(false)} />
             </ScrollViewport>
             {footer}
