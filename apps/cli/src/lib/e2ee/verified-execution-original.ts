@@ -1,4 +1,9 @@
-import { getSessionRoomId, queuedInputEvidence, type SessionId } from '@lody/shared';
+import {
+  getSessionRoomId,
+  normalizeSessionTurnInputConfig,
+  queuedInputEvidence,
+  type SessionId,
+} from '@lody/shared';
 import { isDeepStrictEqual } from 'node:util';
 import { Effect, type Scope } from 'effect';
 import type { LoroDoc, OpId } from 'loro-crdt';
@@ -20,7 +25,7 @@ type LedgerState = {
   readonly members: ReadonlyMap<string, { readonly userId: { toBytes(): Uint8Array } }>;
 };
 type OpenedDispatch = {
-  readonly args: { sessionId: string; userTurnId: string; inputConfig?: unknown };
+  readonly args: { sessionId: string; userTurnId: string; userId: string; inputConfig?: unknown };
   readonly requesterDevice: string;
   readonly expiresAt: number;
 };
@@ -96,11 +101,26 @@ export function makeVerifiedExecutionOriginal(options: {
           }
         }
         if (!doc) return undefined;
-        // A promoted row is signed by this machine whoever queued it, so authorship
-        // comes from the queued input's own original, or this machine's local receipt.
-        const queued = options.origins.queuedTurn(doc, intent.userTurnId);
+        const resolved = yield* options.origins.resolve(
+          intent,
+          doc,
+          (request) => options.openContent(intent, request),
+          options.recover,
+          lookup
+        );
+        if (
+          !resolved ||
+          'state' in resolved ||
+          !resolved.queued ||
+          resolved.requesterDevice !== options.selfDevice
+        )
+          return resolved;
+        // This machine signs every promoted row, so its signature proves the row's
+        // content, not who queued it. A client's own marked row stops at the return above.
+        const row = resolved.queued;
         const queuedOriginal = doc.getMap('queueDispatchOriginals').get(intent.userTurnId);
-        if (queued && typeof queuedOriginal === 'string') {
+        const automation = normalizeSessionTurnInputConfig(row.inputConfig)?._lodyAutomation;
+        if (automation === undefined && typeof queuedOriginal === 'string') {
           const state = (yield* options.ledger()).inspectState();
           const machineId = state.devices.get(options.selfDevice)?.machineId;
           if (!machineId) return undefined;
@@ -113,7 +133,7 @@ export function makeVerifiedExecutionOriginal(options: {
               )
             );
           if (!verified) return undefined;
-          const evidence = queuedInputEvidence(queued.inputConfig);
+          const evidence = queuedInputEvidence(row.inputConfig);
           const device = state.devices.get(verified.requesterDevice);
           const member = device && state.members.get(hex(device.membershipId.toBytes()));
           if (
@@ -122,8 +142,8 @@ export function makeVerifiedExecutionOriginal(options: {
             verified.requesterDevice === options.selfDevice ||
             verified.args.sessionId !== intent.sessionId ||
             verified.args.userTurnId !== intent.userTurnId ||
-            queuedInputEvidence(verified.args.inputConfig) !== evidence ||
-            (!lookup.origin && queuedInputEvidence(intent.inputConfig) !== evidence)
+            verified.args.userId !== row.userId ||
+            queuedInputEvidence(verified.args.inputConfig) !== evidence
           )
             return undefined;
           return {
@@ -132,33 +152,16 @@ export function makeVerifiedExecutionOriginal(options: {
             expiresAt: verified.expiresAt,
           };
         }
-        const resolved = yield* options.origins.resolve(
-          intent,
-          doc,
-          (request) => options.openContent(intent, request),
-          options.recover,
-          lookup
-        );
-        if (
-          !resolved ||
-          'state' in resolved ||
-          !resolved.queuedInput ||
-          resolved.requesterDevice !== options.selfDevice
-        )
-          return resolved;
-        const row = options.origins.queuedTurn(doc, intent.userTurnId);
-        const receipted =
-          row !== undefined &&
-          (yield* Effect.try({
-            try: () =>
-              options.origins.hasQueuedInput({
-                sessionId: intent.sessionId,
-                userTurnId: intent.userTurnId,
-                timestamp: row.timestamp,
-                inputConfig: row.inputConfig,
-              }),
-            catch: (cause) => cause,
-          }).pipe(Effect.catch(() => Effect.succeed(false))));
+        const receipted = yield* Effect.try({
+          try: () =>
+            options.origins.hasQueuedInput({
+              sessionId: intent.sessionId,
+              userTurnId: intent.userTurnId,
+              timestamp: row.timestamp,
+              inputConfig: row.inputConfig,
+            }),
+          catch: (cause) => cause,
+        }).pipe(Effect.catch(() => Effect.succeed(false)));
         return receipted ? resolved : undefined;
       })
     );

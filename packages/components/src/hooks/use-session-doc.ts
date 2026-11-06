@@ -1,7 +1,7 @@
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from '../lib/session-send-admission';
-import { sealEditedQueueItem } from '../lib/session-send-delivery';
+import { removeQueuedOriginal, sealEditedQueueItem } from '../lib/session-send-delivery';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
@@ -379,9 +379,12 @@ export function useSessionDoc(
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      const mq = await withStore((store) => (store.getState().mq ?? []) as MessageQueueItem[]);
+      const userTurnId = mq.find((item) => item.$cid === cid)?.userTurnId;
       await runtime.writer.removeSessionMessage(sessionId, cid);
+      if (userTurnId) await removeQueuedOriginal(runtime, sessionId, userTurnId);
     },
-    [runtime, sessionId]
+    [withStore, runtime, sessionId]
   );
 
   const updateMessageQueueItem = useCallback(
@@ -411,6 +414,8 @@ export function useSessionDoc(
         cid,
         sealed as unknown as Record<string, unknown>
       );
+      if (current.userTurnId && sealed.userTurnId !== current.userTurnId)
+        await removeQueuedOriginal(runtime, sessionId, current.userTurnId);
     },
     [withStore, runtime, sessionId]
   );

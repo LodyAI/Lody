@@ -1083,6 +1083,7 @@ describe('host-only E2EE realtime journal', () => {
     };
     const gate = (open: () => RealtimeJournal, expiresAt = 1000) =>
       makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: key.genesis,
         workspaceId: key.workspaceId,
         targetMachineId: key.targetMachineId,
@@ -1098,6 +1099,7 @@ describe('host-only E2EE realtime journal', () => {
 
     it('denies a verified original when no authorization capability is available', async () => {
       const execution = makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: key.genesis,
         workspaceId: key.workspaceId,
         targetMachineId: key.targetMachineId,
@@ -1122,6 +1124,7 @@ describe('host-only E2EE realtime journal', () => {
         return read(storedKey);
       });
       const execution = makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: key.genesis,
         workspaceId: key.workspaceId,
         targetMachineId: key.targetMachineId,
@@ -1155,6 +1158,7 @@ describe('host-only E2EE realtime journal', () => {
       async (principals, expected) => {
         let index = 0;
         const execution = makeEncryptedAgentExecution({
+          machineUserId: 'synthetic-machine-account',
           genesis: key.genesis,
           workspaceId: key.workspaceId,
           targetMachineId: key.targetMachineId,
@@ -1182,6 +1186,7 @@ describe('host-only E2EE realtime journal', () => {
     it('requires every project the turn reaches to be shared before the durable start', async () => {
       const asked: (string | undefined)[] = [];
       const execution = makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: key.genesis,
         workspaceId: key.workspaceId,
         targetMachineId: key.targetMachineId,
@@ -1276,6 +1281,7 @@ describe('host-only E2EE realtime journal', () => {
       const released = Promise.withResolvers<void>();
       let open = true;
       const execution = makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: key.genesis,
         workspaceId: key.workspaceId,
         targetMachineId: key.targetMachineId,
@@ -1351,6 +1357,7 @@ describe('host-only E2EE realtime journal', () => {
     // The member may use only `shared-project`; the machine owner may use anything.
     const gate = (rows: Map<string, Original> = originals) =>
       makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: 'synthetic-genesis',
         workspaceId: 'synthetic-workspace',
         targetMachineId: 'synthetic-machine',

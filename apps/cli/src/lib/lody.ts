@@ -181,6 +181,7 @@ export class Lody {
         genesis: options.genesisHash,
         workspaceId: options.workspaceId,
         targetMachineId: options.machineId,
+        machineUserId: options.cloudPort.identity.userId,
         journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
         authorizeExecution: options.authorizeEncryptedExecution ?? e2ee.authorizeExecution,
         isExecutionOpen: e2ee.isExecutionOpen,

@@ -131,19 +131,58 @@ export async function writeUserTurn(
       ? await prepareQueuedOriginal(runtime, send.sessionId, {
           ...send.entry,
           machineId: send.creation?.machineId as MachineId | undefined,
+          signal,
         })
       : undefined;
   const late = queuedOriginal ? undefined : (await refuseKnownWithdrawnTarget(runtime, send))?.late;
   await prepareUserTurnWrite(runtime, send, signal);
   await persistHumanInputReceipt(runtime, send.sessionId, send.entry, signal);
   throwIfSendAborted(signal);
-  if (queuedOriginal)
+  if (queuedOriginal) {
     await storeQueuedOriginal(runtime, send.sessionId, send.entry.id, queuedOriginal);
-  if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
+    try {
+      await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue!);
+    } catch (error) {
+      await removeQueuedOriginal(runtime, send.sessionId, send.entry.id);
+      throw error;
+    }
+  } else if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
   else await runtime.writer.appendSessionTurn(send.sessionId, send.entry);
   if (late && !send.queue) settleOnLateWithdrawal(runtime, send, late);
   if (send.delivery.kind === 'dispatch')
     await activateUserTurn(runtime, send.sessionId, send.entry.id);
+}
+
+/** How long a queued send waits for its original past the shared preparation deadline. */
+export const QUEUED_ORIGINAL_DEADLINE_MS = 10_000;
+
+async function awaitQueuedOriginal(
+  prepare: Promise<PreparedEncryptedDispatch>,
+  signal?: AbortSignal
+): Promise<PreparedEncryptedDispatch> {
+  const answer = prepare.catch((error: unknown) => {
+    if (error instanceof EncryptedPrepareTimeout) return error.late;
+    throw error;
+  });
+  // A late answer stays observed after this send stops waiting; a retry reuses the original.
+  answer.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('e2ee_rpc_prepare_timeout')),
+      QUEUED_ORIGINAL_DEADLINE_MS
+    );
+    onAbort = () => reject(new Error('e2ee_rpc_prepare_aborted'));
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([answer, stopped]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
 }
 
 /** A queue row with no original cannot start, so an unsigned input is not sent at all. */
@@ -152,6 +191,7 @@ async function prepareQueuedOriginal(
   sessionId: SessionId,
   input: Pick<SessionHistory, 'id' | 'userId' | 'timestamp' | 'inputConfig'> & {
     machineId?: MachineId;
+    signal?: AbortSignal;
   }
 ): Promise<string> {
   const notSent = (key: string) => new SessionInputNotSentError(i18next.t(key));
@@ -161,18 +201,17 @@ async function prepareQueuedOriginal(
   if (!runtime.prepareEncryptedDispatch || !machineId || !inputConfig || !userId)
     throw notSent('sessions.sendError');
   if (!input.timestamp) throw notSent('sessions.sendError');
-  const prepare = runtime.prepareEncryptedDispatch(machineId, {
-    sessionId,
-    userTurnId: input.id,
-    userId,
-    timestamp: input.timestamp,
-    inputConfig,
-  });
   try {
-    const prepared = await prepare.catch((error: unknown) => {
-      if (error instanceof EncryptedPrepareTimeout) return error.late;
-      throw error;
-    });
+    const prepared = await awaitQueuedOriginal(
+      runtime.prepareEncryptedDispatch(machineId, {
+        sessionId,
+        userTurnId: input.id,
+        userId,
+        timestamp: input.timestamp,
+        inputConfig,
+      }),
+      input.signal
+    );
     return prepared.original.frameHex;
   } catch (error) {
     throw notSent(
@@ -194,6 +233,20 @@ async function storeQueuedOriginal(
         throw new Error('e2ee_rpc_original_conflict');
       draft.queueDispatchOriginals ??= {};
       draft.queueDispatchOriginals[userTurnId] = frameHex;
+    });
+  });
+}
+
+/** A withdrawn queued input drops its original with the row that used it. */
+export async function removeQueuedOriginal(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  userTurnId: string
+) {
+  if (runtime.contentMode !== 'e2ee') return;
+  await runtime.sendResources.withSessionStore(sessionId, (store) => {
+    store.setState((draft: SessionDocDraft) => {
+      if (draft.queueDispatchOriginals) delete draft.queueDispatchOriginals[userTurnId];
     });
   });
 }

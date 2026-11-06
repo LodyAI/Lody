@@ -18,6 +18,8 @@ import {
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
 import {
   dispatchUserTurn,
+  QUEUED_ORIGINAL_DEADLINE_MS,
+  removeQueuedOriginal,
   sealEditedQueueItem,
   writeUserTurn,
 } from '../src/lib/session-send-delivery';
@@ -447,6 +449,68 @@ it.each(['failed', 'unavailable'] as const)(
   }
 );
 
+it('removes the stored original when the queue row cannot be written', async () => {
+  const f = fixture();
+  const input = entry('queued-half-written');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('0d'.repeat(32));
+  f.runtime.writer.enqueueSessionMessage = async () => {
+    throw new Error('synthetic write failure');
+  };
+  await expect(
+    writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'queue' },
+      queue: queueRow(input),
+    })
+  ).rejects.toThrow('synthetic write failure');
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
+});
+
+it('stops waiting for a host that never answers a queued send', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const f = fixture();
+    const input = entry('queued-unanswered');
+    f.runtime.contentMode = 'e2ee';
+    let wrote = false;
+    f.runtime.writer.enqueueSessionMessage = async () => {
+      wrote = true;
+    };
+    f.runtime.prepareEncryptedDispatch = async () => {
+      throw new EncryptedPrepareTimeout(new Promise(() => {}));
+    };
+    const sent = writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'queue' },
+      queue: queueRow(input),
+    });
+    const outcome = expect(sent).rejects.toBeInstanceOf(SessionInputNotSentError);
+    await vi.advanceTimersByTimeAsync(QUEUED_ORIGINAL_DEADLINE_MS);
+    await outcome;
+    expect(wrote).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('stops waiting for a queued original when the send is aborted', async () => {
+  const f = fixture();
+  const input = entry('queued-aborted');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = () => new Promise(() => {});
+  const abort = new AbortController();
+  const sent = writeUserTurn(
+    f.runtime,
+    { sessionId: SESSION, entry: input, delivery: { kind: 'queue' }, queue: queueRow(input) },
+    abort.signal
+  );
+  abort.abort();
+  await expect(sent).rejects.toBeDefined();
+});
+
 it('leaves an ordinary workspace queue row unsigned', async () => {
   const f = fixture();
   const input = entry('queued-plain');
@@ -496,6 +560,13 @@ it('gives an edited encrypted queue row a new Turn and its own original', async 
     inputConfig: { prompt: 'changed' },
   });
   expect(queuedOriginal(f, sealed.userTurnId!)).toBe('0c'.repeat(32));
+  await f.runtime.sendResources.withSessionStore(SESSION, (store) =>
+    store.setState((draft: { queueDispatchOriginals?: Record<string, string> }) => {
+      draft.queueDispatchOriginals = { ...draft.queueDispatchOriginals, [input.id]: '0e' };
+    })
+  );
+  await removeQueuedOriginal(f.runtime, SESSION, input.id);
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
   const toggled = { ...current, isEditing: true } as MessageQueueItem;
   expect(await sealEditedQueueItem(f.runtime, SESSION, current, toggled)).toBe(toggled);
   expect(prepared).toHaveLength(1);

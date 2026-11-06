@@ -914,6 +914,7 @@ describe('machine E2EE local runtime', () => {
           replica.commit();
           const checkedDevices: string[] = [];
           const gate = makeEncryptedAgentExecution({
+            machineUserId: 'synthetic-machine-account',
             genesis: hex(signed.genesis.toBytes()),
             workspaceId: 'workspace',
             targetMachineId: 'machine',
@@ -5552,7 +5553,18 @@ const queuedConfig = (prompt: string) => ({
   inputBlocks: [{ type: 'text' as const, text: prompt }],
   cliType: 'builtin' as const,
   agentType: 'codex',
+  // A composer's cached value; promotion replaces it from the Session's metadata.
+  resume: 'composer-acp-session',
 });
+const ownerAccount = 'owner-account';
+const memberAccount = 'member-account';
+const automationOrigin = {
+  invocationId: 'invocation',
+  ruleId: 'rule',
+  ruleRevision: 1,
+  eventRef: 'event',
+  authorizationUserId: ownerAccount,
+};
 
 /** Real ledger, signed dispatch originals, watcher promotion and start claim. */
 const queuedInputHarness = Effect.fnUntraced(function* (directory: string, shared: boolean) {
@@ -5639,9 +5651,10 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
   let meta = {
     id: queuedSessionId,
     machineId: 'machine',
-    userId: 'display-account',
+    userId: ownerAccount,
     cliType: 'builtin',
     agentType: 'codex',
+    acpSessionId: 'machine-acp-session',
     createdAt: queuedTimestamp,
     status: { type: 'idle' },
   } as SessionMeta;
@@ -5710,32 +5723,44 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     authorizeExecution: gate.authorizeExecution,
     resolveVerifiedOriginal: (intent, lookup) => resolve(intent, doc, lookup),
     selfDevice: machineKey,
+    machineUserId: ownerAccount,
   });
-  const clientConfig = (turnId: string) =>
-    normalizeSessionTurnInputConfig({ ...queuedConfig(turnId), mcpServerIds: [] });
-  /** The composer's order: signed original, then the queue row. */
-  const send = Effect.fnUntraced(function* (turnId: string, rpc?: typeof memberRpc) {
-    const inputConfig = clientConfig(turnId);
-    if (rpc) {
-      const prepared = yield* rpc.prepareDispatch('machine', {
-        sessionId: queuedSessionId,
-        userTurnId: turnId,
-        userId: 'display-account',
-        timestamp: queuedTimestamp,
-        inputConfig,
-      });
-      doc.getMap('queueDispatchOriginals').set(turnId, prepared.frameHex);
-      doc.commit();
-    }
-    yield* Effect.promise(() =>
+  const clientConfig = (turnId: string, config: object = queuedConfig(turnId)) =>
+    normalizeSessionTurnInputConfig({ ...config, mcpServerIds: [] });
+  const prepareOriginal = Effect.fnUntraced(function* (
+    rpc: typeof memberRpc,
+    turnId: string,
+    userId: string,
+    inputConfig: unknown = clientConfig(turnId)
+  ) {
+    const prepared = yield* rpc.prepareDispatch('machine', {
+      sessionId: queuedSessionId,
+      userTurnId: turnId,
+      userId,
+      timestamp: queuedTimestamp,
+      inputConfig,
+    });
+    doc.getMap('queueDispatchOriginals').set(turnId, prepared.frameHex);
+    doc.commit();
+  });
+  const pushRow = (turnId: string, userId: string, config: object = queuedConfig(turnId)) =>
+    Effect.promise(() =>
       session.pushMessageQueue({
         userTurnId: turnId,
         task: turnId,
-        userId: 'display-account',
+        userId,
         timestamp: queuedTimestamp,
-        acpSessionConfig: { ...queuedConfig(turnId), mcpServerIds: [] },
+        acpSessionConfig: { ...config, mcpServerIds: [] },
       } as never)
     );
+  /** The composer's order: signed original, then the queue row. */
+  const send = Effect.fnUntraced(function* (
+    turnId: string,
+    rpc?: typeof memberRpc,
+    userId = rpc === ownerRpc ? ownerAccount : memberAccount
+  ) {
+    if (rpc) yield* prepareOriginal(rpc, turnId, userId);
+    yield* pushRow(turnId, userId);
   });
   const promote = Effect.fnUntraced(function* () {
     const from = doc.version();
@@ -5746,7 +5771,7 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
             sessionDoc: SessionDocument,
             currentMeta: SessionMeta,
             history: never[]
-          ) => Promise<{ id: string; inputConfig?: unknown } | null>;
+          ) => Promise<{ id: string; inputConfig?: unknown; userId?: string } | null>;
         }
       ).promoteNextQueuedMessage(session, meta, [])
     );
@@ -5755,19 +5780,81 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     yield* retainSignedScheduleUpdate(origins, docId, doc, contentBinding, from);
     return promoted;
   });
-  const claim = (turn: { id: string; inputConfig?: unknown }) =>
+  const claim = (turn: { id: string; inputConfig?: unknown; userId?: string }) =>
     execution.claim({
       workspaceId: 'workspace',
       sessionId: queuedSessionId,
       userTurnId: turn.id,
       inputConfig: turn.inputConfig,
+      requesterUserId: turn.userId,
       localProjectIds: [],
     });
+  const historyRow = (turnId: string) => {
+    const list = doc.getList('history');
+    for (let index = 0; index < list.length; index += 1) {
+      const row = list.get(index) as LoroMap;
+      if (row.get('id') === turnId) return row;
+    }
+    throw new Error('history row missing');
+  };
+  /** Another writer's update to the live row; the signed row keeps its original bytes. */
+  const rewriteRow = (turnId: string, change: (config: Record<string, unknown>) => void) => {
+    const row = historyRow(turnId);
+    const stored: unknown = row.get('inputConfig');
+    const config = (
+      stored && typeof stored === 'object' && 'toJSON' in stored
+        ? (stored as LoroMap).toJSON()
+        : stored
+    ) as Record<string, unknown>;
+    change(config);
+    row.set('inputConfig', config);
+    doc.commit();
+    return normalizeSessionTurnInputConfig(config);
+  };
+  const memberContent = yield* makeStreamsUpdateBinding({
+    genesis: fixture.genesis,
+    resource: `doc:${docId}`,
+    model: 'loro',
+    writeEpoch: 'current',
+    signer: member,
+    ledger: runtime.executionLedger,
+    readEpochKey,
+  });
+  /** A history row the member writes and signs directly, never promoted by this machine. */
+  const writeMemberRow = Effect.fnUntraced(function* (turnId: string, userId: string) {
+    const from = doc.version();
+    const inputConfig = normalizeSessionTurnInputConfig({
+      ...queuedConfig(turnId),
+      resume: undefined,
+      mcpServerIds: [],
+    });
+    yield* Effect.promise(() =>
+      session.sessionData.commands.appendTurn({
+        id: turnId,
+        role: 'user',
+        userId,
+        timestamp: queuedTimestamp,
+        status: 'pending',
+        queuedInput: true,
+        items: [{ type: 'text', text: turnId }],
+        inputConfig,
+        fileDiff: [],
+      } as never)
+    );
+    doc.commit();
+    yield* retainSignedScheduleUpdate(origins, docId, doc, memberContent, from);
+    return { id: turnId, inputConfig, userId };
+  });
   return {
     fixture,
     append,
     claim,
     doc,
+    historyRow,
+    prepareOriginal,
+    pushRow,
+    rewriteRow,
+    writeMemberRow,
     execution,
     machineKey,
     member,
@@ -5905,6 +5992,133 @@ describe('encrypted queued input evidence', () => {
           inputConfig: h.clientConfig('receipted-config'),
         });
         yield* h.send('edited-automation');
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('carries the machine resume target through a signed queued input', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('resume-turn', h.memberRpc);
+        const turn = yield* h.promote();
+        expect(turn.inputConfig).toMatchObject({ resume: 'machine-acp-session' });
+        expect(yield* h.claim(turn)).toMatchObject({ state: 'claimed', principal: 'member' });
+      })
+    ));
+
+  it('does not start a promoted row changed after promotion', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('rewritten-turn', h.ownerRpc);
+        const turn = yield* h.promote();
+        const live = h.rewriteRow('rewritten-turn', (config) => {
+          config.resume = 'other-acp-session';
+        });
+        expect(yield* h.claim({ ...turn, inputConfig: live })).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('does not start a promoted row whose requester changed after promotion', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('relabelled-turn', h.memberRpc);
+        const turn = yield* h.promote();
+        h.historyRow('relabelled-turn').set('userId', 'other-account');
+        h.doc.commit();
+        expect(yield* h.claim({ ...turn, userId: 'other-account' })).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('requires the local receipt for an automation row even with an original', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const config = { ...queuedConfig('automation-row'), _lodyAutomation: automationOrigin };
+        yield* h.prepareOriginal(
+          h.memberRpc,
+          'automation-row',
+          ownerAccount,
+          h.clientConfig('automation-row', config)
+        );
+        yield* h.pushRow('automation-row', ownerAccount, config);
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('binds an automation receipt to the signed row content', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const config = { ...queuedConfig('automation-signed'), _lodyAutomation: automationOrigin };
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'automation-signed',
+          timestamp: queuedTimestamp,
+          inputConfig: h.clientConfig('automation-signed', config),
+        });
+        yield* h.pushRow('automation-signed', ownerAccount, config);
+        const turn = yield* h.promote();
+        expect(turn.inputConfig).toMatchObject({ _lodyAutomation: automationOrigin });
+        expect(yield* h.claim(turn)).toMatchObject({ state: 'claimed', principal: 'owner' });
+      })
+    ));
+
+  it('does not accept a receipt for different automation provenance', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const receipted = {
+          ...queuedConfig('automation-other'),
+          _lodyAutomation: automationOrigin,
+        };
+        const row = {
+          ...receipted,
+          _lodyAutomation: { ...automationOrigin, ruleId: 'other-rule' },
+        };
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'automation-other',
+          timestamp: queuedTimestamp,
+          inputConfig: h.clientConfig('automation-other', receipted),
+        });
+        yield* h.pushRow('automation-other', ownerAccount, row);
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('treats a client-written queued marker as that client own input', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const turn = yield* h.writeMemberRow('marked-turn', memberAccount);
+        yield* h.prepareOriginal(h.ownerRpc, 'marked-turn', ownerAccount, turn.inputConfig);
+        expect(yield* h.claim(turn)).toMatchObject({
+          state: 'claimed',
+          principal: 'member',
+          origin: { requesterDevice: hex(h.member.publicKey.toBytes()) },
+        });
+      })
+    ));
+
+  it.each([
+    ['a queued original', true],
+    ['a directly written row', false],
+  ] as const)('refuses the machine account as requester of %s from a member', (_name, queued) =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        if (queued) {
+          yield* h.send('labelled-turn', h.memberRpc, ownerAccount);
+          expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+        } else {
+          expect(yield* h.claim(yield* h.writeMemberRow('labelled-turn', ownerAccount))).toEqual({
+            state: 'denied',
+          });
+        }
+      })
+    )
+  );
+
+  it('does not start a queued input whose row names another requester than its original', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.prepareOriginal(h.ownerRpc, 'mismatched-turn', ownerAccount);
+        yield* h.pushRow('mismatched-turn', memberAccount);
         expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
       })
     ));
@@ -6190,6 +6404,7 @@ describe('machine execution authorization freshness', () => {
           };
           const makeExecution = () =>
             makeEncryptedAgentExecution({
+              machineUserId: 'synthetic-machine-account',
               genesis: hex(fixture.genesis.toBytes()),
               workspaceId: 'workspace',
               targetMachineId: 'machine',

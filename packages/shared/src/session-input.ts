@@ -720,8 +720,8 @@ const sortedJson = (value: unknown): unknown =>
 
 /**
  * Canonical bytes of what a queued input's author chose, comparable across the
- * composer's config and the promoted history row. `resume` and automation markers
- * are added at promotion; absent and empty MCP selections mean the same input.
+ * composer's config and the promoted history row. Promotion replaces `resume`
+ * from Session metadata; absent and empty MCP selections mean the same input.
  */
 export const queuedInputEvidence = (config: unknown): string | undefined => {
   const input = normalizeSessionTurnInputConfig(config);
@@ -737,7 +737,8 @@ export const queuedInputEvidence = (config: unknown): string | undefined => {
     inputBlocks,
     mcpServerIds: input.mcpServerIds?.length ? input.mcpServerIds : undefined,
   });
-  return JSON.stringify(sortedJson(JSON.parse(JSON.stringify(chosen))));
+  const evidence = { ...chosen, _lodyAutomation: input._lodyAutomation };
+  return JSON.stringify(sortedJson(JSON.parse(JSON.stringify(evidence))));
 };
 
 export const buildInitialSessionTurnInputConfig = (args: {

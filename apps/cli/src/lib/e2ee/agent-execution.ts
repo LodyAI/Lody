@@ -20,7 +20,7 @@ const intentSchema = z.object({
   workspaceId: z.string().min(1),
   sessionId: z.string().min(1),
   userTurnId: z.string().min(1),
-  /** Display metadata only; execution identity comes from the verified signer. */
+  /** Never grants authority: execution identity comes from the verified signer. */
   requesterUserId: z.string().optional(),
   inputConfig: z.unknown().optional(),
   /** Every local project this machine resolved for the turn; empty means projectless. */
@@ -51,8 +51,8 @@ export type VerifiedExecutionOriginal = {
   schedule?: ScheduleAuthorizationRequest;
   /** Present only on a machine-authored input derived from a shared member's Turn. */
   derivedFrom?: DerivationOrigin;
-  /** The row was promoted from a queue item, so its signer is not its author. */
-  queuedInput?: true;
+  /** The signed row's content when it is marked as promoted from a queue item. */
+  queued?: { timestamp: unknown; inputConfig: unknown; userId: unknown };
 };
 export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
 export type ResolveVerifiedExecutionOriginal = (
@@ -90,6 +90,9 @@ export function makeEncryptedAgentExecution(options: {
   resolveVerifiedOriginal: ResolveVerifiedExecutionOriginal;
   /** This machine's own signing key (hex): the only author of derived inputs. */
   selfDevice?: string;
+  /** This machine's account. Host-scoped credentials and identity follow it, so only
+   * its owner principal may run a turn that names it as requester. */
+  machineUserId: string;
   /** Observation only, after the committed actual-start claim. */
   onClaim?: (userTurnId: string) => void;
 }) {
@@ -295,6 +298,8 @@ export function makeEncryptedAgentExecution(options: {
       : authorization.principal === 'owner'
         ? ('owner' as const)
         : ('member' as const);
+    if (principal !== 'owner' && intent.requesterUserId === options.machineUserId)
+      return { state: 'denied' };
     return yield* attempt(() => {
       // No await between the terminal lifecycle fence and the durable start.
       if (

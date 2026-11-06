@@ -2861,6 +2861,7 @@ describe('SessionExecutionService', () => {
       workspaceId = 'workspace-1'
     ) =>
       makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: 'genesis',
         workspaceId,
         targetMachineId: 'machine-1',
@@ -3500,6 +3501,7 @@ describe('SessionExecutionService', () => {
     // A member granted only project p1 on this machine; the owner-signed policy decides.
     const sharedOnly = (f: ReturnType<typeof encryptedExecutionFixture>, asked: unknown[][]) =>
       makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: 'genesis',
         workspaceId: 'workspace-1',
         targetMachineId: 'machine-1',
@@ -3686,6 +3688,7 @@ describe('SessionExecutionService', () => {
     let originalAvailable = false;
     const submitted: string[] = [];
     const gate = makeEncryptedAgentExecution({
+      machineUserId: 'synthetic-machine-account',
       genesis: 'genesis',
       workspaceId: 'workspace-1',
       targetMachineId: 'machine-1',

@@ -26,7 +26,8 @@
 - Queue dispatch uses the same normalized input config as history dispatch. JavaScript-only
   undefined fields must not make an unchanged encrypted original fail equality.
 - Encrypted promotion marks the row `queuedInput`: the machine's signature on it is not
-  authorship. Start needs that input's signed original or this machine's local receipt
+  authorship. Start needs that input's signed original or this machine's local receipt;
+  only the owner principal may name the machine account as requester
   ([evidence](../../../../.agents/notes/implemented/bug-fix/2026-11-05-e2ee-queued-input-evidence.md)).
 - Absent meta is unknown, not foreign: hold the TTL-bounded RPC stash until meta lands or
   a definitive verdict.

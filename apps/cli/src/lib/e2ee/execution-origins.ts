@@ -93,6 +93,8 @@ const projection = (map: LoroMap) => {
     scheduleRun: read('scheduleRun'),
     derivedFrom: read('derivedFrom'),
     queuedInput: read('queuedInput'),
+    // A promoted row's requester is copied from its queue item, so it is signed content.
+    ...(read('queuedInput') === true ? { userId: read('userId') } : {}),
   };
 };
 const derivedFromSchema = z
@@ -165,13 +167,6 @@ export class ExecutionOrigins {
           .prepare('SELECT 1 FROM queued_inputs WHERE session=? AND turn=? AND digest=?')
           .get(...row) !== undefined
     );
-  }
-
-  /** The promoted row as this replica sees it now; carries no authorship. */
-  queuedTurn(doc: LoroDoc, userTurnId: string) {
-    const selected = findTurn(doc, userTurnId);
-    const current = selected && projection(selected.map);
-    return current?.queuedInput === true ? current : undefined;
   }
 
   /** Called only after signature AND AEAD verification; snapshot opens never call it. */
@@ -410,7 +405,15 @@ export class ExecutionOrigins {
               expiresAt: timestamp + windowMs,
               ...(schedule?.success ? { schedule: schedule.data } : {}),
               ...(derivedFrom?.success ? { derivedFrom: derivedFrom.data } : {}),
-              ...(current.queuedInput === true ? { queuedInput: true as const } : {}),
+              ...(current.queuedInput === true
+                ? {
+                    queued: {
+                      timestamp: current.timestamp,
+                      inputConfig: current.inputConfig,
+                      userId: current.userId,
+                    },
+                  }
+                : {}),
             };
             // Imported/forwarded operations cannot replace an earlier signer with
             // another device's authorization. Conflicting provenance is unknown.
