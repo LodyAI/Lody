@@ -23,6 +23,9 @@ Cancellation or scope changes retire only that export, retain selection and neve
 clear drafts. Ordinary/local exports retain their existing flow. PNG output uses
 the existing Blob, Electron or native byte-save path; native staging cleanup and
 OS cancellation stay with that adapter, with no new key or file-path bridge.
+Native PNG export stages an isolated cache file and distinguishes OS handoff from
+cancellation; it never falls back to a browser download
+([native sharing decision](../../../../.agents/notes/implemented/bug-fix/2026-10-07-native-share-image-save.md)).
 An abandoned UI waiter does not await obsolete capture/reads or prevent a new
 copy. The raw operation still observes rejection and drains its own cleanup;
 late continuations must pass the retired source guard before any further output.
