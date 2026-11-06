@@ -158,6 +158,7 @@ export function makeVerifiedExecutionOriginal(options: {
               sessionId: intent.sessionId,
               userTurnId: intent.userTurnId,
               timestamp: row.timestamp,
+              userId: row.userId,
               inputConfig: row.inputConfig,
             }),
           catch: (cause) => cause,

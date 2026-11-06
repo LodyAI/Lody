@@ -164,6 +164,16 @@ export function makeEncryptedAgentExecution(options: {
           Effect.map((result) => result._tag === 'Authorized' && result.isCurrent?.() !== false)
         )
       : Effect.succeed(false);
+  /** Automation admission spends an owner's rule, so it needs this machine's own input. */
+  const automationEvidence = Effect.fnUntraced(function* (
+    input: EncryptedExecutionIntent
+  ): Effect.fn.Return<'verified' | 'pending' | 'denied', unknown> {
+    const verified = yield* options.resolveVerifiedOriginal(
+      yield* attempt(() => intentSchema.parse(input))
+    );
+    if (verified && 'state' in verified) return 'pending';
+    return verified?.requesterDevice === options.selfDevice ? 'verified' : 'denied';
+  });
   const claim = Effect.fnUntraced(function* (
     input: EncryptedExecutionIntent
   ): Effect.fn.Return<EncryptedExecutionClaim, unknown> {
@@ -211,6 +221,9 @@ export function makeEncryptedAgentExecution(options: {
       !Number.isSafeInteger(verified.expiresAt) ||
       verified.expiresAt < 0
     )
+      return { state: 'denied' };
+    const config = intent.inputConfig as { _lodyAutomation?: unknown } | undefined;
+    if (config?._lodyAutomation !== undefined && verified.requesterDevice !== options.selfDevice)
       return { state: 'denied' };
     const authorizeExecution = options.authorizeExecution;
     if (!authorizeExecution) return { state: 'denied' };
@@ -334,7 +347,7 @@ export function makeEncryptedAgentExecution(options: {
     attempt(() => {
       options.journal().finish(permit, Buffer.from('{"state":"settled"}'));
     });
-  return { claim, complete, classifyOrigin, authorizeAgentControl };
+  return { claim, complete, classifyOrigin, authorizeAgentControl, automationEvidence };
 }
 export type EncryptedAgentExecution = ReturnType<typeof makeEncryptedAgentExecution>;
 

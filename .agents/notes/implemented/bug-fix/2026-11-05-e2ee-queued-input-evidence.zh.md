@@ -24,15 +24,18 @@ Translation: current
 - **比较方式。** `queuedInputEvidence` 是作者所选内容的规范形式。它排除 `resume`（提升时取自 Session 元数据，由签名行
   覆盖），并把缺失与空的 MCP 选择视为相同。它包含 `_lodyAutomation`。
 - **机器输入。** 自动化是 CLI `pushMessageQueue` 的唯一调用方，Schedule 容量调度也经由它进入队列。写入前它把摘要
-  记到 `execution-origins.sqlite`，启动时与签名行比较。带 `_lodyAutomation` 的行忽略 `queueDispatchOriginals`，必须有
-  这张收据。
+  记到 `execution-origins.sqlite`（包含请求者），启动时与签名行比较。带 `_lodyAutomation` 的行忽略
+  `queueDispatchOriginals`，必须有这张收据。
+- **自动化来源。** `_lodyAutomation` 会按规则所有者的账户消耗规则，所以带它的输入必须由当前机器签名。
+  `automationEvidence` 在准入触碰规则或 Inbox 之前检查，`claim` 再查一次。证据未到时推迟该 Turn；其他情况跳过准入，
+  由 claim 可见地拒绝。
 - **请求者。** `userId` 没有账本身份签名，机器上也没有加密身份到账户的映射。主机级凭据和身份跟随机器账户，所以
   `claim` 拒绝声明该账户、但 principal 不是 `owner` 的 Turn。这适用于所有加密启动，因为直接写的行也会到达同样的
-  使用方。
+  使用方。MCP 环境、机器 Git 身份和 MCP 账户凭据都拿标签与机器账户比较，所以非 owner principal 一个都拿不到。
 - **发送。** 加密排队发送必须有帧才能继续，所以会等过 200 ms 的准备期限，上限是 `QUEUED_ORIGINAL_DEADLINE_MS` 和
   调用方的 signal。等不到帧时不发送，发送者能看到结果。
 - **编辑和移除。** 每个 Turn 的原件不可变，所以改变输入的编辑会换新的 `userTurnId`、`operationId` 和时间戳。切换编辑
-  标记不会。编辑、移除和队列写入失败都会删除该 Turn 存放的帧。
+  标记不会。编辑、移除和队列写入失败都会删除该 Turn 存放的帧，除非当前副本里还有队列行或历史行指向该 Turn。
 - **范围。** 直接写的历史行不受影响：它的签名者就是作者。客户端 steer 路径自己写行，拒绝只改状态。这里覆盖
   [#2344](https://github.com/LodyAI/Lody/pull/2344) 执行来源提议的排队部分，其余部分仍在该 PR 中。
 
@@ -47,13 +50,15 @@ Translation: current
 ## 后果和限制
 
 - 不含此改动的客户端写的排队行没有帧，启动时被拒绝。Web 和手机通过 `lody-oss` 版本获得此改动，所以该更新要与
-  CLI 一起发布。升级前排队的行同样处理。
+  CLI 一起发布。升级前排队的行同样处理；升级前排队的自动化行，其收据是旧摘要，也会被拒绝。这里不做迁移：窗口只有
+  该输入的 15 分钟，E2EE 仍在 test-build 阶段，规则下一次运行会重新排队。
 - 排队输入保持原有的 15 分钟窗口。
 - 帧会让 Session 文档增长，`rpcDispatchOriginals` 本来也是如此；不做裁剪。
 - 账本落后时，未知的请求签名者会被拒绝，不会重试。
 - 帧在到期前对其签名者一直有效，从共享文档删除也无法撤销其他读者保留的字节。复用它的队列行绑定的是已签名内容和
   Turn，而不是该行的写者；journal 仍只允许启动一次。
-- `userId` 只与机器账户比较。启动时不区分另外两个成员的标签，`resume` 仍来自 Session 元数据。
+- `userId` 只与机器账户比较。成员仍可把输入的署名标成另一个成员，`resume` 仍来自 Session 元数据。
+- 移除与当前副本尚未看到的提升发生竞争时，帧会被删除，该 Turn 随后在启动时被拒绝。
 
 ## 验证
 

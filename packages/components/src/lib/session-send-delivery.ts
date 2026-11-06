@@ -143,7 +143,7 @@ export async function writeUserTurn(
     try {
       await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue!);
     } catch (error) {
-      await removeQueuedOriginal(runtime, send.sessionId, send.entry.id);
+      await releaseQueuedOriginal(runtime, send.sessionId, send.entry.id);
       throw error;
     }
   } else if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
@@ -237,18 +237,56 @@ async function storeQueuedOriginal(
   });
 }
 
-/** A withdrawn queued input drops its original with the row that used it. */
+/** Drops a Turn's original once no queue row or history row in this replica uses it. */
 export async function removeQueuedOriginal(
   runtime: SessionSendRuntime,
   sessionId: SessionId,
   userTurnId: string
 ) {
   if (runtime.contentMode !== 'e2ee') return;
-  await runtime.sendResources.withSessionStore(sessionId, (store) => {
+  await runtime.sendResources.withSessionStore(sessionId, async (store) => {
+    const state = store.getState();
+    if (state.queueDispatchOriginals?.[userTurnId] === undefined) return;
+    if ((state.mq ?? []).some((item) => item.userTurnId === userTurnId)) return;
+    if ((await store.sessionData.history.readTurn(userTurnId)).state === 'ready') return;
     store.setState((draft: SessionDocDraft) => {
       if (draft.queueDispatchOriginals) delete draft.queueDispatchOriginals[userTurnId];
     });
   });
+}
+
+/** Cleanup after a failed or finished write must not replace that write's own outcome. */
+async function releaseQueuedOriginal(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  userTurnId: string
+) {
+  await removeQueuedOriginal(runtime, sessionId, userTurnId).catch((error: unknown) => {
+    log('queued original cleanup failed for %s/%s: %o', sessionId, userTurnId, error);
+  });
+}
+
+/** Writes a queue edit; each original's cleanup follows what the row ends up naming. */
+export async function replaceQueueItem(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  cid: string,
+  current: MessageQueueItem,
+  next: MessageQueueItem
+): Promise<void> {
+  const sealed = await sealEditedQueueItem(runtime, sessionId, current, next);
+  try {
+    await runtime.writer.updateSessionMessage(
+      sessionId,
+      cid,
+      sealed as unknown as Record<string, unknown>
+    );
+  } finally {
+    if (sealed.userTurnId !== current.userTurnId) {
+      if (sealed.userTurnId) await releaseQueuedOriginal(runtime, sessionId, sealed.userTurnId);
+      if (current.userTurnId) await releaseQueuedOriginal(runtime, sessionId, current.userTurnId);
+    }
+  }
 }
 
 /**

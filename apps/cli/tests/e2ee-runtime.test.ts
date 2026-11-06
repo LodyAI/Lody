@@ -5821,10 +5821,15 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     readEpochKey,
   });
   /** A history row the member writes and signs directly, never promoted by this machine. */
-  const writeMemberRow = Effect.fnUntraced(function* (turnId: string, userId: string) {
+  const writeMemberRow = Effect.fnUntraced(function* (
+    turnId: string,
+    userId: string,
+    extra: object = {}
+  ) {
     const from = doc.version();
     const inputConfig = normalizeSessionTurnInputConfig({
       ...queuedConfig(turnId),
+      ...extra,
       resume: undefined,
       mcpServerIds: [],
     });
@@ -5972,6 +5977,7 @@ describe('encrypted queued input evidence', () => {
           sessionId: queuedSessionId,
           userTurnId: 'automation-turn',
           timestamp: queuedTimestamp,
+          userId: memberAccount,
           inputConfig: h.clientConfig('automation-turn'),
         });
         yield* h.send('automation-turn');
@@ -5989,6 +5995,7 @@ describe('encrypted queued input evidence', () => {
           sessionId: queuedSessionId,
           userTurnId: 'edited-automation',
           timestamp: queuedTimestamp,
+          userId: memberAccount,
           inputConfig: h.clientConfig('receipted-config'),
         });
         yield* h.send('edited-automation');
@@ -6052,6 +6059,7 @@ describe('encrypted queued input evidence', () => {
           sessionId: queuedSessionId,
           userTurnId: 'automation-signed',
           timestamp: queuedTimestamp,
+          userId: ownerAccount,
           inputConfig: h.clientConfig('automation-signed', config),
         });
         yield* h.pushRow('automation-signed', ownerAccount, config);
@@ -6076,6 +6084,7 @@ describe('encrypted queued input evidence', () => {
           sessionId: queuedSessionId,
           userTurnId: 'automation-other',
           timestamp: queuedTimestamp,
+          userId: ownerAccount,
           inputConfig: h.clientConfig('automation-other', receipted),
         });
         yield* h.pushRow('automation-other', ownerAccount, row);
@@ -6113,6 +6122,68 @@ describe('encrypted queued input evidence', () => {
       })
     )
   );
+
+  it('refuses automation provenance on an input this machine did not write', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const turn = yield* h.writeMemberRow('member-automation', 'session-owner-account', {
+          _lodyAutomation: automationOrigin,
+        });
+        const intent = {
+          workspaceId: 'workspace',
+          sessionId: queuedSessionId,
+          userTurnId: turn.id,
+          inputConfig: turn.inputConfig,
+          requesterUserId: turn.userId,
+        };
+        expect(yield* h.claim(turn)).toEqual({ state: 'denied' });
+        expect(yield* h.execution.automationEvidence(intent)).toBe('denied');
+      })
+    ));
+
+  it('accepts automation evidence for a receipted row this machine promoted', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const config = {
+          ...queuedConfig('automation-admitted'),
+          _lodyAutomation: automationOrigin,
+        };
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'automation-admitted',
+          timestamp: queuedTimestamp,
+          userId: ownerAccount,
+          inputConfig: h.clientConfig('automation-admitted', config),
+        });
+        yield* h.pushRow('automation-admitted', ownerAccount, config);
+        const turn = yield* h.promote();
+        expect(
+          yield* h.execution.automationEvidence({
+            workspaceId: 'workspace',
+            sessionId: queuedSessionId,
+            userTurnId: turn.id,
+            inputConfig: turn.inputConfig,
+            requesterUserId: turn.userId,
+          })
+        ).toBe('verified');
+      })
+    ));
+
+  it('binds a machine receipt to the requester on the queue row', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const config = { ...queuedConfig('relabelled-receipt'), _lodyAutomation: automationOrigin };
+        h.origins.retainQueuedInput({
+          sessionId: queuedSessionId,
+          userTurnId: 'relabelled-receipt',
+          timestamp: queuedTimestamp,
+          userId: 'session-owner-account',
+          inputConfig: h.clientConfig('relabelled-receipt', config),
+        });
+        yield* h.pushRow('relabelled-receipt', ownerAccount, config);
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
 
   it('does not start a queued input whose row names another requester than its original', () =>
     run(true, (h) =>

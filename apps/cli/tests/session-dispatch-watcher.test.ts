@@ -2037,7 +2037,7 @@ describe('SessionDispatchWatcher', () => {
         expect(work.watchedSessions.has(sessionId)).toBe(false);
         expect(dispatched).toEqual([]);
         if (automation) {
-          let receipted: { timestamp: unknown; inputConfig: unknown } | undefined;
+          let receipted: { timestamp: unknown; userId: unknown; inputConfig: unknown } | undefined;
           const adapter = new AutomationSessionActionsLegacy({
             lody: {
               documentManager: {
@@ -2082,6 +2082,7 @@ describe('SessionDispatchWatcher', () => {
           const promoted = await doc.sessionData.history.readTurn('late-queued-turn');
           if (promoted.state !== 'ready') throw new Error('promoted turn missing');
           expect(receipted?.timestamp).toBe(promoted.turn.timestamp);
+          expect(receipted?.userId).toBe(promoted.turn.userId);
           expect(queuedInputEvidence(promoted.turn.inputConfig)).toBeDefined();
           expect(queuedInputEvidence(receipted?.inputConfig)).toBe(
             queuedInputEvidence(promoted.turn.inputConfig)

@@ -108,6 +108,7 @@ type QueuedInput = {
   sessionId: string;
   userTurnId: string;
   timestamp: unknown;
+  userId: unknown;
   inputConfig: unknown;
 };
 
@@ -146,7 +147,15 @@ export class ExecutionOrigins {
       input.sessionId,
       input.userTurnId,
       createHash('sha256')
-        .update(JSON.stringify([input.sessionId, input.userTurnId, input.timestamp, evidence]))
+        .update(
+          JSON.stringify([
+            input.sessionId,
+            input.userTurnId,
+            input.timestamp,
+            input.userId,
+            evidence,
+          ])
+        )
         .digest('hex'),
     ] as const;
   }

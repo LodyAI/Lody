@@ -12901,6 +12901,57 @@ describe('Operation Inbox execution boundary', () => {
     }
   );
 
+  it.each([
+    ['denied', 'failed'],
+    // `seen` stays dispatchable for the watcher's retry.
+    ['pending', 'seen'],
+  ] as const)(
+    'admits encrypted automation input only on verified evidence (%s)',
+    async (evidence, status) => {
+      const prompts: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        prompts.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      const origin = {
+        invocationId: 'invocation',
+        ruleId: 'rule',
+        ruleRevision: 1,
+        eventRef: 'event',
+        authorizationUserId: 'user-1',
+      };
+      let admitted = 0;
+      f.service.setAutomationAdmission(async () => {
+        admitted += 1;
+        return true;
+      });
+      Object.assign((f.service as unknown as { deps: object }).deps, {
+        encryptedExecution: {
+          automationEvidence: () => Effect.succeed(evidence),
+          claim: () =>
+            Effect.succeed(
+              evidence === 'pending' ? { state: 'pending-evidence' } : { state: 'denied' }
+            ),
+          complete: () => Effect.void,
+        },
+      });
+      try {
+        await f.service.continueSession({
+          ...f.message,
+          acpSessionConfig: { ...f.message.acpSessionConfig, _lodyAutomation: origin },
+        });
+        expect(admitted).toBe(0);
+        expect(prompts).toHaveLength(0);
+        const input = (await (await createSessionBackend(f.doc)).readHistory()).find(
+          (turn) => turn.id === f.message.userTurnId
+        );
+        expect(input?.status).toBe(status);
+      } finally {
+        await f.close();
+      }
+    }
+  );
+
   it.each([true, false])(
     'checks current worktree HEAD before delivering CI evidence (match=%s)',
     async (matches) => {

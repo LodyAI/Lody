@@ -528,6 +528,7 @@ export class AutomationSessionActionsLegacy {
       sessionId,
       userTurnId: receipt.turnId,
       timestamp,
+      userId: receipt.rule.ownerUserId,
       inputConfig: config,
     });
     await doc.pushMessageQueue({

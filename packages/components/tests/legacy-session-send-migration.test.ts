@@ -20,6 +20,7 @@ import {
   dispatchUserTurn,
   QUEUED_ORIGINAL_DEADLINE_MS,
   removeQueuedOriginal,
+  replaceQueueItem,
   sealEditedQueueItem,
   writeUserTurn,
 } from '../src/lib/session-send-delivery';
@@ -466,6 +467,102 @@ it('removes the stored original when the queue row cannot be written', async () 
     })
   ).rejects.toThrow('synthetic write failure');
   expect(queuedOriginal(f, input.id)).toBeUndefined();
+});
+
+it('keeps the stored original when the queue row committed before the failure', async () => {
+  const f = fixture();
+  const input = entry('queued-committed');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('0f'.repeat(32));
+  f.runtime.writer.enqueueSessionMessage = async (sessionId, item) => {
+    await f.runtime.sendResources.withSessionStore(sessionId as SessionId, (store) =>
+      store.setState((draft: { mq?: unknown[] }) => {
+        draft.mq = [...(draft.mq ?? []), item];
+      })
+    );
+    throw new Error('synthetic watermark failure');
+  };
+  await expect(
+    writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'queue' },
+      queue: queueRow(input),
+    })
+  ).rejects.toThrow('synthetic watermark failure');
+  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+});
+
+it('drops the new original when an encrypted queue edit cannot be written', async () => {
+  const f = fixture();
+  const input = entry('queued-failed-edit');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('11'.repeat(32));
+  let written = '';
+  f.runtime.writer.updateSessionMessage = async (_sessionId, _cid, patch) => {
+    written = String(patch.userTurnId);
+    throw new Error('synthetic edit failure');
+  };
+  const current = { ...queueRow(input), $cid: 'cid' } as unknown as MessageQueueItem;
+  const edited = {
+    ...current,
+    acpSessionConfig: {
+      ...current.acpSessionConfig,
+      prompt: 'changed',
+      inputBlocks: [{ type: 'text', text: 'changed' }],
+    },
+  } as MessageQueueItem;
+  await expect(replaceQueueItem(f.runtime, SESSION, 'cid', current, edited)).rejects.toThrow(
+    'synthetic edit failure'
+  );
+  expect(written).not.toBe(input.id);
+  expect(queuedOriginal(f, written)).toBeUndefined();
+});
+
+it('replaces the original of a written encrypted queue edit', async () => {
+  const f = fixture();
+  const input = entry('queued-written-edit');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('12'.repeat(32));
+  await f.runtime.sendResources.withSessionStore(SESSION, (store) =>
+    store.setState((draft: { queueDispatchOriginals?: Record<string, string> }) => {
+      draft.queueDispatchOriginals = { [input.id]: '13' };
+    })
+  );
+  let written = '';
+  f.runtime.writer.updateSessionMessage = async (sessionId, _cid, patch) => {
+    written = String(patch.userTurnId);
+    await f.runtime.sendResources.withSessionStore(sessionId as SessionId, (store) =>
+      store.setState((draft: { mq?: unknown[] }) => {
+        draft.mq = [...(draft.mq ?? []), patch];
+      })
+    );
+  };
+  const current = { ...queueRow(input), $cid: 'cid' } as unknown as MessageQueueItem;
+  const edited = {
+    ...current,
+    acpSessionConfig: {
+      ...current.acpSessionConfig,
+      prompt: 'changed',
+      inputBlocks: [{ type: 'text', text: 'changed' }],
+    },
+  } as MessageQueueItem;
+  await replaceQueueItem(f.runtime, SESSION, 'cid', current, edited);
+  expect(queuedOriginal(f, written)).toBe('12'.repeat(32));
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
+});
+
+it('keeps the original of a Turn already promoted to history', async () => {
+  const f = fixture();
+  f.runtime.contentMode = 'e2ee';
+  await f.append(entry('queued-promoted'));
+  await f.runtime.sendResources.withSessionStore(SESSION, (store) =>
+    store.setState((draft: { queueDispatchOriginals?: Record<string, string> }) => {
+      draft.queueDispatchOriginals = { 'queued-promoted': '10' };
+    })
+  );
+  await removeQueuedOriginal(f.runtime, SESSION, 'queued-promoted');
+  expect(queuedOriginal(f, 'queued-promoted')).toBe('10');
 });
 
 it('stops waiting for a host that never answers a queued send', async () => {

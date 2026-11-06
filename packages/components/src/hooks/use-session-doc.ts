@@ -1,7 +1,7 @@
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from '../lib/session-send-admission';
-import { removeQueuedOriginal, sealEditedQueueItem } from '../lib/session-send-delivery';
+import { removeQueuedOriginal, replaceQueueItem } from '../lib/session-send-delivery';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
@@ -408,14 +408,7 @@ export function useSessionDoc(
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const sealed = await sealEditedQueueItem(runtime, sessionId, current, next);
-      await runtime.writer.updateSessionMessage(
-        sessionId,
-        cid,
-        sealed as unknown as Record<string, unknown>
-      );
-      if (current.userTurnId && sealed.userTurnId !== current.userTurnId)
-        await removeQueuedOriginal(runtime, sessionId, current.userTurnId);
+      await replaceQueueItem(runtime, sessionId, cid, current, next);
     },
     [withStore, runtime, sessionId]
   );
