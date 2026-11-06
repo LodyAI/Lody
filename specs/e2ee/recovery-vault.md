@@ -6,16 +6,17 @@ Translation: current
 [中文](recovery-vault.zh.md)
 
 This draft proposes [passkey unlock](#passkey-unlock-proposed) on macOS, iPhone and
-Web, which exceeds the [revision approved on 2026-10-31](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration).
+Web and a [trust anchor taken from the package](#trust-anchor-proposed-awaiting-owner-confirmation),
+which exceed the [revision approved on 2026-10-31](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration).
 It awaits owner approval. Until then, that approved revision stays in force. Passages
-about passkeys and the service gap are the only intended changes; everything else
-keeps its approved meaning.
+about passkeys, the trust anchor and the service gap are the only intended changes;
+everything else keeps its approved meaning.
 
 ## Approved format boundaries
 
-On 2026-10-28, owner Zixuan Chen (zxch3n) approved only these boundaries, recorded in the [approval note](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md) ([approval update #2032](https://github.com/LodyAI/Lody/pull/2032)). Recovery admission keeps the existing ledger tag 4 and `lody-e2ee/possess/v2\0` bytes; genesis is unchanged. The encrypted recovery package uses `formatVersion: 1` and contains the recovery generation and trusted ledger material; the trust anchor must be independently confirmed. An encrypted package, its source locator or a server response alone does not establish that anchor or prove the latest ledger head.
+On 2026-10-28, owner Zixuan Chen (zxch3n) approved only these boundaries, recorded in the [approval note](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md) ([approval update #2032](https://github.com/LodyAI/Lody/pull/2032)). Recovery admission keeps the existing ledger tag 4 and `lody-e2ee/possess/v2\0` bytes; genesis is unchanged. The encrypted recovery package uses `formatVersion: 1` and contains the recovery generation and trusted ledger material; the trust anchor comes from an authenticated package, as [proposed below](#trust-anchor-proposed-awaiting-owner-confirmation). A source locator or a server response alone does not establish that anchor, and no package proves the latest ledger head.
 
-Before recovery is accepted, import R's keys, independently confirm the trust anchor, actually decrypt a current-epoch envelope addressed to R and verify the recovered key against its ledger commitment. The R signature binds the encryption public key but alone does not prove possession of its private key. The package version and these boundaries were approved on 2026-10-28; on 2026-10-31 the owner approved this Spec as a whole ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration)). The recovery vault remains outside the MVP. The core package carries `formatVersion: 1` and rejects any other or missing version; its private keys must be the exact 48-byte RFC 8410 PKCS#8 encodings for Ed25519 and X25519 (accepted by the owner on 2026-10-31, see the approval note). Approval does not establish deployed or real-device behavior.
+Before recovery is accepted, import R's keys, replay the ledger from the package's genesis, actually decrypt a current-epoch envelope addressed to R and verify the recovered key against its ledger commitment. The R signature binds the encryption public key but alone does not prove possession of its private key. The package version and these boundaries were approved on 2026-10-28; on 2026-10-31 the owner approved this Spec as a whole ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration)). The recovery vault remains outside the MVP. The core package carries `formatVersion: 1` and rejects any other or missing version; its private keys must be the exact 48-byte RFC 8410 PKCS#8 encodings for Ed25519 and X25519 (accepted by the owner on 2026-10-31, see the approval note). Approval does not establish deployed or real-device behavior.
 
 ## Recovery material and ciphertext
 
@@ -153,8 +154,8 @@ holding R's private key already confers R's ledger authority, so the credential 
 no new capability.
 
 **Restore and notification.** On a device without an identity for a workspace,
-"Restore from recovery file" sits next to pairing. It opens the vault, asks the user
-to confirm the trust anchor independently, decrypts R's current-epoch envelope,
+"Restore from recovery file" sits next to pairing. It opens the vault, verifies the
+ledger from the package's genesis, decrypts R's current-epoch envelope,
 checks its commitment, then has R admit a new personal device C. After C's admission
 commits, the service notifies every active device of the account and the account
 email that workspace X was restored on a new device with the recovery file. There
@@ -192,18 +193,19 @@ Passkey unlock adds the risks listed [below](#passkey-unlock-proposed).
 **Scenario.** A user who lost every device still has a passkey in iCloud Keychain.
 On a new Mac, iPhone or supported browser they sign in, choose "Restore with passkey"
 and approve the system prompt. From the moment V is open, the path is the same as the
-file path: confirm the trust anchor, open R's envelope, check its commitment, have R
-admit a new personal device C, then notify. A passkey opens V for every workspace in
-the vault; it never replaces the anchor or the ledger checks.
+file path: verify the ledger, open R's envelope, check its commitment, have R admit a
+new personal device C, then notify. A passkey opens V for every workspace in the
+vault; it never replaces the ledger checks. The scope is backup and restore through R,
+the extra account device; the vault adds no other capability.
 
 **Dependencies.** A passkey only wraps V, so it has nothing to unlock until a platform
-can run the file-based restore. The order is fixed: file create and check, per-workspace
-setup, restore with an anchor, and only then the passkey wrap. The recovery file is
+can run the file-based restore. A passkey cannot ship on a platform before that
+restore works there; both are built in parallel, behind default-off gates. The recovery file is
 still created with every vault. It remains the fallback when a passkey is lost, the
 iCloud account is lost, or the platform has no PRF.
 
 **One RP on a dedicated host.** All platforms share one RP ID so a synced passkey works
-everywhere. The RP ID is a dedicated exact host, such as `vault.<lody-domain>`, and never
+everywhere. The RP ID is the dedicated exact host `vault.lody.ai` (owner decision, 2026-11-06), and never
 the parent domain or the Web app's own host. A browser lets any page on the RP ID or its
 subdomains run a ceremony, so a parent-domain RP would put every subdomain and every
 script served from them inside the boundary. The RP ID cannot change later without
@@ -261,10 +263,10 @@ restores in the first phase. V is never retained, and the app must not gain
 over-the-air JavaScript updates while this path exists, or it falls under the Web
 risk below.
 
-**Web.** PRF is judged by a real ceremony, not by a browser list. When a browser has no
-PRF, the user is told to use the recovery file or another device. There is no
-downgrade. The recommended design is unlock-only on an isolated surface hosted on the
-RP host: a separate minimal build with no third-party scripts or telemetry, a strict
+**Web.** Web ships after macOS and iPhone. PRF is judged by a real ceremony, not by a
+browser list. When a browser has no PRF, the user uses the recovery file on the same
+surface. There is no downgrade. The surface is unlock-only and isolated on the RP host
+(owner decision, 2026-11-06): a separate minimal build with no third-party scripts or telemetry, a strict
 CSP, and its own deployment credentials. C lives on that origin, and the regular Web
 app or any other device then joins through ordinary pairing approved by C. V, R and
 the PRF result never reach the regular Web app. V is never stored in a browser.
@@ -302,26 +304,61 @@ so its takeover plus Lody account access can open V.
 **Unchanged.** Ledger records and `formatVersion: 1` are unchanged. A passkey grants
 R's existing authority and nothing more. Restore notifications, with no forced
 replacement, approval or cooldown, apply the same way and name the passkey path.
-Passkey unlock is outside the MVP and stays behind the same default-off gates.
+Recovery and passkey work proceed in parallel with the MVP but are not part of its
+acceptance, and stay behind default-off gates that leave creation, joining, pairing
+and rotation unchanged.
 
-### Decisions needed from the owner
+### Owner decisions
 
-Each carries a recommendation; none is decided by this draft.
+Decided on 2026-11-06: the RP host is `vault.lody.ai`; Web is the isolated unlock-only
+surface, after macOS and iPhone, and other devices join it by ordinary pairing; that
+surface also accepts the recovery file; the passkey feature requires iOS 18.4; and
+recovery and passkey work run now, in parallel.
 
-1. **RP ID.** Recommended: a dedicated exact host. This is the only choice that
-   cannot be reversed later.
-2. **Web.** Recommended: isolated unlock-only surface, shipped after macOS and iPhone.
-   The alternatives are unlock on the regular Web app, which is cheaper but exposes
-   every passkey to that app's whole delivery chain, or no Web, which accepts missing
-   the stated goal.
-3. **Web file restore.** Recommended: the same surface accepts the recovery file,
-   because this is what "fall back to the file" means on a browser.
-4. **iPhone floor.** Recommended: 18.4.
-5. **Other authenticators.** Recommended: unpromised, as above.
-6. **Trust anchor carrier.** Restore cannot finish without it, on any path, and the
-   carrier is still undecided.
-7. **Phase and gate.** Whether this stays outside the MVP gate, and whether iPhone
-   enrollment joins the first phase.
+Awaiting confirmation; this draft is written as if they are accepted:
+
+- **Other authenticators.** Standard WebAuthn with PRF and no allow-list, promising only
+  iCloud Keychain.
+- **Trust anchor.** The [proposal above](#trust-anchor-proposed-awaiting-owner-confirmation).
+
+## Trust anchor (proposed, awaiting owner confirmation)
+
+**Proposal.** The genesis inside an authenticated recovery package is the trust anchor.
+The user saves no fingerprint, prints nothing and asks nobody. This replaces the earlier
+"independently confirm" requirement. It needs no ledger change, because the genesis
+record already binds the workspace.
+
+**Why this is enough.** A package is a sealed note from the user's own earlier device to
+their later one. That device had verified the workspace before it wrote the package, and
+only a holder of V can produce one that decrypts. The new device then replays the
+complete signed history from that genesis. The history must contain the package's
+`head` and `length` checkpoint, and it must show R active; a shorter or forked history
+stops. Retained state exported from another device is still not accepted as trust.
+
+**What the old rule guarded against.** The permission ledger says a correct decryption
+does not by itself qualify as a trust anchor when a backup location returns another R or
+genesis. It predates this analysis and names no attacker. Taken attacker by attacker:
+
+| Attacker | Can do | Other genesis accepted? |
+| --- | --- | --- |
+| Service or network, no V | Withhold, roll back to an older authentic package, hide newer ledger records | No. It cannot forge a package, and an older package carries the same genesis. |
+| Holder of V (leaked file or wrap with its passkey, compromised device retaining V), with vault write access | Write a package naming a lookalike workspace | Yes, but this attacker already opens every real R until it is revoked. |
+| Anyone who gets the user to use a file or passkey the attacker made | Present the attacker's own vault, if it can also place that vault under this account | Yes, a lookalike workspace, but the user's real keys stay out of reach. |
+
+**Conclusion.** No attacker without V can make a client accept another genesis, unless
+the user is tricked into using the attacker's own file or passkey. In the remaining
+cases an independent anchor would help only narrowly: it would stop a lookalike
+workspace, which is a forgery the user could type secrets into. It would not protect
+real workspaces, and it costs every user a second artifact to keep safe. If that artifact
+is lost, recovery fails even though the user holds everything else. The recommendation
+is therefore to drop it and accept this residual risk.
+
+**Rules that keep this true.** The client always uses its signed-in service and ignores
+the file's `serviceLocator` for connecting; a mismatch stops. A vault that may be
+compromised is replaced, not kept. A surviving member may compare workspaces, but
+nothing requires it. Existing limits are unchanged: a device that saw no newer state
+still cannot prove it holds the latest head. On approval, the matching row in the
+[permission ledger](permission-ledger.zh.md) must be reworded in the same change.
 
 ## Boundaries and validation
 
