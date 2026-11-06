@@ -62,6 +62,19 @@ panel, then bake copied values into `DEFAULT_PARAMS`. Verify with
 `pnpm --filter @lody/site-docs build` and a screenshot; WebGL renders in headless
 Chromium. There is no second legacy site tree.
 
+## Styling
+
+Site-owned components migrate to local `stylex.create` declarations through
+[site-local options](stylex-options.ts), without importing product UI or its build
+configuration. The SSR document loads StyleX's virtual CSS/HMR runtime only in
+development; production extraction targets the shared index stylesheet.
+Site-owned styles follow the utilities layer: Fumadocs prose defaults also live
+in that layer, so placing StyleX before it loses the original local overrides.
+Migrate a styled owner and its real callers together through typed composition.
+Tailwind remains for unmigrated callers and Fumadocs' stylesheet;
+converting a site component does not retire that external pipeline. Preserve the
+actual theme variables and static HTML rendering when migrating a page.
+
 ## Local development
 
 The shared head in `src/routes/__root.tsx` loads Microsoft Clarity project

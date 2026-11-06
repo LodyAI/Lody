@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { DocsTocLanguageSelect } from '@site/components/docs-toc-language-select';
 import { DocsSidebarFooter } from '@site/components/docs-sidebar-footer';
 import { getMDXComponents } from '@site/components/mdx';
@@ -12,6 +13,10 @@ import type { TOCItemType } from 'fumadocs-core/toc';
 import { DocsLayout } from 'fumadocs-ui/layouts/docs';
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
 import { type DocsRouteData, localeCode, type SerializedTocItem, type SiteLocale } from './shared';
+
+const styles = stylex.create({
+  titleAnchor: { scrollMargin: 'calc(var(--spacing) * 28)' },
+});
 
 const docsContentLoaders = {
   en: browserCollections.docsEn.createClientLoader({
@@ -79,7 +84,7 @@ export function DocsRoutePage({ locale, data }: { locale: SiteLocale; data: Docs
           header: <DocsTocLanguageSelect />,
         }}
       >
-        <DocsTitle id={titleId} className="scroll-m-28">
+        <DocsTitle id={titleId} {...stylex.props(styles.titleAnchor)}>
           {data.title}
         </DocsTitle>
         <DocsDescription>{data.description}</DocsDescription>

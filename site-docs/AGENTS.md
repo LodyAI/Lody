@@ -64,7 +64,8 @@ tuning shortcut are in [`README.md`](README.md).
   content during install; never use the switch unless a later build/generate step
   is guaranteed.
 - `vite.config.ts` is the build integration point. Keep TanStack Start, Fumadocs
-  MDX, Tailwind, React, and the `@site` alias there. `build.modulePreload`
+  MDX, React and the `@site` alias there. Site-owned StyleX uses local
+  `stylex-options.ts`; Tailwind remains for unmigrated and Fumadocs CSS. `build.modulePreload`
   filters HTML hosts only; JS hosts keep extracted route CSS so client nav to
   `/price` or legal is not unstyled. `finalize-prerender-html.mjs` strips leftover
   HTML preloads and inlines first-paint CSS on landing so the H1 is not waiting

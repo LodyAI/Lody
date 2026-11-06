@@ -1,7 +1,12 @@
+import * as stylex from '@stylexjs/stylex';
 import '@site/app/global.css';
 import { SiteRootProvider } from '@site/components/site-root-provider';
 import { SiteNotFound } from '@site/src/site-pages/not-found';
 import { createRootRoute, HeadContent, Outlet, Scripts, useLocation } from '@tanstack/react-router';
+
+const styles = stylex.create({
+  body: { display: 'flex', minHeight: '100vh', flexDirection: 'column' },
+});
 
 const description =
   'Lody is an AI coding-agent workspace for running multiple agents in parallel with isolated Git worktrees, real-time diff review, GitHub integration, mobile access, and team collaboration.';
@@ -23,6 +28,7 @@ export const Route = createRootRoute({
       { name: 'twitter:image', content: 'https://lody.ai/og-image.png' },
     ],
     links: [
+      ...(import.meta.env.DEV ? [{ rel: 'stylesheet', href: '/virtual:stylex.css' }] : []),
       { rel: 'icon', href: '/favicon.ico', sizes: 'any' },
       { rel: 'icon', href: '/favicon-light.svg', type: 'image/svg+xml' },
       {
@@ -34,6 +40,7 @@ export const Route = createRootRoute({
       { rel: 'apple-touch-icon', href: '/_docs-assets/logo-180.png' },
     ],
     scripts: [
+      ...(import.meta.env.DEV ? [{ type: 'module', src: '/@id/virtual:stylex:runtime' }] : []),
       {
         children: `(function(c,l,a,r,i,t,y){
     c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
@@ -70,7 +77,7 @@ function RootDocument() {
       <head>
         <HeadContent />
       </head>
-      <body className="flex min-h-screen flex-col">
+      <body {...stylex.props(styles.body)}>
         <SiteRootProvider>
           <Outlet />
         </SiteRootProvider>
