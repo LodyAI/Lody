@@ -6,9 +6,11 @@ import os from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import {
   AGENT_ROLE_VERSION,
   SESSION_FILE_MAX_COUNT,
@@ -261,7 +263,7 @@ describe('Lody MCP tool catalog', () => {
     }
   });
 
-  it('publishes bounded catalog retry guidance on every create/chat tool', async () => {
+  it('serves bounded catalog retry guidance through help for every create/chat tool', async () => {
     const server = buildLodyMcpServer();
     const client = new Client({ name: 'retry-guidance-test-client', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -274,7 +276,13 @@ describe('Lody MCP tool catalog', () => {
         'lody_session_chat',
         'lody_session_chat_many',
       ]) {
-        const description = tools.find((tool) => tool.name === name)?.description;
+        expect(tools.find((tool) => tool.name === name)?.description).toContain('lody_help');
+        const help = CallToolResultSchema.parse(
+          await client.callTool({ name: 'lody_help', arguments: { command: name } })
+        );
+        const block = help.content.find((item) => item.type === 'text');
+        if (!block || block.type !== 'text') throw new Error('Missing tool help');
+        const { description } = z.object({ description: z.string() }).parse(JSON.parse(block.text));
         expect(description).toContain('wait at least 5 seconds between attempts');
         expect(description).toContain('at most 3 total attempts (the initial call plus 2 retries)');
         expect(description).toContain('reuse the identical request and operationId');
@@ -289,6 +297,7 @@ describe('Lody MCP tool catalog', () => {
   it('publishes session tools and never advertises a Task family', async () => {
     const names = await listPublishedToolNames();
     expect(names).toContain('lody_feedback');
+    expect(names).toContain('lody_help');
     expect(names).toEqual(
       expect.arrayContaining([
         'lody_session_rename',

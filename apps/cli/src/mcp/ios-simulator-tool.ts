@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { LodyToolServer } from './tool-help';
 import { z } from 'zod';
 import {
   IosSimulatorCommandSchema,
@@ -33,12 +33,14 @@ const inputSchema = z
   });
 
 export function registerIosSimulatorPreviewTool(
-  server: McpServer,
+  server: LodyToolServer,
   request: (command: IosSimulatorCommand) => Promise<unknown>
 ) {
   server.registerTool(
     IOS_SIMULATOR_PREVIEW_TOOL_NAME,
     {
+      summary:
+        'Preview iOS Simulators in Lody: list/start/status/stop, without building or installing apps.',
       title: 'iOS Simulator Preview',
       description:
         'Preview a native iOS app in an iOS Simulator inside Lody’s dedicated simulator panel. Use this tool when developing, debugging, or demonstrating an iOS app and the user needs to see or interact with the simulator. Supports listing simulators, starting a preview, checking status, and stopping a preview on the current session’s Mac. Listing does not boot a device. Starting boots the selected simulator if needed; preparation is asynchronous and the stream connects when the user opens the iOS Simulator panel. Each simulator can be controlled by only one session; occupied devices cannot be taken over. Stopping the preview leaves the simulator running. This tool does not build or install apps. For web pages or web apps, use lody_report_preview_candidate.',
