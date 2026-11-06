@@ -2264,6 +2264,8 @@
   "sessions.fileViewer.save": "保存",
   "sessions.fileViewer.save.conflict": "请先解决保存冲突",
   "sessions.fileViewer.save.withShortcut": "保存 (⌘S / Ctrl+S)",
+  "sessions.fileViewer.edit": "编辑文件",
+  "sessions.fileViewer.readOnly": "切换为只读",
   "sessions.fileViewer.search": "搜索",
   "sessions.fileViewer.wordWrap": "自动换行",
   "sessions.fileViewer.wordWrapEnable": "长行自动换行",

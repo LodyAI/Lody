@@ -196,6 +196,10 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   live text layers, so closing one viewer cannot disable another; removing the
   final layer releases them. Preserve these responsibilities on dependency
   upgrades. See [PDF Worker and listener ownership](../notes/implemented/bug-fix/2026-10-17-pdf-worker-build-compatibility.md).
+- Mobile session file viewers open read-only, including when a retained drawer
+  is reopened. The toolbar explicitly enables editing for writable files and can
+  return to read-only without discarding drafts; pending saves and conflicts stay
+  actionable in either mode. Desktop viewers retain their existing editing default.
 - Markdown file viewers copy the latest complete source text (including unsaved
   editor changes) from the top toolbar. On mobile, source mode uses the native
   text surface instead of Monaco so long-press keeps the OS selection menu;
