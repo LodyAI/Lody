@@ -234,7 +234,12 @@ opens the new personal device's workspace with the recovered keys installed.
 
 `RecoveryVaults` (_requires `RecoveryVaultStore`, `RecoveryVaultLocalStore`_)
 creates and unlocks vault-v1 vaults: a recovery file kept offline, or a
-passkey PRF. `makeWorkspaceRecovery` keeps one workspace's recovery entry
+passkey PRF. A passkey needs a registration that reported `enabled: true` and an
+authentication with user verification and a 32-byte `results.first`; WebAuthn never reports
+`enabled` at authentication. Every ceremony uses `vaultPrfInput()`, and `user.id` is
+`passkeyUserHandle(vaultId)`, so a new device without the file learns the vault from the
+ceremony. The encrypted index lists each passkey, and CAS references its wrap so the
+service cannot delete it as unreferenced. `makeWorkspaceRecovery` keeps one workspace's recovery entry
 current (setup, test, replace, skip) and performs a restore. A restore stops unless the
 ledger contains the package's `head` and `length` checkpoint. A recovery device
 admits a new personal device, then that device installs every epoch key.
