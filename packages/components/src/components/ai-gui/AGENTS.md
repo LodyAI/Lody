@@ -34,10 +34,11 @@ Ownership: [README.md](README.md).
 ## Turn Folding And Layout
 
 - Work regions start expanded while streaming and may be folded by the reader.
-  Finished turns fold thoughts and tool calls; explicit `commentary` joins work
-  only when its segment has a nonempty `final_answer`. Final and unknown-phase
-  text remain visible. Interrupted work without a visible result stays expanded.
-  Expanded work stays in chronological order, with the header before its first item.
+  Finished turns keep the final contiguous text run before trailing attachments,
+  plans and notices visible, and fold earlier text with thoughts and tool calls.
+  Apply this rule per plan segment regardless of ACP phase or provider.
+  Interrupted work without a visible result stays expanded. Expanded details keep
+  chronological order, with the header before the first work item.
 - Plan approval cuts a live turn by ACP kind `switch_mode`, never title.
   `plan-surface.ts` prefers nonempty `rawInput.plan` over replaceable tool content.
   Keep `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility and expansion
