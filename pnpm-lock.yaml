@@ -1771,6 +1771,9 @@ importers:
       '@lody/cloud-api':
         specifier: workspace:*
         version: link:../cloud-api
+      '@lody/e2ee-client':
+        specifier: workspace:*
+        version: link:../e2ee-client
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 7.6.13

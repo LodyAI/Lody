@@ -17,7 +17,7 @@ import { openEpochEnvelope, authenticateEpochEnvelopeSignature } from '../keys/e
 import { authenticateEpochStagedGroup, type EpochStagedGroup } from '../keys/staging';
 import { openEpochKeyHpke } from '../crypto/hpke';
 import { commitEpochKey, recoverLedgerHistory } from '../keys/history';
-import { canonical, parseCanonical, attempt, random, hex, vaultError } from './crypto';
+import { canonical, fromHex, parseCanonical, attempt, random, hex, vaultError } from './crypto';
 import { deriveRecoveryAccessCredential } from './credential';
 import { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity } from './identity';
 import {
@@ -491,10 +491,17 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           ref.membershipId === hex(membership.toBytes())
       );
     if (!reference) return yield* vaultError('missing');
-    return yield* useIdentity(reference, (identity) =>
+    return yield* useIdentity(reference, (identity, bundle) =>
       Effect.gen(function* () {
         const view = yield* current();
         if (!active(view, identity)) return yield* vaultError('unauthorized');
+        // The genesis anchors the replay; the package's checkpoint stops a fork from it.
+        const checkpoint = yield* attempt(() => ({
+          head: Result.getOrThrow(Bytes.recordHash(fromHex(bundle.trust.head))),
+          length: bundle.trust.length,
+        }));
+        if (!(yield* Effect.fromResult(hasVerifiedCheckpoint(view, checkpoint))))
+          return yield* vaultError('authentication');
         const epoch = yield* openCurrent(identity),
           personal = request.personal;
         if (

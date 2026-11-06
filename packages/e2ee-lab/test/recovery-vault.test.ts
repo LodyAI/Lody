@@ -591,6 +591,92 @@ describe('encrypted recovery vault and genuine workflow', () => {
         )
       );
     }));
+  it('refuses a restore when the served history lacks the package checkpoint', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* fixture(),
+              storage = yield* makeLabRecoveryVaultStore({
+                path: join(dir, 'vault.sqlite'),
+                mode: 'create',
+              }),
+              created = yield* createRecoveryVault({
+                locator: 'https://synthetic.invalid/vault',
+                ...storage,
+              }),
+              journal = yield* Layer.build(
+                sqliteSubmissionJournal({ path: join(dir, 'p09.sqlite') })
+              ).pipe(Effect.map((context) => Context.get(context, SubmissionJournal))),
+              installed = yield* makeSqliteProtectedEpochKeys({
+                path: join(dir, 'keys.sqlite'),
+                mode: 'create',
+                genesis: f.initial.genesis,
+                recipient: f.owner.publicKey,
+                ledger: () => Effect.sync(f.view),
+                protector: labSyntheticProtector,
+              });
+            const submit = (record: Uint8Array) =>
+              Effect.gen(function* () {
+                const result = yield* submitRecord(f.initial.genesis, record).pipe(
+                  Effect.provideService(SubmissionJournal, journal),
+                  Effect.provideService(LedgerLog, f.remote)
+                );
+                yield* acknowledgeSubmission(f.initial.genesis, result).pipe(
+                  Effect.provideService(SubmissionJournal, journal),
+                  Effect.provideService(LedgerLog, f.remote)
+                );
+                return result;
+              });
+            const workflow = yield* makeWorkspaceRecovery({
+              vault: created.vault,
+              local: storage.local,
+              genesis: f.initial.genesis,
+              membershipId: f.membership,
+              personalSigner: f.owner,
+              ledger: () => Effect.sync(f.view),
+              submitOriginal: submit,
+              installed,
+              // A later head of a fork the served history does not contain.
+              trust: {
+                source: 'synthetic checkpoint from a device that saw another history',
+                genesisRecord: f.initial.record,
+                head: hex(new Uint8Array(32).fill(66)),
+                length: 1,
+              },
+              fetchCurrentEnvelope: (recipient, epoch) =>
+                Effect.gen(function* () {
+                  const context = {
+                    genesis: f.initial.genesis,
+                    epoch: ok(Bytes.epochNumber(epoch)),
+                    sender: f.owner.publicKey,
+                    recipient,
+                  };
+                  return {
+                    sender: f.owner.publicKey,
+                    frame: yield* prepareEpochEnvelope({
+                      context,
+                      key: f.epochKey,
+                      signer: f.owner,
+                      ledger: () => Effect.sync(f.view),
+                    }),
+                  };
+                }),
+            });
+            yield* workflow.setup();
+            const before = f.records.length;
+            const refused = yield* Effect.result(
+              workflow.restoreFromRecovery({
+                personal: { ...f.personal, encryptionPublicKey: f.personal.enc },
+                submitOriginalAsRecovery: (record) => submit(record),
+              })
+            );
+            expect(refused).toMatchObject({ _tag: 'Failure', failure: { code: 'authentication' } });
+            expect(f.records).toHaveLength(before);
+          })
+        )
+      );
+    }));
   it('concurrent first setup on two durable clients reuses the winning R and leaves no duplicate ledger identity', async () =>
     inDir(async (dir) => {
       await Effect.runPromise(
