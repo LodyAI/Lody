@@ -45,7 +45,7 @@ import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-loc
 import { useMachineActions } from '@/hooks/use-machine-actions';
 import { useAgentConfigMigration } from '@/hooks/use-agent-config-migration';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
-import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
+import { useRefreshMachineAcpCapabilities } from '@/hooks/use-refresh-machine-acp-capabilities';
 import { useMachineAcpBinaryActions } from '@/hooks/use-machine-acp-binary-actions';
 import { useProviderSetupRuntimeProgress } from '@/hooks/use-provider-setup-runtime-progress';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -973,47 +973,7 @@ export function MachineAgentSettings({
     };
   }, [remoteMachinesAvailable]);
 
-  const refreshCapabilities = useCallback(
-    async (args: { machineId: MachineId; configId: AgentConfigId }) => {
-      if (!runtime || !workspaceId) {
-        throw new Error(t('chat.validation.missingContext', 'Missing workspace context'));
-      }
-      const response = await runtime.requestMachineAcpCapabilitiesRefresh({
-        type: 'machine/acp-capabilities-refresh',
-        machineId: args.machineId,
-        workspaceId,
-        configId: args.configId,
-        // A person pressed refresh because they changed something Lody cannot
-        // see in the launch inputs, so this path always starts the agent.
-        force: true,
-      });
-      if (!response) {
-        throw new Error(
-          t('agents.acpCapabilities.refreshTimeout', 'Refresh timed out, please try again')
-        );
-      }
-      if (!response.success) {
-        if (response.authRequired) {
-          return response;
-        }
-        const errorMessage =
-          typeof response.error === 'string' && response.error.length > 0
-            ? response.error
-            : t('agents.acpCapabilities.refreshError', 'Refresh failed');
-        throw new Error(errorMessage);
-      }
-      // The CLI wrote the fresh capabilities to the machine flock doc, which the
-      // web only syncs once per session; force a re-sync so chat landing and the
-      // settings dialog reflect the new modes/models without a reload.
-      await resyncMachineFlockRows(runtime, args.machineId, {
-        refreshedCapability: response.capability
-          ? { configId: response.configId, value: response.capability }
-          : undefined,
-      });
-      return response;
-    },
-    [runtime, t, workspaceId]
-  );
+  const refreshCapabilities = useRefreshMachineAcpCapabilities();
 
   const pingMachine = useCallback(
     (machineId: MachineId): Promise<number> => {

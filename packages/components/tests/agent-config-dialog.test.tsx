@@ -34,7 +34,9 @@ import {
   AgentConfigDialog,
   type AgentConfigDialogMode,
   type AgentConfigSubmitPayload,
+  listAddableProviders,
 } from '../src/components/settings/agent-config-dialog';
+import i18next from 'i18next';
 import { initI18n } from '../src/i18n';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
@@ -738,7 +740,9 @@ describe('AgentConfigDialog', () => {
       expect.stringContaining('DeepSeek Harness'),
       expect.stringContaining('Pi'),
     ]);
-    expect(getOptionButtons().some((option) => option.textContent?.includes('Lody Agent'))).toBe(false);
+    expect(getOptionButtons().some((option) => option.textContent?.includes('Lody Agent'))).toBe(
+      false
+    );
 
     await act(async () => {
       getOptionByText('Custom command').dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -752,31 +756,19 @@ describe('AgentConfigDialog', () => {
     expect(document.body.querySelector('#custom-acp-command')).not.toBeNull();
   });
 
-  it('offers Lody Agent and creates its builtin configuration', async () => {
+  it('leaves Lody Agent to its own settings page even while its beta is on', async () => {
     store.set(developerModeEnabledAtom, true);
     store.set(lodyAgentBetaEnabledAtom, true);
-    const onSubmit = vi.fn(async () => {});
     await renderDialog(
       { kind: 'create' },
-      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
-      onSubmit
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION })
     );
-    expect(getOptionButtons()[0]?.textContent).toContain('Lody Agent');
-    await act(async () => {
-      getOptionByText('Lody Agent').click();
-    });
-    expect(getSelectedOption()?.textContent).toContain('Lody Agent');
-    expect(document.body.textContent).toContain(
-      'After setup, open this provider to sign in and choose an available account.'
+    expect(getOptionButtons().some((option) => option.textContent?.includes('Lody Agent'))).toBe(
+      false
     );
-    await act(async () => {
-      getPrimaryAction('Create').click();
-    });
-    await vi.waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({ cliType: 'builtin', agentType: 'sorbet', name: 'Lody Agent' })
-      );
-    });
+    expect(
+      listAddableProviders(i18next.t).some((provider) => provider.agentType === 'sorbet')
+    ).toBe(false);
   });
 
   it('queues Lody Agent creation and requires provider setup support', async () => {
