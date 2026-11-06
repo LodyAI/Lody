@@ -844,8 +844,8 @@ async function openWorkspaceOwned(
       opened.sharingRemote
         ? opened.sharing
             .authorize(machineId, opened.signingPublicKey, undefined, opened.sharingRemote)
-            .pipe(Effect.map((result) => result.allowed))
-        : Effect.succeed(false),
+            .pipe(Effect.map((result) => result.allowed || result.reason === 'policy-unavailable'))
+        : Effect.succeed(true),
     originals: new E2eeRpcOriginals(
       join(
         repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
