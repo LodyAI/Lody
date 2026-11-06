@@ -301,7 +301,6 @@ describe('ContextChip actions', () => {
     const methodButton = buttons.find(
       (button) => button.getAttribute('aria-label') === 'Choose merge method'
     );
-    // The merge control's success tint is the component's own StyleX style now.
     expect(mergeControl).not.toBeNull();
     expect(mergeButton).toBeInstanceOf(HTMLButtonElement);
     expect(methodButton).toBeInstanceOf(HTMLButtonElement);

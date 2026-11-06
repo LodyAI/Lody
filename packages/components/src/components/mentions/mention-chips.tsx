@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { themeColors } from '../../style/theme-colors.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as React from 'react';
 import { ClipboardList, MessagesSquare, UserRoundCog } from 'lucide-react';
 
@@ -57,8 +57,8 @@ export const wrapPastedTextChipLabel = (label: string) => `${CHIP_PAD}${label}${
  */
 const styles = stylex.create({
   icon: { width: '1.05em', height: '1.05em', flexShrink: 0 },
-  chip: { color: 'color-mix(in srgb,hsl(var(--primary)) 82%,hsl(var(--foreground)))' },
-  neutralChip: { color: themeColors.mutedForeground },
+  chip: { color: colors.accent },
+  neutralChip: { color: colors.secondaryLabel },
   emoji: {
     display: 'inline-flex',
     alignItems: 'center',

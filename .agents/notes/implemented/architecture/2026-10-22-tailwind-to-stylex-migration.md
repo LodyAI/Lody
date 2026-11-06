@@ -11,6 +11,8 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 Lody's shared product UI now uses direct StyleX instead of a Tailwind declaration bridge. The Electron renderer and standalone review helper no longer use the Tailwind build plugin or runtime class-merging dependencies. Component owners compose actual caller styles through narrow typed inputs, preserving effective layout, themes and interaction states. Storybook fixtures and the public site are also migrated; their Tailwind compiler inputs and direct build dependencies are removed. The site keeps public Fumadocs behavior APIs beneath local StyleX skins and semantic reading CSS. Real screenshot differences and unvisited states remain open. Successful compilation or a zero literal count does not establish completion.
 
+The subsequent [design-system convergence](2026-11-07-design-system-convergence.md) intentionally replaces preserved legacy opacity and material overrides; its new appearance checks are separate from migration equivalence.
+
 ## Ownership and composition
 
 The [product style layer](../../../../packages/components/src/style/README.md) owns application colors and scales; the [migration guide](../../../../packages/components/src/style/MIGRATION.md) owns the detailed composition and capture contract. Components keep local `stylex.create` declarations and share only repeated area styles in adjacent surfaces. Semantic primitive props remain the normal design API.

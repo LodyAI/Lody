@@ -1,3 +1,5 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { PanelLeftIcon } from 'lucide-react';
@@ -218,7 +220,7 @@ const styles = stylex.create({
     fontSize: 'var(--text-xs)',
     lineHeight: 'var(--text-xs--line-height)',
     fontWeight: 'var(--font-weight-medium)',
-    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground) / 1) 70%, transparent)',
+    color: colors.tertiaryLabel,
     transitionProperty: 'margin,opacity',
     transitionDuration: '.2s',
     transitionTimingFunction: 'linear',
@@ -317,7 +319,11 @@ const styles = stylex.create({
   },
   disabled: {
     pointerEvents: { default: null, ':disabled': 'none', ':is([aria-disabled="true"])': 'none' },
-    opacity: { default: null, ':disabled': 0.5, ':is([aria-disabled="true"])': 0.5 },
+    opacity: {
+      default: null,
+      ':disabled': control.disabledOpacity,
+      ':is([aria-disabled="true"])': control.disabledOpacity,
+    },
   },
   buttonDefault: { height: 'calc(var(--spacing) * 8)' },
   buttonSmall: {

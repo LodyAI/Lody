@@ -5,7 +5,15 @@ import { useTranslation } from 'react-i18next';
 import { AlertCircle, Clock, Download, Eye } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+} from '@lody/ui/tokens/scales.stylex';
 import type { SessionFilePayload } from '@lody/shared';
 import { FileSheet } from './session-file-sheet';
 import { evidenceSurface } from './surface';
@@ -202,7 +210,7 @@ const card = stylex.create({
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     backgroundColor: { default: 'transparent', ':hover': colors.wellBackground },
     cursor: { default: 'pointer', ':disabled': 'not-allowed' },
-    opacity: { default: 1, ':disabled': 0.6 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
   },
   actionFailed: { color: colors.label },
   /** The glyphs the card's own actions carry. */

@@ -12,7 +12,15 @@ import * as stylex from '@stylexjs/stylex';
 import { SHARE_LIMITS } from '@lody/shared/session-sharing';
 import type { useSessionShareManagement } from '@/hooks/use-session-share-management';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  radius,
+  space,
+  text,
+} from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
 import { Input } from '@lody/ui/input';
@@ -109,7 +117,7 @@ const styles = stylex.create({
     cursor: 'not-allowed',
     backgroundColor: { default: 'transparent', ':hover': 'transparent' },
   },
-  optionLabelDisabled: { opacity: 0.45 },
+  optionLabelDisabled: { opacity: control.disabledOpacity },
   /**
    * The answers stick to the bottom of the dialog's scroll body. The panel is
    * what separates them from the content scrolling under, so the row takes the

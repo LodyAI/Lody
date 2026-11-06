@@ -2,109 +2,67 @@ import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Command as CommandPrimitive } from 'cmdk';
 import { Search } from 'lucide-react';
-
 import { clsx } from 'clsx';
-import { Dialog } from './dialog';
 import { ScrollArea } from '@lody/ui/scroll-area';
-import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
-import { themeColors } from '../style/theme-colors.stylex';
-import {
-  themeFontSize,
-  themeLineHeight,
-  themeRadius,
-  themeSpace,
-} from '../style/theme-scale.stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
+import { control, corner, duration, ease, text } from '@lody/ui/tokens/scales.stylex';
+import { Dialog } from './dialog';
+import { themeSpace } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
-  dialogPanel: {
-    height: 'min(640px, 72vh)',
-    overflow: 'hidden',
-    borderStyle: 'solid',
-    borderWidth: 0,
-    maxWidth: '42rem',
-    backgroundColor: 'transparent',
-    boxShadow: 'none',
-  },
-  dialogBackdrop: {
-    zIndex: 'var(--z-command-palette,85)',
-    [dialog.overlay]: {
-      default: '#0006',
-      '@supports (color: color-mix(in lab, red, red))':
-        'color-mix(in oklab, var(--color-black) 40%, transparent)',
-    },
-    backdropFilter: 'blur(2px)',
-  },
-  dialogCommand: {
-    borderRadius: 'var(--radius-xl)',
-    borderWidth: 1,
-    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
-    boxShadow: 'var(--shadow-2xl)',
-    ':is(*) [cmdk-input-wrapper] svg': {
-      width: 'calc(var(--spacing) * 4)',
-      height: 'calc(var(--spacing) * 4)',
-    },
-    ':is(*) [cmdk-input]': { height: 'calc(var(--spacing) * 12)' },
-  },
+  dialogPanel: { height: 'min(640px, 72vh)', overflow: 'hidden', maxWidth: '42rem' },
   command: {
     display: 'flex',
     height: '100%',
     width: '100%',
     flexDirection: 'column',
     overflow: 'hidden',
-    borderRadius: themeRadius.md,
-    backgroundColor: themeColors.popover,
-    color: themeColors.popoverForeground,
+    backgroundColor: 'transparent',
+    color: popup.label,
   },
   inputWrapper: {
     display: 'flex',
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomStyle: 'solid',
-    borderBottomColor: themeColors.border,
-    paddingInline: themeSpace[3],
+    gap: field.triggerGap,
+    margin: { default: popup.inset, ':is([data-command-dialog] *)': themeSpace[1.5] },
+    paddingInline: field.paddingXMedium,
+    borderRadius: field.radiusMedium,
+    cornerShape: corner.round,
+    backgroundColor: field.background,
+    boxShadow: {
+      default: field.well,
+      ':focus-within': `0 0 0 ${field.ringWidth} ${field.ring}, ${field.well}`,
+    },
+    opacity: { default: 1, ':has([cmdk-input]:disabled)': control.disabledOpacity },
+    transitionProperty: 'box-shadow, opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
-  searchIcon: {
-    marginRight: themeSpace[2],
-    width: themeSpace[4],
-    height: themeSpace[4],
-    flexShrink: 0,
-    opacity: 0.5,
-  },
+  searchIcon: { width: field.iconSize, height: field.iconSize, flexShrink: 0, color: field.icon },
   input: {
     display: 'flex',
-    height: themeSpace[10],
+    height: { default: control.medium, ':is([data-command-dialog] *)': control.large },
     width: '100%',
-    borderRadius: themeRadius.md,
+    minWidth: 0,
+    borderWidth: 0,
     backgroundColor: 'transparent',
-    paddingBlock: themeSpace[3],
-    fontSize: themeFontSize.sm,
-    lineHeight: themeLineHeight.sm,
-    color: { default: themeColors.inputForeground, '::placeholder': themeColors.inputPlaceholder },
-    boxShadow: 'none',
+    padding: 0,
+    fontFamily: 'inherit',
+    fontSize: field.text,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+    color: { default: field.value, '::placeholder': field.placeholder },
+    boxShadow: { default: 'none', ':focus-visible': 'none' },
     outlineStyle: 'none',
-    cursor: { default: null, ':disabled': 'not-allowed' },
-    opacity: { default: null, ':disabled': 0.5 },
+    cursor: { default: null, ':disabled': 'default' },
+    '::placeholder': { opacity: 1 },
   },
   listContainer: { maxHeight: 300 },
   listViewport: {
-    scrollbarGutter: 'auto',
-    overscrollBehavior: 'contain',
-    scrollbarWidth: 'thin',
-    scrollbarColor: 'hsl(var(--scrollbar-thumb) / .5) transparent',
-    '::-webkit-scrollbar': { width: 10, height: 10 },
-    '::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
-    '::-webkit-scrollbar-thumb': {
-      backgroundColor: 'hsl(var(--scrollbar-thumb) / .5)',
-      borderRadius: 999,
-      borderWidth: 3,
-      borderStyle: 'solid',
-      borderColor: 'transparent',
-      backgroundClip: 'content-box',
-    },
-    '::-webkit-scrollbar-thumb:hover': {
-      backgroundColor: 'hsl(var(--scrollbar-thumb-hover) / .65)',
-    },
     maxHeight: 300,
+    overscrollBehavior: 'contain',
     overflowY: 'auto',
     overflowX: 'hidden',
     touchAction: 'pan-y',
@@ -113,75 +71,79 @@ const styles = stylex.create({
   empty: {
     paddingBlock: themeSpace[6],
     textAlign: 'center',
-    fontSize: themeFontSize.sm,
-    lineHeight: themeLineHeight.sm,
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    color: popup.hint,
   },
   group: {
     overflow: 'hidden',
-    padding: themeSpace[1],
-    color: themeColors.foreground,
+    padding: popup.inset,
+    color: popup.label,
     ':is(*) [cmdk-group-heading]': {
-      paddingInline: 'calc(var(--spacing) * 2)',
-      paddingBlock: 'calc(var(--spacing) * 1.5)',
-      fontSize: 'var(--text-xs)',
-      lineHeight: 'var(--text-xs--line-height)',
-      fontWeight: 'var(--font-weight-medium)',
-      color: 'hsl(var(--muted-foreground) / 1)',
+      paddingInline: popup.itemPaddingX,
+      paddingBlock: themeSpace[1.5],
+      fontSize: popup.groupLabelSize,
+      lineHeight: popup.groupLabelLeading,
+      fontWeight: 500,
+      color: popup.groupLabel,
     },
   },
   separator: {
-    marginInline: `calc(${themeSpace[1]} * -1)`,
+    marginInline: `calc(${popup.inset} * -1)`,
     height: 1,
-    backgroundColor: themeColors.border,
+    backgroundColor: popup.separator,
   },
   item: {
     position: 'relative',
     outlineStyle: 'none',
-    ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))[data-selected="true"]':
-      { backgroundColor: 'color-mix(in oklab, var(--color-white) 10%, transparent)' },
+    boxShadow: 'none',
     ':is(*) svg': {
       pointerEvents: 'none',
       flexShrink: 0,
-      width: 'var(--lody-command-icon-size, calc(var(--spacing) * 4))',
-      height: 'var(--lody-command-icon-size, calc(var(--spacing) * 4))',
+      width: 'var(--lody-command-icon-size, 16px)',
+      height: 'var(--lody-command-icon-size, 16px)',
     },
     display: 'flex',
     cursor: 'default',
-    gap: themeSpace[2],
+    gap: popup.itemGap,
     userSelect: 'none',
     alignItems: 'center',
-    borderRadius: themeRadius.xs,
-    paddingInline: themeSpace[2],
-    paddingBlock: themeSpace[1.5],
-    fontSize: themeFontSize.sm,
-    lineHeight: themeLineHeight.sm,
+    borderRadius: popup.itemRadius,
+    cornerShape: corner.shape,
+    minHeight: popup.itemHeight,
+    paddingInline: popup.itemPaddingX,
+    paddingBlock: 0,
+    fontSize: popup.text,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 400,
+    letterSpacing: text.controlTracking,
     pointerEvents: { default: null, ':is([data-disabled="true"])': 'none' },
-    backgroundColor: {
-      default: null,
-      ':is([data-selected="true"])': 'hsl(var(--foreground) / 0.05)',
-    },
-    color: { default: null, ':is([data-selected="true"])': themeColors.foreground },
-    opacity: { default: null, ':is([data-disabled="true"])': 0.5 },
+    backgroundColor: { default: null, ':is([data-selected="true"])': popup.highlight },
+    color: popup.label,
+    opacity: { default: null, ':is([data-disabled="true"])': control.disabledOpacity },
   },
   shortcut: {
     marginLeft: 'auto',
-    fontSize: themeFontSize.xs,
-    lineHeight: themeLineHeight.xs,
-    letterSpacing: 'var(--tracking-widest)',
-    color: themeColors.mutedForeground,
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: popup.hint,
   },
 });
 
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive> & { xstyle?: stylex.StyleXStyles }
->(({ className, xstyle, ...props }, ref) => (
-  <CommandPrimitive
-    ref={ref}
-    className={clsx(stylex.props(styles.command, xstyle).className, className)}
-    {...props}
-  />
-));
+>(({ className, xstyle, style, ...props }, ref) => {
+  const sx = stylex.props(styles.command, xstyle);
+  return (
+    <CommandPrimitive
+      ref={ref}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
+      {...props}
+    />
+  );
+});
 Command.displayName = CommandPrimitive.displayName;
 
 const CommandDialog = ({
@@ -194,15 +156,7 @@ const CommandDialog = ({
 }) => {
   return (
     <Dialog.Root {...props}>
-      {/* The mention / slash-command popover in the chat composer carries a hardcoded
-          z-index: 50 (from @diceui/shared's anchored positioner), and the shared dialog's
-          `z-[var(--z-dialog)]` resolves to `auto` (that CSS var is never defined). Without
-          an explicit z-index the palette renders *under* an open mention popover. Pin the
-          overlay AND content above it via --z-command-palette (registry value 85, with an
-          inline fallback so it works even though the var isn't globally defined).
-          See packages/components/src/lib/editor-overlay-z-index.ts for the layer scale. */}
-      {/* A fixed, screen-relative height keeps the panel in place as results filter;
-          the list scrolls inside the dialog's column. */}
+      {/* Keep the command layer above mention popovers; the modal owns its material. */}
       <Dialog.Content
         closeButton={false}
         noAnimation
@@ -210,9 +164,9 @@ const CommandDialog = ({
         gap="none"
         xstyle={styles.dialogPanel}
         style={{ zIndex: 'var(--z-command-palette,85)' }}
-        backdropClassName={stylex.props(styles.dialogBackdrop).className}
+        backdropStyle={{ zIndex: 'var(--z-command-palette,85)' }}
       >
-        <Command shouldFilter={shouldFilter} xstyle={styles.dialogCommand}>
+        <Command shouldFilter={shouldFilter} data-command-dialog="">
           {children}
         </Command>
       </Dialog.Content>
@@ -271,11 +225,10 @@ const CommandList = React.forwardRef<
         stylex.props(styles.listContainer, containerXstyle).className,
         containerClassName
       )}
+      style={stylex.props(styles.listContainer, containerXstyle).style}
       viewportRef={viewportRef}
-      viewportClassName={clsx(
-        stylex.props(styles.listViewport, viewportXstyle).className,
-        viewportClassName
-      )}
+      viewportClassName={viewportClassName}
+      viewportXstyle={[styles.listViewport, viewportXstyle]}
       viewportStyle={viewportStyle}
     >
       <CommandPrimitive.List
@@ -314,13 +267,17 @@ CommandEmpty.displayName = CommandPrimitive.Empty.displayName;
 const CommandGroup = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Group>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Group> & { xstyle?: stylex.StyleXStyles }
->(({ className, xstyle, ...props }, ref) => (
-  <CommandPrimitive.Group
-    ref={ref}
-    className={clsx(stylex.props(styles.group, xstyle).className, className)}
-    {...props}
-  />
-));
+>(({ className, xstyle, style, ...props }, ref) => {
+  const sx = stylex.props(styles.group, xstyle);
+  return (
+    <CommandPrimitive.Group
+      ref={ref}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
+      {...props}
+    />
+  );
+});
 
 CommandGroup.displayName = CommandPrimitive.Group.displayName;
 

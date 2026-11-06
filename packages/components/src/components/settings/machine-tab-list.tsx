@@ -519,7 +519,7 @@ const styles = stylex.create({
   },
   accessIcon: { width: '12px', height: '12px' },
   tooltipTitle: { margin: 0 },
-  tooltipHint: { margin: 0, marginTop: '2px', opacity: 0.7 },
+  tooltipHint: { margin: 0, marginTop: '2px', color: colors.secondaryLabel },
 });
 
 export function buildMachineTabItems(params: {

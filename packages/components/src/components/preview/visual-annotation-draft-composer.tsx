@@ -1,14 +1,8 @@
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
-import { themeColors } from '../../style/theme-colors.stylex';
-import {
-  themeFontSize,
-  themeFontWeight,
-  themeLineHeight,
-  themeRadius,
-  themeShadow,
-  themeSpace,
-} from '../../style/theme-scale.stylex';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
+import { corner, text } from '@lody/ui/tokens/scales.stylex';
+import { themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
 import type { CSSProperties } from 'react';
 import { Send, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -16,7 +10,6 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
-import { field as fieldTokens } from '@lody/ui/field/field.tokens.stylex';
 
 export type VisualAnnotationDraftComposerProps = {
   targetLabel: string;
@@ -72,12 +65,8 @@ export function VisualAnnotationDraftComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={t('sessions.preview.annotation.placeholder', 'Describe the change...')}
-        {...stylex.props(styles.annotationTextarea)}
+        xstyle={styles.annotationTextarea}
         resize="none"
-        style={{
-          fontSize: 'var(--text-xs)',
-          lineHeight: 'var(--text-xs--line-height)',
-        }}
         autoFocus={autoFocus}
       />
       <div {...stylex.props(styles.footer)}>
@@ -101,21 +90,18 @@ export function VisualAnnotationDraftComposer({
 
 const styles = stylex.create({
   annotationTextarea: {
-    [fieldTokens.textareaMinHeight]: 'calc(var(--spacing) * 20)',
-    [fieldTokens.background]: 'hsl(var(--background) / 1)',
+    minHeight: 'calc(var(--spacing) * 20)',
   },
   root: {
     pointerEvents: 'auto',
     width: '280px',
     maxWidth: 'calc(100% - 24px)',
-    borderRadius: themeRadius.md,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: themeColors.border,
-    backgroundColor: themeColors.popover,
+    borderRadius: popup.radius,
+    cornerShape: corner.shape,
+    backgroundColor: popup.background,
     padding: themeSpace[3],
-    color: themeColors.popoverForeground,
-    boxShadow: themeShadow.xl,
+    color: popup.label,
+    boxShadow: popup.shadow,
   },
   header: {
     marginBottom: themeSpace[2],
@@ -125,8 +111,8 @@ const styles = stylex.create({
   },
   headerText: { minWidth: 0, flex: '1 1 0%' },
   title: {
-    fontSize: themeFontSize.xs,
-    lineHeight: themeLineHeight.xs,
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
     fontWeight: themeFontWeight.semibold,
   },
   target: {
@@ -135,8 +121,9 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     fontFamily: 'var(--font-mono)',
     fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
-    fontSize: '10px',
-    color: themeColors.mutedForeground,
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: popup.hint,
   },
   icon: { width: themeSpace[3.5], height: themeSpace[3.5] },
   footer: { marginTop: themeSpace[2], display: 'flex', justifyContent: 'flex-end' },

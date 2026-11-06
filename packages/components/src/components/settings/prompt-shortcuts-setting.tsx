@@ -2,6 +2,7 @@ import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { dialog as dialogTokens } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
@@ -55,7 +56,6 @@ import {
 import { settingsType as type } from './type.stylex';
 
 /** The well's ink without its alpha, for the chip cover below. */
-const WELL_INK = `rgb(from ${colors.wellBackground} r g b)`;
 
 const styles = stylex.create({
   /** The row's body is two columns that wrap, so its glyph sits on the first line. */
@@ -119,9 +119,9 @@ const styles = stylex.create({
    *
    * A mention chip covers the textarea's glyphs with `--mention-chip-surface`,
    * which has to be opaque and equal to what shows through the well. The well is
-   * translucent ink over the dialog, so the cover is that ink mixed into the
-   * page at the well's own strength — close in both palettes, where a raw
-   * surface colour would leave a faint box under every chip.
+   * translucent ink over the dialog. Two native background layers paint that
+   * same composition over an opaque dialog backdrop, independent of the
+   * well's alpha and the active palette.
    */
   promptWell: {
     boxSizing: 'border-box',
@@ -135,7 +135,8 @@ const styles = stylex.create({
     },
     borderRadius: radius.medium,
     cornerShape: corner.round,
-    '--mention-chip-surface': `color-mix(in srgb, ${colors.background} 95%, ${WELL_INK})`,
+    '--mention-chip-surface': dialogTokens.background,
+    '--mention-chip-overlay': `linear-gradient(${colors.wellBackground},${colors.wellBackground})`,
   },
   promptInput: {
     boxShadow: { default: null, ':focus-visible': 'none' },
@@ -770,7 +771,8 @@ export function ShortcutPromptField({
       disabled={disabled}
       rows={4}
       // A value holder, so the well every other field in the form is.
-      containerClassName={stylex.props(styles.promptWell).className}
+      appearance="bare"
+      containerXstyle={styles.promptWell}
       // The wrapper owns this field's focus ring; suppress the shell's global
       // inset focus shadow on the textarea inside it.
       className="input-scrollbar"

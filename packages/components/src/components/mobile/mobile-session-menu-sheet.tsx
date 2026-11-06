@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Copy, UserRoundCog } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -256,7 +257,7 @@ const styles = stylex.create({
     lineHeight: themeLineHeight.sm,
     borderRadius: themeRadius.lg,
     cursor: { default: null, ':disabled': 'not-allowed' },
-    opacity: { default: 1, ':disabled': 0.5 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     ...TRANSITION_COLORS,
   },
   /** The glyph column of an action. */

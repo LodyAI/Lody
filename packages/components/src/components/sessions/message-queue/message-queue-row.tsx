@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
@@ -269,7 +270,7 @@ export const queueRowStyles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 1)' },
     },
     pointerEvents: { default: 'auto', ':disabled': 'none' },
-    opacity: { default: 1, ':disabled': 0.5 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
   },
   iconInkDestructive: {
     color: {

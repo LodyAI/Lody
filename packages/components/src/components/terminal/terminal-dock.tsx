@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'rea
 import { useSetAtom } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import * as stylex from '@stylexjs/stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { control, space } from '@lody/ui/tokens/scales.stylex';
 
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { cn } from '@/lib/utils';
@@ -171,7 +171,7 @@ const styles = stylex.create({
   },
   createAction: {
     cursor: { default: null, ':disabled': 'not-allowed' },
-    opacity: { default: null, ':disabled': 0.4 },
+    opacity: { default: null, ':disabled': control.disabledOpacity },
     color: {
       default: null,
       '@media (hover: hover)': {

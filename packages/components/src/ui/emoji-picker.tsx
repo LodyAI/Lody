@@ -7,12 +7,13 @@ import {
 import { SearchIcon } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
-import { colors } from '@lody/ui/tokens/colors.stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
+import { control, corner, text } from '@lody/ui/tokens/scales.stylex';
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { clsx } from 'clsx';
-import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeFontSize,
   themeLineHeight,
@@ -20,17 +21,8 @@ import {
   themeSpace,
 } from '../style/theme-scale.stylex';
 
-/**
- * shadcn's `frimousse` emoji picker, kept as the registry ships it apart from
- * three changes this repo requires: the `"use client"` banner is dropped (there
- * is no RSC boundary here), its two visible strings go through i18n, and it
- * carries no surface color of its own. The registry's `bg-popover` resolves to
- * `--popover`, which `vscode-theme-css.ts` derives from the theme's widget
- * background — under Vesper that is `#101010`, darker than the `@lody/ui`
- * popup surface (`colors.raisedBackground`) the picker always renders inside,
- * so the picker sat as a near-black slab on a lighter panel. The root is
- * therefore transparent, and the one part that still needs a fill — the sticky
- * category header — takes the popup rung's color directly.
+/** Frimousse owns search and navigation; the skin shares field and popup roles.
+ * The containing popup owns its floating material, so the picker stays transparent.
  */
 const styles = stylex.create({
   root: {
@@ -39,23 +31,34 @@ const styles = stylex.create({
     height: '100%',
     width: 'fit-content',
     flexDirection: 'column',
-    overflow: 'hidden',
     borderRadius: themeRadius.md,
   },
   searchWrapper: {
+    position: 'relative',
+    zIndex: 1,
     display: 'flex',
     height: themeSpace[9],
     alignItems: 'center',
     gap: themeSpace[2],
-    borderBottomStyle: 'solid',
-    borderBottomWidth: 1,
+    borderRadius: field.radiusMedium,
+    cornerShape: corner.round,
+    backgroundColor: field.background,
+    boxShadow: {
+      default: field.well,
+      ':focus-within': `0 0 0 ${field.ringWidth} ${field.ring}, ${field.well}`,
+    },
+    color: field.value,
+    opacity: {
+      default: 1,
+      ':has([data-slot="emoji-picker-search"]:disabled)': control.disabledOpacity,
+    },
     paddingInline: themeSpace[3],
   },
   searchIcon: {
     width: themeSpace[4],
     height: themeSpace[4],
     flexShrink: 0,
-    opacity: 0.5,
+    color: field.icon,
   },
   search: {
     outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
@@ -67,13 +70,16 @@ const styles = stylex.create({
     width: '100%',
     borderRadius: themeRadius.md,
     backgroundColor: 'transparent',
+    borderWidth: 0,
+    color: field.value,
     paddingBlock: themeSpace[3],
-    fontSize: themeFontSize.sm,
-    lineHeight: themeLineHeight.sm,
+    fontSize: field.text,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
     boxShadow: { default: null, ':focus-visible': 'none' },
-    cursor: { default: null, ':disabled': 'not-allowed' },
-    opacity: { default: null, ':disabled': 0.5 },
-    '::placeholder': { color: themeColors.mutedForeground },
+    cursor: { default: null, ':disabled': 'default' },
+    '::placeholder': { color: field.placeholder, opacity: 1 },
   },
   row: { scrollMarginBlock: themeSpace[1], paddingInline: themeSpace[1] },
   emoji: {
@@ -85,19 +91,12 @@ const styles = stylex.create({
     borderRadius: themeRadius.sm,
     fontSize: themeFontSize.base,
     lineHeight: themeLineHeight.base,
-    backgroundColor: {
-      default: null,
-      ':is([data-active])': {
-        default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 5%, transparent)',
-        ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))':
-          'color-mix(in oklab, var(--color-white) 10%, transparent)',
-      },
-    },
+    backgroundColor: { default: null, ':is([data-active])': popup.highlight },
   },
   categoryHeader: {
     // Sticky rows cover the scrolling emoji with the containing popup's surface.
-    backgroundColor: colors.raisedBackground,
-    color: themeColors.mutedForeground,
+    backgroundColor: popup.background,
+    color: popup.groupLabel,
     paddingInline: themeSpace[3],
     paddingBottom: themeSpace[2],
     paddingTop: themeSpace[3.5],
@@ -118,7 +117,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: themeColors.mutedForeground,
+    color: popup.hint,
   },
   empty: { fontSize: themeFontSize.sm, lineHeight: themeLineHeight.sm },
   list: { userSelect: 'none', paddingBottom: themeSpace[1] },
@@ -129,8 +128,6 @@ const styles = stylex.create({
     minWidth: 0,
     alignItems: 'center',
     gap: themeSpace[1],
-    borderTopStyle: 'solid',
-    borderTopWidth: 1,
     padding: themeSpace[2],
   },
   activeEmoji: {
@@ -144,7 +141,7 @@ const styles = stylex.create({
     lineHeight: themeLineHeight.lg,
   },
   activeLabel: {
-    color: themeColors.secondaryForeground,
+    color: popup.label,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -152,7 +149,7 @@ const styles = stylex.create({
     lineHeight: themeLineHeight.xs,
   },
   placeholder: {
-    color: themeColors.mutedForeground,
+    color: popup.hint,
     marginLeft: themeSpace[1.5],
     display: 'flex',
     height: themeSpace[7],

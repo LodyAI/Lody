@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -187,7 +188,7 @@ export const localProjectsSurface = stylex.create({
   /** A row that cannot be picked. */
   rowDisabled: {
     cursor: 'not-allowed',
-    opacity: 0.5,
+    opacity: control.disabledOpacity,
   },
   /** The row's glyph: the machine, the folder, the file. */
   rowGlyph: {
@@ -354,7 +355,7 @@ export const localProjectsSurface = stylex.create({
     borderRadius: themeRadius.full,
     color: themeColors.mutedForeground,
     backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.6)' },
-    opacity: { default: null, ':disabled': 0.4 },
+    opacity: { default: null, ':disabled': control.disabledOpacity },
   },
   /** The glyph inside the edit control. */
   pathEditGlyph: {

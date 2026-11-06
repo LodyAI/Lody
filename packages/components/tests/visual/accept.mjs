@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { createConnection } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -18,7 +19,15 @@ const policy = {
   randomSeed: 20260101,
   reducedMotion: 'reduce',
   repeats: 2,
+  browserLaunchTimeout: 30000,
+  browserShutdownTimeout: 15000,
+  clientDisconnectTimeout: 5000,
+  listenerShutdownTimeout: 5000,
+  listenerProbeInterval: 250,
   rawPixelTolerance: 0,
+  themeStorage: 'top-level document only',
+  serviceWorkers:
+    'registration no-op in non-opaque documents; native opaque-origin restrictions retained',
   animationState: 'finite animations finished; infinite animations and SVG SMIL paused at zero',
 };
 const mime = {
@@ -84,16 +93,146 @@ async function inputTree(root) {
   return { sha256: hash(json(files)), files };
 }
 
+async function deadline(promise, milliseconds, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(Error(`${label} timed out after ${milliseconds}ms`)),
+          milliseconds
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForListenerClose(endpoint) {
+  const { hostname, port } = new URL(endpoint);
+  const until = performance.now() + policy.listenerShutdownTimeout;
+  while (performance.now() < until) {
+    const listening = await new Promise((resolve, reject) => {
+      const socket = createConnection({ host: hostname, port: Number(port) });
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once('error', (error) => {
+        socket.destroy();
+        if (error.code === 'ECONNREFUSED') resolve(false);
+        else reject(error);
+      });
+      socket.setTimeout(Math.max(1, until - performance.now()), () => {
+        socket.destroy(Error('Browser listener close timed out'));
+      });
+    });
+    if (!listening) return;
+    // Resource shutdown polling is rate-limited to avoid consuming ephemeral ports.
+    await new Promise((resolve) => setTimeout(resolve, policy.listenerProbeInterval));
+  }
+  throw Error('Browser listener remained open after shutdown');
+}
+
+async function closeOwnedBrowser(owner, browser) {
+  const child = owner.process();
+  const errors = [];
+  let onExit, onDisconnected;
+  let closedOwnedStdio = false;
+  const releaseExitedStdio = () => {
+    if (child.exitCode === null && child.signalCode === null) return;
+    // Chrome has exited; inherited pipes must not delay Playwright's close event.
+    for (const stream of child.stdio) {
+      if (stream && !stream.destroyed) {
+        stream.destroy();
+        closedOwnedStdio = true;
+      }
+    }
+  };
+  const exited =
+    child.exitCode !== null || child.signalCode !== null
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          onExit = () => {
+            releaseExitedStdio();
+            resolve();
+          };
+          child.once('exit', onExit);
+        });
+  const disconnected = !browser?.isConnected()
+    ? Promise.resolve()
+    : new Promise((resolve) => {
+        onDisconnected = resolve;
+        browser.once('disconnected', onDisconnected);
+      });
+  releaseExitedStdio();
+  try {
+    try {
+      // For chromium.connect this disconnects the local client; the server owns Chrome.
+      await deadline(
+        Promise.race([browser?.close(), disconnected]),
+        policy.clientDisconnectTimeout,
+        'Browser client disconnect'
+      );
+    } catch (error) {
+      errors.push(error.message);
+    }
+    try {
+      // Native exit alone precedes Playwright's process-close and listener cleanup.
+      await deadline(owner.close(), policy.browserShutdownTimeout, 'Browser owner shutdown');
+      await deadline(exited, 5000, 'Browser exit confirmation');
+    } catch (error) {
+      errors.push(error.message);
+      // The public owner kills only the process group created by this run.
+      try {
+        await deadline(owner.kill(), 5000, 'Owned browser forced exit');
+      } catch (killError) {
+        errors.push(killError.message);
+      }
+    }
+    let listenerClosed = false;
+    try {
+      await waitForListenerClose(owner.wsEndpoint());
+      listenerClosed = true;
+    } catch (error) {
+      errors.push(error.message);
+    }
+    return {
+      clientDisconnected: !browser?.isConnected(),
+      processExitConfirmed: child.exitCode !== null || child.signalCode !== null,
+      listenerClosed,
+      closedOwnedStdio,
+      exitCode: child.exitCode,
+      signal: child.signalCode,
+      errors,
+    };
+  } finally {
+    if (onExit) child.removeListener('exit', onExit);
+    if (onDisconnected) browser.removeListener('disconnected', onDisconnected);
+  }
+}
+
 async function serve(root) {
-  const server = createServer(async (request, response) => {
+  const serveFile = async (request, response) => {
     try {
       const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
       let file = path.resolve(root, '.' + pathname);
-      if (file !== root && !file.startsWith(root + path.sep)) return response.writeHead(403).end();
+      if (file !== root && !file.startsWith(root + path.sep)) {
+        response.writeHead(403).end();
+        return;
+      }
       if ((await stat(file)).isDirectory()) file = path.join(file, 'index.html');
       const canonical = await realpath(file);
-      if (!canonical.startsWith(root + path.sep)) return response.writeHead(403).end();
-      if (!(await stat(canonical)).isFile()) return response.writeHead(404).end();
+      if (!canonical.startsWith(root + path.sep)) {
+        response.writeHead(403).end();
+        return;
+      }
+      if (!(await stat(canonical)).isFile()) {
+        response.writeHead(404).end();
+        return;
+      }
       response.writeHead(200, {
         'content-type': mime[path.extname(file)] ?? 'application/octet-stream',
         'cache-control': 'no-store',
@@ -102,6 +241,9 @@ async function serve(root) {
     } catch {
       response.writeHead(404).end('Not found');
     }
+  };
+  const server = createServer((request, response) => {
+    void serveFile(request, response).catch((error) => response.destroy(error));
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -109,7 +251,11 @@ async function serve(root) {
   });
   return {
     origin: `http://127.0.0.1:${server.address().port}`,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    close: () =>
+      new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+        server.closeAllConnections();
+      }),
   };
 }
 
@@ -198,7 +344,9 @@ async function capture(browser, origin, scenario, profile, out, sample, timeout)
     deviceScaleFactor: 1,
     reducedMotion: 'reduce',
     colorScheme: scenario.theme,
-    serviceWorkers: 'block',
+    // Playwright's block init reads a forbidden getter in opaque sandbox frames.
+    // The origin-aware init below preserves its registration no-op instead.
+    serviceWorkers: 'allow',
   });
   const page = await context.newPage();
   page.setDefaultTimeout(timeout);
@@ -208,12 +356,19 @@ async function capture(browser, origin, scenario, profile, out, sample, timeout)
     blocked = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
-    if (message.type() === 'error') diagnostics.push(message.text());
+    if (
+      message.type() === 'error' ||
+      message.text().startsWith('Service Worker registration blocked by visual acceptance policy:')
+    )
+      diagnostics.push(message.text());
   });
   page.on('response', (response) => {
     if (response.status() >= 400)
       errors.push(`HTTP ${response.status()}: ${new URL(response.url()).pathname}`);
   });
+  context.on('serviceworker', (worker) =>
+    errors.push(`Unexpected service worker: ${worker.url()}`)
+  );
   await context.route('**/*', async (route) => {
     const url = route.request().url();
     if (url.startsWith('data:') || url.startsWith('blob:') || new URL(url).origin === origin)
@@ -226,12 +381,24 @@ async function capture(browser, origin, scenario, profile, out, sample, timeout)
   await page.clock.setFixedTime(new Date(policy.fixedTime));
   await context.addInitScript(
     ({ theme, seed }) => {
-      localStorage.setItem('theme', theme);
+      if (window === window.top) localStorage.setItem('theme', theme);
       let state = seed;
       Math.random = () => {
         state = (state * 1664525 + 1013904223) >>> 0;
         return state / 4294967296;
       };
+      // Opaque sandbox frames already forbid registration, and even accessing
+      // their navigator.serviceWorker getter throws. Keep that browser boundary.
+      if (window.origin !== 'null' && 'serviceWorker' in navigator) {
+        const workers = navigator.serviceWorker;
+        if (workers) {
+          workers.register = async (scriptURL) => {
+            console.warn(
+              `Service Worker registration blocked by visual acceptance policy: ${String(scriptURL)}`
+            );
+          };
+        }
+      }
     },
     { theme: scenario.theme, seed: policy.randomSeed }
   );
@@ -399,7 +566,7 @@ async function report(manifest, out, baselineDir) {
   }
   await writeFile(
     path.join(out, 'report.html'),
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Deterministic visual acceptance</title><style>body{font:14px system-ui;margin:24px;background:#111827;color:#e5e7eb}h1{font-size:24px}section{border-top:1px solid #64748b;margin-top:24px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}figure{margin:0;min-width:0}img{max-width:100%;cursor:zoom-in}.images{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:12px}dialog{max-width:95vw;max-height:95vh;padding:8px}dialog img{max-width:none}dialog::backdrop{background:#000b}button{padding:8px}</style><h1>${manifest.pass ? 'PASS' : 'FAIL'} — ${escape(manifest.profileName)}</h1><p>Strict zero raw RGBA pixels and equal geometry/content. Two independent contexts per case. Computed CSS differences are recorded separately. Animation snapshots cover the declared endpoints, not motion equivalence. No baseline auto-update, masks or pixel tolerances.</p><pre>${escape(json({ environment: manifest.environment, policy: manifest.policy, inputs: { runnerSHA256: manifest.runnerSHA256, profileSHA256: manifest.profileSHA256, beforeBuildSHA256: manifest.baselineBuildSHA256, buildSHA256: manifest.build?.sha256 }, errors: manifest.errors }))}</pre>${cards.join('')}<dialog><button autofocus>Close</button><div><img alt="Original real browser screenshot"></div></dialog><script>const dialog=document.querySelector('dialog'),original=dialog.querySelector('img');document.querySelectorAll('figure img').forEach(img=>{img.tabIndex=0;const open=()=>{original.src=img.src;dialog.showModal()};img.onclick=open;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}}});dialog.querySelector('button').onclick=()=>dialog.close();dialog.addEventListener('close',()=>original.removeAttribute('src'));</script></html>`
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Deterministic visual acceptance</title><style>body{font:14px system-ui;margin:24px;background:#111827;color:#e5e7eb}h1{font-size:24px}section{border-top:1px solid #64748b;margin-top:24px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}figure{margin:0;min-width:0}img{max-width:100%;cursor:zoom-in}.images{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:12px}dialog{max-width:95vw;max-height:95vh;padding:8px}dialog img{max-width:none}dialog::backdrop{background:#000b}button{padding:8px}</style><h1>${manifest.pass ? 'PASS' : 'FAIL'} — ${escape(manifest.profileName)}</h1><p>Strict zero raw RGBA pixels and equal geometry/content. Two independent contexts per case. Computed CSS differences are recorded separately. Animation snapshots cover the declared endpoints, not motion equivalence. No baseline auto-update, masks or pixel tolerances.</p><pre>${escape(json({ environment: manifest.environment, policy: manifest.policy, inputs: { runnerSHA256: manifest.runnerSHA256, profileSHA256: manifest.profileSHA256, beforeBuildSHA256: manifest.baselineBuildSHA256, buildSHA256: manifest.build?.sha256 }, errors: manifest.errors, cleanup: manifest.cleanup }))}</pre>${cards.join('')}<dialog><button autofocus>Close</button><div><img alt="Original real browser screenshot"></div></dialog><script>const dialog=document.querySelector('dialog'),original=dialog.querySelector('img');document.querySelectorAll('figure img').forEach(img=>{img.tabIndex=0;const open=()=>{original.src=img.src;dialog.showModal()};img.onclick=open;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}}});dialog.querySelector('button').onclick=()=>dialog.close();dialog.addEventListener('close',()=>original.removeAttribute('src'));</script></html>`
   );
 }
 
@@ -413,7 +580,7 @@ async function main() {
     throw Error('Output must be outside the immutable static build');
   await mkdir(out); // Refuse to overwrite evidence, including failed runs.
   const manifest = { schema: 1, mode: args.mode, pass: false, policy, results: [], errors: [] };
-  let browser, server;
+  let browser, browserOwner, server;
   try {
     const profile = (await import(pathToFileURL(profilePath))).default;
     if (!profile?.scenarios?.length) throw Error('Profile must contain scenarios');
@@ -438,10 +605,19 @@ async function main() {
     const executable = await realpath(
       args.browser ?? process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ?? chromium.executablePath()
     );
-    browser = await chromium.launch({
+    browserOwner = await chromium.launchServer({
+      host: '127.0.0.1',
       executablePath: executable,
       headless: true,
       args: ['--force-color-profile=srgb', '--disable-gpu'],
+      timeout: policy.browserLaunchTimeout,
+    });
+    manifest.resources = {
+      browserPID: browserOwner.process().pid,
+      browserPort: Number(new URL(browserOwner.wsEndpoint()).port),
+    };
+    browser = await chromium.connect(browserOwner.wsEndpoint(), {
+      timeout: policy.browserLaunchTimeout,
     });
     manifest.environment = {
       browserVersion: browser.version(),
@@ -470,6 +646,7 @@ async function main() {
         for (const sample of row.samples) await loadSample(args.baseline, sample);
     }
     server = await serve(build);
+    manifest.resources.staticPort = Number(new URL(server.origin).port);
     const comparePage = await browser.newPage();
     for (const scenario of profile.scenarios) {
       const row = { id: scenario.id, pass: false, samples: [], errors: [] };
@@ -517,7 +694,15 @@ async function main() {
     manifest.errors.push(error.stack ?? error.message);
   } finally {
     try {
-      await browser?.close();
+      if (browserOwner) {
+        manifest.cleanup = await closeOwnedBrowser(browserOwner, browser);
+        if (manifest.cleanup.errors.length) {
+          manifest.errors.push(
+            ...manifest.cleanup.errors.map((error) => `Browser cleanup: ${error}`)
+          );
+          manifest.pass = false;
+        }
+      }
     } catch (error) {
       manifest.errors.push(`Browser cleanup: ${error.message}`);
       manifest.pass = false;

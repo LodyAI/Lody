@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -412,7 +413,7 @@ const styles = stylex.create({
     fontWeight: themeFontWeight.semibold,
     color: themeColors.destructive,
     backgroundColor: { default: 'transparent', ':active': 'hsl(var(--destructive) / 0.1)' },
-    opacity: { default: 1, ':disabled': 0.4 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
   },
 });
 

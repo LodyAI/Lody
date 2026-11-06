@@ -1,13 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { act, createRef } from 'react';
+import { act, createRef, useState } from 'react';
 import { describe, expect, test } from 'vitest';
 import { Field } from '../src/field/field';
 import { field, fieldPaletteTheme } from '../src/field/field.tokens.stylex';
 import { Input } from '../src/field/input';
 import { Textarea } from '../src/field/textarea';
 import { forcedThemeClassNames } from '../src/theme/theme';
-import { mount } from './dom';
+import { mount, typeInto } from './dom';
 
 function classesOf(html: string, tag: string): string[] {
   const open = new RegExp(`<${tag}\\b[^>]*>`).exec(html)?.[0] ?? '';
@@ -117,14 +117,20 @@ describe('Field', () => {
 });
 
 describe('Input and Textarea', () => {
-  test.each([undefined, '/'])(
-    'a resized input retains its native attributes, ref and caller style (leading %s)',
-    async (leading) => {
+  test.each([
+    { name: 'plain', leading: undefined, trailing: undefined },
+    { name: 'leading', leading: '/', trailing: undefined },
+    { name: 'trailing', leading: undefined, trailing: <span>Connected to preview server</span> },
+    { name: 'both slots', leading: '/', trailing: <span>Connected to preview server</span> },
+  ])(
+    'a resized input retains native attributes, ref and caller style ($name)',
+    async ({ leading, trailing }) => {
       const ref = createRef<HTMLInputElement>();
       const view = await mount(
         <Input
           ref={ref}
           leading={leading}
+          trailing={trailing}
           controlHeight={40}
           height={17}
           defaultValue="Retained input"
@@ -141,6 +147,7 @@ describe('Input and Textarea', () => {
           <Input
             ref={ref}
             leading={leading}
+            trailing={trailing}
             controlHeight={0}
             height={18}
             defaultValue="Retained input"
@@ -157,7 +164,13 @@ describe('Input and Textarea', () => {
       expect(input.style.letterSpacing).toBe('');
       await act(async () => {
         view.root.render(
-          <Input ref={ref} leading={leading} defaultValue="Retained input" style={{ height: 46 }} />
+          <Input
+            ref={ref}
+            leading={leading}
+            trailing={trailing}
+            defaultValue="Retained input"
+            style={{ height: 46 }}
+          />
         );
       });
       expect(ref.current).toBe(input);
@@ -168,6 +181,68 @@ describe('Input and Textarea', () => {
       await view.unmount();
     }
   );
+
+  test('both slots keep the label, editing, keyboard action and dynamic shell styling on one input', async () => {
+    const ref = createRef<HTMLInputElement>();
+    const extension = stylex.create({ width: (width: number) => ({ maxWidth: width }) });
+    function Address() {
+      const [value, setValue] = useState('https://preview.local');
+      const [submitted, setSubmitted] = useState('');
+      return (
+        <Field.Root name="preview-url" invalid>
+          <Field.Label>Preview address</Field.Label>
+          <Input
+            ref={ref}
+            leading="/"
+            trailing={<span data-status>Connected to preview server</span>}
+            value={value}
+            onValueChange={setValue}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') setSubmitted(event.currentTarget.value);
+            }}
+            xstyle={extension.width(280)}
+            className="shell-hook"
+            inputClassName="value-hook"
+            style={{ letterSpacing: '1px' }}
+          />
+          <output>{submitted}</output>
+        </Field.Root>
+      );
+    }
+    const view = await mount(<Address />);
+    try {
+      const input = ref.current!;
+      const shell = input.closest<HTMLElement>('[data-slot="input-shell"]')!;
+      expect(shell.querySelectorAll('input')).toHaveLength(1);
+      expect(shell.classList.contains('shell-hook')).toBe(true);
+      expect(input.classList.contains('value-hook')).toBe(true);
+      expect(input.classList.contains('shell-hook')).toBe(false);
+      expect(input.style.letterSpacing).toBe('1px');
+      const variables = stylex.props(extension.width(280)).style!;
+      expect(Object.keys(variables).length).toBeGreaterThan(0);
+      for (const [name, value] of Object.entries(variables)) {
+        expect(shell.style.getPropertyValue(name)).toBe(value);
+        expect(input.style.getPropertyValue(name)).toBe('');
+      }
+      expect(input.previousElementSibling?.getAttribute('data-slot')).toBe('input-leading');
+      expect(input.nextElementSibling?.getAttribute('data-slot')).toBe('input-trailing');
+      expect(input.nextElementSibling?.textContent).toBe('Connected to preview server');
+      expect(view.container.querySelector('label')?.htmlFor).toBe(input.id);
+      expect(input.getAttribute('aria-invalid')).toBe('true');
+      input.focus();
+      await typeInto(input, 'https://preview.local/updated');
+      await act(async () => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      expect(ref.current).toBe(input);
+      expect(document.activeElement).toBe(input);
+      expect(view.container.querySelector('output')?.textContent).toBe(
+        'https://preview.local/updated'
+      );
+    } finally {
+      await view.unmount();
+    }
+  });
 
   test('Input renders a native input carrying its size step', () => {
     const html = renderToStaticMarkup(<Input size="small" placeholder="Search" />);

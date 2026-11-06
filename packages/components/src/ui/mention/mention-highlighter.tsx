@@ -2,6 +2,8 @@ import { clsx } from 'clsx';
 import { useCallbackRef, useComposedRefs } from '@diceui/shared';
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { badge } from '@lody/ui/badge/badge.tokens.stylex';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { type Mention, type MentionChip, useMentionContext } from './mention-root';
 
@@ -11,7 +13,8 @@ const styles = stylex.create({
   hidden: { visibility: 'hidden' },
   chip: {
     boxDecorationBreak: 'clone',
-    backgroundColor: 'var(--mention-chip-surface,hsl(var(--input)))',
+    backgroundColor: `var(--mention-chip-surface,${colors.background})`,
+    backgroundImage: 'var(--mention-chip-overlay,none)',
   },
   selectedChip: {
     backgroundImage: 'linear-gradient(Highlight,Highlight)',
@@ -31,21 +34,13 @@ const styles = stylex.create({
   },
   pastedHighlight: {
     borderRadius: 'var(--radius-md)',
-    backgroundColor: {
-      default: 'hsl(var(--foreground) / 1)',
-      '@supports (color:color-mix(in lab, red, red))':
-        'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
-    },
+    backgroundColor: badge.neutralFill,
     WebkitBoxDecorationBreak: 'clone',
     boxDecorationBreak: 'clone',
   },
   highlight: {
     borderRadius: 'var(--radius-sm)',
-    backgroundColor: {
-      default: 'hsl(var(--primary))',
-      '@supports (color:color-mix(in lab, red, red))':
-        'color-mix(in oklab, hsl(var(--primary)) 15%, transparent)',
-    },
+    backgroundColor: colors.wellBackground,
     WebkitBoxDecorationBreak: 'clone',
     boxDecorationBreak: 'clone',
   },
@@ -160,8 +155,9 @@ export function getMentionHighlightSegments(
  * makes the cover invisible while it does that job.
  *
  * `--mention-chip-surface` is therefore whatever sits behind the textarea. It
- * defaults to the input colour; a composer on a different surface must say so,
- * or its mentions will show as faint rectangles.
+ * is an opaque backdrop. A translucent well also publishes its fill as
+ * `--mention-chip-overlay`; native background layers reproduce the well without
+ * painting the underlying glyphs through a second translucent cover.
  */
 const CHIP_CLASS_NAME = stylex.props(styles.chip).className;
 

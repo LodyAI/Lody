@@ -6,6 +6,8 @@ import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Toggle } from '@lody/ui/toggle';
 import { Tooltip } from '@lody/ui/tooltip';
 import {
   PreviewConnectionStatus,
@@ -14,68 +16,18 @@ import {
 
 const styles = stylex.create({
   toolbarButton: { flexShrink: 0 },
-  annotationEnabled: {
-    backgroundColor: 'hsl(var(--accent) / 1)',
-    color: 'hsl(var(--accent-foreground) / 1)',
-  },
+  annotationMark: { color: colors.accent },
   toolbar: {
     display: 'flex',
     minWidth: 0,
     alignItems: 'center',
     gap: '2px',
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: colors.separator,
-    backgroundColor: colors.background,
     paddingInline: '6px',
     paddingBottom: '6px',
     paddingTop: 'calc(0.375rem + var(--safe-area-top))',
   },
   form: { minWidth: 0, flex: '1 1 0%', paddingInline: '4px' },
-  addressWell: {
-    display: 'flex',
-    minWidth: 0,
-    height: '32px',
-    alignItems: 'center',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: {
-      default: 'hsl(var(--input-border))',
-      ':focus-within': 'hsl(var(--ring))',
-    },
-    borderRadius: '6px',
-    backgroundColor: 'hsl(var(--input-field))',
-    transitionProperty: 'border-color, box-shadow',
-    transitionDuration: '150ms',
-    boxShadow: {
-      default: null,
-      ':focus-within': '0 0 0 1px hsl(var(--ring))',
-    },
-  },
-  addressInput: {
-    width: '100%',
-    height: '100%',
-    minWidth: 0,
-    flex: '1 1 0%',
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    paddingInline: '10px',
-    color: {
-      default: colors.label,
-      '::placeholder': colors.secondaryLabel,
-    },
-    fontSize: '0.75rem',
-    lineHeight: '1rem',
-    outlineStyle: 'none',
-    opacity: {
-      default: null,
-      '::placeholder': 1,
-    },
-    boxShadow: {
-      default: null,
-      ':focus-visible': 'none',
-    },
-  },
+  addressInput: { minWidth: 0, width: '100%' },
   statusSlot: { display: 'flex', flexShrink: 0, alignItems: 'center', marginInlineEnd: '2px' },
   icon: { width: '16px', height: '16px' },
 });
@@ -166,6 +118,15 @@ export function SessionBrowserToolbar({
     if (focusAddress) addressInputRef.current?.focus();
   }, [focusAddress]);
 
+  const annotationLabel = annotationAvailable
+    ? annotationEnabled
+      ? t('sessions.browser.annotationDisable', 'Exit annotation mode')
+      : t('sessions.browser.annotationEnable', 'Annotate page')
+    : t(
+        'sessions.browser.annotationManagedOnly',
+        'Annotation is available only for local and private-network pages'
+      );
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     onNavigate();
@@ -208,54 +169,55 @@ export function SessionBrowserToolbar({
         </ToolbarButton>
 
         <form {...stylex.props(styles.form)} onSubmit={submit}>
-          <div {...stylex.props(styles.addressWell)}>
-            <input
-              ref={addressInputRef}
-              type="text"
-              inputMode="url"
-              value={address}
-              onChange={(event) => onAddressChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  onRestoreAddress();
-                  event.currentTarget.blur();
-                }
-              }}
-              placeholder={t('sessions.browser.addressPlaceholder', 'Enter a URL')}
-              aria-label={t('sessions.browser.address', 'Address')}
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              disabled={busy}
-              {...stylex.props(styles.addressInput)}
-            />
-            {previewStatus ? (
-              <div {...stylex.props(styles.statusSlot)}>
-                <PreviewConnectionStatus {...previewStatus} />
-              </div>
-            ) : null}
-          </div>
+          <Input
+            ref={addressInputRef}
+            type="text"
+            inputMode="url"
+            value={address}
+            onChange={(event) => onAddressChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                onRestoreAddress();
+                event.currentTarget.blur();
+              }
+            }}
+            placeholder={t('sessions.browser.addressPlaceholder', 'Enter a URL')}
+            aria-label={t('sessions.browser.address', 'Address')}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            disabled={busy}
+            xstyle={styles.addressInput}
+            trailing={
+              previewStatus ? (
+                <div {...stylex.props(styles.statusSlot)}>
+                  <PreviewConnectionStatus {...previewStatus} />
+                </div>
+              ) : undefined
+            }
+          />
         </form>
 
-        <ToolbarButton
-          label={
-            annotationAvailable
-              ? annotationEnabled
-                ? t('sessions.browser.annotationDisable', 'Exit annotation mode')
-                : t('sessions.browser.annotationEnable', 'Annotate page')
-              : t(
-                  'sessions.browser.annotationManagedOnly',
-                  'Annotation is available only for local and private-network pages'
-                )
-          }
-          xstyle={annotationEnabled ? styles.annotationEnabled : undefined}
-          disabled={!annotationAvailable || busy}
-          aria-pressed={annotationEnabled}
-          onClick={onToggleAnnotation}
-        >
-          <MessageCircle {...stylex.props(styles.icon)} />
-        </ToolbarButton>
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            render={
+              <Toggle
+                icon
+                type="button"
+                pressed={annotationEnabled}
+                disabled={!annotationAvailable || busy}
+                aria-label={annotationLabel}
+                onPressedChange={onToggleAnnotation}
+              >
+                <MessageCircle
+                  {...stylex.props(styles.icon, annotationEnabled && styles.annotationMark)}
+                />
+              </Toggle>
+            }
+          />
+          <Tooltip.Content>{annotationLabel}</Tooltip.Content>
+        </Tooltip.Root>
         <ToolbarButton
           label={
             hasShareUrl

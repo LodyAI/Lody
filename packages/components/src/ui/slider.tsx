@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import * as React from 'react';
 
 import { clsx } from 'clsx';
@@ -12,7 +13,7 @@ const styles = stylex.create({
     appearance: 'none',
     backgroundColor: 'transparent',
     cursor: { default: 'pointer', ':disabled': 'not-allowed' },
-    opacity: { default: null, ':disabled': 0.6 },
+    opacity: { default: null, ':disabled': control.disabledOpacity },
     '::-webkit-slider-runnable-track': {
       height: themeSpace[1],
       borderRadius: themeRadius.full,

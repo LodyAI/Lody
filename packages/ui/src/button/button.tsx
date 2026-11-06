@@ -8,7 +8,7 @@ import {
   type CSSProperties,
 } from 'react';
 import { colors } from '../tokens/colors.stylex';
-import { corner, duration, ease, radius, text } from '../tokens/scales.stylex';
+import { control, corner, duration, ease, radius, text } from '../tokens/scales.stylex';
 import { button } from './button.tokens.stylex';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'solid' | 'destructive' | 'link';
@@ -70,7 +70,7 @@ const styles = stylex.create({
     // same box-shadow as the variant's own edge. Each variant composes it,
     // because a box-shadow list cannot be added to from a second class.
     outlineStyle: 'none',
-    opacity: { default: 1, ':disabled': 0.45 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     pointerEvents: { default: 'auto', ':disabled': 'none' },
     transitionProperty: 'background-color, color, box-shadow, transform, opacity',
     transitionDuration: duration.fast,

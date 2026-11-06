@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Locale } from 'date-fns';
@@ -154,7 +155,7 @@ const styles = stylex.create({
     backgroundColor: { default: null, ':hover': 'hsl(var(--primary) / 0.1)' },
     scale: { default: null, ':active': '0.97' },
     cursor: { default: null, ':disabled': 'default' },
-    opacity: { default: 1, ':disabled': 0.5 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     ...TRANSITION_COLORS,
   },
   syncGlyph: {
@@ -218,7 +219,7 @@ const styles = stylex.create({
     textAlign: 'left',
     backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.4)' },
     cursor: { default: null, ':disabled': 'default' },
-    opacity: { default: 1, ':disabled': 0.6 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     ...TRANSITION_COLORS,
   },
   /** The checkbox in front of a row. */
@@ -303,7 +304,7 @@ const styles = stylex.create({
   /** A row that cannot be toggled. */
   rowLocked: {
     cursor: 'default',
-    opacity: 0.7,
+    opacity: control.disabledOpacity,
   },
   /** A row that can be toggled. */
   rowToggleable: {

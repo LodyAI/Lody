@@ -1,16 +1,17 @@
 # Product style layer
 
-The product's shared StyleX vocabulary. Surfaces read their colours from
-`theme-colors.stylex.ts` and sizes from `theme-scale.stylex.ts`. These values
-preserve the existing theme contract; browser comparisons verify their
-computed behavior.
+Product controls and standard surfaces use `@lody/ui` family tokens and its
+[material rules](../../../ui/src/tokens/RULES.md). This directory retains app/domain
+colours and layout scales; a legacy theme alias is not proof of design-system
+conformance. [Design-system convergence](../../../../.agents/notes/implemented/architecture/2026-11-07-design-system-convergence.md)
+owns the deliberate replacement of preserved legacy overrides.
 
 | Part                                                       | Responsibility                                                        |
 | ---------------------------------------------------------- | --------------------------------------------------------------------- |
 | [Theme colors](theme-colors.stylex.ts)                     | App semantic colors, including portals and VS Code themes.            |
 | [Theme scale](theme-scale.stylex.ts)                       | Existing spacing, radius, type, motion, shadow and stacking scales.   |
 | [Migration guide](MIGRATION.md)                            | Style ownership, cascade, compatibility and real visual verification. |
-| [Alpha catalogue](ALPHAS.md)                               | Existing ad-hoc color opacity expressions.                            |
+| [Alpha catalogue](ALPHAS.md)                               | Historical lexical snapshot of ad-hoc color opacity expressions.      |
 | [Visual harness](../../tests/visual/visual-regression.mjs) | Real screenshots, interaction states and self-contained HTML reports. |
 
 The declaration bridge, its Tailwind-dependent profile and the Electron Tailwind
@@ -21,29 +22,26 @@ Components use local StyleX directly; primitive overrides compose through typed
 `xstyle` props. The [migration guide](MIGRATION.md) describes the remaining
 transition and verification rules.
 
-## Why the theme's own variables
+## Palette and roles
 
-Tailwind's preset maps every colour to `hsl(var(--token))`, and the app writes
-those variables on the document root — from the bundled palette, from `.dark`,
-and at runtime from the active VS Code theme
-(`lib/vscode-theme/vscode-theme-css.ts`). A token here is that same expression,
-so a migrated surface keeps its colour in every theme, in every theme variant,
-and inside a portal (a portal renders outside the subtree carrying the
-`@lody/ui` palette, so `@lody/ui`'s `colors` are not a safe reference for a
-product surface).
+The product's `theme-provider.tsx` publishes the resolved semantic palette, shadows
+and sheens on the document root; ordinary portals inherit them. Forced palettes
+must use the existing theme owners that redeclare dependent family tokens. Raw
+subtree `--input` or `--composer` overrides are not the design system's theme API.
 
-`@lody/ui`'s primitives keep reading `colors`: that is the design system's
-palette, and a primitive is not a product surface.
+Use `field` for value/placeholder/well, `popup` for floating lists and metadata,
+`card` for a card surface, and component variants for controls. Disabled state
+reads `control.disabledOpacity` once. Icons and supporting text take their named
+ink roles instead of an arbitrary `opacity` multiplier. Media overlays use the
+paired `media.scrim` / `media.label` contrast roles; ordinary controls do not.
 
-`themeColors` aliases resolve where their group is declared. A surface that pins
-its own CSS palette, such as a share card, applies the complete `scopedThemeColors`
-on that same scope alongside its UI/conversation themes. An isolated spacing
-scope likewise applies `scopedThemeSpace`. Both reuse their original defaults;
-they re-evaluate dependencies locally instead of changing the app palette or scale.
-Further descendant overrides still need their own scope or an element-local
-expression; a parent theme does not re-read them automatically.
+`themeColors` remains for legacy and domain-specific readers, including code and
+GitHub state. Its aliases resolve where their group is declared. A retained local
+CSS palette must use its explicit scoped owner; an inherited alias does not
+re-evaluate descendant overrides. `scopedThemeColors` and `scopedThemeSpace`
+retain those migration contracts, not a replacement vocabulary for UI families.
 
-## Colour map
+## Legacy colour map
 
 | Tailwind                                     | StyleX                                                      |
 | -------------------------------------------- | ----------------------------------------------------------- |
@@ -69,7 +67,9 @@ The sidebar's own tokens (`sidebar.tokens.stylex.ts`) stay where they are.
 
 ### Alpha
 
-Preserve the exact original declaration. The retired Tailwind 4.3 compiler used
+For an explicitly preserved migration comparison, preserve the exact original
+declaration. For design-system convergence, select the existing semantic role
+and record the intentional visual change. The retired Tailwind 4.3 compiler used
 `color-mix` in `oklab` for these opacity modifiers:
 
 ```ts
@@ -94,8 +94,11 @@ semantic home, is recorded in [ALPHAS.md](./ALPHAS.md) — that list is the
 input to the question "which of these deserve a name?", asked once rather than
 one arbitrary step at a time.
 
-Where an alpha has a semantic home in the theme, use that token instead:
-`hsl(var(--hover) / 0.4)`, `hsl(var(--selection) / 0.5)`.
+Use the current read-only inventory with `node scripts/design-system-audit.mjs`.
+It records opacity, mixes, shadows and literal colours with owner/state context;
+its findings require semantic review and are not a violation count. Visibility,
+artwork and motion are distinct from disabled controls or hint text. Add a named
+role only when an actual semantic gap exists; do not create `muted60`-style steps.
 
 ## Size map
 

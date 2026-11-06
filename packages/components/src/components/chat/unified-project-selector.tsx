@@ -13,7 +13,9 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
 import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
@@ -52,7 +54,7 @@ const styles = stylex.create({
   option: { gap: 'calc(var(--spacing) * 2)', paddingBlock: 'calc(var(--spacing) * 1.5)' },
   optionStart: { alignItems: 'flex-start' },
   optionCenter: { alignItems: 'center' },
-  triggerGlyphMuted: { color: 'currentColor', opacity: 0.7 },
+  triggerGlyphMuted: { color: colors.tertiaryLabel },
   triggerGlyphOpaque: { color: 'currentColor', opacity: 1 },
   projectPathTooltip: { [tooltip.maxWidth]: '22rem', wordBreak: 'break-all' },
   tooltipPadding: {
@@ -63,11 +65,11 @@ const styles = stylex.create({
   groupGlyph: {
     width: 'calc(var(--spacing) * 4)',
     height: 'calc(var(--spacing) * 4)',
-    opacity: 0.7,
+    color: popup.hint,
   },
   groupOwnerGlyph: { flexShrink: 0 },
   /* The owner mark beside a project name. */
-  ownerGlyph: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0, opacity: 0.7 },
+  ownerGlyph: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0, color: popup.hint },
   ownerAvatar: {
     width: themeSpace[4],
     height: themeSpace[4],
@@ -75,7 +77,7 @@ const styles = stylex.create({
     borderRadius: themeRadius.sm,
     objectFit: 'cover',
   },
-  folderGlyph: { width: themeSpace[4], height: themeSpace[4], opacity: 0.7 },
+  folderGlyph: { width: themeSpace[4], height: themeSpace[4], color: popup.hint },
   lockGlyph: { width: themeSpace[3], height: themeSpace[3] },
 
   /* The access badge: "Private", and the action that shares the project. */
@@ -734,7 +736,7 @@ export function UnifiedProjectSelectorView({
       });
     }
     return combined.sort(compareUnifiedProjectOptions);
-  }, [latestMessageAtByRepo, localProjects, projectGroups, repositories, t]);
+  }, [folderIconXstyle, latestMessageAtByRepo, localProjects, projectGroups, repositories, t]);
 
   const selectedValue = getSelectionValue(value);
   const selectedOption = useMemo(

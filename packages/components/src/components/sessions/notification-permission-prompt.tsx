@@ -156,11 +156,7 @@ export function NotificationPermissionPrompt({
           is left to the one primary action. */}
       <div
         className={clsx(
-          stylex.props(
-            styles.prompt,
-            composerSurfaceStyles.composerElevation,
-            composerSurfaceStyles.darkElevation
-          ).className,
+          stylex.props(styles.prompt, composerSurfaceStyles.composerElevation).className,
           className
         )}
       >

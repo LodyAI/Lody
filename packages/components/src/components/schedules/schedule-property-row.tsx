@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import type { ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { settingsCard } from '@/components/settings/compact-layout';
@@ -50,7 +51,7 @@ const styles = stylex.create({
     boxShadow: { default: null, ':focus-visible': 'none' },
     outlineStyle: { default: null, ':focus-visible': 'none' },
     cursor: { default: null, ':disabled': 'not-allowed' },
-    opacity: { default: null, ':disabled': 0.5 },
+    opacity: { default: null, ':disabled': control.disabledOpacity },
   },
   row: {
     display: { default: 'flex', '@media (min-width: 40rem)': 'grid' },

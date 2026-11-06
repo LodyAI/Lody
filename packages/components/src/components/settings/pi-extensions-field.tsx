@@ -13,7 +13,7 @@ import { Checkbox } from '@lody/ui/checkbox';
 import { Input } from '@lody/ui/input';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { control, corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { CollapsibleSection, FormMessage } from './form-primitives';
 
 const ABSOLUTE_PATH_PATTERN = /^(?:\/|~(?:[/\\]|$)|[a-zA-Z]:[\\/]|\\\\)/;
@@ -62,9 +62,9 @@ const styles = stylex.create({
     cursor: 'pointer',
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
   },
-  rowDisabled: { opacity: 0.6 },
   checkbox: { marginTop: '2px' },
   rowBody: { flexGrow: 1, minWidth: 0 },
+  rowBodyDisabled: { opacity: control.disabledOpacity },
   rowHead: { display: 'flex', alignItems: 'baseline', gap: space[2] },
   rowName: {
     minWidth: 0,
@@ -237,7 +237,7 @@ export function PiExtensionsField({
                   {...stylex.props(
                     styles.row,
                     index > 0 && styles.rowRuled,
-                    rowDisabled ? styles.rowDisabled : styles.rowEnabled
+                    !rowDisabled && styles.rowEnabled
                   )}
                 >
                   <Checkbox
@@ -253,7 +253,7 @@ export function PiExtensionsField({
                       }
                     }}
                   />
-                  <span {...stylex.props(styles.rowBody)}>
+                  <span {...stylex.props(styles.rowBody, rowDisabled && styles.rowBodyDisabled)}>
                     <span {...stylex.props(styles.rowHead)}>
                       <span {...stylex.props(styles.rowName)}>{row.name}</span>
                       {row.stale ? (

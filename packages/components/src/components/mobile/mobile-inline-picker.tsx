@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import {
   createContext,
   useContext,
@@ -45,7 +46,6 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
-  spinner: { opacity: 0.7 },
   /** The picker's own column. */
   root: { width: '100%' },
   /** The slot a picker projects its list into. */
@@ -78,7 +78,7 @@ const styles = stylex.create({
   /** An option that cannot be chosen. */
   optionDisabled: {
     cursor: 'not-allowed',
-    opacity: 0.5,
+    opacity: control.disabledOpacity,
     backgroundColor: {
       default: null,
       ':hover': 'transparent',
@@ -95,6 +95,7 @@ const styles = stylex.create({
     justifyContent: 'center',
     opacity: 0.8,
   },
+  disabledOptionIcon: { opacity: 1 },
   /** An option's text column. */
   optionText: {
     display: 'flex',
@@ -173,7 +174,7 @@ const styles = stylex.create({
   /** A trigger that cannot be opened. */
   triggerDisabled: {
     cursor: 'not-allowed',
-    opacity: 0.6,
+    opacity: control.disabledOpacity,
   },
   /** A label clipped to its column. */
   truncate: {
@@ -724,7 +725,10 @@ export function MobileInlinePicker<T extends string = string>({
           {opt.icon ? (
             /* The option's icon box. Its size is what lines every option's
                label up, including the ones whose icon is an empty glyph. */
-            <span data-picker-option-icon="" {...stylex.props(styles.optionIcon)}>
+            <span
+              data-picker-option-icon=""
+              {...stylex.props(styles.optionIcon, opt.disabled && styles.disabledOptionIcon)}
+            >
               {opt.icon}
             </span>
           ) : null}
@@ -768,11 +772,7 @@ export function MobileInlinePicker<T extends string = string>({
       <span {...stylex.props(styles.triggerBody)}>
         {loading ? (
           <>
-            <Spinner
-              diameter="calc(var(--spacing) * 3.5)"
-              className={stylex.props(styles.spinner).className}
-              aria-hidden="true"
-            />
+            <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />
             {loadingText ? (
               <span {...stylex.props(styles.truncate)}>{loadingText}</span>
             ) : (

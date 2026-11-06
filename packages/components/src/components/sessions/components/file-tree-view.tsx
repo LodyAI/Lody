@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -126,7 +127,7 @@ const styles = stylex.create({
     },
     color: { default: themeColors.selectionForeground, ':hover': themeColors.selectionForeground },
   },
-  rowDisabled: { cursor: 'not-allowed', opacity: 0.5 },
+  rowDisabled: { cursor: 'not-allowed', opacity: control.disabledOpacity },
   /** The virtualized row is placed by the virtualizer, not by the flow. */
   rowVirtual: { position: 'absolute', left: 0, top: 0 },
   chevron: {

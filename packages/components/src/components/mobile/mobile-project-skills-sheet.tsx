@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -230,7 +231,7 @@ const styles = stylex.create({
     borderRadius: themeRadius.full,
     color: themeColors.mutedForeground,
     backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.5)' },
-    opacity: { default: 1, ':disabled': 0.5 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     ...TRANSITION_COLORS,
   },
 

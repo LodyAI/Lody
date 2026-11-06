@@ -11,7 +11,8 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
   after defaults; forward dynamic variables and preserve caller style callbacks.
 - Depends on React, `@base-ui/react` and `@stylexjs/stylex` only; never on
   `@lody/components`, `@lody/platform` or a cloud package.
-- No border token: use wells, shadows and focus rings; read `src/tokens/RULES.md`.
+- No border token. Disabled: `control.disabledOpacity` (45%).
+  `media` contrast is image-only. Read `src/tokens/RULES.md`.
 - Text sizes/leading derive from document `--ui-font-size` (14px fallback), not nested `em`.
 - A focus or invalid ring is a `box-shadow` composed with the control's own
   shadow, never an `outline` (the shell resets outlines with `!important`); a

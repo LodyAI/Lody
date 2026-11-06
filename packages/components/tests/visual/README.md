@@ -71,6 +71,39 @@ analytics prefixes: `https://www.clarity.ms/tag/` and
 requests; it sends no analytics traffic and does not rewrite application source.
 Other network failures remain failures, including unexpected external assets.
 
+## Design-system convergence
+
+`profiles/design-system-core.mjs` and `profiles/design-system-rich-inputs.mjs`
+retain real Before/After evidence for intentional material, type and state
+changes. They still use the strict zero-difference gate: a changed design stays
+red, with its actual raw pixels and geometry available for review.
+
+`profiles/design-system-contracts.mjs` is an **After-only** contract board. It
+compares production nodes with public tokens in the same palette, checks effective
+opacity through ancestors and checks a single parent-owned focus edge. It does
+not establish equivalence to the old UI. See the
+[owning decision](../../../../.agents/notes/implemented/architecture/2026-11-07-design-system-convergence.md)
+for scope and retained fixture blockers.
+
+Theme storage is initialized only in the top-level document. Opaque sandbox
+frames keep their native storage and service-worker restrictions. Playwright's
+built-in service-worker block initialization accesses the forbidden getter in
+those frames, so the runner instead installs the same registration no-op only in
+non-opaque documents and records each blocked registration. A real worker or any
+application `pageerror`, including one from a sandbox frame, still fails capture.
+The fixed clock and seeded randomness remain enabled; no sandbox flags are changed.
+
+Browser cleanup first disconnects its `chromium.connect` client, then closes the
+BrowserServer owner and confirms native exit and that its WebSocket/HTTP listener
+refuses connections. Native exit alone does not confirm listener cleanup. Each
+stage has a bounded deadline; a lost client close receipt cannot hold a confirmed
+disconnection open. Failure still reaches the command result, sibling static-server
+cleanup continues, and forced termination is limited to the owned process group.
+The browser and static listener ports are recorded for independent exit checks.
+After native exit, the owner releases its own inherited stdio streams so a child
+pipe cannot postpone Playwright's close event. Listener probes are bounded and
+spaced 250ms apart; they never busy-loop through ephemeral TCP ports.
+
 ## Capture a component batch
 
 From `packages/components`, before editing the selected components:

@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -134,7 +135,7 @@ const styles = stylex.create({
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
     pointerEvents: { default: null, ':disabled': 'none' },
-    opacity: { default: null, ':disabled': 0.6 },
+    opacity: { default: null, ':disabled': control.disabledOpacity },
   },
   /** The name inside that button. */
   nameValue: {

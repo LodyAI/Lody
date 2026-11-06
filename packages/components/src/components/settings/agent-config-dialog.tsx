@@ -272,7 +272,7 @@ const styles = stylex.create({
   railItem: { gap: '10px', fontSize: '13px' },
   railItemNarrow: { paddingBlock: '10px', fontSize: '15px' },
   railItemDisabled: {
-    opacity: 0.45,
+    opacity: control.disabledOpacity,
     cursor: 'not-allowed',
     backgroundColor: { default: 'transparent', ':hover': 'transparent' },
   },

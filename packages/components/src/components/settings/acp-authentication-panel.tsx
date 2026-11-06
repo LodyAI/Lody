@@ -121,7 +121,7 @@ const styles = stylex.create({
     minHeight: control.large,
     paddingBlock: space[1.5],
   },
-  methodDisabled: { opacity: 0.45, cursor: 'not-allowed' },
+  methodDisabled: { opacity: control.disabledOpacity, cursor: 'not-allowed' },
   methodBody: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
   methodName: { fontSize: '13px', lineHeight: 1.375, color: colors.label },
   methodDescription: { fontSize: '12px', lineHeight: 1.375, color: colors.secondaryLabel },

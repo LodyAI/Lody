@@ -1,7 +1,6 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
 import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
@@ -23,16 +22,10 @@ import {
   useSessionMentionSource,
   type UseSessionMentionSourceArgs,
 } from '@/hooks/use-session-mention-source';
-import { themeColors } from '../../style/theme-colors.stylex';
-import {
-  themeDuration,
-  themeEasing,
-  themeRadius,
-  themeSpace,
-} from '../../style/theme-scale.stylex';
-
-const DARK_SCOPE =
-  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+import { card } from '@lody/ui/card/card.tokens.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
   card: {
@@ -40,44 +33,30 @@ const styles = stylex.create({
     width: '32rem',
     maxWidth: '100%',
     flexDirection: 'column',
-    borderRadius: themeRadius['2xl'],
-    borderWidth: '0.5px',
-    borderStyle: 'solid',
-    borderColor: {
-      default: 'hsl(var(--foreground) / 0.1)',
-      ':focus-within': 'hsl(var(--foreground) / 0.25)',
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input-border) / 1)',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
-        ':focus-within': 'hsl(var(--input-border) / 1)',
-      },
-    },
-    backgroundColor: {
-      default: themeColors.background,
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input) / 1)',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
-      },
-    },
+    borderRadius: card.radius,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: card.background,
+    cornerShape: corner.round,
+    '--mention-chip-surface': card.background,
+    '--mention-chip-overlay': 'none',
     paddingInline: themeSpace[3],
     paddingBlock: themeSpace[2.5],
-    boxShadow: '0 1px 2px hsl(0 0% 0%/0.04), 0 8px 24px -16px hsl(0 0% 0%/0.12)',
-    transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    transitionDuration: themeDuration[150],
-    transitionTimingFunction: themeEasing['in-out'],
+    boxShadow: {
+      default: card.shadow,
+      ':has(textarea:focus)': `0 0 0 2px ${colors.accent}, ${card.shadow}`,
+    },
+    transitionProperty: 'background-color, box-shadow',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
   input: {
-    lineHeight: '1.625',
-    // The card carries the focus edge; the textarea itself must not draw a
-    // second outline/ring inside it (MentionInput is a bare primitive, not the
-    // styled Textarea). The Tailwind ring painted nothing and erased the
-    // app's own focus ring with it, so the textarea stays as blind as it was.
-    boxShadow: { default: null, ':focus-visible': 'none' },
+    fontSize: textScale.bodySize,
+    lineHeight: textScale.bodyLeading,
+    fontWeight: 400,
+    letterSpacing: 'normal',
   },
-  inputSaving: { color: themeColors.mutedForeground },
+  inputSaving: { color: colors.secondaryLabel },
   actions: {
     marginTop: themeSpace[2],
     display: 'flex',
@@ -218,13 +197,8 @@ function UserMessageEditorContent({
             handleSave();
           }
         }}
-        className={clsx(
-          // The card carries the focus edge; the textarea itself must not draw
-          // a second outline/ring inside it (MentionInput is a bare primitive,
-          // not the styled Textarea).
-          'input-scrollbar',
-          stylex.props(styles.input, isSaving && styles.inputSaving).className
-        )}
+        className="input-scrollbar"
+        xstyle={[styles.input, isSaving && styles.inputSaving]}
         style={conversationTextFontSizeStyle(conversationFontSize)}
         aria-label={t('sessions.editMessage', 'Edit message')}
       />

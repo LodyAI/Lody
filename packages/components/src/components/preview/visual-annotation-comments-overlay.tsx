@@ -1,8 +1,10 @@
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
-import { themeColors } from '../../style/theme-colors.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
+import { corner, focus, text } from '@lody/ui/tokens/scales.stylex';
+import { Button } from '@lody/ui/button';
 import {
-  themeFontSize,
   themeFontWeight,
   themeDuration,
   themeEasing,
@@ -274,7 +276,7 @@ function OpenComment({
       </button>
       <article
         data-visual-comment-id={comment.id}
-        {...stylex.props(styles.card, isActive ? styles.activeCard : styles.inactiveCard)}
+        {...stylex.props(styles.card)}
         style={{
           left: layout.cardLeft,
           top: layout.cardTop,
@@ -305,33 +307,31 @@ function OpenComment({
             <p {...stylex.props(styles.body)}>{comment.body}</p>
           </div>
           {onCollapse ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              icon
+              width="24px"
+              height="24px"
               aria-label="Collapse comment"
-              {...stylex.props(styles.collapseButton)}
+              xstyle={styles.collapseButton}
               onClick={(event) => {
                 event.stopPropagation();
                 onCollapse(comment.id);
               }}
             >
               <X {...stylex.props(styles.closeIcon)} />
-            </button>
+            </Button>
           ) : null}
         </div>
         {onToggleResolved || onSendToChat ? (
           <div {...stylex.props(styles.footer)}>
             {onSendToChat ? (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="small"
                 aria-pressed={isSubmitted || isStaged}
-                {...stylex.props(
-                  styles.action,
-                  isSubmitted
-                    ? styles.sentAction
-                    : isStaged
-                      ? styles.positiveAction
-                      : styles.sendAction
-                )}
                 disabled={isSubmitted}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -341,19 +341,20 @@ function OpenComment({
                 }}
               >
                 {isSubmitted || isStaged ? (
-                  <Check {...stylex.props(styles.actionIcon)} />
+                  <Check {...stylex.props(styles.actionIcon, styles.completedMark)} />
                 ) : (
                   <SendHorizontal {...stylex.props(styles.sendIcon)} />
                 )}
                 {isSubmitted ? 'Sent' : isStaged ? 'Added' : 'Send'}
-              </button>
+              </Button>
             ) : (
               <span />
             )}
             {onToggleResolved ? (
-              <button
+              <Button
                 type="button"
-                {...stylex.props(styles.action, styles.positiveAction)}
+                variant="ghost"
+                size="small"
                 onClick={(event) => {
                   event.stopPropagation();
                   onToggleResolved({ commentId: comment.id, resolved: true });
@@ -361,7 +362,7 @@ function OpenComment({
               >
                 <Check {...stylex.props(styles.actionIcon)} />
                 Resolve
-              </button>
+              </Button>
             ) : (
               <span />
             )}
@@ -448,9 +449,6 @@ function CollapsedComment({ comment, viewport, resolvedAnchor, onOpen }: Collaps
   );
 }
 
-const DARK =
-  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
-
 const styles = stylex.create({
   root: { pointerEvents: 'none', position: 'absolute', inset: 0, overflow: 'hidden' },
   pin: {
@@ -466,7 +464,7 @@ const styles = stylex.create({
     height: themeSpace[3],
     borderRadius: 'calc(infinity * 1px)',
     backgroundColor: 'var(--color-amber-500, oklch(76.9% 0.188 70.08))',
-    boxShadow: `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 2px ${themeColors.background}, 0 0 #0000`,
+    boxShadow: `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 2px ${colors.background}, 0 0 #0000`,
     transitionProperty: 'transform, translate, scale, rotate',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing.out,
@@ -477,23 +475,14 @@ const styles = stylex.create({
     pointerEvents: 'auto',
     position: 'absolute',
     overflow: 'hidden',
-    borderRadius: themeRadius.xl,
-    backgroundColor: themeColors.popover,
-    color: themeColors.popoverForeground,
+    borderRadius: popup.radius,
+    cornerShape: corner.shape,
+    backgroundColor: popup.background,
+    color: popup.label,
+    boxShadow: popup.shadow,
     transitionProperty: 'box-shadow',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-  },
-  activeCard: {
-    boxShadow: `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px color-mix(in oklab, ${themeColors.ring} 50%, transparent), 0 18px 45px rgba(15,23,42,0.18)`,
-  },
-  inactiveCard: {
-    boxShadow: {
-      default: `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px ${themeColors.border}, 0 10px 30px rgba(15,23,42,0.12)`,
-      '@media (hover: hover)': {
-        ':hover': `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px ${themeColors.border}, 0 14px 36px rgba(15,23,42,0.14)`,
-      },
-    },
   },
   header: {
     display: 'flex',
@@ -521,10 +510,10 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: themeSpace[1.5],
-    fontSize: themeFontSize.xs,
+    fontSize: text.footnoteSize,
     lineHeight: themeSpace[4],
     fontWeight: themeFontWeight.semibold,
-    color: themeColors.popoverForeground,
+    color: popup.label,
   },
   truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   body: {
@@ -533,24 +522,12 @@ const styles = stylex.create({
     overflowWrap: 'break-word',
     fontSize: '13px',
     lineHeight: themeSpace[5],
-    color: 'hsl(var(--popover-foreground) / 0.8)',
+    color: popup.label,
   },
   collapseButton: {
     marginRight: 'calc(var(--spacing) * -1)',
     marginTop: 'calc(var(--spacing) * -0.5)',
-    display: 'inline-flex',
-    width: themeSpace[6],
-    height: themeSpace[6],
     flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: themeRadius.md,
-    color: { default: themeColors.mutedForeground, ':hover': themeColors.popoverForeground },
-    backgroundColor: { default: null, ':hover': themeColors.hover },
-    transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
   closeIcon: { width: themeSpace[3.5], height: themeSpace[3.5] },
   footer: {
@@ -559,51 +536,10 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: themeSpace[1],
-    borderTopWidth: 1,
-    borderTopStyle: 'solid',
-    borderColor: themeColors.border,
     paddingInline: themeSpace[1.5],
     paddingBlock: themeSpace[1],
   },
-  action: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: themeSpace[1],
-    borderRadius: themeRadius.md,
-    paddingInline: themeSpace[2],
-    paddingBlock: themeSpace[1],
-    fontSize: '11px',
-    fontWeight: themeFontWeight.medium,
-    transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-  },
-  sentAction: { cursor: 'default', color: themeColors.mutedForeground },
-  sendAction: {
-    color: {
-      default: themeColors.mutedForeground,
-      '@media (hover: hover)': { ':hover': themeColors.popoverForeground },
-    },
-    backgroundColor: { default: null, '@media (hover: hover)': { ':hover': themeColors.hover } },
-  },
-  positiveAction: {
-    color: {
-      default: 'var(--color-emerald-700, oklch(50.8% 0.118 165.612))',
-      [DARK]: 'var(--color-emerald-300, oklch(84.5% 0.143 164.978))',
-    },
-    backgroundColor: {
-      default: null,
-      '@media (hover: hover)': { ':hover': 'var(--color-emerald-50, oklch(97.9% 0.021 166.113))' },
-      [DARK]: {
-        default: null,
-        '@media (hover: hover)': {
-          ':hover':
-            'color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 10%, transparent)',
-        },
-      },
-    },
-  },
+  completedMark: { color: colors.success },
   actionIcon: { width: themeSpace[3], height: themeSpace[3] },
   sendIcon: { width: themeSpace[3], height: themeSpace[3], scale: '-1 1' },
   collapsedRoot: {
@@ -664,19 +600,15 @@ const styles = stylex.create({
     display: 'block',
     width: '100%',
     overflow: 'hidden',
-    borderRadius: themeRadius.lg,
-    backgroundColor: themeColors.popover,
+    borderRadius: popup.radius,
+    cornerShape: corner.shape,
+    backgroundColor: popup.background,
     textAlign: 'left',
-    color: themeColors.popoverForeground,
+    color: popup.label,
+    borderWidth: 0,
     boxShadow: {
-      default: `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px ${themeColors.border}, 0 12px 30px rgba(15,23,42,0.18)`,
-      '@media (hover: hover)': {
-        ':hover': `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px ${themeColors.border}, 0 18px 40px rgba(15,23,42,0.22)`,
-        ':focus:hover':
-          '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 18px 40px rgba(15,23,42,0.22)',
-      },
-      // The app's global :focus reset removes the original Tailwind ring, while its shadow survives.
-      ':focus': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 12px 30px rgba(15,23,42,0.18)',
+      default: popup.shadow,
+      ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}, ${popup.shadow}`,
     },
     transitionProperty: 'box-shadow',
     transitionDuration: themeDuration[150],
@@ -707,10 +639,10 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: themeSpace[1.5],
-    fontSize: '11px',
-    lineHeight: themeSpace[4],
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
     fontWeight: themeFontWeight.semibold,
-    color: themeColors.popoverForeground,
+    color: popup.label,
   },
   peekBody: {
     marginTop: themeSpace[0.5],
@@ -720,6 +652,6 @@ const styles = stylex.create({
     WebkitLineClamp: 2,
     fontSize: '12px',
     lineHeight: 1.375,
-    color: 'hsl(var(--popover-foreground) / 0.75)',
+    color: popup.description,
   },
 });

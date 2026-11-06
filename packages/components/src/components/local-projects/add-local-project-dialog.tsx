@@ -20,7 +20,16 @@ import {
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+  text,
+} from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { Spinner } from '@/ui/spinner';
 import type {
@@ -167,7 +176,7 @@ const styles = stylex.create({
   },
   machineRowDisabled: {
     backgroundColor: { default: REGION, ':hover': REGION },
-    opacity: 0.45,
+    opacity: control.disabledOpacity,
     cursor: 'not-allowed',
   },
   machineText: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
@@ -300,7 +309,7 @@ const styles = stylex.create({
   },
   entryRowDisabled: {
     backgroundColor: { default: 'transparent', ':hover': 'transparent' },
-    opacity: 0.45,
+    opacity: control.disabledOpacity,
     cursor: 'not-allowed',
   },
   entryName: { flexGrow: 1 },

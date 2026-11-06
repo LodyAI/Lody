@@ -11,6 +11,8 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875)（草稿）
 
 Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥。Electron renderer 与独立 review helper 不再使用 Tailwind 构建插件和运行时 class 合并依赖。组件通过必要的 typed 入口组合实际调用方样式，保留有效布局、主题和交互状态。Storybook 示例与公共网站也已迁移，其 Tailwind 编译输入和直接构建依赖均已移除。站点以本地 StyleX 皮肤和语义阅读 CSS 组合公开 Fumadocs 行为 API；真实截图差异和未访问状态继续保持开放。构建成功或字面量归零不代表迁移完成。
 
+后续[设计系统收敛](2026-11-07-design-system-convergence.zh.md)会有意替换迁移时保留的旧透明度与材质覆盖；其新外观验收与原迁移等价性分开。
+
 ## 所有权与组合
 
 [产品样式层](../../../../packages/components/src/style/README.md)拥有应用颜色和尺度；[迁移指南](../../../../packages/components/src/style/MIGRATION.md)拥有具体组合及采集规则。样式位于组件本地 `stylex.create`，只有区域内重复结构才提取到相邻 surface。语义化 primitive 参数仍是常规设计 API。

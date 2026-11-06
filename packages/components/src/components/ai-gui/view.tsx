@@ -6,7 +6,7 @@ import * as stylex from '@stylexjs/stylex';
 import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { control, space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import {
   messageActionButtonTheme,
   messageActionInkTheme,
@@ -433,7 +433,6 @@ const viewStyles = stylex.create({
     },
     color: 'hsl(var(--primary) / 1)',
     boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-    opacity: { default: 1, ':disabled': 0.6 },
   },
   footerActionNeutral: {
     borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
@@ -736,7 +735,7 @@ const viewStyles = stylex.create({
     color: 'hsl(var(--foreground) / 0.8)',
     ...TRANSITION_COLORS,
     ':hover': { backgroundColor: 'hsl(var(--muted-foreground) / 0.07)' },
-    ':disabled': { pointerEvents: 'none', opacity: 0.5 },
+    ':disabled': { pointerEvents: 'none', opacity: control.disabledOpacity },
     /* The Tailwind `focus-visible:ring-1` this button used to carry declared a
        full box-shadow in the utilities layer, which erased the global inset
        focus ring. The button owned no ring of its own — it showed NO focus

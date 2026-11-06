@@ -484,7 +484,6 @@ export function SessionInfoBar({
   const surfaceStyleProps = stylex.props(
     styles.surface,
     composerSurfaceStyles.infoBarElevation,
-    composerSurfaceStyles.darkElevation,
     hasMachine && styles.surfaceWithMachine,
     Boolean(queue) && styles.surfaceWithQueue
   );

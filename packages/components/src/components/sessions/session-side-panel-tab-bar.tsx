@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { memo, useEffect, useRef, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { space, radius } from '@lody/ui/tokens/scales.stylex';
+import { control, space, radius } from '@lody/ui/tokens/scales.stylex';
 import { tabPillStyles } from '../shared/tab-pill-strip';
 import {
   FileDiff,
@@ -231,7 +231,7 @@ const styles = stylex.create({
     },
     opacity: {
       default: null,
-      ':disabled': 0.45,
+      ':disabled': control.disabledOpacity,
     },
   },
   emptyActionLabel: {
@@ -428,7 +428,7 @@ const styles = stylex.create({
     },
     opacity: {
       default: null,
-      ':disabled': 0.35,
+      ':disabled': control.disabledOpacity,
     },
   },
 });

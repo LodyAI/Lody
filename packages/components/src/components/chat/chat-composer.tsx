@@ -13,7 +13,15 @@ import {
   type ReactNode,
   type Ref,
 } from 'react';
-import { ClipboardPaste, RefreshCw, X, Pencil } from 'lucide-react';
+import {
+  ClipboardPaste,
+  RefreshCw,
+  X,
+  Pencil,
+  TriangleAlert,
+  CircleAlert,
+  Info,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { AcpCommandSummary } from '@lody/shared';
@@ -53,7 +61,7 @@ import { Button, type ButtonProps } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
 import { dialog as dialogTokens } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { Drawer } from '@lody/ui/drawer';
-import type { TextareaProps } from '@lody/ui/textarea';
+import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
   COMPOSER_COMPACT_PLACEHOLDER_MAX_PX,
@@ -64,14 +72,11 @@ import {
 import { Kbd } from '@/components/commands/kbd';
 import { commands, formatKeyBinding } from '@/lib/commands';
 import * as stylex from '@stylexjs/stylex';
-import { text as textScale, space } from '@lody/ui/tokens/scales.stylex';
-import { themeColors } from '../../style/theme-colors.stylex';
-import {
-  themeFontSize,
-  themeFontWeight,
-  themeRadius,
-  themeSpace,
-} from '../../style/theme-scale.stylex';
+import { text as textScale, space, duration, ease, radius } from '@lody/ui/tokens/scales.stylex';
+import { colors, shadow, media } from '@lody/ui/tokens/colors.stylex';
+import { card } from '@lody/ui/card/card.tokens.stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
 const typography = stylex.create({
   imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
@@ -81,26 +86,11 @@ const typography = stylex.create({
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
 });
 
-const DARK_SCOPE =
-  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
-
 const styles = stylex.create({
   textarea: {
-    borderColor: 'transparent',
-    backgroundColor: 'transparent',
-    color: {
-      default: 'hsl(var(--input-foreground) / 1)',
-      '::placeholder': 'color-mix(in oklab, hsl(var(--input-placeholder) / 1) 85%, transparent)',
-    },
-    transitionProperty: 'box-shadow',
-    transitionDuration: 'var(--default-transition-duration, 150ms)',
-    transitionTimingFunction: 'var(--default-transition-timing-function, ease)',
-  },
-  textareaQuietOutline: {
-    outlineStyle: { default: null, ':focus-visible': 'solid' },
-    outlineWidth: { default: null, ':focus-visible': '2px' },
-    outlineColor: { default: null, ':focus-visible': 'transparent' },
-    outlineOffset: { default: null, ':focus-visible': '2px' },
+    color: { default: colors.label, '::placeholder': field.placeholder },
+    fontWeight: 400,
+    letterSpacing: 'normal',
   },
   textareaLanding: {
     minHeight: { default: '120px', '@media (min-width: 640px)': '140px' },
@@ -121,58 +111,7 @@ const styles = stylex.create({
     paddingBlock: 'calc(var(--spacing) * 3)',
   },
   textareaHint: { paddingRight: 'calc(var(--spacing) * 16)' },
-  secondaryAction: {
-    width: 'auto',
-    userSelect: 'none',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    fontWeight: 'var(--font-weight-semibold)',
-    transitionProperty: 'all',
-    transitionDuration: 'var(--default-transition-duration, 150ms)',
-    transitionTimingFunction: 'var(--default-transition-timing-function, ease)',
-    borderColor: {
-      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
-      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input-border) / 1) 60%, transparent)',
-    },
-    backgroundColor: {
-      default: 'hsl(var(--background) / 1)',
-      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input) / 1) 60%, transparent)',
-      '@media (hover: hover)': {
-        default: null,
-        ':hover': {
-          default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 4%, transparent)',
-          [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
-        },
-      },
-    },
-    color: {
-      default: 'hsl(var(--muted-foreground) / 1)',
-      [DARK_SCOPE]: 'hsl(var(--input-foreground) / 1)',
-      '@media (hover: hover)': {
-        default: null,
-        ':hover': {
-          default: 'hsl(var(--foreground) / 1)',
-          [DARK_SCOPE]: 'hsl(var(--input-foreground) / 1)',
-        },
-      },
-    },
-  },
-  actionDialog: {
-    height: 'calc(var(--spacing) * 10)',
-    borderRadius: 'var(--radius-lg)',
-    paddingInline: 'calc(var(--spacing) * 5)',
-  },
-  actionLanding: {
-    height: 'calc(var(--spacing) * 6)',
-    borderRadius: '4px',
-    paddingInline: 'calc(var(--spacing) * 2)',
-    flexShrink: 0,
-  },
-  actionSession: {
-    height: 'calc(var(--spacing) * 7)',
-    borderRadius: 'var(--radius-md)',
-    paddingInline: 'calc(var(--spacing) * 2.5)',
-  },
+  secondaryAction: { width: 'auto', userSelect: 'none', flexShrink: 0 },
   /* The composer's own frame. */
   root: { display: 'flex', width: '100%', flexDirection: 'column' },
   rootDialog: { gap: themeSpace[3] },
@@ -181,8 +120,9 @@ const styles = stylex.create({
   title: { textAlign: 'center' },
   titleText: {
     userSelect: 'none',
-    fontSize: { default: themeFontSize['2xl'], '@media (min-width: 640px)': themeFontSize['3xl'] },
-    lineHeight: '1.25',
+    fontSize: textScale.titleSize,
+    lineHeight: textScale.titleLeading,
+    fontWeight: 600,
   },
   column: { display: 'flex', flexDirection: 'column' },
   columnLanding: { gap: themeSpace[2] },
@@ -203,109 +143,21 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: themeSpace[4],
-    borderRadius: themeRadius.xl,
-    borderWidth: '1px',
-    borderStyle: 'solid',
     paddingInline: themeSpace[4],
     paddingTop: themeSpace[4],
     paddingBottom: themeSpace[3],
     position: 'relative',
   },
   /* The dialog composer box, which has no container of its own. */
-  dialogBox: {
-    display: 'flex',
-    width: '100%',
-    flexDirection: 'column',
-    borderRadius: themeRadius['2xl'],
-    borderWidth: '1px',
-    borderStyle: 'solid',
-  },
-  landingColors: {
-    borderColor: {
-      default: 'hsl(var(--foreground) / 0.1)',
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input-border) / 1)',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, hsl(var(--input-border) / 1) 60%, transparent)',
-      },
-    },
-    backgroundColor: {
-      default: themeColors.composer,
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input) / 1)',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
-      },
+  dialogBox: { display: 'flex', width: '100%', flexDirection: 'column' },
+  mentionSurface: { '--mention-chip-surface': card.background, '--mention-chip-overlay': 'none' },
+  fieldFocus: {
+    boxShadow: {
+      default: card.shadow,
+      ':has(textarea:focus)': `0 0 0 2px ${colors.accent}, ${card.shadow}`,
     },
   },
-  sessionColors: {
-    borderColor: {
-      default: 'hsl(var(--foreground) / 0.1)',
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input-border) / 1)',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
-      },
-    },
-    backgroundColor: {
-      default: themeColors.composer,
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input) / 1)',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
-      },
-    },
-  },
-  // Mention decorations cover native glyphs before repainting their labels.
-  // Keep the original local, opaque sRGB cover separate from the frame's fill.
-  mentionSurface: {
-    '--mention-chip-surface': {
-      default: 'hsl(var(--composer))',
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input))',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in srgb, hsl(var(--input)) 90%, hsl(var(--background)))',
-      },
-    },
-  },
-  /* An image dragged over the box: the box takes the accent edge and fill. */
-  boxDropping: {
-    // Dark keeps its resting edge/fill while the drop ring remains visible.
-    // State composition must retain the complete light and dark contracts.
-    borderColor: {
-      default: 'hsl(var(--primary) / 0.5)',
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input-border) / 1)',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
-      },
-    },
-    backgroundColor: {
-      default: 'hsl(var(--primary) / 0.04)',
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input) / 1)',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
-      },
-    },
-    // The drop ring is composed with the composer's own lift, in Tailwind's
-    // order: the ring first, then the shadow. The lift is stated inline: the
-    // StyleX compiler evaluates a `stylex.create` argument statically and
-    // cannot read an identifier imported from a plain module.
-    boxShadow:
-      '0 0 0 2px hsl(var(--primary) / 0.25), var(--composer-elevation, 0 10px 28px -14px lch(0% 0 0/0.16), 0 1px 2px lch(0% 0 0/0.05))',
-  },
-  boxDroppingLanding: {
-    borderColor: {
-      default: 'hsl(var(--primary) / 0.5)',
-      [DARK_SCOPE]: {
-        default: 'hsl(var(--input-border) / 1)',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, hsl(var(--input-border) / 1) 60%, transparent)',
-      },
-    },
-  },
-
+  boxDropping: { boxShadow: `0 0 0 2px ${colors.accent}, ${card.shadow}` },
   /* The attachment strips. */
   referenceStrip: {
     display: 'flex',
@@ -323,53 +175,44 @@ const styles = stylex.create({
     position: 'relative',
     flexShrink: 0,
     overflow: 'hidden',
-    borderRadius: themeRadius.xl,
-    borderWidth: '1px',
-    borderStyle: 'solid',
+    borderRadius: radius.medium,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
   },
   imageCardMobile: { width: '104px', height: '104px' },
   imageCardDesktop: { width: themeSpace[20], height: themeSpace[20] },
-  imageCardFailed: { borderColor: 'hsl(var(--destructive) / 0.5)' },
+  imageCardFailed: { boxShadow: `0 0 0 2px ${colors.destructive}, ${shadow.inset}` },
   imageButton: { width: '100%', height: '100%' },
   imagePreview: { width: '100%', height: '100%', objectFit: 'cover' },
-  imageBadge: { color: themeColors.mutedForeground },
+  imageBadge: { color: colors.secondaryLabel },
   imageProgress: {
     position: 'absolute',
     inset: 0,
-    backgroundColor: 'hsl(0 0% 0% / 0.45)',
+    backgroundColor: media.scrim,
     transitionProperty: 'clip-path',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
-  imageScrim: { position: 'absolute', inset: 0, backgroundColor: 'hsl(0 0% 0% / 0.45)' },
+  imageScrim: { position: 'absolute', inset: 0, backgroundColor: media.scrim },
   imageCorner: { position: 'absolute', top: themeSpace[1], right: themeSpace[1] },
   imageProgressBar: {
     position: 'absolute',
     insetInline: 0,
     bottom: 0,
-    backgroundColor: 'hsl(0 0% 0% / 0.6)',
+    backgroundColor: media.scrim,
     paddingInline: themeSpace[1],
     paddingBlock: themeSpace[0.5],
     textAlign: 'center',
-    color: '#ffffff',
+    color: media.label,
   },
   imageFailure: {
     position: 'absolute',
     insetInline: 0,
     bottom: 0,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: themeSpace[1],
-    backgroundColor: 'hsl(0 0% 0% / 0.65)',
-    paddingInline: themeSpace[1],
-    paddingBlock: themeSpace[1],
-    fontWeight: themeFontWeight.medium,
-    color: '#ffffff',
-    transitionProperty: 'all',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    ':hover': { backgroundColor: 'hsl(0 0% 0% / 0.75)' },
+    width: '100%',
+    borderRadius: 0,
   },
   fileCard: {
     position: 'relative',
@@ -377,21 +220,16 @@ const styles = stylex.create({
     flexShrink: 0,
     flexDirection: 'column',
     overflow: 'hidden',
-    borderRadius: themeRadius.xl,
-    borderWidth: '1px',
-    borderStyle: 'solid',
+    borderRadius: radius.medium,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
     padding: themeSpace[2],
   },
   fileCardMobile: { width: '104px', height: '104px' },
-  fileCardDesktop: { width: themeSpace[20], height: themeSpace[20] },
-  fileCardFailed: {
-    borderColor: 'hsl(var(--destructive) / 0.45)',
-    backgroundColor: 'hsl(var(--muted) / 0.6)',
-  },
-  fileCardResting: {
-    borderColor: 'hsl(var(--border) / 0.6)',
-    backgroundColor: 'hsl(var(--muted) / 0.6)',
-  },
+  fileCardDesktop: { width: themeSpace[20], minHeight: themeSpace[20] },
+  fileCardFailed: { boxShadow: `0 0 0 2px ${colors.destructive}, ${shadow.inset}` },
   fileType: {
     maxWidth: '64%',
     overflow: 'hidden',
@@ -401,14 +239,14 @@ const styles = stylex.create({
     textTransform: 'uppercase',
     letterSpacing: '0.025em',
   },
-  fileTypeFailed: { color: 'hsl(var(--destructive) / 0.8)' },
-  fileTypeResting: { color: themeColors.mutedForeground },
+  fileTypeFailed: { color: colors.destructive },
+  fileTypeResting: { color: colors.secondaryLabel },
   fileName: {
     marginTop: themeSpace[1],
     overflowWrap: 'break-word',
     textAlign: 'left',
     fontWeight: themeFontWeight.medium,
-    color: themeColors.inputForeground,
+    color: colors.label,
   },
   fileNameMobile: {
     overflow: 'hidden',
@@ -422,38 +260,25 @@ const styles = stylex.create({
     WebkitBoxOrient: 'vertical',
     WebkitLineClamp: 2,
   },
-  fileRetry: {
-    marginTop: 'auto',
-    display: 'flex',
-    width: 'fit-content',
-    alignItems: 'center',
-    gap: themeSpace[1],
-    paddingTop: themeSpace[1],
-    fontWeight: themeFontWeight.medium,
-    color: themeColors.destructive,
-    transitionProperty: 'all',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    ':hover': { color: 'hsl(var(--destructive) / 0.8)' },
-  },
+  fileRetry: { marginTop: 'auto', width: 'fit-content', maxWidth: '100%' },
   fileStatus: {
     marginTop: 'auto',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     paddingTop: themeSpace[1],
-    color: themeColors.mutedForeground,
+    color: colors.secondaryLabel,
   },
   fileProgressTrack: {
     position: 'absolute',
     insetInline: 0,
     bottom: 0,
     height: themeSpace[1],
-    backgroundColor: themeColors.muted,
+    backgroundColor: colors.gray4,
   },
   fileProgressFill: {
     height: '100%',
-    backgroundColor: themeColors.primary,
+    backgroundColor: colors.accent,
     transitionProperty: 'width',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
@@ -500,23 +325,19 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     // Match every original .group ancestor, including one outside this composer.
-    opacity: { default: 0.5, ':where(.group:focus-within *)': 0 },
+    color: colors.tertiaryLabel,
+    opacity: { default: 1, ':where(.group:focus-within *)': 0 },
     transitionProperty: 'opacity',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
 
   /* The composer's status line. */
-  status: { paddingInline: themeSpace[1] },
-  statusWarning: {
-    color: {
-      default: 'var(--color-amber-600)',
-      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
-        'var(--color-amber-400)',
-    },
-  },
-  statusError: { color: themeColors.destructive },
-  statusMuted: { color: themeColors.mutedForeground },
+  status: { display: 'flex', alignItems: 'start', gap: space[1.5], paddingInline: themeSpace[1] },
+  statusMark: { width: space[4], height: space[4], flexShrink: 0 },
+  statusWarning: { color: colors.warning },
+  statusError: { color: colors.destructive },
+  statusMuted: { color: colors.secondaryLabel },
 
   /* The dialog composer's own rows. */
   dialogRow: {
@@ -557,31 +378,12 @@ const styles = stylex.create({
     display: 'block',
     minHeight: 0,
     width: '100%',
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: '0%',
+    flex: '1 1 0%',
     resize: 'none',
     overflow: 'auto',
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    color: themeColors.inputForeground,
   },
   pastedEditorMobile: { paddingInline: themeSpace[4], paddingBlock: themeSpace[3] },
-  pastedEditorDesktop: {
-    height: '100%',
-    borderRadius: themeRadius.md,
-    backgroundColor: 'hsl(var(--muted) / 0.3)',
-    paddingInline: themeSpace[4],
-    paddingBlock: themeSpace[3],
-    // The Tailwind `focus-visible:ring-1 focus-visible:ring-ring/50` this
-    // editor used to carry declared a full box-shadow in the utilities layer,
-    // which erased the app's global inset focus ring — and the app forces
-    // Tailwind's own ring transparent, so the editor painted NO focus
-    // indicator of its own. Keep that: no resting shadow, and no focus
-    // shadow. (The mobile sheet's editor never carried the ring, so it keeps
-    // the global one.)
-    boxShadow: { default: null, ':focus-visible': 'none' },
-  },
+  pastedEditorDesktop: { height: '100%' },
   pastedDrawer: {
     display: 'flex',
     height: '85dvh',
@@ -599,15 +401,12 @@ const styles = stylex.create({
     height: themeSpace[1],
     width: themeSpace[9],
     borderRadius: themeRadius.full,
-    backgroundColor: 'hsl(var(--muted-foreground) / 0.3)',
+    backgroundColor: colors.gray2,
   },
   pastedDrawerHeader: {
     display: 'flex',
     flexShrink: 0,
     flexDirection: 'column',
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: 'hsl(var(--border) / 0.6)',
     paddingTop: themeSpace[2],
     paddingBottom: themeSpace[2],
     paddingRight: themeSpace[2],
@@ -623,7 +422,6 @@ const styles = stylex.create({
   },
   pastedSummary: {
     fontVariantNumeric: 'tabular-nums',
-    [dialogTokens.description]: 'hsl(var(--muted-foreground) / 1)',
   },
   pastedDrawerSummary: {
     overflow: 'hidden',
@@ -632,8 +430,6 @@ const styles = stylex.create({
     paddingRight: themeSpace[2],
   },
   pastedDrawerContent: {
-    borderTopLeftRadius: 'var(--radius-2xl)',
-    borderTopRightRadius: 'var(--radius-2xl)',
     paddingTop: 0,
     paddingBottom: 0,
     paddingLeft: 0,
@@ -651,23 +447,11 @@ const styles = stylex.create({
     flexDirection: 'column',
     overflow: 'hidden',
   },
-  pastedDialogClose: {
-    borderRadius: themeRadius.xs,
-    opacity: { default: 0.7, ':hover': 1 },
-    transitionProperty: 'opacity',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    // The former focus ring utilities erased the app's inset focus shadow.
-    boxShadow: { default: null, ':focus': 'none' },
-  },
   pastedDialogHeader: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: themeSpace[3],
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: 'hsl(var(--border) / 0.6)',
     paddingInline: themeSpace[5],
     paddingBlock: themeSpace[3],
   },
@@ -683,7 +467,7 @@ const styles = stylex.create({
   glyph16: { width: themeSpace[4], height: themeSpace[4] },
   glyph12: { width: themeSpace[3], height: themeSpace[3] },
   truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  glyphMuted: { color: themeColors.mutedForeground },
+  glyphMuted: { color: colors.secondaryLabel },
 });
 
 type ChatComposerTone = 'light' | 'dark';
@@ -827,7 +611,6 @@ export function getChatComposerTextareaStyles({
   return [
     typography.prompt,
     styles.textarea,
-    styles.textareaQuietOutline,
     variant === 'landing'
       ? styles.textareaLanding
       : [styles.textareaSession, isMobile ? styles.textareaMobile : styles.textareaDesktop],
@@ -1227,35 +1010,34 @@ export function ChatComposer({
 
   const boxTextareaStyles = getChatComposerTextareaStyles({ tone, variant, isMobile });
   const mentionContainerClassName = !isLanding
-    ? stylex.props(styles.dialogBox, styles.sessionColors, styles.mentionSurface).className
+    ? stylex.props(
+        styles.dialogBox,
+        composerSurfaceStyles.composerElevation,
+        styles.mentionSurface,
+        styles.fieldFocus
+      ).className
     : undefined;
   const dialogTextareaStyles: stylex.StyleXStyles = [
     typography.prompt,
     styles.textarea,
     styles.textareaDialog,
   ];
-  const secondaryButtonStyles: stylex.StyleXStyles = [
-    isLanding ? typography.caption : typography.code,
-    styles.secondaryAction,
-    isDialog ? styles.actionDialog : isLanding ? styles.actionLanding : styles.actionSession,
-  ];
+  const secondaryButtonStyles: stylex.StyleXStyles = [styles.secondaryAction];
+  const secondaryButtonSize = isDialog ? 'large' : isLanding ? 'mini' : 'small';
 
-  // Focus stays quiet: the caret and placeholder already show where typing
-  // goes, so the composer keeps its resting border instead of an accent ring.
   const boxStyle = isLanding
     ? stylex.props(
         styles.landingBox,
-        styles.landingColors,
         styles.mentionSurface,
         composerSurfaceStyles.composerElevation,
-        isImageDropActive && styles.boxDropping,
-        isImageDropActive && styles.boxDroppingLanding
+        styles.fieldFocus,
+        isImageDropActive && styles.boxDropping
       )
     : stylex.props(
         composerSurfaceStyles.sessionSurface,
-        styles.sessionColors,
         styles.mentionSurface,
         composerSurfaceStyles.composerElevation,
+        styles.fieldFocus,
         isImageDropActive && styles.boxDropping
       );
   const boxClassName = [
@@ -1276,9 +1058,11 @@ export function ChatComposer({
   // yet (so the chip never collides with text or thumbnails). focus-within hides it too.
   const showFocusHint =
     focusHintSupported && Boolean(focusHintBinding) && !promptValue && !composerHasAttachments;
-  const statusStyle = stylex.props(
-    styles.status,
-    typography.helper,
+  const statusStyle = stylex.props(typography.helper, styles.status, styles.statusMuted);
+  const StatusGlyph =
+    statusTone === 'warning' ? TriangleAlert : statusTone === 'error' ? CircleAlert : Info;
+  const statusMarkStyle = stylex.props(
+    styles.statusMark,
     statusTone === 'warning'
       ? styles.statusWarning
       : statusTone === 'error'
@@ -1488,20 +1272,17 @@ export function ChatComposer({
                         </div>
                       ) : null}
                       {image.status === 'failed' ? (
-                        <button
+                        <Button
                           type="button"
+                          variant="secondary"
+                          size="mini"
                           onClick={() => onImageRetry?.(image.id)}
                           aria-label={retryUploadLabel}
-                          className={[
-                            stylex.props(styles.imageFailure).className,
-                            stylex.props(typography.caption).className,
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
+                          xstyle={[styles.imageFailure, typography.caption]}
                         >
                           <RefreshCw className={stylex.props(styles.glyph12).className} />
                           <span {...stylex.props(styles.truncate)}>{uploadFailedShortLabel}</span>
-                        </button>
+                        </Button>
                       ) : null}
                     </div>
                   ))}
@@ -1512,7 +1293,7 @@ export function ChatComposer({
                       {...stylex.props(
                         styles.fileCard,
                         isMobile ? styles.fileCardMobile : styles.fileCardDesktop,
-                        file.status === 'failed' ? styles.fileCardFailed : styles.fileCardResting
+                        file.status === 'failed' && styles.fileCardFailed
                       )}
                     >
                       <span
@@ -1543,20 +1324,17 @@ export function ChatComposer({
                         {file.name}
                       </span>
                       {file.status === 'failed' ? (
-                        <button
+                        <Button
                           type="button"
+                          variant="secondary"
+                          size="mini"
                           onClick={() => onFileRetry?.(file.id)}
                           aria-label={retryUploadLabel}
-                          className={[
-                            stylex.props(styles.fileRetry).className,
-                            stylex.props(typography.caption).className,
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
+                          xstyle={[styles.fileRetry, typography.caption]}
                         >
                           <RefreshCw className={stylex.props(styles.glyph12).className} />
                           <span {...stylex.props(styles.truncate)}>{uploadFailedShortLabel}</span>
-                        </button>
+                        </Button>
                       ) : (
                         <span
                           className={[
@@ -1643,6 +1421,7 @@ export function ChatComposer({
                 // room for it so the placeholder wraps before the chip; the padding is
                 // dropped once the user types (showFocusHint → false → full width).
                 className="input-scrollbar"
+                appearance="bare"
                 focusRing={false}
                 xstyle={[boxTextareaStyles, showFocusHint && styles.textareaHint]}
                 data-keyboard-nav="composer"
@@ -1667,7 +1446,8 @@ export function ChatComposer({
                   aria-live={statusTone === 'error' ? 'assertive' : 'polite'}
                   className={statusStyle.className}
                 >
-                  {statusMessage}
+                  <StatusGlyph {...statusMarkStyle} aria-hidden="true" />
+                  <span>{statusMessage}</span>
                 </div>
               ) : null}
 
@@ -1700,7 +1480,8 @@ export function ChatComposer({
                   {secondaryAction ? (
                     <Button
                       type="button"
-                      variant={secondaryAction.variant ?? 'ghost'}
+                      variant={secondaryAction.variant ?? 'secondary'}
+                      size={secondaryButtonSize}
                       onClick={() => {
                         void secondaryAction.onClick();
                       }}
@@ -1747,6 +1528,7 @@ export function ChatComposer({
               placeholder={resolvedPromptPlaceholder}
               containerClassName={mentionContainerClassName}
               className="input-scrollbar"
+              appearance="bare"
               focusRing={false}
               xstyle={dialogTextareaStyles}
               data-keyboard-nav="composer"
@@ -1758,7 +1540,8 @@ export function ChatComposer({
                 aria-live={statusTone === 'error' ? 'assertive' : 'polite'}
                 className={statusStyle.className}
               >
-                {statusMessage}
+                <StatusGlyph {...statusMarkStyle} aria-hidden="true" />
+                <span>{statusMessage}</span>
               </div>
             ) : null}
 
@@ -1769,7 +1552,8 @@ export function ChatComposer({
                 {secondaryAction ? (
                   <Button
                     type="button"
-                    variant={secondaryAction.variant ?? 'ghost'}
+                    variant={secondaryAction.variant ?? 'secondary'}
+                    size={secondaryButtonSize}
                     onClick={() => {
                       void secondaryAction.onClick();
                     }}
@@ -1809,7 +1593,7 @@ export function ChatComposer({
         // Textarea is a form control (medium weight, control tracking), which is
         // why this is a plain textarea, as the prompt itself is.
         const pastedTextEditor = (layout: stylex.StyleXStyles) => (
-          <textarea
+          <Textarea
             aria-label={pastedTextEditorLabel}
             value={previewPastedTextEditorValue}
             onChange={handlePastedTextDraftTextChange}
@@ -1845,7 +1629,6 @@ export function ChatComposer({
                     <div {...stylex.props(styles.pastedDrawerHeader)}>
                       <div {...stylex.props(styles.pastedDrawerTitleRow)}>
                         <Drawer.Title
-                          fontWeight="var(--font-weight-medium)"
                           className={
                             stylex.props(styles.pastedTitle, styles.pastedDrawerTitle).className
                           }
@@ -1898,10 +1681,7 @@ export function ChatComposer({
               {previewPastedTextDraft ? (
                 <>
                   <div {...stylex.props(styles.pastedDialogHeader)}>
-                    <Dialog.Title
-                      fontWeight="var(--font-weight-medium)"
-                      className={stylex.props(styles.pastedTitle).className}
-                    >
+                    <Dialog.Title className={stylex.props(styles.pastedTitle).className}>
                       <ClipboardPaste {...stylex.props(styles.glyph14, styles.glyphMuted)} />
                       {pastedTextDialogTitle}
                     </Dialog.Title>
@@ -1909,10 +1689,7 @@ export function ChatComposer({
                       <Dialog.Description className={stylex.props(styles.pastedSummary).className}>
                         {summaryText}
                       </Dialog.Description>
-                      <Dialog.Close
-                        {...stylex.props(styles.pastedDialogClose)}
-                        aria-label={t('common.close', 'Close')}
-                      >
+                      <Dialog.Close aria-label={t('common.close', 'Close')}>
                         <X className={stylex.props(styles.glyph16).className} />
                       </Dialog.Close>
                     </div>

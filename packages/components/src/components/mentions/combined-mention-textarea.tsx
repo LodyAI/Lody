@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useMentionFileSearch } from './file-search/use-file-search';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
 import { shortcutComposerScope } from './shortcut-composer-state';
@@ -795,6 +796,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       className,
       xstyle,
       focusRing,
+      appearance = 'well',
       ...props
     },
     ref
@@ -1062,7 +1064,8 @@ export const CombinedMentionTextarea = React.forwardRef<
           }}
           className={className}
           focusRing={focusRing}
-          xstyle={[styles.input, xstyle]}
+          appearance={appearance}
+          xstyle={[styles.input, appearance === 'bare' && styles.bareDisabled, xstyle]}
           aria-label={props['aria-label'] ?? label}
           {...props}
           resize="none"
@@ -1158,7 +1161,9 @@ export const CombinedMentionTextarea = React.forwardRef<
           containerClassName={containerClassName}
           containerXstyle={containerXstyle}
           className={className}
-          xstyle={[styles.input, focusRing === false && styles.quietFocus, xstyle]}
+          appearance={appearance}
+          focusRing={focusRing}
+          xstyle={[styles.input, xstyle]}
           {...props}
         />
         <TwoLevelMentionMenu
@@ -1198,7 +1203,7 @@ CombinedMentionTextarea.displayName = 'CombinedMentionTextarea';
 
 const styles = stylex.create({
   input: { resize: 'none' },
-  quietFocus: { boxShadow: 'none' },
+  bareDisabled: { opacity: { default: 1, ':disabled': control.disabledOpacity } },
   root: { width: '100%' },
   label: {
     position: 'absolute',

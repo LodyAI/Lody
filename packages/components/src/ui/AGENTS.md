@@ -15,8 +15,9 @@ feature directory.
 `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its two copy
 strings on i18n rather than the registry's inline English.
 
-- No surface fill: `bg-popover` lands darker than the `@lody/ui` popup it sits in;
-  only the sticky header fills (`colors.raisedBackground`).
+- The popup owns floating material; the picker stays transparent. Its search
+  owns one field well with a bare input; sticky headers use `popup.background`.
+  Active emoji use `popup.highlight`, not an ad-hoc alpha fill.
 - Its dataset SHIPS WITH THE APP. `frimousse` otherwise fetches
   `${emojibaseUrl}/${locale}/{data,messages}.json` from a public CDN, which leaves the
   picker spinning forever in an offline desktop or mobile app. Every host build must
@@ -33,18 +34,18 @@ strings on i18n rather than the registry's inline English.
 - Anchor the URL on the Vite BASE, never `document.baseURI`: router paths are deep
   routes, so document-relative resolution asks for `…/settings/emojibase` and gets
   SPA-fallback HTML parsed as JSON.
-- Keep the search input's `:focus-visible` shadow neutralized: the app's global
-  inset input ring otherwise appears inside this bare registry field.
+- Keep the search input's focus shadow neutralized: its surrounding field well
+  owns the focus ring. Keep forced-colors focus feedback.
 
 ## Field colors
 
-- An editable control fills with `bg-input-field`, never `bg-input`. `--input` is the
-  theme's raw `input.background` and doubles as a muted chip/composer slab that may sit
-  BELOW the page color in a light theme — a recessed gray field reads as disabled.
-  `--input-field` (derived in `lib/vscode-theme/vscode-theme-css.ts` as the lighter of
-  the field and page colors) keeps a dark theme's raised fill and lifts a light theme's
-  field onto the page, where `--input-border` delimits it. Gray then means disabled
-  (`disabled:bg-muted`), so keep that pair intact.
+- Rewritten fields share `field` roles: one well, or bare input in an owned well.
+  Mention/Emoji follow this boundary; audit other legacy controls.
+- Value, placeholder, glyph and hints use semantic roles, not text opacity or new
+  alpha tokens. Active popup rows use `popup.highlight`.
+- Disabled state reads `control.disabledOpacity` (45%) once at its control owner;
+  never also dim its child glyph, Spinner or disabled control. Preserve native/
+  ARIA behavior and still-actionable row controls.
 
 ## Menus and viewers
 

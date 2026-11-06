@@ -11,6 +11,12 @@ consumption, as documented by its
 [build owner](../../../code-review-helper/standalone-build.md#style-extraction-and-single-file-output).
 Its utility inventory is separate from this package's source count.
 
+[Design-system convergence](../../../../.agents/notes/implemented/architecture/2026-11-07-design-system-convergence.md)
+is a separate, intentional appearance change. New or rewritten controls and
+standard surfaces follow UI family roles; preserving a legacy alpha or border is
+not a design-system compliance rule. Keep its contract checks separate from
+Before/After pixel equivalence.
+
 ## Ownership and composition
 
 | Concern                 | Owner                                             | Migration rule                                                                         |

@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import React from 'react';
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { ChevronRight } from 'lucide-react';
@@ -69,7 +70,7 @@ const styles = stylex.create({
     height: '22px',
     cursor: 'pointer',
   },
-  leafDisabled: { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' },
+  leafDisabled: { opacity: control.disabledOpacity, cursor: 'not-allowed', pointerEvents: 'none' },
 
   /** A node's trigger: the same box, plus the twisty. */
   trigger: {

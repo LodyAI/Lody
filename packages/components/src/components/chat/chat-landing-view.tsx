@@ -10,6 +10,7 @@ import type { PersistedMentionRange } from '@/components/mentions/mention-persis
 
 import type { AcpCommandSummary, AgentConfigCliType } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
 import { Button } from '@lody/ui/button';
 import {
@@ -84,7 +85,7 @@ const styles = stylex.create({
     width: themeSpace[4],
     height: themeSpace[4],
     flexShrink: 0,
-    opacity: 0.7,
+    color: colors.tertiaryLabel,
   },
   hintBody: { display: 'flex', flexGrow: 1, flexDirection: 'column', gap: themeSpace[2] },
   hintText: { fontSize: themeFontSize.sm, lineHeight: themeLineHeight.sm },

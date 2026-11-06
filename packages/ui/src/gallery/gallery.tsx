@@ -74,7 +74,7 @@ import { table as tableTokens } from '../table/table.tokens.stylex';
 import { chip } from '../tooltip/chip';
 import { Tooltip } from '../tooltip/tooltip';
 import { tooltip as tooltipTokens } from '../tooltip/tooltip.tokens.stylex';
-import { colors, shadow, sheen } from '../tokens/colors.stylex';
+import { colors, media, shadow, sheen } from '../tokens/colors.stylex';
 import { control, corner, duration, ease, radius, space, text, z } from '../tokens/scales.stylex';
 import {
   Board,
@@ -153,6 +153,29 @@ const styles = stylex.create({
   floating: { backgroundColor: colors.raisedBackground, boxShadow: shadow.popover },
   modal: { backgroundColor: colors.elevatedBackground, boxShadow: shadow.large },
   textSample: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  mediaSample: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  mediaFrame: {
+    position: 'relative',
+    width: '100%',
+    maxWidth: '320px',
+    aspectRatio: '8 / 3',
+    overflow: 'hidden',
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  mediaImage: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
+  mediaCaption: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    padding: space[2],
+    backgroundColor: media.scrim,
+    color: media.label,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  mediaCaptionText: { margin: 0 },
+
   separatorRow: { display: 'flex', flexDirection: 'column', gap: 0 },
   separatorText: {
     paddingBlock: space[2],
@@ -1009,6 +1032,53 @@ const SAMPLE_FACE =
       '</svg>'
   );
 
+// Bright, dark and saturated pixels exercise image contrast without a network asset.
+const MEDIA_CONTRAST_IMAGE =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120">' +
+      '<path fill="#fff" d="M0 0h80v120H0z"/>' +
+      '<path fill="#000" d="M80 0h80v120H80z"/>' +
+      '<path fill="#ffd400" d="M160 0h80v120h-80z"/>' +
+      '<path fill="#0078ff" d="M240 0h80v120h-80z"/>' +
+      '</svg>'
+  );
+
+function MediaContrastSample() {
+  const scrim = useMeasured<HTMLDivElement>('background-color');
+  const label = useMeasured<HTMLParagraphElement>('color');
+  return (
+    <div {...stylex.props(styles.mediaSample)} data-media-contrast-sample>
+      <div {...stylex.props(styles.mediaFrame)}>
+        <img
+          {...stylex.props(styles.mediaImage)}
+          src={MEDIA_CONTRAST_IMAGE}
+          alt="White, black, yellow and blue image regions"
+        />
+        <div ref={scrim.ref} {...stylex.props(styles.mediaCaption)} data-media-caption>
+          <p ref={label.ref} {...stylex.props(styles.mediaCaptionText)}>
+            Image caption · Uploading 42%
+          </p>
+        </div>
+      </div>
+      <Rows>
+        <Row>
+          <LegendKey>media.scrim</LegendKey>
+          <span {...stylex.props(styles.readout)} data-media-scrim-readout>
+            {scrim.value}
+          </span>
+        </Row>
+        <Row>
+          <LegendKey>media.label</LegendKey>
+          <span {...stylex.props(styles.readout)} data-media-label-readout>
+            {label.value}
+          </span>
+        </Row>
+      </Rows>
+    </div>
+  );
+}
+
 const STRIP_SIZES: { name: string; size: TabsSize }[] = [
   { name: 'small · 28', size: 'small' },
   { name: 'medium · 32', size: 'medium' },
@@ -1204,6 +1274,20 @@ function ControlRow({
       <Button size={size} icon aria-label={`Add at ${size}`}>
         <PlusGlyph />
       </Button>
+    </Row>
+  );
+}
+
+/** The shared state read from a real native disabled control. */
+function ControlDisabledRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('opacity');
+  return (
+    <Row>
+      <LegendKey>control.disabledOpacity</LegendKey>
+      <Button ref={ref} disabled variant="secondary" data-token="control.disabledOpacity">
+        Disabled action
+      </Button>
+      <span {...stylex.props(styles.readout)}>{value}</span>
     </Row>
   );
 }
@@ -4232,6 +4316,15 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
       </Section>
 
       <Section
+        title="Text over images"
+        rule="An image can be white, black or colored in either palette. Non-interactive captions and upload status pair the fixed media.scrim with media.label; ordinary controls and UI surfaces keep their own roles."
+      >
+        <PaletteSplit palettes={palettes}>
+          <MediaContrastSample />
+        </PaletteSplit>
+      </Section>
+
+      <Section
         title="Fills and edges"
         rule="separator divides list and table rows only, never around a surface. The ring is 2px, tight to the control, no glow."
       >
@@ -4325,14 +4418,15 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
       </Section>
 
       <Section
-        title="Control sizes"
-        rule="28 / 32 / 36. Default 32; 36 only for empty states and onboarding. Icon-only buttons are square at the size's height."
+        title="Controls"
+        rule="28 / 32 / 36. Default 32; 36 only for empty states and onboarding. Icon-only buttons are square at the size's height. Disabled controls share one 45% state."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
             {CONTROL_SIZES.map((token) => (
               <ControlRow key={token.name} {...token} />
             ))}
+            <ControlDisabledRow />
           </Rows>
         </PaletteSplit>
       </Section>
@@ -4568,7 +4662,11 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             <FieldRow legend="disabled">
               <Field.Root name="title" disabled>
                 <Field.Label>Session title</Field.Label>
-                <Input defaultValue="Rebuild the composer" />
+                <Input
+                  defaultValue="Rebuild the composer"
+                  trailing={<Badge>Locked</Badge>}
+                  data-gallery-input-trailing
+                />
                 <Field.Description>Locked while the session runs.</Field.Description>
               </Field.Root>
             </FieldRow>
@@ -4593,7 +4691,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Field · sizes and Textarea"
-        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward. What a value belongs with — an emoji before a name, the / before a command — goes in the leading slot inside the same well. Its square follows the named height and inset, including when controlHeight changes the outer well."
+        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward. What a value belongs with — an emoji before a name, the / before a command — goes in the leading slot inside the same well. Its square follows the named height and inset, including when controlHeight changes the outer well. A trailing status keeps its intrinsic width inside that same well."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4610,7 +4708,13 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             <FieldRow legend="input · leading text">
               <Field.Root name="command">
                 <Field.Label>Slash command</Field.Label>
-                <Input size="large" leading="/" placeholder="review-pr" />
+                <Input
+                  size="large"
+                  leading="/"
+                  trailing={<Badge>Available for review</Badge>}
+                  placeholder="review-pr"
+                  data-gallery-input-trailing
+                />
               </Field.Root>
             </FieldRow>
             <FieldRow legend="textarea">

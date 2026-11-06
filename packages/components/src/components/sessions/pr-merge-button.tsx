@@ -3,118 +3,17 @@ import { Spinner } from '@lody/ui/spinner';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
-import { Button } from '@lody/ui/button';
+import { Button, ButtonGroup } from '@lody/ui/button';
 import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import { Menu } from '@/ui/menu';
-import { themeColors } from '../../style/theme-colors.stylex';
-import {
-  themeDuration,
-  themeEasing,
-  themeFontSize,
-  themeFontWeight,
-  themeLineHeight,
-  themeRadius,
-  themeSpace,
-} from '../../style/theme-scale.stylex';
+import { themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
-  mainShape: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
-  mainSecondary: { borderRightWidth: 0 },
-  mainTransparent: { borderColor: 'transparent' },
-  triggerShape: {
-    borderTopLeftRadius: 0,
-    borderBottomLeftRadius: 0,
-    borderLeftWidth: '1px',
-    borderLeftStyle: 'solid',
-    borderColor: 'color-mix(in oklab, var(--color-black) 10%, transparent)',
-  },
-  triggerReady: { borderLeftColor: 'color-mix(in oklab, var(--color-white) 25%, transparent)' },
-  ready: {
-    backgroundColor: {
-      default: 'hsl(var(--status-success))',
-      '@media (hover: hover)': {
-        default: null,
-        ':hover': 'color-mix(in oklab, hsl(var(--status-success)) 90%, transparent)',
-      },
-    },
-    color: {
-      default: 'var(--color-white)',
-      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
-        'hsl(var(--background))',
-    },
-  },
-  fullMainGap: {
-    [buttonTokens.gap]: 'calc(var(--spacing) * 1)',
-  },
-  fullTriggerPadding: {
-    [buttonTokens.paddingXSmall]: 'calc(var(--spacing) * 1.5)',
-  },
-  root: {
-    display: 'flex',
-    flexShrink: 0,
-    alignItems: 'stretch',
-    overflow: 'hidden',
-    borderRadius: themeRadius.md,
-  },
-  /** The compact control paints its own tinted well behind both halves. */
-  rootCompact: {
-    height: themeSpace[5],
-    backgroundColor: 'hsl(var(--status-success) / 0.08)',
-  },
-  compactMain: {
-    display: 'flex',
-    minWidth: 0,
-    alignItems: 'center',
-    gap: themeSpace[1],
-    paddingInline: themeSpace[1.5],
-    fontSize: themeFontSize.xs,
-    lineHeight: themeLineHeight.xs,
-    fontWeight: themeFontWeight.medium,
-    color: themeColors.statusSuccess,
-    transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    transitionDuration: themeDuration[150],
-    transitionTimingFunction: themeEasing['in-out'],
-    ':disabled': { opacity: 0.5 },
-  },
-  compactTrigger: {
-    position: 'relative',
-    display: 'flex',
-    width: themeSpace[5],
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: themeColors.statusSuccess,
-    transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    transitionDuration: themeDuration[150],
-    transitionTimingFunction: themeEasing['in-out'],
-    '::before': {
-      content: '""',
-      position: 'absolute',
-      left: 0,
-      height: themeSpace[3],
-      width: '1px',
-      backgroundColor: 'hsl(var(--status-success) / 0.25)',
-    },
-    ':disabled': { opacity: 0.5 },
-  },
-  compactFeedback: {
-    backgroundColor: {
-      default: null,
-      ':focus-visible': 'hsl(var(--status-success) / 0.12)',
-      '@media (hover: hover)': {
-        ':enabled:hover': {
-          default: 'hsl(var(--status-success) / 1)',
-          '@supports (color: color-mix(in lab, red, red))':
-            'color-mix(in oklab, hsl(var(--status-success) / 1) 10%, transparent)',
-        },
-      },
-    },
-  },
-  icon: {
-    width: themeSpace[3.5],
-    height: themeSpace[3.5],
-  },
+  fullMainGap: { [buttonTokens.gap]: 'calc(var(--spacing) * 1)' },
+  fullTriggerPadding: { [buttonTokens.paddingXSmall]: 'calc(var(--spacing) * 1.5)' },
+  compactMain: { gap: themeSpace[1], paddingInline: themeSpace[1.5] },
+  compactTrigger: { paddingInline: 0 },
+  icon: { width: themeSpace[3.5], height: themeSpace[3.5] },
 });
 
 const MERGE_METHODS: Array<{
@@ -174,11 +73,8 @@ export function PrMergeButton({
 }) {
   const { t } = useTranslation();
   const isDisabled = disabled || isMerging || !onMerge;
-  const buttonVariant =
-    tone === 'ready' ? 'primary' : tone === 'conflict' ? 'destructive' : 'secondary';
-  // The full (non-compact) ready button uses GitHub's green so "merge" reads as
-  // the positive terminal action, matching the compact info-bar merge control.
-  const readyGreen = tone === 'ready' && !compact;
+  // A compact action is secondary in the info bar; a standalone ready action is primary.
+  const buttonVariant = tone === 'ready' && !compact ? 'primary' : 'secondary';
   const mainContent = (
     <>
       {isMerging ? (
@@ -190,67 +86,34 @@ export function PrMergeButton({
     </>
   );
 
-  const rootProps = stylex.props(styles.root, compact && styles.rootCompact);
-
   return (
-    <div {...rootProps} data-pr-merge-control="">
-      {compact ? (
-        <button
-          type="button"
-          disabled={isDisabled}
-          onClick={() => void onMerge?.(method)}
-          {...stylex.props(styles.compactMain, styles.compactFeedback)}
-        >
-          {mainContent}
-        </button>
-      ) : (
-        <Button
-          type="button"
-          size="small"
-          height="calc(var(--spacing) * 8)"
-          variant={buttonVariant}
-          disabled={isDisabled}
-          onClick={() => void onMerge?.(method)}
-          xstyle={[
-            styles.fullMainGap,
-            styles.mainShape,
-            buttonVariant === 'secondary' ? styles.mainSecondary : styles.mainTransparent,
-            readyGreen && styles.ready,
-          ]}
-        >
-          {mainContent}
-        </Button>
-      )}
+    <ButtonGroup data-pr-merge-control="">
+      <Button
+        type="button"
+        size={compact ? 'mini' : 'small'}
+        height={compact ? themeSpace[5] : themeSpace[8]}
+        variant={buttonVariant}
+        disabled={isDisabled}
+        onClick={() => void onMerge?.(method)}
+        xstyle={compact ? styles.compactMain : styles.fullMainGap}
+      >
+        {mainContent}
+      </Button>
       <Menu.Root>
         <Menu.Trigger
           render={
-            compact ? (
-              <button
-                type="button"
-                disabled={isMerging || !onSelectMethod}
-                aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-                {...stylex.props(styles.compactTrigger, styles.compactFeedback)}
-              >
-                <ChevronDown {...stylex.props(styles.icon)} />
-              </button>
-            ) : (
-              <Button
-                type="button"
-                size="small"
-                height="calc(var(--spacing) * 8)"
-                variant={buttonVariant}
-                disabled={isMerging || !onSelectMethod}
-                aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-                xstyle={[
-                  styles.fullTriggerPadding,
-                  styles.triggerShape,
-                  readyGreen && styles.ready,
-                  readyGreen && styles.triggerReady,
-                ]}
-              >
-                <ChevronDown {...stylex.props(styles.icon)} />
-              </Button>
-            )
+            <Button
+              type="button"
+              size={compact ? 'mini' : 'small'}
+              height={compact ? themeSpace[5] : themeSpace[8]}
+              width={compact ? themeSpace[5] : undefined}
+              variant={buttonVariant}
+              disabled={isMerging || !onSelectMethod}
+              aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
+              xstyle={compact ? styles.compactTrigger : styles.fullTriggerPadding}
+            >
+              <ChevronDown {...stylex.props(styles.icon)} />
+            </Button>
           }
         />
         <Menu.Content align="end" side={compact ? 'top' : 'bottom'}>
@@ -266,6 +129,6 @@ export function PrMergeButton({
           </Menu.RadioGroup>
         </Menu.Content>
       </Menu.Root>
-    </div>
+    </ButtonGroup>
   );
 }

@@ -8,7 +8,7 @@ import * as stylex from '@stylexjs/stylex';
 import { Badge } from '@lody/ui/badge';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { control, corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeFontSize,
@@ -2272,7 +2272,7 @@ const styles = stylex.create({
       'color, background-color, border-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    opacity: { default: 1, ':disabled': 0.5 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
   },
   linkButtonSmall: {
     fontSize: themeFontSize.xs,
@@ -2287,7 +2287,7 @@ const styles = stylex.create({
       'color, background-color, border-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    opacity: { default: 1, ':disabled': 0.5 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
   },
   divider: {
     height: '1px',

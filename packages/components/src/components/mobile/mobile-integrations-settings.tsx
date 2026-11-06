@@ -10,6 +10,7 @@ import { currentWorkspaceSlugAtom } from '@/atoms';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAppCapability } from '@/lib/app-platform';
 import { Switch } from '@lody/ui/switch';
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { Input } from '@lody/ui/input';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/toast';
@@ -108,8 +109,13 @@ const styles = stylex.create({
   },
   /** A repository's row: its mark and its name. */
   repoIdentity: { display: 'flex', alignItems: 'center', gap: themeSpace[2], minWidth: 0 },
-  repoDimmed: { opacity: 0.6 },
-  repoIcon: { height: themeSpace[4], width: themeSpace[4], flexShrink: 0, opacity: 0.7 },
+  repoIdentityDisabled: { opacity: control.disabledOpacity },
+  repoIcon: {
+    height: themeSpace[4],
+    width: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
   /** The note under the card, with the way to fix it. */
   hint: {
     marginInline: themeSpace[5],
@@ -570,13 +576,13 @@ function MobileCloudIntegrationsSettings() {
             {filteredRepos.map((repo) => (
               <MobileSettingsRow
                 key={repo.repoFullName}
-                className={
-                  !canManage || !workspaceAuthReady
-                    ? stylex.props(styles.repoDimmed).className
-                    : undefined
-                }
                 label={
-                  <div {...stylex.props(styles.repoIdentity)}>
+                  <div
+                    {...stylex.props(
+                      styles.repoIdentity,
+                      (!canManage || !workspaceAuthReady) && styles.repoIdentityDisabled
+                    )}
+                  >
                     <Book {...stylex.props(styles.repoIcon)} />
                     <span {...stylex.props(mobileSurface.identityLabel, styles.identityName)}>
                       {repo.repoFullName}

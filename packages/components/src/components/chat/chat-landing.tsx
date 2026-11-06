@@ -71,6 +71,7 @@ import {
   X,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { PiProviderMigrationCard } from './pi-provider-migration-card';
@@ -268,7 +269,12 @@ const landingStyles = stylex.create({
   },
   footerSlot: { display: 'contents' },
   glyph14: { width: themeSpace[3.5], height: themeSpace[3.5] },
-  glyph14Muted: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0, opacity: 0.7 },
+  glyph14Muted: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
+  },
   glyph16: { width: themeSpace[4], height: themeSpace[4] },
   glyph20: { width: themeSpace[5], height: themeSpace[5] },
   truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },

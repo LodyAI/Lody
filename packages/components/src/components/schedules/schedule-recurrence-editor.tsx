@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import * as stylex from '@stylexjs/stylex';
@@ -47,7 +48,7 @@ const styles = stylex.create({
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-    opacity: { default: null, ':disabled': 0.5 },
+    opacity: { default: null, ':disabled': control.disabledOpacity },
   },
   selectedDay: { backgroundColor: themeColors.primary, color: themeColors.primaryForeground },
   unselectedDay: {
@@ -90,7 +91,7 @@ const styles = stylex.create({
     color: themeColors.primary,
     textUnderlineOffset: '2px',
     '@media (hover: hover)': { ':hover': { textDecorationLine: 'underline' } },
-    ':disabled': { opacity: 0.5 },
+    ':disabled': { opacity: control.disabledOpacity },
   },
   // In Chromium the indicator also opens the picker; hiding it leaves only
   // the editable segments for both time and date-time fields.

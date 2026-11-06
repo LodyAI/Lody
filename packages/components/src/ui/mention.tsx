@@ -2,6 +2,10 @@ import { clsx } from 'clsx';
 import * as MentionPrimitive from './mention/index';
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, text, duration, ease, corner } from '@lody/ui/tokens/scales.stylex';
+import type { TextareaAppearance } from '@lody/ui/textarea';
 
 import { withClassName } from '@/lib/stylex';
 import { useMentionContext } from './mention/mention-root';
@@ -24,18 +28,52 @@ const styles = stylex.create({
     fontSize: 'var(--text-sm)',
     lineHeight: 'var(--text-sm--line-height)',
   },
-  input: {
-    display: 'flex',
-    width: '100%',
-    resize: 'none',
-    color: {
-      default: 'hsl(var(--input-foreground) / 1)',
-      '::placeholder': 'hsl(var(--input-placeholder) / 1)',
-    },
-    outlineStyle: { default: null, ':focus-visible': 'none' },
-    cursor: { default: null, ':disabled': 'not-allowed' },
-    opacity: { default: null, ':disabled': 0.5 },
+  inputShell: { width: '100%', minWidth: 0 },
+  inputWell: {
+    '--mention-chip-surface': colors.background,
+    '--mention-chip-overlay': `linear-gradient(${field.background},${field.background})`,
+    backgroundColor: field.background,
+    boxShadow: { default: field.well, ':focus-within': `0 0 0 2px ${field.ring}, ${field.well}` },
+    borderRadius: field.radiusMedium,
+    cornerShape: corner.round,
+    transitionProperty: 'box-shadow, opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
+  quietWell: { boxShadow: field.well },
+  inputInvalid: {
+    boxShadow: {
+      default: `0 0 0 2px ${field.invalidRing}, ${field.well}`,
+      ':focus-within': `0 0 0 2px ${field.invalidRing}, ${field.well}`,
+    },
+  },
+  inputDisabled: { opacity: control.disabledOpacity },
+  input: {
+    display: 'block',
+    width: '100%',
+    minWidth: 0,
+    resize: 'none',
+    margin: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    color: { default: field.value, '::placeholder': field.placeholder },
+    fontFamily: 'inherit',
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+    fontSize: field.text,
+    lineHeight: text.subheadlineLeading,
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus': 'none', ':focus-visible': 'none' },
+    opacity: { default: 1, '::placeholder': 1 },
+    cursor: { default: 'text', ':disabled': 'default' },
+  },
+  wellInput: {
+    paddingBlock: field.paddingBlock,
+    paddingInline: field.paddingXMedium,
+    minHeight: field.textareaMinHeight,
+  },
+  bareInput: { padding: 0 },
   content: {
     position: 'relative',
     zIndex: 'var(--z-popover)',
@@ -77,18 +115,36 @@ function MentionLabel({
 
 const MentionInput = React.forwardRef<
   React.ElementRef<typeof MentionPrimitive.Input>,
-  React.ComponentPropsWithoutRef<typeof MentionPrimitive.Input>
->(({ className, xstyle, ...props }, ref) => {
-  return (
-    <MentionPrimitive.Input
-      ref={ref}
-      data-slot="mention-input"
-      className={className}
-      xstyle={[styles.input, xstyle]}
-      {...props}
-    />
-  );
-});
+  React.ComponentPropsWithoutRef<typeof MentionPrimitive.Input> & {
+    appearance?: TextareaAppearance;
+    focusRing?: boolean;
+  }
+>(
+  (
+    { className, xstyle, containerXstyle, appearance = 'well', focusRing = true, ...props },
+    ref
+  ) => {
+    return (
+      <MentionPrimitive.Input
+        ref={ref}
+        data-slot="mention-input"
+        className={className}
+        containerXstyle={[
+          styles.inputShell,
+          appearance === 'well' && styles.inputWell,
+          appearance === 'well' && !focusRing && styles.quietWell,
+          appearance === 'well' &&
+            (props['aria-invalid'] === true || props['aria-invalid'] === 'true') &&
+            styles.inputInvalid,
+          props.disabled && styles.inputDisabled,
+          containerXstyle,
+        ]}
+        xstyle={[styles.input, appearance === 'well' ? styles.wellInput : styles.bareInput, xstyle]}
+        {...props}
+      />
+    );
+  }
+);
 
 MentionInput.displayName = 'MentionInput';
 

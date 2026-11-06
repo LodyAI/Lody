@@ -15,7 +15,7 @@ import { toggle } from '../src/toggle/toggle.tokens.stylex';
 import { tooltip } from '../src/tooltip/tooltip.tokens.stylex';
 import { surface } from '../src/popup/surface';
 import { forcedThemeClassNames } from '../src/theme/theme';
-import { colors, shadow, sheen } from '../src/tokens/colors.stylex';
+import { colors, media, shadow, sheen } from '../src/tokens/colors.stylex';
 import { control, duration, radius, space, text, z } from '../src/tokens/scales.stylex';
 
 /** StyleX adds bookkeeping keys to the runtime token objects. */
@@ -26,7 +26,7 @@ function tokenNames(tokens: object): string[] {
 const board = renderToStaticMarkup(<UiGallery />);
 
 describe('UiGallery', () => {
-  test('names every colour, shadow and sheen token', () => {
+  test('names every colour, media, shadow and sheen token', () => {
     for (const name of tokenNames(colors)) {
       expect(board, `colour token ${name} is missing from the board`).toContain(`>${name}<`);
     }
@@ -35,6 +35,9 @@ describe('UiGallery', () => {
     }
     for (const name of tokenNames(sheen)) {
       expect(board, `sheen token ${name} is missing from the board`).toContain(`>sheen.${name}<`);
+    }
+    for (const name of tokenNames(media)) {
+      expect(board, `media token ${name} is missing from the board`).toContain(`>media.${name}<`);
     }
   });
 
@@ -54,6 +57,35 @@ describe('UiGallery', () => {
     const typeSteps = new Set(tokenNames(text).map((name) => name.replace(/(Size|Leading)$/, '')));
     for (const step of typeSteps) {
       expect(board, `type step ${step} is missing from the board`).toContain(step);
+    }
+  });
+
+  test('shows the shared disabled token on a native disabled control in each palette', () => {
+    const rendered = document.createElement('div');
+    rendered.innerHTML = board;
+    const controls = rendered.querySelectorAll<HTMLButtonElement>(
+      'button[data-token="control.disabledOpacity"]'
+    );
+    expect(controls).toHaveLength(2);
+    for (const disabledControl of controls) {
+      expect(disabledControl.disabled).toBe(true);
+      expect(disabledControl.textContent).toBe('Disabled action');
+    }
+  });
+
+  test('shows media contrast on a loadable image with a non-interactive caption in both palettes', () => {
+    const rendered = document.createElement('div');
+    rendered.innerHTML = board;
+    const samples = rendered.querySelectorAll('[data-media-contrast-sample]');
+    expect(samples).toHaveLength(2);
+    for (const sample of samples) {
+      const image = sample.querySelector('img');
+      expect(image?.src.startsWith('data:image/svg+xml;')).toBe(true);
+      expect(image?.alt).toBe('White, black, yellow and blue image regions');
+      expect(sample.querySelector('[data-media-caption]')?.textContent).toBe(
+        'Image caption · Uploading 42%'
+      );
+      expect(sample.querySelector('button, input, a')).toBeNull();
     }
   });
 
@@ -98,6 +130,23 @@ describe('UiGallery', () => {
       'field.well',
     ]) {
       expect(board, `${name} is missing from the board`).toContain(name);
+    }
+  });
+
+  test('keeps trailing status inside the field well, with and without a leading part', () => {
+    const rendered = document.createElement('div');
+    rendered.innerHTML = board;
+    const inputs = rendered.querySelectorAll<HTMLInputElement>(
+      'input[data-gallery-input-trailing]'
+    );
+    expect(inputs).toHaveLength(4);
+    for (const input of inputs) {
+      const shell = input.closest('[data-slot="input-shell"]');
+      expect(shell?.querySelectorAll('input')).toHaveLength(1);
+      expect(shell?.querySelector('[data-slot="input-trailing"]')?.textContent).toBe(
+        input.disabled ? 'Locked' : 'Available for review'
+      );
+      expect(Boolean(shell?.querySelector('[data-slot="input-leading"]'))).toBe(!input.disabled);
     }
   });
 
@@ -334,11 +383,13 @@ describe('UiGallery', () => {
     }
     expect(board).toContain('data-shape="tile"');
     expect(board).toContain('data-shape="circle"');
-    // The letters where a picture has not arrived, and the identity colour a
-    // surface brought itself. There is no `<img>` in this markup and that is
-    // the component working: Base UI mounts the picture only once it has
-    // loaded, so a static render is every avatar showing its stand-in.
-    expect(board).not.toContain('<img');
+    // Base UI mounts an avatar picture after it loads; static avatars show
+    // their stand-ins. Other sections contain real image specimens.
+    const rendered = document.createElement('div');
+    rendered.innerHTML = board;
+    const avatarRoots = rendered.querySelectorAll('span[data-shape]');
+    expect(avatarRoots.length).toBeGreaterThan(0);
+    for (const root of avatarRoots) expect(root.querySelector('img')).toBeNull();
     expect(board).toContain('background-color:hsl(268 62% 52%)');
     for (const name of tokenNames(avatar)) {
       expect(board, `avatar.${name} is missing from the board`).toContain(`avatar.${name}`);

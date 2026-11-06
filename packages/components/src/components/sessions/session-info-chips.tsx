@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from '@/lib/toast';
 import {
@@ -204,7 +205,7 @@ const styles = stylex.create({
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-    ':disabled': { opacity: 0.5 },
+    ':disabled': { opacity: control.disabledOpacity },
   },
   actionLabel: {
     overflow: 'hidden',

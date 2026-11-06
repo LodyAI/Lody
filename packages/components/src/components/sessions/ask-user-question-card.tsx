@@ -39,7 +39,16 @@ import { Textarea } from '@lody/ui/textarea';
 import { Dialog } from '@/ui/dialog';
 import { Tooltip } from '@/ui/armed-overlays';
 import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+  text,
+} from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 
@@ -149,7 +158,7 @@ const styles = stylex.create({
   optionSelected: { backgroundColor: colors.selectedFill },
   optionDisabled: { cursor: 'not-allowed' },
   optionReadonly: { cursor: 'default' },
-  dimmed: { opacity: 0.45 },
+  dimmed: { opacity: control.disabledOpacity },
   optionLabel: { display: 'flex', flexGrow: 1, minWidth: 0, alignItems: 'center', gap: space[1] },
   optionText: { minWidth: 0 },
   // An inline (i) sits on the label's 20px line.

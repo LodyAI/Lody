@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -97,7 +98,7 @@ export const sheetSurface = stylex.create({
   iconButtonLeftTight: { position: 'absolute', top: themeSpace[1.5], left: themeSpace[2] },
   /** A chip that steps back while its sheet is busy. */
   iconButtonDisabled: {
-    opacity: { default: 1, ':disabled': 0.5 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     pointerEvents: { default: null, ':disabled': 'none' },
   },
 

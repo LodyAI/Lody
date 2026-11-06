@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { ReadOnlyHtmlPreview } from './read-only-html-preview';
 import { PagedFileViewer } from './paged-file-viewer';
 import * as stylex from '@stylexjs/stylex';
@@ -242,7 +243,7 @@ const styles = stylex.create({
     },
     opacity: {
       default: null,
-      ':disabled': 0.5,
+      ':disabled': control.disabledOpacity,
     },
   },
   toolButtonActive: { color: 'hsl(var(--foreground))' },

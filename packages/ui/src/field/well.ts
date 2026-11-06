@@ -107,7 +107,7 @@ export const well = stylex.create({
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: 'transparent',
-    boxShadow: 'none',
+    boxShadow: { default: 'none', ':focus': 'none', ':focus-visible': 'none' },
     color: { default: 'inherit', '::placeholder': field.placeholder },
     fontFamily: 'inherit',
     fontSize: 'inherit',
