@@ -11,7 +11,11 @@ import {
 import type { MachineId } from '@lody/shared';
 import { AppThemeShell } from '@/components/app-theme-shell';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { getSettingsBackDestination, resolveSettingsCloseTo } from '@/lib/settings-navigation';
+import {
+  getSettingsBackDestination,
+  isSettingsPath,
+  resolveSettingsCloseTo,
+} from '@/lib/settings-navigation';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { SettingsDataCacheProvider } from '@/components/settings/settings-data-cache';
 import {
@@ -45,6 +49,7 @@ export function SettingsLayoutComponent() {
   const isNativeApp = isNativeAppShell();
   const { workspaceName } = Route.useParams();
 
+  const onSettingsPath = isSettingsPath(location.pathname, workspaceName);
   const settingsListPage = isSettingsListPath(location.pathname, workspaceName);
   const activeTabId = getActiveSettingsTabId(location.pathname);
   const activeTab = useMemo(
@@ -116,12 +121,15 @@ export function SettingsLayoutComponent() {
   // anyway (deep link, Electron "About" menu, an old bookmark), open the modal at the
   // URL's tab and redirect the URL back to where settings was opened from (or chat) so
   // the workspace stays visible behind the dialog instead of a blank settings page.
+  // While that redirect is pending, the router already reports the destination location
+  // to this still-mounted layout; it carries no settings tab and must not reset the modal
+  // to the default tab (a checkout return would otherwise land on Account, not Billing).
   const setSettingsModalOpen = useSetAtom(settingsDialogOpenAtom);
   const setSettingsModalTab = useSetAtom(settingsActiveTabAtom);
   const setSettingsMachineTarget = useSetAtom(settingsSelectedMachineIdAtom);
   const setSettingsProjectTarget = useSetAtom(settingsSelectedProjectKeyAtom);
   useEffect(() => {
-    if (isMobile) return;
+    if (isMobile || !onSettingsPath) return;
     setSettingsModalTab(activeTabId ?? SETTINGS_DEFAULT_TAB);
     setSettingsMachineTarget(
       typeof locationSearch.machine === 'string' ? (locationSearch.machine as MachineId) : null
@@ -142,6 +150,7 @@ export function SettingsLayoutComponent() {
     }
   }, [
     isMobile,
+    onSettingsPath,
     activeTabId,
     settingsFrom,
     navigate,
