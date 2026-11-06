@@ -1261,6 +1261,7 @@
   "composer.collapseMessageQuote": "收起引用",
   "composer.removeMessageQuote": "移除引用",
   "composer.messageQuoteTooLong": "请选择不超过 50,000 字符的内容进行引用。",
+  "composer.messageQuoteFormatFailed": "无法保留所选内容的格式，请重新选择后再试。",
   "composer.messageQuotesUpgrade": "请升级目标机器以使用消息引用，已有草稿会保留。",
   "composer.messageQuoteDraftStorageFailed": "无法在本机保存引用草稿，请在关闭前复制或发送。",
   "composer.pastedTextInlineLabel": "[已粘贴 {{charCount}} 字符]",

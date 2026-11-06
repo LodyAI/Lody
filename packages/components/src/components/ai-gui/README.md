@@ -394,7 +394,15 @@ Session data and action controls continue updating. This is independent of
 
 The chat quote action floats above the first visible selected line, centered on
 that line. It measures its rendered size, flips below the selection when there is
-no room above, and stays inside the conversation and safe viewport bounds.
+no room above, and stays inside the conversation and safe viewport bounds. A
+continuous selection may span text rows of the same turn when every intervening
+row is mounted and contains quoteable text. Other cross-region selections request
+separate quotes rather than capturing an incomplete or unrelated interval. The
+[multi-row quote note](../../../../../.agents/notes/implemented/bug-fix/2026-11-04-multi-row-message-quotes.md)
+records the boundary and its trade-off. `message-quote-markdown.ts` converts the
+selected rendered content to a Markdown snapshot, preserving supported formatting,
+code lines and math source for the preview and Agent-bound text. It reconstructs
+Markdown from rendered content; it does not promise byte-identical source syntax.
 
 The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
 records lifecycle, alternatives, and platform verification limits.

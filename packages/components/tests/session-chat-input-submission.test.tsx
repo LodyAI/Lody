@@ -17,6 +17,7 @@ import {
 } from 'react';
 import { getDefaultStore } from 'jotai';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
+import { selectedMessageMarkdown } from '../src/components/ai-gui/message-quote-markdown';
 import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import {
@@ -598,6 +599,37 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     await submit('button');
     expect(submitted[1]).toEqual(submitted[0]);
+  });
+
+  it('sends the selected Markdown snapshot in the actual session input', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return true;
+      },
+    });
+    const region = document.createElement('div');
+    region.innerHTML =
+      '<div data-message-quote-text><p><strong>Important</strong> <a href="https://example.com">guide</a></p><ul><li>first</li><li>second</li></ul></div>';
+    document.body.append(region);
+    const range = document.createRange();
+    range.selectNodeContents(region.querySelector('[data-message-quote-text]')!);
+    const markdown = selectedMessageMarkdown(range, region);
+    region.remove();
+    expect(markdown).toBe('**Important** [guide](https://example.com)\n\n* first\n* second');
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote(markdown)).toBe(true);
+    });
+    await submit('button');
+    expect(submitted[0]?.[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining(formatMessageQuote(markdown)),
+      spans: [{ kind: 'message_quote', quoteVersion: 1 }],
+    });
   });
 
   it('preserves a quote draft when the target machine loses support', async () => {

@@ -1261,6 +1261,7 @@
   "composer.collapseMessageQuote": "Collapse quote",
   "composer.removeMessageQuote": "Remove quote",
   "composer.messageQuoteTooLong": "Select up to 50,000 characters to quote.",
+  "composer.messageQuoteFormatFailed": "Could not preserve this selection. Try selecting it again.",
   "composer.messageQuotesUpgrade": "Update the target machine to use message quotes. Your draft is preserved.",
   "composer.messageQuoteDraftStorageFailed": "This quote draft could not be saved on this device. Copy or send it before closing.",
   "composer.pastedTextInlineLabel": "[Pasted {{charCount}} chars]",
