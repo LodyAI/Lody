@@ -495,6 +495,7 @@ export type CloudApi = {
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */
   e2eeRecoveryVault: {
+    hasAccountVault: Query<Record<string, never>, { exists: boolean }>;
     putImmutable: Mutation<RecoveryVaultPutRequest, { ok: true }>;
     readEntry: Query<RecoveryVaultReadRequest, RecoveryVaultCiphertextDto | null>;
     readIndex: Query<RecoveryVaultIndexReadRequest, RecoveryVaultCiphertextDto | null>;

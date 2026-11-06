@@ -31,7 +31,7 @@ passkey 解锁，任何返回真实 PRF 结果的 passkey 都能用，并以通�
 MVP 要求用户至少配对两台设备。保险库覆盖没有设备幸存的情况，但目前只有 `packages/e2ee-core`
 和 Lab 在使用它。[开放契约 note](../architecture/2026-10-15-e2ee-open-contracts.zh.md) 将保险库
 列为仅在 core 中实现。[#2125](https://github.com/LodyAI/Lody/pull/2125) 加了一个默认关闭的桌面
-闭环：创建账号保险库及其恢复文件，再检查文件。它在按决定 2、3 调整前保持 draft。
+闭环：创建账号保险库及其恢复文件，再检查文件。它既不保留 V，也不接纳 R，所以决定 2、3 只约束后续工作。
 
 ## 决定与被否决的选项
 
