@@ -49,7 +49,7 @@ Home/app switcher/lock, rotation, shake, supported volume/Action buttons, explic
 Unicode input, appearance and simulator deep links. Capture saves a PNG or stages a
 composer attachment without sending. Fit/expanded view and the dependency-free device
 shell stay local; the shell preserves actual screen bounds and adds no duplicate island
-or Home bar. DeviceKit assets are loaded privately from the target Mac; illustrative CSS is only a missing-asset fallback.
+or Home bar. DeviceKit assets are loaded privately from the target Mac; missing assets show content without a drawn shell.
 
 Controls require `iosSimulatorControls: 1` independently of basic preview support.
 Text and deep links can contain credentials, so device actions use exact-origin
@@ -204,7 +204,7 @@ processes were removed. This checks native command acceptance and selected readb
 it does not prove every visible button effect or remote/mobile end-to-end behavior.
 
 The controls UI adds a responsive second toolbar row, mobile More menu, model-aware
-DeviceKit hardware exterior (with a CSS fallback) and draft-only screenshot attachment. It adds no dependency.
+DeviceKit hardware exterior (content-only while artwork is unavailable) and draft-only screenshot attachment. It adds no dependency.
 The final bridge tests cover exact reply identity, serial controls, timeout and
 navigation/unmount cancellation, and state-before-ack rotation without a double turn.
 The viewer's acknowledged absolute angle is the only orientation authority. The UI
@@ -218,7 +218,7 @@ fixed Baguette routes, normalizes geometry/button hit regions and drops upstream
 The private gateway caches bounded geometry/PNG bytes; the initialized viewer transfers
 them to its exact parent. The renderer checks identity, geometry and PNG dimensions,
 creates a revocable object URL and rotates the exterior independently of screen pixels.
-Missing assets retain the drawn fallback. No asset is bundled or publicly published.
+Missing assets show content without a drawn shell. No asset is bundled or publicly published.
 
 For iPhone/iPad, the owned worker writes device-local
 `com.apple.Preferences AutomaticMinimizationEnabled=false` and posts

@@ -15,4 +15,4 @@ The Claude adapter owns the SDK used by built-in launch. Its package and manifes
 
 Codex, Claude, Grok, and Pi manifests were refreshed after artifact hash and size verification. The lockfile follows the checked-in adapter manifests; dependency release-age policy remains unchanged. The two managed runtime test files pass all 39 tests with the refreshed pins and adapter metadata imports. Full repository verification is recorded in the PR when complete.
 
-This is distinct from the [login download cancellation proposal](2026-09-21-acp-auth-runtime-download.md): it changes pin ownership, not login progress or cancellation. Native platform execution, Windows desktop onboarding, and main CI after merge remain separate evidence.
+This is distinct from the [login download cancellation proposal](../../implemented/bug-fix/2026-09-21-acp-auth-runtime-download.md): it changes pin ownership, not login progress or cancellation. Native platform execution, Windows desktop onboarding, and main CI after merge remain separate evidence.

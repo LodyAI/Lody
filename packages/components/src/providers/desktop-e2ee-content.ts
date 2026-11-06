@@ -54,6 +54,17 @@ function untilAborted<A>(
   });
 }
 
+/**
+ * Upper bound on waiting for this device's key to an epoch its verified ledger already
+ * holds (a rotation not received yet). One reception, then one retry of the open.
+ */
+export const KEY_PENDING_WAIT_MS = 30_000;
+const keyPending = (error: unknown) =>
+  error instanceof Error &&
+  /^(?:Error invoking remote method 'e2ee[.:]openContent': Error: )?e2ee_key-pending$/.test(
+    error.message
+  );
+
 /** Shared purpose-bound providers. Keys and credentials stay inside the injected host runtime. */
 export function createE2eeContent(input: {
   runtime: E2eeWorkspaceRuntime;
@@ -75,6 +86,8 @@ export function createE2eeContent(input: {
   let currentKeyMissing = false;
   let lost: E2eeAccessLoss | null = null,
     closed = false;
+  // Close and access loss abort a pending key wait; the room never outlives its owner.
+  const stopped = new AbortController();
   const assertOpen = () => {
     if (closed || lost) throw new Error('e2ee_closed');
   };
@@ -90,6 +103,7 @@ export function createE2eeContent(input: {
     if (!lost) {
       setMemberRole(null);
       lost = reason;
+      stopped.abort(new Error('e2ee_closed'));
       try {
         input.onMemberRemoved?.(reason);
       } catch {
@@ -124,6 +138,30 @@ export function createE2eeContent(input: {
       console.warn('[e2ee] snapshot repair request failed; will retry');
     });
   };
+  // One shared reception for every open waiting on a not-yet-received key.
+  let reception: Promise<void> | undefined;
+  const receiveKey = () =>
+    (reception ??= (async () => {
+      const deadline = new AbortController();
+      const timer = setTimeout(
+        () => deadline.abort(new Error('e2ee_key_pending_timeout')),
+        KEY_PENDING_WAIT_MS
+      );
+      try {
+        await untilAborted(input.runtime.refresh(input.workspaceId), [
+          stopped.signal,
+          deadline.signal,
+        ]);
+      } catch (error) {
+        if (observeRemoval(error) || stopped.signal.aborted || deadline.signal.aborted) throw error;
+        // A failed round can still have installed the key (e.g. from a staged
+        // group); the single retry below decides.
+      } finally {
+        clearTimeout(timer);
+      }
+    })().finally(() => {
+      reception = undefined;
+    }));
   const tokens = new Set<ReturnType<typeof createLoroStreamsTokenProviderLegacy>>();
   const transition = createWorkspaceEpochTransitionLegacy({
     epoch: input.epoch,
@@ -235,9 +273,19 @@ export function createE2eeContent(input: {
                 throw error;
               }
             },
-            open: (request) => {
+            open: async (request) => {
               const open = () => input.runtime.openContent(input.workspaceId, { room, ...request });
-              return effects ? effects.track('read', open) : open();
+              const read = () => (effects ? effects.track('read', open) : open());
+              try {
+                return await read();
+              } catch (error) {
+                // Only the host's verified missing-key answer waits; every other
+                // failure, including access loss, keeps its terminal meaning.
+                if (closed || lost || !keyPending(error)) throw error;
+                await receiveKey();
+                assertOpen();
+                return read();
+              }
             },
           }) satisfies PayloadProtectionProvider
       )
@@ -330,6 +378,7 @@ export function createE2eeContent(input: {
     close: () => {
       setMemberRole(null);
       closed = true;
+      stopped.abort(new Error('e2ee_closed'));
       return transition.close();
     },
     e2ee: {

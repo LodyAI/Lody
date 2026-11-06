@@ -6,6 +6,7 @@ import { Quote } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { useSafeAreaCollisionPadding } from '@/hooks/use-safe-area-insets';
+import { selectedMessageMarkdown } from './message-quote-markdown';
 
 const styles = stylex.create({ floating: { position: 'fixed', zIndex: 80 } });
 type Capture = {
@@ -15,6 +16,39 @@ type Capture = {
   anchor: { center: number; top: number; bottom: number };
   bounds: { left: number; right: number; top: number; bottom: number };
 };
+
+// A turn can render consecutive text entries as separate virtual rows. Do not
+// mistake those rows for separate messages, or snapshot a gap in a virtualized
+// selection while its intervening rows are still unavailable.
+function isSinglePassage(root: HTMLElement, start: Element, end: Element): boolean {
+  if (start === end) return true;
+  const startRow = start.closest<HTMLElement>('[data-conversation-row-key]');
+  const endRow = end.closest<HTMLElement>('[data-conversation-row-key]');
+  const turnId = startRow?.dataset.conversationTurnId;
+  const first = Number(startRow?.dataset.virtualIndex);
+  const last = Number(endRow?.dataset.virtualIndex);
+  if (
+    !turnId ||
+    turnId !== endRow?.dataset.conversationTurnId ||
+    !Number.isInteger(first) ||
+    !Number.isInteger(last) ||
+    first > last
+  )
+    return false;
+  const rows = Array.from(root.querySelectorAll<HTMLElement>('[data-conversation-row-key]')).filter(
+    (row) => {
+      const index = Number(row.dataset.virtualIndex);
+      return index >= first && index <= last;
+    }
+  );
+  return (
+    rows.length === last - first + 1 &&
+    rows.every(
+      (row) =>
+        row.dataset.conversationTurnId === turnId && row.querySelector('[data-message-quote-text]')
+    )
+  );
+}
 
 /** A portal action, not a row or a composer bar: it cannot resize the viewport. */
 export function MessageQuoteAction({
@@ -116,7 +150,7 @@ export function MessageQuoteAction({
       setCapture({
         text,
         range: range.cloneRange(),
-        multiplePassages: start !== end,
+        multiplePassages: !isSinglePassage(root, start, end),
         anchor: { center: (first.left + first.right) / 2, top: first.top, bottom: last.bottom },
         bounds,
       });
@@ -174,7 +208,17 @@ export function MessageQuoteAction({
         size="small"
         onPointerDown={(event) => event.preventDefault()}
         onClick={() => {
-          if (capture.multiplePassages) {
+          const start = (
+            capture.range.startContainer.nodeType === Node.ELEMENT_NODE
+              ? (capture.range.startContainer as Element)
+              : capture.range.startContainer.parentElement
+          )?.closest('[data-message-quote-text]');
+          const end = (
+            capture.range.endContainer.nodeType === Node.ELEMENT_NODE
+              ? (capture.range.endContainer as Element)
+              : capture.range.endContainer.parentElement
+          )?.closest('[data-message-quote-text]');
+          if (capture.multiplePassages || !start || !end || !isSinglePassage(root, start, end)) {
             toast.error(
               t(
                 'composer.messageQuoteSeparatePassages',
@@ -196,7 +240,26 @@ export function MessageQuoteAction({
             setCapture(null);
             return;
           }
-          if (onQuoteRef.current(capture.text)) {
+          let markdown: string;
+          try {
+            markdown = selectedMessageMarkdown(capture.range, root);
+            if (!markdown.trim()) throw new Error('Empty quote');
+          } catch {
+            toast.error(
+              t(
+                'composer.messageQuoteFormatFailed',
+                'Could not preserve this selection. Try selecting it again.'
+              )
+            );
+            return;
+          }
+          if (markdown.length > 50_000) {
+            toast.error(
+              t('composer.messageQuoteTooLong', 'Select up to 50,000 characters to quote.')
+            );
+            return;
+          }
+          if (onQuoteRef.current(markdown)) {
             root.ownerDocument.getSelection()?.removeAllRanges();
             setCapture(null);
           }

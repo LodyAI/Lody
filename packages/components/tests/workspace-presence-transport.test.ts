@@ -403,6 +403,87 @@ describe('WorkspacePresenceTransport', () => {
     }
   });
 
+  describe('snapshot continuity across store replacement', () => {
+    const remoteHeartbeat = {
+      kind: 'machine',
+      machineId: 'machine-remote',
+      instanceId: 'instance-remote',
+      since: 1,
+      updatedAt: 1,
+    };
+
+    const setup = () => {
+      const stores: FakePresenceStore[] = [];
+      const transports: FakePresenceTransport[] = [];
+      const snapshots: LodyPresenceStateMap[] = [];
+      const presence = new WorkspacePresenceTransport({
+        workspaceId: 'workspace-1' as WorkspaceId,
+        presenceShardId: '03',
+        createStore: () => {
+          const store = new FakePresenceStore();
+          stores.push(store);
+          return store;
+        },
+        createTransport: () => {
+          const transport = new FakePresenceTransport();
+          transports.push(transport);
+          return transport;
+        },
+        onSnapshot: (states) => snapshots.push(states),
+      });
+      const start = () =>
+        presence.start({ baseUrl: 'https://streams.example.test', auth: async () => 'token' });
+      start();
+      transports[0]?.emitStatus('joined');
+      stores[0]?.setStates({ 'machine:remote': remoteHeartbeat });
+      return { presence, stores, transports, snapshots, start };
+    };
+
+    it('keeps the last room state through a stalled-room restart until the new room joins', async () => {
+      vi.useFakeTimers();
+      const { presence, stores, transports, snapshots } = setup();
+      try {
+        const delivered = snapshots.length;
+        transports[0]?.emitStatus('reconnecting');
+        await vi.advanceTimersByTimeAsync(20_000);
+
+        expect(transports).toHaveLength(2);
+        expect(snapshots.slice(delivered).filter((states) => !states['machine:remote'])).toEqual(
+          []
+        );
+
+        stores[1]?.setStates({
+          'machine:other': { ...remoteHeartbeat, machineId: 'machine-other' },
+        });
+        transports[1]?.emitStatus('joined');
+        expect(Object.keys(snapshots.at(-1) ?? {})).toEqual(['machine:other']);
+      } finally {
+        await presence.stop();
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the last room state through a reconnect-loop stop and start', async () => {
+      const { presence, transports, snapshots, start } = setup();
+      transports[0]?.emitStatus('error');
+      const delivered = snapshots.length;
+
+      await presence.stop({ retainSnapshot: true });
+      start();
+
+      expect(snapshots.slice(delivered).filter((states) => !states['machine:remote'])).toEqual([]);
+      await presence.stop();
+    });
+
+    it('still clears the room state on a terminal stop', async () => {
+      const { presence, snapshots } = setup();
+
+      await presence.stop();
+
+      expect(snapshots.at(-1)).toEqual({});
+    });
+  });
+
   describe('publishSessionViewing', () => {
     const viewingEntriesOf = (store: FakePresenceStore) =>
       Object.values(parseLodyPresenceStates(store.getAllStates())).filter(

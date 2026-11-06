@@ -145,17 +145,11 @@ refresh contract. Purely local sidebar drag ordering never writes session metada
 
 ## Sender withdrawal gate
 
-A machine discovers encrypted input in two ways: the signed RPC fast path and pending
-turns in synced session history. History origins are authenticated by their writer, so
-a pending user turn is executable once it syncs. An honest sender that has already
-verified a withdrawal therefore must not write that input. Before any metadata,
-receipt or history write, an encrypted send prepares its dispatch. If the host returns
-the verified denial `e2ee_machine_not_shared`, the send fails as not sent and the
-composer keeps the draft. `prepareDispatch` reports an unverifiable policy separately
-as `e2ee_machine_sharing_unavailable`. That outcome, like timeouts and transport
-failures, stays unknown: the input is written as before and the receiving machine
-decides. Writing first and repairing the turn afterwards was rejected because upload
-and a machine's history discovery race the repair.
+Before any metadata, receipt or history write, an encrypted send prepares its dispatch. A
+verified denial, `e2ee_machine_not_shared`, fails the send as not sent, and the composer keeps
+the draft. An unverifiable policy, a host with no policy reader, a timeout or a transport
+failure stays unknown: the input is written as usual and the receiving machine decides. The
+check runs before the write, not as a repair afterwards.
 
 A verified withdrawal must stay known. The host derives it from the resource's
 accepted pin, which is bound to workspace, genesis, machine, owner and generation, and

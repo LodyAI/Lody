@@ -1,5 +1,5 @@
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
-import { machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
+import { getSessionGroupTitle, machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
@@ -2077,8 +2077,8 @@ const SessionDetail = ({
     [postHog]
   );
 
-  // Set document title based on session title
-  useDocumentTitle(activeSession?.title);
+  // The window names the conversation group, not whichever tab is active.
+  useDocumentTitle(getSessionGroupTitle(activeSession));
 
   useEffect(() => {
     attemptedExternalHistoryRefreshKeysRef.current.clear();

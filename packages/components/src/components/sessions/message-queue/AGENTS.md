@@ -23,7 +23,8 @@ top, square bottom) sitting directly on the bar, or on the composer when the bar
 has nothing to show; never with a gap, and never inside the input area.
 
 Rows are inset tiles without hairline dividers; desktop rows share a 16 px index
-gutter, mobile rows drop it. Actions always end the row. Mobile rows, and any sheet
+gutter, mobile rows drop it. Actions always end the row and stay on the message line, because a separate action
+line looked detached and cost a full row per item. Mobile rows, and any sheet
 narrower than 520 px, fold them into one More button (a real 40 × 36 px box on 36 px touch rows)
 whose menu preserves Steer, move-to-top, edit and delete when applicable. Prior intent:
 [queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
@@ -40,9 +41,10 @@ Only the latest edit operation may change the local editor or pending state;
 an earlier blur-save acknowledgement must preserve the next row's draft and focus.
 [Decision](../../../../../../.agents/notes/implemented/bug-fix/2026-10-13-queued-edit-operation-ownership.md).
 
-The queue disclosure is local display state, initially expanded. Keep its editing
-rows mounted while folded; focusing the disclosure must not commit or discard a
-row draft. Folded summaries retain pending/failed-send awareness. Intent:
+The queue disclosure is local display state, initially expanded, never shared or
+persisted. Keep its editing rows mounted while folded; focusing the disclosure must
+not commit or discard a row draft. Pressing its header therefore moves focus to the
+header, which bypasses ordinary blur-save and keeps an unfinished edit as a draft. Folded summaries retain pending/failed-send awareness. Intent:
 [queue presentation](../../../../../../specs/message-queue.md).
 
 Production passes a separate `scheduledItems` view model; never fake a

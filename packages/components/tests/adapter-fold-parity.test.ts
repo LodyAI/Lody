@@ -7,8 +7,7 @@ import {
 import { buildAssistantTurnRenderLayout } from '../src/components/ai-gui/assistant-turn-render-blocks';
 
 /**
- * Every ACP adapter streams assistant text in one of a few shapes and none of them
- * may lose the answer. This runs each shape through the real ingest and the real
+ * Every ACP adapter uses the same completed-turn tail rule. This runs each shape through the real ingest and the real
  * fold so a future folding change cannot regress a provider that looks fine today.
  */
 const visibleTexts = (items: MessageContent[]): string[] => {
@@ -48,10 +47,10 @@ const toolCall = (id: string) => ({
 });
 
 describe('assistant text folding across adapter shapes', () => {
-  it('keeps an answer that was written before more tool work (Pi/Sorbet deltas)', () => {
+  it('folds earlier prose and keeps the last answer (Claude/Pi/Sorbet deltas)', () => {
     const items = ingest([text('The bug is in the parser.'), toolCall('call-1'), text('Done.')]);
 
-    expect(visibleTexts(items)).toEqual(['The bug is in the parser.', 'Done.']);
+    expect(visibleTexts(items)).toEqual(['Done.']);
   });
 
   it('folds explicit commentary while keeping the answer visible (Codex)', () => {

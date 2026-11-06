@@ -49,7 +49,7 @@ PR 发现与状态使用有界后台轮询，不为每个视图增加轮询循�
 - [协调器边界](../apps/cli/src/lib/pr-poller/AGENTS.md)
 - [工作目录 Git 观测](../apps/cli/src/session/workspace-git-service.ts)
 - [决策](../.agents/notes/implemented/feature/2026-09-24-local-github-pr-observation.zh.md)
-- [托管发布修正](../.agents/notes/proposed/bug-fix/2026-10-01-pr-observation-association.zh.md)
+- [托管发布修正](../.agents/notes/implemented/bug-fix/2026-10-01-pr-observation-association.zh.md)
 
 ## 关联与生命周期职责
 

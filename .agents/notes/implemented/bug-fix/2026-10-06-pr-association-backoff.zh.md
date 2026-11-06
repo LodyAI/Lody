@@ -26,7 +26,7 @@ PR: https://github.com/LodyAI/Lody/pull/1266
 会拖延有效的 PR/CI 更新；若把拒绝伪装成成功，会阻止后续关联恢复。
 按仓库门控避免同一不可用仓库的多个会话放大请求，不同工作区与仓库互不阻塞。
 
-本决策扩展[观测与关联分离决策](../../proposed/bug-fix/2026-10-01-pr-observation-association.zh.md)。
+本决策扩展[观测与关联分离决策](2026-10-01-pr-observation-association.zh.md)。
 [观测 Spec](../../../../specs/local-github-pr-observation.zh.md)仍为 draft。
 
 ## 验证

@@ -282,7 +282,7 @@ paths untouched, including same-version replacements. Status, installation and l
 selector: filter the base and all completed generations by current pins and host compatibility,
 then rank eligible candidates by installedAt and command. Best-effort cleanup conservatively retains corrupt originals and generation trees
 because the manager cannot prove their readers have exited. Downloads have a 60-second idle deadline;
-progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/proposed/bug-fix/2026-09-21-acp-auth-runtime-download.md).
+progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-21-acp-auth-runtime-download.md).
 
 Completed caches written before metadata schema v1 remain reusable through a separate strict
 legacy schema; their old `name`/`version`/`platform` fields are normalized in memory and only
@@ -413,6 +413,11 @@ sending task text through native default credentials.
 Other isolated title sessions retain the Provider's current model unless a title model
 was explicitly saved. Catalog order does not define a model preference; inferred safe
 mode and reasoning options remain independent of the model choice.
+
+Every generated or agent-pushed title names one tab. A root Session's sidebar title is
+the separate `groupTitle`: the first generated root title is copied into it once, and
+later titles never replace it. See the
+[group title decision](../../../../.agents/notes/implemented/architecture/2026-11-05-session-group-titles.md).
 
 Title output accepts normal assistant text with an absent message phase, as Codex
 providers do not all emit that optional field. Explicit `commentary` is excluded;

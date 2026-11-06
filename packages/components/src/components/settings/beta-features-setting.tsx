@@ -43,7 +43,7 @@ export function BetaFeaturesSection() {
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
       <CompactRow
         label={t('settings.beta.lodyAgent', 'Lody Agent')}
-        helper={t('settings.beta.lodyAgentHelper', 'Show Lody Agent when adding a provider.')}
+        helper={t('settings.beta.lodyAgentHelper', 'Show Lody Agent in Settings.')}
       >
         <Switch
           checked={lodyAgentEnabled}

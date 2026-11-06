@@ -3083,8 +3083,19 @@ export class SessionExecutionService {
     });
   }
 
-  async dispatchPreparedSessionTurn(options: PreparedSessionDispatchOptions): Promise<void> {
-    const { sessionId, userTurnId, dispatchSource } = options;
+  async dispatchPreparedSessionTurn(prepared: PreparedSessionDispatchOptions): Promise<void> {
+    const { sessionId, userTurnId, dispatchSource } = prepared;
+    // Ordinary workspaces must stay synchronous up to the first registration below.
+    const verifiedUserId = this.deps.encryptedExecution
+      ? await this.verifiedRequesterUserId(sessionId, userTurnId, prepared.invocation?.inputConfig)
+      : undefined;
+    const options =
+      verifiedUserId && prepared.invocation
+        ? {
+            ...prepared,
+            invocation: { ...prepared.invocation, requesterUserId: verifiedUserId },
+          }
+        : prepared;
     const expectedTurnId = this.getAssistantEntryIdForUserTurn(userTurnId);
     const span = startTraceSpan(this.deps.logger, 'execution.prepared_session_turn', {
       sessionId,
@@ -4643,14 +4654,33 @@ export class SessionExecutionService {
     const invocation = options.invocation;
     if (invocation?.inputConfig._lodyAutomation) {
       try {
+        const gate = this.deps.encryptedExecution;
+        const evidence = gate
+          ? await Effect.runPromise(
+              gate.automationEvidence({
+                workspaceId: this.deps.workspaceId,
+                sessionId,
+                userTurnId: invocation.sourceTurnId,
+                requesterUserId: invocation.requesterUserId,
+                inputConfig: invocation.inputConfig,
+              })
+            )
+          : 'verified';
+        if (evidence === 'pending') {
+          releaseConflict();
+          span.end({ outcome: 'execution-deferred' });
+          return 'execution-deferred';
+        }
+        // Unverified input never reaches a rule; the start claim refuses it visibly.
         if (
-          !invocation.requesterUserId ||
-          !(await this.acceptAutomationInput({
-            sessionId,
-            turnId: invocation.sourceTurnId,
-            userId: invocation.requesterUserId,
-            config: invocation.inputConfig,
-          }))
+          evidence === 'verified' &&
+          (!invocation.requesterUserId ||
+            !(await this.acceptAutomationInput({
+              sessionId,
+              turnId: invocation.sourceTurnId,
+              userId: invocation.requesterUserId,
+              config: invocation.inputConfig,
+            })))
         ) {
           releaseConflict();
           span.end({ outcome: 'automation-admission-blocked' });
@@ -4671,11 +4701,15 @@ export class SessionExecutionService {
       ) {
         const control = await sessionDoc.getDocState();
         const receipt = control?.humanInputReceipts?.[invocation.sourceTurnId];
-        if (receipt?.userId === invocation.requesterUserId)
+        // Encrypted receipts carry a display label; the requester here is already verified.
+        if (
+          receipt &&
+          (this.deps.encryptedExecution || receipt.userId === invocation.requesterUserId)
+        )
           await this.acceptInboxHumanInput({
             sessionId,
             inputId: invocation.sourceTurnId,
-            userId: receipt.userId,
+            userId: invocation.requesterUserId,
             config: invocation.inputConfig,
           });
       }
@@ -6500,10 +6534,44 @@ export class SessionExecutionService {
     return { kind: 'github', repoFullName, branch };
   }
 
+  /** Encrypted starts run as the verified signer; a row's `userId` stays display data. */
+  private async verifiedRequesterUserId(
+    sessionId: string,
+    userTurnId: string | undefined,
+    inputConfig: unknown
+  ): Promise<string | undefined> {
+    const gate = this.deps.encryptedExecution;
+    if (!gate?.resolveRequester || !userTurnId) return undefined;
+    const requester = await Effect.runPromise(
+      gate.resolveRequester({
+        workspaceId: this.deps.workspaceId,
+        sessionId,
+        userTurnId,
+        inputConfig,
+      })
+    ).catch(() => undefined);
+    return requester && 'userId' in requester ? requester.userId : undefined;
+  }
+
+  private async withVerifiedRequester<
+    T extends { sessionId: string; userTurnId?: string; userId: string; acpSessionConfig: unknown },
+  >(message: T): Promise<T> {
+    const userId = await this.verifiedRequesterUserId(
+      message.sessionId,
+      message.userTurnId,
+      message.acpSessionConfig
+    );
+    return userId ? { ...message, userId } : message;
+  }
+
   async continueSession(
-    message: SessionChatRequestValidated,
+    rawMessage: SessionChatRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    const message =
+      dispatchOptions?.dispatchSource === 'inbox'
+        ? rawMessage
+        : await this.withVerifiedRequester(rawMessage);
     if (
       dispatchOptions?.dispatchSource === 'inbox' &&
       (!dispatchOptions.inboxBatch || !this.operationInbox)
@@ -7520,9 +7588,10 @@ export class SessionExecutionService {
   }
 
   async startSession(
-    message: SessionCreateRequestValidated,
+    rawMessage: SessionCreateRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    const message = await this.withVerifiedRequester(rawMessage);
     const turn = await this.prepareStartSessionTurn(message, dispatchOptions);
     const userTurnId =
       typeof message.userTurnId === 'string' && message.userTurnId.trim()

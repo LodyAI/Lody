@@ -177,6 +177,13 @@ against its own deadline if it really is down. `lody machine list` reports
 a `--json` consumer parsing stdout is no longer told a confident offline when the truth
 is that nothing could be checked.
 
+A presence restart replaces the renderer's store, so `WorkspacePresenceTransport` keeps
+the consumers' last snapshot until the new room reaches `joined`, while the sync state
+still reports the restart. Those entries age out through `LODY_PRESENCE_TTL_MS` like any
+other, and only terminal stops clear them. The chat landing additionally refuses to
+let liveness move a chosen machine after startup
+([decision](../notes/implemented/bug-fix/2026-11-05-landing-selection-presence-churn.md)).
+
 Durable `MachineMeta.lastSeen` is retired and is not written even at registration;
 machine online checks read presence only. Never reintroduce periodic doc-meta writes
 (`lastSeen` / `lastRunningSeen`): they stall Loro flush, and meta timestamps are

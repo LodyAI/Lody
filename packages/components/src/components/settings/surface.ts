@@ -87,6 +87,7 @@ export const settingsSurface = stylex.create({
     fontSize: text.footnoteSize,
     color: colors.secondaryLabel,
   },
+  sectionAsideUnclipped: { overflow: 'visible' },
   sectionActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
 
   /**

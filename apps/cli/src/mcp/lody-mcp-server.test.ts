@@ -6,9 +6,11 @@ import os from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import {
   AGENT_ROLE_VERSION,
   SESSION_FILE_MAX_COUNT,
@@ -21,6 +23,7 @@ import {
   type AgentRoleId,
   type MachineId,
   type SessionId,
+  type SessionMeta,
   type SessionTurnInputConfig,
   type WorkspaceId,
 } from '@lody/shared';
@@ -260,7 +263,7 @@ describe('Lody MCP tool catalog', () => {
     }
   });
 
-  it('publishes bounded catalog retry guidance on every create/chat tool', async () => {
+  it('serves bounded catalog retry guidance through help for every create/chat tool', async () => {
     const server = buildLodyMcpServer();
     const client = new Client({ name: 'retry-guidance-test-client', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -273,7 +276,13 @@ describe('Lody MCP tool catalog', () => {
         'lody_session_chat',
         'lody_session_chat_many',
       ]) {
-        const description = tools.find((tool) => tool.name === name)?.description;
+        expect(tools.find((tool) => tool.name === name)?.description).toContain('lody_help');
+        const help = CallToolResultSchema.parse(
+          await client.callTool({ name: 'lody_help', arguments: { command: name } })
+        );
+        const block = help.content.find((item) => item.type === 'text');
+        if (!block || block.type !== 'text') throw new Error('Missing tool help');
+        const { description } = z.object({ description: z.string() }).parse(JSON.parse(block.text));
         expect(description).toContain('wait at least 5 seconds between attempts');
         expect(description).toContain('at most 3 total attempts (the initial call plus 2 retries)');
         expect(description).toContain('reuse the identical request and operationId');
@@ -288,6 +297,7 @@ describe('Lody MCP tool catalog', () => {
   it('publishes session tools and never advertises a Task family', async () => {
     const names = await listPublishedToolNames();
     expect(names).toContain('lody_feedback');
+    expect(names).toContain('lody_help');
     expect(names).toEqual(
       expect.arrayContaining([
         'lody_session_rename',
@@ -517,19 +527,21 @@ describe('session MCP input schemas', () => {
         oneOf: expect.arrayContaining([
           expect.objectContaining({
             type: 'object',
-            properties: expect.objectContaining({ kind: { const: 'chat', type: 'string' } }),
+            properties: expect.objectContaining({
+              kind: expect.objectContaining({ const: 'chat', type: 'string' }),
+            }),
           }),
           expect.objectContaining({
             type: 'object',
             properties: expect.objectContaining({
-              kind: { const: 'github', type: 'string' },
+              kind: expect.objectContaining({ const: 'github', type: 'string' }),
               repo: expect.objectContaining({ type: 'string' }),
             }),
           }),
           expect.objectContaining({
             type: 'object',
             properties: expect.objectContaining({
-              kind: { const: 'local', type: 'string' },
+              kind: expect.objectContaining({ const: 'local', type: 'string' }),
               projectId: expect.objectContaining({ type: 'string' }),
             }),
           }),
@@ -1436,7 +1448,7 @@ describe('session MCP input schemas', () => {
         [{ sessionId: 'current', title: 'Current title' }],
         createMcpContext()
       )
-    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title' }]);
+    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title', scope: 'tab' }]);
     expect(() =>
       resolveSessionRenameItems(
         [
@@ -1449,9 +1461,9 @@ describe('session MCP input schemas', () => {
 
     const results = await applySessionRenameItems(
       [
-        { sessionId: 'session-1' as SessionId, title: 'One' },
-        { sessionId: 'missing' as SessionId, title: 'Missing' },
-        { sessionId: 'session-3' as SessionId, title: 'Three' },
+        { sessionId: 'session-1' as SessionId, title: 'One', scope: 'tab' },
+        { sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' },
+        { sessionId: 'session-3' as SessionId, title: 'Three', scope: 'tab' },
       ],
       async ({ sessionId }) => {
         if (sessionId === 'missing') {
@@ -1465,7 +1477,7 @@ describe('session MCP input schemas', () => {
     );
 
     expect(results).toEqual([
-      { sessionId: 'session-1', ok: true, title: 'One' },
+      { sessionId: 'session-1', ok: true, title: 'One', scope: 'tab' },
       {
         sessionId: 'missing',
         ok: false,
@@ -1475,7 +1487,7 @@ describe('session MCP input schemas', () => {
           retryable: false,
         },
       },
-      { sessionId: 'session-3', ok: true, title: 'Three' },
+      { sessionId: 'session-3', ok: true, title: 'Three', scope: 'tab' },
     ]);
   });
 
@@ -1497,15 +1509,15 @@ describe('session MCP input schemas', () => {
     const results = await persistSessionRenameItems(
       manager,
       [
-        { sessionId: 'session-1' as SessionId, title: 'One' },
-        { sessionId: 'missing' as SessionId, title: 'Missing' },
-        { sessionId: 'session-3' as SessionId, title: 'Three' },
+        { sessionId: 'session-1' as SessionId, title: 'One', scope: 'tab' },
+        { sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' },
+        { sessionId: 'session-3' as SessionId, title: 'Three', scope: 'tab' },
       ],
       'mcp.session_rename_many:current-session-id'
     );
 
     expect(results).toEqual([
-      { sessionId: 'session-1', ok: true, title: 'One' },
+      { sessionId: 'session-1', ok: true, title: 'One', scope: 'tab' },
       {
         sessionId: 'missing',
         ok: false,
@@ -1515,7 +1527,7 @@ describe('session MCP input schemas', () => {
           retryable: false,
         },
       },
-      { sessionId: 'session-3', ok: true, title: 'Three' },
+      { sessionId: 'session-3', ok: true, title: 'Three', scope: 'tab' },
     ]);
     expect(upsertDocMeta.mock.calls).toEqual([
       [getSessionRoomId('session-1' as SessionId), { title: 'One', titleSource: 'user' }],
@@ -1526,6 +1538,60 @@ describe('session MCP input schemas', () => {
       reason: 'mcp.session_rename_many:current-session-id',
       timeoutMs: 30_000,
     });
+  });
+
+  it('renames a tab and its group sidebar title independently', async () => {
+    const rootId = 'root-session' as SessionId;
+    const childId = 'child-session' as SessionId;
+    const metas = new Map<string, Partial<SessionMeta>>([
+      [getSessionRoomId(rootId), { id: rootId, title: 'Generated root', titleSource: 'generated' }],
+      [getSessionRoomId(childId), { id: childId, title: 'Child', parentSessionId: rootId }],
+    ]);
+    const manager = {
+      repo: {
+        getDocMeta: vi.fn(async (roomId: string) => {
+          const meta = metas.get(roomId);
+          return meta ? { meta, exists: true } : undefined;
+        }),
+        upsertDocMeta: vi.fn(async (roomId: string, patch: Partial<SessionMeta>) => {
+          metas.set(roomId, { ...metas.get(roomId), ...patch });
+        }),
+      },
+      waitUntilMetaSynced: vi.fn(async () => true),
+    } as unknown as LoroDocumentManager;
+    const reason = 'mcp.session_rename_many:current-session-id';
+
+    await persistSessionRenameItems(
+      manager,
+      [{ sessionId: rootId, title: 'Root tab', scope: 'tab' }],
+      reason
+    );
+    // The sidebar keeps the name it showed before the tab was renamed.
+    expect(metas.get(getSessionRoomId(rootId))).toMatchObject({
+      title: 'Root tab',
+      titleSource: 'user',
+      groupTitle: 'Generated root',
+      groupTitleSource: 'generated',
+    });
+
+    await persistSessionRenameItems(
+      manager,
+      [{ sessionId: rootId, title: 'Sidebar name', scope: 'group' }],
+      reason
+    );
+    expect(metas.get(getSessionRoomId(rootId))).toMatchObject({
+      title: 'Root tab',
+      groupTitle: 'Sidebar name',
+      groupTitleSource: 'user',
+    });
+
+    const [rejected] = await persistSessionRenameItems(
+      manager,
+      [{ sessionId: childId, title: 'Not a group', scope: 'group' }],
+      reason
+    );
+    expect(rejected).toMatchObject({ ok: false, error: { code: 'COMMAND_REJECTED' } });
+    expect(metas.get(getSessionRoomId(childId))).not.toHaveProperty('groupTitle');
   });
 
   it('does not request write confirmation when every session is missing', async () => {
@@ -1541,7 +1607,7 @@ describe('session MCP input schemas', () => {
     await expect(
       persistSessionRenameItems(
         manager,
-        [{ sessionId: 'missing' as SessionId, title: 'Missing' }],
+        [{ sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' }],
         'mcp.session_rename_many:current-session-id'
       )
     ).resolves.toEqual([

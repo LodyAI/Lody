@@ -48,7 +48,7 @@ for the reason `dialog` covers three modals: what differs is the arrangement,
 not what either is made of. The colour a closed row's label takes and the colour
 a tab you are not on takes are one decision, not two that can drift.
 
-The group is deliberately *not* `field`. None of the three holds a value — a tab
+The group is deliberately _not_ `field`. None of the three holds a value — a tab
 picks what is shown, not what is stored — so none takes a name, answers to a
 `Field.Root`, or has an invalid state. A strip borrows the well the controls sit
 in because the elevation ladder puts it there, not because it is one of them.
@@ -183,8 +183,8 @@ Intended behavior: [Shared UI primitives](../../../../specs/ui-primitives.md),
 which stays `draft` with the disclosure family stated.
 
 Inspected implementation: `packages/ui/src/disclosure`, the deleted
-`packages/components/src/ui/accordion.tsx` and
-`packages/components/src/ui/collapsible.tsx`, and the seven migrated surfaces.
+Radix `accordion.tsx` (now `packages/ui/src/disclosure/accordion.tsx`) and
+`collapsible.tsx` (now `packages/ui/src/disclosure/collapsible.tsx`), and the seven migrated surfaces.
 
 Executed validation: `pnpm --filter @lody/ui typecheck` and
 `pnpm --filter @lody/ui test` (166 tests, 18 of them new in

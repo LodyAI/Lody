@@ -22,17 +22,14 @@ import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { makeEncryptedRpcListener, type E2eeRpcTiming } from '@lody/loro-streams-rpc/e2ee-streams';
 import type { E2eeDispatchInput, E2eeDispatchAck } from '@lody/shared/e2ee-rpc';
-import { isDeepStrictEqual } from 'node:util';
+import {
+  makeVerifiedExecutionOriginal,
+  sessionContentResource,
+} from './verified-execution-original';
 import { ExecutionOrigins } from './execution-origins';
-import type { EncryptedExecutionIntent } from './agent-execution';
 import type { LoroDoc } from 'loro-crdt';
 import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../cloud-e2ee-errors';
-import {
-  getSessionRoomId,
-  isSessionDocRoomId,
-  type SessionId,
-  type LoroStreamsTokenAuth,
-} from '@lody/shared';
+import { isSessionDocRoomId, type SessionId, type LoroStreamsTokenAuth } from '@lody/shared';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
@@ -847,8 +844,8 @@ async function openWorkspaceOwned(
       opened.sharingRemote
         ? opened.sharing
             .authorize(machineId, opened.signingPublicKey, undefined, opened.sharingRemote)
-            .pipe(Effect.map((result) => result.allowed))
-        : Effect.succeed(false),
+            .pipe(Effect.map((result) => result.allowed || result.reason === 'policy-unavailable'))
+        : Effect.succeed(true),
     originals: new E2eeRpcOriginals(
       join(
         repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
@@ -1406,6 +1403,27 @@ async function openWorkspaceOwned(
         isExecutionOpen: () => !closed,
       })
     );
+  const resolveVerifiedExecutionOriginal = makeVerifiedExecutionOriginal({
+    workspaceId: options.workspaceId,
+    selfDevice: opened.signingPublicKey,
+    isClosed: () => closed,
+    origins: executionOrigins,
+    readIncoming: (intent) => rpc.readIncoming(intent),
+    openDispatch: dispatchNative.openDispatch,
+    ledger: () => opened.runtime.executionLedger(),
+    openContent: (intent, request) =>
+      Effect.gen(function* () {
+        if (closed || intent.workspaceId !== options.workspaceId)
+          return yield* Effect.fail(new Error('e2ee_execution_origin_unavailable'));
+        const contentBinding = yield* opened.runtime.binding(
+          sessionContentResource(intent.sessionId),
+          'loro',
+          'current'
+        );
+        return yield* contentBinding.openAuthenticated(request);
+      }),
+    recover: originRecovery?.recover,
+  });
   return {
     attachmentToken: async () => {
       if (closed) throw new Error('e2ee_closed');
@@ -1435,71 +1453,56 @@ async function openWorkspaceOwned(
     authorizeScheduleExecution,
     authorizeScheduleExecutionLegacy: (request: ScheduleAuthorizationRequest, doc: LoroDoc) =>
       run(authorizeScheduleExecution(request, doc)),
-    resolveVerifiedExecutionOriginal: (
-      intent: EncryptedExecutionIntent,
-      doc?: LoroDoc,
-      lookup: { readonly origin?: boolean } = {}
-    ) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          if (closed || intent.workspaceId !== options.workspaceId) return undefined;
-          // Origin lookups and this machine's own inputs always use the signed row,
-          // whose `derivedFrom` the dispatch fast path cannot carry.
-          const fromDoc = lookup.origin
-            ? undefined
-            : doc?.getMap('rpcDispatchOriginals').get(intent.userTurnId);
-          // This original cache is an accelerator, never the actual-start journal.
-          // Its local I/O fault cannot block the independently signed durable origin.
-          const cached = yield* rpc
-            .readIncoming(intent)
-            .pipe(Effect.catch(() => Effect.succeed(undefined)));
-          const rpcOriginal =
-            typeof fromDoc === 'string' ? fromDoc : cached ? hex(cached.frame) : undefined;
-          if (rpcOriginal !== undefined) {
-            if (cached && hex(cached.frame) !== rpcOriginal) return undefined;
-            const view = yield* opened.runtime.executionLedger();
+    resolveVerifiedExecutionOriginal,
+    ledgerIdentity: {
+      ownsDevice: (device: string) =>
+        opened.runtime.executionLedger().pipe(
+          Effect.map((view) => {
             const state = view.inspectState();
-            const machineId = state.devices.get(opened.signingPublicKey)?.machineId;
-            if (!machineId) return undefined;
-            const verified = yield* dispatchNative.openDispatch(machineId, rpcOriginal);
-            if (
-              verified.args.sessionId !== intent.sessionId ||
-              verified.args.userTurnId !== intent.userTurnId ||
-              !isDeepStrictEqual(verified.args.inputConfig ?? {}, intent.inputConfig ?? {})
-            )
-              return undefined;
-            // A self-authored input may be derived; only its signed row says so.
-            if (verified.requesterDevice !== opened.signingPublicKey) {
-              const device = state.devices.get(verified.requesterDevice);
-              const member = device && state.members.get(hex(device.membershipId.toBytes()));
-              if (!member) return undefined;
-              return {
-                requesterDevice: verified.requesterDevice,
-                requesterCryptoUserId: hex(member.userId.toBytes()),
-                expiresAt: verified.expiresAt,
-              };
+            const own = state.devices.get(opened.signingPublicKey);
+            const entry = state.devices.get(device);
+            return !!own && !!entry && own.membershipId.equals(entry.membershipId);
+          })
+        ),
+      memberDevice: (cryptoUserId: string) =>
+        opened.runtime.executionLedger().pipe(
+          Effect.map((view) => {
+            const state = view.inspectState();
+            for (const [device, entry] of state.devices) {
+              const member = state.members.get(hex(entry.membershipId.toBytes()));
+              if (
+                entry.kind === 'personal' &&
+                member &&
+                hex(member.userId.toBytes()) === cryptoUserId
+              )
+                return device;
             }
-          }
-          if (!doc) return undefined;
-          return yield* executionOrigins.resolve(
-            intent,
-            doc,
-            (request) =>
-              Effect.gen(function* () {
-                if (closed || intent.workspaceId !== options.workspaceId)
-                  return yield* Effect.fail(new Error('e2ee_execution_origin_unavailable'));
-                const contentBinding = yield* opened.runtime.binding(
-                  `doc:${getSessionRoomId(intent.sessionId as SessionId)}`,
-                  'loro',
-                  'current'
-                );
-                return yield* contentBinding.openAuthenticated(request);
-              }),
-            originRecovery?.recover,
-            lookup
-          );
-        })
-      ),
+            return undefined;
+          })
+        ),
+    },
+    authorizeMachineTarget: (machineId: string, localProjectId?: string) =>
+      Effect.gen(function* () {
+        const state = (yield* opened.runtime.executionLedger()).inspectState();
+        const own = state.devices.get(opened.signingPublicKey);
+        for (const device of state.devices.values())
+          if (
+            device.kind === 'machine' &&
+            device.machineId === machineId &&
+            own?.membershipId.equals(device.membershipId)
+          )
+            return true;
+        if (!opened.sharingRemote) return false;
+        const result = yield* opened.sharing.authorize(
+          machineId,
+          opened.signingPublicKey,
+          localProjectId,
+          opened.sharingRemote
+        );
+        return result.allowed;
+      }),
+    retainQueuedInput: (input: Parameters<ExecutionOrigins['retainQueuedInput']>[0]) =>
+      executionOrigins.retainQueuedInput(input),
     startRpc: (
       machineId: string,
       offer: (input: E2eeDispatchInput) => Promise<E2eeDispatchAck>,

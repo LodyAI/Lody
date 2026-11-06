@@ -11,7 +11,7 @@ import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
-import { Context, Effect, Layer, Scope, Exit, Result, Clock } from 'effect'
+import { Context, Effect, Fiber, Layer, Scope, Exit, Result, Clock } from 'effect'
 import { TestClock } from 'effect/testing'
 import { BackendError, KeyMailbox } from '@lody/e2ee-core/services'
 import { makeSqliteKeyMailbox, referenceKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite'
@@ -4781,7 +4781,8 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
             latency(`mailbox.${name}`, {
               device: publicKeyHex === offer.endorser ? 'owner' : 'member',
               self: publicKeyHex,
-              recipient: args[0]?.recipient
+              recipient: args[0]?.recipient,
+              args
             }),
             method(...args)
           )
@@ -5173,6 +5174,154 @@ void test(
       `to put ${toPut}, missed claim ${missed}, installing claim ${installing}: about ${seconds.toFixed(1)} s`
     )
     assert.ok(seconds <= 30, `about ${seconds.toFixed(1)} s from approval to ready`)
+  }
+)
+/** Relay round trips on the critical path, from the calling fibers' fork/join structure
+ * rather than wall-clock time. A call follows every earlier call of its own fiber, the
+ * calls its forking fibers made before it, and the subtrees of fibers that finished
+ * before it was created; concurrently running siblings do not delay each other.
+ * Concurrent `Effect.forEach` forks detached children and evaluates them at once, so
+ * the forking fiber is the one current at a fiber's first evaluation. */
+function criticalPath(t) {
+  // A fresh fiber id, ordered against every fiber created so far.
+  const serial = () => Effect.runFork(Effect.void).id
+  const Impl = Effect.runFork(Effect.void).constructor
+  const evaluate = Impl.prototype.evaluate
+  const forkedBy = new WeakMap()
+  const born = serial()
+  Impl.prototype.evaluate = function (effect) {
+    if (this.id > born && !forkedBy.has(this))
+      forkedBy.set(this, Fiber.getCurrent() ?? this._parent)
+    return evaluate.call(this, effect)
+  }
+  t.after(() => {
+    Impl.prototype.evaluate = evaluate
+  })
+  const parent = (fiber) => forkedBy.get(fiber) ?? fiber._parent
+  const fibers = new Map()
+  let longest = 0
+  const track = (fiber) => {
+    let entry = fibers.get(fiber)
+    if (entry) return entry
+    entry = { own: undefined, subtree: 0, finished: undefined, children: new Set() }
+    fibers.set(fiber, entry)
+    const tracked = entry
+    fiber.addObserver(() => {
+      tracked.finished = serial()
+    })
+    if (parent(fiber)) track(parent(fiber)).children.add(fiber)
+    return entry
+  }
+  const finishedBefore = (entry, id, except) => {
+    let longestChild = 0
+    for (const child of entry.children) {
+      const done = fibers.get(child)
+      if (child !== except && done.finished !== undefined && done.finished < id)
+        longestChild = Math.max(longestChild, done.subtree)
+    }
+    return longestChild
+  }
+  const start = (fiber) => {
+    const above = parent(fiber)
+    if (!above) return 0
+    const entry = fibers.get(above)
+    return Math.max(entry.own ?? start(above), finishedBefore(entry, fiber.id, fiber))
+  }
+  return {
+    call: () =>
+      Effect.withFiberSucceed((fiber) => {
+        const entry = track(fiber)
+        const depth =
+          Math.max(entry.own ?? start(fiber), finishedBefore(entry, Number.POSITIVE_INFINITY)) + 1
+        entry.own = depth
+        for (let at = fiber; at; at = parent(at)) {
+          const above = fibers.get(at)
+          above.subtree = Math.max(above.subtree, depth)
+        }
+        longest = Math.max(longest, depth)
+      }),
+    longest: () => longest
+  }
+}
+/** The J07 shape: an approver, five member devices and a removed sixth member whose
+ * removal rotated to epoch 1. The approver's next full round sends the new epoch key
+ * to the five remaining devices. */
+async function rotatedTeam(t, latency) {
+  const f = await twoDeviceMemberJoin(t, { latency })
+  await f.approver.open('team')
+  const joined = async (joiner, submitted, accountId) => {
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('account', 'team')
+    let claimed = await joiner.claimMemberJoin('team', submitted.requestId)
+    for (let attempt = 0; !claimed.ready && attempt < 3; attempt++)
+      claimed = await joiner.claimMemberJoin('team', submitted.requestId)
+    assert.equal(claimed.ready, true)
+    await joiner.memberSettleIdle(accountId, 'team')
+  }
+  await joined(f.joiner, await f.submit(), 'member')
+  const others = []
+  for (const [index, name] of ['m2', 'm3', 'm4', 'm5', 'm6'].entries()) {
+    const other = await f.addMember(name, `${index + 1}${index + 1}`.repeat(32), 10 + index)
+    await joined(other.ipc, other.submitted, name)
+    others.push(other)
+  }
+  await f.approver.removeMember('team', others.at(-1).submitted.requestId)
+  await f.approver.updateKeys('team')
+  return f
+}
+// At ~1.3 s per relay call (B on-site run22: 36 serial mailbox calls, 47.7 s) only about
+// ten round trips fit beside the rest of J07/continue's 60 s window.
+void test(
+  'a full key round reaches every other device in a bounded number of serial relay round trips',
+  { timeout: 120_000 },
+  async (t) => {
+    let path
+    const calls = []
+    const f = await rotatedTeam(t, (name, { device }) => {
+      if (!path || device !== 'owner' || !name.startsWith('mailbox.')) return Effect.void
+      calls.push(name)
+      // A relay call suspends its fiber, as a network round trip does.
+      return Effect.andThen(path.call(), Effect.yieldNow)
+    })
+    path = criticalPath(t)
+    await f.approver.refresh('team')
+    const tally = Object.entries(
+      calls.reduce((counts, name) => ({ ...counts, [name]: (counts[name] ?? 0) + 1 }), {})
+    )
+    t.diagnostic(`round trips ${path.longest()} of ${calls.length} calls: ${tally.join(' ')}`)
+    assert.equal(calls.filter((name) => name === 'mailbox.put').length, 5)
+    assert.ok(path.longest() <= 10, `${path.longest()} serial mailbox round trips`)
+  }
+)
+void test(
+  'a delivery refused during a concurrent round stays pending with its original while the other devices are delivered',
+  { timeout: 120_000 },
+  async (t) => {
+    let watching = false
+    let refusing = true
+    let refused
+    const puts = []
+    const f = await rotatedTeam(t, (name, { device, args }) => {
+      if (!watching || device !== 'owner' || name !== 'mailbox.put') return Effect.void
+      const [slot, frame] = args
+      puts.push({ slot, frame: Buffer.from(frame).toString('hex') })
+      refused ??= puts.at(-1)
+      return refusing && slot === refused.slot
+        ? Effect.fail(new BackendError({ service: 'KeyMailbox', reason: 'conflict' }))
+        : Effect.yieldNow
+    })
+    watching = true
+    await f.approver.refresh('team')
+    refusing = false
+    assert.equal(new Set(puts.map((put) => put.slot)).size, 5)
+    // The next round re-sends only the refused task, with its exact original ciphertext.
+    puts.length = 0
+    await f.approver.refresh('team')
+    assert.deepEqual(puts, [refused])
+    puts.length = 0
+    await f.approver.refresh('team')
+    assert.deepEqual(puts, [])
   }
 )
 void test(

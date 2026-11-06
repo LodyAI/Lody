@@ -52,7 +52,7 @@ export const E2eeFeatureInputSchema = z
   .strict();
 export type E2eeFeatureInput = { requestId: string; request: LocalMachineRpcRequest };
 
-/** Closed set of reads with no machine writes, process/worker starts or lazy storage setup. */
+/** Closed set of reads with no machine writes or execution claims. */
 export const E2EE_READ_QUERY_METHODS = [
   'machine/status',
   'machine/ping',

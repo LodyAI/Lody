@@ -61,6 +61,7 @@ function fixture(options?: { guest?: boolean }) {
     });
   const gate = (journal = execution) =>
     makeEncryptedAgentExecution({
+      machineUserId: 'synthetic-machine-account',
       workspaceId: f.workspaceId,
       genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
       targetMachineId: f.machineId,

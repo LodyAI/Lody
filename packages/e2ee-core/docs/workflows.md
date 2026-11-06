@@ -114,6 +114,8 @@ results() / acknowledge(id)   ended tasks until acknowledged
   `MailboxInstallError` names the failing frame (sender, `frameDigest`) so the
   application can decide on a repair.
 - Only a genuine ledger change ends a task as `Obsolete` or `Revoked`.
+- Every ledger check repeats before a report is queued or sent. The mailbox
+  revision hint is asked once per step, immediately before that queue or send.
 
 ## KeyRepair
 
@@ -148,6 +150,10 @@ every retry. A revision only triggers a retry, never a new ciphertext. Recovery
 devices receive keys but never send them. `Observed` means the mailbox returned
 the exact bytes, not that the recipient installed them. A full journal fails new
 tasks with `task-limit`; acknowledging frees capacity without deleting history.
+Different recipients are scheduled and delivered concurrently (at most eight at
+once); one recipient's steps stay in order. Outcomes are still checked in
+recipient/task order: a blocked recipient never blocks the others, and storage
+damage fails the batch.
 
 ## EpochPublisher
 
@@ -194,7 +200,6 @@ acknowledged only after the local feed contains the checkpoint it observed.
 `KeyDistributor`_) is one finite maintenance round: flush repairs, resume
 installs, fetch one mailbox page, send reports, reconcile and send deliveries,
 send reports again, list results. Each queue keeps its own cursor hint.
-
 
 Receive (including committed staging) and distribution run as separate finite phases.
 A failed receive cannot prevent reconciliation/delivery. `WorkspaceKeyRoundFailure`

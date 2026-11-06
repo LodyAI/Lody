@@ -480,8 +480,39 @@ void test('a different account retains its KeyPackage, joins as Member, exchange
         yield* owner.host.keyDeliveryEvidence(workspaceId, memberDevice, () => ownerPort),
         'delivered'
       )
+      // Genuine content of an epoch this admitted device's verified ledger holds, read
+      // before its own key arrives (a rotation it has not received yet): retryable
+      // key-pending, never a terminal ledger failure.
+      const early = yield* owner.host.seal(workspaceId, {
+        epoch: 0,
+        room,
+        context,
+        plaintext,
+        additionalData
+      })
+      const pending = yield* Effect.flip(
+        member.host.openContent(workspaceId, { room, context, ...early, additionalData })
+      )
+      assert.equal(pending.code, 'key-pending')
+      // A frame that fails authentication stays terminal, key or no key.
+      const forged = new Uint8Array(early.sealed)
+      forged[forged.length - 1] ^= 1
+      const refused = yield* Effect.flip(
+        member.host.openContent(workspaceId, {
+          room,
+          context,
+          ...early,
+          sealed: forged,
+          additionalData
+        })
+      )
+      assert.notEqual(refused.code, 'key-pending')
       yield* member.host.keyRound(workspaceId, () => memberPort)
       assert.equal((yield* member.host.status(workspaceId)).hasCurrentKey, true)
+      assert.deepEqual(
+        yield* member.host.openContent(workspaceId, { room, context, ...early, additionalData }),
+        plaintext
+      )
       encrypted = yield* owner.host.seal(workspaceId, {
         epoch: 0,
         room,
@@ -2751,7 +2782,33 @@ for (const damaged of [false, true, 'header'])
           })
           if (!reopened) {
             assert.equal((yield* owner.host.managementState(workspaceId)).mayRotate, true)
-            yield* owner.host.manage(workspaceId, { type: 'revoke', target }, ports)
+            // Every command first refreshes the ledger, before any candidate or pending
+            // submission exists. Its state must already read as an update in progress,
+            // or a reader takes the old epoch as settled and closes mid-update.
+            const entered = yield* Deferred.make()
+            const release = yield* Deferred.make()
+            const gated = (signal) => {
+              const upstream = ports(signal)
+              return {
+                ...upstream,
+                history: (request) =>
+                  Deferred.succeed(entered, undefined).pipe(
+                    Effect.andThen(Deferred.await(release)),
+                    Effect.andThen(upstream.history(request))
+                  )
+              }
+            }
+            const revoking = yield* Effect.forkChild(
+              owner.host.manage(workspaceId, { type: 'revoke', target }, gated)
+            )
+            yield* Deferred.await(entered)
+            const during = yield* owner.host.managementState(workspaceId)
+            // Release before asserting: the update itself is uninterruptible.
+            yield* Deferred.succeed(release, undefined)
+            yield* Fiber.join(revoking)
+            assert.equal(during.updatePending, true)
+            assert.equal(during.updateInProgress, true)
+            assert.equal((yield* owner.host.managementState(workspaceId)).updateInProgress, false)
             assert.equal(view.inspectState().devices.has(target), false)
             assert.equal(view.inspectState().epoch.rotationRequired, true)
             assert.equal(

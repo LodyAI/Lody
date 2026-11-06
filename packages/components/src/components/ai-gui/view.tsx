@@ -1425,38 +1425,14 @@ export const buildChatVirtualRows = ({
       let hasVisibleFinalContent = false;
       for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
         const block = blocks[blockIndex];
-        if (
-          block &&
-          !segment.workBlockKeys.has(block.key) &&
-          !(
-            block.kind === 'content' &&
-            block.entry.content.type === 'text' &&
-            block.entry.content.messagePhase === 'commentary'
-          )
-        ) {
+        if (block && !segment.workBlockKeys.has(block.key)) {
           hasVisibleFinalContent = true;
           break;
         }
       }
-      const segmentBlocks = blocks.slice(segmentStart, segmentEnd);
-      const hasUnansweredCommentary =
-        isTurnFinished &&
-        segmentBlocks.some(
-          (block) =>
-            block.kind === 'content' &&
-            block.entry.content.type === 'text' &&
-            block.entry.content.messagePhase === 'commentary'
-        ) &&
-        !segmentBlocks.some(
-          (block) =>
-            block.kind === 'content' &&
-            block.entry.content.type === 'text' &&
-            block.entry.content.messagePhase === 'final_answer' &&
-            block.entry.content.text.trim().length > 0
-        );
       const shouldUseWorkedGroup =
         (segment.workBlockKeys.size > 0 || (isTurnFinished && segmentSubagentTasks.length > 0)) &&
-        (!isTurnFinished || (hasVisibleFinalContent && !hasUnansweredCommentary));
+        (!isTurnFinished || hasVisibleFinalContent);
 
       const workedSearchEntries: { itemIndex: number }[] = [];
       for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {

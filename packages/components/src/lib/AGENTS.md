@@ -85,9 +85,11 @@ Organization queries require matching authenticated sessions.
   readonly regardless of the index; saves stay inside the session workspace.
 - Validate file-index rows with shared Zod helpers; preserve structured lazy-directory
   entries so `@file` completion initializes directories before refreshing results.
-- Turn-scoped diffs come only from the CLI-local evidence store, never current disk,
-  All Changes, or the removed v1 capture. File/diff reads retain cross-render in-flight
-  limits; active requests release slots only on settlement.
+- Diff blobs require negotiation, current manifests, verified bytes and bounded caches.
+  Protected/local blobs never persist; hidden diffs cancel paging.
+- Turn diffs require the CLI-local store. Cross-render permits release
+  only on settlement.
+
 
 - Preview and More-menu shell actions share `useSessionFileActions`. Only Electron
   on the session's own machine may invoke them; explicit local absolute artifact

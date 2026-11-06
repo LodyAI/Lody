@@ -15,7 +15,7 @@ const tool = (
 });
 
 describe('buildAssistantTurnRenderLayout', () => {
-  it('folds finished activity into work while keeping every text block visible', () => {
+  it('folds earlier text and activity while keeping the final text run visible', () => {
     const layout = buildAssistantTurnRenderLayout(
       'assistant-1',
       [
@@ -37,7 +37,7 @@ describe('buildAssistantTurnRenderLayout', () => {
     expect(layout.firstWorkBlockIndex).toBe(0);
     expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
       true,
-      false,
+      true,
       true,
       false,
     ]);
@@ -64,9 +64,7 @@ describe('buildAssistantTurnRenderLayout', () => {
     ]);
   });
 
-  it('keeps an answer visible even when more work follows it', () => {
-    // A run that answers first and keeps verifying used to have that answer
-    // folded away: only the final text run counted as the reply.
+  it('folds earlier text when the agent continues working and sends a later answer', () => {
     const layout = buildAssistantTurnRenderLayout(
       'assistant-1',
       [
@@ -78,8 +76,32 @@ describe('buildAssistantTurnRenderLayout', () => {
     );
 
     expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
-      false,
       true,
+      true,
+      false,
+    ]);
+  });
+
+  it('keeps every adjacent trailing text block regardless of phase', () => {
+    const layout = buildAssistantTurnRenderLayout(
+      'tail',
+      [
+        { type: 'text', text: 'Earlier' },
+        tool('read', 'read'),
+        { type: 'text', text: 'First answer part' },
+        { type: 'text', text: 'Second answer part', messagePhase: 'commentary' },
+        {
+          type: 'image_group',
+          images: [{ imageId: 'generated', mimeType: 'image/png', sizeBytes: 123 }],
+        },
+      ],
+      true
+    );
+    expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
+      true,
+      true,
+      false,
+      false,
       false,
     ]);
   });

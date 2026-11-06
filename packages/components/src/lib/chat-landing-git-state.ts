@@ -83,16 +83,19 @@ export function getLocalProjectGitStateLoadKey(args: {
  *  - An *unknown* target machine (not yet in the workspace map) does NOT
  *    short-circuit. The workspace meta room may still be bootstrapping, and a
  *    false-positive offline error during initial sync is worse than letting
- *    the single 30s RPC timeout run.
+ *    the single 30s RPC timeout run. An unsynced presence room is unknown in
+ *    the same way: only a synced room proves a missing heartbeat means offline.
  */
 export function isLocalProjectMachineOffline(args: {
   projectMachineId: MachineId;
   visibleLocalMachineId: MachineId | null;
   targetMachine: MachineMeta | undefined;
+  /** Whether the presence room is synced, so a missing heartbeat is meaningful. */
+  presenceSynced: boolean;
   /** Presence-based machine liveness (see useMachineOnlineStatus). */
   isMachineOnline: (machineId: MachineId) => boolean;
 }): boolean {
   if (args.visibleLocalMachineId === args.projectMachineId) return false;
   if (!args.targetMachine) return false;
-  return !args.isMachineOnline(args.projectMachineId);
+  return args.presenceSynced && !args.isMachineOnline(args.projectMachineId);
 }
