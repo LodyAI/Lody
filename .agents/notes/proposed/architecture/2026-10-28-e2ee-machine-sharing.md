@@ -151,10 +151,9 @@ a pending user turn is executable once it syncs. An honest sender that has alrea
 verified a withdrawal therefore must not write that input. Before any metadata,
 receipt or history write, an encrypted send prepares its dispatch. If the host returns
 the verified denial `e2ee_machine_not_shared`, the send fails as not sent and the
-composer keeps the draft. `prepareDispatch` reports an unverifiable policy separately
-as `e2ee_machine_sharing_unavailable`. That outcome, like timeouts and transport
-failures, stays unknown: the input is written as before and the receiving machine
-decides. Writing first and repairing the turn afterwards was rejected because upload
+composer keeps the draft. An unverifiable policy, or a host with no policy reader, signs
+as usual. That outcome, like timeouts and transport failures, stays unknown: the input is
+written as before and the receiving machine decides. Writing first and repairing the turn afterwards was rejected because upload
 and a machine's history discovery race the repair.
 
 A verified withdrawal must stay known. The host derives it from the resource's
