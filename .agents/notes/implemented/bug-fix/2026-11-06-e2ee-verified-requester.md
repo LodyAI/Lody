@@ -45,7 +45,8 @@ format or server change is involved.
 - Automation on a row labelled with an account other than the machine's keeps that label, and its
   delegated access is denied.
 - `verifyRequesterAccess` checks a member through one current personal device.
-- One-shot commands outside a daemon keep their existing authenticated access path.
+- A one-shot command decides access from its own replica, for its own account. A machine with no
+  usable ledger gets a clear error: `session` commands have no route to forward to the daemon.
 
 ## Verification
 

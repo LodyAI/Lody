@@ -1,4 +1,4 @@
-import { getDaemonWorkspace } from './session-command-environment';
+import { readEncryptedMachineAccess } from './session-command-environment';
 import {
   getMachineFlockDocId,
   isMachineDocRoomId,
@@ -47,7 +47,7 @@ const defaultDependencies: RemoteProjectListDependencies = {
     (await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId)).map((entry) => entry.meta),
   readProjects: readMachineLocalProjects,
   verifyAccess: async ({ auth, workspaceId, machineId, localProjectId }) =>
-    (await getDaemonWorkspace()?.checkEncryptedMachineAccess?.({
+    (await readEncryptedMachineAccess({
       machineId,
       requesterUserId: auth.userId,
       ...(localProjectId ? { localProjectId } : {}),

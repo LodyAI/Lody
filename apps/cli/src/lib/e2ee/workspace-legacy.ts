@@ -1481,7 +1481,7 @@ async function openWorkspaceOwned(
           })
         ),
     },
-    authorizeMachineTarget: (machineId: string) =>
+    authorizeMachineTarget: (machineId: string, localProjectId?: string) =>
       Effect.gen(function* () {
         const state = (yield* opened.runtime.executionLedger()).inspectState();
         const own = state.devices.get(opened.signingPublicKey);
@@ -1496,7 +1496,7 @@ async function openWorkspaceOwned(
         const result = yield* opened.sharing.authorize(
           machineId,
           opened.signingPublicKey,
-          undefined,
+          localProjectId,
           opened.sharingRemote
         );
         return result.allowed;
