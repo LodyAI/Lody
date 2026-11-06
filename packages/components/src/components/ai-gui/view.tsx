@@ -650,7 +650,7 @@ export interface SessionChatStreamViewProps {
   sendMessage?: (message: ClientToServer) => void;
   renderMessageRow: (args: { message: SessionHistoryParsed; sessionId: SessionId }) => ReactNode;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
-  onFilePathClick?: (filePath: string) => void;
+  onFilePathClick?: (filePath: string, options?: { pathKind: 'canonical' }) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
   onAnnotateImage?: (selection: DocumentSelection) => boolean;
@@ -692,7 +692,7 @@ export interface SessionChatStreamViewProps {
 export const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
-  openLocalFile?: (path: string) => void;
+  openLocalFile?: (path: string, options?: { pathKind: 'canonical' }) => void;
   copyContext?: (messageId: string) => void;
 }>({});
 const SessionImagePreviewContext = createContext<{
@@ -7061,7 +7061,8 @@ export const LocalAttachmentCard = ({
         void ipc.localProjects
           .resolveLocalAttachment({ workspaceId, sessionId, attachment })
           .then((filePath) => {
-            if (currentBinding.current === binding) openLocalFile?.(filePath);
+            if (currentBinding.current === binding)
+              openLocalFile?.(filePath, { pathKind: 'canonical' });
           })
           .catch(() =>
             setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'))

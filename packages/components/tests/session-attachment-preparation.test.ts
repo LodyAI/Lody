@@ -1,3 +1,4 @@
+import { installAttachmentWorkspaceAccess } from '../src/lib/attachment-workspace-access';
 import * as electronIpc from '../src/lib/electron-ipc-client';
 import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
@@ -596,19 +597,130 @@ it('retains a same-machine draft when the daemon does not advertise local refere
 });
 
 it('passes an original path through the actual native bridge without reading file bytes', async () => {
-  const { prepareElectronLocalAttachment } = await vi.importActual<typeof import('../src/lib/electron-local-attachment')>('../src/lib/electron-local-attachment');
+  const { prepareElectronLocalAttachment } = await vi.importActual<
+    typeof import('../src/lib/electron-local-attachment')
+  >('../src/lib/electron-local-attachment');
   const referenceId = crypto.randomUUID();
-  const expected = { type: 'local_attachment' as const, referenceId, machineId: 'machine', sessionId: 'session', turnId: 'turn', kind: 'file' as const, fileName: 'original.txt', mimeType: 'text/plain', sizeBytes: 9 };
+  const expected = {
+    type: 'local_attachment' as const,
+    referenceId,
+    machineId: 'machine',
+    sessionId: 'session',
+    turnId: 'turn',
+    kind: 'file' as const,
+    fileName: 'original.txt',
+    mimeType: 'text/plain',
+    sizeBytes: 9,
+  };
   let request: unknown;
-  const bridge = vi.spyOn(electronIpc, 'getIpcServices').mockReturnValue({ localProjects: { prepareLocalAttachment: async (payload: unknown) => { request = payload; return { ok: true, attachment: expected }; } } } as never);
+  const bridge = vi.spyOn(electronIpc, 'getIpcServices').mockReturnValue({
+    localProjects: {
+      prepareLocalAttachment: async (payload: unknown) => {
+        request = payload;
+        return { ok: true, attachment: expected };
+      },
+    },
+  } as never);
   try {
     const source = new Blob(['synthetic']);
-    source.arrayBuffer = async () => { throw new Error('Original file bytes must not cross IPC'); };
-    await expect(prepareElectronLocalAttachment({ workspaceId: 'workspace', sessionId: 'session', machineId: 'machine', turnId: 'turn', signal: new AbortController().signal, attachment: {
-      id: 'draft', kind: 'file', source, name: 'original.txt', mimeType: 'text/plain', lastModified: 0,
-      localSourcePath: '/synthetic/original.txt', localReferenceId: referenceId,
-    } })).resolves.toEqual(expected);
-    expect(request).toMatchObject({ source: { path: '/synthetic/original.txt' }, referenceId, turnId: 'turn' });
-    expect((request as {source: unknown}).source).not.toHaveProperty('bytes');
-  } finally { bridge.mockRestore(); }
+    source.arrayBuffer = async () => {
+      throw new Error('Original file bytes must not cross IPC');
+    };
+    await expect(
+      prepareElectronLocalAttachment({
+        workspaceId: 'workspace',
+        sessionId: 'session',
+        machineId: 'machine',
+        turnId: 'turn',
+        signal: new AbortController().signal,
+        attachment: {
+          id: 'draft',
+          kind: 'file',
+          source,
+          name: 'original.txt',
+          mimeType: 'text/plain',
+          lastModified: 0,
+          localSourcePath: '/synthetic/original.txt',
+          localReferenceId: referenceId,
+        },
+      })
+    ).resolves.toEqual(expected);
+    expect(request).toMatchObject({
+      source: { path: '/synthetic/original.txt' },
+      referenceId,
+      turnId: 'turn',
+    });
+    expect((request as { source: unknown }).source).not.toHaveProperty('bytes');
+  } finally {
+    bridge.mockRestore();
+  }
+});
+
+it('admits same-machine draft attachments without cloud identity', async () => {
+  Object.assign(local, { enabled: true, machineId: MACHINE });
+  const remove = installAttachmentWorkspaceAccess({
+    identity: { session: { get: () => ({ status: 'unauthenticated' }) } },
+    workspaces: {},
+    e2eeWorkspaces: {},
+  } as never);
+  try {
+    const f = fixture(false, null);
+    const input = send('offline-admission', ['local.png']);
+    const result = await acceptSessionUserTurn(
+      {
+        ...f.runtime,
+        workspaceId: 'workspace',
+        pendingSends: f.pending,
+      } as unknown as WorkspaceRuntime,
+      SESSION,
+      input.entry,
+      input.delivery,
+      undefined,
+      undefined,
+      input.attachments
+    );
+    expect(result).toBe('pending');
+    await f.delivered(input.id);
+    expect(f.turns()[0]?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'local_attachment', fileName: 'local.png' }),
+      ])
+    );
+  } finally {
+    remove();
+  }
+});
+
+it('rejects a remote attachment before consuming the draft when cloud admission fails', async () => {
+  Object.assign(local, { enabled: true, machineId: 'another-machine' });
+  const remove = installAttachmentWorkspaceAccess({
+    identity: { session: { get: () => ({ status: 'unauthenticated' }) } },
+    workspaces: {},
+    e2eeWorkspaces: {},
+  } as never);
+  try {
+    const f = fixture(false, null);
+    const input = send('remote-admission', ['remote.png']);
+    await expect(
+      acceptSessionUserTurn(
+        {
+          ...f.runtime,
+          workspaceId: 'workspace',
+          pendingSends: f.pending,
+        } as unknown as WorkspaceRuntime,
+        SESSION,
+        input.entry,
+        input.delivery,
+        undefined,
+        undefined,
+        input.attachments
+      )
+    ).rejects.toThrow('attachment_workspace_mode_unverified');
+    expect(f.pending.getSnapshot()).toEqual([]);
+    expect(input.attachments[0]?.source).toBeDefined();
+    expect(f.turns()).toEqual([]);
+    expect(local.files).toEqual([]);
+  } finally {
+    remove();
+  }
 });

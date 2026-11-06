@@ -7952,6 +7952,7 @@ export class SessionExecutionService {
                 await self.deps.buildAcpPromptBlocks({
                   workspaceId,
                   sessionId,
+                  userTurnId,
                   inputBlocks: sessionInputBlocks,
                 })
             );

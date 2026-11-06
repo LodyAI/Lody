@@ -120,3 +120,15 @@ fixed Session/Turn IDs; daemon recovery consumes these instead of source paths.
 ## Encrypted workspace attachments
 
 The transfer selects the encrypted-file route only for an admitted encrypted workspace and obtains a short-lived attachment grant from its host-owned device credential. Paired machine ports receive the relay URL explicitly from cloud startup, without restoring an account CLI token. Files and images upload bounded opaque parts; the protected conversation stores the secret manifest. Downloads authenticate parts before materialization, and local backfill retains that manifest with its crash-recovery receipt. The [file-key decision](../notes/implemented/architecture/2026-10-28-encrypted-attachments.md) explains rotation, retention and failure trade-offs. Ordinary transfer paths remain unchanged.
+
+### Local reference integration boundaries
+
+Initial session prompts carry the original user turn ID into local-reference resolution,
+just like subsequent turns. Draft admission bypasses cloud attachment authorization only for a known native
+same-machine target; remote drafts wait for workspace mode before queueing; prepared cloud references still require admission,
+and protected-workspace restrictions remain in force. Local attachment cards open resolved
+paths as canonical paths, preserving literal `#`, `?`, `%` and colon suffixes.
+
+OSS-to-cloud export/migration rejects `local_attachment` references during local preflight,
+including opaque legacy contents and removed turns retained in CRDT history. The migration
+does not transfer the local registry, so these snapshots must not be published as complete.

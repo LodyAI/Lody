@@ -1,3 +1,10 @@
+import { localProbeResultAtom } from '../src/atoms/local-probe';
+import * as electronIpc from '../src/lib/electron-ipc-client';
+import { SessionChatActionContext } from '../src/components/ai-gui/view';
+import {
+  resolveSessionFileOpenTarget,
+  resolveDirectMarkdownFileOpenTarget,
+} from '../src/lib/session-file-open-target';
 import { Provider, createStore } from 'jotai';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom } from '../src/atoms';
@@ -232,3 +239,66 @@ it('downloads a remote local attachment only after clicking its card', async () 
     save.mockRestore();
   }
 });
+
+it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp/literal%20.txt'])(
+  'opens a local attachment with its exact canonical path %s',
+  async (filePath) => {
+    await initI18n('en');
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'workspace' as never);
+    store.set(localProbeResultAtom, { ok: true, machineId: 'local' });
+    const ipc = vi
+      .spyOn(electronIpc, 'getIpcServices')
+      .mockReturnValue({
+        localProjects: { resolveLocalAttachment: async () => filePath },
+      } as never);
+    let opened: string | undefined;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () =>
+        root.render(
+          createElement(
+            Provider,
+            { store },
+            createElement(
+              SessionChatActionContext.Provider,
+              {
+                value: {
+                  openLocalFile: (path: string, options?: { pathKind?: 'canonical' }) => {
+                    opened = (
+                      options?.pathKind === 'canonical'
+                        ? resolveSessionFileOpenTarget({ rawPath: path, pathKind: 'canonical' })
+                        : resolveDirectMarkdownFileOpenTarget(path)
+                    )?.filePath;
+                  },
+                },
+              },
+              createElement(LocalAttachmentCard, {
+                sessionId: 'session' as never,
+                attachment: {
+                  type: 'local_attachment',
+                  referenceId: '148aa46f-967a-45c1-b752-04e1bb81eb11',
+                  machineId: 'local',
+                  sessionId: 'session',
+                  turnId: 'turn',
+                  kind: 'file',
+                  fileName: 'attachment',
+                  mimeType: 'text/plain',
+                  sizeBytes: 5,
+                },
+              })
+            )
+          )
+        )
+      );
+      await act(async () => (container.querySelector('button') as HTMLButtonElement).click());
+      expect(opened).toBe(filePath);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      ipc.mockRestore();
+    }
+  }
+);

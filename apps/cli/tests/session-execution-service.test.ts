@@ -5473,8 +5473,14 @@ describe('SessionExecutionService', () => {
     } satisfies Extract<SessionInputBlock, { type: 'file' }>;
     const buildAcpPromptBlocks: SessionExecutionServiceDeps['buildAcpPromptBlocks'] = async ({
       inputBlocks,
+      userTurnId,
     }) =>
       inputBlocks.flatMap((block): ContentBlock[] => {
+        if (block.type === 'local_attachment') {
+          if (userTurnId !== block.turnId)
+            throw new Error('Local attachment requires its original turn');
+          return [{ type: 'resource_link', uri: 'file:///tmp/local.txt', name: block.fileName }];
+        }
         if (block.type === 'text') return [{ type: 'text', text: block.text }];
         if (block.type === 'file')
           return [{ type: 'text', text: `Attached file: ${block.fileName}` }];
@@ -5509,7 +5515,21 @@ describe('SessionExecutionService', () => {
       project: { kind: 'github', repoFullName: 'owner/repo' },
       acpSessionConfig: {
         prompt: 'CONFIG_INSTRUCTION\n\nROLE_INSTRUCTION\n\ninspect the attached trace',
-        inputBlocks: [{ type: 'text', text: 'inspect the attached trace' }, fileBlock],
+        inputBlocks: [
+          { type: 'text', text: 'inspect the attached trace' },
+          fileBlock,
+          {
+            type: 'local_attachment',
+            referenceId: '148aa46f-967a-45c1-b752-04e1bb81eb11',
+            machineId: 'machine-1',
+            sessionId: 'session-file-create',
+            turnId: 'turn-user-file',
+            kind: 'file',
+            fileName: 'local.txt',
+            mimeType: 'text/plain',
+            sizeBytes: 5,
+          },
+        ],
         cliType: 'builtin',
         agentType: 'codex',
       },
@@ -5521,14 +5541,15 @@ describe('SessionExecutionService', () => {
 
     expect(deliveredPrompt).toEqual([
       { type: 'text', text: 'Attached file: trace.json' },
+      { type: 'resource_link', uri: 'file:///tmp/local.txt', name: 'local.txt' },
       { type: 'text', text: expect.stringContaining('inspect the attached trace') },
     ]);
-    expect(deliveredPrompt[1]).toMatchObject({
+    expect(deliveredPrompt[2]).toMatchObject({
       text: expect.stringContaining(
         'Before starting this task, rename the branch session/session-'
       ),
     });
-    const executionText = (deliveredPrompt[1] as Extract<ContentBlock, { type: 'text' }>).text;
+    const executionText = (deliveredPrompt[2] as Extract<ContentBlock, { type: 'text' }>).text;
     for (const instruction of [
       'CONFIG_INSTRUCTION',
       'ROLE_INSTRUCTION',
