@@ -48,6 +48,6 @@ is introduced.
 The export suite exercises the real native helper with an in-memory filesystem and
 share-sheet boundary, checking exact PNG bytes, filename, completion, cancellation,
 failure, cleanup, and absence of browser downloads. The native-file suite checks
-chunked bytes, concurrent isolation, cancellation variants, and cleanup on failure.
+chunked bytes, concurrent isolation, cancellation, and cleanup on failure.
 Electron save and browser download/clipboard regressions remain covered. These
 checks do not replace a native device test of the system sheet and photo permissions.
