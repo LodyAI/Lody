@@ -595,48 +595,67 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             )
             .map(([id]) => id),
           journaled = (yield* local.list(prefix)).map((row) => row.key.slice(prefix.length));
+        const signRevocation = Effect.fnUntraced(function* (target: string) {
+          const latest = yield* current(),
+            targetKey = yield* Effect.fromResult(Bytes.signingPublicKey(fromHex(target))),
+            proposal = yield* Effect.fromResult(
+              prepareLedgerCommand(latest, personalSigner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: targetKey,
+              })
+            );
+          return {
+            target,
+            record: yield* signLedgerRecord(proposal, personalSigner),
+            position: latest.length + 1,
+          };
+        });
         for (const target of new Set([...journaled, ...others])) {
-          const journalKey = `${prefix}${target}`,
-            before = yield* local.read(journalKey);
+          const journalKey = `${prefix}${target}`;
+          let raw = yield* local.read(journalKey);
           let intent: typeof RevokeIntentSchema.Type;
-          if (before)
+          if (raw) {
+            const stored = raw;
             intent = yield* attempt(() =>
               Result.getOrThrow(
-                Schema.decodeUnknownResult(RevokeIntentSchema)(parseCanonical(before))
+                Schema.decodeUnknownResult(RevokeIntentSchema)(parseCanonical(stored))
               )
             );
-          else {
-            const latest = yield* current(),
-              targetKey = yield* Effect.fromResult(Bytes.signingPublicKey(fromHex(target))),
-              proposal = yield* Effect.fromResult(
-                prepareLedgerCommand(latest, personalSigner.publicKey, {
-                  _tag: 'RevokeDevice',
-                  target: targetKey,
+          } else {
+            intent = yield* signRevocation(target);
+            const next = canonical(intent);
+            if ((yield* local.compareAndSwap(journalKey, null, next)) !== 'Committed')
+              return yield* vaultError('conflict');
+            raw = next;
+          }
+          for (let attempts = 0; ; attempts++) {
+            const outcome = yield* submit(new Uint8Array(intent.record), null);
+            if (!bytesEqual(outcome.record, intent.record))
+              return yield* vaultError('authentication');
+            if (outcome.outcome === 'Pending') return { outcome: outcome.outcome };
+            const after = yield* current(),
+              landed = yield* Effect.fromResult(
+                hasVerifiedCheckpoint(after, {
+                  head: hashRecordBytes(intent.record),
+                  length: intent.position,
                 })
               );
-            intent = {
-              target,
-              record: yield* signLedgerRecord(proposal, personalSigner),
-              position: latest.length + 1,
-            };
-            if ((yield* local.compareAndSwap(journalKey, null, canonical(intent))) !== 'Committed')
+            if (outcome.outcome === 'Committed') {
+              if (after.inspectState().devices.has(target) || !landed)
+                return yield* vaultError('authentication');
+              break;
+            }
+            // Only the ledger proves this original can never commit: a different record
+            // holds its position. Until then it is resent unchanged, never re-signed.
+            if (landed || !after.inspectState().devices.has(target)) break;
+            if (after.length < intent.position || attempts >= 3)
+              return { outcome: outcome.outcome };
+            intent = yield* signRevocation(target);
+            const next = canonical(intent);
+            if ((yield* local.compareAndSwap(journalKey, raw, next)) !== 'Committed')
               return yield* vaultError('conflict');
+            raw = next;
           }
-          const outcome = yield* submit(new Uint8Array(intent.record), null);
-          if (!bytesEqual(outcome.record, intent.record))
-            return yield* vaultError('authentication');
-          if (outcome.outcome !== 'Committed') return { outcome: outcome.outcome };
-          const after = yield* current();
-          if (
-            after.inspectState().devices.has(target) ||
-            !(yield* Effect.fromResult(
-              hasVerifiedCheckpoint(after, {
-                head: hashRecordBytes(intent.record),
-                length: intent.position,
-              })
-            ))
-          )
-            return yield* vaultError('authentication');
         }
         return { outcome: 'Committed' as const };
       })
