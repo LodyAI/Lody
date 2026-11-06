@@ -12,6 +12,8 @@
   "lodyAgentConnections.apiKey": "API key",
   "lodyAgentConnections.savedCredential": "Saved credential",
   "lodyAgentConnections.endpoint": "Custom endpoint",
+  "lodyAgentConnections.keyTitle": "Connect {{name}}",
+  "lodyAgentConnections.saveKey": "Save API key",
   "lodyAgentConnections.enterKey": "Enter API key",
   "lodyAgentConnections.needsKey": "Needs an API key",
   "lodyAgentConnections.empty": "No connections on this machine.",

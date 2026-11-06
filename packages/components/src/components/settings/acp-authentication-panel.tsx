@@ -966,7 +966,7 @@ export function AcpAuthenticationPanel({
 
   const details = (
     <div {...stylex.props(methodRows ? styles.rowsDetail : styles.detail)}>
-      {methodRows && phase === 'authenticated' ? (
+      {(methodRows || layout === 'action') && phase === 'authenticated' ? (
         <span {...stylex.props(styles.success)}>
           {t('agents.authentication.succeeded', '{{provider}} sign-in completed', { provider })}
         </span>
@@ -1061,6 +1061,11 @@ export function AcpAuthenticationPanel({
       {phase === 'running' && interaction ? (
         <AcpAuthenticationInteractionView
           interaction={interaction}
+          dialog={layout === 'action'}
+          onCancel={() => {
+            setActionOpen(false);
+            handleCancel();
+          }}
           values={formValues}
           submitting={submittingInteraction}
           onValuesChange={setFormValues}
@@ -1138,12 +1143,17 @@ export function AcpAuthenticationPanel({
             if (!open && waiting) handleCancel();
           }}
         >
-          <Dialog.Content>
+          <Dialog.Content width="420px">
             <Dialog.Header>
-              <Dialog.Title>{t('lodyAgentConnections.enterKey')}</Dialog.Title>
+              <Dialog.Title>{t('lodyAgentConnections.keyTitle', { name: provider })}</Dialog.Title>
             </Dialog.Header>
-            {waiting ? waitingStatus : null}
+            {waiting && !interaction ? waitingStatus : null}
             {details}
+            {phase === 'authenticated' ? (
+              <Dialog.Footer>
+                <Button onClick={() => setActionOpen(false)}>{t('common.done', 'Done')}</Button>
+              </Dialog.Footer>
+            ) : null}
           </Dialog.Content>
         </Dialog.Root>
       ) : (
@@ -1329,8 +1339,12 @@ export function AcpAuthenticationInteractionView({
   submitting,
   onValuesChange,
   onSubmit,
+  dialog = false,
+  onCancel,
 }: {
   interaction: AuthenticationInteraction;
+  dialog?: boolean;
+  onCancel?: () => void;
   values: Record<string, string>;
   submitting: boolean;
   onValuesChange: (values: Record<string, string>) => void;
@@ -1377,12 +1391,14 @@ export function AcpAuthenticationInteractionView({
     (field) => field.required && !(values[field.id] ?? '').trim()
   );
   return (
-    <div {...stylex.props(surface.formBlock, styles.block)}>
+    <div {...stylex.props(!dialog && surface.formBlock, styles.block)}>
       <div {...stylex.props(styles.text)}>
-        <p {...stylex.props(styles.title)}>
-          {interaction.form.title ??
-            t('agents.authentication.additionalInformation', 'Additional information')}
-        </p>
+        {!dialog ? (
+          <p {...stylex.props(styles.title)}>
+            {interaction.form.title ??
+              t('agents.authentication.additionalInformation', 'Additional information')}
+          </p>
+        ) : null}
         {interaction.message || interaction.form.description ? (
           <p {...stylex.props(styles.hint, styles.titleHint)}>
             {interaction.message || interaction.form.description}
@@ -1443,17 +1459,33 @@ export function AcpAuthenticationInteractionView({
           {field.description ? <p {...stylex.props(styles.hint)}>{field.description}</p> : null}
         </div>
       ))}
-      <div {...stylex.props(styles.answer)}>
-        <Button
-          type="button"
-          size="small"
-          disabled={submitting || invalid}
-          onClick={() => onSubmit({ action: 'accept', content: values })}
-        >
-          {submitting ? <Spinner size="small" /> : null}
-          {t('common.continue', 'Continue')}
-        </Button>
-      </div>
+      {dialog ? (
+        <Dialog.Footer>
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            {t('common.cancel', 'Cancel')}
+          </Button>
+          <Button
+            type="button"
+            disabled={submitting || invalid}
+            onClick={() => onSubmit({ action: 'accept', content: values })}
+          >
+            {submitting ? <Spinner size="small" /> : null}
+            {t('lodyAgentConnections.saveKey')}
+          </Button>
+        </Dialog.Footer>
+      ) : (
+        <div {...stylex.props(styles.answer)}>
+          <Button
+            type="button"
+            size="small"
+            disabled={submitting || invalid}
+            onClick={() => onSubmit({ action: 'accept', content: values })}
+          >
+            {submitting ? <Spinner size="small" /> : null}
+            {t('common.continue', 'Continue')}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

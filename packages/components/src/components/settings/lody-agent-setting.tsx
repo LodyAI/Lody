@@ -231,16 +231,16 @@ function LodyAgentMachine({ machine }: { machine: MachineViewMeta }) {
             onAuthenticated={() => setConnectionsVersion((version) => version + 1)}
           />
         )}
-        endpointSignIn={(providerId) => (
+        endpointSignIn={(endpoint) => (
           <AcpAuthenticationPanel
             machineId={machine.id}
             configId={config.id}
             cliType={config.cliType}
             agentType={config.agentType}
-            providerName={config.name}
+            providerName={endpoint.name}
             compact
             layout="action"
-            onlyMethodId={`sorbet:${providerId}:api_key`}
+            onlyMethodId={`sorbet:${endpoint.id}:api_key`}
             onAuthenticated={() => setConnectionsVersion((version) => version + 1)}
           />
         )}

@@ -57,7 +57,7 @@ export interface LodyAgentConnectionsProps {
   onCreate?: (draft: LodyAgentCustomProviderDraft) => Promise<void>;
   /** The agent's sign-in methods, drawn as the last lines of the same card. */
   signIn?: ReactNode;
-  endpointSignIn?: (providerId: string) => ReactNode;
+  endpointSignIn?: (provider: LodyAgentCustomProvider) => ReactNode;
 }
 
 type Connection = LodyAgentConnectionRef & { name: string; meta: string; attention: boolean };
@@ -190,7 +190,7 @@ export function LodyAgentConnections({
               </div>
               <div {...stylex.props(catalog.actions)}>
                 {connection.kind === 'endpoint' && !uncertain.has(connection.id)
-                  ? endpointSignIn?.(connection.id)
+                  ? endpointSignIn?.(providers.find((provider) => provider.id === connection.id)!)
                   : null}
                 {uncertain.has(connection.id) ? (
                   <Button size="small" variant="secondary" disabled={busy} onClick={onRetry}>

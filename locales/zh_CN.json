@@ -12,6 +12,8 @@
   "lodyAgentConnections.apiKey": "API 密钥",
   "lodyAgentConnections.savedCredential": "已保存凭据",
   "lodyAgentConnections.endpoint": "自定义端点",
+  "lodyAgentConnections.keyTitle": "连接 {{name}}",
+  "lodyAgentConnections.saveKey": "保存 API Key",
   "lodyAgentConnections.enterKey": "输入 API Key",
   "lodyAgentConnections.needsKey": "需要 API 密钥",
   "lodyAgentConnections.empty": "此设备上还没有连接。",

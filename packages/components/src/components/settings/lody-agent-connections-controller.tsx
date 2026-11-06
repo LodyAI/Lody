@@ -55,7 +55,7 @@ export function LodyAgentConnectionsController({
   onProvidersChanged?: () => Promise<void>;
   /** Sign-in methods drawn inside the connections card. */
   signIn?: (providerIds: readonly string[]) => ReactNode;
-  endpointSignIn?: (providerId: string) => ReactNode;
+  endpointSignIn?: (provider: LodyAgentCustomProvider) => ReactNode;
 }) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const { t } = useTranslation();

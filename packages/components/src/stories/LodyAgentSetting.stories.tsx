@@ -9,6 +9,8 @@ import {
   type AgentConfigMeta,
   type MachineId,
   type MachineMeta,
+  type MachineAcpAuthenticationProgressMessage,
+  type MachineAcpAuthenticateResponse,
   type WorkspaceId,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
@@ -83,19 +85,94 @@ const config: AgentConfigMeta = {
   env: {},
 } as AgentConfigMeta;
 
+const progressListeners = new Map<
+  string,
+  (message: MachineAcpAuthenticationProgressMessage) => void
+>();
+const responseWaiters = new Map<string, (response: MachineAcpAuthenticateResponse) => void>();
+const pendingProviders = new Map<string, string>();
+const signedInProviders = new Set<string>();
+
 const storyRuntime = {
   workspaceId,
   workspaceSlug: 'lody',
   contentMode: 'ordinary',
   accountId: userId,
-  sendControl: () => {},
-  subscribeMachineAcpAuthenticationProgress: () => () => {},
-  waitForMachineAcpAuthenticateResponse: () => new Promise(() => {}),
+  sendControl: (message: Parameters<WorkspaceRuntime['sendControl']>[0]) => {
+    if (message.type !== 'machine/acp-authenticate') return;
+    if (message.action === 'start') {
+      const providerId = message.methodId?.match(/^sorbet:(.+):api_key$/)?.[1];
+      if (!providerId) return;
+      pendingProviders.set(message.requestId, providerId);
+      queueMicrotask(() =>
+        progressListeners.get(message.requestId)?.({
+          type: 'machine/acp-authentication-progress',
+          machineId,
+          requestId: message.requestId,
+          agentType: 'sorbet',
+          status: 'input-required',
+          interactionId: 'story-key-form',
+          message: 'Enter the API key for this endpoint.',
+          form: { fields: [{ id: 'api_key', type: 'secret', label: 'API key', required: true }] },
+        })
+      );
+    } else if (message.action === 'submit-input') {
+      const providerId = pendingProviders.get(message.authenticationRequestId);
+      if (!providerId) return;
+      signedInProviders.add(providerId);
+      pendingProviders.delete(message.authenticationRequestId);
+      responseWaiters.get(message.requestId)?.({
+        type: 'machine/acp-authenticate_response',
+        machineId,
+        requestId: message.requestId,
+        agentType: 'sorbet',
+        success: true,
+        disposition: 'input-accepted',
+      });
+      queueMicrotask(() =>
+        responseWaiters.get(message.authenticationRequestId)?.({
+          type: 'machine/acp-authenticate_response',
+          machineId,
+          requestId: message.authenticationRequestId,
+          agentType: 'sorbet',
+          success: true,
+          disposition: 'authenticated',
+          capabilitiesRefreshed: true,
+        })
+      );
+    } else if (message.action === 'cancel') {
+      pendingProviders.delete(message.authenticationRequestId);
+      responseWaiters.get(message.authenticationRequestId)?.({
+        type: 'machine/acp-authenticate_response',
+        machineId,
+        requestId: message.authenticationRequestId,
+        agentType: 'sorbet',
+        success: true,
+        disposition: 'cancelled',
+      });
+    }
+  },
+  subscribeMachineAcpAuthenticationProgress: (
+    _machineId: MachineId,
+    requestId: string,
+    listener: (message: MachineAcpAuthenticationProgressMessage) => void
+  ) => {
+    progressListeners.set(requestId, listener);
+    return () => progressListeners.delete(requestId);
+  },
+  waitForMachineAcpAuthenticateResponse: (_machineId: MachineId, requestId: string) =>
+    new Promise<MachineAcpAuthenticateResponse>((resolve) => {
+      responseWaiters.set(requestId, (response) => {
+        responseWaiters.delete(requestId);
+        resolve(response);
+      });
+    }),
   requestLocalSorbetCredentials: async () => ({
     type: 'sorbet/credentials-list',
     credentials: [
       { providerId: 'anthropic', type: 'oauth' },
       { providerId: 'openai', type: 'oauth' },
+      ...[...signedInProviders].map((providerId) => ({ providerId, type: 'api_key' })),
     ],
   }),
   requestLocalSorbetProviders: async () => ({
