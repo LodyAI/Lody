@@ -270,6 +270,9 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  # The quote converters exchange HAST nodes and must share their augmented types.
+  'hast-util-from-dom>@types/hast': 3.0.5
+  'hast-util-to-mdast>@types/hast': 3.0.5
   # Tango Consumable needs one class identity across ADB and scrcpy streams.
   '@yume-chan/stream-extra': 2.6.1
   # CodeMode tools and Lody must share the same Effect runtime and schema identity.

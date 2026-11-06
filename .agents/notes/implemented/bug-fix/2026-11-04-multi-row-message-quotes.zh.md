@@ -23,3 +23,5 @@ PR: https://github.com/LodyAI/Lody/pull/2304
 GitHub 单独开源的 [`quote-selection` 实现](https://github.com/github/quote-selection/blob/f3934361ed0d35b4aaf85b81aa942fce27d223a7/src/index.ts)提供 `MarkdownQuote`，克隆所选 DOM 并插入 Markdown 语法；基础的 `Quote` 则读取选区纯文本。这证明了一个可参考的实现方式，并不能证明 GitHub 当前部署了哪个版本或所有部分选区都能完全还原。Codex CLI 的[选区复制实现](https://github.com/openai/codex/blob/a33fb9751c1e468b0062aae63e8f06e9d75e2376/codex-rs/tui/src/markdown_copy.rs)在渲染时保留语义标记，复制选区时重新生成配对完整的 Markdown。源码明确区分了这种方式与通过 `/copy` 获取完整回复原始源码写法。这个剪贴板功能不能证明桌面引用发送了什么。
 
 后续实现将所选 DOM 转换为 Markdown，保留部分选中的祖先格式，并将支持的链接、列表、表格、代码和公式转换为一个快照。它重建语义而非切取原始 Markdown：分隔符选择、空白、不支持的控件及部分表格结构可能不同。转换器排除界面控件，并将部分公式选区扩展为完整公式；转换失败会提示，而不会悄悄发送纯文本。现有 v1 引用快照和序列化保持兼容。行为测试覆盖转换与会话输入，浏览器测试使用实际渲染器；实际 Agent 请求以及 Safari／触摸设备尚未验证。
+
+DOM 与 Markdown 转换器通过限定依赖范围的 override 共用 `@types/hast` 3.0.5。原锁定的 3.0.5/3.0.4 组合在转换边界上的扩展节点类型不兼容，会同时阻断组件和 Electron 编译。验证使用冻结锁文件安装，因为已有安装可能恰好让两个包共用同一类型版本，而提交的锁文件仍将它们分开。
