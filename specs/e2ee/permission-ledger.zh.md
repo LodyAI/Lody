@@ -1,11 +1,11 @@
 # 加密 Org：权限账本与加入流程
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)
 Translation: pending
 
 本文保留固定来源的设计意图。文中的独立包实现指来源原型，不表示本公共仓已完成；实际迁移与未定协议见[迁移指南](../../.agents/docs/e2ee-migration.zh.md)。生产 E2EE 入口未开放。
 
-版本 0.7 · 2026-10-22。草案变更 2026-11-06：账本用户编号改为账户 ID（[决定](../../.agents/notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.zh.md)）。只有“账本用户编号”的表格说明和用户身份一段里的编码说明待批准，其余内容不变；上一批准版本见[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)。
+版本 0.7 · 2026-10-22。2026-11-06 账本用户编号修订已批准（[决定](../../.agents/notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.zh.md)）。
 
 E2EE 文档入口 · 当前 22 项决策。本文已同步方案方向；标为待定的协议字段与实现参数仍未获默认批准。
 

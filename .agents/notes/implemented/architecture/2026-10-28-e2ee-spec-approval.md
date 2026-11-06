@@ -130,6 +130,25 @@ The scope covers these points:
 
 Ledger records and `formatVersion: 1` do not change. Approval records intent only, not implementation, deployment or real-device acceptance.
 
+## Ledger user ID is the account ID
+
+On 2026-11-06T19:47:07Z, the owner (Lody account `js7cxcb4nzj3dpht6gc9vq8n517xznbm`, message `ac3cc04f-be5d-4497-b9e6-e144bc7171f5`), as relayed by the E2EE coordinator (session `b12f1597`), approved [PR #2365](https://github.com/LodyAI/Lody/pull/2365) at head `0d35850c1b4dd1d9ed50ed39f51222ad740c60cb`. Their words were "批准 #2365，#2374 用别的办法" (approve #2365; use another approach for #2374). This record covers only the #2365 part. The approved files are:
+
+| File                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/permission-ledger.zh.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/permission-ledger.zh.md) | `30b77b2ccedfdb6ef8a744e4c9565e962f082c68` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/whitepaper.md)                     | `ca583dec691023aa7d8aa0a8226335b7422e83b6` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/whitepaper.zh.md)               | `ddd77ddccf0b83f6f89f927124cd101fe743a5c1` |
+
+Later commits change only approval metadata in these files.
+
+The scope is the ledger user ID passages of the whitepaper and `permission-ledger`, and the encoding rule in the [decision](2026-11-06-e2ee-ledger-user-id.md):
+
+- **Meaning.** The stable ledger user ID encodes the account ID. It names an account and does not prove who holds a signing key.
+- **Encoding.** 32 bytes: byte 0 is the character count, then lowercase Crockford base32 characters at 5 bits each, most significant bit first, with zero fill. It freezes when production first enables encrypted workspace creation.
+
+Ledger records and their format do not change. Approval records intent only, not implementation, deployment or real-device acceptance.
+
 ## Machine sharing
 
 On 2026-11-02, owner Zixuan Chen (zxch3n) approved the [machine sharing Spec](../../../../specs/e2ee/machine-sharing.md) by merging [PR #2228](https://github.com/LodyAI/Lody/pull/2228) as merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`. The approved [English text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md) has Git blob `37ce21f8e5a3db433b38ac0d2701fcacf6408080`; the approved [Chinese text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md) has Git blob `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`. Later changes that only record this approval are editorial. The scope includes the owner's decision that withdrawal blocks new starts and further authorized actions without forcibly terminating running commands, and the 2026-10-28 acceptance that withdrawal has no strict upper bound if the server keeps withholding newer policies. Approval records intent, not deployment or two-member product acceptance.

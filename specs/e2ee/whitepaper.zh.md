@@ -1,11 +1,9 @@
 # Lody 安全白皮书
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)
 Translation: current
 
-草案变更 2026-11-06：账本用户编号改为账户 ID（[决定](../../.agents/notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.zh.md)）。只有组织一节中关于稳定用户编号的那句待批准，其余内容与上一批准版本相同。
-
-上一批准版本：2026-11-06 恢复 passkey 解锁与可信锚；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)。上一版：2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
+Approved revision: 2026-11-06 账本用户编号；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)。上一版：2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；

@@ -1,11 +1,9 @@
 # Lody Security Whitepaper
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ledger-user-id-is-the-account-id)
 Translation: current
 
-Draft change 2026-11-06: the ledger user ID is the account ID ([decision](../../.agents/notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.md)). Only the stable user ID sentence in the organization section awaits approval; the rest of this document is unchanged from the last approved revision.
-
-Last approved revision: 2026-11-06 recovery passkey unlock and trust anchor; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor). Previous: 2026-11-01 account-wide pairing, 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
+Approved revision: 2026-11-06 ledger user ID; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ledger-user-id-is-the-account-id). Previous: 2026-11-06 recovery passkey unlock and trust anchor ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)), 2026-11-01 account-wide pairing, 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
