@@ -5541,7 +5541,13 @@ const retainSignedScheduleUpdate = Effect.fnUntraced(function* (
   });
   const request = { ...sealed, context, additionalData: Uint8Array.from([...sealed.header, 9]) };
   const opened = yield* binding.openAuthenticated(request);
-  origins.retain(`doc:${docId}`, request, opened.plaintext);
+  origins.retain(
+    `doc:${docId}`,
+    request,
+    opened.plaintext,
+    undefined,
+    hex(opened.author.device.toBytes())
+  );
   opened.plaintext.fill(0);
   return request;
 });
@@ -5753,6 +5759,36 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
         acpSessionConfig: { ...config, mcpServerIds: [] },
       } as never)
     );
+  const machinePeer = doc.peerIdStr;
+  const contentBindings = new Map<string, typeof contentBinding>();
+  /** One client's edit: its own Loro peer, sealed and retained under its own device. */
+  const asClient = Effect.fnUntraced(function* <A, E, R>(
+    rpc: typeof memberRpc,
+    work: Effect.Effect<A, E, R>
+  ) {
+    const owner = rpc === ownerRpc;
+    let binding = contentBindings.get(owner ? 'owner' : 'member');
+    if (!binding) {
+      binding = yield* makeStreamsUpdateBinding({
+        genesis: fixture.genesis,
+        resource: `doc:${docId}`,
+        model: 'loro',
+        writeEpoch: 'current',
+        signer: owner ? fixture.owner : member,
+        ledger: runtime.executionLedger,
+        readEpochKey,
+      });
+      contentBindings.set(owner ? 'owner' : 'member', binding);
+    }
+    doc.commit();
+    const from = doc.version();
+    doc.setPeerId(owner ? '101' : '202');
+    const result = yield* work;
+    doc.commit();
+    yield* retainSignedScheduleUpdate(origins, docId, doc, binding, from);
+    doc.setPeerId(machinePeer);
+    return result;
+  });
   /** The composer's order: signed original, then the queue row. */
   const send = Effect.fnUntraced(function* (
     turnId: string,
@@ -5760,7 +5796,8 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     userId = rpc === ownerRpc ? ownerAccount : memberAccount
   ) {
     if (rpc) yield* prepareOriginal(rpc, turnId, userId);
-    yield* pushRow(turnId, userId);
+    if (rpc) yield* asClient(rpc, pushRow(turnId, userId));
+    else yield* pushRow(turnId, userId);
   });
   const promote = Effect.fnUntraced(function* () {
     const from = doc.version();
@@ -5853,6 +5890,13 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
   return {
     fixture,
     append,
+    asClient,
+    /** Another signer's work under the owner's Loro peer, which any writer may choose. */
+    borrowOwnerPeer: <A, E, R>(work: Effect.Effect<A, E, R>) =>
+      Effect.suspend(() => {
+        doc.setPeerId('101');
+        return work;
+      }),
     claim,
     doc,
     historyRow,
@@ -6181,6 +6225,58 @@ describe('encrypted queued input evidence', () => {
           inputConfig: h.clientConfig('relabelled-receipt', config),
         });
         yield* h.pushRow('relabelled-receipt', ownerAccount, config);
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('does not start an original replayed by another writer after a removal', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('withdrawn-turn', h.ownerRpc);
+        const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
+        if (!row) throw new Error('queue row missing');
+        yield* h.asClient(
+          h.ownerRpc,
+          Effect.promise(() => h.session.removeMessageQueueItem(row.$cid))
+        );
+        yield* h.asClient(h.memberRpc, h.pushRow('withdrawn-turn', ownerAccount));
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('does not start an original replayed by another writer after an edit', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('edited-away-turn', h.ownerRpc);
+        const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
+        if (!row) throw new Error('queue row missing');
+        const map = () => h.doc.getContainerById(row.$cid as never) as unknown as LoroMap;
+        yield* h.asClient(
+          h.ownerRpc,
+          Effect.sync(() => map().set('userTurnId', 'edited-turn'))
+        );
+        yield* h.asClient(
+          h.memberRpc,
+          Effect.sync(() => map().set('userTurnId', 'edited-away-turn'))
+        );
+        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('does not start a replayed original written under the signer own peer', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('borrowed-peer-turn', h.ownerRpc);
+        const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
+        if (!row) throw new Error('queue row missing');
+        yield* h.asClient(
+          h.ownerRpc,
+          Effect.promise(() => h.session.removeMessageQueueItem(row.$cid))
+        );
+        yield* h.asClient(
+          h.memberRpc,
+          h.borrowOwnerPeer(h.pushRow('borrowed-peer-turn', ownerAccount))
+        );
         expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
       })
     ));

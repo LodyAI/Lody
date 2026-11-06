@@ -93,6 +93,7 @@ const projection = (map: LoroMap) => {
     scheduleRun: read('scheduleRun'),
     derivedFrom: read('derivedFrom'),
     queuedInput: read('queuedInput'),
+    queuedBy: read('queuedBy'),
     // A promoted row's requester is copied from its queue item, so it is signed content.
     ...(read('queuedInput') === true ? { userId: read('userId') } : {}),
   };
@@ -132,6 +133,8 @@ export class ExecutionOrigins {
       db.exec(`CREATE TABLE IF NOT EXISTS frames(digest TEXT PRIMARY KEY, resource TEXT NOT NULL, sealed BLOB NOT NULL, aad BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS spans(resource TEXT NOT NULL, peer TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, digest TEXT NOT NULL,
         PRIMARY KEY(resource, peer, start, end, digest));
+        CREATE TABLE IF NOT EXISTS peer_signers(resource TEXT NOT NULL, peer TEXT NOT NULL, signer TEXT NOT NULL, end INTEGER NOT NULL,
+        PRIMARY KEY(resource, peer, signer));
         CREATE TABLE IF NOT EXISTS queued_inputs(session TEXT NOT NULL, turn TEXT NOT NULL, digest TEXT NOT NULL,
         PRIMARY KEY(session, turn, digest));`);
       return body(db);
@@ -178,12 +181,27 @@ export class ExecutionOrigins {
     );
   }
 
+  /** Every verified device seen writing as a Loro peer, which any writer may choose. */
+  peerSigners(resource: string, peer: string) {
+    const rows = this.database((db) =>
+      db
+        .prepare('SELECT signer, end FROM peer_signers WHERE resource=? AND peer=?')
+        .all(resource, peer)
+        .map((row) => z.object({ signer: z.string(), end: z.number() }).parse(row))
+    );
+    return {
+      signers: rows.map((row) => row.signer),
+      end: Math.max(0, ...rows.map((row) => row.end)),
+    };
+  }
+
   /** Called only after signature AND AEAD verification; snapshot opens never call it. */
   retain(
     resource: string,
     request: PayloadProtectionOpenInput,
     plaintext: Uint8Array,
-    target?: OpId
+    target?: OpId,
+    signer?: string
   ): boolean {
     if (
       request.context.kind !== 'update_batch' ||
@@ -209,7 +227,14 @@ export class ExecutionOrigins {
           for (const { meta } of decoded) {
             for (const [peer, end] of meta.partialEndVersionVector.toJSON()) {
               const start = meta.partialStartVersionVector.get(peer) ?? 0;
-              if (start < end) insert.run(resource, peer, start, end, digest);
+              if (start < end) {
+                insert.run(resource, peer, start, end, digest);
+                if (signer)
+                  db.prepare(
+                    `INSERT INTO peer_signers VALUES (?, ?, ?, ?)
+                     ON CONFLICT(resource, peer, signer) DO UPDATE SET end=max(end, excluded.end)`
+                  ).run(resource, peer, signer, end);
+              }
             }
           }
         })
@@ -420,6 +445,7 @@ export class ExecutionOrigins {
                       timestamp: current.timestamp,
                       inputConfig: current.inputConfig,
                       userId: current.userId,
+                      queuedBy: current.queuedBy,
                     },
                   }
                 : {}),

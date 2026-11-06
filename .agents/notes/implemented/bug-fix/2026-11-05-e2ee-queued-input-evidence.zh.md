@@ -19,6 +19,10 @@ Translation: current
 - **人的输入。** 客户端把帧存到 `queueDispatchOriginals`，先于队列行，且在同一文档内。两者因此有因果顺序，
   没有帧的行也就不会再等到证据。启动时 `makeVerifiedExecutionOriginal` 按当前账本打开帧，把会话、Turn、`userId` 和配置
   绑定到签名行，返回签名者。之后由现有 `authorizeExecution` 检查当前成员资格、设备状态和共享。
+- **写者。** 帧在到期前一直有效，任何读者都能复制它的字节，所以使用它的行也必须属于它的签名者。提升时把最后写入队列行
+  `userTurnId` 的 Loro peer 作为 `queuedBy` 记入签名行。`retain` 把看到的以某 peer 写入的已验证设备记到 `peer_signers`。
+  启动时要求该 peer 唯一的签名者就是帧的签名者。peer 可以随意选择，所以同一 peer 上出现第二个签名者就拒绝启动。证据
+  没有覆盖该 peer 的最新操作时，按缺失原件回填，到期前保持 pending。因此被编辑或移除的输入不能再次启动。
 - **单独的 map。** `rpcDispatchOriginals` 按严格相等比较，而提升时会加上 `resume`。如果从那里读队列帧，不含此改动
   的 CLI 会拒绝该 Turn。
 - **比较方式。** `queuedInputEvidence` 是作者所选内容的规范形式。它排除 `resume`（提升时取自 Session 元数据，由签名行
@@ -60,8 +64,9 @@ Translation: current
 - 后续工作：队列编辑路径没有同样的重试和类型化信号失败，也没有用例让真实提升行走这条失败路径。
 - 帧会让 Session 文档增长，`rpcDispatchOriginals` 本来也是如此；不做裁剪。
 - 账本落后时，未知的请求签名者会被拒绝，不会重试。
-- 帧在到期前对其签名者一直有效，从共享文档删除也无法撤销其他读者保留的字节。复用它的队列行绑定的是已签名内容和
-  Turn，而不是该行的写者；journal 仍只允许启动一次。
+- 签名者本人可以重新排队自己帧对应的 Turn；同一成员的另一台设备算不同写者。帧和行来自同一个客户端，所以普通发送和
+  编辑不受影响。
+- `peer_signers` 出现之前排队的行，要么从 Streams 回填，要么过期。
 - `userId` 只与机器账户比较。成员仍可把输入的署名标成另一个成员，`resume` 仍来自 Session 元数据。
 - 移除与当前副本尚未看到的提升发生竞争时，帧会被删除，该 Turn 随后在启动时被拒绝。
 

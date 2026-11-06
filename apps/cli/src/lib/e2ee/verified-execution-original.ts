@@ -6,7 +6,7 @@ import {
 } from '@lody/shared';
 import { isDeepStrictEqual } from 'node:util';
 import { Effect, type Scope } from 'effect';
-import type { LoroDoc, OpId } from 'loro-crdt';
+import type { LoroDoc, OpId, PeerID } from 'loro-crdt';
 import type { PayloadProtectionOpenInput } from '@loro-dev/streams-crdt';
 import type { EncryptedExecutionIntent } from './agent-execution';
 import type { ExecutionOrigins } from './execution-origins';
@@ -143,8 +143,27 @@ export function makeVerifiedExecutionOriginal(options: {
             verified.args.sessionId !== intent.sessionId ||
             verified.args.userTurnId !== intent.userTurnId ||
             verified.args.userId !== row.userId ||
-            queuedInputEvidence(verified.args.inputConfig) !== evidence
+            queuedInputEvidence(verified.args.inputConfig) !== evidence ||
+            typeof row.queuedBy !== 'string'
           )
+            return undefined;
+          // The original proves what its signer asked for once. The queue row must be
+          // that signer's too, so a withdrawn original cannot return through another writer.
+          const peer = row.queuedBy;
+          const resource = sessionContentResource(intent.sessionId);
+          const seen = doc.version().get(peer as PeerID) ?? 0;
+          let writers = options.origins.peerSigners(resource, peer);
+          if ((!writers.signers.length || writers.end < seen) && options.recover && seen > 0) {
+            yield* options.recover(
+              getSessionRoomId(intent.sessionId as SessionId),
+              { peer: peer as PeerID, counter: seen - 1 },
+              (request) => options.openContent(intent, request)
+            );
+            writers = options.origins.peerSigners(resource, peer);
+          }
+          if (!writers.signers.length || writers.end < seen)
+            return { state: 'pending-evidence' as const, expiresAt: verified.expiresAt };
+          if (writers.signers.some((signer) => signer !== verified.requesterDevice))
             return undefined;
           return {
             requesterDevice: verified.requesterDevice,

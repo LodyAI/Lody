@@ -75,7 +75,11 @@ export function makeExecutionOriginRecovery(
     id: OpId,
     open: (
       input: PayloadProtectionOpenInput
-    ) => Effect.Effect<{ plaintext: Uint8Array }, unknown, import('effect').Scope.Scope>
+    ) => Effect.Effect<
+      { plaintext: Uint8Array; author: { device: { toBytes(): Uint8Array } } },
+      unknown,
+      import('effect').Scope.Scope
+    >
   ) {
     const key = `${docId}:${id.peer}:${id.counter}`;
     const work = Effect.gen(function* () {
@@ -95,7 +99,14 @@ export function makeExecutionOriginRecovery(
             const opened = yield* open(request);
             try {
               const retained = yield* Effect.try({
-                try: () => origins.retain(`doc:${docId}`, request, opened.plaintext, id),
+                try: () =>
+                  origins.retain(
+                    `doc:${docId}`,
+                    request,
+                    opened.plaintext,
+                    id,
+                    Buffer.from(opened.author.device.toBytes()).toString('hex')
+                  ),
                 catch: (cause) => cause,
               });
               found = retained || found;

@@ -27,6 +27,13 @@ change.
   the current ledger, binds session, Turn, `userId` and config to the signed row, and returns
   the signer. The existing `authorizeExecution` then applies current membership, device state
   and sharing.
+- **Writer.** A frame stays valid until its deadline and any reader can copy its bytes, so the
+  row that uses it must be its signer's too. Promotion records in the signed row, as `queuedBy`,
+  the Loro peer that last wrote the queue row's `userTurnId`. `retain` records each verified
+  device seen writing as a peer in `peer_signers`. The start requires that peer's only signer to
+  be the frame's signer. A peer is a free choice, so a second signer on it refuses the start.
+  Evidence that does not reach the peer's latest operation is recovered like a missing original,
+  and stays pending until the deadline. An edited or removed input therefore cannot start again.
 - **Separate map.** `rpcDispatchOriginals` is compared strictly, and promotion adds `resume`.
   Reading a queue frame from it would make a CLI without this change deny the Turn.
 - **Comparison.** `queuedInputEvidence` is the canonical form of what the author chose. It
@@ -89,9 +96,10 @@ change.
   real promoted row through this failure path.
 - Frames grow the Session document, as `rpcDispatchOriginals` already does; nothing is pruned.
 - A request signer unknown to a stale ledger is refused rather than retried.
-- A frame stays valid for its signer until its deadline, and deletion from a shared document
-  does not revoke bytes another reader kept. A queue row reusing it is bound to the signed
-  content and Turn, not to the row's writer, and the journal still allows one start.
+- The signer itself can requeue its own frame's Turn, and another device of the same member
+  counts as a different writer. Frame and row come from one client, so ordinary sends and edits
+  are unaffected.
+- Rows queued before `peer_signers` existed are recovered from Streams or expire.
 - `userId` is checked only against the machine account. One member can still label an input
   as another for attribution, and `resume` still comes from Session metadata.
 - A removal that races a promotion this replica has not seen deletes the frame, and that Turn
