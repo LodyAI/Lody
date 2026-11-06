@@ -1,3 +1,4 @@
+import { FileDownloadRequestSchema, FILE_DOWNLOAD_CHUNK_BYTES } from '@lody/shared';
 import { afterEach, expect, it } from 'vitest';
 import { mkdtemp, writeFile, readFile, rm, symlink, unlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -5,6 +6,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   registerLocalAttachment,
+  downloadLocalAttachmentChunk,
   resolveLocalAttachment,
   rebindLocalAttachment,
 } from './session-local-attachments';
@@ -95,4 +97,32 @@ it('explicitly authorizes a same-machine resend without transferring or invalida
   await expect(
     rebindLocalAttachment(f.root, f.scope, { ...target, machineId: 'remote' }, original)
   ).rejects.toThrow();
+});
+
+it('downloads registered content in existing RPC chunks without copying or publishing a cloud receipt', async () => {
+  const f = await fixture();
+  const bytes = Buffer.alloc(FILE_DOWNLOAD_CHUNK_BYTES + 17, 0x57);
+  await writeFile(f.source, bytes);
+  const attachment = await registerLocalAttachment(f.root, f.input);
+  const request = FileDownloadRequestSchema.parse({
+    sessionId: f.scope.sessionId,
+    path: attachment.fileName,
+    attachment,
+    offset: 0,
+  });
+  const first = await downloadLocalAttachmentChunk(f.root, f.scope, request);
+  expect(first.status).toBe('ok');
+  if (first.status !== 'ok') throw new Error('First chunk unavailable');
+  const last = await downloadLocalAttachmentChunk(f.root, f.scope, {
+    ...request,
+    offset: FILE_DOWNLOAD_CHUNK_BYTES,
+    revision: first.revision,
+  });
+  if (last.status !== 'ok') throw new Error('Last chunk unavailable');
+  expect(
+    Buffer.concat([Buffer.from(first.data, 'base64'), Buffer.from(last.data, 'base64')])
+  ).toEqual(bytes);
+  expect(await resolveLocalAttachment(f.root, f.scope, attachment)).toMatchObject({
+    path: await realpath(f.source),
+  });
 });

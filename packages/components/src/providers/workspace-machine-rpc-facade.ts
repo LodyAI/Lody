@@ -374,6 +374,14 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       )
     )
       return { status: 'error', code: 'unsupported_protocol' };
+    if (
+      request.attachment &&
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities: capabilities },
+        MACHINE_PROTOCOL_CAPABILITIES.localAttachmentDownload
+      )
+    )
+      return { status: 'error', code: 'unsupported_protocol' };
     // This is a remote-only path. Same-machine file actions retain local IPC.
     if ((await resolveMachineTargetPlane(machineId)) === 'local')
       return { status: 'error', code: 'unsupported_protocol' };

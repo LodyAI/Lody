@@ -26,7 +26,7 @@ content edits remain visible, but redirected links and missing files fail.
 
 Dispatch resolves the reference into an encoded ACP `file://` resource link;
 images additionally retain ACP image bytes for visual input. Local preview resolves
-through the same narrow native boundary. Other devices show a local-only card.
+through the same narrow native boundary. Other devices offer an explicit download.
 Resend, same-machine fork and scheduled dispatch explicitly rebind authorized
 source records to the new turn before publishing history. A copied reference
 alone never grants another turn access. Sharing refuses local attachments, while
@@ -36,6 +36,22 @@ New sends require the Daemon's `localAttachments` capability. Unknown or changed
 targets keep the draft pending. Protected workspaces currently reject this native
 registration route explicitly; they never downgrade or upload a same-machine
 attachment implicitly. Agent sandbox access remains independently enforced.
+
+## On-demand download from another device
+
+Clicking the attachment card uses the existing authenticated `file/download-chunk`
+RPC with the scoped attachment reference. The Daemon resolves that registration,
+then returns the current file content using the existing chunk format and 100 MiB
+transfer limit. `localAttachmentDownload: 1` gates this request extension. The
+absolute path is never sent to the receiving device. Session-owner authorization
+and account/workspace scope remain those of the existing RPC and registry.
+
+The receiver saves a normal browser/desktop download or opens the native mobile
+share sheet. Missing files, offline machines and unsupported Daemons show an error;
+the user can click again. No automatic requests, retry queue, cloud attachment
+object, replica catalog or new permission dialog is introduced. Existing RPC
+transport may use its relay. Downloading does not rewrite the attachment reference
+or grant it to another Agent turn; it is a user-initiated export of current bytes.
 
 ## Existing transferred attachments
 

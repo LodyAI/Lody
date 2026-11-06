@@ -1,3 +1,9 @@
+import {
+  FILE_DOWNLOAD_CHUNK_BYTES,
+  FILE_DOWNLOAD_MAX_BYTES,
+  type FileDownloadRequest,
+  type FileDownloadResponse,
+} from '@lody/shared';
 import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
@@ -203,4 +209,48 @@ export async function rebindLocalAttachment(
   if (resolved.path !== saved.canonicalPath)
     throw new Error('Local attachment inheritance conflicts with an existing registration');
   return rebound;
+}
+
+/** Explicit downloads reuse the authenticated file RPC and its bounded chunk format. */
+export async function downloadLocalAttachmentChunk(
+  root: string,
+  scope: Omit<LocalAttachmentScope, 'turnId'>,
+  request: FileDownloadRequest
+): Promise<FileDownloadResponse> {
+  if (!request.attachment) return { status: 'error', code: 'invalid_path' };
+  try {
+    const resolved = await resolveLocalAttachment(
+      root,
+      { ...scope, turnId: request.attachment.turnId },
+      request.attachment
+    );
+    const file = await fs.open(resolved.path, 'r');
+    try {
+      const stat = await file.stat();
+      if (stat.size > FILE_DOWNLOAD_MAX_BYTES) return { status: 'error', code: 'too_large' };
+      // The existing download protocol uses a metadata revision, not a content hash.
+      const revision = createHash('sha256')
+        .update(JSON.stringify([stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs]))
+        .digest('hex');
+      if (request.offset > stat.size || (request.revision && request.revision !== revision))
+        return { status: 'error', code: 'file_changed' };
+      const bytes = Buffer.alloc(Math.min(FILE_DOWNLOAD_CHUNK_BYTES, stat.size - request.offset));
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, request.offset);
+      return {
+        status: 'ok',
+        path: request.attachment.fileName,
+        revision,
+        sizeBytes: stat.size,
+        offset: request.offset,
+        data: bytes.subarray(0, bytesRead).toString('base64'),
+      };
+    } finally {
+      await file.close();
+    }
+  } catch (error) {
+    return {
+      status: 'error',
+      code: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'file_not_found' : 'transient_io',
+    };
+  }
 }

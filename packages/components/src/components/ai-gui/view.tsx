@@ -1,3 +1,7 @@
+import { collectFileDownload } from '@/lib/file-download';
+import { downloadBytesAsFile } from '@/lib/download-file';
+import { shareFileBytesNatively } from '@/lib/session-file-native-save';
+import { isNativeAppShell } from '@/lib/native-platform';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import type { SessionLocalAttachment } from '@lody/shared';
@@ -6991,6 +6995,8 @@ export const LocalAttachmentCard = ({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const machineId = useAtomValue(localMachineIdAtom);
+  const runtime = useAtomValue(runtimeAtom);
+  const session = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const readonly = useContext(SessionReadonlyContext);
   const { openLocalFile } = useContext(SessionChatActionContext);
   const [error, setError] = useState<string | null>(null);
@@ -7004,26 +7010,72 @@ export const LocalAttachmentCard = ({
     },
     []
   );
+  const remote = machineId !== attachment.machineId;
   const available =
     !readonly &&
-    machineId === attachment.machineId &&
     sessionId === attachment.sessionId &&
     !!workspaceId &&
-    !!openLocalFile;
+    (remote ? !!runtime : !!openLocalFile);
   return (
     <SessionFileCardLayout
       fileName={attachment.fileName}
       mimeType={attachment.mimeType}
       subtitle={
-        error ?? t('sessions.localAttachmentOnly', 'Available only on the original computer')
+        error ??
+        (opening && remote
+          ? t('sessions.localAttachmentDownloading', 'Downloading from original computer…')
+          : remote
+            ? t('sessions.localAttachmentDownload', 'Download from original computer')
+            : t('sessions.localAttachmentOnly', 'Available only on the original computer'))
       }
-      actionIcon={null}
+      actionIcon={
+        remote ? (
+          opening ? (
+            <Spinner className="h-4 w-4" />
+          ) : (
+            <ArrowDown className="h-4 w-4" />
+          )
+        ) : null
+      }
       failed={!!error}
       isInteractive={available && !opening}
       onClick={() => {
         if (!available || !workspaceId) return;
         setOpening(true);
         setError(null);
+        if (remote && runtime) {
+          void collectFileDownload((range) =>
+            runtime.requestFileDownloadChunk(
+              attachment.machineId as MachineId,
+              {
+                sessionId,
+                path: attachment.fileName,
+                attachment: { ...attachment, sessionId },
+                ...range,
+              },
+              session?.parentSessionId ?? sessionId
+            )
+          )
+            .then(async (bytes) => {
+              if (currentBinding.current !== binding) return;
+              if (!bytes) throw new Error('Attachment download unavailable');
+              if (isNativeAppShell()) await shareFileBytesNatively(attachment.fileName, bytes);
+              else downloadBytesAsFile(attachment.fileName, bytes);
+            })
+            .catch(() => {
+              if (currentBinding.current === binding)
+                setError(
+                  t(
+                    'sessions.localAttachmentDownloadFailed',
+                    'Cannot download. Check that the original computer is online and the file still exists.'
+                  )
+                );
+            })
+            .finally(() => {
+              if (currentBinding.current === binding) setOpening(false);
+            });
+          return;
+        }
         const ipc = getIpcServices();
         if (!ipc) {
           setOpening(false);

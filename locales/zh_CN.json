@@ -1,4 +1,7 @@
 {
+  "sessions.localAttachmentDownload": "从原电脑下载",
+  "sessions.localAttachmentDownloading": "正在从原电脑下载…",
+  "sessions.localAttachmentDownloadFailed": "无法下载，请确认原电脑在线且文件仍然存在。",
   "sessions.localAttachmentOnly": "仅在原电脑上可用",
   "sessions.localAttachmentUnavailable": "本地附件不可用",
   "lodyAgentAccounts.title": "Agent 账户",

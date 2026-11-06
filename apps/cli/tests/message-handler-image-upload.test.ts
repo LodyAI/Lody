@@ -751,6 +751,27 @@ describe('MessageHandler image upload flow', () => {
           inputBlocks: [attachment, { type: 'text', text: 'must not run' }],
         })
       ).rejects.toThrow();
+      const download = await handler.handleLocalMachineRpc({
+        machineId: 'machine-1',
+        workspaceId: 'ws-1',
+        method: 'file/download-chunk',
+        params: { sessionId: 'session-1', path: attachment.fileName, attachment, offset: 0 },
+      } as never);
+      expect(download).toMatchObject({
+        ok: true,
+        result: { status: 'ok', data: bytes.toString('base64'), sizeBytes: bytes.length },
+      });
+      await fs.unlink(source);
+      const missing = await handler.handleLocalMachineRpc({
+        machineId: 'machine-1',
+        workspaceId: 'ws-1',
+        method: 'file/download-chunk',
+        params: { sessionId: 'session-1', path: attachment.fileName, attachment, offset: 0 },
+      } as never);
+      expect(missing).toMatchObject({
+        ok: true,
+        result: { status: 'error', code: 'file_not_found' },
+      });
       expect(await fs.readdir(tempDir)).not.toContain('session-files');
     } finally {
       vi.unstubAllEnvs();

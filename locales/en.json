@@ -1,4 +1,7 @@
 {
+  "sessions.localAttachmentDownload": "Download from original computer",
+  "sessions.localAttachmentDownloading": "Downloading from original computer…",
+  "sessions.localAttachmentDownloadFailed": "Cannot download. Check that the original computer is online and the file still exists.",
   "sessions.localAttachmentOnly": "Available only on the original computer",
   "sessions.localAttachmentUnavailable": "Local attachment unavailable",
   "lodyAgentAccounts.title": "Agent accounts",

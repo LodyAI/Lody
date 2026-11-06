@@ -1,3 +1,6 @@
+import { Provider, createStore } from 'jotai';
+import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { currentWorkspaceIdAtom } from '@/atoms';
 import { LocalAttachmentCard } from '@/components/ai-gui/view';
 import type { SessionId } from '@lody/shared';
 import type { Meta, StoryObj } from '@storybook/react';
@@ -201,12 +204,33 @@ export const AggregatedList: Story = {
     ),
 };
 
-/** A second device retains metadata but cannot resolve another computer's path. */
+const remoteAttachmentStore = createStore();
+remoteAttachmentStore.set(currentWorkspaceIdAtom, 'attachment-demo' as never);
+remoteAttachmentStore.set(runtimeAtom, {
+  requestFileDownloadChunk: async () => ({ status: 'error', code: 'machine_offline' }),
+} as unknown as WorkspaceRuntime);
+
+/** A second device explicitly downloads; this fixture demonstrates the offline result. */
 export const LocalOnlyAttachment: Story = {
   args: { file: baseFile({ fileName: '设计说明.pdf' }) },
-  render: () => wrap(<LocalAttachmentCard sessionId={'local-preview' as SessionId} attachment={{
-    type: 'local_attachment', referenceId: 'e788cc78-cb44-4d20-8199-69fe70dcc1ed',
-    machineId: 'original-computer', sessionId: 'local-preview', turnId: 'turn',
-    kind: 'file', fileName: '设计说明.pdf', mimeType: 'application/pdf', sizeBytes: 24000,
-  }} />),
+  render: () => (
+    <Provider store={remoteAttachmentStore}>
+      {wrap(
+        <LocalAttachmentCard
+          sessionId={'local-preview' as SessionId}
+          attachment={{
+            type: 'local_attachment',
+            referenceId: 'e788cc78-cb44-4d20-8199-69fe70dcc1ed',
+            machineId: 'original-computer',
+            sessionId: 'local-preview',
+            turnId: 'turn',
+            kind: 'file',
+            fileName: '设计说明.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 24000,
+          }}
+        />
+      )}
+    </Provider>
+  ),
 };

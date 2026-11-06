@@ -1,5 +1,6 @@
 import {
   registerLocalAttachment,
+  downloadLocalAttachmentChunk,
   resolveLocalAttachment,
   rebindLocalAttachment,
 } from './session-local-attachments';
@@ -3828,7 +3829,10 @@ export class MessageHandler {
           ? this.resolveEncryptedCodeCollabOwnerSessionId
           : this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await fileReader.previewFile(request),
-        downloadFileChunk: async (request) => await fileReader.downloadFileChunk(request),
+        downloadFileChunk: async (request) =>
+          request.attachment
+            ? this.downloadRegisteredAttachment(request)
+            : fileReader.downloadFileChunk(request),
         openCodeCollabText: async (request) => await codeReader.openText(request),
         refreshCodeCollabText: async (request) => await codeReader.refreshText(request),
         saveCodeCollabText: async (request) => await this.codeCollabV2Service.saveText(request),
@@ -7477,6 +7481,21 @@ export class MessageHandler {
     }
   }
 
+  private async downloadRegisteredAttachment(
+    request: import('@lody/shared').FileDownloadRequest
+  ): Promise<import('@lody/shared').FileDownloadResponse> {
+    if (this.encryptedAttachments) return { status: 'error', code: 'unsupported_protocol' };
+    return downloadLocalAttachmentChunk(
+      path.join(
+        getLodyDataDir(),
+        'local-attachments',
+        crypto.createHash('sha256').update(this.userId).digest('hex')
+      ),
+      { workspaceId: this.workspaceId, machineId: this.machineId, sessionId: request.sessionId },
+      request
+    );
+  }
+
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
     signal?: AbortSignal
@@ -7588,7 +7607,9 @@ export class MessageHandler {
         );
       case 'file/download-chunk':
         await assertOwner(request.params.sessionId as SessionId);
-        return this.filePreviewService.downloadFileChunk(request.params);
+        return request.params.attachment
+          ? this.downloadRegisteredAttachment(request.params)
+          : this.filePreviewService.downloadFileChunk(request.params);
 
       case 'project/probe-local-member': {
         if (

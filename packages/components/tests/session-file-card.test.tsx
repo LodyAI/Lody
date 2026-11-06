@@ -1,3 +1,8 @@
+import { Provider, createStore } from 'jotai';
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { currentWorkspaceIdAtom } from '../src/atoms';
+import { LocalAttachmentCard } from '../src/components/ai-gui/view';
+import * as fileSaver from '../src/lib/download-file';
 // @vitest-environment jsdom
 
 // The card's second action exists for exactly one gap: an HTML attachment's
@@ -160,4 +165,70 @@ describe('SessionFileCard download action', () => {
 
   const statusLine = (view: HTMLElement) =>
     view.querySelector('button[aria-label]')?.querySelector('[title]')?.textContent;
+});
+
+it('downloads a remote local attachment only after clicking its card', async () => {
+  await initI18n('en');
+  const store = createStore();
+  store.set(currentWorkspaceIdAtom, 'workspace' as never);
+  const finish = Promise.withResolvers<import('@lody/shared').FileDownloadResponse>();
+  let requested = false;
+  let saved: Uint8Array | undefined;
+  const save = vi.spyOn(fileSaver, 'downloadBytesAsFile').mockImplementation((_name, bytes) => {
+    saved = bytes;
+  });
+  store.set(runtimeAtom, {
+    requestFileDownloadChunk: async () => {
+      requested = true;
+      return finish.promise;
+    },
+  } as unknown as WorkspaceRuntime);
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(LocalAttachmentCard, {
+            sessionId: 'session' as never,
+            attachment: {
+              type: 'local_attachment',
+              referenceId: 'e788cc78-cb44-4d20-8199-69fe70dcc1ed',
+              machineId: 'remote',
+              sessionId: 'session',
+              turnId: 'turn',
+              kind: 'file',
+              fileName: 'input.txt',
+              mimeType: 'text/plain',
+              sizeBytes: 5,
+            },
+          })
+        )
+      )
+    );
+    expect(container.textContent).toContain('Download from original computer');
+    expect(requested).toBe(false);
+    await act(async () => (container.querySelector('button') as HTMLButtonElement).click());
+    expect(container.textContent).toContain('Downloading from original computer');
+    expect(saved).toBeUndefined();
+    await act(async () =>
+      finish.resolve({
+        status: 'ok',
+        path: 'input.txt',
+        offset: 0,
+        revision: 'a'.repeat(64),
+        sizeBytes: 5,
+        data: btoa('hello'),
+      })
+    );
+    expect(Array.from(saved ?? [])).toEqual([104, 101, 108, 108, 111]);
+    expect(container.textContent).not.toContain('Downloading from original computer');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    save.mockRestore();
+  }
 });
