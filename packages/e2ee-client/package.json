@@ -12,7 +12,8 @@
     "./history": "./src/admission.ts",
     "./errors": "./src/errors.ts",
     "./maintenance": "./src/maintenance.ts",
-    "./recovery-restore": "./src/recovery-restore.ts"
+    "./recovery-restore": "./src/recovery-restore.ts",
+    "./vault-replacement": "./src/vault-replacement.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
