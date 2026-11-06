@@ -313,6 +313,55 @@ export function dshProfileLockName(rootDir: string): string {
   return `dsh-profile-${createHash('sha256').update(resolve(rootDir)).digest('hex')}`;
 }
 
+/** One `llm-deepseek.models` entry: the Harness resolves capabilities only here. */
+export type DeepSeekHarnessCatalogModel = {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  inputModalities: readonly ('text' | 'image')[];
+};
+
+/** The adapter-owned row this host layer extends; it reads the user's settings section. */
+const LLM_DEEPSEEK_CONFIG_ROW = /^(- id: llm-deepseek\n {2}config: !!js )("(?:[^"\\]|\\.)*")$/mu;
+
+/**
+ * Add the gateway catalog to the adapter's own `llm-deepseek` row.
+ *
+ * The Harness cannot infer image support from the endpoint: `/v1/models`
+ * returns ids only, so every model resolves text-only and ACP `initialize`
+ * cannot advertise image prompts. The generated row already loads the user's
+ * `settings.yaml` section, so this extends that expression instead of restating
+ * it: a catalog the user declared keeps winning, and every other field keeps
+ * its exact upstream meaning.
+ *
+ * A row we cannot recognize leaves the patch untouched, so an adapter that
+ * reformats it degrades to the previous behavior instead of failing the launch.
+ */
+export function withDeepSeekModelCatalog(
+  cordisPatchYml: string,
+  modelCatalog: readonly DeepSeekHarnessCatalogModel[] | undefined
+): string {
+  if (!modelCatalog?.length) return cordisPatchYml;
+  const [, rowPrefix, rowLiteral] = LLM_DEEPSEEK_CONFIG_ROW.exec(cordisPatchYml) ?? [];
+  if (!rowPrefix || !rowLiteral) return cordisPatchYml;
+  let configured: unknown;
+  try {
+    configured = JSON.parse(rowLiteral);
+  } catch {
+    return cordisPatchYml;
+  }
+  if (typeof configured !== 'string') return cordisPatchYml;
+  const expression = `(() => {
+  const configured = (${configured});
+  return configured.models === void 0 ? { ...configured, models: ${JSON.stringify(modelCatalog)} } : configured;
+})()`;
+  return cordisPatchYml.replace(
+    rowPrefix + rowLiteral,
+    `${rowPrefix}${JSON.stringify(expression)}`
+  );
+}
+
 export async function resolveDeepSeekHarnessProcessLaunch(options: {
   adapterPath: string;
   rootDir?: string;
@@ -321,6 +370,8 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
   extraArgs?: string[];
   /** Host-only plugin CLI arguments, never accepted from RPC. */
   pluginArgs?: string[];
+  /** Gateway catalog that teaches the Harness which models accept images. */
+  modelCatalog?: readonly DeepSeekHarnessCatalogModel[];
 }) {
   const legacyHome = options.rootDir ?? resolveDeepSeekHarnessHome();
   const rootDir = options.providerId
@@ -336,6 +387,12 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
     sessionCompression,
     reasoningEffort: 'max',
   });
+  // Content-addressed: a different catalog is a different host layer, which
+  // keeps the config the process actually loaded identifiable from its path.
+  const cordisPatchYml = withDeepSeekModelCatalog(
+    profileFiles.cordisPatchYml,
+    options.modelCatalog
+  );
   await mkdir(sessionsRoot, { recursive: true });
   // Host machinery is a generated bundle; the final profile patch belongs to the user.
   // Bundle identity changes with the installed adapter, but the editable path never does.
@@ -359,7 +416,7 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
   name: ${JSON.stringify(options.adapterPath.startsWith('file:') ? options.adapterPath : pathToFileURL(options.adapterPath).href)}
 `;
   const fingerprint = createHash('sha256')
-    .update(profileFiles.cordisPatchYml)
+    .update(cordisPatchYml)
     .update(guardPatch)
     .digest('hex')
     .slice(0, 16);
@@ -380,7 +437,7 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
             dsh: { bundle: { patch: './cordis.patch.yml' } },
           }) + '\n'
         ),
-        publishFileAtomically(join(bundleDir, 'cordis.patch.yml'), profileFiles.cordisPatchYml),
+        publishFileAtomically(join(bundleDir, 'cordis.patch.yml'), cordisPatchYml),
         publishFileAtomically(join(bundleDir, 'host.patch.yml'), guardPatch),
       ]);
       const generated = DshProfileManifestSchema.parse(JSON.parse(profileFiles.packageJson));
