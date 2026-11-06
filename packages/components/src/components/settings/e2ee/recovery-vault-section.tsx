@@ -98,9 +98,11 @@ export function RecoveryVaultSection() {
               {t(
                 result.code.includes('e2ee_recovery_disabled')
                   ? 'e2ee.recovery.disabled'
-                  : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
-                    ? 'e2ee.recovery.wrongFile'
-                    : 'e2ee.recovery.failed'
+                  : result.code.includes('e2ee_recovery_exists')
+                    ? 'e2ee.recovery.exists'
+                    : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
+                      ? 'e2ee.recovery.wrongFile'
+                      : 'e2ee.recovery.failed'
               )}
             </Alert.Description>
           </Alert.Root>

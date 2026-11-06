@@ -6063,6 +6063,7 @@
   "e2ee.recovery.failed": "The recovery file could not be created or opened. Check the file and your connection, then try again.",
   "e2ee.recovery.wrongFile": "This file does not open a Lody recovery vault for this account.",
   "e2ee.recovery.disabled": "Recovery files are turned off in this build.",
+  "e2ee.recovery.exists": "This account already has a recovery file, so a new one was not created. Keep using your existing file.",
   "e2ee.security.refresh": "Refresh status",
   "e2ee.security.devices": "Authorized devices and machines",
   "e2ee.security.thisDevice": "This device",

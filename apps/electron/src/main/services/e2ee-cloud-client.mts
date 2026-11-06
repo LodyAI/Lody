@@ -885,6 +885,13 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     staging,
     /** Opaque recovery-vault ciphertext storage. Login gates retrieval only; the
      * service never decrypts, selects ledger trust or proves an active Recovery device. */
+    /** Whether this account already has a vault. One account has one vault. */
+    hasRecoveryVault: (signal?: AbortSignal) =>
+      request(
+        (client) => client.query(api.e2eeRecoveryVault.hasAccountVault, {}),
+        z.object({ exists: z.boolean() }),
+        signal
+      ).pipe(Effect.map((reply) => reply.exists)),
     recoveryVault: (signal?: AbortSignal): RecoveryVaultStore['Service'] => {
       const ciphertext = (value: unknown) => {
         if (value === null) return Effect.succeed(null)

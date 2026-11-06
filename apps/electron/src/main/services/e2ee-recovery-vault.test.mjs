@@ -58,6 +58,8 @@ function syntheticService() {
         })
         return response({ outcome: 'Committed' })
       }
+      case 'e2eeRecoveryVault:hasAccountVault':
+        return response({ exists: entries.size > 0 })
       default:
         throw new Error(`unexpected endpoint ${path}`)
     }
@@ -76,7 +78,7 @@ async function withClient(service, work) {
         fetch: service.fetch
       }).pipe(Scope.provide(scope))
     )
-    return await work(client.recoveryVault())
+    return await work(client.recoveryVault(), client)
   } finally {
     await Effect.runPromise(Scope.close(scope, Exit.void))
   }
@@ -99,6 +101,7 @@ void test('creates an account vault, reopens it from the saved file through the 
         createAccountRecoveryVault({
           journalPath,
           store,
+          exists: Effect.succeed(false),
           locator: 'https://synthetic.convex.cloud',
           persist: (file) =>
             Effect.sync(() => {
@@ -156,6 +159,7 @@ void test('a save whose read-back differs fails before the vault is reported cre
           createAccountRecoveryVault({
             journalPath: join(dir, 'recovery-vault.sqlite'),
             store,
+            exists: Effect.succeed(false),
             locator: 'https://synthetic.convex.cloud',
             persist: (file) => Effect.sync(() => file.subarray(0, file.length - 1))
           })
@@ -167,6 +171,66 @@ void test('a save whose read-back differs fails before the vault is reported cre
       recoveryVaultFailure(Exit.isFailure(exit) ? exit.cause.reasons[0]?.error : null).message,
       'e2ee_recovery_storage'
     )
+    assert.equal(service.entries.size, 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('an account with a vault creates nothing and writes no file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    service.entries.set('existing/entry', {})
+    let saved = 0
+    const failed = await withClient(service, (store, client) =>
+      Effect.runPromise(
+        Effect.exit(
+          createAccountRecoveryVault({
+            journalPath: join(dir, 'recovery-vault.sqlite'),
+            store,
+            exists: client.hasRecoveryVault(),
+            locator: 'https://synthetic.convex.cloud',
+            persist: (file) =>
+              Effect.sync(() => {
+                saved += 1
+                return new Uint8Array(file)
+              })
+          })
+        )
+      )
+    )
+    assert.equal(Exit.isFailure(failed), true)
+    assert.equal(
+      recoveryVaultFailure(Exit.isFailure(failed) ? failed.cause.reasons[0]?.error : null).message,
+      'e2ee_recovery_exists'
+    )
+    assert.equal(saved, 0)
+    assert.equal(service.entries.size, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('a failed save uploads nothing, so the account can still create a vault', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const failed = await withClient(service, (store) =>
+      Effect.runPromise(
+        Effect.exit(
+          createAccountRecoveryVault({
+            journalPath: join(dir, 'recovery-vault.sqlite'),
+            store,
+            exists: Effect.succeed(false),
+            locator: 'https://synthetic.convex.cloud',
+            persist: () => Effect.fail(new Error('synthetic disk full'))
+          })
+        )
+      )
+    )
+    assert.equal(Exit.isFailure(failed), true)
+    assert.equal(service.entries.size, 0)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

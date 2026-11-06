@@ -593,6 +593,8 @@ export const createRecoveryVault = Effect.fnUntraced(function* (input: {
   locator: string;
   store: RecoveryVaultStore;
   local: RecoveryVaultLocalStore;
+  /** Runs before anything reaches the service, so a failed save leaves no vault behind. */
+  persistFile?: (file: Uint8Array) => Effect.Effect<unknown, unknown>;
 }) {
   if (!input.locator || input.locator.length > 2048) return yield* vaultError('invalid-input');
   const vaultId = yield* attempt(() => hex(random(32))),
@@ -613,11 +615,17 @@ export const createRecoveryVault = Effect.fnUntraced(function* (input: {
             secret.master
           )
         );
+        if (input.persistFile)
+          yield* input
+            .persistFile(new Uint8Array(recoveryFile))
+            .pipe(Effect.mapError(() => vaultError('storage')));
         yield* input.store.putImmutable(vaultId, wrapped);
         const read = yield* input.store.readEntry(vaultId, vaultId);
         if (!read || !sameCiphertext(wrapped, read)) return yield* vaultError('storage');
         const vault = yield* makeSession({
-          ...input,
+          locator: input.locator,
+          store: input.store,
+          local: input.local,
           vaultId,
           master: new Uint8Array(secret.master),
         });

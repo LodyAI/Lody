@@ -6052,6 +6052,7 @@
   "e2ee.recovery.failed": "无法创建或打开恢复文件。请检查文件与网络连接后重试。",
   "e2ee.recovery.wrongFile": "此文件无法打开本账号的 Lody 恢复保险库。",
   "e2ee.recovery.disabled": "此版本已关闭恢复文件功能。",
+  "e2ee.recovery.exists": "这个账号已有恢复文件，所以没有新建。请继续使用现有文件。",
   "e2ee.security.refresh": "刷新状态",
   "e2ee.security.devices": "已授权设备与机器",
   "e2ee.security.thisDevice": "本设备",

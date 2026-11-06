@@ -3226,6 +3226,7 @@ export class E2eeIpc extends IpcService {
       accountId: string
       store: RecoveryVaultStore['Service']
       journalPath: string
+      exists: Effect.Effect<boolean, unknown>
     }) => Effect.Effect<A, unknown>
   ): Promise<A> {
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
@@ -3235,7 +3236,8 @@ export class E2eeIpc extends IpcService {
         work({
           accountId,
           store: client.recoveryVault(),
-          journalPath: desktopE2eeRecoveryJournalPath(accountId)
+          journalPath: desktopE2eeRecoveryJournalPath(accountId),
+          exists: client.hasRecoveryVault()
         })
       ).catch((error) => {
         throw recoveryVaultFailure(error)
@@ -3253,6 +3255,8 @@ export class E2eeIpc extends IpcService {
   async createRecoveryVault() {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    if (await this.recoveryOperation(({ exists }) => exists))
+      throw new Error('e2ee_recovery_exists')
     const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
     const options = {
       defaultPath: 'lody-recovery.lodyrecovery',
@@ -3263,10 +3267,11 @@ export class E2eeIpc extends IpcService {
       : await dialog.showSaveDialog(options)
     if (target.canceled || !target.filePath) return { outcome: 'cancelled' as const }
     const path = target.filePath
-    const created = await this.recoveryOperation(({ store, journalPath }) =>
+    const created = await this.recoveryOperation(({ store, journalPath, exists }) =>
       createAccountRecoveryVault({
         store,
         journalPath,
+        exists,
         locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
         persist: (file) =>
           Effect.tryPromise(async () => {

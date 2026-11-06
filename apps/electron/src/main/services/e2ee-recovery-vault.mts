@@ -13,6 +13,7 @@ export const MAX_RECOVERY_FILE_BYTES = 4096
 
 const publicCodes = new Set([
   'invalid-input',
+  'exists',
   'authentication',
   'rollback',
   'storage',
@@ -51,41 +52,45 @@ const vaults = (io: RecoveryVaultIo) =>
   )
 
 /**
- * Create the account vault and prove the saved file reopens it. `persist`
- * writes the file and returns the bytes actually read back from disk; the vault
- * is reopened from those bytes, never from the in-memory copy. If saving fails
- * after upload, the unreferenced vault ciphertext stays on the service but
- * nothing can open it. Every file copy owned here is wiped before returning.
+ * Create the account vault and prove the saved file reopens it. One account has
+ * one vault, so an existing vault stops this before anything is written. `persist`
+ * writes the file and returns the bytes actually read back from disk; it runs before
+ * any upload, because a vault without a saved file would block every later attempt,
+ * and the vault is reopened from those bytes, never from the in-memory copy. If the
+ * upload then fails, the saved file opens nothing. Every file copy owned here is wiped.
  */
 export const createAccountRecoveryVault = (
   io: RecoveryVaultIo & {
     readonly locator: string
+    readonly exists: Effect.Effect<boolean, unknown>
     readonly persist: (file: Uint8Array) => Effect.Effect<Uint8Array, unknown>
   }
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
+      if (yield* io.exists) return yield* Effect.fail({ code: 'exists' })
       const service = yield* RecoveryVaults
-      const created = yield* service.create({ locator: io.locator })
-      return yield* Effect.acquireUseRelease(
-        Effect.succeed(created.recoveryFile),
-        (file) =>
-          Effect.acquireUseRelease(
-            io.persist(new Uint8Array(file)),
-            (saved) =>
-              Effect.gen(function* () {
-                if (saved.length !== file.length || saved.some((byte, i) => byte !== file[i]))
-                  return yield* Effect.fail({ code: 'storage' })
-                const reopened = yield* service.open({ recoveryFile: new Uint8Array(saved) })
-                if (reopened.vaultId !== created.vault.vaultId)
-                  return yield* Effect.fail({ code: 'authentication' })
-                yield* reopened.readIndex()
-                return { vaultId: reopened.vaultId }
-              }),
-            (saved) => Effect.sync(() => saved.fill(0))
-          ),
-        (file) => Effect.sync(() => file.fill(0))
-      )
+      let saved: Uint8Array = new Uint8Array()
+      return yield* Effect.gen(function* () {
+        const created = yield* service.create({
+          locator: io.locator,
+          persistFile: (file) =>
+            io.persist(new Uint8Array(file)).pipe(
+              Effect.flatMap((read) => {
+                saved = read
+                return read.length === file.length && read.every((byte, i) => byte === file[i])
+                  ? Effect.void
+                  : Effect.fail({ code: 'storage' })
+              })
+            )
+        })
+        created.recoveryFile.fill(0)
+        const reopened = yield* service.open({ recoveryFile: new Uint8Array(saved) })
+        if (reopened.vaultId !== created.vault.vaultId)
+          return yield* Effect.fail({ code: 'authentication' })
+        yield* reopened.readIndex()
+        return { vaultId: reopened.vaultId }
+      }).pipe(Effect.ensuring(Effect.sync(() => saved.fill(0))))
     }).pipe(Effect.provide(vaults(io)))
   )
 
