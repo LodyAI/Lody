@@ -6152,7 +6152,7 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it('does not create a native session when expected create history cannot be read', async () => {
+  it('continues without replay when expected create history cannot be read', async () => {
     const currentTurn: SessionHistoryInput = {
       id: 'turn-current',
       role: 'user',
@@ -6172,7 +6172,28 @@ describe('SessionExecutionService', () => {
       getHistory: vi.fn(() => [currentTurn]),
       updateHistory: vi.fn(async () => {}),
     });
-    const createSession = vi.fn();
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      prompt: vi.fn(async () => ({})),
+      currentModel: undefined,
+    };
+    const createdSession = {
+      sessionId: 'session-history-unavailable' as SessionId,
+      acpSessionId: 'acp-history-unavailable' as ACPSessionId,
+      agentClient,
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-history-unavailable'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const createSession = vi.fn(async () => createdSession as unknown);
+    const buildAcpPromptBlocks = vi.fn(async () => [{ type: 'text' as const, text: 'and now?' }]);
     const deps = createBaseDeps({
       sessionManager: {
         getSession: vi.fn(() => null),
@@ -6190,6 +6211,7 @@ describe('SessionExecutionService', () => {
         getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
         updateAcpCapabilities: vi.fn(async () => {}),
       } as unknown as LoroDocumentManager,
+      buildAcpPromptBlocks,
     });
 
     const service = new SessionExecutionService(deps);
@@ -6213,12 +6235,16 @@ describe('SessionExecutionService', () => {
       userEmail: 'user@example.com',
     });
 
-    expect(createSession).not.toHaveBeenCalled();
-    expect(deps.recordChatFailure).toHaveBeenCalledWith(
-      expect.anything(),
-      'turn_pre_prompt_failed',
-      expect.stringContaining('history unavailable')
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(buildAcpPromptBlocks).toHaveBeenCalledWith(
+      expect.objectContaining({ replayPromptText: undefined })
     );
+    expect(agentClient.prompt).toHaveBeenCalledWith(
+      'acp-history-unavailable',
+      [{ type: 'text', text: 'and now?' }],
+      { signal: expect.any(AbortSignal) }
+    );
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
   });
 
   it('waits for late-syncing history before replacing an unresumable ACP session', async () => {

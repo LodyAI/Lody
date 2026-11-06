@@ -73,7 +73,7 @@ that id is written. A later send still uses create so that workspace preparation
 runs, but includes the earlier input as context. A genuinely new turn skips the
 history read; when metadata pointers or imported turn count prove earlier turns
 exist, create waits on the bounded mirror subscription before opening the native
-session and fails before `createSession` if nothing replayable arrives. The current
+session, then proceeds without replay if nothing replayable arrives. The current
 user turn and its deterministic `assistant:<userTurnId>` entry are excluded so a
 re-dispatched turn cannot replay its own output or make an empty assistant entry
 look like synced prior context. Routing these sessions to `continue` would skip
@@ -98,10 +98,11 @@ expiries; a turn failing on `OAuth session expired` records `acp_auth_required`
 and terminates with `force = false`; a resume failure wrapping an auth cause
 halts without a second `createSession`; an unsynced history refuses the
 context-free fallback; and late-arriving history is awaited through a mirror
-subscription and reaches the prompt as replay text. The late-sync test drives the
-subscription from a microtask, so it asserts the signal rather than a sleep.
+subscription and reaches the prompt as replay text. A create turn continues
+without replay when expected history cannot be read. The late-sync test drives
+the subscription from a microtask, so it asserts the signal rather than a sleep.
 
 Not verified: no real provider credential was expired against a live adapter, so
 which adapters actually lose their transcript on `SIGKILL` — the premise for the
 graceful close — is inferred from the ACP contract rather than measured. The
-15s history-sync bound is a judgement, not a measurement.
+30s history-sync bound is a judgement, not a measurement.

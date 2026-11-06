@@ -30,8 +30,8 @@ A new send after failed first startup still uses create dispatch when no native
 ACP session id exists. Create preserves workspace preparation and includes earlier
 history as prompt context, excluding the current user turn and its assistant entry.
 When metadata or imported history proves earlier turns exist, it waits briefly for
-the local mirror to sync and fails before creating a native ACP session if no
-replayable content arrives. A genuinely new turn skips that history read. The
+the local mirror to sync, then proceeds without replay if no replayable content
+arrives. A genuinely new turn skips that history read. The
 [context recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-oauth-expiry-context-loss.md)
 explains why missing native state does not imply an empty conversation.
 

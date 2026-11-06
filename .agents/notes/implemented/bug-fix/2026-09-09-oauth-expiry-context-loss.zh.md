@@ -57,7 +57,7 @@ fallback 也会拒绝启动一个没有上下文的会话，而不是无声降�
 恢复历史。缺少 `meta.acpSessionId` 不代表历史为空：第一条 turn 可能在进程启动期间、
 写入该 id 之前就失败。全新 turn 不读取历史；当 metadata 指针或导入 turn 数量证明存在
 更早的 turn 时，create 会先在有界的 mirror 订阅上等待，再打开 native session；若等不到
-可 replay 的内容，则在 `createSession` 之前失败。当前用户 turn 及其确定性的
+可 replay 的内容，则不带 replay 继续创建。当前用户 turn 及其确定性的
 `assistant:<userTurnId>` entry 会被排除，避免重分发的 turn replay 自己的旧输出，或让空白
 assistant entry 冒充已同步的前序上下文。后续发送仍走 create，保留工作区准备步骤，同时
 把之前的输入作为上下文。把这些会话改走 `continue` 会跳过 create 独有的 worktree 准备。
@@ -77,10 +77,10 @@ replay 本身按设计仍是有损的：上限 10 万字符，先丢终端输出
 同时拒绝无关的过期；因 `OAuth session expired` 失败的 turn 记录 `acp_auth_required`
 并以 `force = false` 终止；包装了认证原因的 resume 失败会停止且不再调用第二次
 `createSession`；未同步的历史会拒绝无上下文的 fallback；迟到的历史通过 mirror 订阅
-被等到并作为 replay 文本进入 prompt；create 在读不到预期历史时不创建 native session。
+被等到并作为 replay 文本进入 prompt；create 在读不到预期历史时仍继续，只是不带 replay。
 迟到同步的测试把当前 turn 的 assistant entry 也放进初始历史，并用 microtask 驱动订阅，
 断言等待的是前序历史而非当前 turn 的空壳，也不是睡眠。
 
 未验证：没有对活的适配器真实制造过期凭据，因此"哪些适配器会在 `SIGKILL` 时丢失
-transcript"——优雅关闭这一修复的前提——是依据 ACP 契约推断的，而非实测。15 秒的历史
+transcript"——优雅关闭这一修复的前提——是依据 ACP 契约推断的，而非实测。30 秒的历史
 同步上限是判断值，不是测量值。

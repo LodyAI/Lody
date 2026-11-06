@@ -246,17 +246,6 @@ const CONTEXT_FREE_RESTORE_MESSAGE =
   'started — retry once the session finishes syncing so the agent keeps its history.';
 
 /**
- * Shown when create dispatch has evidence of earlier turns but this machine has
- * not synced any of them. Starting a fresh agent would silently answer as if
- * those turns never happened, so the turn is failed before a native session is
- * created and the user can retry once history arrives.
- */
-const CONTEXT_FREE_CREATE_MESSAGE =
-  'This session has earlier turns that have not synced to this machine yet, so the agent ' +
-  'would start without their context. The turn was not started — retry once the session ' +
-  'finishes syncing.';
-
-/**
  * Shown in chat when a turn ends with no agent output at all. It names the most
  * common upstream cause without asserting it, because the adapter discarded the
  * real error before we could classify it.
@@ -6127,10 +6116,10 @@ export class SessionExecutionService {
 
   /**
    * Create dispatch has no `meta.acpSessionId`, but that does not prove the
-   * conversation is empty: a first start can fail during process startup. Wait
-   * for the local mirror to carry earlier turns before creating a native
-   * session, because creating it first would persist an ACP id and make the
-   * next dispatch a `continue` that never builds this replay.
+   * conversation is empty: a first start can fail during process startup.
+   * Replay is best-effort. Wait briefly for earlier turns, but if the mirror or
+   * backend cannot provide them, start the requested turn without replay rather
+   * than blocking a session that otherwise could run.
    */
   private hasPriorCreateHistory(
     meta: SessionMeta | undefined,
@@ -6154,24 +6143,37 @@ export class SessionExecutionService {
       return undefined;
     }
 
-    const replayHistory = await this.waitForReplayableHistory({
-      sessionId,
-      sessionDoc,
-      excludeTurnId: userTurnId,
-    });
-    const hasReplayableEntry = replayHistory.some(
-      (entry) =>
-        !isReplayEntryExcluded(entry, userTurnId) &&
-        (entry.role === 'user' || entry.role === 'assistant')
-    );
-    if (!hasReplayableEntry) {
-      throw new Error(CONTEXT_FREE_CREATE_MESSAGE);
+    try {
+      const replayHistory = await this.waitForReplayableHistory({
+        sessionId,
+        sessionDoc,
+        excludeTurnId: userTurnId,
+      });
+      const hasReplayableEntry = replayHistory.some(
+        (entry) =>
+          !isReplayEntryExcluded(entry, userTurnId) &&
+          (entry.role === 'user' || entry.role === 'assistant')
+      );
+      if (!hasReplayableEntry) {
+        this.deps.logger.warn(
+          `[${sessionId}] Continuing create without history replay; prior turns were expected but none are replayable`
+        );
+        return undefined;
+      }
+      const replay = await this.buildHistoryReplay(sessionDoc, userTurnId);
+      if (replay.stats.messagesIncluded === 0) {
+        this.deps.logger.warn(
+          `[${sessionId}] Continuing create without history replay; replay contained no messages`
+        );
+        return undefined;
+      }
+      return replay;
+    } catch (error) {
+      this.deps.logger.warn(
+        `[${sessionId}] Continuing create without history replay: ${formatErrorMessage(error)}`
+      );
+      return undefined;
     }
-    const replay = await this.buildHistoryReplay(sessionDoc, userTurnId);
-    if (replay.stats.messagesIncluded === 0) {
-      throw new Error(CONTEXT_FREE_CREATE_MESSAGE);
-    }
-    return replay;
   }
 
   private async getSessionBackend(
