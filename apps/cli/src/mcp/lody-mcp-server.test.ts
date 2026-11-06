@@ -527,19 +527,21 @@ describe('session MCP input schemas', () => {
         oneOf: expect.arrayContaining([
           expect.objectContaining({
             type: 'object',
-            properties: expect.objectContaining({ kind: { const: 'chat', type: 'string' } }),
+            properties: expect.objectContaining({
+              kind: expect.objectContaining({ const: 'chat', type: 'string' }),
+            }),
           }),
           expect.objectContaining({
             type: 'object',
             properties: expect.objectContaining({
-              kind: { const: 'github', type: 'string' },
+              kind: expect.objectContaining({ const: 'github', type: 'string' }),
               repo: expect.objectContaining({ type: 'string' }),
             }),
           }),
           expect.objectContaining({
             type: 'object',
             properties: expect.objectContaining({
-              kind: { const: 'local', type: 'string' },
+              kind: expect.objectContaining({ const: 'local', type: 'string' }),
               projectId: expect.objectContaining({ type: 'string' }),
             }),
           }),

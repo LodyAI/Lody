@@ -4,11 +4,11 @@ import { SessionProjectRunSchema, type LocalProjectId } from '@lody/shared';
 import { buildPrompt } from '../src/session/session-execution-helpers';
 
 describe('session execution prompt helpers', () => {
-  it('replaces detailed Lody MCP guidance with a concise reminder', () => {
+  it('requires command-specific help before executing Lody commands', () => {
     const prompt = buildPrompt('inspect the UI');
 
     expect(prompt).toBe(
-      'inspect the UI\n\nUse the available Lody MCP tools when relevant; rely on their tool descriptions for complete, current capabilities and usage guidance.'
+      'inspect the UI\n\nUse the available Lody MCP tools when relevant. Before executing a Lody command, you MUST call lody_help({command: TOOL_NAME}) and read its successful command-specific response. The index and short summaries do not replace full help. Read help before issuing the command, never in parallel with it. Reuse full help already in the current context; after compaction or loss, fetch it again. lody_help itself is exempt.'
     );
   });
 
