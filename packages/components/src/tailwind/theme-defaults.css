@@ -67,6 +67,7 @@
   --color-black: #000;
   --color-white: #fff;
   --spacing: 0.25rem;
+  --container-4xl: 56rem;
   --text-xs: 0.75rem;
   --text-xs--line-height: calc(1 / 0.75);
   --text-sm: 0.875rem;

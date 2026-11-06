@@ -6,6 +6,18 @@ import { Button } from '@lody/ui/button';
 
 import { MobileFileViewerDrawer } from '@/components/mobile/mobile-file-viewer-drawer';
 import { SessionFileErrorState } from '@/components/sessions/session-file-error-state';
+const viewerStory = stylex.create({
+  source: {
+    height: '100%',
+    overflow: 'auto',
+    padding: 'calc(var(--spacing) * 4)',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'calc(var(--spacing) * 5)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 const storyLayout = stylex.create({
   frame: {
     height: '100dvh',
@@ -47,7 +59,7 @@ function MobileFileViewerDrawerStory({
         {error ? (
           <SessionFileErrorState message={error} />
         ) : (
-          <pre className="h-full overflow-auto p-4 font-mono text-xs leading-5 text-foreground">
+          <pre {...stylex.props(viewerStory.source)}>
             {long
               ? Array.from(
                   { length: 60 },

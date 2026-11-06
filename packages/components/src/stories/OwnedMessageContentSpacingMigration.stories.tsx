@@ -102,7 +102,6 @@ function ScopedContentCases() {
           )
         ) {
           label.style.setProperty('--spacing', '5px');
-          label.style.setProperty('--tw-space-y-reverse', '1');
         }
       }
       const title = [...root.querySelectorAll('span')].find(
@@ -110,7 +109,6 @@ function ScopedContentCases() {
       );
       const card = title?.parentElement?.parentElement?.parentElement;
       card?.style.setProperty('--spacing', '5px');
-      card?.style.setProperty('--tw-space-y-reverse', '1');
       root.dataset.writersReady = String(Boolean(root.querySelector('img') && card));
     };
     apply();
@@ -125,7 +123,7 @@ function ScopedContentCases() {
   return (
     <div
       data-spacing-scopes
-      style={{ '--spacing': '6px', '--tw-space-y-reverse': '1' } as CSSProperties}
+      style={{ '--spacing': '6px' } as CSSProperties}
     >
       <Row name="outer" items={items} />
       <div style={{ '--spacing': '3px' } as CSSProperties}>

@@ -17,6 +17,43 @@ import {
   SidebarRail,
   useSidebar,
 } from '@/ui/sidebar';
+const storyCallerStyles = stylex.create({
+  layoutOverride: {
+    position: 'relative',
+    'z-index': '0',
+    'margin-inline': 'calc(var(--spacing) * 1)',
+    width: 'calc(var(--spacing) * 9)',
+    'flex-direction': 'row',
+    gap: 'calc(var(--spacing) * 3)',
+    'padding-inline': 'calc(var(--spacing) * 1)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+  },
+  wildcard: {
+    ':is(*) *': {
+      position: 'relative',
+      'z-index': '0',
+      'margin-inline': 'calc(var(--spacing) * 1)',
+      width: 'calc(var(--spacing) * 7)',
+      'min-width': 'calc(var(--spacing) * 0)',
+      gap: 'calc(var(--spacing) * 3)',
+      'padding-inline': 'calc(var(--spacing) * 1)',
+      'padding-block': 'calc(var(--spacing) * 1)',
+    },
+  },
+  targeted: {
+    ':is(*) [data-edge-part]': {
+      position: 'relative',
+      'z-index': '0',
+      'margin-inline': 'calc(var(--spacing) * 1)',
+      width: 'calc(var(--spacing) * 7)',
+      'min-width': 'calc(var(--spacing) * 0)',
+      gap: 'calc(var(--spacing) * 3)',
+      'padding-inline': 'calc(var(--spacing) * 1)',
+      'padding-block': 'calc(var(--spacing) * 1)',
+    },
+  },
+});
+
 const styles = stylex.create({
   outer: { position: 'relative' },
   content: { padding: 16 },
@@ -69,15 +106,15 @@ function Fixture({ mode = 'natural', none = false }: { mode?: string; none?: boo
     vertical = mode === 'vertical';
   const caller =
     mode === 'opaque'
-      ? stylex.props(styles.opaque).className
+      ? styles.opaque
       : mode === 'utility'
-        ? 'relative w-9 z-0 mx-1 flex-row gap-3 px-1 py-1'
+        ? storyCallerStyles.layoutOverride
         : undefined;
   const ancestor =
     mode === 'wildcard'
-      ? '[&_*]:w-7 [&_*]:min-w-0 [&_*]:relative [&_*]:z-0 [&_*]:gap-3 [&_*]:px-1 [&_*]:py-1 [&_*]:mx-1'
+      ? stylex.props(storyCallerStyles.wildcard).className
       : mode === 'targeted'
-        ? '[&_[data-edge-part]]:w-7 [&_[data-edge-part]]:min-w-0 [&_[data-edge-part]]:relative [&_[data-edge-part]]:z-0 [&_[data-edge-part]]:gap-3 [&_[data-edge-part]]:px-1 [&_[data-edge-part]]:py-1 [&_[data-edge-part]]:mx-1'
+        ? stylex.props(storyCallerStyles.targeted).className
         : undefined;
   return (
     <div
@@ -107,7 +144,7 @@ function Fixture({ mode = 'natural', none = false }: { mode?: string; none?: boo
               <SidebarGroupContent>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuSub data-edge-part="sub" className={caller} ref={ref}>
+                    <SidebarMenuSub data-edge-part="sub" xstyle={caller} ref={ref}>
                       <SidebarMenuSubItem>
                         <SidebarMenuSubButton
                           href="#sidebar-edge-native"
@@ -135,7 +172,7 @@ function Fixture({ mode = 'natural', none = false }: { mode?: string; none?: boo
               </SidebarGroupContent>
             </SidebarGroup>
           </SidebarContent>
-          <SidebarRail data-edge-part="rail" className={caller} ref={ref} />
+          <SidebarRail data-edge-part="rail" xstyle={caller} ref={ref} />
         </Sidebar>
         <SidebarInset>
           <div {...stylex.props(styles.content)}>

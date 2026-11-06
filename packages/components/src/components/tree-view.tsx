@@ -138,6 +138,7 @@ interface TreeDataItem {
   droppable?: boolean;
   disabled?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 type TreeRenderItemParams = {
@@ -430,7 +431,8 @@ const TreeNode = ({
         : styles.rowSelected
       : isDragOver
         ? styles.rowDragOver
-        : styles.rowIdle
+        : styles.rowIdle,
+    item.xstyle
   );
 
   return (
@@ -443,6 +445,9 @@ const TreeNode = ({
           aria-selected={isSelected}
           aria-disabled={item.disabled === true ? true : undefined}
           className={clsx(rowProps.className, GROUP_CLASS, item.className)}
+          {...(rowProps.style && {
+            style: { paddingLeft: level * TREE_INDENT_PX + 8, ...rowProps.style },
+          })}
           onClick={() => {
             handleSelectChange(item);
             item.onClick?.();
@@ -571,7 +576,8 @@ const TreeLeaf = React.forwardRef<
           : styles.rowSelected
         : isDragOver
           ? styles.rowDragOver
-          : styles.rowIdle
+          : styles.rowIdle,
+      item.xstyle
     );
     const leafProps = stylex.props(styles.leaf, item.disabled && styles.leafDisabled);
 
@@ -589,7 +595,7 @@ const TreeLeaf = React.forwardRef<
           GROUP_CLASS,
           clsx(className, item.className)
         )}
-        style={{ paddingLeft: leafPaddingLeft }}
+        style={{ ...rowProps.style, ...leafProps.style, paddingLeft: leafPaddingLeft }}
         onClick={activate}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {

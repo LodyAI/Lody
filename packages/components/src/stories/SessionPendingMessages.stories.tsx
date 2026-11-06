@@ -19,6 +19,38 @@ import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '@/atoms/runti
 import { SessionPendingMessages } from '@/components/chat/session-pending-messages';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
+const migrationStyles = stylex.create({
+  messageFrame: {
+    containerType: 'inline-size',
+    maxWidth: '100%',
+    borderRadius: 'var(--radius-xl)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    paddingTop: 'calc(var(--spacing) * 4)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  columnSpacing: {
+    paddingBlock: {
+      default: 'calc(var(--spacing) * 2)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 3)',
+    },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    borderTopStyle: 'solid',
+    borderTopWidth: '1px',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -107,14 +139,9 @@ function StoryShell({
   } as unknown as WorkspaceRuntime);
   return (
     <Provider store={store}>
-      <div
-        className="@container max-w-full rounded-xl border bg-background pt-4 shadow-xs"
-        style={{ width }}
-      >
+      <div {...stylex.props(migrationStyles.messageFrame)} style={{ width }}>
         <SessionPendingMessages sessionId={sessionId} />
-        <div className="border-t px-4 py-3 text-sm text-muted-foreground">
-          Composer stays available here.
-        </div>
+        <div {...stylex.props(storyLayoutStyles.canvas)}>Composer stays available here.</div>
       </div>
     </Provider>
   );
@@ -295,7 +322,7 @@ function UploadHandoff({ width = 720 }: { width?: number }) {
           </Button>
         </div>
         {phase === 'written' ? (
-          <ConversationColumn className="py-2 sm:py-3">
+          <ConversationColumn xstyle={migrationStyles.columnSpacing}>
             <MessageRowView
               sessionId={sessionId}
               message={

@@ -1,7 +1,7 @@
 'use client';
 
 import { Plus } from 'lucide-react';
-import { clsx } from 'clsx';
+import { withClassName } from '@/lib/stylex';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeDuration, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
@@ -35,13 +35,18 @@ const styles = stylex.create({
 interface SessionCommentAddButtonProps {
   onClick: () => void;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 /**
  * The "+" button shown when hovering over a commentable line in the diff viewer.
  * Positioned in the gutter area, similar to GitHub's review button.
  */
-export function SessionCommentAddButton({ onClick, className }: SessionCommentAddButtonProps) {
+export function SessionCommentAddButton({
+  onClick,
+  className,
+  xstyle,
+}: SessionCommentAddButtonProps) {
   return (
     <button
       type="button"
@@ -49,7 +54,7 @@ export function SessionCommentAddButton({ onClick, className }: SessionCommentAd
         e.stopPropagation();
         onClick();
       }}
-      className={clsx(stylex.props(styles.button).className, className)}
+      {...withClassName(stylex.props(styles.button, xstyle), className)}
       aria-label="Add comment"
     >
       <Plus {...stylex.props(styles.glyph)} />

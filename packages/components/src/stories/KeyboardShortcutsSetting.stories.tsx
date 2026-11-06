@@ -1,5 +1,17 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { KeyboardShortcutsSetting } from '@/components/settings/keyboard-shortcuts-setting';
+const storyLayout = stylex.create({
+  frame: {
+    width: '560px',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 if (typeof window !== 'undefined') {
   window.__LODY_ELECTRON__ = true;
@@ -42,7 +54,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   render: () => (
-    <div className="w-[560px] rounded-lg border border-border/60 bg-background p-4">
+    <div {...stylex.props(storyLayout.frame)}>
       <KeyboardShortcutsSetting />
     </div>
   ),

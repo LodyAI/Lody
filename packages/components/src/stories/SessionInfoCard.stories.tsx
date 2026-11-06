@@ -9,6 +9,52 @@ import {
   type SessionInfoCardProps,
 } from '@/components/session-info-hover-card';
 import type { PrCiRun } from '@/components/sessions/session-info-chips';
+const hoverRowStyles = stylex.create({
+  row: {
+    display: 'flex',
+    width: '100%',
+    cursor: 'pointer',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    backgroundColor: {
+      default: null,
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+  },
+  changes: {
+    flexShrink: 0,
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+    color: 'hsl(var(--code-added) / 1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  frame: {
+    width: 'calc(var(--spacing) * 64)',
+    borderRadius: 'var(--radius-lg)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  stack: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 64)',
+    flexDirection: 'column',
+    borderRadius: 'var(--radius-lg)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     height: 'calc(var(--spacing) * 2)',
@@ -222,16 +268,12 @@ export const LongBranchName: Story = {
 export const HoverInteraction: Story = {
   args: { historyBackend: 'roost' },
   render: (args) => (
-    <div className="w-64 rounded-lg border border-border p-2">
+    <div {...stylex.props(storyLayoutStyles.frame)}>
       <SessionInfoHoverCard {...args} {...githubArgs} prCiRuns={ciPassing} standalone={false}>
-        <div
-          role="button"
-          tabIndex={0}
-          className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-hover"
-        >
+        <div role="button" tabIndex={0} {...stylex.props(hoverRowStyles.row)}>
           <span {...stylex.props(storyLayout.frame)} />
           <span {...stylex.props(storyLayout.label)}>{args.title}</span>
-          <span className="shrink-0 text-[11px] tabular-nums text-code-added">+312</span>
+          <span {...stylex.props(hoverRowStyles.changes)}>+312</span>
         </div>
       </SessionInfoHoverCard>
     </div>
@@ -270,7 +312,7 @@ const listRows: Array<Partial<SessionInfoCardProps> & { title: string }> = [
  */
 export const HoverAcrossRows: Story = {
   render: (args) => (
-    <div className="flex w-64 flex-col rounded-lg border border-border p-2">
+    <div {...stylex.props(storyLayoutStyles.stack)}>
       {listRows.map((row) => (
         <SessionInfoHoverCard
           key={row.title}
@@ -283,7 +325,7 @@ export const HoverAcrossRows: Story = {
             role="button"
             tabIndex={0}
             data-row={row.title}
-            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-hover"
+            {...stylex.props(hoverRowStyles.row)}
           >
             <span {...stylex.props(storyLayout.label)}>{row.title}</span>
           </div>

@@ -133,13 +133,12 @@ const CollapsibleCard = ({
   allowStickyChildren = false,
   ...props
 }: CollapsibleCardProps) => {
+  const sx = stylex.props(styles.card, !allowStickyChildren && styles.clipped, xstyle);
   return (
     <Collapsible.Root
       {...props}
-      className={clsx(
-        stylex.props(styles.card, !allowStickyChildren && styles.clipped, xstyle).className,
-        className
-      )}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...props.style } : props.style}
     >
       {children}
     </Collapsible.Root>
@@ -161,15 +160,14 @@ const CollapsibleCardHeader: React.FC<CollapsibleCardHeaderProps> = ({
   ...props
 }) => {
   const headerPosition = position ?? (sticky ? 'sticky' : 'absolute');
+  const sx = stylex.props(styles.header, styles[headerPosition], xstyle);
 
   return (
     <Collapsible.Trigger asChild>
       <div
         {...props}
-        className={clsx(
-          stylex.props(styles.header, styles[headerPosition], xstyle).className,
-          className
-        )}
+        className={clsx(sx.className, className)}
+        style={sx.style ? { ...sx.style, ...props.style } : props.style}
       >
         <Button variant="ghost" aria-label="Toggle section" size="mini" icon>
           <ChevronDown {...stylex.props(styles.glyph)} aria-hidden="true" />
@@ -197,6 +195,7 @@ type CollapsibleCardContentProps = React.HTMLAttributes<HTMLDivElement> & {
   showTopFade?: boolean;
   noInternalScroll?: boolean;
   xstyle?: stylex.StyleXStyles;
+  containerXstyle?: stylex.StyleXStyles;
 };
 
 const CollapsibleCardContent: React.FC<CollapsibleCardContentProps> = ({
@@ -204,6 +203,7 @@ const CollapsibleCardContent: React.FC<CollapsibleCardContentProps> = ({
   showTopFade = true,
   noInternalScroll = false,
   xstyle,
+  containerXstyle,
   ...props
 }) => {
   const topFadeRef = useRef<HTMLDivElement>(null);
@@ -224,20 +224,19 @@ const CollapsibleCardContent: React.FC<CollapsibleCardContentProps> = ({
     }
   }
 
+  const containerStyles = stylex.props(
+    styles.content,
+    noInternalScroll ? styles.horizontalScroll : styles.clipped,
+    containerXstyle
+  );
+  const bodyStyles = stylex.props(noInternalScroll ? styles.externalBody : styles.body, xstyle);
   return (
-    <Collapsible.Content
-      className={
-        stylex.props(styles.content, noInternalScroll ? styles.horizontalScroll : styles.clipped)
-          .className
-      }
-    >
+    <Collapsible.Content className={containerStyles.className} style={containerStyles.style}>
       <div
         {...props}
         ref={contentRef}
-        className={clsx(
-          stylex.props(noInternalScroll ? styles.externalBody : styles.body, xstyle).className,
-          className
-        )}
+        className={clsx(bodyStyles.className, className)}
+        style={xstyle ? { ...bodyStyles.style, ...props.style } : props.style}
         onScroll={noInternalScroll ? undefined : onScroll}
       />
       {showTopFade && !noInternalScroll && (

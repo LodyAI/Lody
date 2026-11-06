@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useState } from 'react';
 import { type MachineId, type MachineViewMeta } from '@lody/shared';
@@ -7,6 +8,18 @@ import {
   type MachineTabItem,
 } from '@/components/settings/machine-tab-list';
 import type { MachineSettingsFilter } from '@/atoms/settings-machine-tab';
+const storyLayout = stylex.create({
+  frame: {
+    height: '480px',
+    width: '260px',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--card) / 1) 40%, transparent)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
 
 const makeMachine = (id: string, overrides: Partial<MachineViewMeta> = {}): MachineViewMeta => ({
   id: id as MachineId,
@@ -88,7 +101,7 @@ function StoryWrapper({
     initialSelected ?? items[0]?.machine.id ?? null
   );
   return (
-    <div className="h-[480px] w-[260px] rounded-lg border border-border/60 bg-card/40 p-2">
+    <div {...stylex.props(storyLayout.frame)}>
       <MachineTabList
         items={items as MachineTabItem[]}
         selectedMachineId={selected}

@@ -36,6 +36,61 @@ import { InterfaceFontController } from '@/components/interface-font-controller'
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { SessionPinContext } from '@/components/sessions/session-pin-context';
 import { createConversationViewFromHistory, type ConversationView } from '@/lib/conversation-view';
+const alignmentSceneStyles = stylex.create({
+  fill: { height: '100%' },
+  guide: { position: 'relative', height: '100%' },
+  outcome: (height: string) => ({
+    position: 'relative',
+    width: '100%',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    height,
+  }),
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    height: '520px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame2: {
+    position: 'relative',
+    height: '520px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  overlay: {
+    'pointer-events': 'none',
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * 0)',
+    'z-index': '10',
+  },
+  overlay2: {
+    position: 'absolute',
+    'inset-block': 'calc(var(--spacing) * 0)',
+    left: 'calc(var(--spacing) * 4)',
+    width: '1px',
+    'background-color': 'color-mix(in oklab, hsl(var(--status-danger) / 1) 70%, transparent)',
+  },
+  frame3: {
+    position: 'relative',
+    height: '1100px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame4: {
+    position: 'relative',
+    height: '380px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame5: {
+    position: 'relative',
+    height: '900px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 /**
  * `usePermissionResponse` reports `isReady: !!runtime`, and a NOT-ready card
@@ -652,7 +707,7 @@ export const DesktopStreamingTurn: Story = {
   args: { sessionId, items, renderMessageRow },
   globals: { theme: 'dark' },
   render: () => (
-    <div className="h-[520px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
         items={items}
         sessionId={sessionId}
@@ -745,11 +800,11 @@ export const DesktopScrollToLatestWorking: Story = {
   args: { sessionId, items: scrollToLatestItems, renderMessageRow },
   globals: { theme: 'dark' },
   render: () => (
-    <div className="relative h-[520px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame2)}>
       <SessionChatStreamView
         items={scrollToLatestItems}
         sessionId={sessionId}
-        className="h-full"
+        xstyle={alignmentSceneStyles.fill}
         renderMessageRow={renderMessageRow}
         lastAssistantMessageId={scrollToLatestTurn.id}
         agentActivityLabel="Working"
@@ -772,11 +827,11 @@ export const DesktopScrollToLatestWaiting: Story = {
   args: { sessionId, items: scrollToLatestItems, renderMessageRow },
   globals: { theme: 'dark' },
   render: () => (
-    <div className="relative h-[520px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame2)}>
       <SessionChatStreamView
         items={scrollToLatestItems}
         sessionId={sessionId}
-        className="h-full"
+        xstyle={alignmentSceneStyles.fill}
         renderMessageRow={renderMessageRow}
         lastAssistantMessageId={scrollToLatestTurn.id}
         agentActivityLabel="Waiting for permission"
@@ -799,7 +854,7 @@ export const DesktopFinishedTurn: Story = {
   args: { sessionId, items: finishedItems, renderMessageRow },
   globals: { theme: 'dark' },
   render: () => (
-    <div className="h-[520px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
         items={finishedItems}
         sessionId={sessionId}
@@ -922,7 +977,7 @@ export const DesktopTurnTimingLive: Story = {
     // Live sync opened well before the last update, so that update counts.
     const [historyLive] = useState(() => ({ sync: 'live' as const, since: Date.now() - 600_000 }));
     return (
-      <div className="h-[520px] w-full bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <SessionChatStreamView
           items={[{ type: 'message', sessionId, message: silentLiveTurn, turnIndex: 0 }]}
           sessionId={sessionId}
@@ -957,7 +1012,7 @@ export const DesktopTurnTimingFinished: Story = {
   args: { sessionId, items: [], renderMessageRow },
   globals: { theme: 'dark' },
   render: () => (
-    <div className="h-[520px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
         items={[{ type: 'message', sessionId, message: timedFinishedTurn, turnIndex: 0 }]}
         sessionId={sessionId}
@@ -978,7 +1033,7 @@ export const DesktopForkingTurn: Story = {
   args: { sessionId, items: finishedItems, renderMessageRow },
   globals: { theme: 'dark' },
   render: () => (
-    <div className="h-[520px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
         items={finishedItems}
         sessionId={sessionId}
@@ -1188,10 +1243,18 @@ const planModeItems: ChatStreamItem[] = [
 
 /** Story-only guide at the column's content edge. */
 const RailGuide = () => (
-  <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
-    <div className={cn(stylex.props(conversationColumnStyles.base, conversationColumnStyles.capped).className, 'relative h-full')}>
+  <div aria-hidden {...stylex.props(storyLayout.overlay)}>
+    <div
+      className={cn(
+        stylex.props(
+          conversationColumnStyles.base,
+          conversationColumnStyles.capped,
+          alignmentSceneStyles.guide
+        ).className
+      )}
+    >
       {/* `left-4` == the `sm:px-4` gutter, i.e. where every top-level row starts. */}
-      <div className="absolute inset-y-0 left-4 w-px bg-status-danger/70" />
+      <div {...stylex.props(storyLayout.overlay2)} />
     </div>
   </div>
 );
@@ -1255,7 +1318,7 @@ const planExitOutcomeTurn = (
   ],
 });
 
-const outcomeStory = (message: SessionHistoryParsed, height = 'h-[320px]'): Story => ({
+const outcomeStory = (message: SessionHistoryParsed, height = '320px'): Story => ({
   args: {
     sessionId,
     items: [{ type: 'message', sessionId, message, turnIndex: 0 } as const],
@@ -1264,7 +1327,7 @@ const outcomeStory = (message: SessionHistoryParsed, height = 'h-[320px]'): Stor
   globals: { theme: 'dark' },
   render: () => (
     <WithRuntime>
-      <div className={cn('relative w-full bg-background', height)}>
+      <div {...stylex.props(alignmentSceneStyles.outcome(height))}>
         <SessionChatStreamView
           items={[{ type: 'message', sessionId, message, turnIndex: 0 } as const]}
           sessionId={sessionId}
@@ -1431,7 +1494,7 @@ export const DesktopPlanAdapterParity: Story = {
   globals: { theme: 'dark' },
   render: () => (
     <WithRuntime>
-      <div className="relative h-[1100px] w-full bg-background">
+      <div {...stylex.props(storyLayout.frame3)}>
         <SessionChatStreamView
           items={parityTurns.map(
             (message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const
@@ -1445,10 +1508,7 @@ export const DesktopPlanAdapterParity: Story = {
   ),
 };
 
-export const DesktopPlanAwaitingDecision: Story = outcomeStory(
-  planAwaitingDecisionTurn,
-  'h-[760px]'
-);
+export const DesktopPlanAwaitingDecision: Story = outcomeStory(planAwaitingDecisionTurn, '760px');
 
 export const DesktopPlanDenied: Story = outcomeStory(
   planExitOutcomeTurn('alignment-plan-denied', { outcome: 'selected', optionId: 'reject' })
@@ -1534,7 +1594,7 @@ export const DesktopCommandSteps: Story = {
   globals: { theme: 'dark' },
   render: () => (
     <WithRuntime>
-      <div className="relative h-[380px] w-full bg-background">
+      <div {...stylex.props(storyLayout.frame4)}>
         <SessionChatStreamView
           items={[{ type: 'message', sessionId, message: commandStepsTurn, turnIndex: 0 } as const]}
           sessionId={sessionId}
@@ -1552,7 +1612,7 @@ export const DesktopPlanModeTurn: Story = {
   globals: { theme: 'dark' },
   render: () => (
     <WithRuntime>
-      <div className="relative h-[900px] w-full bg-background">
+      <div {...stylex.props(storyLayout.frame5)}>
         <SessionChatStreamView
           items={planModeItems}
           sessionId={sessionId}

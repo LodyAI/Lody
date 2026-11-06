@@ -37,6 +37,17 @@ import {
    Candidates come from the real registry mappers, so a story breaks if the
    insert-text or detail mapping drifts. */
 
+const menuStory = stylex.create({
+  frame: { height: 460, width: 760, padding: 'calc(var(--spacing) * 6)' },
+  narrow: { width: 320, padding: 'calc(var(--spacing) * 3)' },
+  input: {
+    width: '100%',
+    borderRadius: 'var(--radius-md)',
+    borderWidth:"1px",borderStyle:"solid",borderColor:"hsl(var(--input-border) / 1)",
+    backgroundColor: 'hsl(var(--input) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
 const SKILL_LABELS = {
   author: 'Author',
   path: 'Path',
@@ -345,7 +356,7 @@ function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }:
   const inputValue = `@${search}`;
 
   return (
-    <div className={narrow ? 'h-[460px] w-[320px] p-3' : 'h-[460px] w-[760px] p-6'}>
+    <div {...stylex.props(menuStory.frame, narrow && menuStory.narrow)}>
       <Mention
         open
         triggers={['@']}
@@ -362,7 +373,7 @@ function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }:
         <MentionInput
           value={inputValue}
           onChange={() => {}}
-          className="w-full rounded-md border border-input-border bg-input p-2"
+          xstyle={menuStory.input}
           aria-label="composer"
         />
         <div
@@ -511,7 +522,7 @@ function FloatingHarness({
           <MentionInput
             value={value}
             onChange={() => {}}
-            className="w-full rounded-md border border-input-border bg-input p-2"
+            xstyle={menuStory.input}
             aria-label="composer"
             rows={3}
           />

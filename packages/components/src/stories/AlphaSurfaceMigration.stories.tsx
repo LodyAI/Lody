@@ -20,6 +20,18 @@ const styles = stylex.create({
     backgroundColor: themeColors.background,
     color: themeColors.foreground,
   },
+  noticeOverride: {
+    maxWidth: '620px', borderRadius: 0, borderWidth: '2px',
+    borderColor: 'color-mix(in oklab, hsl(var(--primary) / 1) 40%, transparent)', boxShadow: 'none',
+  },
+  noticeChildOverride: {
+    insetInline: 'calc(var(--spacing) * 3)', borderRadius: 'var(--radius-lg)',
+    borderStyle: 'dashed', borderBottomStyle: 'dashed', borderColor: 'var(--color-blue-500)',
+    backgroundColor: 'var(--color-amber-100)', paddingLeft: 'calc(var(--spacing) * 7)', paddingRight: 'calc(var(--spacing) * 6)',
+  },
+  noticeChildDarkBorder: {
+    borderColor: { default: 'var(--color-blue-500)', ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))': 'var(--color-blue-300)' },
+  },
   output: { display: 'block', paddingBottom: themeSpace[3] },
   streamCanvas: {
     height: '100vh',
@@ -38,11 +50,11 @@ const longPath = 'src/本地工作区/' + 'long-directory/'.repeat(7) + 'preserv
 function NoticeFixture({
   long = false,
   overrides = false,
-  callerClassName,
+  directChildXstyle,
 }: {
   long?: boolean;
   overrides?: boolean;
-  callerClassName?: string;
+  directChildXstyle?: stylex.StyleXStyles;
 }) {
   const [action, setAction] = useState('Ready');
   return (
@@ -59,12 +71,8 @@ function NoticeFixture({
               )
             : 'Synthetic file contents are unavailable. Preserve the original notice.'
         }
-        className={
-          callerClassName ??
-          (overrides
-            ? 'max-w-[620px] rounded-none border-2 border-primary/40 shadow-none'
-            : undefined)
-        }
+        xstyle={overrides ? styles.noticeOverride : undefined}
+        directChildXstyle={directChildXstyle}
         onOpenFile={(path) => setAction(`Opened ${path}`)}
       />
     </div>
@@ -143,13 +151,13 @@ export const NoticeDescendantOverrides: Story = {
   render: () => (
     <NoticeFixture
       long
-      callerClassName="[&>*]:inset-x-3 [&>*]:rounded-lg [&>*]:border-dashed [&>*]:border-blue-500 [&>*]:bg-amber-100 [&>*]:pl-7 [&>*]:pr-6 dark:[&>*]:border-blue-300"
+      directChildXstyle={[styles.noticeChildOverride, styles.noticeChildDarkBorder]}
     />
   ),
 };
 export const NoticeDirectChildOverrides: Story = {
   render: () => (
-    <NoticeFixture callerClassName="*:border-blue-500 *:bg-amber-100 *:rounded-lg *:border-dashed *:pl-7 *:pr-6 *:inset-x-3" />
+    <NoticeFixture directChildXstyle={styles.noticeChildOverride} />
   ),
 };
 export const ReadCompleted: Story = { render: () => <ToolFixture /> };

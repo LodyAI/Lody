@@ -230,11 +230,11 @@ const styles = stylex.create({
     boxShadow: { default: null, ':focus-visible': 'none' },
   },
   glyphs: {
-    ':is(*) > svg:not([class*="size-"]):not([class*="h-"]):not([class*="w-"])': {
+    ':is(*) > svg': {
+      flexShrink: 0,
       width: 'calc(var(--spacing) * 4)',
       height: 'calc(var(--spacing) * 4)',
     },
-    ':is(*) > svg': { flexShrink: 0 },
   },
   action: {
     position: 'absolute',
@@ -753,13 +753,14 @@ function SidebarInset({
   );
 }
 
-function SidebarInput({ className, ...props }: React.ComponentProps<typeof Input>) {
+function SidebarInput({ className, xstyle, ...props }: React.ComponentProps<typeof Input>) {
   return (
     <Input
       data-slot="sidebar-input"
       data-sidebar="input"
       controlHeight="calc(var(--spacing) * 8)"
-      className={clsx(stylex.props(styles.input).className, className)}
+      className={className}
+      xstyle={[styles.input, xstyle]}
       {...props}
     />
   );

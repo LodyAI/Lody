@@ -5,6 +5,40 @@ import { fn } from 'storybook/test';
 
 import { MobileSidebarDrawer } from '@/components/mobile/mobile-sidebar-drawer';
 import { Button } from '@lody/ui/button';
+const drawerStory = stylex.create({
+  copy: {
+    marginTop: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 2)',
+    },
+  },
+});
+const storyLayoutStyles = stylex.create({
+  frame: {
+    position: 'relative',
+    height: '640px',
+    overflow: 'hidden',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 10%, transparent)',
+  },
+  caption: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  canvas: {
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
+
 const storyLayout = stylex.create({
   canvas: {
     padding: 'calc(var(--spacing) * 4)',
@@ -30,7 +64,7 @@ function StoryShell({
   const [isOpen, setIsOpen] = useState(open);
 
   return (
-    <div className="relative h-[640px] overflow-hidden border bg-muted/10">
+    <div {...stylex.props(storyLayoutStyles.frame)}>
       <div {...stylex.props(storyLayout.canvas)}>
         <Button type="button" onClick={() => setIsOpen(true)}>
           Open drawer
@@ -45,11 +79,11 @@ function StoryShell({
         }}
       >
         <div {...stylex.props(storyLayout.stack)}>
-          <div className="text-sm font-semibold">Mobile sidebar</div>
-          <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-            <div className="rounded-md border p-2">Navigation item</div>
-            <div className="rounded-md border p-2">Sessions</div>
-            <div className="rounded-md border p-2">Settings</div>
+          <div {...stylex.props(storyLayoutStyles.caption)}>Mobile sidebar</div>
+          <div {...stylex.props(drawerStory.copy)}>
+            <div {...stylex.props(storyLayoutStyles.canvas)}>Navigation item</div>
+            <div {...stylex.props(storyLayoutStyles.canvas)}>Sessions</div>
+            <div {...stylex.props(storyLayoutStyles.canvas)}>Settings</div>
           </div>
         </div>
       </MobileSidebarDrawer>

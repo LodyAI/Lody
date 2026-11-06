@@ -17,6 +17,44 @@ import {
   EMPTY_SIDEBAR_GROUP_ACTIVITY,
   SidebarSectionHeader,
 } from '@/components/sidebar-row-shared';
+const migrationStyles = stylex.create({
+  group: {
+    marginBottom: 'calc(var(--spacing) * 3)',
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 0.5)',
+    },
+  },
+  rows: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 0.5)',
+    },
+  },
+  collapsedGroup: { marginBottom: 'calc(var(--spacing) * 1)' },
+  expandedGroup: { marginBottom: 'calc(var(--spacing) * 3)' },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    paddingInline: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  canvas2: {
+    borderRadius: 'var(--radius-xl)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-border) / 1) 80%, transparent)',
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+    fontSize: '14px',
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -179,22 +217,20 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
 
   return (
     <div {...stylex.props(storyLayout.stack)}>
-      {heading ? (
-        <div className="px-1 text-xs font-medium text-muted-foreground">{heading}</div>
-      ) : null}
+      {heading ? <div {...stylex.props(storyLayoutStyles.canvas)}>{heading}</div> : null}
       <Provider store={store}>
         <div
           data-folded-groups-sidebar={folded ? 'folded' : 'expanded'}
-          className="rounded-xl border border-sidebar-border/80 bg-sidebar p-2 text-sidebar-foreground text-[14px]"
+          {...stylex.props(storyLayoutStyles.canvas2)}
         >
-          <div className="mb-3 space-y-0.5">
+          <div {...stylex.props(migrationStyles.group)}>
             <SidebarSectionHeader
               label="Mac Studio"
               collapsed={false}
               toggleLabel="Toggle"
               onToggleCollapsed={() => undefined}
             />
-            <div className="space-y-0.5">
+            <div {...stylex.props(migrationStyles.rows)}>
               {PROJECTS.map(({ project, sessions }) => (
                 <LocalProjectItem
                   key={project.id}
@@ -258,7 +294,11 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
             />
           </div>
 
-          <div className={teammateCollapsed ? 'mb-1' : 'mb-3'}>
+          <div
+            {...stylex.props(
+              teammateCollapsed ? migrationStyles.collapsedGroup : migrationStyles.expandedGroup
+            )}
+          >
             <SidebarSectionHeader
               label="Lampese's MacBook"
               collapsed={teammateCollapsed}
@@ -268,7 +308,7 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
             />
           </div>
 
-          <div className="mb-3 space-y-0.5">
+          <div {...stylex.props(migrationStyles.group)}>
             <SidebarSectionHeader
               label="GitHub Worktrees"
               collapsed={false}

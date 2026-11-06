@@ -12,6 +12,29 @@ import {
   type ConversationTabEntry,
   type ViewerTabEntry,
 } from '@/components/mobile/mobile-session-tab-sheet';
+const tabsStory = stylex.create({
+  header: {
+    borderRadius: 'var(--radius-2xl)',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--background) / 1) 55%,transparent)',
+    padding: 'calc(var(--spacing) * 3)',
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+});
+const storyLayoutStyles = stylex.create({
+  label: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  label2: {
+    'max-width': '8rem',
+    'text-align': 'center',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -196,7 +219,7 @@ function Harness({ withViewers, crowded }: { withViewers: boolean; crowded?: boo
   return (
     <div {...stylex.props(storyLayout.stack)}>
       <div {...stylex.props(storyLayout.row)}>
-        <span className="text-sm text-muted-foreground">Header trigger:</span>
+        <span {...stylex.props(storyLayoutStyles.label)}>Header trigger:</span>
         <MobileSessionTabButton
           hasUnread={hasBackgroundUnread(shownConversations)}
           hasWorking={hasBackgroundWorking(shownConversations)}
@@ -248,10 +271,10 @@ function BadgeCell({
   return (
     <div {...stylex.props(storyLayout.stack2)}>
       {/* Frosted plate mimicking the floating session header the button sits on. */}
-      <div className="rounded-2xl bg-background/55 p-3 backdrop-blur-xl">
+      <div {...stylex.props(tabsStory.header)}>
         <MobileSessionTabButton hasUnread={hasUnread} hasWorking={hasWorking} onOpen={fn()} />
       </div>
-      <span className="max-w-[8rem] text-center text-xs text-muted-foreground">{caption}</span>
+      <span {...stylex.props(storyLayoutStyles.label2)}>{caption}</span>
     </div>
   );
 }

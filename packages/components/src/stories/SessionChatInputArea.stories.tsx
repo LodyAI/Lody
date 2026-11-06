@@ -37,6 +37,20 @@ import {
   SessionChatInputArea,
   type SessionChatInputAreaProps,
 } from '@/components/sessions/session-chat-input-area';
+const migrationStyles = stylex.create({
+  conversationCard: {
+    marginInline: 'auto',
+    maxWidth: 'var(--container-4xl, 56rem)',
+    overflow: 'hidden',
+    borderRadius: '28px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--card) / 1)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     'min-height': '100vh',
@@ -137,7 +151,7 @@ function StoryShell({
     <PlatformContext.Provider value={storyPlatform}>
       <Provider store={store}>
         <div {...stylex.props(storyLayout.frame)}>
-          <div className="mx-auto max-w-4xl overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-xs">
+          <div {...stylex.props(migrationStyles.conversationCard)}>
             <div {...stylex.props(storyLayout.frame2)} />
             <SessionChatInputArea
               session={session}

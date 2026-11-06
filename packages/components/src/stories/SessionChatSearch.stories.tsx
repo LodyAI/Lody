@@ -14,6 +14,38 @@ import {
   type SessionSearchResult,
 } from '@/lib/session-chat-search';
 import { useTranslation } from 'react-i18next';
+const migrationStyles = stylex.create({
+  conversationFrame: {
+    height: '100%',
+    borderRadius: 'var(--radius-2xl)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    paddingTop: 'calc(var(--spacing) * 16)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    borderRadius: 'var(--radius-xl)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 40%, transparent)',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  caption: {
+    marginBottom: 'calc(var(--spacing) * 2)',
+    fontSize: '11px',
+    fontWeight: 'var(--font-weight-medium)',
+    letterSpacing: 'var(--tracking-wider)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    textTransform: 'uppercase',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     position: 'relative',
@@ -283,7 +315,7 @@ function SearchStoryPreview({
           t={t}
         />
         {showChatBackdrop && (
-          <div className="h-full rounded-2xl border border-border/60 bg-background pt-16 shadow-xs">
+          <div {...stylex.props(migrationStyles.conversationFrame)}>
             <SessionChatStreamView
               sessionId={sessionId}
               items={buildItems(messages)}
@@ -387,10 +419,8 @@ export const States: Story = {
 
 function StateRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-background/40 p-3">
-      <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
+    <div {...stylex.props(storyLayoutStyles.canvas)}>
+      <div {...stylex.props(storyLayoutStyles.caption)}>{label}</div>
       <div {...stylex.props(storyLayout.frame2)}>{children}</div>
     </div>
   );

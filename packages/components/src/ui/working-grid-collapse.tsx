@@ -21,6 +21,7 @@ const styles = stylex.create({
 });
 
 export type WorkingGridCollapseProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'> & {
+  xstyle?: stylex.StyleXStyles;
   /** Box the animation plays in, px; the grid and dot are centred inside it. */
   size?: number;
   /** Edge of the 3×3 grid it starts from, px (match {@link WorkingGrid}). */
@@ -57,6 +58,7 @@ export function WorkingGridCollapse({
   dotSize = 8,
   onDone,
   className,
+  xstyle,
   style,
   ...props
 }: WorkingGridCollapseProps) {
@@ -138,13 +140,14 @@ export function WorkingGridCollapse({
   }, [pitch, size]);
 
   const inset = (size - gridSize) / 2;
+  const sx = stylex.props(styles.root, xstyle);
   return (
     <span
       ref={rootRef}
       data-working-grid-collapse=""
       aria-hidden="true"
-      className={clsx(stylex.props(styles.root).className, className)}
-      style={{ width: size, height: size, ...style }}
+      className={clsx(sx.className, className)}
+      style={{ ...sx.style, width: size, height: size, ...style }}
       {...props}
     >
       <span

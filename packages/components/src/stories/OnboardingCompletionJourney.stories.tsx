@@ -15,6 +15,36 @@ import {
   ProvidersScreenView,
   SummaryScreen,
 } from '@/components/onboarding';
+const completionStory = stylex.create({
+  card: {
+    borderRadius: 'var(--radius-2xl)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab,var(--color-slate-200) 80%,transparent)',
+    backgroundColor: 'color-mix(in oklab,var(--color-white) 85%,transparent)',
+    paddingInline: 'calc(var(--spacing) * 10)',
+    paddingBlock: 'calc(var(--spacing) * 8)',
+    textAlign: 'center',
+    boxShadow:
+      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+});
+const storyLayoutStyles = stylex.create({
+  caption: {
+    fontSize: 'var(--text-3xl)',
+    lineHeight: 'var(--text-3xl--line-height)',
+    fontWeight: 'var(--font-weight-semibold)',
+    letterSpacing: 'var(--tracking-tight)',
+  },
+  caption2: {
+    marginTop: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'var(--color-slate-600)',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     position: 'relative',
@@ -79,9 +109,9 @@ function JourneyPreviewWrapper({ children }: { children: React.ReactNode }) {
 function CompletionCheckpoint({ detail }: { detail: string }) {
   return (
     <div data-testid="onboarding-complete" {...stylex.props(storyLayout.overlay)}>
-      <div className="rounded-2xl border border-slate-200/80 bg-white/85 px-10 py-8 text-center shadow-xl backdrop-blur-xl">
-        <h1 className="text-3xl font-semibold tracking-tight">Onboarding complete</h1>
-        <p className="mt-3 text-sm text-slate-600">{detail}</p>
+      <div {...stylex.props(completionStory.card)}>
+        <h1 {...stylex.props(storyLayoutStyles.caption)}>Onboarding complete</h1>
+        <p {...stylex.props(storyLayoutStyles.caption2)}>{detail}</p>
       </div>
     </div>
   );

@@ -4,6 +4,69 @@ import { useState } from 'react';
 import { fn } from 'storybook/test';
 
 import { MobileArchiveScreen } from '@/components/mobile/mobile-archive-screen';
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflow: 'hidden',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 3)',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 40%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+  },
+  caption: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  caption2: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  label: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  caption3: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    'text-decoration-line': 'underline',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     height: 'calc(var(--spacing) * 9)',
@@ -24,13 +87,13 @@ const storyLayout = stylex.create({
 
 function ArchiveRow({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <div className="flex items-center gap-3 border-b border-border/40 px-4 py-3">
+    <div {...stylex.props(storyLayoutStyles.row)}>
       <div {...stylex.props(storyLayout.frame)} />
       <div {...stylex.props(storyLayout.section)}>
-        <div className="truncate text-sm font-medium">{title}</div>
-        <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
+        <div {...stylex.props(storyLayoutStyles.caption)}>{title}</div>
+        <div {...stylex.props(storyLayoutStyles.caption2)}>{subtitle}</div>
       </div>
-      <span className="text-xs text-muted-foreground">2d</span>
+      <span {...stylex.props(storyLayoutStyles.label)}>2d</span>
     </div>
   );
 }
@@ -46,8 +109,8 @@ function ArchiveStoryShell({
   const [selected, setSelected] = useState(initialSelectedCount);
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
         <MobileArchiveScreen
           isMultiSelectMode={isMulti}
           selectedCount={selected}
@@ -70,7 +133,7 @@ function ArchiveStoryShell({
             <div {...stylex.props(storyLayout.canvas)}>
               <button
                 type="button"
-                className="text-xs text-muted-foreground underline"
+                {...stylex.props(storyLayoutStyles.caption3)}
                 onClick={() => {
                   setIsMulti(true);
                   setSelected(2);

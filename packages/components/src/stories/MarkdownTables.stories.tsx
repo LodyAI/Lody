@@ -4,6 +4,17 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { MarkdownFileResources } from '@/components/ai-gui/markdown-file-image';
 import { createFakeFileWorkspaceProvider } from '@/lib/file-workspace-provider';
+const tableStory = stylex.create({
+  bounds: { outlineWidth: 1, outlineStyle: 'dashed', outlineColor: 'hsl(var(--border) / 1)' },
+});
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -179,8 +190,8 @@ function TableGallery({ width }: { width: number }) {
     <div className={clsx(stylex.props(storyLayout.stack).className, 'scrollbar-pro')}>
       {SCENARIOS.map(([title, markdown]) => (
         <section key={title} {...stylex.props(storyLayout.stack2)}>
-          <div className="text-xs text-muted-foreground">{title}</div>
-          <div style={{ width }} className="outline outline-1 outline-dashed outline-border">
+          <div {...stylex.props(storyLayoutStyles.caption)}>{title}</div>
+          <div style={{ width }} {...stylex.props(tableStory.bounds)}>
             <MarkdownFileResources
               provider={provider}
               documentPath="docs/tables.md"

@@ -11,6 +11,14 @@ import { themeColors } from '../style/theme-colors.stylex';
 import { themeSpace } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  caller: { display: 'block', flexShrink: 1, color: 'hsl(var(--primary))' },
+  primaryInk: { color: 'hsl(var(--primary))' },
+  spinnerCaller: {
+    display: 'block',
+    width: 'calc(var(--spacing) * 8)',
+    height: 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--primary))',
+  },
   canvas: {
     padding: themeSpace[4],
     minHeight: '100dvh',
@@ -79,7 +87,7 @@ function CallerComposition() {
         <WorkingGrid
           data-status-grid="caller"
           size={64}
-          className="block shrink text-primary"
+          xstyle={styles.caller}
           style={{ marginLeft: 12, opacity: 0.65, color: 'rgb(72, 110, 160)' }}
         />
         <span>Caller class and inline style</span>
@@ -90,7 +98,7 @@ function CallerComposition() {
           size={64}
           gridSize={56}
           dotSize={24}
-          className="block shrink text-primary"
+          xstyle={styles.caller}
           style={{ marginLeft: 12, color: 'rgb(72, 110, 160)' }}
         />
         <span>Collapse caller class and inline style</span>
@@ -133,7 +141,7 @@ function StatusSamples() {
               <WorkingStatusMark
                 working={Boolean(working)}
                 unread={Boolean(unread)}
-                className="text-primary"
+                xstyle={styles.primaryInk}
               />
             </span>
             <span>{label}</span>
@@ -177,7 +185,7 @@ function StatusTransition() {
       </div>
       <div {...stylex.props(styles.sample)}>
         <span {...stylex.props(styles.mark)} data-status-transition="">
-          <WorkingStatusMark working={working} unread={unread} className="text-primary" />
+          <WorkingStatusMark working={working} unread={unread} xstyle={styles.primaryInk} />
         </span>
         <output>{working ? 'Working' : unread ? 'Unread' : 'Idle'}</output>
       </div>
@@ -213,7 +221,7 @@ function SpinnerSamples() {
           <Spinner
             icon={RefreshCw}
             data-status-spinner="caller"
-            className="block h-6 w-8 text-primary"
+            xstyle={styles.spinnerCaller}
             style={{ marginLeft: 12, color: 'rgb(72, 110, 160)' }}
           />
           <span>Caller layout and inline color</span>

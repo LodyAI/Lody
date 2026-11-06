@@ -21,6 +21,26 @@ import {
   type CodexResetForecastState,
   type CodexResetForecastStore,
 } from '@/lib/codex-reset-forecast-store';
+const sceneStyles = stylex.create({
+  usageTrigger: { width: 'fit-content' },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  section: {
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--card) / 1) 50%, transparent)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -139,7 +159,7 @@ function EntryPoints({ state, showActions, narrow, withoutRateLimits }: StoryPro
     <WithStubbedForecast state={state}>
       <div {...stylex.props(styles.entries, narrow && styles.narrow)}>
         <section {...stylex.props(storyLayout.stack)}>
-          <p className="text-xs font-medium text-muted-foreground">Composer usage popover</p>
+          <p {...stylex.props(storyLayoutStyles.caption)}>Composer usage popover</p>
           <SessionUsagePopover
             contextWindowUsage={{ size: 258_400, used: 203_700 }}
             rateLimits={codexMachine.raceLimits}
@@ -148,13 +168,13 @@ function EntryPoints({ state, showActions, narrow, withoutRateLimits }: StoryPro
             modelId="codex"
             modelLabel="5.6-Sol"
             showCodexResetForecast
-            className="w-fit"
+            xstyle={sceneStyles.usageTrigger}
           />
         </section>
 
         <section {...stylex.props(storyLayout.stack)}>
-          <p className="text-xs font-medium text-muted-foreground">Provider row</p>
-          <div className="rounded-lg border border-border/60 bg-card/50">
+          <p {...stylex.props(storyLayoutStyles.caption)}>Provider row</p>
+          <div {...stylex.props(storyLayoutStyles.section)}>
             <ProviderRow
               config={codexConfig}
               machine={withoutRateLimits ? { ...codexMachine, raceLimits: {} } : codexMachine}

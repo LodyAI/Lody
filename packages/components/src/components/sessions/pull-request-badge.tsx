@@ -103,6 +103,8 @@ type PullRequestBadgeProps = {
   pr: SessionPullRequestMeta;
   size?: PullRequestBadgeSize;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
+  iconXstyle?: stylex.StyleXStyles;
   onClick?: React.MouseEventHandler<HTMLAnchorElement>;
   /**
    * When provided, the badge renders as a button and calls this callback
@@ -115,6 +117,8 @@ export const PullRequestBadge = ({
   pr,
   size = 'md',
   className,
+  xstyle,
+  iconXstyle,
   onClick,
   onOpenTab,
 }: PullRequestBadgeProps) => {
@@ -132,9 +136,10 @@ export const PullRequestBadge = ({
   const badgeProps = stylex.props(
     styles.badge,
     size === 'sm' ? styles.badgeSm : styles.badgeMd,
-    statusMeta.iconXstyle
+    statusMeta.iconXstyle,
+    xstyle
   );
-  const iconProps = stylex.props(size === 'sm' ? styles.iconSm : styles.iconMd);
+  const iconProps = stylex.props(size === 'sm' ? styles.iconSm : styles.iconMd, iconXstyle);
 
   const sharedClassName = clsx(badgeProps.className, className);
 

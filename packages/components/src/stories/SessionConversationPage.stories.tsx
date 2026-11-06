@@ -124,8 +124,74 @@ import {
 import { StableSessionContext } from '@/hooks/useStableSession';
 import type { LodyAuthClient } from '@/lib/auth';
 import type { SessionSharingState } from '@/lib/session-sharing';
-import { cn } from '@/lib/utils';
 import { AuthProvider } from '@/providers/convex-provider';
+
+const previewFrameStyles = stylex.create({
+  outer: { color: 'hsl(var(--foreground) / 1)' },
+  embedded: {
+    height: '100%',
+    minHeight: 'calc(var(--spacing) * 0)',
+    width: '100%',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  fullViewport: { height: '100dvh', width: '100%', backgroundColor: 'hsl(var(--background) / 1)' },
+  desktop: {
+    height: '100dvh',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 35%, transparent)',
+    padding: {
+      default: 'calc(var(--spacing) * 4)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 6)',
+    },
+  },
+  frame: {
+    overflow: 'hidden',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    height: '100%',
+    width: '100%',
+  },
+  desktopFrame: {
+    marginInline: 'auto',
+    maxWidth: '72rem',
+    borderInlineStyle: 'solid',
+    borderInlineWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    boxShadow:
+      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 1px 3px 0 rgb(0 0 0 / .1), 0 1px 2px -1px rgb(0 0 0 / .1)',
+  },
+  mobileTitle: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    lineHeight: 'var(--leading-tight)',
+  },
+  title: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '.95rem',
+    fontWeight: 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  subtitle: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  floatingHeader: {
+    position: 'absolute',
+    insetInline: 'calc(var(--spacing) * 0)',
+    top: 'calc(var(--spacing) * 0)',
+    zIndex: 30,
+    borderBottomWidth: 0,
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 55%, transparent)',
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+});
 
 const storyOverrides = stylex.create({ stream: { height: '100%' } });
 
@@ -1567,11 +1633,9 @@ export function SessionConversationStoryHarness({
   // Mirrors production `MobileProjectInfo`: session title (primary) + repo /
   // project (muted subtitle).
   const mobileTitleNode = (
-    <span className="flex min-w-0 flex-col justify-center leading-tight">
-      <span className="truncate text-[0.95rem] font-semibold text-foreground">
-        {session.title ?? 'Session'}
-      </span>
-      <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+    <span {...stylex.props(previewFrameStyles.mobileTitle)}>
+      <span {...stylex.props(previewFrameStyles.title)}>{session.title ?? 'Session'}</span>
+      <span {...stylex.props(previewFrameStyles.subtitle)}>
         <Github {...stylex.props(storyLayoutStyles.frame2)} />
         <span {...stylex.props(storyLayout.label)}>{session.repoFullName ?? ''}</span>
       </span>
@@ -1594,12 +1658,6 @@ export function SessionConversationStoryHarness({
   // Mobile renders full-bleed (fills the phone-width viewport) to match how the
   // app actually looks on a phone — no fake bezel or gray padding that could
   // clip content or misrepresent spacing. Desktop keeps the framed preview.
-  const frameClassName =
-    frame === 'mobile'
-      ? 'h-full w-full'
-      : // Fill the preview viewport height instead of a fixed 760px box, so the
-        // conversation area gets the real available height and doesn't clip.
-        'mx-auto h-full w-full max-w-6xl border-x border-border/70 shadow-sm';
 
   const headerMenuNode = (
     <SessionHeaderMenu
@@ -1639,21 +1697,19 @@ export function SessionConversationStoryHarness({
               data-stream-chunk={streamChunkCount}
               data-stream-total={STREAM_CHUNK_TOTAL}
               data-stream-phase={streamPhase}
-              className={cn(
-                'text-foreground',
-                // Desktop uses a definite h-dvh (not min-h-dvh) so the frame's
-                // h-full resolves and the conversation fills the real height.
+              {...stylex.props(
+                previewFrameStyles.outer,
                 embedded
-                  ? 'h-full min-h-0 w-full bg-background'
+                  ? previewFrameStyles.embedded
                   : frame === 'mobile' || shareImage
-                    ? 'h-dvh w-full bg-background'
-                    : 'h-dvh bg-muted/35 p-4 sm:p-6'
+                    ? previewFrameStyles.fullViewport
+                    : previewFrameStyles.desktop
               )}
             >
               <div
-                className={cn(
-                  'overflow-hidden bg-background',
-                  embedded || shareImage ? 'h-full w-full' : frameClassName
+                {...stylex.props(
+                  previewFrameStyles.frame,
+                  !embedded && !shareImage && frame !== 'mobile' && previewFrameStyles.desktopFrame
                 )}
                 style={
                   frame === 'mobile'
@@ -1673,7 +1729,7 @@ export function SessionConversationStoryHarness({
                       // `--conversation-top-inset` var set on the frame below.
                       <BaseHeader
                         hideMenuButton
-                        className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+                        xstyle={previewFrameStyles.floatingHeader}
                         style={{ height: '3rem' }}
                         leading={
                           // Mirrors production `MobileSessionHeaderBackButton`.

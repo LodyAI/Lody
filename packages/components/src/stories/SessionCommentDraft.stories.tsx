@@ -1,7 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
 import React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SessionCommentDraft } from '@/ui/diff-viewer/session-comment-draft';
 import type { CommentAnchor, CommentUser } from '@/ui/diff-viewer/session-comment-types';
+
+const draftFrameStyles = stylex.create({
+  desktop: { marginInline: 'auto', maxWidth: '32rem', padding: 'calc(var(--spacing) * 4)' },
+  mobile: { marginInline: 'auto', width: '360px', padding: 'calc(var(--spacing) * 3)' },
+});
 
 const mockUser: CommentUser = { id: 'u1', name: 'Alice Chen', image: null };
 
@@ -14,11 +20,11 @@ const mockAnchor: CommentAnchor = {
 };
 
 const wrap = (children: React.ReactNode) => (
-  <div className="mx-auto max-w-lg space-y-4 p-4">{children}</div>
+  <div {...stylex.props(draftFrameStyles.desktop)}>{children}</div>
 );
 
 const wrapMobile = (children: React.ReactNode) => (
-  <div className="mx-auto w-[360px] space-y-4 p-3">{children}</div>
+  <div {...stylex.props(draftFrameStyles.mobile)}>{children}</div>
 );
 
 const meta = {

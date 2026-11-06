@@ -11,6 +11,18 @@ import {
 import { sidebarCollapsedOpenedBySessionsAtom, sidebarShowFullListAtom } from '@/atoms/focus-layer';
 import { sidebarShowBranchNamesAtom } from '@/atoms/sidebar-state';
 import { sessionSendStatusesAtom } from '@/atoms/session-send-status';
+const storyCallerStyles = stylex.create({
+  spacious: { gap: 'calc(var(--spacing) * 4)' },
+  layoutOverride: {
+    width: '280px',
+    'max-width': '100%',
+    gap: 'calc(var(--spacing) * 5)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--sidebar-ring) / 1)',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+});
 
 const meta = {
   title: 'Components/Owned Session List Migration',
@@ -155,7 +167,7 @@ function Demo({
             selectedSessionId={selected}
             activeGroupKey={selectedGroup ? 'projectGroup:alpha' : undefined}
             className={
-              caller ? 'gap-5 p-3 border border-sidebar-ring w-[280px] max-w-full' : undefined
+              caller ? stylex.props(storyCallerStyles.layoutOverride).className : undefined
             }
             headerAction={
               <Button size="small" variant="ghost" onClick={() => setEvent('Header action')}>
@@ -258,7 +270,7 @@ export const EmptyAndLoading: Story = {
             sessions={[]}
             repos={[]}
             isLoading
-            className="gap-4"
+            className={stylex.props(storyCallerStyles.spacious).className}
             headerAction={<Button size="small">Loading filter</Button>}
           />
         </section>

@@ -9,6 +9,31 @@ import { themeColors } from '../style/theme-colors.stylex';
 import { themeSpace } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  caller: {
+    maxWidth: '680px',
+    borderRadius: 0,
+    borderWidth: '2px',
+    borderColor: 'color-mix(in oklab, hsl(var(--primary) / 1) 40%, transparent)',
+    boxShadow: 'none',
+  },
+  directChild: {
+    borderColor: 'var(--color-blue-500)',
+    borderRadius: 0,
+    backgroundColor: {
+      default: 'var(--color-emerald-100)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-emerald-950)',
+    },
+  },
+  headerDescendant: {
+    borderColor: 'var(--color-fuchsia-500)',
+    borderRadius: '3px',
+    backgroundColor: {
+      default: 'var(--color-cyan-100)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-cyan-950)',
+    },
+  },
   canvas: {
     padding: themeSpace[4],
     minHeight: '100vh',
@@ -165,18 +190,16 @@ function Fixture({ mode = 'unified' }: { mode?: Mode }) {
           },
         }
       : {}),
-    ...(mode === 'caller'
-      ? { className: 'max-w-[680px] rounded-none border-2 border-primary/40 shadow-none' }
-      : {}),
+    ...(mode === 'caller' ? { xstyle: styles.caller } : {}),
     ...(mode === 'header-direct-child'
       ? {
-          className: '*:border-blue-500 *:rounded-none *:bg-emerald-100 dark:*:bg-emerald-950',
+          headerXstyle: styles.directChild,
+          contentXstyle: styles.directChild,
         }
       : {}),
     ...(mode === 'header-descendant'
       ? {
-          className:
-            '[&>div[aria-expanded]]:border-fuchsia-500 [&>div[aria-expanded]]:rounded-[3px] [&>div[aria-expanded]]:bg-cyan-100 dark:[&>div[aria-expanded]]:bg-cyan-950',
+          headerXstyle: styles.headerDescendant,
         }
       : {}),
     ...(mode === 'custom'

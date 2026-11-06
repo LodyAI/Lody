@@ -136,12 +136,22 @@ describe('spinners animate on a compositable wrapper and rotate in place', () =>
 
   it('a refresh glyph reuses one element and only animates while spinning', () => {
     render(
-      React.createElement(Spinner, { icon: RefreshCw, spinning: false, className: 'h-4 w-4' })
+      React.createElement(Spinner, {
+        icon: RefreshCw,
+        spinning: false,
+        style: { width: 16, height: 16 },
+      })
     );
     expect(container.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')).toBeNull();
     expect(container.querySelector('svg')).not.toBeNull();
 
-    render(React.createElement(Spinner, { icon: RefreshCw, spinning: true, className: 'h-4 w-4' }));
+    render(
+      React.createElement(Spinner, {
+        icon: RefreshCw,
+        spinning: true,
+        style: { width: 16, height: 16 },
+      })
+    );
     const wrapper = expectCompositableSpinner();
     expect(wrapper.querySelector('svg.lucide-refresh-cw')).not.toBeNull();
   });

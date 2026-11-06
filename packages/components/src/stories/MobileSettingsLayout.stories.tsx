@@ -13,6 +13,71 @@ import { MobileSettingsLayout } from '@/components/mobile/mobile-settings-layout
 import { MachineDetailPane } from '@/components/settings/machine-detail-pane';
 import { AccountMachinesOverviewView } from '@/components/settings/account-machines-overview';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+const settingsStory = stylex.create({
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+  divider: { borderBottomWidth:"1px",borderBottomStyle:"solid",borderBottomColor:"color-mix(in oklab,hsl(var(--border) / 1) 40%,transparent)" },
+});
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflow: 'hidden',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    'text-transform': 'uppercase',
+  },
+  section: {
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 40%, transparent)',
+    'background-color': 'hsl(var(--card) / 1)',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--card) / 1) 40%, transparent)',
+  },
+});
+
 const storyLayout = stylex.create({
   canvas: {
     'padding-inline': 'calc(var(--spacing) * 4)',
@@ -75,16 +140,12 @@ const monitorSnapshot: MachineMonitorSnapshot = {
 function SettingsSection({ title, rows }: { title: string; rows: string[] }) {
   return (
     <section {...stylex.props(storyLayout.canvas)}>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </div>
-      <div className="overflow-hidden rounded-2xl border border-border/40 bg-card">
+      <div {...stylex.props(storyLayoutStyles.caption)}>{title}</div>
+      <div {...stylex.props(storyLayoutStyles.section)}>
         {rows.map((row, i) => (
           <div
             key={row}
-            className={`flex items-center justify-between px-4 py-3 text-sm ${
-              i < rows.length - 1 ? 'border-b border-border/40' : ''
-            }`}
+            {...stylex.props(settingsStory.row, i < rows.length - 1 && settingsStory.divider)}
           >
             <span>{row}</span>
             <span {...stylex.props(storyLayout.label)}>›</span>
@@ -107,8 +168,8 @@ function StoryShell({
   isNativeApp: boolean;
 }) {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
         <MobileSettingsLayout
           title={title}
           isNativeApp={isNativeApp}
@@ -118,7 +179,7 @@ function StoryShell({
         >
           {isMachineDetail ? (
             <div {...stylex.props(storyLayout.stack)}>
-              <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/60 bg-card/40">
+              <div {...stylex.props(storyLayoutStyles.frame)}>
                 <MachineDetailPane
                   mode="devices"
                   machine={machine}

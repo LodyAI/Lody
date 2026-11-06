@@ -10,6 +10,57 @@ import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
+const storyLayoutStylesStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    width: '360px',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 6)',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    'text-transform': 'uppercase',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--card) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  canvas: {
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+  canvas2: {
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 40%, transparent)',
+    padding: 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -63,14 +114,14 @@ function StoryShell({
 
   return (
     <div {...stylex.props(storyLayout.row)}>
-      <div className="flex w-[360px] flex-col gap-6 rounded-2xl bg-background p-6 shadow-2xl">
+      <div {...stylex.props(storyLayoutStylesStyles.stack)}>
         <div>
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div {...stylex.props(storyLayoutStyles.caption)}>
             Composer footer cluster (Fast lives here)
           </div>
-          <div className="flex items-center gap-1.5 rounded-xl border border-border/60 bg-card p-2">
-            <button className="rounded-md bg-muted/60 px-2 py-1 text-sm">claude-3.5-sonnet</button>
-            <button className="rounded-md bg-muted/60 px-2 py-1 text-sm">high</button>
+          <div {...stylex.props(storyLayoutStyles.row)}>
+            <button {...stylex.props(storyLayoutStyles.canvas)}>claude-3.5-sonnet</button>
+            <button {...stylex.props(storyLayoutStyles.canvas)}>high</button>
             <MobileFastModeToggle
               configOptionSelectors={baseSelectors}
               configOptionValues={values}
@@ -80,23 +131,23 @@ function StoryShell({
         </div>
 
         <div>
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div {...stylex.props(storyLayoutStyles.caption)}>
             Below-composer row (Plan + permission)
           </div>
-          <div className="flex items-center gap-1.5 rounded-xl border border-border/60 bg-card p-2">
-            <button className="rounded-md bg-muted/60 px-2 py-1 text-sm">Codex</button>
+          <div {...stylex.props(storyLayoutStyles.row)}>
+            <button {...stylex.props(storyLayoutStyles.canvas)}>Codex</button>
             <div {...stylex.props(storyLayout.row2)}>
               <MobilePlanModeToggle
                 configOptionSelectors={baseSelectors}
                 configOptionValues={values}
                 onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
               />
-              <button className="rounded-md bg-muted/60 px-2 py-1 text-sm">Full access</button>
+              <button {...stylex.props(storyLayoutStyles.canvas)}>Full access</button>
             </div>
           </div>
         </div>
 
-        <pre className="rounded-md bg-muted/40 p-3 text-xs">{JSON.stringify(values, null, 2)}</pre>
+        <pre {...stylex.props(storyLayoutStyles.canvas2)}>{JSON.stringify(values, null, 2)}</pre>
       </div>
     </div>
   );

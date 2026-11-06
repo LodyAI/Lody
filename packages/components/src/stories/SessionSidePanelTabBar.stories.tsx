@@ -10,6 +10,39 @@ import {
   type SessionSidePanelTabItem,
 } from '@/components/sessions/session-side-panel-tab-bar';
 import { Button } from '@lody/ui/button';
+const storyLayoutStylesStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '520px',
+    width: '620px',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderLeftStyle: 'solid',
+    borderLeftWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  row: {
+    display: 'flex',
+    flex: '1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  stack2: {
+    display: 'flex',
+    height: '520px',
+    width: '420px',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderLeftStyle: 'solid',
+    borderLeftWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+});
 
 const storyOverrides = stylex.create({
   border: {
@@ -87,7 +120,7 @@ function SidePanelTabBarStory({ pending = false }: { pending?: boolean }) {
 
   return (
     <div {...stylex.props(storyLayout.frame)}>
-      <div className="flex h-[520px] w-[620px] flex-col overflow-hidden border-l border-border/70 bg-background">
+      <div {...stylex.props(storyLayoutStylesStyles.stack)}>
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -131,7 +164,7 @@ function SidePanelTabBarStory({ pending = false }: { pending?: boolean }) {
           }
           xstyle={storyOverrides.border}
         />
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+        <div {...stylex.props(storyLayoutStylesStyles.row)}>
           {tabs.find((tab) => tab.id === activeTabId)?.label}
         </div>
       </div>
@@ -167,7 +200,7 @@ export const PendingTab: Story = { render: () => <SidePanelTabBarStory pending /
 export const EmptyState: Story = {
   render: () => (
     <div {...stylex.props(storyLayout.frame)}>
-      <div className="flex h-[520px] w-[420px] flex-col overflow-hidden border-l border-border/70 bg-background">
+      <div {...stylex.props(storyLayoutStylesStyles.stack2)}>
         <SessionSidePanelTabBar
           tabs={[]}
           activeTabId={null}

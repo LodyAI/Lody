@@ -184,11 +184,14 @@ function EmojiPicker({
 
 function EmojiPickerSearch({
   className,
+  xstyle,
   ...props
-}: React.ComponentProps<typeof EmojiPickerPrimitive.Search>) {
+}: React.ComponentProps<typeof EmojiPickerPrimitive.Search> & { xstyle?: stylex.StyleXStyles }) {
+  const sx = stylex.props(styles.searchWrapper, xstyle);
   return (
     <div
-      className={clsx(stylex.props(styles.searchWrapper).className, className)}
+      className={clsx(sx.className, className)}
+      style={sx.style}
       data-slot="emoji-picker-search-wrapper"
     >
       <SearchIcon {...stylex.props(styles.searchIcon)} />
@@ -242,12 +245,16 @@ function EmojiPickerCategoryHeader({
 
 function EmojiPickerContent({
   className,
+  xstyle,
+  style,
   ...props
-}: React.ComponentProps<typeof EmojiPickerPrimitive.Viewport>) {
+}: React.ComponentProps<typeof EmojiPickerPrimitive.Viewport> & { xstyle?: stylex.StyleXStyles }) {
   const { t } = useTranslation();
+  const sx = stylex.props(styles.viewport, xstyle);
   return (
     <EmojiPickerPrimitive.Viewport
-      className={clsx(stylex.props(styles.viewport).className, className)}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
       data-slot="emoji-picker-viewport"
       {...props}
     >
@@ -276,11 +283,18 @@ function EmojiPickerContent({
   );
 }
 
-function EmojiPickerFooter({ className, ...props }: React.ComponentProps<'div'>) {
+function EmojiPickerFooter({
+  className,
+  xstyle,
+  style,
+  ...props
+}: React.ComponentProps<'div'> & { xstyle?: stylex.StyleXStyles }) {
   const { t } = useTranslation();
+  const sx = stylex.props(styles.footer, xstyle);
   return (
     <div
-      className={clsx(stylex.props(styles.footer).className, className)}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
       data-slot="emoji-picker-footer"
       {...props}
     >

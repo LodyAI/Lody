@@ -11,6 +11,49 @@ import {
 } from '@/components/mobile/mobile-project-skills-sheet';
 import { SkillDetailContent } from '@/components/settings/skill-detail';
 import type { ProjectSkillResolvedGroup } from '@/hooks/use-project-skills';
+const skillsStory = stylex.create({
+  sheet: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 10,
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+});
+const storyLayoutStylesStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    'max-height': '88%',
+    width: '100%',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+    'border-top-left-radius': 'var(--radius-2xl)',
+    'border-top-right-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  label: {
+    'margin-inline': 'auto',
+    'max-width': '68%',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': '0.95rem',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-tight)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -194,7 +237,7 @@ function SheetFrame({
           : undefined
       }
     >
-      <div className="flex max-h-[88%] w-full flex-col overflow-hidden rounded-t-2xl border border-border/60 bg-background">
+      <div {...stylex.props(storyLayoutStyles.stack)}>
         <header {...stylex.props(storyLayout.row2)}>
           {detail ? (
             <button
@@ -202,14 +245,14 @@ function SheetFrame({
               onClick={() => setDetail(null)}
               {...stylex.props(storyLayout.overlay)}
             >
-              <ChevronLeft className="h-5 w-5" strokeWidth={1.8} />
+              <ChevronLeft {...stylex.props(storyLayoutStylesStyles.frame)} strokeWidth={1.8} />
             </button>
           ) : null}
-          <span className="mx-auto max-w-[68%] truncate text-[0.95rem] font-semibold tracking-tight">
+          <span {...stylex.props(storyLayoutStyles.label)}>
             {detail ? detail.skill.name : 'Skills'}
           </span>
           <span {...stylex.props(storyLayout.overlay2)}>
-            <X className="h-5 w-5" strokeWidth={1.8} />
+            <X {...stylex.props(storyLayoutStylesStyles.frame)} strokeWidth={1.8} />
           </span>
         </header>
         <div {...stylex.props(storyLayout.stack)}>
@@ -239,7 +282,7 @@ function SheetFrame({
                 animate={{ x: 0 }}
                 exit={{ x: '100%' }}
                 transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
-                className="absolute inset-0 z-10 flex flex-col bg-background"
+                {...stylex.props(skillsStory.sheet)}
               >
                 <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
                   <SkillDetailContent skill={detail.skill} scope={detail.scope} />

@@ -13,6 +13,10 @@ import {
   type UnifiedProjectGroupOption,
 } from '@/components/chat/unified-project-selector';
 import { Tooltip } from '@lody/ui/tooltip';
+const migrationStyles = stylex.create({
+  folderGlyph: { width: 'calc(var(--spacing) * 7)', opacity: 0.4 },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -288,9 +292,6 @@ function GroupMigrationFixture(args: UnifiedProjectSelectorViewProps) {
   const [value, setValue] = useState(args.value);
   const [scoped, setScoped] = useState(false);
   const [override, setOverride] = useState(false);
-  const callerClass = override
-    ? '[&_.lucide-folders]:w-7 [&_.lucide-folders]:opacity-40'
-    : undefined;
   const scopeStyle = scoped ? ({ '--spacing': '5px' } as CSSProperties) : undefined;
   return (
     <div
@@ -312,8 +313,7 @@ function GroupMigrationFixture(args: UnifiedProjectSelectorViewProps) {
         {...args}
         value={value}
         onChange={setValue}
-        className={[args.className, callerClass].filter(Boolean).join(' ')}
-        contentClassName={[args.contentClassName, callerClass].filter(Boolean).join(' ')}
+        folderIconXstyle={override ? migrationStyles.folderGlyph : undefined}
         contentStyle={{ ...args.contentStyle, ...scopeStyle }}
       />
       <output data-group-selection="">

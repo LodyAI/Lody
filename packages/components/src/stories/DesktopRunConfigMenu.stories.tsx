@@ -23,6 +23,35 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+const sceneStyles = stylex.create({
+  footer: {
+    containerType: 'inline-size',
+    containerName: 'composer-face',
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    columnGap: 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'align-items': 'center',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground) / 1) 6%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-normal)',
+    color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 80%, transparent)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -325,9 +354,7 @@ function MachineScopeShell() {
           onChange={setSelectedMachineId}
           onAddMachine={fn()}
         />
-        <div className="flex h-6 items-center rounded-md bg-foreground/[0.06] px-2 text-xs font-normal text-foreground/80">
-          lody
-        </div>
+        <div {...stylex.props(storyLayoutStyles.row)}>lody</div>
       </div>
     </div>
   );
@@ -453,7 +480,7 @@ function LongModelNameShell() {
             style={{ width }}
             {...stylex.props(storyLayout.row5)}
           >
-            <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
+            <div {...stylex.props(sceneStyles.footer)}>
               <DesktopRunConfigMenu
                 agentSelection={{ agentId: codexId, machineId }}
                 allowedMachineIds={[machineId]}

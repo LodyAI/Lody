@@ -4,8 +4,21 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { Moon, Sun, Monitor } from 'lucide-react';
 import { PreviewSelect } from '@/components/settings/preview-select';
 import type { PreviewSelectOption } from '@/components/settings/preview-select';
+const storyLayoutStylesStyles = stylex.create({
+  caption: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
-const storyOverrides = stylex.create({ trigger: { width: '220px' } });
+const storyOverrides = stylex.create({
+  trigger: { width: '220px' },
+  triggerSpace: {
+    marginBlockStart: 'calc(var(--spacing) * 0)',
+    marginBlockEnd: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const storyLayoutStyles = stylex.create({
   frame: {
@@ -96,7 +109,7 @@ function InteractiveDemo() {
   const [previewValue, setPreviewValue] = useState<string | null>(null);
 
   return (
-    <div className="space-y-4">
+    <div>
       <PreviewSelect
         value={value}
         options={themeOptions}
@@ -106,9 +119,9 @@ function InteractiveDemo() {
           setPreviewValue(null);
         }}
         onCancel={() => setPreviewValue(null)}
-        triggerXstyle={storyOverrides.trigger}
+        triggerXstyle={[storyOverrides.trigger, storyOverrides.triggerSpace]}
       />
-      <div className="text-sm text-muted-foreground">
+      <div {...stylex.props(storyLayoutStylesStyles.caption)}>
         <div>Committed: {value}</div>
         {previewValue && <div>Previewing: {previewValue}</div>}
       </div>

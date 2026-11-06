@@ -20,6 +20,32 @@ import { SessionInfoBar, type SessionInfoBarProps } from '@/components/sessions/
 import type { SessionMachineInfo } from '@/components/sessions/session-machine-info';
 import type { ContextChipAction, PrCiRun } from '@/components/sessions/session-info-chips';
 import type { SessionStatusStripState } from '@/components/sessions/session-status-strip';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 14)',
+    borderRadius: 'var(--radius-lg)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  canvas: {
+    borderRadius: 'var(--radius-md)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -225,9 +251,7 @@ function StoryHarness({
         diffStat={diffStat}
         syncing={syncing}
       />
-      <div className="h-14 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        (composer placeholder)
-      </div>
+      <div {...stylex.props(storyLayoutStyles.frame)}>(composer placeholder)</div>
     </div>
   );
 }
@@ -692,28 +716,28 @@ function PeekPlayground() {
       <div {...stylex.props(storyLayout.row)}>
         <button
           type="button"
-          className="rounded-md border border-border px-2 py-1 text-xs"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setGoal(makeGoal())}
         >
           + goal appears
         </button>
         <button
           type="button"
-          className="rounded-md border border-border px-2 py-1 text-xs"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setGoal((g) => (g ? makeGoal({ status: 'paused' }) : g))}
         >
           pause goal (re-focus)
         </button>
         <button
           type="button"
-          className="rounded-md border border-border px-2 py-1 text-xs"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setTasks([makeWakeup(9 * 60_000)])}
         >
           + schedule appears
         </button>
         <button
           type="button"
-          className="rounded-md border border-border px-2 py-1 text-xs"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => {
             setGoal(null);
             setTasks([]);
@@ -736,9 +760,7 @@ function PeekPlayground() {
         onOpenPr={fn()}
         diffStat={{ add: 128, del: 42 }}
       />
-      <div className="h-14 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        (composer placeholder)
-      </div>
+      <div {...stylex.props(storyLayoutStyles.frame)}>(composer placeholder)</div>
     </div>
   );
 }

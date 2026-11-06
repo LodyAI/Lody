@@ -16,6 +16,12 @@ const platform = createLocalPlatformProvider({
   workspaces: createStaticStore({ status: 'ready', workspaces: [], activeWorkspaceId: null }),
 });
 const styles = stylex.create({
+  caller: {
+    pointerEvents: 'auto',
+    position: 'relative',
+    inset: 'auto',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--primary)) 30%,transparent)',
+  },
   canvas: {
     position: 'relative',
     minHeight: '100dvh',
@@ -133,7 +139,7 @@ function BackdropFixture({ caller = false }: { caller?: boolean }) {
     <div {...stylex.props(styles.canvas)} data-onboarding-surface-fixture="backdrop">
       <div {...stylex.props(styles.backdropStage)} data-onboarding-backdrop-host="">
         <OnboardingBackdrop
-          className={caller ? 'pointer-events-auto relative inset-auto bg-primary/30' : undefined}
+          className={caller ? stylex.props(styles.caller).className : undefined}
         />
         <div {...stylex.props(styles.content)}>
           <h1>Synthetic backdrop host</h1>

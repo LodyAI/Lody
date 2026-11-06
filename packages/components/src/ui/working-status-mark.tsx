@@ -23,6 +23,7 @@ export type WorkingStatusMarkProps = {
   unread: boolean;
   /** Text colour class for the grid, transition and dot. */
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 /**
@@ -41,7 +42,7 @@ export type WorkingStatusMarkProps = {
  * render, so the transition lands in the same commit that removes the grid; keep
  * this component mounted across both states for it to see the change.
  */
-export function WorkingStatusMark({ working, unread, className }: WorkingStatusMarkProps) {
+export function WorkingStatusMark({ working, unread, className, xstyle }: WorkingStatusMarkProps) {
   const [wasWorking, setWasWorking] = useState(working);
   const [finishing, setFinishing] = useState(false);
   if (wasWorking !== working) {
@@ -50,24 +51,21 @@ export function WorkingStatusMark({ working, unread, className }: WorkingStatusM
   }
 
   if (working) {
-    return <WorkingGrid data-session-working-indicator="" className={className} />;
+    return <WorkingGrid data-session-working-indicator="" className={className} xstyle={xstyle} />;
   }
   if (unread && finishing) {
     return (
       <WorkingGridCollapse
         data-session-done-transition=""
         className={className}
+        xstyle={xstyle}
         onDone={() => setFinishing(false)}
       />
     );
   }
   if (unread) {
-    return (
-      <span
-        data-session-unread-dot=""
-        className={clsx(stylex.props(styles.unread).className, className)}
-      />
-    );
+    const sx = stylex.props(styles.unread, xstyle);
+    return <span data-session-unread-dot="" {...sx} className={clsx(sx.className, className)} />;
   }
   return null;
 }

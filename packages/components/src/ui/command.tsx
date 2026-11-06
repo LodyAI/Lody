@@ -139,10 +139,11 @@ const styles = stylex.create({
     outlineStyle: 'none',
     ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))[data-selected="true"]':
       { backgroundColor: 'color-mix(in oklab, var(--color-white) 10%, transparent)' },
-    ':is(*) svg': { pointerEvents: 'none', flexShrink: 0 },
-    ':is(*) svg:not([class*="size-"]):not([class*="h-"]):not([class*="w-"])': {
-      width: 'calc(var(--spacing) * 4)',
-      height: 'calc(var(--spacing) * 4)',
+    ':is(*) svg': {
+      pointerEvents: 'none',
+      flexShrink: 0,
+      width: 'var(--lody-command-icon-size, calc(var(--spacing) * 4))',
+      height: 'var(--lody-command-icon-size, calc(var(--spacing) * 4))',
     },
     display: 'flex',
     cursor: 'default',
@@ -221,17 +222,21 @@ const CommandDialog = ({
 
 const CommandInput = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Input>,
-  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
->(({ className, ...props }, ref) => (
-  <div {...stylex.props(styles.inputWrapper)} cmdk-input-wrapper="">
-    <Search {...stylex.props(styles.searchIcon)} />
-    <CommandPrimitive.Input
-      ref={ref}
-      className={clsx(stylex.props(styles.input).className, className)}
-      {...props}
-    />
-  </div>
-));
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input> & { xstyle?: stylex.StyleXStyles }
+>(({ className, xstyle, style, ...props }, ref) => {
+  const sx = stylex.props(styles.input, xstyle);
+  return (
+    <div {...stylex.props(styles.inputWrapper)} cmdk-input-wrapper="">
+      <Search {...stylex.props(styles.searchIcon)} />
+      <CommandPrimitive.Input
+        ref={ref}
+        className={clsx(sx.className, className)}
+        style={sx.style ? { ...sx.style, ...style } : style}
+        {...props}
+      />
+    </div>
+  );
+});
 
 CommandInput.displayName = CommandPrimitive.Input.displayName;
 
@@ -286,8 +291,23 @@ CommandList.displayName = CommandPrimitive.List.displayName;
 
 const CommandEmpty = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Empty>,
-  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Empty>
->((props, ref) => <CommandPrimitive.Empty ref={ref} {...stylex.props(styles.empty)} {...props} />);
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Empty> & { xstyle?: stylex.StyleXStyles }
+>(({ xstyle, ...props }, ref) => {
+  const sx = stylex.props(styles.empty, xstyle);
+  return (
+    <CommandPrimitive.Empty
+      ref={ref}
+      {...sx}
+      {...props}
+      {...(xstyle
+        ? {
+            className: clsx(sx.className, props.className),
+            style: sx.style ? { ...sx.style, ...props.style } : props.style,
+          }
+        : {})}
+    />
+  );
+});
 
 CommandEmpty.displayName = CommandPrimitive.Empty.displayName;
 
@@ -316,16 +336,27 @@ const CommandSeparator = React.forwardRef<
 ));
 CommandSeparator.displayName = CommandPrimitive.Separator.displayName;
 
+const iconSizing = stylex.create({
+  size: (value: string) => ({ '--lody-command-icon-size': value }),
+});
+
 const CommandItem = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Item> & { xstyle?: stylex.StyleXStyles }
->(({ className, xstyle, ...props }, ref) => (
-  <CommandPrimitive.Item
-    ref={ref}
-    className={clsx(stylex.props(styles.item, xstyle).className, className)}
-    {...props}
-  />
-));
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Item> & {
+    xstyle?: stylex.StyleXStyles;
+    iconSize?: string;
+  }
+>(({ className, xstyle, iconSize, style, ...props }, ref) => {
+  const sx = stylex.props(styles.item, iconSize != null && iconSizing.size(iconSize), xstyle);
+  return (
+    <CommandPrimitive.Item
+      ref={ref}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
+      {...props}
+    />
+  );
+});
 
 CommandItem.displayName = CommandPrimitive.Item.displayName;
 

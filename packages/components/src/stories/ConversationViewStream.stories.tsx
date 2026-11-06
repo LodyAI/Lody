@@ -21,6 +21,26 @@ import {
   createConversationDerivation,
   type ConversationView,
 } from '@/lib/conversation-view';
+const sceneStyles = stylex.create({
+  fill: { height: '100%' },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': '0.25rem',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+  element: {
+    'border-style': 'solid',
+    'border-width': '1px',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     height: '720px',
@@ -202,7 +222,7 @@ function WindowedStream({
         initialWindowReady={initialWindowReady}
         items={items}
         sessionId={streamSessionId}
-        className="h-full"
+        xstyle={sceneStyles.fill}
         renderMessageRow={renderMessageRow}
         showScrollToLatest={false}
         lastAssistantMessageId={lastAssistantMessageId}
@@ -253,7 +273,7 @@ function OpenFlickerStory({
           type="button"
           data-testid="open-conversation"
           disabled={!view}
-          className="rounded border px-3 py-1 text-sm"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setOpenId((n) => n + 1)}
         >
           Open conversation
@@ -261,7 +281,7 @@ function OpenFlickerStory({
         <button
           type="button"
           data-testid="close-conversation"
-          className="rounded border px-3 py-1 text-sm"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setOpenId(0)}
         >
           Close
@@ -304,7 +324,7 @@ function OpenedStream({
       initialWindowReady={initialWindowReady}
       items={items}
       sessionId={streamSessionId}
-      className="h-full"
+      xstyle={sceneStyles.fill}
       // The session page always supplies a non-null fragment here, even when it
       // renders no DOM, so it counts as a Virtua row. Anything deriving "is
       // there anything to virtualize" from the item count must survive that.
@@ -414,7 +434,7 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
             type="button"
             data-testid={`select-conversation-${index}`}
             disabled={!views}
-            className="rounded border px-3 py-1 text-sm"
+            {...stylex.props(storyLayoutStyles.canvas)}
             onClick={() => {
               setDocumentPending(true);
               setCurrent(index);
@@ -606,7 +626,11 @@ function NativeTextSelectionStory() {
         >
           Finish first turn
         </button>
-        <textarea data-testid="selection-paste" aria-label="Paste copied text" className="border" />
+        <textarea
+          data-testid="selection-paste"
+          aria-label="Paste copied text"
+          {...stylex.props(storyLayoutStyles.element)}
+        />
       </div>
       <div {...stylex.props(storyLayout.frame2)} data-testid="native-selection-story">
         <SessionChatStreamView
@@ -622,7 +646,7 @@ function NativeTextSelectionStory() {
           onOutlinePreviewRound={stream.onOutlinePreviewRound}
           leadingContent={<div>Selection regression fixture</div>}
           renderMessageRow={renderMessageRow}
-          className="h-full"
+          xstyle={sceneStyles.fill}
         />
       </div>
     </div>

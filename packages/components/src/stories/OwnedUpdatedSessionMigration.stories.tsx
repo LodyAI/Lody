@@ -9,6 +9,19 @@ import {
   SidebarUpdatedSessionList,
   type SidebarUpdatedItem,
 } from '../components/sidebar-updated-session-list';
+const storyCallerStyles = stylex.create({
+  listOverride: {
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-xl)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 10%, transparent)',
+    ':is(*) [data-session-row-leading-slot] button': {
+      opacity: '50%',
+    },
+    ':is(*) [data-sidebar-updated-id]': {
+      'background-color': 'transparent',
+    },
+  },
+});
 
 const meta = {
   title: 'Components/OwnedUpdatedSessionMigration',
@@ -175,11 +188,7 @@ function Fixture({
             selectedItemId={selected}
             isMobile={mobile}
             showProjectContext
-            className={
-              caller
-                ? 'gap-2 rounded-xl bg-muted/10 [&_[data-sidebar-updated-id]]:bg-transparent [&_[data-session-row-leading-slot]_button]:opacity-50'
-                : undefined
-            }
+            className={caller ? stylex.props(storyCallerStyles.listOverride).className : undefined}
             toggleBucketLabel="Toggle updated chats"
             collapsedBuckets={{ all: collapsed }}
             onToggleBucket={() => setCollapsed((value) => !value)}

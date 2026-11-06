@@ -615,6 +615,7 @@ export type LoroSidebarLabels = {
 
 export interface LoroSidebarProps {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 
   workspaceName: string;
   userEmail: string;
@@ -1283,6 +1284,7 @@ export const MAX_DESKTOP_SIDEBAR_WIDTH = 420;
 
 export const LoroSidebar = memo(function LoroSidebar({
   className,
+  xstyle,
   workspaceName,
   userEmail,
   workspaces,
@@ -1831,15 +1833,21 @@ export const LoroSidebar = memo(function LoroSidebar({
       </div>
     );
 
+  const shellProps = stylex.props(shellStyles.shell, xstyle);
   return (
     <div
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
-      className={clsx(stylex.props(shellStyles.shell).className, className)}
+      className={clsx(shellProps.className, className)}
       style={
         isMobile || overlay
-          ? undefined
-          : { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
+          ? shellProps.style
+          : {
+              ...shellProps.style,
+              width: sidebarWidth,
+              minWidth: resolvedMinWidth,
+              maxWidth: resolvedMaxWidth,
+            }
       }
     >
       {!isMobile && !overlay && (

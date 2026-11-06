@@ -17,6 +17,7 @@ export interface CardProps extends Omit<ComponentProps<'div'>, 'className'> {
    * have made it. A caller wraps the card in one, or renders one over it.
    */
   interactive?: boolean;
+  xstyle?: stylex.StyleXStyles;
   children?: ReactNode;
   className?: string;
 }
@@ -124,12 +125,17 @@ const styles = stylex.create({
  * than a primitive.
  */
 export const CardRoot = forwardRef<HTMLDivElement, CardProps>(function CardRoot(
-  { interactive = false, className, children, ...rest },
+  { interactive = false, className, xstyle, children, ...rest },
   ref
 ) {
-  const sx = stylex.props(styles.root, interactive && styles.interactive);
+  const sx = stylex.props(styles.root, interactive && styles.interactive, xstyle);
   return (
-    <div ref={ref} {...rest} className={appendClassName(sx.className, className)} style={sx.style}>
+    <div
+      ref={ref}
+      {...rest}
+      className={appendClassName(sx.className, className)}
+      style={xstyle ? { ...sx.style, ...rest.style } : sx.style}
+    >
       {children}
     </div>
   );

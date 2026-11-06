@@ -54,7 +54,7 @@ function Scene({
 }: {
   reader?: boolean;
   initialPending?: boolean;
-  caller?: 'none' | 'low' | 'unlayered';
+  caller?: 'none' | 'unlayered';
   long?: boolean;
 }) {
   const [pending, setPending] = useState(initialPending);
@@ -87,10 +87,7 @@ function Scene({
     ],
     [pending, reader, long]
   );
-  const publicClass =
-    caller === 'low'
-      ? '[:where(&)_:where(button)]:text-sky-600 [:where(&)_:where(button)]:hover:text-sky-700'
-      : 'owned-assistant-action-unlayered';
+  const publicClass = 'owned-assistant-action-unlayered';
   return (
     <section
       data-assistant-action-fixture
@@ -160,5 +157,4 @@ export const GlyphActions: Story = { render: () => <Scene /> };
 export const PendingActions: Story = { render: () => <Scene initialPending /> };
 export const ReaderActions: Story = { render: () => <Scene reader /> };
 export const LongActions: Story = { render: () => <Scene long /> };
-export const StreamCallerLow: Story = { render: () => <Scene caller="low" /> };
 export const StreamCallerUnlayered: Story = { render: () => <Scene caller="unlayered" /> };

@@ -193,12 +193,9 @@ describe('SessionList PR badge', () => {
     expect(passedVerdict?.parentElement?.getAttribute('transform')).toBe('translate(7 7)');
     expect(passedVerdict?.getAttribute('width')).toBe('10');
     expect(passedVerdict?.getAttribute('height')).toBe('10');
-    expect(passedPrIcon?.querySelector('.bg-sidebar')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-github-addition')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-github-deletion')).toBeNull();
+    expect(rowWithPr?.textContent).not.toMatch(/[+-]\d/);
     expect(rowWithoutPr?.querySelector('[data-pr-ci-verdict]')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-github-addition')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-github-deletion')).toBeNull();
+    expect(rowWithoutPr?.textContent).not.toMatch(/[+-]\d/);
   });
 
   it('replaces diff stats with a Mergeable pill only while the ready session is inactive', () => {
@@ -235,8 +232,7 @@ describe('SessionList PR badge', () => {
 
     const row = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(row?.querySelector('[data-session-mergeable-pill]')?.textContent).toBe('Mergeable');
-    expect(row?.querySelector('.text-github-addition')).toBeNull();
-    expect(row?.querySelector('.text-github-deletion')).toBeNull();
+    expect(row?.textContent).not.toMatch(/[+-]\d/);
     expect(row?.querySelector('.lucide-git-pull-request')).not.toBeNull();
 
     flushSync(() => {
@@ -251,8 +247,7 @@ describe('SessionList PR badge', () => {
 
     const selectedRow = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(selectedRow?.querySelector('[data-session-mergeable-pill]')).toBeNull();
-    expect(selectedRow?.querySelector('.text-github-addition')).toBeNull();
-    expect(selectedRow?.querySelector('.text-github-deletion')).toBeNull();
+    expect(selectedRow?.textContent).not.toMatch(/[+-]\d/);
     expect(selectedRow?.querySelector('.lucide-git-pull-request')).not.toBeNull();
   });
 

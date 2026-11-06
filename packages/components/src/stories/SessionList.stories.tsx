@@ -1,9 +1,26 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createStore, Provider } from 'jotai';
 import { SessionList } from '@/components/session-list';
 import type { SessionListProps } from '@/components/session-list';
 import { sidebarCollapsedOpenedBySessionsAtom } from '@/atoms/focus-layer';
 import { useEffect, useMemo, useRef, useState } from 'react';
+
+const migrationStyles = stylex.create({
+  frame: {
+    width: '360px',
+    borderRadius: 'var(--radius-xl)',
+    padding: 'calc(var(--spacing) * 3)',
+    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+    backgroundColor: 'hsl(var(--card) / 1)',
+    color: 'hsl(var(--card-foreground) / 1)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  scrolling: { maxHeight: '520px', overflow: 'auto' },
+  longList: { height: '760px', overflowY: 'auto' },
+});
 
 const meta = {
   title: 'Components/SessionList',
@@ -19,6 +36,7 @@ type Story = StoryObj<typeof meta>;
 
 type TaskListDemoProps = SessionListProps & {
   containerClassName?: string;
+  containerXstyle?: stylex.StyleXStyles;
   /** Seeds the shared sidebar collapse atom so a story can show a folded opener. */
   collapsedOpenedBySessionIds?: Record<string, boolean>;
 };
@@ -29,6 +47,7 @@ function TaskListDemo({
   isLoading,
   selectedSessionId,
   containerClassName,
+  containerXstyle,
   collapsedOpenedBySessionIds,
 }: TaskListDemoProps) {
   const [selectedId, setSelectedId] = useState<string | null>(selectedSessionId ?? null);
@@ -93,16 +112,7 @@ function TaskListDemo({
     setSelectedId(sessionId);
   };
 
-  const frameClassName = useMemo(
-    () =>
-      [
-        'w-[360px] rounded-xl p-3 shadow-lg',
-        'bg-card text-card-foreground',
-        'border border-border/60',
-        containerClassName,
-      ].join(' '),
-    [containerClassName]
-  );
+  const frameProps = stylex.props(migrationStyles.frame, containerXstyle);
 
   // A fresh store per mount keeps stories independent: the collapse state is a
   // shared jotai atom in production, so a leaked default would bleed across.
@@ -115,7 +125,10 @@ function TaskListDemo({
   }, [collapsedOpenedBySessionIds]);
 
   return (
-    <div className={frameClassName}>
+    <div
+      {...frameProps}
+      className={[frameProps.className, containerClassName].filter(Boolean).join(' ')}
+    >
       <Provider store={store}>
         <SessionList
           sessions={taskState}
@@ -301,7 +314,7 @@ export const LongTitles: Story = {
       },
     ],
   },
-  render: (args) => <TaskListDemo {...args} containerClassName="w-[300px]" />,
+  render: (args) => <TaskListDemo {...args} />,
 };
 
 /**
@@ -463,7 +476,11 @@ function buildLongListTasks(): SessionListProps {
 export const VeryLongList: Story = {
   args: buildLongListTasks(),
   render: (args) => (
-    <TaskListDemo {...args} containerClassName="scrollbar-pro max-h-[520px] overflow-auto" />
+    <TaskListDemo
+      {...args}
+      containerClassName="scrollbar-pro"
+      containerXstyle={migrationStyles.scrolling}
+    />
   ),
 };
 
@@ -713,7 +730,11 @@ export const AllDiffAndPrStates: Story = {
   name: 'All Diff and PR States',
   args: ALL_DIFF_AND_PR_STATES_ARGS,
   render: (args) => (
-    <TaskListDemo {...args} containerClassName="scrollbar-pro h-[760px] overflow-y-auto" />
+    <TaskListDemo
+      {...args}
+      containerClassName="scrollbar-pro"
+      containerXstyle={migrationStyles.longList}
+    />
   ),
 };
 

@@ -38,7 +38,7 @@ describe('InlineSvg', () => {
     const render = (className: string) =>
       act(() => root.render(createElement(InlineSvg, { raw: SVG_MARKUP, className })));
 
-    render('h-4 w-4');
+    render('first-glyph');
     const host = container.querySelector('span');
     const parsed = host?.firstElementChild;
     expect(parsed?.tagName.toLowerCase()).toBe('svg');
@@ -46,11 +46,11 @@ describe('InlineSvg', () => {
     // React 19 assigns `innerHTML` whenever the `dangerouslySetInnerHTML` prop
     // is a new object, so a fresh literal per render reparses the markup and
     // replaces this node. Interning the wrapper is what keeps it alive.
-    render('h-4 w-4');
-    render('h-5 w-5');
+    render('first-glyph');
+    render('second-glyph');
 
     expect(container.querySelector('span')?.firstElementChild).toBe(parsed);
-    expect(container.querySelector('span')?.className).toBe('h-5 w-5');
+    expect(container.querySelector('span')?.className).toBe('second-glyph');
   });
 
   it('fills the glyph without replacing its parsed node or explicit SVG styles', () => {

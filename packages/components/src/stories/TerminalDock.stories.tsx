@@ -13,6 +13,37 @@ import type {
 } from '@/components/terminal/terminal-channel';
 import { TerminalDock, type TerminalDockProps } from '@/components/terminal/terminal-dock';
 import { terminalControllerAtom } from '@/components/terminal/terminal-controller';
+const storyLayoutStylesStyles = stylex.create({
+  row: {
+    display: 'flex',
+    flex: 'none',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 2)',
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+  },
+  label: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  row2: {
+    display: 'flex',
+    flex: '1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingInline: 'calc(var(--spacing) * 6)',
+    textAlign: 'center',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayoutStyles = stylex.create({
   frame: {
     height: 'calc(var(--spacing) * 3.5)',
@@ -21,6 +52,23 @@ const storyLayoutStyles = stylex.create({
 });
 
 const storyLayout = stylex.create({
+  toggle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius-md)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      ':hover': { '@media (hover: hover)': 'hsl(var(--foreground) / 1)' },
+    },
+  },
   stack: {
     display: 'flex',
     height: '100vh',
@@ -172,18 +220,18 @@ function DockHarness(props: Partial<TerminalDockProps>) {
   const controller = useAtomValue(terminalControllerAtom);
   return (
     <div {...stylex.props(storyLayout.stack)}>
-      <div className="flex flex-none items-center justify-between gap-2 border-b border-border px-3 py-2">
-        <span className="text-sm text-muted-foreground">主内容区（对话）</span>
+      <div {...stylex.props(storyLayoutStylesStyles.row)}>
+        <span {...stylex.props(storyLayoutStylesStyles.label)}>主内容区（对话）</span>
         <button
           type="button"
           onClick={() => controller?.toggleOpen()}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+          {...stylex.props(storyLayout.toggle)}
         >
           <PanelBottom {...stylex.props(storyLayoutStyles.frame)} />
           Toggle terminal dock
         </button>
       </div>
-      <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+      <div {...stylex.props(storyLayoutStylesStyles.row2)}>
         点击右上角按钮，终端从底部弹出（浮动圆角卡片，tab 头在顶部），body 可拖动顶边调高
       </div>
       <TerminalDock channel={channel} {...props} />

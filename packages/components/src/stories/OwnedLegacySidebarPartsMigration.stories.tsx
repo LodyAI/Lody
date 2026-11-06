@@ -30,6 +30,16 @@ import {
   useSidebar,
 } from '@/ui/sidebar';
 
+const callerParts = stylex.create({
+  input: { height: 'calc(var(--spacing) * 12)', width: 'calc(var(--spacing) * 40)' },
+  skeleton: {
+    display: 'grid',
+    height: 'calc(var(--spacing) * 12)',
+    gap: 'calc(var(--spacing) * 4)',
+    borderRadius: 0,
+    paddingInline: 'calc(var(--spacing) * 5)',
+  },
+});
 const styles = stylex.create({
   outer: { display: 'contents' },
   main: { padding: 16, minWidth: 0 },
@@ -218,17 +228,6 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = { render: () => <Fixture /> };
 export const OpaqueCallers: Story = { render: () => <Fixture opaque /> };
 
-// These legal zero-specificity callers must not overturn the parts' own utilities.
-export const ZeroSpecificityHeaderGap: Story = {
-  render: () => <Fixture ancestorClassName="[:where(&)_:where([data-sidebar=header])]:gap-12" />,
-};
-export const ZeroSpecificityMenuWidth: Story = {
-  render: () => <Fixture ancestorClassName="[:where(&)_:where([data-sidebar=menu-button])]:w-7" />,
-};
-export const ZeroSpecificityLabelHeight: Story = {
-  render: () => <Fixture ancestorClassName="[:where(&)_:where([data-sidebar=group-label])]:h-12" />,
-};
-
 export const Palette: Story = { render: () => <Fixture palette /> };
 
 function InputSkeletonFixture() {
@@ -251,7 +250,7 @@ function InputSkeletonFixture() {
             aria-label="Leading caller synthetic input"
             placeholder="Leading input"
             leading={<File />}
-            className="h-12 w-40"
+            xstyle={callerParts.input}
           />
           <SidebarInput
             aria-label="Disabled opaque synthetic input"
@@ -275,7 +274,7 @@ function InputSkeletonFixture() {
                   <SidebarMenuItem>
                     <SidebarMenuSkeleton
                       data-input-skeleton="utility"
-                      className="grid h-12 gap-4 rounded-none px-5"
+                      xstyle={callerParts.skeleton}
                     />
                   </SidebarMenuItem>
                   <SidebarMenuItem>

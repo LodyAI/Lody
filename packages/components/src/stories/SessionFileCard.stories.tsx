@@ -3,6 +3,18 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { getServerNow, type SessionFilePayload } from '@lody/shared';
 import { SESSION_FILE_RETENTION_MS } from '@/lib/session-file-presentation';
 import { SessionFileCard, SessionFileCardList } from '@/components/ai-gui/session-file-card';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    width: '28rem',
+    borderRadius: 'var(--radius-xl)',
+    borderStyle: 'dashed',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -35,9 +47,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const wrap = (content: React.ReactNode) => (
-  <div className="w-[28rem] rounded-xl border border-dashed border-border/60 bg-muted/20 p-4">
-    {content}
-  </div>
+  <div {...stylex.props(storyLayoutStyles.frame)}>{content}</div>
 );
 
 export const DownloadablePdf: Story = {

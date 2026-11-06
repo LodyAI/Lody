@@ -6,6 +6,26 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { SessionList, type SessionListRow } from '@/components/session-list';
 import { sessionSendStatusesAtom } from '@/atoms/session-send-status';
 import type { SessionSendStatus } from '@/lib/session-send-status';
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    paddingInline: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  canvas2: {
+    borderRadius: 'var(--radius-xl)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-border) / 1) 80%, transparent)',
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+    fontSize: '14px',
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -132,9 +152,9 @@ function SidebarFrame({
   const [repos, setRepos] = useState([{ repoFullName: 'loro-dev/loro', collapsed: folded }]);
   return (
     <div {...stylex.props(storyLayout.stack)}>
-      <div className="px-1 text-xs font-medium text-muted-foreground">{heading}</div>
+      <div {...stylex.props(storyLayoutStyles.canvas)}>{heading}</div>
       <Provider store={store}>
-        <div className="rounded-xl border border-sidebar-border/80 bg-sidebar p-2 text-[14px] text-sidebar-foreground">
+        <div {...stylex.props(storyLayoutStyles.canvas2)}>
           <div {...stylex.props(storyLayout.section)}>
             <SessionList
               sessions={REPO_ROWS}

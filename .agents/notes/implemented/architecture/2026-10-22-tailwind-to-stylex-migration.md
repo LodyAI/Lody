@@ -9,7 +9,7 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Lody's shared product UI now uses direct StyleX instead of a Tailwind declaration bridge. The Electron renderer and standalone review helper no longer use the Tailwind build plugin or runtime class-merging dependencies. Component owners compose actual caller styles through narrow typed inputs, preserving effective layout, themes and interaction states. Storybook still compiles unmigrated fixtures separately; real screenshot differences and unvisited states remain open. Successful compilation or a zero literal count does not establish completion.
+Lody's shared product UI now uses direct StyleX instead of a Tailwind declaration bridge. The Electron renderer and standalone review helper no longer use the Tailwind build plugin or runtime class-merging dependencies. Component owners compose actual caller styles through narrow typed inputs, preserving effective layout, themes and interaction states. Storybook fixtures are also migrated, and their temporary compiler input, shared preset and remaining component compiler dependencies are removed. Real screenshot differences and unvisited states remain open. Successful compilation or a zero literal count does not establish completion.
 
 ## Ownership and composition
 
@@ -19,7 +19,7 @@ Actual callers that need physical overrides use typed `xstyle` or named part inp
 
 The former declaration bridge, declaration profile, Vite plugin and dedicated tests were removed, together with their Vite, Storybook, Vitest and Electron wiring. They retained Tailwind's ordering engine and were not the migration endpoint. The [bridge decision](2026-10-31-stylex-cascade-compatibility.md) is historical, not permission to restore that architecture.
 
-Product CSS has no Tailwind/Konsta/animation-package imports, compiler directives or private `--tw-*` state. Licensed browser normalization lives in `src/tailwind/reset.css`; ordinary scale defaults and native safe areas live in `theme-defaults.css`. The historical directory/export names do not load a compiler. Only `.storybook/legacy-stories.css` retains fixture compilation. Electron's Tailwind plugin/config/dependencies and component runtime CVA/Konsta/merging dependencies are removed. The review helper's independent pipeline is also retired.
+Product CSS has no Tailwind/Konsta/animation-package imports, compiler directives or private `--tw-*` state. Licensed browser normalization lives in `src/tailwind/reset.css`; ordinary scale defaults and native safe areas live in `theme-defaults.css`. The historical directory/export names do not load a compiler. Storybook's temporary fixture stylesheet and compiler plugin are removed, together with the unused shared preset and compiler-backed inventory tool. Electron's Tailwind plugin/config/dependencies and component runtime CVA/Konsta/merging dependencies are removed. The review helper's independent pipeline is also retired.
 
 ## Decisions supported by browser evidence
 
@@ -47,9 +47,9 @@ Comparison provenance is part of acceptance. An independent audit found two earl
 
 ## Remaining work
 
-The scanner validates AST-discovered candidates against the remaining fixture compiler input. Version 3 also follows class-named status-map properties and parameter defaults. An independent all-string audit remains necessary: earlier zero counts missed actual PR/Goal maps and settings-dialog caps. Counts are lower bounds, not completion percentages or runtime coverage.
+The final frozen compiler-backed v3 snapshot scans 1,795 source files and finds zero recognized utilities, with 744 unresolved expressions. This includes product components and all stories. The scanner, its tests and compiler dependency were then retired; their source and exact final JSON remain in ignored artifacts. Earlier zero counts missed real maps, so dynamic producer review remains distinct from this static lower bound.
 
-The recorded v3 continuation snapshot has 4,103 occurrences across 160 files and 757 unresolved expressions: 4,101 in stories and two `text-modified-file` occurrences backed by an ordinary authored CSS rule. Product and review-helper compiler retirement does not imply all fixtures or states are accepted. Continue fixture conversion, Slot/caller audits, pending production qualification and unresolved visual diagnosis; preserve unrelated working changes.
+Fixture overrides now compose through their actual owner and part inputs, including DiffViewer, list loading states and mobile tab glyph dimensions. Pure Tailwind ordering diagnostics were retired, while meaningful Slot, geometry, interaction and screenshot coverage remains. The compiler-free Storybook production build succeeds with 1,923 unchanged inputs. MobileNewChatSheet has 16 pixel-exact browser pairs across light/dark and 390/820 widths; four frames record only removal of transparent zero-shadow carriers in computed styles. This does not qualify all later fixtures; the earlier report and its OPEN frames are unchanged.
 
 The inventory is scoped to shared product sources and their fixtures. `site-docs` owns a separate Fumadocs/Tailwind pipeline and requires its own baseline and migration; it is not silently counted as removed. Isolated ACP demo/editor applications remain outside this UI task and require no submodule operations.
 

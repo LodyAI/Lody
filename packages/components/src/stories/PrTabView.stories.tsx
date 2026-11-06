@@ -15,6 +15,29 @@ import type {
 import { PrTabView, type PrTabViewData } from '@/components/sessions/pr-tab-view';
 import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
 import type { PrCommitSelection } from '@/lib/github-pr-diff';
+const prStory = stylex.create({
+  back: {
+    marginLeft: 'calc(var(--spacing) * -1)',
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'var(--radius-sm)',
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted) / 1)' },
+    },
+  },
+  phone: {
+    marginInline: 'auto',
+    height: '100vh',
+    width: 390,
+    borderWidth:"1px",borderStyle:"solid",borderColor:"hsl(var(--border) / 1)",
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+  },
+});
 const storyLayout = stylex.create({
   frame: {
     height: '100vh',
@@ -900,21 +923,14 @@ export const MobileWithBackButton: Story = {
     data: baseData,
     ...storyCallbacks,
     leadingSlot: (
-      <button
-        type="button"
-        className="-ml-1 inline-flex h-7 w-7 items-center justify-center rounded-sm hover:bg-muted"
-        aria-label="Back"
-      >
+      <button type="button" {...stylex.props(prStory.back)} aria-label="Back">
         <span aria-hidden>←</span>
       </button>
     ),
   },
   decorators: [
     (Story) => (
-      <div
-        className="mx-auto h-screen w-[390px] border border-border bg-background shadow-lg"
-        style={{ maxWidth: '100vw' }}
-      >
+      <div {...stylex.props(prStory.phone)} style={{ maxWidth: '100vw' }}>
         <Story />
       </div>
     ),

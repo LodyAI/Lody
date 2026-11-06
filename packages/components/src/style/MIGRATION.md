@@ -1,8 +1,7 @@
 # Tailwind → StyleX migration guide
 
 Move one owned surface at a time, preserving its rendered layout and behavior.
-The product renderer uses StyleX and native integration CSS. Only unmigrated
-Storybook fixtures retain a separate Tailwind compiler input. The
+The product renderer and Storybook fixtures use StyleX and native integration CSS. The
 [token reference](README.md) owns the shared vocabulary.
 
 The independent [code-review helper](../../../code-review-helper/README.md) has
@@ -40,20 +39,18 @@ when the component owns the descendants; keep semantic part props when callers
 need to customize an owned part. Do not add global utility aliases or specificity
 patches to imitate the old utility layer.
 
-The application retains its existing CSS layer order while fixture migration
-continues. Product CSS contains no Tailwind imports or directives, and Electron
-has no Tailwind plugin. `tailwind/reset.css` owns browser normalization;
-`tailwind/theme-defaults.css` owns ordinary scale variables and native safe-area
-hooks. Neither generates utilities. Storybook alone imports
-`.storybook/legacy-stories.css`; remove that input and its dependencies when the
-remaining fixtures are migrated.
+The application retains its existing CSS layer order. Product and Storybook
+contain no Tailwind compiler input or plugin. `tailwind/reset.css` owns browser
+normalization; `tailwind/theme-defaults.css` owns ordinary scale variables and
+native safe-area hooks. Neither generates utilities. The historical directory
+and stylesheet export names remain compatible with existing hosts.
 
-Audit dynamic class maps and helper defaults as well as JSX. The inventory
-scanner v3 includes class-named object properties and parameter defaults; its
-compiler reads the remaining fixture input. A zero recognized count is still
-not proof that runtime strings or integration CSS are correct. Inspect the
-actual desktop: a viewport hook with only an old-browser fallback does not
-provide the normal `100svh` height after utility generation is removed.
+Audit dynamic class maps and helper defaults as well as JSX. The compiler-backed
+scanner was retired with its compiler after the final source snapshot reached
+zero recognized utilities. Frozen inventories retain unresolved expressions and
+their method; zero recognized count is not proof of runtime or visual coverage.
+Inspect the actual desktop: an old-browser viewport fallback alone does not
+provide normal `100svh` height.
 
 ## Compose props before rendering
 
@@ -255,14 +252,9 @@ and focus as well as the component's own hover and focus.
 
 ## Capture and verify a batch
 
-1. Record the remaining usage with `node scripts/tailwind-usage.mjs --json`.
-   It uses the locked Tailwind compiler to validate AST-discovered candidates.
-   Scanner version 2 also follows direct `element.className = …` writes,
-   including literal bracket access. Version 1 omitted the iframe's five
-   utilities, so its frozen inventory fell by 21 while that batch migrated 26.
-   Keep historical method/count records and compare versions on the same source
-   snapshot. Counts are source occurrences; unresolved dynamic/compound writes
-   are reported separately and are not evidence of zero usage.
+1. Identify the owned surface and its real callers, including dynamic class maps,
+   native hooks and Slot/render children. Historical compiler inventories are
+   frozen evidence; do not reinstall Tailwind solely to count source strings.
 2. Capture the unchanged component before editing. Verify the effective root theme
    and relevant computed palette: story-level globals can override URL globals,
    leaving a requested light frame dark.

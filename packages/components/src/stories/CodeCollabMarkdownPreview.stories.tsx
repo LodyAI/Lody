@@ -8,6 +8,21 @@ import {
   createFakeSessionFileProvider,
   type SessionFileProviderEntry,
 } from '@/lib/session-file-provider';
+const storyLayoutStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '640px',
+    width: '760px',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     'min-height': 'calc(var(--spacing) * 0)',
@@ -74,7 +89,7 @@ function MarkdownPreviewStory() {
   );
 
   return (
-    <div className="flex h-[640px] w-[760px] flex-col overflow-hidden rounded-md border border-border bg-background">
+    <div {...stylex.props(storyLayoutStyles.stack)}>
       <div {...stylex.props(storyLayout.frame)}>
         <SessionFileContentView
           sessionId={storySession.id}

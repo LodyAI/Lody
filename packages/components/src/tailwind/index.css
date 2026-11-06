@@ -141,10 +141,6 @@ pre,
     overflow: hidden;
   }
 
-  .text-modified-file {
-    color: hsl(var(--modified-file));
-  }
-
   /* 防止移动端长按选择文本 - 特别是在 iOS Safari 上 */
   .-webkit-touch-callout-none {
     -webkit-touch-callout: none;
@@ -1753,7 +1749,9 @@ pre,
 
 /* The workspace keeps its viewport height on older embedded browsers. */
 @supports not (height: 1dvh) {
-  .workspace-viewport { height: 100vh !important; }
+  .workspace-viewport {
+    height: 100vh !important;
+  }
 }
 
 /*

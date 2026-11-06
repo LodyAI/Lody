@@ -3,7 +3,7 @@ import { Check, Copy, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 
-import { clsx } from 'clsx';
+import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeSpace } from '../../style/theme-scale.stylex';
 
@@ -11,6 +11,7 @@ export type DiffFileHeaderActionsProps = {
   readonly path: string;
   readonly onOpenFile?: (path: string) => void;
   readonly className?: string;
+  readonly xstyle?: stylex.StyleXStyles;
 };
 
 const styles = stylex.create({
@@ -44,7 +45,12 @@ function stopHeaderTrigger(event: MouseEvent | PointerEvent): void {
   event.stopPropagation();
 }
 
-export function DiffFileHeaderActions({ path, onOpenFile, className }: DiffFileHeaderActionsProps) {
+export function DiffFileHeaderActions({
+  path,
+  onOpenFile,
+  className,
+  xstyle,
+}: DiffFileHeaderActionsProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
@@ -70,7 +76,7 @@ export function DiffFileHeaderActions({ path, onOpenFile, className }: DiffFileH
   };
 
   return (
-    <div className={clsx(stylex.props(styles.actions).className, className)}>
+    <div {...withClassName(stylex.props(styles.actions, xstyle), className)}>
       <button
         type="button"
         onPointerDown={stopHeaderTrigger}

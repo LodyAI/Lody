@@ -6,9 +6,55 @@ import {
   getComposerMentionChip,
   wrapPastedTextChipLabel,
 } from '@/components/mentions/mention-chips';
-import { cn } from '@/lib/utils';
 import { Mention, MentionInput, MentionLabel } from '@/ui/mention';
 import { Root as MentionRoot, type Mention as MentionRange } from '@/ui/mention/index';
+const chipStory = stylex.create({
+  surface: {
+    width: '100%',
+    borderRadius: 'var(--radius-xl)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab,hsl(var(--foreground) / 1) 10%,transparent)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab,hsl(var(--input-border) / 1) 70%,transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--background) / 1)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab,hsl(var(--input) / 1) 90%,transparent)',
+    },
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2.5)',
+    '--mention-chip-surface': {
+      default: 'hsl(var(--background))',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in srgb,hsl(var(--input)) 90%,hsl(var(--background)))',
+    },
+  },
+  input: {
+    resize: 'none',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    padding: 0,
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    boxShadow: {
+      default: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+      ':focus-visible':
+        '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 0px var(--lody-input-focus-ring, transparent), 0 0 #0000',
+    },
+  },
+});
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   hiddenLabel: {
     position: 'absolute',
@@ -110,7 +156,7 @@ function ComposerBox({
 
   return (
     <div {...stylex.props(storyLayout.stack)} data-mention-fixture-box={label}>
-      <div className="font-medium text-muted-foreground text-xs">{label}</div>
+      <div {...stylex.props(storyLayoutStyles.caption)}>{label}</div>
       <Root
         inputValue={value}
         onInputValueChange={setValue}
@@ -123,18 +169,10 @@ function ComposerBox({
         // glyphs by painting that colour, so a story on a *different* surface
         // would hide the one bug this is most likely to have: the cover showing
         // up as a rectangle.
-        className={cn(
-          'w-full rounded-xl border border-foreground/[0.10] bg-background px-3 py-2.5',
-          'dark:border-input-border/70 dark:bg-input/90',
-          '[--mention-chip-surface:hsl(var(--background))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]'
-        )}
+        className={stylex.props(chipStory.surface).className}
       >
         <MentionLabel xstyle={storyLayout.hiddenLabel}>Prototype composer</MentionLabel>
-        <MentionInput
-          value={value}
-          rows={3}
-          className="resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
-        />
+        <MentionInput value={value} rows={3} xstyle={chipStory.input} />
       </Root>
     </div>
   );
@@ -205,6 +243,12 @@ export const ScopeTokens: Story = {
 };
 
 const nativeControlStyles = stylex.create({
+  utility: {
+    display: 'block',
+    width: 'calc(var(--spacing) * 56)',
+    resize: 'vertical',
+    color: 'hsl(var(--destructive) / 1)',
+  },
   opaque: { display: 'grid', width: 173, resize: 'vertical', color: 'rgb(17, 57, 89)', zIndex: 47 },
 });
 
@@ -213,11 +257,11 @@ function NativeFieldControl({ caller = 'default' }: { caller?: 'default' | 'util
   const [mentions, setMentions] = useState(SHORT.mentions);
   const [disabled, setDisabled] = useState(false);
   const [readonly, setReadonly] = useState(false);
-  const inputClass =
+  const inputStyles =
     caller === 'utility'
-      ? 'block w-56 resize-y text-destructive'
+      ? nativeControlStyles.utility
       : caller === 'opaque'
-        ? stylex.props(nativeControlStyles.opaque).className
+        ? nativeControlStyles.opaque
         : undefined;
   return (
     <div data-native-mention-control={caller} style={{ padding: 20, maxWidth: 760 }}>
@@ -249,7 +293,7 @@ function NativeFieldControl({ caller = 'default' }: { caller?: 'default' | 'util
         <MentionInput
           value={value}
           rows={3}
-          className={inputClass}
+          xstyle={inputStyles}
           aria-label="Native mention control"
         />
       </Mention>

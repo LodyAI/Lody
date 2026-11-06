@@ -82,7 +82,7 @@ function renderRows(conversations: ConversationTabEntry[]): HTMLElement[] {
 
 const hand = (row: HTMLElement) => row.querySelector(`[aria-label="${WAITING_LABEL}"]`);
 const spinner = (row: HTMLElement) =>
-  row.querySelector('.animate-spin, [data-slot="spinner"]');
+  row.querySelector('[data-slot="spinner"]');
 const unreadDot = (row: HTMLElement) => row.querySelector('[aria-label="Unread messages"]');
 
 describe('mobile session tab sheet status slot', () => {

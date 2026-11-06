@@ -32,8 +32,8 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   expand/collapse uses the same toggle.
 - Conversation titles stay `font-normal`; pin with a glyph, never weight.
 - Conversation/repo/nav radius, inset, ink, hover/selected fill and title clipping
-  use `sidebar-surface.ts` / `sidebar.tokens.stylex.ts`. Tailwind wins conflicting
-  properties; retain it only for groups, menu-open and focus states.
+  use `sidebar-surface.ts` / `sidebar.tokens.stylex.ts`. Compose overrides in the
+  owner; native group/data hooks drive local menu-open and focus selectors.
 - Desktop work/wait/unread/send status lives only in `SessionRowStatusIndicator`
   within `SidebarRowEndSlot`, never leading slots. One 14px mark replaces resting
   Mergeable/worktree/PR/mobile-time content; +/- totals stay in hover cards.

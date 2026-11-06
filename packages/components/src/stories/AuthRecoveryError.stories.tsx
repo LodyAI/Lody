@@ -21,6 +21,23 @@ import { SessionTabBar } from '@/components/sessions/session-tab-bar';
 import { SessionInfoBar } from '@/components/sessions/session-info-bar';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import type { SessionHistoryParsed, SessionMeta } from '@lody/shared';
+const sceneStyles = stylex.create({
+  fill: { height: '100%' },
+  content: {
+    marginInline: 'auto',
+    marginBottom: 'calc(var(--spacing) * 4)',
+    width: '100%',
+    maxWidth: '48rem',
+    paddingInline: 'calc(var(--spacing) * 4)',
+  },
+  failureTrigger: {
+    position: 'fixed',
+    right: 'calc(var(--spacing) * 4)',
+    top: 'calc(var(--spacing) * 4)',
+    zIndex: 50,
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -147,7 +164,7 @@ function RealWorkspace({ recovery }: { recovery?: ReactNode }) {
           <WorkspaceCard>
             <main {...stylex.props(storyLayout.element)}>
               <SessionConversationPage
-                className="h-full"
+                xstyle={sceneStyles.fill}
                 subHeaderSlot={
                   <SessionTabBar
                     variant="session"
@@ -195,7 +212,7 @@ function RealWorkspace({ recovery }: { recovery?: ReactNode }) {
                           onPromptChange={setDraft}
                           promptPlaceholder="Message the agent…"
                           primaryAction={<Button size="small">Send</Button>}
-                          className="mx-auto mb-4 w-full max-w-3xl px-4"
+                          {...stylex.props(sceneStyles.content)}
                         />
                       </>
                     }
@@ -299,7 +316,7 @@ export const FailureWhileTyping: Story = {
           }
         />
         {!failed ? (
-          <Button className="fixed right-4 top-4 z-50" size="small" onClick={() => setFailed(true)}>
+          <Button xstyle={sceneStyles.failureTrigger} size="small" onClick={() => setFailed(true)}>
             Simulate recovery failure
           </Button>
         ) : null}

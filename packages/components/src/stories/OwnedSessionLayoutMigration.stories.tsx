@@ -7,6 +7,36 @@ import { SessionMentionDropLayer } from '../components/sessions/session-mention-
 import { startSessionMentionDrag } from '../lib/session-mention-drag';
 import { WorkspaceCard } from '../components/workspace-frame';
 import { ForceDesktopLayoutProvider } from '../hooks/use-mobile';
+const storyCallerStyles = stylex.create({
+  lowDefaults: {
+    ':is(*) :where([data-session-mention-drop-layer])': {
+      overflow: 'visible',
+    },
+    ':is(*) :where([data-workspace-card])': {
+      display: 'block',
+    },
+  },
+  caller: {
+    width: 'calc(4 / 5 * 100%)',
+    'min-width': '360px',
+    flex: 'none',
+    'flex-direction': 'row',
+    overflow: 'visible',
+  },
+  arbitrary: {
+    display: 'block',
+    width: '80px',
+    'min-width': '70px',
+    flex: '0',
+    'flex-direction': 'row',
+    overflow: 'visible',
+  },
+  dropLayer: {
+    position: 'static',
+    'min-height': '40px',
+    overflow: 'visible',
+  },
+});
 
 const fixtureStyles = stylex.create({
   opaque: {
@@ -115,9 +145,7 @@ function Fixture({
           data-drag-ended={String(dragEnded)}
           data-drag-types={dragTypes}
           className={
-            mode === 'zero'
-              ? '[&_:where([data-workspace-card])]:block [&_:where([data-session-mention-drop-layer])]:overflow-visible'
-              : undefined
+            mode === 'zero' ? stylex.props(storyCallerStyles.lowDefaults).className : undefined
           }
           onDropCapture={(event) => setDropTrusted(event.nativeEvent.isTrusted)}
           data-sidebar-open={sidebarOpen}
@@ -194,9 +222,9 @@ function Fixture({
               anchored={mode !== 'unanchored'}
               className={
                 mode === 'caller'
-                  ? 'min-w-[360px] w-4/5 flex-none flex-row overflow-visible'
+                  ? stylex.props(storyCallerStyles.caller).className
                   : mode === 'arbitrary'
-                    ? '[display:block] [min-width:70px] [width:80px] [flex:0] [flex-direction:row] [overflow:visible]'
+                    ? stylex.props(storyCallerStyles.arbitrary).className
                     : mode === 'opaque'
                       ? stylex.props(fixtureStyles.opaque).className
                       : undefined
@@ -206,7 +234,11 @@ function Fixture({
                 enabled={dropEnabled}
                 excludeSessionId="sample-self"
                 onDropSessionId={setDropResult}
-                className={mode === 'caller' ? 'static min-h-[40px] overflow-visible' : undefined}
+                className={
+                  mode === 'caller'
+                    ? stylex.props(storyCallerStyles.dropLayer).className
+                    : undefined
+                }
               >
                 <DesktopSessionDetailLayout
                   defaultSizes={{ main: 65, sidebar: 35 }}

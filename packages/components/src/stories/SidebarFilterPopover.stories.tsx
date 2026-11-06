@@ -4,6 +4,35 @@ import { useState } from 'react';
 
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import type { SidebarChatScope, SidebarOrganizeMode } from '@/atoms/sidebar-state';
+const storyLayoutStyles = stylex.create({
+  caption: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    letterSpacing: 'var(--tracking-wide)',
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 70%, transparent)',
+    textTransform: 'uppercase',
+  },
+  canvas: {
+    borderRadius: 'var(--radius-lg)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-border) / 1) 60%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 40%, transparent)',
+    padding: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+  label: {
+    fontWeight: 'var(--font-weight-medium)',
+  },
+  caption2: {
+    marginTop: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--sidebar-foreground-muted) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -51,28 +80,28 @@ function FilterShell({
   return (
     <div {...stylex.props(storyLayout.row)}>
       <div {...stylex.props(storyLayout.stack)}>
-        <div className="text-xs uppercase tracking-wide text-sidebar-foreground-muted/70">
-          State
-        </div>
-        <div className="rounded-lg border border-sidebar-border/60 bg-background/40 p-3 text-xs">
+        <div {...stylex.props(storyLayoutStyles.caption)}>State</div>
+        <div {...stylex.props(storyLayoutStyles.canvas)}>
           <div>
             <span {...stylex.props(storyLayout.label)}>Organize:</span>{' '}
-            <span className="font-medium">{organize}</span>
+            <span {...stylex.props(storyLayoutStyles.label)}>{organize}</span>
           </div>
           <div {...stylex.props(storyLayout.section)}>
             <span {...stylex.props(storyLayout.label)}>Scope:</span>{' '}
-            <span className="font-medium">{scope}</span>
+            <span {...stylex.props(storyLayoutStyles.label)}>{scope}</span>
           </div>
           <div {...stylex.props(storyLayout.section)}>
             <span {...stylex.props(storyLayout.label)}>Project line:</span>{' '}
-            <span className="font-medium">{showUpdatedProjectNames ? 'on' : 'off'}</span>
+            <span {...stylex.props(storyLayoutStyles.label)}>
+              {showUpdatedProjectNames ? 'on' : 'off'}
+            </span>
           </div>
           <div {...stylex.props(storyLayout.section)}>
             <span {...stylex.props(storyLayout.label)}>Branch line:</span>{' '}
-            <span className="font-medium">{showBranchNames ? 'on' : 'off'}</span>
+            <span {...stylex.props(storyLayoutStyles.label)}>{showBranchNames ? 'on' : 'off'}</span>
           </div>
         </div>
-        <p className="mt-3 text-xs text-sidebar-foreground-muted">
+        <p {...stylex.props(storyLayoutStyles.caption2)}>
           Click the filter icon to open the popover. Selections update the panel above.
         </p>
       </div>

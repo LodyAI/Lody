@@ -3,7 +3,6 @@ import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import { searchForWorkspaceRoot } from 'vite';
 import stylex from '@stylexjs/unplugin';
-import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
 import { componentsStylexOptions as stylexOptions } from '../stylex-options';
 import { emojibaseAssetsPlugin } from '../vite-emojibase-assets';
@@ -61,8 +60,6 @@ const config: StorybookConfig = {
       if (name.startsWith('vite-plugin-top-level-await')) return false;
       return true;
     });
-    const tailwindOptions = {};
-    viteConfig.plugins.push(tailwindcss(tailwindOptions));
     viteConfig.plugins.push(stylex.vite(stylexOptions));
     viteConfig.plugins.push({
       name: 'storybook-diffs-web-component-registration',

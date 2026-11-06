@@ -5,6 +5,34 @@ import { Button } from '@lody/ui/button';
 import { Plus, Filter, Search } from 'lucide-react';
 import { Input } from '@lody/ui/input';
 const storyLayout = stylex.create({
+  icon: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  leadingIcon: {
+    marginRight: 'calc(var(--spacing) * 2)',
+  },
+  search: {
+    position: 'relative',
+    display: { default: 'none', '@media (min-width: 48rem)': 'block' },
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: 'calc(var(--spacing) * 3)',
+    top: '50%',
+    translate: '0 -50%',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  searchInput: {
+    width: 'calc(var(--spacing) * 64)',
+    paddingLeft: 'calc(var(--spacing) * 9)',
+  },
+  fullActionLabel: {
+    display: { default: 'none', '@media (min-width: 40rem)': 'inline' },
+  },
+  shortActionLabel: {
+    display: { default: 'inline', '@media (min-width: 40rem)': 'none' },
+  },
   row: {
     display: 'flex',
     'align-items': 'center',
@@ -51,11 +79,11 @@ export const Default: Story = {
     actions: (
       <div {...stylex.props(storyLayout.row)}>
         <Button variant="secondary" size="small">
-          <Filter className="mr-2 h-4 w-4" />
+          <Filter {...stylex.props(storyLayout.icon, storyLayout.leadingIcon)} />
           Filter
         </Button>
         <Button size="small">
-          <Plus className="mr-2 h-4 w-4" />
+          <Plus {...stylex.props(storyLayout.icon, storyLayout.leadingIcon)} />
           New Item
         </Button>
       </div>
@@ -73,10 +101,10 @@ export const Mobile: Story = {
     actions: (
       <div {...stylex.props(storyLayout.row)}>
         <Button variant="ghost" size="small">
-          <Filter className="h-4 w-4" />
+          <Filter {...stylex.props(storyLayout.icon)} />
         </Button>
         <Button size="small">
-          <Plus className="h-4 w-4" />
+          <Plus {...stylex.props(storyLayout.icon)} />
         </Button>
       </div>
     ),
@@ -97,18 +125,18 @@ export const WithSearch: Story = {
     title: 'Sessions',
     actions: (
       <>
-        <div className="relative hidden md:block">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Search..." className="w-64 pl-9" />
+        <div {...stylex.props(storyLayout.search)}>
+          <Search {...stylex.props(storyLayout.icon, storyLayout.searchIcon)} />
+          <Input placeholder="Search..." xstyle={storyLayout.searchInput} />
         </div>
         <Button variant="secondary" size="small">
-          <Filter className="mr-2 h-4 w-4" />
-          <span className="hidden sm:inline">Filter</span>
+          <Filter {...stylex.props(storyLayout.icon, storyLayout.leadingIcon)} />
+          <span {...stylex.props(storyLayout.fullActionLabel)}>Filter</span>
         </Button>
         <Button size="small">
-          <Plus className="mr-2 h-4 w-4" />
-          <span className="hidden sm:inline">New Session</span>
-          <span className="sm:hidden">New</span>
+          <Plus {...stylex.props(storyLayout.icon, storyLayout.leadingIcon)} />
+          <span {...stylex.props(storyLayout.fullActionLabel)}>New Session</span>
+          <span {...stylex.props(storyLayout.shortActionLabel)}>New</span>
         </Button>
       </>
     ),
@@ -135,13 +163,13 @@ export const Tablet: Story = {
     actions: (
       <div {...stylex.props(storyLayout.row)}>
         <Button variant="secondary" size="small">
-          <Filter className="mr-2 h-4 w-4" />
-          <span className="hidden sm:inline">Filter</span>
+          <Filter {...stylex.props(storyLayout.icon, storyLayout.leadingIcon)} />
+          <span {...stylex.props(storyLayout.fullActionLabel)}>Filter</span>
         </Button>
         <Button size="small">
-          <Plus className="mr-2 h-4 w-4" />
-          <span className="hidden sm:inline">New Project</span>
-          <span className="sm:hidden">New</span>
+          <Plus {...stylex.props(storyLayout.icon, storyLayout.leadingIcon)} />
+          <span {...stylex.props(storyLayout.fullActionLabel)}>New Project</span>
+          <span {...stylex.props(storyLayout.shortActionLabel)}>New</span>
         </Button>
       </div>
     ),
@@ -162,11 +190,11 @@ export const DarkMode: Story = {
     actions: (
       <div {...stylex.props(storyLayout.row)}>
         <Button variant="secondary" size="small">
-          <Filter className="mr-2 h-4 w-4" />
+          <Filter {...stylex.props(storyLayout.icon, storyLayout.leadingIcon)} />
           Filter
         </Button>
         <Button size="small">
-          <Plus className="mr-2 h-4 w-4" />
+          <Plus {...stylex.props(storyLayout.icon, storyLayout.leadingIcon)} />
           New Item
         </Button>
       </div>

@@ -18,6 +18,32 @@ import {
   SidebarProvider,
   useSidebar,
 } from '@/ui/sidebar';
+const storyCallerStyles = stylex.create({
+  layoutOverride: {
+    position: 'relative',
+    display: 'block',
+    height: 'auto',
+    'min-height': 'calc(var(--spacing) * 0)',
+    width: 'calc(var(--spacing) * 40)',
+    'flex-direction': 'row',
+  },
+  wildcard: {
+    ':is(*) *': {
+      position: 'relative',
+      'z-index': '0',
+      'min-height': 'calc(var(--spacing) * 0)',
+      width: 'calc(var(--spacing) * 7)',
+    },
+  },
+  targeted: {
+    ':is(*) [data-frame-part]': {
+      position: 'relative',
+      'z-index': '0',
+      'min-height': 'calc(var(--spacing) * 0)',
+      width: 'calc(var(--spacing) * 7)',
+    },
+  },
+});
 
 const styles = stylex.create({
   outer: { display: 'contents' },
@@ -98,17 +124,17 @@ function Fixture({ mode = 'natural', none = false }: { mode?: string; none?: boo
   const controlled = mode === 'scoped';
   const caller =
     mode === 'opaque'
-      ? stylex.props(styles.opaque).className
+      ? styles.opaque
       : mode === 'utility'
-        ? 'relative block h-auto min-h-0 w-40 flex-row'
+        ? storyCallerStyles.layoutOverride
         : undefined;
   const ancestor =
     mode === 'wildcard'
-      ? '[&_*]:w-7 [&_*]:min-h-0 [&_*]:relative [&_*]:z-0'
+      ? stylex.props(storyCallerStyles.wildcard).className
       : mode === 'targeted'
-        ? '[&_[data-frame-part]]:w-7 [&_[data-frame-part]]:min-h-0 [&_[data-frame-part]]:relative [&_[data-frame-part]]:z-0'
+        ? stylex.props(storyCallerStyles.targeted).className
         : undefined;
-  const common = { className: caller, ref: stampRef };
+  const common = { xstyle: caller, ref: stampRef };
   return (
     <div
       data-frame-fixture={mode}

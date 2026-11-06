@@ -17,6 +17,21 @@ import { themeColors } from '../style/theme-colors.stylex';
 import { themeSpace } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  fullscreen: { inset: 0, borderRadius: 0, borderWidth: 0, borderLeftWidth: '0px !important' },
+  callerPanel: {
+    height: 'auto !important',
+    maxHeight: '88dvh !important',
+    borderTopLeftRadius: 'var(--radius-2xl)',
+    borderTopRightRadius: 'var(--radius-2xl)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  callerHeader: {
+    gap: 'calc(var(--spacing) * 3)',
+    padding: 'calc(var(--spacing) * 6)',
+    textAlign: 'left',
+  },
+  callerTitle: { fontWeight: 'var(--font-weight-medium)' },
+  callerFooter: { gap: 'calc(var(--spacing) * 3)', padding: 'calc(var(--spacing) * 6)' },
   canvas: {
     minHeight: '100dvh',
     padding: themeSpace[4],
@@ -58,13 +73,7 @@ function DrawerFixture({
         </DrawerTrigger>
         <DrawerContent
           width={fullscreen ? 'full' : undefined}
-          className={
-            fullscreen
-              ? 'inset-0 rounded-none border-0 border-l-0!'
-              : caller
-                ? 'h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60'
-                : undefined
-          }
+          xstyle={fullscreen ? styles.fullscreen : caller && styles.callerPanel}
           style={
             inlineHeight
               ? { height: '92dvh', maxHeight: '92dvh' }
@@ -74,12 +83,10 @@ function DrawerFixture({
           }
         >
           <DrawerHeader
-            className={caller ? 'gap-3 p-6 text-left' : undefined}
+            xstyle={caller && styles.callerHeader}
             style={caller ? { paddingBottom: 9 } : undefined}
           >
-            <DrawerTitle className={caller ? 'font-medium' : undefined}>
-              Drawer migration
-            </DrawerTitle>
+            <DrawerTitle xstyle={caller && styles.callerTitle}>Drawer migration</DrawerTitle>
             <DrawerDescription>Inspect the original drawer layout and controls.</DrawerDescription>
           </DrawerHeader>
           <div data-testid="drawer-scroll-body" {...stylex.props(styles.body)}>
@@ -101,7 +108,7 @@ function DrawerFixture({
               />
             </label>
           </div>
-          <DrawerFooter className={caller ? 'gap-3 p-6' : undefined}>
+          <DrawerFooter xstyle={caller && styles.callerFooter}>
             <Button onClick={() => setOpen(false)}>Confirm drawer</Button>
             <DrawerClose asChild>
               <Button variant="secondary">Close drawer</Button>

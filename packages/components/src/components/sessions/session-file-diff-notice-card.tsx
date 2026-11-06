@@ -87,6 +87,8 @@ export type SessionFileDiffNoticeCardProps = {
   message: string;
   stickyHeader?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
+  directChildXstyle?: stylex.StyleXStyles;
   onOpenFile?: (path: string) => void;
 };
 
@@ -94,18 +96,24 @@ export function SessionFileDiffNoticeCard({
   filePath,
   message,
   className,
+  xstyle,
+  directChildXstyle,
   onOpenFile,
 }: SessionFileDiffNoticeCardProps) {
   // stickyHeader remains on the props type for API compatibility, but sticky is
   // forced off so overflow-hidden can clip the rounded card border.
   return (
     <CollapsibleCard
-      xstyle={styles.card}
+      xstyle={[styles.card, xstyle]}
       className={className}
       defaultOpen
       allowStickyChildren={false}
     >
-      <CollapsibleCardHeader sticky={false} position="relative" xstyle={styles.noticeHeader}>
+      <CollapsibleCardHeader
+        sticky={false}
+        position="relative"
+        xstyle={[styles.noticeHeader, directChildXstyle]}
+      >
         <FileIcon filePath={filePath} className={stylex.props(styles.fileIcon).className} />
         <div {...stylex.props(styles.headerRow)}>
           <span {...stylex.props(styles.fileName)} title={filePath}>
@@ -114,7 +122,11 @@ export function SessionFileDiffNoticeCard({
           <DiffFileHeaderActions path={filePath} onOpenFile={onOpenFile} />
         </div>
       </CollapsibleCardHeader>
-      <CollapsibleCardContent noInternalScroll xstyle={styles.content}>
+      <CollapsibleCardContent
+        noInternalScroll
+        xstyle={styles.content}
+        containerXstyle={directChildXstyle}
+      >
         <div {...stylex.props(styles.message)}>{message}</div>
       </CollapsibleCardContent>
     </CollapsibleCard>

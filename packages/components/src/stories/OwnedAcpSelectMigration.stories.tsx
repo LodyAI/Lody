@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useLayoutEffect, useState, type CSSProperties } from 'react';
 import { WandSparkles } from 'lucide-react';
@@ -6,6 +7,20 @@ import {
   type AcpSessionSelectOption,
   type AcpSessionSelectProps,
 } from '../components/shared/acp-session-select';
+const storyCallerStyles = stylex.create({
+  content: { minWidth: 180 },
+  trigger: { height: 'calc(var(--spacing) * 10)' },
+  descendants: {
+    ':is(*) span': {
+      display: 'block',
+      'font-weight': 'var(--font-weight-normal)',
+    },
+    ':is(*) svg': {
+      width: 'calc(var(--spacing) * 5)',
+      height: 'calc(var(--spacing) * 5)',
+    },
+  },
+});
 
 const options: AcpSessionSelectOption[] = [
   { value: 'plan', label: 'Plan', description: 'Synthetic planning mode description.' },
@@ -106,14 +121,16 @@ function Fixture({
           <SelectionCase
             name="caller-small-last"
             variant="compact"
-            className="h-10 h-6 [&_svg]:size-5 [&_span]:font-normal [&_span]:block"
-            contentClassName="min-w-[180px]"
+            xstyle={storyCallerStyles.trigger}
+            className={stylex.props(storyCallerStyles.descendants).className}
+            contentXstyle={storyCallerStyles.content}
           />
           <SelectionCase
             name="caller-large-last"
             variant="compact"
-            className="h-6 h-10 [&_svg]:size-5 [&_span]:font-normal [&_span]:block"
-            contentClassName="min-w-[180px]"
+            xstyle={storyCallerStyles.trigger}
+            className={stylex.props(storyCallerStyles.descendants).className}
+            contentXstyle={storyCallerStyles.content}
           />
         </>
       ) : (

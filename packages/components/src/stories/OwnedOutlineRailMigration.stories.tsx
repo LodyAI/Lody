@@ -5,6 +5,9 @@ import { PopupContainerProvider } from '@lody/ui/popup-container';
 import { ConversationOutlineRail } from '../components/ai-gui/conversation-outline-rail';
 import type { ConversationOutlineEntry } from '../lib/conversation-outline';
 
+const outlineCaller = stylex.create({
+  rail: { display: 'flex', ':is(*) button>span': { backgroundColor: '#8053b8' } },
+});
 const meta = {
   title: 'Sessions/OwnedOutlineRailMigration',
   parameters: { layout: 'fullscreen' },
@@ -40,8 +43,7 @@ function Fixture({
     | 'basic'
     | 'overflow'
     | 'subtree'
-    | 'flex-last'
-    | 'hidden-last'
+    | 'caller'
     | 'portal'
     | 'named-host'
     | 'named-host-padding-caller';
@@ -51,17 +53,13 @@ function Fixture({
   const [lastPreview, setLastPreview] = useState(-1);
   const [overlayRoot, setOverlayRoot] = useState<HTMLDivElement | null>(null);
   const [popupHost, setPopupHost] = useState<HTMLElement | null>(null);
-  const isNamedHost = mode === 'named-host' || mode === 'named-host-padding-caller';
+  const isNamedHost = mode === 'named-host';
   const scopedVariables =
     mode === 'subtree'
       ? ({ '--muted-foreground': '320 80% 40%', '--foreground': '150 75% 30%' } as CSSProperties)
       : undefined;
   const callerClassName =
-    mode === 'flex-last'
-      ? 'hidden flex [&_button>span]:bg-[#8053b8]'
-      : mode === 'hidden-last'
-        ? 'flex hidden [&_button>span]:bg-[#8053b8]'
-        : undefined;
+    mode === 'caller' ? stylex.props(outlineCaller.rail).className : undefined;
   return (
     <main
       {...stylex.props(stylex.defaultMarker())}
@@ -88,11 +86,7 @@ function Fixture({
         data-outline-container
         ref={isNamedHost ? setPopupHost : undefined}
         data-outline-popup-host={isNamedHost ? String(popupHost !== null) : undefined}
-        className={
-          mode === 'named-host-padding-caller'
-            ? '[:where(&)_:where([role=dialog])]:p-12'
-            : undefined
-        }
+
         style={{ containerType: 'inline-size', position: 'relative', height: 440 }}
       >
         {mode === 'portal' ? (
@@ -133,11 +127,8 @@ function Fixture({
 export const Basic: Story = { render: () => <Fixture /> };
 export const Overflow: Story = { render: () => <Fixture mode="overflow" /> };
 export const SubtreeVariables: Story = { render: () => <Fixture mode="subtree" /> };
-export const CallerFlexLast: Story = { render: () => <Fixture mode="flex-last" /> };
-export const CallerHiddenLast: Story = { render: () => <Fixture mode="hidden-last" /> };
 export const Portalled: Story = { render: () => <Fixture mode="portal" /> };
 
 export const NamedHost: Story = { render: () => <Fixture mode="named-host" /> };
-export const NamedHostPaddingCaller: Story = {
-  render: () => <Fixture mode="named-host-padding-caller" />,
-};
+
+export const StyledCaller: Story = { render: () => <Fixture mode="caller" /> };

@@ -5,7 +5,104 @@ import { ChevronLeft, Ellipsis, Github } from 'lucide-react';
 
 import { ChatsIcon } from '@/components/icons/chats-icon';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
-import { cn } from '@/lib/utils';
+const frostedStory = stylex.create({
+  bubbleRow: { display: 'flex', width: '100%', justifyContent: 'flex-start' },
+  userRow: { justifyContent: 'flex-end' },
+  bubble: {
+    maxWidth: '80%',
+    borderRadius: 'var(--radius-2xl)',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 2.5)',
+    fontSize: '.95rem',
+    lineHeight: 'var(--leading-snug)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  userBubble: { backgroundColor: 'color-mix(in oklab,hsl(var(--secondary) / 1) 60%,transparent)' },
+  code: {
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: '.8rem',
+    color: 'color-mix(in oklab,hsl(var(--foreground) / 1) 90%,transparent)',
+  },
+  header: {
+    position: 'absolute',
+    insetInline: 0,
+    top: 0,
+    zIndex: 30,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--background) / 1) 55%,transparent)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+  chats: { height: '1.15rem', width: '1.15rem' },
+  largeButton: { height: 'calc(var(--spacing) * 28)', width: 'calc(var(--spacing) * 28)' },
+});
+const storyLayoutStylesStylesStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    'flex-shrink': '0',
+  },
+  frame3: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+  frame4: {
+    height: 'calc(var(--spacing) * 10)',
+    width: 'calc(var(--spacing) * 10)',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  overlay: {
+    position: 'absolute',
+    top: 'calc(var(--spacing) * -0.5)',
+    right: 'calc(var(--spacing) * -0.5)',
+    height: 'calc(var(--spacing) * 2)',
+    width: 'calc(var(--spacing) * 2)',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'hsl(var(--primary))',
+    'box-shadow':
+      '0 0 #0000, 0 0 #0000, 0 0 #0000,  0 0 0 calc(2px + 0px) hsl(var(--background) / 1), 0 0 #0000',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'flex-direction': 'column',
+    'justify-content': 'center',
+    'padding-inline': 'calc(var(--spacing) * 1)',
+    'line-height': 'var(--leading-tight)',
+  },
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  row: {
+    display: 'flex',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     position: 'relative',
@@ -76,14 +173,9 @@ const MESSAGES = [
 function Bubble({ from, text, code }: { from: string; text?: string; code?: string }) {
   const isUser = from === 'user';
   return (
-    <div className={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}>
-      <div
-        className={cn(
-          'max-w-[80%] rounded-2xl px-4 py-2.5 text-[0.95rem] leading-snug',
-          isUser ? 'bg-secondary/60 text-foreground' : 'text-foreground'
-        )}
-      >
-        {code ? <code className="font-mono text-[0.8rem] text-foreground/90">{code}</code> : text}
+    <div {...stylex.props(frostedStory.bubbleRow, isUser && frostedStory.userRow)}>
+      <div {...stylex.props(frostedStory.bubble, isUser && frostedStory.userBubble)}>
+        {code ? <code {...stylex.props(frostedStory.code)}>{code}</code> : text}
       </div>
     </div>
   );
@@ -114,28 +206,23 @@ function Prototype() {
       </div>
 
       {/* Floating frosted header — same chrome as production session-detail. */}
-      <header
-        className="absolute inset-x-0 top-0 z-30 flex items-center gap-1 bg-background/55 px-1 backdrop-blur-xl"
-        style={{ height: headerHeight }}
-      >
+      <header {...stylex.props(frostedStory.header)} style={{ height: headerHeight }}>
         <GlassIconButton label="Back">
-          <ChevronLeft className="h-5 w-5" />
+          <ChevronLeft {...stylex.props(storyLayoutStylesStylesStyles.frame)} />
         </GlassIconButton>
-        <div className="flex min-w-0 flex-1 flex-col justify-center px-1 leading-tight">
-          <span className="truncate text-sm font-semibold text-foreground">
-            Solve merge conflicts
-          </span>
-          <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-            <Github className="h-3 w-3 shrink-0" />
+        <div {...stylex.props(storyLayoutStyles.stack)}>
+          <span {...stylex.props(storyLayoutStyles.label)}>Solve merge conflicts</span>
+          <span {...stylex.props(storyLayoutStyles.row)}>
+            <Github {...stylex.props(storyLayoutStylesStylesStyles.frame2)} />
             <span {...stylex.props(storyLayout.label)}>loro-dev/loro</span>
           </span>
         </div>
         <GlassIconButton label="Tabs">
-          <ChatsIcon className="h-[1.15rem] w-[1.15rem]" />
-          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
+          <ChatsIcon {...stylex.props(frostedStory.chats)} />
+          <span {...stylex.props(storyLayoutStylesStyles.overlay)} />
         </GlassIconButton>
         <GlassIconButton label="More actions">
-          <Ellipsis className="h-4 w-4" />
+          <Ellipsis {...stylex.props(storyLayoutStylesStylesStyles.frame3)} />
         </GlassIconButton>
       </header>
     </div>
@@ -147,8 +234,8 @@ function Prototype() {
 function GlassButtonTarget() {
   return (
     <div {...stylex.props(storyLayout.row)} style={{ background: '#0a0a0b' }}>
-      <GlassIconButton label="Back" discSize={96} className="h-28 w-28">
-        <ChevronLeft className="h-10 w-10" strokeWidth={2} />
+      <GlassIconButton label="Back" discSize={96} xstyle={frostedStory.largeButton}>
+        <ChevronLeft {...stylex.props(storyLayoutStylesStylesStyles.frame4)} strokeWidth={2} />
       </GlassIconButton>
     </div>
   );

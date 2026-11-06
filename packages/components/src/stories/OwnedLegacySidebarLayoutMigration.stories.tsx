@@ -15,6 +15,25 @@ import {
   SidebarProvider,
   useSidebar,
 } from '@/ui/sidebar';
+const storyCallerStyles = stylex.create({
+  layoutOverride: {
+    display: 'block',
+    width: 'calc(var(--spacing) * 40)',
+    'min-width': 'calc(var(--spacing) * 0)',
+    gap: 'calc(var(--spacing) * 4)',
+    overflow: 'visible',
+    padding: 'calc(var(--spacing) * 0)',
+  },
+  wildcard: {
+    ':is(*) *': {
+      width: 'calc(var(--spacing) * 7)',
+      'flex-direction': 'row',
+      gap: 'calc(var(--spacing) * 1)',
+      overflow: 'visible',
+      padding: 'calc(var(--spacing) * 0)',
+    },
+  },
+});
 
 const styles = stylex.create({
   outer: { display: 'contents' },
@@ -67,9 +86,9 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
   const [event, setEvent] = useState('Ready');
   const caller =
     mode === 'opaque'
-      ? stylex.props(styles.opaque).className
+      ? styles.opaque
       : mode === 'utility'
-        ? 'block w-40 min-w-0 gap-4 overflow-visible p-0'
+        ? storyCallerStyles.layoutOverride
         : undefined;
   const local =
     mode === 'scoped'
@@ -84,19 +103,17 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
     >
       <SidebarProvider
         className={
-          mode === 'wildcard'
-            ? '[&_*]:w-7 [&_*]:p-0 [&_*]:gap-1 [&_*]:flex-row [&_*]:overflow-visible'
-            : undefined
+          mode === 'wildcard' ? stylex.props(storyCallerStyles.wildcard).className : undefined
         }
       >
         <Sidebar collapsible="icon">
-          <SidebarHeader data-layout-part="header" className={caller} style={local}>
+          <SidebarHeader data-layout-part="header" xstyle={caller} style={local}>
             <span>Synthetic header</span>
             <span>Second header line</span>
           </SidebarHeader>
-          <SidebarContent data-layout-part="content" className={caller} style={local}>
-            <SidebarGroup data-layout-part="group" className={caller} style={local}>
-              <SidebarMenu data-layout-part="menu" className={caller} style={local}>
+          <SidebarContent data-layout-part="content" xstyle={caller} style={local}>
+            <SidebarGroup data-layout-part="group" xstyle={caller} style={local}>
+              <SidebarMenu data-layout-part="menu" xstyle={caller} style={local}>
                 <SidebarMenuItem>
                   <SidebarMenuButton data-layout-action="native" onClick={() => setEvent('Native')}>
                     <File />
@@ -122,7 +139,7 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
             </SidebarGroup>
             <p>Content after the group</p>
           </SidebarContent>
-          <SidebarFooter data-layout-part="footer" className={caller} style={local}>
+          <SidebarFooter data-layout-part="footer" xstyle={caller} style={local}>
             <span>Synthetic footer</span>
             <span>Second footer line</span>
           </SidebarFooter>

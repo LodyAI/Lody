@@ -5,9 +5,113 @@ import { useEffect, useState } from 'react';
 
 import { SidebarRowEndSlot } from '@/components/sidebar-row-shared';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { WorkingGrid, type WorkingGridProps } from '@/ui/working-grid';
 import { WorkingStatusMark } from '@/ui/working-status-mark';
+
+const hoverStyles = stylex.create({
+  muted: { color: 'hsl(var(--sidebar-foreground-muted) / 1)' },
+  primary: { color: 'hsl(var(--primary))' },
+  row: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    backgroundColor: {
+      default: null,
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+  },
+  selected: {
+    backgroundColor: {
+      default: 'hsl(var(--sidebar-selection) / 1)',
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+  },
+  status: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transitionProperty: 'opacity',
+    transitionDuration: '100ms',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    opacity: { default: 1, '@media (hover: hover)': { ':is(:where(.group):hover *)': 0 } },
+  },
+  archive: {
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * 0)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '0.25rem',
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 1)',
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--sidebar-foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: null,
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+    opacity: { default: 0, '@media (hover: hover)': { ':is(:where(.group):hover *)': 1 } },
+    transitionProperty: 'opacity',
+    transitionDuration: '100ms',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    width: '272px',
+    flexDirection: 'column',
+    overflowY: 'auto',
+    borderRightStyle: 'solid',
+    borderRightWidth: '1px',
+    borderColor: 'hsl(var(--sidebar-border) / 1)',
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    paddingInline: 'calc(var(--spacing) * 1.5)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+  },
+  canvas: {
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingTop: 'calc(var(--spacing) * 3)',
+    paddingBottom: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--sidebar-foreground-muted) / 1)',
+  },
+  canvas2: {
+    flex: '1',
+    overflowY: 'auto',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  row: {
+    display: 'flex',
+    width: '260px',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+  },
+});
+
 const storyLayoutStyles = stylex.create({
   frame: {
     height: 'calc(var(--spacing) * 3)',
@@ -128,7 +232,10 @@ const meta = {
     className: {
       name: 'colour',
       options: ['muted', 'primary'],
-      mapping: { muted: 'text-sidebar-foreground-muted', primary: 'text-primary' },
+      mapping: {
+        muted: stylex.props(hoverStyles.muted).className,
+        primary: stylex.props(hoverStyles.primary).className,
+      },
       control: { type: 'inline-radio' },
       description: 'Primary is the sidebar default; muted is kept for comparison.',
     },
@@ -205,24 +312,27 @@ export const SidebarSimulation: Story = {
   parameters: { layout: 'fullscreen' },
   render: (args) => (
     <div {...stylex.props(storyLayout.row2)}>
-      <aside className="flex w-[272px] flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar px-1.5 py-2 text-sidebar-foreground">
+      <aside {...stylex.props(storyLayoutStylesStyles.stack)}>
         {GROUPS.map((group) => (
           <section key={group.name}>
-            <div className="px-2 pb-1 pt-3 text-xs text-sidebar-foreground-muted">{group.name}</div>
+            <div {...stylex.props(storyLayoutStylesStyles.canvas)}>{group.name}</div>
             {group.rows.map(([title, status], index) => (
               <div
                 key={title}
-                className={cn(
-                  'group relative flex h-7 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-sidebar-hover',
-                  group.name === 'lody' && index === 0 && 'bg-sidebar-selection'
+                className={clsx(
+                  'group',
+                  stylex.props(
+                    hoverStyles.row,
+                    group.name === 'lody' && index === 0 && hoverStyles.selected
+                  ).className
                 )}
               >
                 <span {...stylex.props(storyLayout.label)}>{title}</span>
                 <span {...stylex.props(storyLayout.row3)}>
-                  <span className="flex h-3.5 w-3.5 items-center justify-center transition-opacity duration-100 group-hover:opacity-0">
+                  <span {...stylex.props(hoverStyles.status)}>
                     <StatusMark status={status} grid={args} />
                   </span>
-                  <span className="absolute inset-0 flex items-center justify-center rounded text-sidebar-foreground-muted opacity-0 transition-opacity duration-100 hover:bg-sidebar-hover hover:text-sidebar-foreground group-hover:opacity-100">
+                  <span {...stylex.props(hoverStyles.archive)}>
                     <Archive {...stylex.props(storyLayoutStyles.frame2)} />
                   </span>
                 </span>
@@ -231,7 +341,7 @@ export const SidebarSimulation: Story = {
           </section>
         ))}
       </aside>
-      <main className="flex-1 overflow-y-auto bg-background p-8 text-sm text-muted-foreground">
+      <main {...stylex.props(storyLayoutStylesStyles.canvas2)}>
         <div {...stylex.props(storyLayout.row4)}>
           <WorkingGrid {...args} rowPitch={null} />
           <span>Working · 2m 13s</span>
@@ -250,7 +360,7 @@ function CompletionDemo() {
   }, []);
   return (
     <div {...stylex.props(storyLayout.row5)}>
-      <div className="flex w-[260px] items-center gap-1.5 rounded-md bg-sidebar px-2 py-1 text-sm text-sidebar-foreground">
+      <div {...stylex.props(storyLayoutStylesStyles.row)}>
         <span {...stylex.props(storyLayout.label)}>Fix queue drain false failure</span>
         <SidebarRowEndSlot isWorking={working} hasUnreadMessages={!working} />
       </div>

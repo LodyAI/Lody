@@ -9,6 +9,28 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+const storyLayoutStylesStyles = stylex.create({
+  frame: {
+    width: '360px',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'margin-bottom': 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    'text-transform': 'uppercase',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -200,10 +222,8 @@ const CASES: Case[] = [
 function AllStates() {
   return (
     <div {...stylex.props(storyLayout.row)}>
-      <div className="w-[360px] rounded-2xl bg-background p-4 shadow-2xl">
-        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Run config button — face states
-        </div>
+      <div {...stylex.props(storyLayoutStylesStyles.frame)}>
+        <div {...stylex.props(storyLayoutStyles.caption)}>Run config button — face states</div>
         <div {...stylex.props(storyLayout.stack)}>
           {CASES.map((c) => (
             <div key={c.label} {...stylex.props(storyLayout.stack2)}>

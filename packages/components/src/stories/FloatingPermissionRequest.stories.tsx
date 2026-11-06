@@ -16,6 +16,16 @@ import {
   type PermissionOutcome,
   type MessageContent,
 } from '@lody/shared';
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    padding: 'calc(var(--spacing) * 4)',
+    'text-align': 'center',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     width: 'min(500px, calc(100vw - 16px))',
@@ -340,7 +350,7 @@ export const HiddenWhenIdle: Story = {
   render: (args: FloatingPermissionRequestProps) => (
     <div>
       <FloatingPermissionRequest {...args} />
-      <p className="text-sm text-muted-foreground p-4 text-center">
+      <p {...stylex.props(storyLayoutStyles.canvas)}>
         (Component returns null when session is not in requestPermission state)
       </p>
     </div>
@@ -481,7 +491,7 @@ export const NoHistory: Story = {
   render: (args: FloatingPermissionRequestProps) => (
     <div>
       <FloatingPermissionRequest {...args} />
-      <p className="text-sm text-muted-foreground p-4 text-center">
+      <p {...stylex.props(storyLayoutStyles.canvas)}>
         (Component returns null when no pending permission found in history)
       </p>
     </div>

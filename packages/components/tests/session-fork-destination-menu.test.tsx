@@ -191,9 +191,6 @@ describe('SessionForkDestinationMenu', () => {
     } else {
       expect(fork).toBeNull();
       expect(container.querySelector('[aria-label="Copy response"]')).toBeNull();
-      expect(
-        container.querySelector('[data-assistant-turn-actions]')?.classList.contains('opacity-100')
-      ).toBe(false);
     }
     const copy = finished
       ? [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) =>

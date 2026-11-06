@@ -4,9 +4,19 @@ import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { MobileInlinePicker } from '@/components/mobile/mobile-inline-picker';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from '@/components/sessions/adaptive-tab-strip';
-import { cn } from '@/lib/utils';
 
-const ordinary = stylex.create({ opacity: { opacity: 0.4 }, width: { width: '420px' } });
+const ordinary = stylex.create({
+  opacity: { opacity: 0.4 },
+  width: { width: '420px' },
+  half: { opacity: 0.5 },
+  muted: { opacity: 0.7 },
+  faint: { opacity: 0.2 },
+  directSpinner: { ':is(*) [data-slot=spinner]': { opacity: 1 } },
+  faintSpinner: { ':is(*) [data-slot=spinner]': { opacity: 0.2 } },
+  zeroWidth: { width: 0 },
+  minWidth: { minWidth: 840 },
+  overflow: { overflow: 'visible' },
+});
 const meta = {
   title: 'UI/LegacyDeclarationControls',
   parameters: { layout: 'fullscreen' },
@@ -20,9 +30,9 @@ export const Opacity: Story = {
       <h1>Actual picker and public class controls</h1>
       {[
         ['default', ''],
-        ['zero-ancestor', '[:where(&_[data-slot=spinner])]:opacity-100'],
-        ['direct-ancestor', '[&_[data-slot=spinner]]:opacity-100'],
-        ['arbitrary-ancestor', '[&_[data-slot=spinner]]:[opacity:0.2]'],
+        ['zero-ancestor', ''],
+        ['direct-ancestor', stylex.props(ordinary.directSpinner).className],
+        ['arbitrary-ancestor', stylex.props(ordinary.faintSpinner).className],
       ].map(([id, cls]) => (
         <section key={id} data-case={id}>
           <p>{id}</p>
@@ -35,26 +45,26 @@ export const Opacity: Story = {
             loadingText="Loading branches"
             triggerContent={<span>main</span>}
             triggerClassName={cls}
-            ariaLabel={id}
+            ariaLabel={id ?? 'Picker'}
           />
         </section>
       ))}
       <section data-case="named-caller">
         <p>Named cn caller</p>
-        <Spinner className={cn('opacity-70', 'opacity-50')} />
+        <Spinner className={stylex.props(ordinary.half).className} />
       </section>
       <section data-case="opaque-stylex">
         <p>Ordinary opaque atom</p>
-        <Spinner className={cn('opacity-70', stylex.props(ordinary.opacity).className)} />
+        <Spinner className={stylex.props(ordinary.opacity).className} />
       </section>
       <section data-case="arbitrary-caller">
         <p>Arbitrary property</p>
-        <Spinner className={cn('opacity-70', '[opacity:0.2]')} />
+        <Spinner className={stylex.props(ordinary.faint).className} />
       </section>
       <section data-case="slot">
         <p>Real Radix Slot composition</p>
-        <Slot className="opacity-50">
-          <Spinner className="opacity-70" />
+        <Slot className={stylex.props(ordinary.half).className}>
+          <Spinner className={stylex.props(ordinary.muted).className} />
         </Slot>
       </section>
       <section data-case="ordinary-stylex">
@@ -67,13 +77,13 @@ export const Opacity: Story = {
 
 const cases = [
   { id: 'default' },
-  { id: 'arbitrary-width', strip: '[width:0px]' },
-  { id: 'named-width', strip: 'w-0' },
-  { id: 'arbitrary-min', viewport: '[min-width:840px]' },
-  { id: 'named-min', viewport: 'min-w-[840px]' },
-  { id: 'arbitrary-overflow', item: '[overflow:visible]' },
-  { id: 'named-overflow', item: 'overflow-visible' },
-  { id: 'opaque-width', strip: stylex.props(ordinary.width).className },
+  { id: 'arbitrary-width', strip: ordinary.zeroWidth },
+  { id: 'named-width', strip: ordinary.zeroWidth },
+  { id: 'arbitrary-min', viewport: ordinary.minWidth },
+  { id: 'named-min', viewport: ordinary.minWidth },
+  { id: 'arbitrary-overflow', item: ordinary.overflow },
+  { id: 'named-overflow', item: ordinary.overflow },
+  { id: 'opaque-width', strip: ordinary.width },
 ];
 export const Adaptive: Story = {
   render: () => (
@@ -95,12 +105,12 @@ export const Adaptive: Story = {
             <AdaptiveTabStrip
               itemIds={['a', 'b']}
               activeItemId={null}
-              className={c.strip}
-              viewportClassName={c.viewport}
+              xstyle={c.strip}
+              viewportXstyle={c.viewport}
             >
               <AdaptiveTabStripItem
                 itemId="a"
-                className={c.item}
+                xstyle={c.item}
                 style={{ height: 40, background: '#92b4de' }}
               >
                 <button

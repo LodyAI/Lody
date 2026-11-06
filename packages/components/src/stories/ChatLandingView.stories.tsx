@@ -32,6 +32,96 @@ import {
   homeWeekAgentLabel,
   homeWeekUsageFixture,
 } from './fixtures/home-week';
+const sceneStyles = stylex.create({
+  agentGlyph: {
+    height: 'calc(var(--spacing) * 3) !important',
+    width: 'calc(var(--spacing) * 3) !important',
+    flexShrink: 0,
+    opacity: 0.8,
+  },
+  repoGlyph: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    opacity: 0.7,
+  },
+  topSelector: { display: 'flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1)' },
+  repository: {
+    height: 'calc(var(--spacing) * 6)',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'var(--radius-md)',
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    ':is(*) span': { fontSize: '11px', lineHeight: 'var(--leading-tight)' },
+  },
+  repositoryMenu: { width: 'calc(var(--spacing) * 72)' },
+  machineMenu: { width: 'calc(var(--spacing) * 56)' },
+  agentMenu: { width: 'calc(var(--spacing) * 64)' },
+  bottomBar: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    overflowX: 'auto',
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
+  },
+  bottomSelectors: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+  },
+  machineOption: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  machineGlyph: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    opacity: 0.7,
+  },
+  optionLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+  modeSelectors: {
+    marginLeft: 'auto',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+  },
+  canvas: {
+    margin: 'calc(var(--spacing) * 3)',
+    'align-self': 'flex-start',
+    'border-radius': '0.25rem',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+  section: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+});
 
 const samplePromptPlaceholder = "Press '/' for commands, '@' for mentions.";
 const sampleZhCnPromptPlaceholder = "按 '/' 使用命令，'@' 添加提及。";
@@ -127,12 +217,12 @@ const agentOptions: OptionSelectorOption<string>[] = [
   {
     value: 'agent-1',
     label: 'Aurora',
-    startContent: <Bot className="h-3! w-3! shrink-0 opacity-80" />,
+    startContent: <Bot {...stylex.props(sceneStyles.agentGlyph)} />,
   },
   {
     value: 'agent-2',
     label: 'Atlas',
-    startContent: <Bot className="h-3! w-3! shrink-0 opacity-80" />,
+    startContent: <Bot {...stylex.props(sceneStyles.agentGlyph)} />,
   },
 ];
 
@@ -141,13 +231,13 @@ const repoOptions: OptionSelectorOption<string>[] = [
     value: 'loro-dev/lody',
     label: 'loro-dev/lody',
     description: 'Realtime collaboration engine',
-    startContent: <Github className="h-4 w-4 opacity-70" />,
+    startContent: <Github {...stylex.props(sceneStyles.repoGlyph)} />,
   },
   {
     value: 'loro-dev/doha',
     label: 'loro-dev/doha',
     description: 'Desktop shell',
-    startContent: <Github className="h-4 w-4 opacity-70" />,
+    startContent: <Github {...stylex.props(sceneStyles.repoGlyph)} />,
   },
   // Pad past the virtualization threshold (60) so the dropdown shows a search input AND
   // virtualizes its list.
@@ -155,7 +245,7 @@ const repoOptions: OptionSelectorOption<string>[] = [
     value: `loro-dev/sample-${i + 1}`,
     label: `loro-dev/sample-${i + 1}`,
     description: 'Sample repository',
-    startContent: <Github className="h-4 w-4 opacity-70" />,
+    startContent: <Github {...stylex.props(sceneStyles.repoGlyph)} />,
   })),
 ];
 
@@ -351,7 +441,7 @@ function DemoLandingContent({
 
   // Top selector: repo (shown above textarea)
   const topSelectorNode = (
-    <div className="flex items-center gap-1">
+    <div {...stylex.props(sceneStyles.topSelector)}>
       <OptionSelector
         value={selectedRepo}
         options={repoOptions}
@@ -361,8 +451,8 @@ function DemoLandingContent({
         tone={tone}
         searchable
         searchPlaceholder="Search repos"
-        className="h-6 gap-1 rounded-md border-none bg-transparent px-1 [&_span]:text-[11px] [&_span]:leading-tight"
-        contentClassName="w-72"
+        xstyle={sceneStyles.repository}
+        contentXstyle={sceneStyles.repositoryMenu}
       />
     </div>
   );
@@ -382,8 +472,8 @@ function DemoLandingContent({
   );
 
   const bottomBarNode = (
-    <div className="flex w-full items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div className="flex shrink-0 items-center gap-1">
+    <div {...stylex.props(sceneStyles.bottomBar)}>
+      <div {...stylex.props(sceneStyles.bottomSelectors)}>
         <OptionSelector
           value={selectedMachine}
           options={machineOptions}
@@ -394,7 +484,7 @@ function DemoLandingContent({
           xstyle={selectorStyles.tag}
           valueXstyle={selectorStyles.tagText}
           labelXstyle={selectorStyles.tagText}
-          contentClassName="w-56"
+          contentXstyle={sceneStyles.machineMenu}
           renderTriggerValue={(option) => (
             <div {...stylex.props(selectorStyles.machineValue)}>
               <Monitor {...stylex.props(selectorStyles.machineGlyph)} />
@@ -404,9 +494,9 @@ function DemoLandingContent({
             </div>
           )}
           renderOption={(option) => (
-            <div className="flex min-w-0 items-center gap-2">
-              <Monitor className="h-4 w-4 shrink-0 opacity-70" />
-              <span className="truncate text-sm">{option.label}</span>
+            <div {...stylex.props(sceneStyles.machineOption)}>
+              <Monitor {...stylex.props(sceneStyles.machineGlyph)} />
+              <span {...stylex.props(sceneStyles.optionLabel)}>{option.label}</span>
             </div>
           )}
         />
@@ -420,10 +510,10 @@ function DemoLandingContent({
           xstyle={selectorStyles.tag}
           valueXstyle={selectorStyles.tagText}
           labelXstyle={selectorStyles.tagText}
-          contentClassName="w-64"
+          contentXstyle={sceneStyles.agentMenu}
         />
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div {...stylex.props(sceneStyles.modeSelectors)}>
         <AcpBottomBarModeSelector
           tone={tone}
           modeOptions={claudeModeOptions}
@@ -441,16 +531,16 @@ function DemoLandingContent({
 
   if (enableKeyboardNav) {
     return (
-      <div className="flex h-full w-full">
+      <div {...stylex.props(storyLayout.row)}>
         {/* Stand-in for the sidebar: focus here and arrows/Tab must NOT be hijacked. */}
         <button
           type="button"
           data-testid="outside-sidebar-button"
-          className="m-3 self-start rounded border px-3 py-1 text-sm"
+          {...stylex.props(storyLayout.canvas)}
         >
           Sidebar item
         </button>
-        <div className="min-w-0 flex-1">
+        <div {...stylex.props(storyLayout.section)}>
           <ChatLandingView
             tone={tone}
             isMobile={isMobile}

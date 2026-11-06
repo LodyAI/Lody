@@ -32,6 +32,20 @@ import { createStore, Provider } from 'jotai';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import { sidebarCollapsedAtom } from '../atoms/sidebar-state';
+const migrationStyles = stylex.create({
+  page: { height: '100dvh', overflow: 'auto' },
+});
+
+const storyLayoutStyles = stylex.create({
+  frame: {
+    width: '360px',
+    flexShrink: '0',
+    overflow: 'auto',
+    borderRightStyle: 'solid',
+    borderRightWidth: '1px',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     height: '100dvh',
@@ -379,7 +393,7 @@ function EditorStory({
       .map((issue) => issue.message);
   const chat = (id: string) => chats.find((entry) => entry.id === id) ?? null;
   return (
-    <div className={bare ? undefined : 'h-dvh overflow-auto'}>
+    <div {...stylex.props(!bare && migrationStyles.page)}>
       <ScheduleForm
         now={NOW}
         saving={false}
@@ -489,7 +503,7 @@ export const EditorOnceMachineClock: Story = editor({
 export const EditorInNarrowPanel: Story = {
   render: () => (
     <div {...stylex.props(storyLayout.row)}>
-      <div className="w-[360px] shrink-0 overflow-auto border-r">
+      <div {...stylex.props(storyLayoutStyles.frame)}>
         <WithPlatform>
           <EditorStory
             initial={{

@@ -20,6 +20,86 @@ import { ConversationOutlineRail } from '@/components/ai-gui/conversation-outlin
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
+const sceneStyles = stylex.create({
+  root: {
+    containerType: 'inline-size',
+    position: 'relative',
+    width: '100%',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  composerFrame: { display: 'flex', height: '720px', flexDirection: 'column', overflow: 'hidden' },
+  overlay: { pointerEvents: 'none', position: 'absolute', inset: 0, containerType: 'inline-size' },
+  fill: { height: '100%' },
+  streamHeader: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  caption: {
+    'font-size': '13px',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  frame: {
+    position: 'relative',
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+  },
+  frame2: {
+    'margin-inline': 'auto',
+    height: '100%',
+    'max-width': '46rem',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  frame3: {
+    height: '260px',
+    'flex-shrink': '0',
+    'border-top-style': 'solid',
+    'border-top-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  frame4: {
+    'margin-inline': 'auto',
+    height: '100%',
+    'max-width': '46rem',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     'margin-inline': 'auto',
@@ -128,11 +208,11 @@ function RailFrame({
 }) {
   const [activeIndex, setActiveIndex] = useState(initialActiveIndex);
   return (
-    <div className="@container relative w-full bg-background" style={{ height }}>
+    <div {...stylex.props(sceneStyles.root)} style={{ height }}>
       <div {...stylex.props(storyLayout.stack)}>
         {entries.slice(activeIndex, activeIndex + 4).map((item) => (
-          <div key={item.key} className="rounded-md border border-border/60 p-3">
-            <div className="text-[13px] font-medium text-foreground">{item.title}</div>
+          <div key={item.key} {...stylex.props(storyLayoutStyles.canvas)}>
+            <div {...stylex.props(storyLayoutStyles.caption)}>{item.title}</div>
             <div {...stylex.props(storyLayout.caption)}>{item.preview}</div>
           </div>
         ))}
@@ -172,15 +252,12 @@ function ComposerHeightFrame({ pageLevelOverlay }: { pageLevelOverlay: boolean }
   const [outlineOverlayRoot, setOutlineOverlayRoot] = useState<HTMLDivElement | null>(null);
   const activeIndex = 44;
   return (
-    <div className="@container relative flex h-[720px] w-full flex-col overflow-hidden bg-background">
+    <div {...stylex.props(sceneStyles.root, sceneStyles.composerFrame)}>
       {pageLevelOverlay ? (
-        <div
-          ref={setOutlineOverlayRoot}
-          className="pointer-events-none absolute inset-0 @container"
-        />
+        <div ref={setOutlineOverlayRoot} {...stylex.props(sceneStyles.overlay)} />
       ) : null}
-      <div className="relative min-h-0 flex-1 overflow-hidden border-b border-border/70">
-        <div className="mx-auto h-full max-w-[46rem] px-4 py-6 text-sm text-muted-foreground">
+      <div {...stylex.props(storyLayoutStyles.frame)}>
+        <div {...stylex.props(storyLayoutStyles.frame2)}>
           The message viewport shrinks as the composer grows. The outline should remain centred in
           the page, not in this remaining area.
         </div>
@@ -191,10 +268,8 @@ function ComposerHeightFrame({ pageLevelOverlay }: { pageLevelOverlay: boolean }
           overlayRoot={outlineOverlayRoot}
         />
       </div>
-      <div className="h-[260px] shrink-0 border-t border-border bg-muted/20 p-4">
-        <div className="mx-auto h-full max-w-[46rem] rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">
-          Tall composer
-        </div>
+      <div {...stylex.props(storyLayoutStyles.frame3)}>
+        <div {...stylex.props(storyLayoutStyles.frame4)}>Tall composer</div>
       </div>
     </div>
   );
@@ -307,7 +382,7 @@ export const ShortStreamHidesRail: Story = {
       <SessionChatStreamView
         items={integrationItems.slice(0, 8)}
         sessionId={integrationSessionId}
-        className="h-full"
+        xstyle={sceneStyles.fill}
         renderMessageRow={renderMessageRow}
         showScrollToLatest={false}
       />
@@ -326,7 +401,7 @@ export const InsideTheConversationStream: Story = {
       <SessionChatStreamView
         items={integrationItems}
         sessionId={integrationSessionId}
-        className="h-full"
+        xstyle={sceneStyles.fill}
         renderMessageRow={renderMessageRow}
         showScrollToLatest={false}
       />
@@ -419,7 +494,7 @@ export const ExtremeConversation: Story = {
       <SessionChatStreamView
         items={extremeItems}
         sessionId={extremeSessionId}
-        className="h-full"
+        xstyle={sceneStyles.fill}
         renderMessageRow={renderMessageRow}
         showScrollToLatest={false}
       />
@@ -476,7 +551,7 @@ function ExtremeConversationViewFrame() {
   } = useConversationStreamItems(view, sessionId);
   return (
     <div {...stylex.props(storyLayout.stack2)}>
-      <div className="border-b px-3 py-1 font-mono text-xs text-muted-foreground">
+      <div {...stylex.props(sceneStyles.streamHeader)}>
         3000 rounds · {view?.turnCount ?? 0} turns ·{' '}
         {items.filter((item) => item.type === 'message').length} hydrated
       </div>
@@ -485,7 +560,7 @@ function ExtremeConversationViewFrame() {
           initialWindowReady={initialWindowReady}
           items={items}
           sessionId={sessionId}
-          className="h-full"
+          xstyle={sceneStyles.fill}
           renderMessageRow={renderMessageRow}
           showScrollToLatest={false}
           lastAssistantMessageId={lastAssistantMessageId}

@@ -7,6 +7,25 @@ import { TaskList, type TaskListTask, type TaskListRepoState } from '@/component
 import { sidebarShowFullListAtom } from '@/atoms/focus-layer';
 import { sessionSendStatusesAtom } from '@/atoms/session-send-status';
 import { ForceDesktopLayoutProvider } from '@/hooks/use-mobile';
+const storyCallerStyles = stylex.create({
+  blockedActions: {
+    ':is(*) button': {
+      'pointer-events': 'none',
+    },
+    ':is(*) svg': {
+      opacity: '50%',
+    },
+  },
+  layoutOverride: {
+    width: '280px',
+    'max-width': '100%',
+    gap: 'calc(var(--spacing) * 5)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--sidebar-ring) / 1)',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+});
 
 const meta = {
   title: 'Components/Legacy Task List Migration',
@@ -204,12 +223,9 @@ function Demo({
           selectedTaskId={selected}
           activeGroupKey={activeGroup ? ALPHA : undefined}
           className={
-            stateCaller
-              ? '[&_svg]:opacity-50 [&_button]:pointer-events-none'
-              : caller
-                ? 'gap-5 p-3 border border-sidebar-ring w-[280px] max-w-full'
-                : undefined
+            stateCaller ? stylex.props(storyCallerStyles.blockedActions).className : undefined
           }
+          xstyle={caller ? storyCallerStyles.layoutOverride : undefined}
           headerAction={
             <Button size="small" variant="ghost" onClick={() => setEvent('Header action')}>
               Filter

@@ -9,7 +9,7 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875)（草稿）
 
 ## 摘要
 
-Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥。Electron renderer 与独立 review helper 不再使用 Tailwind 构建插件和运行时 class 合并依赖。组件通过必要的 typed 入口组合实际调用方样式，保留有效布局、主题和交互状态。Storybook 尚未迁完的示例仍独立编译 Tailwind；真实截图差异和未访问状态继续保持开放。构建成功或字面量归零不代表迁移完成。
+Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥。Electron renderer 与独立 review helper 不再使用 Tailwind 构建插件和运行时 class 合并依赖。组件通过必要的 typed 入口组合实际调用方样式，保留有效布局、主题和交互状态。Storybook 示例也已迁移，临时编译输入、共享 preset 和组件包剩余编译依赖均已移除；真实截图差异和未访问状态继续保持开放。构建成功或字面量归零不代表迁移完成。
 
 ## 所有权与组合
 
@@ -19,7 +19,7 @@ Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥
 
 声明桥、配置表、Vite 插件及专用测试已删除，Vite、Storybook、Vitest、Electron 接线同步移除。它们仍保留 Tailwind 的排序引擎，不是迁移终点。[桥接决策](2026-10-31-stylex-cascade-compatibility.md)现在是历史记录，不是恢复该架构的依据。
 
-产品 CSS 不再导入 Tailwind、Konsta 或动画工具包，不含编译指令和 `--tw-*` 私有状态。带许可的浏览器 reset 位于 `src/tailwind/reset.css`，普通尺度默认值与原生安全区位于 `theme-defaults.css`。历史目录／导出名字不加载编译器。只有 `.storybook/legacy-stories.css` 继续编译示例；Electron 的 Tailwind 插件、旧配置和依赖，以及组件运行时 CVA、Konsta、合并依赖均已移除。review helper 的独立管线也已退役。
+产品 CSS 不再导入 Tailwind、Konsta 或动画工具包，不含编译指令和 `--tw-*` 私有状态。带许可的浏览器 reset 位于 `src/tailwind/reset.css`，普通尺度默认值与原生安全区位于 `theme-defaults.css`。历史目录／导出名字不加载编译器。Storybook 临时示例样式表与编译插件、无用的共享 preset 及依赖编译器的库存工具均已移除；Electron 的 Tailwind 插件、旧配置和依赖，以及组件运行时 CVA、Konsta、合并依赖均已移除。review helper 的独立管线也已退役。
 
 ## 真实浏览器支持的决策
 
@@ -47,9 +47,9 @@ Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥
 
 ## 后续工作
 
-扫描器用剩余示例的编译输入验证 AST 候选；v3 增加 class 命名的状态映射属性和参数默认值。仍须独立审计全部字符串：早期零计数曾漏掉真实 PR／Goal 映射和设置弹窗高度限制。计数只是下界，不是完成比例或运行时覆盖。
+最终冻结的编译器 v3 快照扫描 1,795 份源码，识别 utility 为零，另有 744 处未解析表达式，范围包括产品组件及全部 stories。之后退役扫描器、其测试和编译依赖；原始工具及最终 JSON 保存在 ignored 产物。早期零计数曾漏掉真实映射，因此动态 producer 审查与该静态下界分开记录。
 
-本轮记录的 v3 快照为 4,103 处／160 文件／757 未解析表达式，其中 stories 为 4,101，另外两处 `text-modified-file` 有普通手写 CSS 规则。产品和 review helper 的编译器退役，不代表全部示例及状态已验收。继续迁移示例、审查 Slot／真实调用方、完成后续生产验收并追查视觉差异，同时保留无关工作区改动。
+示例覆盖通过实际 owner／part 入口组合，包括 DiffViewer、列表加载状态与移动端 tab 图标尺寸。纯 Tailwind 排序诊断已退役，保留有意义的 Slot、几何、交互与截图覆盖。退役后的 Storybook 生产构建成功，1,923 份输入无变化；MobileNewChatSheet 明暗主题／390 与 820 宽度的 16 对真实截图全部像素一致，四帧仅记录删除透明零阴影载体的 computed 差异。其它新迁示例不据此视为视觉通过；此前报告及 OPEN 帧未改。
 
 库存范围是共享产品源码及示例。`site-docs` 另有独立 Fumadocs／Tailwind 管线，需要自己的基线及迁移，不能暗中算作已删除。隔离 ACP demo／编辑器应用不在本次 UI 任务内，也不需要子模块操作。
 

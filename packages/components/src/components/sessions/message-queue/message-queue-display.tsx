@@ -60,6 +60,7 @@ export type MessageQueueDisplayProps = {
   roomy?: boolean | 'airy';
   title?: string;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 const FADE_PX = 20;
@@ -143,6 +144,7 @@ export function MessageQueueDisplay({
   roomy = false,
   title,
   className,
+  xstyle,
 }: MessageQueueDisplayProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -271,9 +273,10 @@ export function MessageQueueDisplay({
         open={expanded}
         onOpenChange={setExpanded}
         className={clsx(
-          stylex.props(styles.sheet, roomy && styles.joinedSheet).className,
+          stylex.props(styles.sheet, roomy && styles.joinedSheet, xstyle).className,
           className
         )}
+        style={stylex.props(styles.sheet, roomy && styles.joinedSheet, xstyle).style}
       >
         <Collapsible.Trigger
           {...stylex.props(styles.header, roomy && styles.roomyHeader)}

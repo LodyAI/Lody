@@ -167,6 +167,7 @@ export function SessionConversationPageBody({
 
 export interface SessionConversationPageProps {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Highlights the page while an accepted drag (attachment or session) is over it. */
   dropActive?: boolean;
   dropKind?: ConversationDropKind;
@@ -184,6 +185,7 @@ export interface SessionConversationPageProps {
 
 export function SessionConversationPage({
   className,
+  xstyle,
   dropActive = false,
   dropKind = 'session-mention',
   headerSlot,
@@ -197,7 +199,7 @@ export function SessionConversationPage({
   onDragLeave,
   onDrop,
 }: SessionConversationPageProps) {
-  const pageProps = stylex.props(styles.page, !hideMessageArea && styles.pageFullHeight);
+  const pageProps = stylex.props(styles.page, !hideMessageArea && styles.pageFullHeight, xstyle);
 
   return (
     <div

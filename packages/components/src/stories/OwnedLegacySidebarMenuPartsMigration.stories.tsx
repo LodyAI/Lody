@@ -21,6 +21,87 @@ import {
   SidebarProvider,
   useSidebar,
 } from '@/ui/sidebar';
+const storyCallerStyles = stylex.create({
+  namedPaint: {
+    'pointer-events': 'auto',
+    'aspect-ratio': 'auto',
+    'justify-content': 'flex-end',
+    'background-color': 'transparent',
+    padding: 'calc(var(--spacing) * 2)',
+    color: 'var(--color-red-500)',
+  },
+  arbitraryPaint: {
+    'pointer-events': 'auto',
+    'aspect-ratio': 'auto',
+    'justify-content': 'flex-end',
+    'background-color': 'rgb(241,203,171)',
+    padding: '9px',
+    color: 'rgb(17,93,41)',
+  },
+  layoutOverride: {
+    position: 'relative',
+    top: 'calc(var(--spacing) * 0)',
+    right: 'calc(var(--spacing) * 0)',
+    display: 'block',
+    'aspect-ratio': 'auto',
+    height: 'calc(var(--spacing) * 10)',
+    width: 'calc(var(--spacing) * 10)',
+    'min-width': 'calc(var(--spacing) * 10)',
+    'align-items': 'flex-end',
+    'justify-content': 'flex-end',
+    gap: 'calc(var(--spacing) * 4)',
+    'border-radius': '0',
+    padding: 'calc(var(--spacing) * 0)',
+  },
+  wildcard: {
+    ':is(*) *': {
+      width: 'calc(var(--spacing) * 7)',
+      gap: 'calc(var(--spacing) * 1)',
+      'border-radius': '0',
+      padding: 'calc(var(--spacing) * 0)',
+    },
+  },
+  targeted: {
+    ':is(*) [data-menu-part]': {
+      top: 'calc(var(--spacing) * 0)',
+      right: 'calc(var(--spacing) * 0)',
+      height: 'calc(var(--spacing) * 10)',
+      width: 'calc(var(--spacing) * 7)',
+      'min-width': 'calc(var(--spacing) * 10)',
+      gap: 'calc(var(--spacing) * 1)',
+      'border-radius': '0',
+      padding: 'calc(var(--spacing) * 0)',
+    },
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    display: { default: 'block', ':is([data-collapsible="icon"] *)': 'block' },
+    height: 'calc(var(--spacing) * 4)',
+    borderRadius: '0',
+    paddingInline: 'calc(var(--spacing) * 0)',
+  },
+  frame2: {
+    position: 'relative',
+    top: 'calc(var(--spacing) * 0)',
+    right: 'calc(var(--spacing) * 0)',
+    display: { default: 'block', ':is([data-collapsible="icon"] *)': 'block' },
+    aspectRatio: 'auto',
+    width: 'calc(var(--spacing) * 4)',
+    borderRadius: '0',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  frame3: {
+    display: { default: 'block', ':is([data-collapsible="icon"] *)': 'block' },
+    height: 'calc(var(--spacing) * 4)',
+    minWidth: 'calc(var(--spacing) * 10)',
+    gap: 'calc(var(--spacing) * 4)',
+    overflow: 'visible',
+    borderRadius: '0',
+    paddingInline: 'calc(var(--spacing) * 0)',
+  },
+});
 
 const styles = stylex.create({
   outer: { display: 'contents' },
@@ -126,15 +207,15 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
   const paint = mode.startsWith('paint-');
   const caller =
     mode === 'paint-opaque'
-      ? stylex.props(styles.opaquePaint).className
+      ? styles.opaquePaint
       : mode === 'paint-named'
-        ? 'bg-transparent text-red-500 p-2 justify-end aspect-auto pointer-events-auto'
+        ? storyCallerStyles.namedPaint
         : mode === 'paint-arbitrary'
-          ? '[background-color:rgb(241,203,171)] [color:rgb(17,93,41)] [padding:9px] [justify-content:flex-end] [aspect-ratio:auto] [pointer-events:auto]'
+          ? storyCallerStyles.arbitraryPaint
           : mode === 'opaque'
-            ? stylex.props(styles.opaque).className
+            ? styles.opaque
             : mode === 'utility'
-              ? 'relative top-0 right-0 block aspect-auto h-10 w-10 min-w-10 items-end justify-end gap-4 rounded-none p-0'
+              ? storyCallerStyles.layoutOverride
               : undefined;
   const local =
     mode === 'paint-subtree'
@@ -145,14 +226,12 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
           ? scopedStyle
           : undefined;
   const rootClass =
-    mode === 'paint-zero'
-      ? '[:where(&)_:where([data-menu-part])]:bg-red-500 [:where(&)_:where([data-menu-part])]:text-yellow-500 [:where(&)_:where([data-menu-part])]:p-2 [:where(&)_:where([data-menu-part])]:justify-end [:where(&)_:where([data-menu-part])]:aspect-auto [:where(&)_:where([data-menu-part])]:pointer-events-auto'
-      : mode === 'wildcard'
-        ? '[&_*]:w-7 [&_*]:p-0 [&_*]:gap-1 [&_*]:rounded-none'
-        : mode === 'targeted'
-          ? '[&_[data-menu-part]]:w-7 [&_[data-menu-part]]:h-10 [&_[data-menu-part]]:min-w-10 [&_[data-menu-part]]:p-0 [&_[data-menu-part]]:gap-1 [&_[data-menu-part]]:rounded-none [&_[data-menu-part]]:top-0 [&_[data-menu-part]]:right-0'
-          : undefined;
-  const common = { className: caller, style: local, ref: stampRef };
+    mode === 'wildcard'
+      ? stylex.props(storyCallerStyles.wildcard).className
+      : mode === 'targeted'
+        ? stylex.props(storyCallerStyles.targeted).className
+        : undefined;
+  const common = { xstyle: caller, style: local, ref: stampRef };
   return (
     <div
       data-sidebar-menu-fixture={mode}
@@ -168,7 +247,7 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
       >
         <Sidebar
           collapsible="icon"
-          className={paint ? caller : undefined}
+          xstyle={paint ? caller : undefined}
           style={paint ? local : undefined}
         >
           <SidebarContent>
@@ -244,8 +323,13 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
               </SidebarMenu>
             </SidebarGroup>
             <SidebarGroup>
-              <SidebarGroupLabel data-menu-part="label-slot" asChild {...common}>
-                <span data-menu-slot-child className="block h-4 rounded-none px-0">
+              <SidebarGroupLabel
+                data-menu-part="label-slot"
+                asChild
+                {...common}
+                xstyle={[caller, storyLayout.frame]}
+              >
+                <span data-menu-slot-child>
                   <File /> Slot group
                 </span>
               </SidebarGroupLabel>
@@ -254,11 +338,11 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                 asChild
                 aria-label="Slot group action"
                 {...common}
+                xstyle={[caller, storyLayout.frame2]}
               >
                 <a
                   data-menu-slot-child
                   href="#sidebar-menu-group"
-                  className="relative top-0 right-0 block aspect-auto w-4 rounded-none p-2"
                   onClick={(e) => e.preventDefault()}
                 >
                   <Plus />
@@ -274,11 +358,11 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                     data-state={open ? 'open' : undefined}
                     aria-label="Slot menu action"
                     {...common}
+                    xstyle={[caller, storyLayout.frame2]}
                   >
                     <a
                       data-menu-slot-child
                       href="#sidebar-menu-action"
-                      className="relative top-0 right-0 block aspect-auto w-4 rounded-none p-2"
                       onClick={(e) => e.preventDefault()}
                     >
                       <MoreHorizontal />
@@ -293,12 +377,16 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                   </SidebarMenuBadge>
                   <SidebarMenuSub>
                     <SidebarMenuSubItem>
-                      <SidebarMenuSubButton data-menu-part="sub-slot" asChild {...common}>
+                      <SidebarMenuSubButton
+                        data-menu-part="sub-slot"
+                        asChild
+                        {...common}
+                        xstyle={[caller, storyLayout.frame3]}
+                      >
                         <a
                           data-menu-last-slot
                           data-menu-slot-child
                           href="#sidebar-menu-slot"
-                          className="block h-4 min-w-10 gap-4 overflow-visible rounded-none px-0"
                           onClick={(e) => {
                             e.preventDefault();
                             setEvent('Slot child');
@@ -316,7 +404,7 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
         </Sidebar>
         <SidebarInset
           data-menu-part={paint ? 'inset-paint' : undefined}
-          className={paint ? caller : undefined}
+          xstyle={paint ? caller : undefined}
           style={paint ? local : undefined}
         >
           <main {...stylex.props(styles.main)}>
@@ -354,8 +442,6 @@ export const PaintSubtree: Story = { args: { mode: 'paint-subtree' } };
 export const PaintNamed: Story = { args: { mode: 'paint-named' } };
 
 export const PaintArbitrary: Story = { args: { mode: 'paint-arbitrary' } };
-
-export const PaintZero: Story = { args: { mode: 'paint-zero' } };
 
 export const PaintOpaque: Story = { args: { mode: 'paint-opaque' } };
 

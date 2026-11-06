@@ -88,6 +88,7 @@ const TREE_INDENT_PX = 8;
 const EMPTY_FILE_TREE: FileTreeItem[] = [];
 
 const styles = stylex.create({
+  modified: { color: 'hsl(var(--modified-file))' },
   skeletonSurface: { height: '100%', overflow: 'hidden' },
   tree: { minWidth: 0 },
   treeVirtual: { position: 'relative', minWidth: 0 },
@@ -223,7 +224,7 @@ const fileTreeToTreeData = (
         ...(lazyDirectoryId === undefined || onLazyDirectoryOpen === undefined
           ? {}
           : { onClick: () => onLazyDirectoryOpen(lazyDirectoryId) }),
-        className: item.modified ? 'text-modified-file' : undefined,
+        xstyle: item.modified ? styles.modified : undefined,
       };
     }
 
@@ -233,7 +234,7 @@ const fileTreeToTreeData = (
       name,
       icon: FileIcon,
       onClick: () => onFileOpen(item.path),
-      className: item.modified ? 'text-modified-file' : undefined,
+      xstyle: item.modified ? styles.modified : undefined,
     };
   };
 
@@ -486,7 +487,8 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
     disabled && styles.rowDisabled,
     // `w-full` resolves against the positioned ancestor once absolute, so
     // the hover/selection background still spans the full row.
-    virtualStart !== undefined && styles.rowVirtual
+    virtualStart !== undefined && styles.rowVirtual,
+    item.xstyle
   );
   const rowButton = (
     <button
@@ -498,12 +500,11 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
       disabled={disabled}
       {...rowProps}
       style={{
+        ...rowProps.style,
         height: `${virtualSize ?? VIRTUAL_FILE_TREE_ROW_HEIGHT_PX}px`,
         paddingLeft,
         ...(virtualStart === undefined ? {} : { transform: `translateY(${virtualStart}px)` }),
       }}
-      // The group's own marker, and the modified-file ink, stay Tailwind: the
-      // marker is not a style, and the ink is a rule of the base sheet.
       className={clsx(rowProps.className, 'group', item.className)}
       onClick={activate}
       onKeyDown={(event) => {

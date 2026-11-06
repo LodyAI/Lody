@@ -19,6 +19,133 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Toast } from '@lody/ui';
 import { toastManager } from '@/lib/toast';
+const removalStory = stylex.create({
+  sidebar: { height: '100%', flexShrink: 0 },
+  add: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'var(--radius-sm)',
+    color: {
+      default: 'color-mix(in oklab,hsl(var(--muted-foreground) / 1) 80%,transparent)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': {
+        ':hover': 'color-mix(in oklab,hsl(var(--muted) / 1) 30%,transparent)',
+      },
+    },
+  },
+  search: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: 'calc(var(--spacing) * 3)',
+    top: '50%',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    translate: '0 -50%',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+const storySpacing = stylex.create({
+  children: {
+    marginBottom: 'calc(var(--spacing) * 3)',
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 0.5)',
+    },
+  },
+  children1: {
+    marginBottom: 'calc(var(--spacing) * 8)',
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 6)',
+    },
+  },
+});
+
+const storyLayoutStylesStylesStylesStyles = stylex.create({
+  element: {
+    paddingLeft: 'calc(var(--spacing) * 9)',
+  },
+});
+
+const storyLayoutStylesStylesStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--card) / 1)',
+    padding: 'calc(var(--spacing) * 3)',
+    'box-shadow':
+      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 11)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+  },
+  caption: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  canvas: {
+    'margin-left': 'auto',
+    'max-width': '72%',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--muted) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--leading-relaxed)',
+  },
+  row2: {
+    display: 'flex',
+    'max-width': '78%',
+    gap: 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--leading-relaxed)',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 12)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  row3: {
+    'margin-bottom': 'calc(var(--spacing) * 3)',
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -183,7 +310,7 @@ function DesktopSidebar({
 }) {
   return (
     <LoroSidebar
-      className="h-full shrink-0"
+      xstyle={removalStory.sidebar}
       defaultWidth={296}
       workspaceName="Lody"
       userEmail="developer@example.com"
@@ -194,7 +321,7 @@ function DesktopSidebar({
       repoSections={[]}
       chats={[]}
       topContent={
-        <div className="mb-3 space-y-0.5">
+        <div {...stylex.props(storySpacing.children)}>
           <SidebarSectionHeader
             label="本地项目"
             collapsed={false}
@@ -203,12 +330,11 @@ function DesktopSidebar({
             toggleLabel="展开或收起本地项目"
             onToggleCollapsed={() => {}}
             action={
-              <button
-                type="button"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted/30 hover:text-foreground"
-                aria-label="添加文件夹"
-              >
-                <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
+              <button type="button" {...stylex.props(removalStory.add)} aria-label="添加文件夹">
+                <FolderPlus
+                  {...stylex.props(storyLayoutStylesStylesStyles.frame)}
+                  strokeWidth={1.8}
+                />
               </button>
             }
           />
@@ -260,29 +386,32 @@ function DesktopSidebar({
 function ProjectConversationPane() {
   return (
     <main {...stylex.props(storyLayout.stack)}>
-      <header className="flex h-11 shrink-0 items-center border-b border-border px-4">
-        <div className="truncate text-sm font-medium">完善移除项目的 UX</div>
+      <header {...stylex.props(storyLayoutStyles.row)}>
+        <div {...stylex.props(storyLayoutStyles.caption)}>完善移除项目的 UX</div>
       </header>
       <div {...stylex.props(storyLayout.stack2)}>
         <div {...stylex.props(storyLayout.stack3)}>
-          <div className="mb-8 space-y-6">
-            <div className="ml-auto max-w-[72%] rounded-2xl bg-muted px-4 py-3 text-sm leading-relaxed">
+          <div {...stylex.props(storySpacing.children1)}>
+            <div {...stylex.props(storyLayoutStyles.canvas)}>
               移除项目时已有对话要保留，而且设备离线时不要让项目突然消失。
             </div>
-            <div className="flex max-w-[78%] gap-3 text-sm leading-relaxed">
+            <div {...stylex.props(storyLayoutStyles.row2)}>
               <span {...stylex.props(storyLayout.row)}>
-                <Bot className="h-4 w-4" />
+                <Bot {...stylex.props(storyLayoutStylesStylesStyles.frame)} />
               </span>
               <p {...stylex.props(storyLayout.caption)}>
                 可以。项目会留在侧栏并显示处理状态，已有对话仍然可以打开查看；设备重新上线后再完成移除。
               </p>
             </div>
           </div>
-          <div className="rounded-2xl border border-border bg-card p-3 shadow-sm">
-            <p className="min-h-12 text-sm text-muted-foreground">继续讨论这个项目…</p>
+          <div {...stylex.props(storyLayoutStylesStyles.canvas)}>
+            <p {...stylex.props(storyLayoutStyles.frame)}>继续讨论这个项目…</p>
             <div {...stylex.props(storyLayout.row2)}>
               <Button variant="ghost" size="small">
-                <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
+                <FolderPlus
+                  {...stylex.props(storyLayoutStylesStylesStyles.frame)}
+                  strokeWidth={1.8}
+                />
                 Lody Desktop
               </Button>
               <Button size="small">发送</Button>
@@ -408,15 +537,21 @@ function RemovedProjectArchive() {
             <div {...stylex.props(storyLayout.frame2)}>
               <div {...stylex.props(storyLayout.row4)}>
                 <div {...stylex.props(storyLayout.section2)}>
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" placeholder="搜索归档对话" />
+                  <Search {...stylex.props(removalStory.search)} />
+                  <Input
+                    xstyle={storyLayoutStylesStylesStylesStyles.element}
+                    placeholder="搜索归档对话"
+                  />
                 </div>
                 <Button variant="secondary" aria-label="筛选归档对话" icon>
-                  <SlidersHorizontal className="h-4 w-4" strokeWidth={1.8} />
+                  <SlidersHorizontal
+                    {...stylex.props(storyLayoutStylesStylesStyles.frame)}
+                    strokeWidth={1.8}
+                  />
                 </Button>
               </div>
-              <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-                <Archive className="h-4 w-4" />
+              <div {...stylex.props(storyLayoutStyles.row3)}>
+                <Archive {...stylex.props(storyLayoutStylesStylesStyles.frame)} />
                 <span>较早</span>
               </div>
               <ArchivedSessionGroupSection

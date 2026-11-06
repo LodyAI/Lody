@@ -14,6 +14,11 @@ import { themeColors } from '../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  picker: { height: '320px' },
+  callerPicker: { height: '360px', width: '100%', borderRadius: 0 },
+  callerSearch: { height: 'calc(var(--spacing) * 12)', paddingInline: 'calc(var(--spacing) * 2)' },
+  callerContent: { minHeight: 0 },
+  callerFooter: { gap: 'calc(var(--spacing) * 3)', padding: 'calc(var(--spacing) * 3)' },
   canvas: {
     minHeight: '100dvh',
     padding: themeSpace[4],
@@ -59,7 +64,7 @@ function Fixture({
           emojibaseUrl={getBundledEmojibaseUrl()}
           locale={locale}
           columns={columns}
-          className={caller ? 'h-[360px] w-full rounded-none' : 'h-[320px]'}
+          xstyle={caller ? styles.callerPicker : styles.picker}
           style={caller ? { border: '2px solid hsl(var(--border))' } : undefined}
           onEmojiSelect={({ emoji }) => setSelected(emoji)}
         >
@@ -67,15 +72,15 @@ function Fixture({
             aria-label="Search emoji"
             placeholder={locale === 'zh' ? '搜索表情…' : 'Search emoji…'}
             disabled={disabled}
-            className={caller ? 'h-12 px-2' : undefined}
+            xstyle={caller && styles.callerSearch}
             style={caller ? { fontSize: 15 } : undefined}
           />
           <EmojiPickerContent
-            className={caller ? 'min-h-0' : undefined}
+            xstyle={caller && styles.callerContent}
             style={caller ? { scrollbarGutter: 'stable' } : undefined}
           />
           <EmojiPickerFooter
-            className={caller ? 'gap-3 p-3' : undefined}
+            xstyle={caller && styles.callerFooter}
             style={caller ? { borderTopWidth: 2 } : undefined}
           />
         </EmojiPicker>

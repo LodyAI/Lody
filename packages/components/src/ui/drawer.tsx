@@ -267,21 +267,35 @@ function DrawerContent({
   );
 }
 
-function DrawerHeader({ className, ...props }: React.ComponentProps<'div'>) {
+function DrawerHeader({
+  className,
+  xstyle,
+  style,
+  ...props
+}: React.ComponentProps<'div'> & { xstyle?: stylex.StyleXStyles }) {
+  const sx = stylex.props(styles.header, xstyle);
   return (
     <div
       data-slot="drawer-header"
-      className={clsx(stylex.props(styles.header).className, className)}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
   );
 }
 
-function DrawerFooter({ className, ...props }: React.ComponentProps<'div'>) {
+function DrawerFooter({
+  className,
+  xstyle,
+  style,
+  ...props
+}: React.ComponentProps<'div'> & { xstyle?: stylex.StyleXStyles }) {
+  const sx = stylex.props(styles.footer, xstyle);
   return (
     <div
       data-slot="drawer-footer"
-      className={clsx(stylex.props(styles.footer).className, className)}
+      className={clsx(sx.className, className)}
+      style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
   );

@@ -21,6 +21,48 @@ import {
 } from '@/components/mobile/mobile-inline-picker';
 import { Button } from '@lody/ui/button';
 import { registerBuiltInCommands } from '@/lib/commands';
+const sceneStyles = stylex.create({
+  attachmentGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    opacity: 0.7,
+  },
+  footerLabel: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  sendGlyph: { width: 'calc(var(--spacing) * 5)', height: 'calc(var(--spacing) * 5)' },
+  mobileFrame: {
+    height: '720px',
+    width: '390px',
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-3xl)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: '100%',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--card) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+});
+
 const storyLayout = stylex.create({
   label: {
     overflow: 'hidden',
@@ -128,11 +170,8 @@ const sampleFileItems: ChatComposerFileItem[] = [
 // rows read like the production form without wiring live workspace data.
 function SelectorPill({ icon: Icon, label }: { icon: typeof Bot; label: string }) {
   return (
-    <button
-      type="button"
-      className="inline-flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-card px-3 text-sm"
-    >
-      <Icon className="h-4 w-4 opacity-70" />
+    <button type="button" {...stylex.props(storyLayoutStyles.row)}>
+      <Icon {...stylex.props(sceneStyles.attachmentGlyph)} />
       <span {...stylex.props(storyLayout.label)}>{label}</span>
     </button>
   );
@@ -200,11 +239,11 @@ function MobileNewChatDemo() {
         onFileRemove={noop}
         onFileRetry={noop}
         footerSelector={
-          <span className="text-xs text-muted-foreground">claude-opus-4-8 · Thinking</span>
+          <span {...stylex.props(sceneStyles.footerLabel)}>claude-opus-4-8 · Thinking</span>
         }
         primaryAction={
           <Button type="button" variant="primary" aria-label="Send" icon shape="pill">
-            <ArrowUp className="h-5 w-5" />
+            <ArrowUp {...stylex.props(sceneStyles.sendGlyph)} />
           </Button>
         }
         autoResize
@@ -233,7 +272,7 @@ function MobileNewChatDemo() {
     // a wide Storybook canvas. Mobile card sizing still keys off window width.
     <StoryPlatform>
       <div {...stylex.props(storyLayout.row)}>
-        <div className="h-[720px] w-[390px] overflow-hidden rounded-3xl border bg-background shadow-xl">
+        <div {...stylex.props(sceneStyles.mobileFrame)}>
           <MobileNewChatSheetContent {...contentProps} />
         </div>
       </div>

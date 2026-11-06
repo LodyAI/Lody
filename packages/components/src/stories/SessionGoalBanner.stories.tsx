@@ -1,8 +1,49 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 
 import { SESSION_GOAL_COMMANDS, type SessionGoalMessage } from '@lody/shared';
 import { SessionGoalBanner } from '@/components/sessions/session-goal-banner';
+const migrationStyles = stylex.create({
+  conversationPlaceholder: {
+    height: 'calc(var(--spacing) * 32)',
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, var(--color-black) 20%, transparent)',
+    },
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    width: '760px',
+    borderRadius: 'var(--radius-lg)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 9)',
+    alignItems: 'center',
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 const baseGoal: SessionGoalMessage = {
   type: 'goal',
@@ -44,14 +85,10 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="w-[760px] rounded-lg border border-border bg-background">
-        <div className="h-9 border-b border-border bg-muted/30 flex items-center px-4 text-xs text-muted-foreground">
-          Tab Bar (simulated)
-        </div>
+      <div {...stylex.props(storyLayout.frame)}>
+        <div {...stylex.props(storyLayout.row)}>Tab Bar (simulated)</div>
         <Story />
-        <div className="h-32 bg-muted/20 dark:bg-black/20 flex items-center justify-center text-xs text-muted-foreground">
-          Chat area
-        </div>
+        <div {...stylex.props(migrationStyles.conversationPlaceholder)}>Chat area</div>
       </div>
     ),
   ],

@@ -15,6 +15,96 @@ import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mo
 import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-config-sheet';
 import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
+const fileStory = stylex.create({
+  list: {
+    marginTop: 'calc(var(--spacing) * 4)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 2)',
+    },
+  },
+  file: {
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--muted) / 1) 60%,transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+});
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflow: 'hidden',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  frame: {
+    height: '1.05rem',
+    width: '1.05rem',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': '0.95rem',
+    'line-height': 'var(--leading-tight)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  canvas: {
+    'margin-inline': 'calc(var(--spacing) * 3)',
+    'margin-top': 'calc(var(--spacing) * 3)',
+    'border-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 40%, transparent)',
+    'background-color': 'hsl(var(--card) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  caption: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  caption2: {
+    'margin-top': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -140,15 +230,13 @@ function MockWorktreeSettings({ shell }: { shell?: WorktreeSetupShell }) {
           label={
             <div {...stylex.props(storyLayout.row)}>
               <div {...stylex.props(storyLayout.row2)}>
-                <Wrench className="h-[1.05rem] w-[1.05rem]" />
+                <Wrench {...stylex.props(storyLayoutStylesStyles.frame)} />
               </div>
-              <span className="truncate text-[0.95rem] font-medium leading-tight">
-                Worktree setup &amp; cleanup
-              </span>
+              <span {...stylex.props(storyLayoutStyles.label)}>Worktree setup &amp; cleanup</span>
             </div>
           }
           onClick={() => setOpen(true)}
-          trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
+          trailing={<ChevronRight {...stylex.props(storyLayoutStylesStyles.frame2)} />}
         />
       </MobileSettingsSection>
       <MobileWorktreeConfigSheet
@@ -166,19 +254,15 @@ function MockWorktreeSettings({ shell }: { shell?: WorktreeSetupShell }) {
 
 function ProjectFilesStoryContent() {
   return (
-    <div className="mx-3 mt-3 rounded-2xl border border-border/40 bg-card p-4">
-      <div className="text-sm font-semibold text-foreground">文件浏览</div>
-      <div className="mt-1 text-xs text-muted-foreground">项目文件树和预览区域</div>
-      <div className="mt-4 space-y-2 text-sm">
-        <div className="rounded-xl bg-muted/60 px-3 py-2 font-mono text-xs">
-          apps/mobile/src/main.tsx
-        </div>
-        <div className="rounded-xl bg-muted/60 px-3 py-2 font-mono text-xs">
+    <div {...stylex.props(storyLayoutStyles.canvas)}>
+      <div {...stylex.props(storyLayoutStyles.caption)}>文件浏览</div>
+      <div {...stylex.props(storyLayoutStyles.caption2)}>项目文件树和预览区域</div>
+      <div {...stylex.props(fileStory.list)}>
+        <div {...stylex.props(fileStory.file)}>apps/mobile/src/main.tsx</div>
+        <div {...stylex.props(fileStory.file)}>
           packages/components/src/components/chat/chat-landing.tsx
         </div>
-        <div className="rounded-xl bg-muted/60 px-3 py-2 font-mono text-xs">
-          packages/shared/src/message.ts
-        </div>
+        <div {...stylex.props(fileStory.file)}>packages/shared/src/message.ts</div>
       </div>
     </div>
   );
@@ -186,8 +270,8 @@ function ProjectFilesStoryContent() {
 
 function StoryShell({ project }: { project: MobileProjectContext }) {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
         <MobileProjectScreen
           project={project}
           conversations={conversations}

@@ -17,6 +17,11 @@ import type {
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeSpace } from '../style/theme-scale.stylex';
 
+const sceneStyles = stylex.create({
+  headerActions: { gap: 'calc(var(--spacing) * 3)', padding: 'calc(var(--spacing) * 2)' },
+  addButton: { height: 'calc(var(--spacing) * 8)', width: 'calc(var(--spacing) * 8)' },
+});
+
 const styles = stylex.create({
   canvas: {
     minHeight: '100vh',
@@ -135,7 +140,7 @@ function HeaderFixture({
           <span {...stylex.props(styles.path)}>{empty ? '(empty path)' : path}</span>
           <DiffFileHeaderActions
             path={empty ? '' : path}
-            className={overrides ? 'gap-3 p-2' : undefined}
+            xstyle={overrides && sceneStyles.headerActions}
             onOpenFile={copyOnly ? undefined : (value) => setAction(`Opened: ${value}`)}
           />
         </div>
@@ -161,7 +166,7 @@ function AddFixture() {
           </div>
           <div data-add-override>
             <SessionCommentAddButton
-              className="h-8 w-8"
+              xstyle={sceneStyles.addButton}
               onClick={() => setAction('Override add activated')}
             />
           </div>

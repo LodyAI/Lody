@@ -5,6 +5,26 @@ import type { McpServerId, WorkspaceMcpServerMeta } from '@lody/shared';
 import { AttachmentAddMenu } from '@/components/chat/attachment-add-menu';
 import { VaulDrawerEdgeBackZone } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { getSessionChatInputAreaShellClassName } from '@/components/sessions/session-chat-input-area';
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    width: '100%',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--input-border) / 1)',
+    'background-color': 'color-mix(in oklab, hsl(var(--input) / 1) 40%, transparent)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  label: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -81,9 +101,9 @@ function WithMcp(args: React.ComponentProps<typeof AttachmentAddMenu>) {
 const Frame = ({ children, dark }: { children: React.ReactNode; dark?: boolean }) => (
   <div className={dark ? 'dark' : ''}>
     <div {...stylex.props(storyLayout.row)}>
-      <div className="flex w-full items-center gap-2 rounded-xl border border-input-border bg-input/40 p-2">
+      <div {...stylex.props(storyLayoutStyles.row)}>
         {children}
-        <span className="text-sm text-muted-foreground">Message…</span>
+        <span {...stylex.props(storyLayoutStyles.label)}>Message…</span>
       </div>
     </div>
   </div>
@@ -97,9 +117,9 @@ const NativeSessionFrame = ({ children }: { children: React.ReactNode }) => (
         protectFromEdgeBackZone: true,
       })}
     >
-      <div className="flex w-full items-center gap-2 rounded-xl border border-input-border bg-input/40 p-2">
+      <div {...stylex.props(storyLayoutStyles.row)}>
         {children}
-        <span className="text-sm text-muted-foreground">Message…</span>
+        <span {...stylex.props(storyLayoutStyles.label)}>Message…</span>
       </div>
     </div>
   </div>

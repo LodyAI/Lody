@@ -1,7 +1,7 @@
 import { AlertCircle } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 
 const styles = stylex.create({
   mark: {
@@ -29,9 +29,11 @@ const styles = stylex.create({
 export function FieldIssueMark({
   messages,
   className,
+  xstyle,
 }: {
   messages: readonly string[];
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }) {
   if (messages.length === 0) return null;
   const label = messages.join(' ');
@@ -44,7 +46,7 @@ export function FieldIssueMark({
             role="img"
             aria-label={label}
             tabIndex={0}
-            className={cn(stylex.props(styles.mark).className, className)}
+            {...withClassName(stylex.props(styles.mark, xstyle), className)}
           >
             <AlertCircle {...stylex.props(styles.icon)} aria-hidden="true" />
           </span>

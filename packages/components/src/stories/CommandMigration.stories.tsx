@@ -20,6 +20,28 @@ import { themeColors } from '../style/theme-colors.stylex';
 import { themeSpace, themeFontSize, themeLineHeight } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  callerCommand: { borderRadius: 0 },
+  callerInput: { height: 'calc(var(--spacing) * 12)', paddingInline: 'calc(var(--spacing) * 2)' },
+  callerList: { maxHeight: '240px' },
+  callerEmpty: {
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    textAlign: 'center',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+  callerGroup: { padding: 0 },
+  callerItem: { paddingBlock: 'calc(var(--spacing) * 2)' },
+  hiddenLabel: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
   canvas: {
     minHeight: '100dvh',
     padding: themeSpace[4],
@@ -44,8 +66,13 @@ function Items({ onSelect }: { onSelect: (value: string) => void }) {
           <Plus />
           New session<CommandShortcut>⌘N</CommandShortcut>
         </CommandItem>
-        <CommandItem value="open-workspace" keywords={['project']} onSelect={onSelect}>
-          <Folder className="h-6 w-6" />
+        <CommandItem
+          iconSize="calc(var(--spacing) * 6)"
+          value="open-workspace"
+          keywords={['project']}
+          onSelect={onSelect}
+        >
+          <Folder />
           Open workspace<CommandShortcut>⌘O</CommandShortcut>
         </CommandItem>
         <CommandItem value="sync-unavailable" disabled onSelect={onSelect}>
@@ -59,8 +86,8 @@ function Items({ onSelect }: { onSelect: (value: string) => void }) {
           <Settings {...stylex.props(styles.svgCaller)} />
           Settings
         </CommandItem>
-        <CommandItem value="small-icon" onSelect={onSelect}>
-          <Plus className="size-3" />
+        <CommandItem iconSize="calc(var(--spacing) * 3)" value="small-icon" onSelect={onSelect}>
+          <Plus />
           Small icon
         </CommandItem>
       </CommandGroup>
@@ -81,20 +108,18 @@ function InlineFixture({
   return (
     <div {...stylex.props(styles.canvas)}>
       <div {...stylex.props(styles.frame)}>
-        <Command loop className={caller ? 'rounded-none' : undefined}>
+        <Command loop xstyle={caller && styles.callerCommand}>
           <CommandInput
             aria-label="Search commands"
             placeholder="Search commands…"
             disabled={disabled}
-            className={caller ? 'h-12 px-2' : undefined}
+            xstyle={caller && styles.callerInput}
           />
           <CommandList
-            containerClassName={caller ? 'max-h-[240px]' : undefined}
-            viewportClassName={caller ? 'max-h-[240px]' : undefined}
+            containerXstyle={caller && styles.callerList}
+            viewportXstyle={caller && styles.callerList}
           >
-            <CommandEmpty {...(caller ? { className: 'py-2 text-center text-xs' } : {})}>
-              No matching commands.
-            </CommandEmpty>
+            <CommandEmpty xstyle={caller && styles.callerEmpty}>No matching commands.</CommandEmpty>
             {overflow ? (
               <CommandGroup heading="Files">
                 {Array.from({ length: 36 }, (_, index) => (
@@ -112,8 +137,8 @@ function InlineFixture({
               <Items onSelect={setSelected} />
             )}
             {caller ? (
-              <CommandGroup heading="Caller overrides" className="p-0">
-                <CommandItem value="override" className="py-2" onSelect={setSelected}>
+              <CommandGroup heading="Caller overrides" xstyle={styles.callerGroup}>
+                <CommandItem value="override" xstyle={styles.callerItem} onSelect={setSelected}>
                   <Plus />
                   Caller row
                 </CommandItem>
@@ -139,8 +164,8 @@ function DialogFixture() {
         {selected}
       </output>
       <CommandDialog open={open} onOpenChange={setOpen}>
-        <Dialog.Title className="sr-only">Command migration</Dialog.Title>
-        <Dialog.Description className="sr-only">Choose a command.</Dialog.Description>
+        <Dialog.Title xstyle={styles.hiddenLabel}>Command migration</Dialog.Title>
+        <Dialog.Description xstyle={styles.hiddenLabel}>Choose a command.</Dialog.Description>
         <CommandInput aria-label="Search commands" placeholder="Search commands…" />
         <CommandList>
           <CommandEmpty>No matching commands.</CommandEmpty>

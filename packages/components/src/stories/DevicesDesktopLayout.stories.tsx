@@ -26,6 +26,47 @@ import {
   type WorkspaceMachineAccordionMeta,
 } from '@/components/settings/workspace-machine-accordion';
 import type { MachineSettingsFilter } from '@/atoms/settings-machine-tab';
+const sceneStyles = stylex.create({
+  list: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 3)',
+    },
+  },
+  privateSection: { paddingTop: 'calc(var(--spacing) * 3)' },
+  overview: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 4)',
+    },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-base)',
+    'line-height': 'var(--text-base--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  caption2: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  caption3: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  label: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -433,26 +474,26 @@ function DevicesDesktopLayout({
     <div {...stylex.props(storyLayout.stack)}>
       <div {...stylex.props(storyLayout.section)}>
         <div {...stylex.props(storyLayout.row)}>
-          <h2 className="text-base font-semibold text-foreground">Machines</h2>
+          <h2 {...stylex.props(storyLayoutStyles.caption)}>Machines</h2>
           <MachineListFilterButton filter={filter} onFilterChange={setFilter} />
         </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        <p {...stylex.props(storyLayoutStyles.caption2)}>
           View workspace machines and manage the machines you own.
         </p>
       </div>
-      <div className="space-y-3">{sharedItems.map(renderMachine)}</div>
-      <section className="space-y-3 pt-3">
+      <div {...stylex.props(sceneStyles.list)}>{sharedItems.map(renderMachine)}</div>
+      <section {...stylex.props(sceneStyles.list, sceneStyles.privateSection)}>
         <div {...stylex.props(storyLayout.canvas)}>
           <div {...stylex.props(storyLayout.row2)}>
-            <h3 className="text-sm font-semibold">Your private machines</h3>
-            <span className="text-xs text-muted-foreground">{privateItems.length}</span>
+            <h3 {...stylex.props(storyLayoutStyles.caption3)}>Your private machines</h3>
+            <span {...stylex.props(storyLayoutStyles.label)}>{privateItems.length}</span>
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <p {...stylex.props(storyLayoutStyles.caption2)}>
             These machines are not available to other workspace members. Select one to manage
             sharing.
           </p>
         </div>
-        <div className="space-y-3">{privateItems.map(renderMachine)}</div>
+        <div {...stylex.props(sceneStyles.list)}>{privateItems.map(renderMachine)}</div>
       </section>
     </div>
   );
@@ -510,7 +551,7 @@ function MachineOnlineStatusPreview() {
     agentCount: 3,
   };
   return (
-    <div className="space-y-4">
+    <div {...stylex.props(sceneStyles.overview)}>
       <WorkspaceMachineCollapsedRow meta={previewMeta} onExpand={fn()} />
       <Button variant="secondary" size="small" onClick={() => setIsOnline((online) => !online)}>
         Toggle online status

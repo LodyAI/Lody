@@ -8,9 +8,40 @@ import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { MessageQueueDisplay } from '@/components/sessions/message-queue';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
+const storyCallerStyles = stylex.create({
+  sheetOverride: {
+    overflow: 'visible',
+    borderTopLeftRadius: 'var(--radius-xl)',
+    borderTopRightRadius: 'var(--radius-xl)',
+    borderBottomRightRadius: 'var(--radius-md)',
+    borderBottomLeftRadius: 'var(--radius-md)',
+    borderStyle: 'solid',
+    borderWidth: '2px',
+    borderColor: 'var(--color-red-500)',
+    backgroundColor: 'var(--color-blue-100)',
+    boxShadow:
+      '0 0 #0000, 0 0 #0000, 0 0 #0000,  0 0 0 calc(2px + 0px) var(--color-green-600), 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-xl)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+    backgroundColor: 'hsl(var(--composer))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)',
+  },
+});
+
 const storyLayout = stylex.create({
   canvas: {
-    'background-color': 'hsl(var(--background) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
     padding: 'calc(var(--spacing) * 6)',
   },
   section: {
@@ -55,17 +86,15 @@ const meta = {
   },
   decorators: [
     (Story, ctx) => {
-      const width = (ctx.parameters as { containerWidth?: string }).containerWidth ?? 'w-[420px]';
+      const width = (ctx.parameters as { containerWidth?: string | number }).containerWidth ?? 420;
       // Mirror production: the sheet is inset over a faux composer and sits on it.
       return (
         <div {...stylex.props(storyLayout.canvas)}>
-          <div className={`${width}`}>
+          <div style={{ width }}>
             <div {...stylex.props(storyLayout.section)}>
               <Story />
             </div>
-            <div className="rounded-xl border border-foreground/[0.10] bg-[hsl(var(--composer))] px-3 py-3 text-xs text-muted-foreground/60">
-              Composer placeholder
-            </div>
+            <div {...stylex.props(storyLayoutStyles.canvas)}>Composer placeholder</div>
           </div>
         </div>
       );
@@ -114,7 +143,7 @@ export const MobileWidth: Story = {
     items: makeItems(3),
   },
   parameters: {
-    containerWidth: 'w-[320px]',
+    containerWidth: 320,
   },
 };
 
@@ -394,11 +423,11 @@ function OwnedQueueFixture({
               )
             : undefined
         }
-        className={
+        xstyle={
           caller === 'utilities'
-            ? 'overflow-visible rounded-t-xl rounded-b-md border-2 border-red-500 bg-blue-100 ring-2 ring-green-600 shadow-lg'
+            ? storyCallerStyles.sheetOverride
             : caller === 'opaque'
-              ? stylex.props(callerStyles.sheet).className
+              ? callerStyles.sheet
               : undefined
         }
         onRemove={(cid) => {
@@ -429,7 +458,7 @@ function OwnedQueueFixture({
 
 type OwnedQueueStory = StoryObj<typeof OwnedQueueFixture>;
 
-const ownedParameters = { containerWidth: 'w-[min(420px,calc(100vw-48px))]' };
+const ownedParameters = { containerWidth: 'min(420px,calc(100vw - 48px))' };
 export const OwnedDefault: OwnedQueueStory = {
   parameters: ownedParameters,
   render: () => <OwnedQueueFixture />,

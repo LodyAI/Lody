@@ -452,21 +452,14 @@ cloud mutation. Delete uses a deferred synthetic callback and verifies its actua
 completion/close/reset behavior. Keep failed fixture/locator calibrations, raw
 pixel differences and unchanged-source control runs separate from formal pairs.
 
-The compiler-backed [inventory](../../scripts/tailwind-usage.mjs) also inspects
-`withClassName`'s second argument, including calls spread onto a component. Its
-first argument contains StyleX props and is not a utility expression. Recount
-both sources with the same scanner version; older snapshots missed this helper
-and cannot establish the current batch's removal count. Pure literal string
-concatenations are joined before tokenization, including tokens split across
-operands. Mixed runtime or numeric operands remain unresolved; the scanner never
-evaluates expressions. Recount the baseline when this recognition changes.
-
-Literal class arrays joined with one space are supported, optionally through an
-exact `.filter(Boolean)`. Other join separators, arbitrary filters and array
-variables remain unresolved. Verify this boundary with
-`node --test scripts/tailwind-usage.test.mjs` from this package; it runs the actual
-scanner and locked Tailwind compiler on synthetic JSX. Compare both sources with
-the same scanner when correcting an earlier undercount.
+The compiler-backed inventory and its parser tests were retired with the final
+Storybook compiler. Their frozen source and final JSON are preserved in ignored
+`artifacts/visual/compiler-retirement-source/` and
+`artifacts/visual/code-focus-zero-compiler-inventory.json`. The final scan found
+zero recognized utilities in 1,795 files, with 744 unresolved expressions. This
+is a static lower bound, not a visual or dynamic-string pass. Earlier inventories
+must retain their scanner versions and source snapshots; do not compare counts
+from different recognition methods as migration percentages.
 
 `session-layout-native.mjs`, `search-table-native.mjs` and
 `onboarding-surface-native.mjs` capture the owned layout, table and onboarding

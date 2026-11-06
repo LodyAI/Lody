@@ -4,6 +4,13 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { PopupContainerProvider } from '@lody/ui/popup-container';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
+const storyCallerStyles = stylex.create({
+  popupOverride: {
+    width: '247px',
+    'min-width': '233px',
+    gap: 'calc(var(--spacing) * 5)',
+  },
+});
 
 const callerStyles = stylex.create({ popup: { width: 273, minWidth: 241, gap: 13 } });
 
@@ -34,7 +41,7 @@ function Fixture({
           <SidebarFilterPopover
             className={
               caller === 'utility'
-                ? 'w-[247px] min-w-[233px] gap-5'
+                ? stylex.props(storyCallerStyles.popupOverride).className
                 : caller === 'opaque'
                   ? stylex.props(callerStyles.popup).className
                   : undefined

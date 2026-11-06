@@ -170,7 +170,7 @@ describe('Combobox input', () => {
   test('a caller className lands after the compiled classes', async () => {
     mounted = await mount(
       <Combobox.Root items={LANGUAGES}>
-        <Combobox.Input className="w-64" />
+        <Combobox.Input className="combobox-input-hook" />
         <Combobox.Content>
           {(item: string) => (
             <Combobox.Item key={item} value={item}>
@@ -181,7 +181,7 @@ describe('Combobox input', () => {
       </Combobox.Root>
     );
     const classes = classesOf(input());
-    expect(classes[classes.length - 1]).toBe('w-64');
+    expect(classes[classes.length - 1]).toBe('combobox-input-hook');
     expect(classes.length).toBeGreaterThan(5);
   });
 });

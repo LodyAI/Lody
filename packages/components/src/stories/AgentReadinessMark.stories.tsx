@@ -2,6 +2,27 @@ import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { AgentReadinessMark } from '@/components/shared/agent-readiness-mark';
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 72)',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    gap: 'calc(var(--spacing) * 6)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+  },
+  label: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -26,8 +47,8 @@ type Story = StoryObj<typeof meta>;
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex w-72 items-center justify-between gap-6 rounded-lg border border-border/60 px-4 py-3">
-      <span className="text-xs text-muted-foreground">{label}</span>
+    <div {...stylex.props(storyLayoutStyles.row)}>
+      <span {...stylex.props(storyLayoutStyles.label)}>{label}</span>
       {children}
     </div>
   );

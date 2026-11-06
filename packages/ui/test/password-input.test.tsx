@@ -140,15 +140,18 @@ describe('PasswordInput', () => {
 
   test('a caller constrains the control through the shell, and the value through the input', () => {
     const html = renderToStaticMarkup(
-      <PasswordInput className="w-64" inputClassName="font-mono" aria-label="Password" />
+      <PasswordInput
+        className="secret-shell-hook"
+        inputClassName="secret-value-hook"
+        aria-label="Password"
+      />
     );
     const shell = /<div\b[^>]*class="([^"]*)"/.exec(html)?.[1] ?? '';
     const value = /<input\b[^>]*class="([^"]*)"/.exec(html)?.[1] ?? '';
-    // The shell is the control, so a width lands there and reaches the value
-    // below it; only what the value alone wears goes on the input.
-    expect(shell.split(' ')).toContain('w-64');
-    expect(shell.split(' ')).not.toContain('font-mono');
-    expect(value.split(' ')).toContain('font-mono');
-    expect(value.split(' ')).not.toContain('w-64');
+    // The root hook stays on the shell; the value hook belongs to the input.
+    expect(shell.split(' ')).toContain('secret-shell-hook');
+    expect(shell.split(' ')).not.toContain('secret-value-hook');
+    expect(value.split(' ')).toContain('secret-value-hook');
+    expect(value.split(' ')).not.toContain('secret-shell-hook');
   });
 });

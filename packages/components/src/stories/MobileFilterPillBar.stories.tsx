@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { Monitor } from 'lucide-react';
@@ -7,6 +8,40 @@ import {
   type FilterPill,
 } from '@/components/mobile/mobile-filter-pill-bar';
 
+const storyStyles = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'var(--color-stone-200, oklch(92.3% 0.003 48.717))',
+    padding: { default: 0, '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflow: 'hidden',
+  },
+  icon: { height: 'calc(var(--spacing) * 3)', width: 'calc(var(--spacing) * 3)' },
+  header: {
+    borderBottomWidth: 1,
+    borderBottomStyle: 'solid',
+    paddingTop: 'calc(var(--spacing) * 3)',
+  },
+  status: {
+    padding: 'calc(var(--spacing) * 4)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 2)',
+    },
+  },
+  hint: { paddingTop: 'calc(var(--spacing) * 3)', color: 'hsl(var(--muted-foreground) / 1)' },
+});
 const allMachines = ['zx-macbook', 'lab-m2', 'mini-offline'];
 
 function StoryShell() {
@@ -47,7 +82,7 @@ function StoryShell() {
       options: allMachines.map((m) => ({
         id: m,
         label: m,
-        icon: <Monitor className="h-3 w-3" />,
+        icon: <Monitor {...stylex.props(storyStyles.icon)} />,
       })),
       selectedIds: machines,
       defaultIds: new Set(allMachines),
@@ -56,16 +91,16 @@ function StoryShell() {
   ];
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
-        <div className="border-b pt-3">
+    <div {...stylex.props(storyStyles.canvas)}>
+      <div {...stylex.props(storyStyles.frame)}>
+        <div {...stylex.props(storyStyles.header)}>
           <MobileFilterPillBar pills={pills} />
         </div>
-        <div className="space-y-2 p-4 text-xs">
+        <div {...stylex.props(storyStyles.status)}>
           <div>scope = <code>{scope}</code></div>
           <div>status = <code>{status}</code></div>
           <div>machines = <code>{Array.from(machines).join(', ') || '(none)'}</code></div>
-          <p className="pt-3 text-muted-foreground">
+          <p {...stylex.props(storyStyles.hint)}>
             Single-select pills auto-close on commit. Multi-select stays open so the user
             can toggle several. The active-dot on "Machines" appears whenever the selection
             differs from the default (all machines).

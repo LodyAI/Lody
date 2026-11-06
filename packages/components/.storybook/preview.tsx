@@ -11,7 +11,6 @@ import {
 } from '@tanstack/react-router';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import '../src/tailwind/index.css';
-import './legacy-stories.css';
 import {
   AuthenticatedConvexContext,
   type AuthenticatedConvexContextValue,

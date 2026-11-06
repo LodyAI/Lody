@@ -12,6 +12,11 @@ import {
 import { Button } from '@lody/ui/button';
 import { clearSavedScrollStates, saveScrollState } from '@/lib/conversation-scroll/saved-state';
 
+const migrationStyles = stylex.create({
+  cachedOffset: { height: '400px', flexShrink: 0 },
+  flexibleOffset: { minHeight: 0, flex: '1' },
+});
+
 const storyOverrides = stylex.create({ stream: { height: '100%' } });
 
 const storyLayout = stylex.create({
@@ -194,7 +199,11 @@ function ColdTailStory({ cachedOffset = false }: { cachedOffset?: boolean }) {
         >
           Open conversation
         </Button>
-        <div className={cachedOffset ? 'h-[400px] shrink-0' : 'min-h-0 flex-1'}>
+        <div
+          {...stylex.props(
+            cachedOffset ? migrationStyles.cachedOffset : migrationStyles.flexibleOffset
+          )}
+        >
           {opened > 0 && (
             <SessionChatStreamView
               key={opened}

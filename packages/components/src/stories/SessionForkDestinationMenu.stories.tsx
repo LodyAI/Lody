@@ -8,6 +8,14 @@ import {
   type SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
 import { Button } from '@lody/ui/button';
+const storyLayoutStylesStyles = stylex.create({
+  caption: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayoutStyles = stylex.create({
   frame: {
     height: 'calc(var(--spacing) * 3.5)',
@@ -52,7 +60,7 @@ function ForkTrigger({
   const [lastChoice, setLastChoice] = useState<string>('none');
   return (
     <div data-spacing-scope={spacingScope} {...stylex.props(storyLayout.stack)}>
-      <div className="text-xs text-muted-foreground">Last choice: {lastChoice}</div>
+      <div {...stylex.props(storyLayoutStylesStyles.caption)}>Last choice: {lastChoice}</div>
       <SessionForkDestinationMenu
         open={open}
         onOpenChange={setOpen}

@@ -5,6 +5,27 @@ import { Button, type ButtonProps } from '@lody/ui/button';
 import { button } from '@lody/ui/button/button.tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { composerActionButtonTheme } from '../components/chat/composer-action-button.stylex';
+const storyCallerStyles = stylex.create({
+  caller: {
+    backgroundColor: {
+      default: 'var(--color-sky-200)',
+      '@media (hover: hover)': { ':hover': 'var(--color-sky-300)' },
+    },
+    color: {
+      default: 'var(--color-fuchsia-700)',
+      '@media (hover: hover)': { ':hover': 'var(--color-fuchsia-800)' },
+    },
+  },
+  action: {
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    'transition-property': 'all',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    ':is(*):active': {
+      translate: '0 1px',
+    },
+  },
+});
 
 const tokenName = (value: unknown) => String(value).slice(4, -1);
 
@@ -17,7 +38,7 @@ function ActionButton({ className, ...props }: Omit<ButtonProps, 'variant'>) {
       variant="solid"
       className={[
         stylex.props(composerActionButtonTheme).className,
-        'shadow-xs transition-all active:translate-y-[1px]',
+        stylex.props(storyCallerStyles.action).className,
         className,
       ]
         .filter(Boolean)
@@ -41,9 +62,6 @@ function Fixture({ scope = 'default' }: { scope?: Scope }) {
       : scope === 'writers'
         ? {
             ['--spacing' as string]: '5px',
-            ['--tw-duration' as string]: '240ms',
-            ['--tw-ease' as string]: 'linear',
-            ['--tw-translate-x' as string]: '3px',
             ['--shadow-xs' as string]: '1px 3px 6px rgb(75 20 120 / 0.2)',
             [tokenName(button.gap)]: '11px',
             [tokenName(button.ringWidth)]: '3px',
@@ -71,9 +89,7 @@ function Fixture({ scope = 'default' }: { scope?: Scope }) {
           aria-label="Owner action"
           onClick={() => setClicks((value) => value + 1)}
           className={
-            scope === 'caller'
-              ? 'bg-sky-200 text-fuchsia-700 hover:bg-sky-300 hover:text-fuchsia-800'
-              : undefined
+            scope === 'caller' ? stylex.props(storyCallerStyles.caller).className : undefined
           }
           render={
             scope === 'inline-token' ? (

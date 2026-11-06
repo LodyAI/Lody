@@ -10,7 +10,6 @@ import {
 } from '../components/schedules/schedule-property-row';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeSpace } from '../style/theme-scale.stylex';
-import { cn } from '../lib/utils';
 
 const styles = stylex.create({
   canvas: {
@@ -22,6 +21,23 @@ const styles = stylex.create({
   card: { maxWidth: '100%', width: 520 },
   narrow: { width: 240 },
   child: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  constrainedChild: { minWidth: '36rem', maxWidth: 'none' },
+  callerMark: {
+    display: 'block',
+    width: 'calc(var(--spacing) * 8)',
+    height: 'calc(var(--spacing) * 8)',
+    flexShrink: 1,
+    borderRadius: 0,
+    color: 'hsl(var(--destructive) / 1)',
+  },
+  callerPaddedMark: {
+    width: 'calc(var(--spacing) * 10)',
+    height: 'calc(var(--spacing) * 10)',
+    alignItems: 'flex-end',
+    justifyContent: 'flex-end',
+    padding: 'calc(var(--spacing) * 1)',
+    color: 'hsl(var(--primary))',
+  },
   full: { width: '100%' },
   marks: { display: 'flex', flexDirection: 'column', gap: themeSpace[6], padding: themeSpace[4] },
   markRow: { display: 'flex', alignItems: 'center', gap: themeSpace[3] },
@@ -66,7 +82,7 @@ function WideRows({ narrow = false }: { narrow?: boolean }) {
         <span {...stylex.props(styles.child)}>Repository / long-project-name / workspace</span>
       </PropertyRowWide>
       <PropertyRowWide label="Child constraints">
-        <span className={cn(stylex.props(styles.child).className, 'min-w-[36rem] max-w-none')}>
+        <span {...stylex.props(styles.child, styles.constrainedChild)}>
           A child with conflicting minimum and maximum utility widths must still shrink
         </span>
       </PropertyRowWide>
@@ -138,17 +154,11 @@ export const CallerOverrides: Story = {
       <div {...stylex.props(styles.marks)}>
         <div {...stylex.props(styles.markRow)} data-schedule-style-marker="caller">
           <span>Caller classes</span>
-          <FieldIssueMark
-            messages={single}
-            className="block size-8 shrink rounded-none text-destructive"
-          />
+          <FieldIssueMark messages={single} xstyle={styles.callerMark} />
         </div>
         <div {...stylex.props(styles.markRow)} data-schedule-style-marker="caller-padding">
           <span>Caller padding and alignment</span>
-          <FieldIssueMark
-            messages={multiple}
-            className="size-10 items-end justify-end p-1 text-primary"
-          />
+          <FieldIssueMark messages={multiple} xstyle={styles.callerPaddedMark} />
         </div>
       </div>
     </Frame>

@@ -4,7 +4,7 @@ import type { VisualAnnotationReferencePayload } from '@lody/shared';
 import { truncateCommentBody } from '@lody/shared';
 import { MousePointer2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -20,6 +20,7 @@ type VisualAnnotationReferenceCardProps = {
   reference: VisualAnnotationReferencePayload;
   onClick?: () => void;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 const styles = stylex.create({
@@ -94,6 +95,7 @@ export function VisualAnnotationReferenceCard({
   reference,
   onClick,
   className,
+  xstyle,
 }: VisualAnnotationReferenceCardProps) {
   const target = reference.anchor.target;
   const preview = truncateCommentBody(reference.body, 72);
@@ -103,8 +105,8 @@ export function VisualAnnotationReferenceCard({
     <button
       type="button"
       onClick={onClick}
-      className={clsx(
-        stylex.props(styles.card, onClick ? styles.cardInteractive : styles.cardStatic).className,
+      {...withClassName(
+        stylex.props(styles.card, onClick ? styles.cardInteractive : styles.cardStatic, xstyle),
         className
       )}
       title={reference.body}

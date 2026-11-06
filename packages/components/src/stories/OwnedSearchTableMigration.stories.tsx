@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
@@ -11,6 +12,23 @@ import {
   SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME,
 } from '../components/sessions/session-search-context';
 import { cn } from '../lib/utils';
+const storyCallerStyles = stylex.create({
+  readingLine: { lineHeight: 'calc(var(--spacing) * 8)' },
+  readingText: {
+    'font-size': 'var(--text-base)',
+    'line-height': 'calc(var(--spacing) * 8)',
+  },
+  activeMark: {
+    'border-radius': '0',
+    'background-color': 'var(--color-pink-200)',
+    'box-shadow':
+      '0 0 #0000, 0 0 #0000, 0 0 #0000,  0 0 0 calc(2px + 0px) var(--color-pink-500), 0 0 #0000',
+    ':is(*):where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+      {
+        'background-color': 'var(--color-pink-900)',
+      },
+  },
+});
 
 const meta = {
   title: 'Components/OwnedSearchTableMigration',
@@ -25,8 +43,6 @@ const variables = {
   '--color-amber-400': 'oklch(68% 0.17 60)',
   '--foreground': '275 50% 35%',
   '--primary': '300 60% 45%',
-  '--tw-ring-offset-width': '2px',
-  '--tw-ring-offset-color': 'rgb(200, 220, 240)',
 } as CSSProperties;
 const tableText = [
   '| Key | 中文标题 | Summary | Result | Owner | Region | Reference | Detail |',
@@ -187,7 +203,10 @@ function Fixture({
                 <MarkdownRenderer text={tableText} />
               </section>
               <section data-search-table-direct style={{ marginTop: 20 }}>
-                <MarkdownTable className="text-base leading-8" style={{ letterSpacing: '0.4px' }}>
+                <MarkdownTable
+                  className={stylex.props(storyCallerStyles.readingText).className}
+                  style={{ letterSpacing: '0.4px' }}
+                >
                   <thead>
                     <tr>
                       <th>Caller</th>
@@ -206,7 +225,11 @@ function Fixture({
           ) : (
             <>
               <section data-search-plain style={{ padding: 12, marginBottom: 16 }}>
-                <SearchHighlightedText blockId="plain" text={plain} className="leading-8" />
+                <SearchHighlightedText
+                  blockId="plain"
+                  text={plain}
+                  className={stylex.props(storyCallerStyles.readingLine).className}
+                />
               </section>
               <section data-search-markdown style={{ padding: 12, marginBottom: 16 }}>
                 <MarkdownRenderer text={markdown} searchBlockId="markdown" />
@@ -244,7 +267,7 @@ function Fixture({
                     className={cn(
                       SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
                       SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
-                      'bg-pink-200 dark:bg-pink-900 ring-2 ring-pink-500 shadow-none rounded-none'
+                      stylex.props(storyCallerStyles.activeMark).className
                     )}
                     style={{ outlineOffset: 6 }}
                   >

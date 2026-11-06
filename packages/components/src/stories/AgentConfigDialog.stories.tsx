@@ -20,7 +20,63 @@ import {
   MINIMAX_CLAUDE_PRESET_ID,
 } from '@/components/settings/agent-config-dialog';
 import { Dialog } from '@/ui/dialog';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    width: 'calc(var(--spacing) * 56)',
+    'border-right-style': 'solid',
+    'border-right-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  canvas: {
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'hsl(var(--secondary) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  caption: {
+    'font-size': 'var(--text-xl)',
+    'line-height': 'var(--text-xl--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  frame2: {
+    'margin-top': 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 24)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--card) / 1)',
+  },
+  canvas2: {
+    'margin-top': 'calc(var(--spacing) * 6)',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--primary))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--primary-foreground))',
+  },
+});
+
 const storyLayout = stylex.create({
+  nestedDialog: { height: 'min(90vh, 950px)', maxWidth: '1100px', overflow: 'hidden', padding: 0 },
+  hiddenLabel: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
   row: {
     display: 'flex',
     height: '100%',
@@ -115,22 +171,21 @@ function NestedCreateWrapper() {
 
   return (
     <Dialog.Root open={settingsOpen} onOpenChange={setSettingsOpen}>
-      <Dialog.Content
-        noAnimation
-        className="h-[min(90vh,950px)] w-[84vw] max-w-[1100px] overflow-hidden p-0 sm:p-0"
-      >
-        <Dialog.Title className="sr-only">Settings</Dialog.Title>
-        <Dialog.Description className="sr-only">Nested provider dialog preview</Dialog.Description>
+      <Dialog.Content noAnimation width="84vw" xstyle={storyLayout.nestedDialog}>
+        <Dialog.Title xstyle={storyLayout.hiddenLabel}>Settings</Dialog.Title>
+        <Dialog.Description xstyle={storyLayout.hiddenLabel}>
+          Nested provider dialog preview
+        </Dialog.Description>
         <div {...stylex.props(storyLayout.row)}>
-          <aside className="w-56 border-r border-border bg-background p-4">
-            <div className="rounded-lg bg-secondary px-3 py-2 text-sm font-medium">Agents</div>
+          <aside {...stylex.props(storyLayoutStyles.frame)}>
+            <div {...stylex.props(storyLayoutStyles.canvas)}>Agents</div>
           </aside>
           <main {...stylex.props(storyLayout.canvas)}>
-            <h2 className="text-xl font-semibold">Agent Provider</h2>
-            <div className="mt-4 h-24 rounded-lg border border-border bg-card" />
+            <h2 {...stylex.props(storyLayoutStyles.caption)}>Agent Provider</h2>
+            <div {...stylex.props(storyLayoutStyles.frame2)} />
             <button
               type="button"
-              className="mt-6 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground"
+              {...stylex.props(storyLayoutStyles.canvas2)}
               onClick={() => setProviderOpen(true)}
             >
               New provider

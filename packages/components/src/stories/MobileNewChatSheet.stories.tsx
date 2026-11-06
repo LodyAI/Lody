@@ -23,9 +23,103 @@ import {
   mobileModelPickerTriggerStyle,
 } from '@/components/mobile/mobile-session-composer-footer';
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { withClassName } from '@/lib/stylex';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
 import { Tabs } from '@lody/ui/tabs';
+
+const styles = stylex.create({
+  glyph: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+  pickerGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    opacity: 0.7,
+  },
+  sendGlyph: { width: 'calc(var(--spacing) * 5)', height: 'calc(var(--spacing) * 5)' },
+  fullWidth: { width: '100%' },
+  tabsList: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 10)',
+    width: '100%',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'hsl(var(--muted) / 1)',
+    padding: 'calc(var(--spacing) * 1)',
+  },
+  tab: {
+    flex: '1 1 0%',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+  },
+  muted: { color: 'hsl(var(--muted-foreground) / 1)' },
+  selectedTab: {
+    backgroundColor: 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  composer: {
+    borderRadius: 'var(--radius-2xl)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  input: {
+    width: '100%',
+    resize: 'none',
+    backgroundColor: 'transparent',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    color: {
+      default: 'hsl(var(--input-foreground) / 1)',
+      '::placeholder': 'hsl(var(--input-placeholder) / 1)',
+    },
+    ':focus': { outlineStyle: 'none' },
+  },
+  footer: { display: 'flex', alignItems: 'center', paddingTop: 'calc(var(--spacing) * 1)' },
+  footerFill: { display: 'flex', minWidth: 0, flex: '1 1 0%', alignItems: 'center' },
+  configRow: { display: 'flex', width: '100%', minWidth: 0, alignItems: 'center' },
+  minWidth: { minWidth: 0 },
+  thinkingBox: { marginLeft: 'calc(var(--spacing) * 1)', flexShrink: 0 },
+  thinkingTrigger: {
+    height: 'calc(var(--spacing) * 8)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  send: { marginLeft: 'calc(var(--spacing) * 2)', flexShrink: 0 },
+  frame: {
+    position: 'relative',
+    height: '956px',
+    width: '100%',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  openRow: { display: 'flex', height: '100%', alignItems: 'flex-end', justifyContent: 'center' },
+  openButton: { marginBottom: 'calc(var(--spacing) * 6)' },
+  pickerRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  pickerFill: { minWidth: 0, flex: '1 1 0%' },
+  trailingPicker: { marginLeft: 'auto', minWidth: 0 },
+});
 
 const meta = {
   title: 'Mobile/MobileNewChatSheet',
@@ -45,8 +139,8 @@ type Story = StoryObj<typeof meta>;
    inline in the footer row. */
 
 const machineOptions: MobileInlinePickerOption[] = [
-  { value: 'zx-macbook', label: 'zx-macbook', icon: <Monitor className="h-3.5 w-3.5" /> },
-  { value: 'lab-m2', label: 'lab-m2', icon: <Monitor className="h-3.5 w-3.5" /> },
+  { value: 'zx-macbook', label: 'zx-macbook', icon: <Monitor {...stylex.props(styles.glyph)} /> },
+  { value: 'lab-m2', label: 'lab-m2', icon: <Monitor {...stylex.props(styles.glyph)} /> },
 ];
 
 const githubRepoOptions: MobileInlinePickerOption[] = [
@@ -54,13 +148,13 @@ const githubRepoOptions: MobileInlinePickerOption[] = [
     value: 'loro-dev/lody',
     label: 'loro-dev/lody',
     description: 'AI-native local-first coding companion',
-    icon: <Github className="h-3.5 w-3.5" />,
+    icon: <Github {...stylex.props(styles.glyph)} />,
   },
   {
     value: 'loro-dev/loro',
     label: 'loro-dev/loro',
     description: 'High-performance CRDT framework',
-    icon: <Github className="h-3.5 w-3.5" />,
+    icon: <Github {...stylex.props(styles.glyph)} />,
   },
 ];
 
@@ -69,16 +163,16 @@ const localProjectOptions: MobileInlinePickerOption[] = [
     value: 'zx-macbook:lody',
     label: 'lody',
     description: '~/code/lody',
-    icon: <Folder className="h-3.5 w-3.5" />,
+    icon: <Folder {...stylex.props(styles.glyph)} />,
   },
 ];
 
 const branchOptions: MobileInlinePickerOption[] = [
-  { value: 'main', label: 'main', icon: <GitBranch className="h-3.5 w-3.5" /> },
+  { value: 'main', label: 'main', icon: <GitBranch {...stylex.props(styles.glyph)} /> },
   {
     value: 'feat/audit-mobile-coupling',
     label: 'feat/audit-mobile-coupling',
-    icon: <GitBranch className="h-3.5 w-3.5" />,
+    icon: <GitBranch {...stylex.props(styles.glyph)} />,
   },
 ];
 
@@ -100,15 +194,19 @@ const thinkingOptions: MobileInlinePickerOption[] = [
 ];
 
 const agentOptions: MobileInlinePickerOption[] = [
-  { value: 'claude-code', label: 'Claude Code', icon: <Sparkles className="h-3.5 w-3.5" /> },
-  { value: 'codex', label: 'Codex', icon: <Sparkles className="h-3.5 w-3.5" /> },
+  {
+    value: 'claude-code',
+    label: 'Claude Code',
+    icon: <Sparkles {...stylex.props(styles.glyph)} />,
+  },
+  { value: 'codex', label: 'Codex', icon: <Sparkles {...stylex.props(styles.glyph)} /> },
 ];
 
 const permissionOptions: MobileInlinePickerOption[] = [
   {
     value: 'askPermission',
     label: 'Ask permission',
-    icon: <ShieldCheck className="h-3.5 w-3.5" />,
+    icon: <ShieldCheck {...stylex.props(styles.glyph)} />,
   },
 ];
 
@@ -119,28 +217,23 @@ function MockContextTypeNode({
   value: 'local' | 'github' | 'chat';
   onChange: (next: 'local' | 'github' | 'chat') => void;
 }) {
-  const triggerClassName = cn(
-    'flex-1 inline-flex items-center justify-start gap-1.5 rounded-md px-2 py-1 text-sm font-medium transition-all',
-    'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs',
-    'text-muted-foreground'
-  );
   return (
     <Tabs.Root
       value={value}
       onValueChange={(v) => onChange(v as 'local' | 'github' | 'chat')}
-      className="w-full"
+      xstyle={styles.fullWidth}
     >
-      <Tabs.List className="flex h-10 w-full rounded-md bg-muted p-1">
-        <Tabs.Tab value="local" className={triggerClassName}>
-          <Folder className="h-3.5 w-3.5" />
+      <Tabs.List xstyle={styles.tabsList}>
+        <Tabs.Tab value="local" xstyle={[styles.tab, styles.muted]}>
+          <Folder {...stylex.props(styles.glyph)} />
           <span>Local</span>
         </Tabs.Tab>
-        <Tabs.Tab value="github" className={triggerClassName}>
-          <Github className="h-3.5 w-3.5" />
+        <Tabs.Tab value="github" xstyle={[styles.tab, styles.muted]}>
+          <Github {...stylex.props(styles.glyph)} />
           <span>GitHub</span>
         </Tabs.Tab>
-        <Tabs.Tab value="chat" className={triggerClassName}>
-          <MessageCircle className="h-3.5 w-3.5" />
+        <Tabs.Tab value="chat" xstyle={[styles.tab, styles.muted]}>
+          <MessageCircle {...stylex.props(styles.glyph)} />
           <span>Chat</span>
         </Tabs.Tab>
       </Tabs.List>
@@ -150,19 +243,14 @@ function MockContextTypeNode({
 
 function MockWorkdirModeNode({ contextType }: { contextType: 'local' | 'github' | 'chat' }) {
   if (contextType !== 'local') return null;
-  const triggerClassName =
-    'flex-1 inline-flex items-center justify-start gap-1.5 rounded-md px-2 py-1 text-sm font-medium transition-all';
   return (
-    <div className="flex h-10 w-full rounded-md bg-muted p-1">
-      <button type="button" className={cn(triggerClassName, 'text-muted-foreground')}>
-        <Folder className="h-3.5 w-3.5" />
+    <div {...stylex.props(styles.tabsList)}>
+      <button type="button" {...stylex.props(styles.tab, styles.muted)}>
+        <Folder {...stylex.props(styles.glyph)} />
         <span>本地文件</span>
       </button>
-      <button
-        type="button"
-        className={cn(triggerClassName, 'bg-background text-foreground shadow-xs')}
-      >
-        <GitBranch className="h-3.5 w-3.5" />
+      <button type="button" {...stylex.props(styles.tab, styles.selectedTab)}>
+        <GitBranch {...stylex.props(styles.glyph)} />
         <span>新工作树</span>
       </button>
     </div>
@@ -188,21 +276,21 @@ function MockComposer({
 }) {
   return (
     <MobileInlinePickerRowSlot>
-      <div className="rounded-2xl border border-input-border/70 bg-input/90 p-3">
+      <div {...stylex.props(styles.composer)}>
         <textarea
           rows={2}
           placeholder="描述你的需求。"
-          className="input-scrollbar w-full resize-none bg-transparent text-sm leading-6 text-input-foreground placeholder:text-input-placeholder focus:outline-none"
+          {...withClassName(stylex.props(styles.input), 'input-scrollbar')}
         />
         {/* Mirrors the real composer footer: the configOptions cluster
             fills the row (`w-full` inside the `flex-1` wrapper) so each
             config shows in full, and only the model shrinks/truncates
             (keeping its tail) once the row is too narrow — thinking is
             pinned `shrink-0`. The send button sits at the far right. */}
-        <div className="flex items-center pt-1">
-          <div className="flex min-w-0 flex-1 items-center">
-            <div className="flex w-full min-w-0 items-center">
-              <div className="min-w-0">
+        <div {...stylex.props(styles.footer)}>
+          <div {...stylex.props(styles.footerFill)}>
+            <div {...stylex.props(styles.configRow)}>
+              <div {...stylex.props(styles.minWidth)}>
                 <MobileInlinePicker
                   id="story-model"
                   value={selectedModel}
@@ -213,15 +301,17 @@ function MockComposer({
                   triggerContent={<MobileModelPickerLabel>{selectedModel}</MobileModelPickerLabel>}
                 />
               </div>
-              <div className="ml-1 shrink-0">
+              <div {...stylex.props(styles.thinkingBox)}>
                 <MobileInlinePicker
                   id="story-thinking"
                   value={selectedThinking}
                   onChange={setSelectedThinking}
                   options={thinkingOptions}
                   ariaLabel="Thinking"
-                  triggerClassName="h-8 px-2 py-1 text-sm"
-                  triggerContent={<span className="truncate">{selectedThinking}</span>}
+                  triggerXstyle={styles.thinkingTrigger}
+                  triggerContent={
+                    <span {...stylex.props(styles.truncate)}>{selectedThinking}</span>
+                  }
                 />
               </div>
             </div>
@@ -232,9 +322,9 @@ function MockComposer({
             aria-label="Send"
             icon
             shape="pill"
-            className="ml-2 shrink-0"
+            xstyle={styles.send}
           >
-            <ArrowUp className="h-5 w-5" />
+            <ArrowUp {...stylex.props(styles.sendGlyph)} />
           </Button>
         </div>
       </div>
@@ -266,9 +356,9 @@ function StoryHarness({
   };
 
   return (
-    <div className="relative h-[956px] w-full bg-background text-foreground">
-      <div className="flex h-full items-end justify-center">
-        <Button type="button" onClick={() => setOpen(true)} className="mb-6">
+    <div {...stylex.props(styles.frame)}>
+      <div {...stylex.props(styles.openRow)}>
+        <Button type="button" onClick={() => setOpen(true)} xstyle={styles.openButton}>
           Open
         </Button>
       </div>
@@ -285,8 +375,8 @@ function StoryHarness({
             ariaLabel="Machine"
             triggerContent={
               <>
-                <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                <span className="truncate">{machine}</span>
+                <Monitor {...stylex.props(styles.pickerGlyph)} />
+                <span {...stylex.props(styles.truncate)}>{machine}</span>
               </>
             }
           />
@@ -294,8 +384,8 @@ function StoryHarness({
         contextTypeNode={<MockContextTypeNode value={contextType} onChange={setContextType} />}
         perTypeNode={
           contextType === 'chat' ? null : (
-            <div className="flex w-full items-start gap-2">
-              <div className="min-w-0 flex-1">
+            <div {...stylex.props(styles.pickerRow)}>
+              <div {...stylex.props(styles.pickerFill)}>
                 {contextType === 'github' ? (
                   <MobileInlinePicker
                     id="story-repo"
@@ -305,8 +395,8 @@ function StoryHarness({
                     ariaLabel="Repository"
                     triggerContent={
                       <>
-                        <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <span className="truncate">{repo}</span>
+                        <Github {...stylex.props(styles.pickerGlyph)} />
+                        <span {...stylex.props(styles.truncate)}>{repo}</span>
                       </>
                     }
                   />
@@ -319,14 +409,16 @@ function StoryHarness({
                     ariaLabel="Project"
                     triggerContent={
                       <>
-                        <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <span className="truncate">{localProject.split(':')[1] ?? 'lody'}</span>
+                        <Folder {...stylex.props(styles.pickerGlyph)} />
+                        <span {...stylex.props(styles.truncate)}>
+                          {localProject.split(':')[1] ?? 'lody'}
+                        </span>
                       </>
                     }
                   />
                 )}
               </div>
-              <div className="min-w-0 flex-1">
+              <div {...stylex.props(styles.pickerFill)}>
                 <MobileInlinePicker
                   id="story-branch"
                   value={branch}
@@ -335,8 +427,8 @@ function StoryHarness({
                   ariaLabel="Branch"
                   triggerContent={
                     <>
-                      <GitBranch className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">{branch}</span>
+                      <GitBranch {...stylex.props(styles.pickerGlyph)} />
+                      <span {...stylex.props(styles.truncate)}>{branch}</span>
                     </>
                   }
                 />
@@ -360,8 +452,8 @@ function StoryHarness({
         }
         belowComposerNode={
           <MobileInlinePickerRowSlot>
-            <div className="flex w-full items-start gap-2">
-              <div className="min-w-0">
+            <div {...stylex.props(styles.pickerRow)}>
+              <div {...stylex.props(styles.minWidth)}>
                 <MobileInlinePicker
                   id="story-agent"
                   value={agent}
@@ -370,15 +462,15 @@ function StoryHarness({
                   ariaLabel="Agent"
                   triggerContent={
                     <>
-                      <Sparkles className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">
+                      <Sparkles {...stylex.props(styles.pickerGlyph)} />
+                      <span {...stylex.props(styles.truncate)}>
                         {agentOptions.find((o) => o.value === agent)?.label ?? agent}
                       </span>
                     </>
                   }
                 />
               </div>
-              <div className="ml-auto min-w-0">
+              <div {...stylex.props(styles.trailingPicker)}>
                 <MobileInlinePicker
                   id="story-permission"
                   value={permission}
@@ -387,8 +479,8 @@ function StoryHarness({
                   ariaLabel="Permission"
                   triggerContent={
                     <>
-                      <ShieldCheck className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">
+                      <ShieldCheck {...stylex.props(styles.pickerGlyph)} />
+                      <span {...stylex.props(styles.truncate)}>
                         {permissionOptions.find((o) => o.value === permission)?.label ?? permission}
                       </span>
                     </>

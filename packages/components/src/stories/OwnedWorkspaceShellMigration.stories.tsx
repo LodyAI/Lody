@@ -1,9 +1,11 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { LoroSidebar, type LoroSidebarNavKey } from '../components/loro-sidebar';
 import { SettingsStoryProviders } from './settings-story-shell';
 
+const shellStory = stylex.create({ sidebar: { outlineOffset: 'calc(var(--spacing) * 4)' } });
 const meta = {
   title: 'Components/OwnedWorkspaceShellMigration',
   parameters: { layout: 'fullscreen' },
@@ -69,7 +71,7 @@ function Fixture({
             style={{ height: 'calc(100vh - 74px)', ...(scoped ? variables : {}) }}
           >
             <LoroSidebar
-              className="outline-offset-4"
+              xstyle={shellStory.sidebar}
               workspaceName={workspaces.find((item) => item.id === workspace)!.name}
               userEmail="synthetic.long.account.address@example.invalid"
               workspaces={workspaces}

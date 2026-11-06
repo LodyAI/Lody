@@ -15,6 +15,22 @@ import { lodyPresenceStatesAtom } from '@/atoms/presence';
 import { SessionInfoBar } from '@/components/sessions/session-info-bar';
 import { SessionRelationsChip } from '@/components/sessions/session-relations-chip';
 import { buildSessionRelationTree } from '@/lib/session-relation-tree';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 14)',
+    borderRadius: 'var(--radius-lg)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -132,9 +148,7 @@ function StoryHarness({
             />
           }
         />
-        <div className="h-14 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-          (composer placeholder)
-        </div>
+        <div {...stylex.props(storyLayoutStyles.frame)}>(composer placeholder)</div>
       </div>
     </Provider>
   );

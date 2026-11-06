@@ -14,6 +14,79 @@ import {
   SidebarProvider,
   useSidebar,
 } from '@/ui/sidebar';
+const storyCallerStyles = stylex.create({
+  wildcard: {
+    ':is(*) *': {
+      width: 'calc(var(--spacing) * 7)',
+      rotate: '0deg',
+      gap: 'calc(var(--spacing) * 1)',
+      'border-radius': '0',
+      padding: 'calc(var(--spacing) * 0)',
+    },
+  },
+  targeted: {
+    ':is(*) [data-sidebar=menu-button]': {
+      display: 'block',
+      width: 'calc(var(--spacing) * 7)',
+      gap: 'calc(var(--spacing) * 1)',
+      'border-radius': '0',
+      padding: 'calc(var(--spacing) * 0)',
+    },
+  },
+  lowDefaults: {
+    ':is(*) :where([data-sidebar=menu-button])': {
+      display: 'block',
+      width: 'calc(var(--spacing) * 20)',
+      'align-items': 'flex-start',
+      gap: 'calc(var(--spacing) * 1)',
+      overflow: 'visible',
+      padding: 'calc(var(--spacing) * 0)',
+    },
+  },
+  arbitrary: {
+    display: 'block',
+    width: '80px',
+    'align-items': 'flex-start',
+    gap: '1px',
+    overflow: 'visible',
+    padding: '0px',
+  },
+});
+
+const storyOverrides = stylex.create({
+  button: {
+    display: 'block',
+    height: 'calc(var(--spacing) * 10)',
+    width: 'calc(var(--spacing) * 20)',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 0,
+    padding: 'calc(var(--spacing) * 0)',
+    textAlign: 'right',
+
+    ':is([data-collapsible="icon"] *)': {
+      height: 'calc(var(--spacing) * 10)',
+      width: 'calc(var(--spacing) * 20)',
+      padding: 'calc(var(--spacing) * 0)',
+    },
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    display: 'block',
+    height: 'calc(var(--spacing) * 10)',
+    width: 'calc(var(--spacing) * 20)',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: '0',
+    padding: 'calc(var(--spacing) * 0)',
+
+    ':is([data-collapsible="icon"] *)': {
+      height: 'calc(var(--spacing) * 10)',
+      width: 'calc(var(--spacing) * 20)',
+      padding: 'calc(var(--spacing) * 0)',
+    },
+  },
+});
 
 const styles = stylex.create({
   outer: { display: 'contents' },
@@ -58,11 +131,11 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
   const [event, setEvent] = useState('Ready');
   const wildcard =
     mode === 'wildcard'
-      ? '[&_*]:w-7 [&_*]:p-0 [&_*]:gap-1 [&_*]:rounded-none [&_*]:rotate-0'
+      ? stylex.props(storyCallerStyles.wildcard).className
       : mode === 'targeted'
-        ? '[&_[data-sidebar=menu-button]]:w-7 [&_[data-sidebar=menu-button]]:p-0 [&_[data-sidebar=menu-button]]:gap-1 [&_[data-sidebar=menu-button]]:rounded-none [&_[data-sidebar=menu-button]]:block'
+        ? stylex.props(storyCallerStyles.targeted).className
         : mode === 'zero'
-          ? '[&_:where([data-sidebar=menu-button])]:block [&_:where([data-sidebar=menu-button])]:w-20 [&_:where([data-sidebar=menu-button])]:items-start [&_:where([data-sidebar=menu-button])]:gap-1 [&_:where([data-sidebar=menu-button])]:overflow-visible [&_:where([data-sidebar=menu-button])]:p-0'
+          ? stylex.props(storyCallerStyles.lowDefaults).className
           : undefined;
   return (
     <div
@@ -94,7 +167,7 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                       data-case={size}
                       className={
                         mode === 'arbitrary'
-                          ? '[display:block] [width:80px] [align-items:flex-start] [gap:1px] [overflow:visible] [padding:0px]'
+                          ? stylex.props(storyCallerStyles.arbitrary).className
                           : undefined
                       }
                       size={size}
@@ -131,10 +204,7 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                   >
                     Opaque caller
                   </SidebarMenuButton>
-                  <SidebarMenuButton
-                    data-case="tw-caller"
-                    className="block h-10 w-20 gap-1 rounded-none p-0 text-right"
-                  >
+                  <SidebarMenuButton data-case="tw-caller" xstyle={storyOverrides.button}>
                     Utility caller
                   </SidebarMenuButton>
                   <SidebarMenuButton
@@ -143,10 +213,8 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                   >
                     Inline caller
                   </SidebarMenuButton>
-                  <SidebarMenuButton data-case="slot-tw" asChild>
-                    <a href="#sidebar-slot" className="block h-10 w-20 gap-1 rounded-none p-0">
-                      Slot utility child
-                    </a>
+                  <SidebarMenuButton data-case="slot-tw" asChild xstyle={storyLayout.frame}>
+                    <a href="#sidebar-slot">Slot utility child</a>
                   </SidebarMenuButton>
                   <SidebarMenuButton data-case="slot-opaque" asChild>
                     <a href="#sidebar-opaque" {...stylex.props(styles.opaque)}>

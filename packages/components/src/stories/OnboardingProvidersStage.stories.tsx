@@ -3,6 +3,66 @@ import type { Meta, StoryObj } from '@storybook/react';
 
 import { OnboardingShell, OnboardingShellHost } from '@/components/onboarding/onboarding-shell';
 import { TestCloudPlatformProvider } from '../../tests/test-platform';
+const providerPreview = stylex.create({
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 3)',
+    borderRadius: 'var(--radius-lg)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab,hsl(var(--border) / 1) 60%,transparent)',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--card) / 1) 40%,transparent)',
+    padding: 'calc(var(--spacing) * 4)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+  },
+});
+const storyLayoutStyles = stylex.create({
+  label: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+  },
+  label2: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  row: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'calc(infinity * 1px)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--primary)) 35%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--primary)) 8%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 0.5)',
+    fontSize: '10px',
+    color: 'hsl(var(--primary))',
+  },
+  label3: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  canvas: {
+    borderRadius: 'var(--radius-md)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -65,22 +125,17 @@ function MockProvidersForm() {
   return (
     <div {...stylex.props(storyLayout.stack)}>
       {PROVIDER_ROWS.map((row) => (
-        <div
-          key={row.name}
-          className="group flex flex-wrap items-center gap-3 rounded-lg border border-border/60 bg-card/40 p-4 transition-colors"
-        >
+        <div key={row.name} className={'group ' + stylex.props(providerPreview.row).className}>
           <div {...stylex.props(storyLayout.row)}>
             <div {...stylex.props(storyLayout.frame)} />
           </div>
           <div {...stylex.props(storyLayout.stack2)}>
-            <span className="text-sm font-medium">{row.name}</span>
-            <span className="text-xs text-muted-foreground">{row.subtitle}</span>
+            <span {...stylex.props(storyLayoutStyles.label)}>{row.name}</span>
+            <span {...stylex.props(storyLayoutStyles.label2)}>{row.subtitle}</span>
           </div>
-          <span className="inline-flex items-center gap-1 rounded-full border border-primary/35 bg-primary/8 px-2 py-0.5 text-[10px] text-primary">
-            {row.badge}
-          </span>
-          <span className="text-sm text-muted-foreground">Edit</span>
-          <span className="rounded-md border border-border/60 px-3 py-1 text-sm">Test</span>
+          <span {...stylex.props(storyLayoutStyles.row)}>{row.badge}</span>
+          <span {...stylex.props(storyLayoutStyles.label3)}>Edit</span>
+          <span {...stylex.props(storyLayoutStyles.canvas)}>Test</span>
         </div>
       ))}
     </div>

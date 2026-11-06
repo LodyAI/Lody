@@ -50,6 +50,155 @@ const storyLayout = stylex.create({
   },
 });
 
+const canvasStyles = stylex.create({
+  container: { marginInline: 'auto', maxWidth: 1180 },
+  header: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    borderRadius: '1rem',
+    backgroundColor: 'white',
+    padding: themeSpace[4],
+    marginBottom: themeSpace[4],
+    boxShadow: '0 0 0 1px var(--color-slate-200), 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.18em',
+    color: 'var(--color-slate-500)',
+  },
+  title: {
+    marginTop: themeSpace[1],
+    fontSize: '1.125rem',
+    lineHeight: '1.75rem',
+    fontWeight: 600,
+    color: 'var(--color-slate-900)',
+  },
+  summary: {
+    marginTop: themeSpace[1],
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: 'var(--color-slate-500)',
+  },
+  device: {
+    borderRadius: 'var(--radius-md)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[1],
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    fontWeight: 500,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    transitionDuration: '150ms',
+  },
+  selectedDevice: {
+    backgroundColor: 'white',
+    color: 'var(--color-slate-900)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  otherDevice: { color: { default: 'var(--color-slate-500)', ':hover': 'var(--color-slate-700)' } },
+  viewport: {
+    overflow: 'auto',
+    borderRadius: '1rem',
+    backgroundColor: 'color-mix(in oklab, var(--color-slate-200) 60%, transparent)',
+    padding: themeSpace[4],
+    boxShadow: '0 0 0 1px var(--color-slate-200)',
+  },
+  preview: {
+    position: 'relative',
+    marginInline: 'auto',
+    overflow: 'hidden',
+    borderRadius: '0.75rem',
+    backgroundColor: 'white',
+    boxShadow:
+      '0 0 0 1px var(--color-slate-200), 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+  },
+  fixtureEyebrow: {
+    fontSize: 11,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.22em',
+    color: 'var(--color-slate-400)',
+  },
+  fixtureGrid: {
+    display: 'grid',
+    alignItems: 'start',
+    gap: themeSpace[8],
+    gridTemplateColumns: {
+      default: null,
+      '@media (min-width: 768px)': 'minmax(0,1.1fr) minmax(220px,0.9fr)',
+    },
+  },
+  headline: {
+    fontFamily: 'var(--font-serif)',
+    fontSize: 'clamp(36px,7vw,72px)',
+    lineHeight: 0.95,
+    letterSpacing: '-0.04em',
+    color: 'var(--color-slate-900)',
+  },
+  explanation: {
+    marginTop: themeSpace[5],
+    maxWidth: 520,
+    fontSize: '1rem',
+    lineHeight: 'calc(var(--spacing) * 7)',
+    color: 'var(--color-slate-600)',
+  },
+  cta: {
+    marginTop: 'calc(var(--spacing) * 7)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: { default: 'var(--color-slate-900)', ':hover': 'var(--color-slate-800)' },
+    paddingInline: themeSpace[5],
+    paddingBlock: themeSpace[2.5],
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+    fontWeight: 600,
+    color: 'white',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    transitionDuration: '150ms',
+  },
+  confidence: {
+    borderRadius: '1rem',
+    backgroundColor: 'var(--color-slate-900)',
+    padding: themeSpace[6],
+    color: 'white',
+    boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+  },
+  confidenceLabel: {
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    fontWeight: 500,
+    textTransform: 'uppercase',
+    letterSpacing: '0.16em',
+    color: 'var(--color-slate-400)',
+  },
+  confidenceValue: {
+    marginTop: themeSpace[1],
+    display: 'block',
+    fontSize: '3rem',
+    lineHeight: 1,
+    fontWeight: 600,
+    letterSpacing: '-0.04em',
+  },
+  confidenceDescription: {
+    marginTop: themeSpace[6],
+    fontSize: '0.875rem',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    color: 'var(--color-slate-300)',
+  },
+  footnote: { fontSize: '0.75rem', lineHeight: '1rem', color: 'var(--color-slate-400)' },
+});
+
 const overlayDevices = [
   { id: 'desktop', label: 'Desktop', width: 960, height: 620 },
   { id: 'mobile', label: 'Mobile', width: 390, height: 720 },
@@ -261,16 +410,14 @@ function VisualAnnotationCommentsOverlayStory() {
 
   return (
     <div {...stylex.props(storyLayout.frame)}>
-      <div className="mx-auto max-w-[1180px] space-y-4">
-        <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-xs ring-1 ring-slate-200">
+      <div {...stylex.props(canvasStyles.container)}>
+        <header {...stylex.props(canvasStyles.header)}>
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Preview comments
-            </p>
-            <h1 className="mt-1 text-lg font-semibold text-slate-900">
+            <p {...stylex.props(canvasStyles.eyebrow)}>Preview comments</p>
+            <h1 {...stylex.props(canvasStyles.title)}>
               Anchored threads, collapsed dots, hover peek
             </h1>
-            <p className="mt-1 text-xs text-slate-500">
+            <p {...stylex.props(canvasStyles.summary)}>
               {openCount} open · {resolvedCount} resolved · {stagedCount} staged · {submittedCount}{' '}
               submitted · resolved comments are hidden from the canvas
             </p>
@@ -282,11 +429,10 @@ function VisualAnnotationCommentsOverlayStory() {
                   key={device.id}
                   type="button"
                   onClick={() => setDeviceId(device.id)}
-                  className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                    deviceId === device.id
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
+                  {...stylex.props(
+                    canvasStyles.device,
+                    deviceId === device.id ? canvasStyles.selectedDevice : canvasStyles.otherDevice
+                  )}
                 >
                   {device.label}
                 </button>
@@ -309,9 +455,9 @@ function VisualAnnotationCommentsOverlayStory() {
           </div>
         </header>
 
-        <div className="overflow-auto rounded-2xl bg-slate-200/60 p-4 ring-1 ring-slate-200">
+        <div {...stylex.props(canvasStyles.viewport)}>
           <main
-            className="relative mx-auto overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-slate-200"
+            {...stylex.props(canvasStyles.preview)}
             style={{ width: selectedDevice.width, height: selectedDevice.height }}
           >
             <PreviewFixture />
@@ -336,36 +482,29 @@ function VisualAnnotationCommentsOverlayStory() {
 function PreviewFixture() {
   return (
     <div {...stylex.props(storyLayout.overlay)}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-        Preview fixture
-      </p>
-      <div className="grid items-start gap-8 md:grid-cols-[minmax(0,1.1fr)_minmax(220px,0.9fr)]">
+      <p {...stylex.props(canvasStyles.fixtureEyebrow)}>Preview fixture</p>
+      <div {...stylex.props(canvasStyles.fixtureGrid)}>
         <div>
-          <h2 className="font-serif text-[clamp(36px,7vw,72px)] leading-[0.95] tracking-[-0.04em] text-slate-900">
-            Design reviews should point at pixels.
-          </h2>
-          <p className="mt-5 max-w-[520px] text-base leading-7 text-slate-600">
+          <h2 {...stylex.props(canvasStyles.headline)}>Design reviews should point at pixels.</h2>
+          <p {...stylex.props(canvasStyles.explanation)}>
             Floating comments stay anchored to rect ratios so the same comment renders consistently
             across desktop and mobile preview widths.
           </p>
-          <button
-            type="button"
-            className="mt-7 inline-flex items-center justify-center rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-slate-800"
-          >
+          <button type="button" {...stylex.props(canvasStyles.cta)}>
             Start review
           </button>
         </div>
-        <aside className="rounded-2xl bg-slate-900 p-6 text-white shadow-xl">
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-            Review confidence
-          </p>
-          <strong className="mt-1 block text-5xl font-semibold tracking-[-0.04em]">94%</strong>
-          <p className="mt-6 text-sm leading-6 text-slate-300">
+        <aside {...stylex.props(canvasStyles.confidence)}>
+          <p {...stylex.props(canvasStyles.confidenceLabel)}>Review confidence</p>
+          <strong {...stylex.props(canvasStyles.confidenceValue)}>94%</strong>
+          <p {...stylex.props(canvasStyles.confidenceDescription)}>
             Resolved comments disappear from the canvas so open feedback stays focused.
           </p>
         </aside>
       </div>
-      <p className="footnote text-xs text-slate-400">A preivew of upcoming work.</p>
+      <p {...withClassName(stylex.props(canvasStyles.footnote), 'footnote')}>
+        A preivew of upcoming work.
+      </p>
     </div>
   );
 }

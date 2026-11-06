@@ -3,7 +3,6 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderPlus } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
 import type {
   LoroSidebarChatScope,
   LoroSidebarNavKey,
@@ -37,6 +36,82 @@ import type {
   SessionMeta,
   SessionStatus,
 } from '@lody/shared';
+const sidebarStory = stylex.create({
+  section: { marginBottom: 'calc(var(--spacing) * 3)' },
+  collapsed: { marginBottom: 'calc(var(--spacing) * 1)' },
+  group: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * .5)',
+    },
+  },
+});
+const storySpacing = stylex.create({
+  children: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 1)',
+    },
+  },
+  children1: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 0.5)',
+    },
+  },
+  children2: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 0.5)',
+    },
+  },
+});
+
+const storyLayoutStylesStylesStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--card) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--card-foreground) / 1)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-lg)',
+    'line-height': 'var(--text-lg--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  caption2: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  frame: {
+    height: '360px',
+    width: '280px',
+    'overflow-y': 'auto',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--sidebar-border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--sidebar-background) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     'min-height': '100vh',
@@ -509,8 +584,8 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
   // `WorkspaceCard` the shell uses (`web-workspace-layout.tsx`), so this shows the shell.
   const content = storyContent ?? (
     <div {...stylex.props(storyLayout.canvas)}>
-      <div className="text-lg font-semibold">Content</div>
-      <div className="mt-2 text-sm text-muted-foreground">
+      <div {...stylex.props(storyLayoutStyles.caption)}>Content</div>
+      <div {...stylex.props(storyLayoutStyles.caption2)}>
         Use the filter button at the bottom-right of the sidebar to switch between Workspace and
         Updated organize modes, toggle My Tasks vs All Tasks, and control the row detail lines
         (project and branch) in the Details group.
@@ -1225,7 +1300,7 @@ function ProductionLikeTopContent({
     <div>
       {chatSessions.length > 0 ? (
         <SessionList
-          className={chatsCollapsed ? 'mb-1' : 'mb-3'}
+          {...stylex.props(sidebarStory.section, chatsCollapsed && sidebarStory.collapsed)}
           sessions={chatSessions}
           repos={[]}
           chatsCollapsed={chatsCollapsed}
@@ -1243,7 +1318,11 @@ function ProductionLikeTopContent({
           return (
             <div
               key={group.machineId}
-              className={cn('space-y-0.5', groupCollapsed ? 'mb-1' : 'mb-3')}
+              {...stylex.props(
+                sidebarStory.section,
+                sidebarStory.group,
+                groupCollapsed && sidebarStory.collapsed
+              )}
             >
               <SidebarSectionHeader
                 label={group.label}
@@ -1267,7 +1346,10 @@ function ProductionLikeTopContent({
                         icon
                         aria-label="Import local project folder"
                       >
-                        <FolderPlus className="h-4 w-4" strokeWidth={1.5} />
+                        <FolderPlus
+                          {...stylex.props(storyLayoutStylesStylesStyles.frame)}
+                          strokeWidth={1.5}
+                        />
                       </Button>
                       {filterAction}
                     </div>
@@ -1275,7 +1357,7 @@ function ProductionLikeTopContent({
                 }
               />
               {groupCollapsed ? null : (
-                <div className="space-y-1">
+                <div {...stylex.props(storySpacing.children)}>
                   {group.projects.map((project) => {
                     const key = `${group.machineId}:${project.id}`;
                     const collapsed = collapsedProjects[key] ?? false;
@@ -1490,15 +1572,15 @@ export function WorkspaceSidebarHarness({
     storyContent ??
     (fullApp ? (
       <div {...stylex.props(storyLayout.canvas)}>
-        <div className="text-lg font-semibold">Content</div>
-        <div className="mt-2 text-sm text-muted-foreground">
+        <div {...stylex.props(storyLayoutStyles.caption)}>Content</div>
+        <div {...stylex.props(storyLayoutStyles.caption2)}>
           This area is intentionally left minimal for the component preview.
         </div>
       </div>
     ) : (
-      <div className="rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-xs">
-        <div className="text-lg font-semibold">Content</div>
-        <div className="mt-2 text-sm text-muted-foreground">
+      <div {...stylex.props(storyLayoutStylesStyles.canvas)}>
+        <div {...stylex.props(storyLayoutStyles.caption)}>Content</div>
+        <div {...stylex.props(storyLayoutStyles.caption2)}>
           This area is intentionally left minimal for the component preview.
         </div>
       </div>
@@ -1677,12 +1759,9 @@ function MachineGroupScrollFixture() {
   );
   return (
     <div {...stylex.props(storyLayout.row4)}>
-      <div
-        data-testid="machine-group-scrollbox"
-        className="h-[360px] w-[280px] overflow-y-auto rounded-xl border border-sidebar-border/60 bg-sidebar p-2"
-      >
+      <div data-testid="machine-group-scrollbox" {...stylex.props(storyLayoutStyles.frame)}>
         {/* Production section wrapper: loro-app-sidebar.tsx localProjectsTopContent. */}
-        <div className="space-y-0.5">
+        <div {...stylex.props(storySpacing.children1)}>
           <div>
             <SidebarSectionHeader
               label="LAPTOP-PP66IJ89"
@@ -1692,7 +1771,7 @@ function MachineGroupScrollFixture() {
               onToggleCollapsed={() => {}}
             />
           </div>
-          <div className="space-y-0.5">
+          <div {...stylex.props(storySpacing.children2)}>
             {projects.map((project, index) => {
               const key = `${demoMachineId}:${project.id}`;
               return (

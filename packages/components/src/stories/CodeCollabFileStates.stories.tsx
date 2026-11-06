@@ -11,6 +11,88 @@ import {
   type SessionFileProviderEntry,
 } from '@/lib/session-file-provider';
 import { getSessionFileEntryModel } from '@/lib/session-file-provider-view-model';
+const sceneStyles = stylex.create({
+  matrix: {
+    ':is(*) > :not(:last-child)': {
+      borderBottomWidth: '1px',
+      borderBottomStyle: 'solid',
+      borderColor: 'hsl(var(--border) / 1)',
+    },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  grid: {
+    display: 'grid',
+    height: '640px',
+    width: '920px',
+    'grid-template-columns': '300px minmax(0,1fr)',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  element: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    'border-right-style': 'solid',
+    'border-right-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+  },
+  canvas: {
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  canvas2: {
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  grid2: {
+    display: 'grid',
+    'grid-template-columns': 'minmax(0,1fr) auto',
+    gap: 'calc(var(--spacing) * 3)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+  stack: {
+    display: 'flex',
+    height: '300px',
+    width: '640px',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame: {
+    width: '420px',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
+
 const storyLayout = stylex.create({
   element: {
     'min-width': 'calc(var(--spacing) * 0)',
@@ -239,9 +321,9 @@ function FileTreeStateMatrixStory() {
   );
 
   return (
-    <div className="grid h-[640px] w-[920px] grid-cols-[300px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background">
-      <aside className="min-w-0 border-r border-border">
-        <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+    <div {...stylex.props(storyLayoutStyles.grid)}>
+      <aside {...stylex.props(storyLayoutStyles.element)}>
+        <div {...stylex.props(storyLayoutStyles.canvas)}>
           File tree mixes live, host-offline, historical, and degraded entries so reviewers can scan
           them all in one place.
         </div>
@@ -253,17 +335,12 @@ function FileTreeStateMatrixStory() {
         />
       </aside>
       <main {...stylex.props(storyLayout.element)}>
-        <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
-          Per-file source states
-        </div>
-        <div className="divide-y divide-border">
+        <div {...stylex.props(storyLayoutStyles.canvas2)}>Per-file source states</div>
+        <div {...stylex.props(sceneStyles.matrix)}>
           {fileTreeStateMatrixEntries.map((entry) => {
             const model = getSessionFileEntryModel(entry);
             return (
-              <div
-                key={entry.fileId}
-                className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2 text-xs"
-              >
+              <div key={entry.fileId} {...stylex.props(storyLayoutStyles.grid2)}>
                 <span {...stylex.props(storyLayout.label)} title={entry.path}>
                   {entry.path}
                 </span>
@@ -296,10 +373,8 @@ function UnsupportedFileStory({
   );
 
   return (
-    <div className="flex h-[300px] w-[640px] flex-col overflow-hidden rounded-md border border-border bg-background">
-      <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-        {description}
-      </div>
+    <div {...stylex.props(storyLayoutStyles.stack)}>
+      <div {...stylex.props(storyLayoutStyles.canvas)}>{description}</div>
       <div {...stylex.props(storyLayout.frame)}>
         <SessionFileContentView
           sessionId={fileTreeStorySession.id}
@@ -393,7 +468,7 @@ function FileErrorActionsStory({
 }) {
   const [sharing, setSharing] = useState(false);
   return (
-    <div className="w-[420px] rounded-md border border-border bg-background p-4">
+    <div {...stylex.props(storyLayoutStyles.frame)}>
       <SessionFileErrorState
         message="Text too large"
         reason="text-too-large"

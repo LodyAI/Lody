@@ -16,7 +16,7 @@ const typography = {
   named: {},
   xs: {
     fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+    lineHeight: 'var(--text-xs--line-height)',
   },
   zero: { fontSize: 0, lineHeight: 0 },
 } satisfies Record<Stage, Pick<ButtonProps, 'fontSize' | 'lineHeight'>>;

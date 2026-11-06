@@ -232,9 +232,9 @@ describe('Input and Textarea', () => {
   });
 
   test('a caller className lands after the compiled classes', () => {
-    const html = renderToStaticMarkup(<Input className="w-64" />);
+    const html = renderToStaticMarkup(<Input className="input-root-hook" />);
     const cls = /class="([^"]*)"/.exec(html)?.[1] ?? '';
-    expect(cls.endsWith(' w-64')).toBe(true);
+    expect(cls.endsWith(' input-root-hook')).toBe(true);
     expect(cls.split(' ').length).toBeGreaterThan(5);
   });
 
@@ -278,11 +278,11 @@ describe('Input and Textarea', () => {
 
   test('with a leading part, className lands on the shell and inputClassName on the value', () => {
     const html = renderToStaticMarkup(
-      <Input leading="/" className="w-56" inputClassName="font-mono" />
+      <Input leading="/" className="input-shell-hook" inputClassName="input-value-hook" />
     );
-    expect(classesOf(html, 'div')).toContain('w-56');
-    expect(classesOf(html, 'div')).not.toContain('font-mono');
-    expect(classesOf(html, 'input')).toContain('font-mono');
+    expect(classesOf(html, 'div')).toContain('input-shell-hook');
+    expect(classesOf(html, 'div')).not.toContain('input-value-hook');
+    expect(classesOf(html, 'input')).toContain('input-value-hook');
   });
 });
 

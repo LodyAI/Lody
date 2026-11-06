@@ -8,6 +8,16 @@ import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
+const migrationStyles = stylex.create({
+  relation: { width: '640px', maxWidth: 'calc(100vw - 2rem)' },
+  column: {
+    paddingBlock: {
+      default: 'calc(var(--spacing) * 2)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 3)',
+    },
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     width: '720px',
@@ -49,7 +59,7 @@ export const CreatedConversation: Story = {
     sessionTitle: 'Audit the sidebar navigation state',
     actionLabel: 'View session',
     onAction: () => {},
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -61,7 +71,7 @@ export const AutomaticallyCreatedBy: Story = {
     actionLabel: 'Back to session',
     actionIcon: CornerLeftUp,
     onAction: () => {},
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -71,7 +81,7 @@ export const ReadOnly: Story = {
     label: 'Related session',
     sessionTitle: 'Audit the sidebar navigation state',
     actionLabel: 'View session',
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -83,7 +93,7 @@ export const WithDetail: Story = {
     actionLabel: 'View session',
     detail: 'The target machine is online and ready.',
     onAction: () => {},
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -262,7 +272,7 @@ export const AtConversationStart: Story = {
         items={openedConversationItems}
         renderMessageRow={renderOpenedConversationMessage}
         leadingContent={
-          <ConversationColumn className="py-2 sm:py-3">
+          <ConversationColumn xstyle={migrationStyles.column}>
             <SessionRelationCard
               relation="opened-by"
               label="This session was automatically created by"

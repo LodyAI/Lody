@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 
 /**
  * The app theme's spacing, radius, type and motion scales, mirrored from the
- * Tailwind preset the app still ships (`packages/configs/tailwind-preset.cjs`).
+ * ordinary defaults in `src/tailwind/theme-defaults.css`.
  *
  * A migrated surface keeps the size it had: every step here is the same
  * expression Tailwind's utility resolved to, so nothing moves by a pixel.

@@ -477,6 +477,7 @@ export type TaskListProps = {
   /** Group key that should be highlighted (e.g. repo fullname or '__only_chats__') */
   activeGroupKey?: string | null;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   onSelect?: (taskId: string) => void;
   onSelectTask?: (taskId: string) => void;
   onToggleRepoCollapsed?: (repoFullName: string) => void;
@@ -1506,6 +1507,7 @@ export const TaskList = memo(function TaskList({
   selectedTaskId,
   activeGroupKey,
   className,
+  xstyle,
   onSelect,
   onSelectTask,
   onToggleRepoCollapsed,
@@ -1597,7 +1599,7 @@ export const TaskList = memo(function TaskList({
     return (
       <div {...stylex.props(taskStyles.listStack)}>
         {headerAction ? <div {...stylex.props(taskStyles.listHeader)}>{headerAction}</div> : null}
-        <SidebarListSkeleton className={className} />
+        <SidebarListSkeleton className={className} xstyle={xstyle} />
       </div>
     );
   }
@@ -1636,7 +1638,10 @@ export const TaskList = memo(function TaskList({
     <Tooltip.Provider>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={repoIds} strategy={verticalListSortingStrategy}>
-          <div className={clsx(stylex.props(taskStyles.listStack).className, className)}>
+          <div
+            className={clsx(stylex.props(taskStyles.listStack, xstyle).className, className)}
+            style={stylex.props(taskStyles.listStack, xstyle).style}
+          >
             {groups.map((group, groupIndex) => {
               const whetherShowFullList = resolvedShowFullListByGroup[group.key] ?? false;
               const groupHeaderAction = groupIndex === 0 ? headerAction : undefined;

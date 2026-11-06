@@ -189,14 +189,14 @@ describe('Select trigger', () => {
   test('a caller className lands after the compiled classes', async () => {
     mounted = await mount(
       <Select.Root>
-        <Select.Trigger className="w-full">
+        <Select.Trigger className="select-trigger-hook">
           <Select.Value placeholder="Pick" />
         </Select.Trigger>
         <Select.Content />
       </Select.Root>
     );
     const classes = classesOf(trigger());
-    expect(classes[classes.length - 1]).toBe('w-full');
+    expect(classes[classes.length - 1]).toBe('select-trigger-hook');
     expect(classes.length).toBeGreaterThan(5);
   });
 });
@@ -318,14 +318,14 @@ describe('Select list', () => {
         <Select.Trigger>
           <Select.Value placeholder="Pick" />
         </Select.Trigger>
-        <Select.Content className="max-h-40">
+        <Select.Content className="select-popup-hook">
           <Select.Item value="a">Alpha</Select.Item>
         </Select.Content>
       </Select.Root>
     );
     await click(trigger());
     const classes = classesOf(popup());
-    expect(classes[classes.length - 1]).toBe('max-h-40');
+    expect(classes[classes.length - 1]).toBe('select-popup-hook');
     expect(classes.length).toBeGreaterThan(5);
   });
 

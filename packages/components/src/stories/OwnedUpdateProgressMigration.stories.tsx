@@ -9,7 +9,7 @@ const styles = stylex.create({
   controls: { display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 },
   sidebar: { height: 720 },
 });
-function Scene({ caller = 'none' }: { caller?: 'none' | 'height' | 'flex' }) {
+function Scene({ caller = 'none' }: { caller?: 'none' | 'sidebar' }) {
   const [percent, setPercent] = useState<number | null>(38);
   const [stage, setStage] = useState<'downloading' | 'downloaded'>('downloading');
   const [restarting, setRestarting] = useState(false);
@@ -74,11 +74,6 @@ function Scene({ caller = 'none' }: { caller?: 'none' | 'height' | 'flex' }) {
       ) : (
         <div {...stylex.props(styles.sidebar)} data-update-sidebar-host>
           <LoroSidebar
-            className={
-              caller === 'height'
-                ? '[:where(&)_:where([role=progressbar])]:h-12'
-                : '[:where(&)_:where([role=progressbar])]:flex-none'
-            }
             workspaceName="Synthetic workspace"
             userEmail=""
             workspaces={[]}
@@ -102,5 +97,5 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Default: Story = {};
-export const PublicHeightCaller: Story = { args: { caller: 'height' } };
-export const PublicFlexCaller: Story = { args: { caller: 'flex' } };
+
+export const SidebarHost: Story = { args: { caller: 'sidebar' } };

@@ -514,6 +514,7 @@ export interface UnifiedProjectSelectorViewProps extends Omit<
   /** Extra classes for the portaled menu (e.g. Tasks cooler menu surface). */
   contentClassName?: string;
   contentStyle?: React.CSSProperties;
+  folderIconXstyle?: stylex.StyleXStyles;
   /**
    * Maximum rendered options. The default view reserves a slot for every
    * available source, while search still evaluates the complete option list.
@@ -672,6 +673,7 @@ export function UnifiedProjectSelectorView({
   triggerVariant = 'chip',
   contentClassName,
   contentStyle,
+  folderIconXstyle,
   renderLimit,
   onCreateProject,
 }: UnifiedProjectSelectorViewProps) {
@@ -698,7 +700,9 @@ export function UnifiedProjectSelectorView({
           ]
             .filter(Boolean)
             .join(' · '),
-        icon: <Folders {...stylex.props(styles.groupGlyph, styles.groupOwnerGlyph)} />,
+        icon: (
+          <Folders {...stylex.props(styles.groupGlyph, styles.groupOwnerGlyph, folderIconXstyle)} />
+        ),
         selection: { kind: 'group', projectId: group.projectId },
         lastUsedAt: group.lastUsedAt,
         disabledReason: group.disabledReason,
@@ -749,7 +753,14 @@ export function UnifiedProjectSelectorView({
     value.kind === 'github' ? (
       <GitHubOwnerAvatarIcon repoFullName={value.repoFullName} glyphStyle={triggerGlyphStyle} />
     ) : value.kind === 'group' ? (
-      <Folders {...stylex.props(styles.groupGlyph, styles.groupOwnerGlyph, triggerGlyphStyle)} />
+      <Folders
+        {...stylex.props(
+          styles.groupGlyph,
+          styles.groupOwnerGlyph,
+          triggerGlyphStyle,
+          folderIconXstyle
+        )}
+      />
     ) : (
       <FolderOpen
         {...stylex.props(

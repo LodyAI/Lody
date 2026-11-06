@@ -22,10 +22,28 @@ import {
   SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX,
 } from '@/components/sessions/session-conversation-page';
 import { SessionTabBar, type ViewerTabItem } from '@/components/sessions/session-tab-bar';
-import { cn } from '@/lib/utils';
 import type { PathLauncherOption } from '@/lib/session-path-launchers';
 import type { DraftSessionTab } from '@/lib/session-draft-tabs';
 import type { SessionSharingState } from '@/lib/session-sharing';
+const migrationStyles = stylex.create({
+  pills: { alignItems: 'center' },
+});
+
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 6)',
+    alignItems: 'center',
+    borderRadius: 'var(--radius-md)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -161,15 +179,22 @@ const vscodeLauncher: PathLauncherOption = {
 function ConversationToolbar() {
   return (
     <div {...stylex.props(storyLayout.row)}>
-      <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
-        <button
-          type="button"
-          className="inline-flex h-6 items-center rounded-md border border-border px-2 text-xs"
-        >
+      <div
+        className={[
+          SESSION_PAGE_HEADER_PILLS_CLASS,
+          stylex.props(migrationStyles.pills).className,
+        ].join(' ')}
+      >
+        <button type="button" {...stylex.props(storyLayoutStyles.row)}>
           VS Code
         </button>
       </div>
-      <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
+      <div
+        className={[
+          SESSION_PAGE_HEADER_PILLS_CLASS,
+          stylex.props(migrationStyles.pills).className,
+        ].join(' ')}
+      >
         <SessionAccessControl state={toolbarSharing} onShareWithTeam={toolbarAction} />
       </div>
       <SessionHeaderMenu

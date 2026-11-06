@@ -17,12 +17,30 @@ import {
   SidebarMenuSubItem,
   SidebarMenuSubButton,
 } from '@/ui/sidebar';
+const storyCallerStyles = stylex.create({
+  typographyOverride: {
+    fontSize: 'var(--text-lg)',
+    lineHeight: 'calc(var(--spacing) * 10)',
+  },
+  wildcard: {
+    ':is(*) *': {
+      fontSize: 'var(--text-lg)',
+      lineHeight: 'calc(var(--spacing) * 10)',
+    },
+  },
+  lowDefaults: {
+    ':is(*) :where([data-type-part])': {
+      fontSize: 'var(--text-lg)',
+      lineHeight: 'calc(var(--spacing) * 10)',
+    },
+  },
+});
+
 type FontVars = CSSProperties & {
   '--text-sm'?: string;
   '--text-xs'?: string;
   '--text-sm--line-height'?: string;
   '--text-xs--line-height'?: string;
-  '--tw-leading'?: string;
 };
 const vars: FontVars = {
   '--text-sm': '17px',
@@ -30,7 +48,6 @@ const vars: FontVars = {
   '--text-sm--line-height': '1.7',
   '--text-xs--line-height': '1.6',
 };
-const leading: FontVars = { ...vars, '--tw-leading': '2.1' };
 const styles = stylex.create({
   outer: { padding: 16 },
   opaque: { fontSize: 24, lineHeight: '33px' },
@@ -51,31 +68,29 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
   const [active, setActive] = useState(false);
   const caller =
     mode === 'opaque'
-      ? stylex.props(styles.opaque).className
+      ? styles.opaque
       : mode === 'utility'
-        ? 'text-lg leading-10'
+        ? storyCallerStyles.typographyOverride
         : undefined;
   const ancestor =
     mode === 'wildcard'
-      ? '[&_*]:text-lg [&_*]:leading-10'
+      ? stylex.props(storyCallerStyles.wildcard).className
       : mode === 'where'
-        ? '[&_:where([data-type-part])]:text-lg [&_:where([data-type-part])]:leading-10'
+        ? stylex.props(storyCallerStyles.lowDefaults).className
         : undefined;
   const local =
     mode === 'local-vars'
       ? vars
-      : mode === 'local-leading'
-        ? leading
-        : mode === 'inline'
-          ? { fontSize: 19, lineHeight: '37px' }
-          : undefined;
-  const common = { className: caller, style: local, ref: stamp };
+      : mode === 'inline'
+        ? { fontSize: 19, lineHeight: '37px' }
+        : undefined;
+  const common = { xstyle: caller, style: local, ref: stamp };
   return (
     <div
       data-type-fixture={mode}
       data-type-active={String(active)}
       className={[stylex.props(styles.outer).className, ancestor].filter(Boolean).join(' ')}
-      style={mode === 'ancestor-vars' ? leading : undefined}
+      style={mode === 'ancestor-vars' ? vars : undefined}
     >
       <div {...stylex.props(styles.controls)}>
         <button type="button" data-type-toggle onClick={() => setActive((value) => !value)}>
@@ -91,7 +106,9 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                 Synthetic label Mjgy012
               </SidebarGroupLabel>
               <SidebarGroupLabel asChild data-type-part="label-slot" {...common}>
-                <span className="text-lg leading-10">Actual Slot label</span>
+                <span className={stylex.props(storyCallerStyles.typographyOverride).className}>
+                  Actual Slot label
+                </span>
               </SidebarGroupLabel>
               <SidebarGroupContent data-type-part="group-content" {...common}>
                 <SidebarMenu>
@@ -117,7 +134,10 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                   ))}
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild data-type-part="button-slot" {...common}>
-                      <button type="button" className="text-lg leading-10">
+                      <button
+                        type="button"
+                        className={stylex.props(storyCallerStyles.typographyOverride).className}
+                      >
                         <File />
                         <span>Actual Slot button</span>
                       </button>
@@ -155,7 +175,7 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                         <SidebarMenuSubButton asChild data-type-part="sub-slot" {...common}>
                           <a
                             href="#sidebar-type-slot"
-                            className="text-lg leading-10"
+                            className={stylex.props(storyCallerStyles.typographyOverride).className}
                             onClick={(e) => e.preventDefault()}
                           >
                             <File />
@@ -188,5 +208,4 @@ export const Wildcard: Story = { args: { mode: 'wildcard' } };
 export const Where: Story = { args: { mode: 'where' } };
 export const AncestorVars: Story = { args: { mode: 'ancestor-vars' } };
 export const LocalVars: Story = { args: { mode: 'local-vars' } };
-export const LocalLeading: Story = { args: { mode: 'local-leading' } };
 export const Inline: Story = { args: { mode: 'inline' } };

@@ -159,6 +159,7 @@ export interface AssistantEditedFilesProps {
   onFileClick?: (filePath: string) => void;
   className?: string;
   cardXstyle?: stylex.StyleXStyles;
+  rowXstyle?: stylex.StyleXStyles;
 }
 
 const DEFAULT_VISIBLE_FILE_COUNT = 4;
@@ -235,6 +236,7 @@ export function AssistantEditedFiles({
   onFileClick,
   className,
   cardXstyle,
+  rowXstyle,
 }: AssistantEditedFilesProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -291,25 +293,26 @@ export function AssistantEditedFiles({
                 <DiffStats add={file.add} del={file.del} />
               </>
             );
-            const rowClassName = stylex.props(
+            const rowProps = stylex.props(
               styles.row,
               styles.rowRule,
               isSingleFile ? styles.rowTall : styles.rowShort,
-              onFileClick && styles.rowInteractive
-            ).className;
+              onFileClick && styles.rowInteractive,
+              rowXstyle
+            );
 
             return onFileClick ? (
               <button
                 key={file.filePath}
                 type="button"
-                className={rowClassName}
+                {...rowProps}
                 title={file.filePath}
                 onClick={() => onFileClick(file.filePath)}
               >
                 {content}
               </button>
             ) : (
-              <div key={file.filePath} className={rowClassName} title={file.filePath}>
+              <div key={file.filePath} {...rowProps} title={file.filePath}>
                 {content}
               </div>
             );

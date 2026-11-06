@@ -3,6 +3,14 @@ import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ZoomableImageViewer } from '@/components/shared/zoomable-image-viewer';
 import { Button } from '@lody/ui/button';
+const storyLayoutStyles = stylex.create({
+  caption: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -77,7 +85,7 @@ function ViewerHarness({
 
   return (
     <div {...stylex.props(storyLayout.stack)}>
-      <p className="text-sm text-muted-foreground">
+      <p {...stylex.props(storyLayoutStyles.caption)}>
         Drag to pan, scroll or double-click to zoom; close from the top-right button or backdrop.
       </p>
       <Button onClick={() => setIndex(0)}>Open viewer</Button>

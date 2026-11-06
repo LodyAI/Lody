@@ -99,7 +99,6 @@ describe('AcpBottomBarModeSelector UI', () => {
 
     expect(fastModeButton?.getAttribute('aria-pressed')).toBe('true');
     expect(planModeButton?.textContent).toBe('Plan');
-    expect(planModeButton?.className).not.toContain('border');
     expect(
       planModeButton && fastModeButton
         ? (planModeButton.compareDocumentPosition(fastModeButton) &

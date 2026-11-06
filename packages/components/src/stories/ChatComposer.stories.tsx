@@ -19,11 +19,134 @@ import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
 import { Card } from '@/ui/card';
 import { Button } from '@lody/ui/button';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import { Spinner } from '@lody/ui/spinner';
-import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
 import { SettingsStoryProviders } from './settings-story-shell';
+const composerScene = stylex.create({
+  glyph: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+  softGlyph: { opacity: 0.7 },
+  fullWidth: { width: '100%' },
+  repoHost: {
+    width: '100%',
+    minWidth: { default: null, '@media (width >= 40rem)': '240px' },
+    maxWidth: { default: null, '@media (width >= 40rem)': '280px' },
+  },
+  agentHost: { width: '100%', maxWidth: { default: null, '@media (width >= 40rem)': '520px' } },
+  repoPopup: { width: 'calc(var(--spacing) * 72)' },
+  agentPopup: { width: 'calc(var(--spacing) * 64)' },
+  gradient: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    inset: 0,
+    backgroundImage: 'linear-gradient(to bottom in oklab, #050b1d 0%, #081327 50%, #0b1a35 100%)',
+  },
+  glass: {
+    width: '100%',
+    borderRadius: '32px',
+    borderColor: 'color-mix(in oklab, var(--color-white) 10%, transparent)',
+    backgroundColor: 'color-mix(in oklab, var(--color-white) 5%, transparent)',
+    boxShadow: {
+      default: '0 0 0 1px color-mix(in oklab, var(--color-white) 10%, transparent)',
+      ':focus': 'none',
+      ':focus-visible': 'none',
+    },
+    backdropFilter: 'blur(var(--blur-2xl))',
+  },
+  liftedGlass: {
+    backgroundColor: {
+      default: 'color-mix(in oklab, var(--color-white) 5%, transparent)',
+      '@supports (backdrop-filter: blur(0px))':
+        'color-mix(in oklab, var(--color-white) 6%, transparent)',
+    },
+    boxShadow: {
+      default:
+        '0 0 0 1px color-mix(in oklab, var(--color-white) 10%, transparent), 0 32px 100px -48px rgba(4,12,30,.95)',
+      ':focus': '0 32px 100px -48px rgba(4,12,30,.95)',
+      ':focus-visible': '0 32px 100px -48px rgba(4,12,30,.95)',
+    },
+  },
+  whitePanel: {
+    width: '100%',
+    maxWidth: '36rem',
+    borderRadius: 'var(--radius-2xl)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    backgroundColor: 'var(--color-white)',
+    padding: 'calc(var(--spacing) * 6)',
+    boxShadow: '0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1)',
+  },
+  dialogAction: {
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    fontWeight: 'var(--font-weight-semibold)',
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    height: 'calc(var(--spacing) * 10)',
+    borderRadius: 'var(--radius-lg)',
+    paddingInline: 'calc(var(--spacing) * 5)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    translate: { default: 'none', ':active': '0 1px' },
+    boxShadow: { default: button.primaryEdge, ':focus-visible': 'none', ':active': 'none' },
+  },
+  darkAction: {
+    borderColor: 'color-mix(in oklab, var(--color-white) 25%, transparent)',
+    '--composer-action-hover': {
+      default: 'color-mix(in oklab, var(--color-white) 10%, transparent)',
+      '@media (hover: hover)': 'color-mix(in oklab, var(--color-white) 15%, transparent)',
+    },
+    backgroundColor: {
+      default: 'color-mix(in oklab, var(--color-white) 10%, transparent)',
+      ':hover': 'var(--composer-action-hover)',
+    },
+    color: 'var(--color-white)',
+  },
+  lightAction: {
+    borderColor: 'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
+    '--composer-action-hover': {
+      default: 'color-mix(in oklab, hsl(var(--input) / 1) 60%, transparent)',
+      '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
+    },
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--input) / 1) 60%, transparent)',
+      ':hover': 'var(--composer-action-hover)',
+    },
+    color: 'hsl(var(--input-foreground) / 1)',
+  },
+  pendingAction: {
+    height: 'calc(var(--spacing) * 8)',
+    width: 'calc(var(--spacing) * 8)',
+    borderRadius: 'calc(infinity * 1px)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / .05)',
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    '--composer-action-hover': {
+      default: 'hsl(var(--foreground) / 1)',
+      '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      ':hover': 'var(--composer-action-hover)',
+    },
+    color: 'hsl(var(--background) / 1)',
+    translate: { default: 'none', ':active': '0 1px' },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'margin-bottom': 'calc(var(--spacing) * 4)',
+    'font-size': 'var(--text-lg)',
+    'line-height': 'var(--text-lg--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'var(--color-slate-900)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -172,13 +295,13 @@ const agentOptions: OptionSelectorOption<string>[] = [
     value: 'agent-1',
     label: 'Aurora',
     description: 'Mac Studio',
-    startContent: <Bot className="h-4 w-4 opacity-70" />,
+    startContent: <Bot {...stylex.props(composerScene.glyph, composerScene.softGlyph)} />,
   },
   {
     value: 'agent-2',
     label: 'Atlas',
     description: 'MacBook Pro',
-    startContent: <Bot className="h-4 w-4 opacity-70" />,
+    startContent: <Bot {...stylex.props(composerScene.glyph, composerScene.softGlyph)} />,
   },
 ];
 
@@ -187,13 +310,13 @@ const repoOptions: OptionSelectorOption<string>[] = [
     value: 'loro-dev/lody',
     label: 'loro-dev/lody',
     description: 'Realtime collaboration engine',
-    startContent: <Github className="h-4 w-4 opacity-70" />,
+    startContent: <Github {...stylex.props(composerScene.glyph, composerScene.softGlyph)} />,
   },
   {
     value: 'loro-dev/doha',
     label: 'loro-dev/doha',
     description: 'Desktop shell',
-    startContent: <Github className="h-4 w-4 opacity-70" />,
+    startContent: <Github {...stylex.props(composerScene.glyph, composerScene.softGlyph)} />,
   },
 ];
 
@@ -324,17 +447,10 @@ function DemoComposer({
       : []
   );
 
-  const dialogPrimaryActionClassName = cn(
-    'border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2 h-10 rounded-lg px-5 text-sm',
-    tone === 'dark'
-      ? 'border-white/25 bg-white/10 text-white hover:bg-white/15 active:translate-y-[1px] focus-visible:ring-white/30 focus-visible:ring-offset-[#050b1d]'
-      : 'border-input-border/70 bg-input/60 text-input-foreground hover:bg-muted/60 active:translate-y-[1px] focus-visible:ring-ring'
-  );
-
   const selectorNode =
     variant === 'dialog' ? (
       <>
-        <div className="w-full sm:min-w-[240px] sm:max-w-[280px]">
+        <div {...stylex.props(composerScene.repoHost)}>
           <OptionSelector
             value={selectedRepo}
             options={repoOptions}
@@ -342,11 +458,11 @@ function DemoComposer({
             placeholder="Select repo"
             placeholderIcon={Github}
             tone={tone}
-            className="w-full"
-            contentClassName="w-72"
+            xstyle={composerScene.fullWidth}
+            contentXstyle={composerScene.repoPopup}
           />
         </div>
-        <div className="w-full sm:max-w-[520px]">
+        <div {...stylex.props(composerScene.agentHost)}>
           <OptionSelector
             value={selectedAgent}
             options={agentOptions}
@@ -354,8 +470,8 @@ function DemoComposer({
             placeholder="Select agent"
             placeholderIcon={Bot}
             tone={tone}
-            className="w-full"
-            contentClassName="w-64"
+            xstyle={composerScene.fullWidth}
+            contentXstyle={composerScene.agentPopup}
           />
         </div>
       </>
@@ -368,8 +484,8 @@ function DemoComposer({
           placeholder="Select repo"
           placeholderIcon={Github}
           tone={tone}
-          className="w-full"
-          contentClassName="w-72"
+          xstyle={composerScene.fullWidth}
+          contentXstyle={composerScene.repoPopup}
         />
         <OptionSelector
           value={selectedAgent}
@@ -378,8 +494,8 @@ function DemoComposer({
           placeholder="Select agent"
           placeholderIcon={Bot}
           tone={tone}
-          className="w-full"
-          contentClassName="w-64"
+          xstyle={composerScene.fullWidth}
+          contentXstyle={composerScene.agentPopup}
         />
       </div>
     );
@@ -387,10 +503,16 @@ function DemoComposer({
   const primaryActionNode =
     variant !== 'dialog' ? (
       <Button type="button" variant="primary" aria-label="Send" size="medium" shape="pill" icon>
-        <ArrowUp className="h-4 w-4" />
+        <ArrowUp {...stylex.props(composerScene.glyph)} />
       </Button>
     ) : (
-      <Button type="button" className={dialogPrimaryActionClassName}>
+      <Button
+        type="button"
+        xstyle={[
+          composerScene.dialogAction,
+          tone === 'dark' ? composerScene.darkAction : composerScene.lightAction,
+        ]}
+      >
         Send
       </Button>
     );
@@ -457,10 +579,10 @@ function DemoComposer({
 export const LandingDark: Story = {
   render: () => (
     <div {...stylex.props(storyLayout.frame)}>
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
+      <div {...stylex.props(composerScene.gradient)} />
       <div {...stylex.props(storyLayout.overlay)} />
       <div {...stylex.props(storyLayout.row2)}>
-        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
+        <Card.Root xstyle={[composerScene.glass, composerScene.liftedGlass]}>
           <Card.Content>
             <DemoComposer tone="dark" variant="landing" title="Let's ship something" />
           </Card.Content>
@@ -489,8 +611,8 @@ export const LandingMentionStress: Story = {
 export const DialogLight: Story = {
   render: () => (
     <div {...stylex.props(storyLayout.row4)}>
-      <div className="w-full max-w-xl rounded-2xl border bg-white p-6 shadow-lg">
-        <h2 className="mb-4 text-lg font-semibold text-slate-900">Start a new chat</h2>
+      <div {...stylex.props(composerScene.whitePanel)}>
+        <h2 {...stylex.props(storyLayoutStyles.caption)}>Start a new chat</h2>
         <DemoComposer tone="light" variant="dialog" showSecondary promptRows={4} />
       </div>
     </div>
@@ -500,8 +622,8 @@ export const DialogLight: Story = {
 export const DialogMentionStress: Story = {
   render: () => (
     <div {...stylex.props(storyLayout.row4)}>
-      <div className="w-full max-w-xl rounded-2xl border bg-white p-6 shadow-lg">
-        <h2 className="mb-4 text-lg font-semibold text-slate-900">Start a new chat</h2>
+      <div {...stylex.props(composerScene.whitePanel)}>
+        <h2 {...stylex.props(storyLayoutStyles.caption)}>Start a new chat</h2>
         <DemoComposer
           tone="light"
           variant="dialog"
@@ -602,9 +724,9 @@ export const AttachmentUploadStatesDark: Story = {
   globals: { theme: 'dark' },
   render: () => (
     <div {...stylex.props(storyLayout.frame)}>
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
+      <div {...stylex.props(composerScene.gradient)} />
       <div {...stylex.props(storyLayout.row2)}>
-        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 ring-1 ring-white/10 backdrop-blur-2xl">
+        <Card.Root xstyle={composerScene.glass}>
           <Card.Content>
             <DemoComposer
               tone="dark"
@@ -623,10 +745,10 @@ export const AttachmentUploadStatesDark: Story = {
 export const LandingWithPastedText: Story = {
   render: () => (
     <div {...stylex.props(storyLayout.frame)}>
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
+      <div {...stylex.props(composerScene.gradient)} />
       <div {...stylex.props(storyLayout.overlay)} />
       <div {...stylex.props(storyLayout.row2)}>
-        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
+        <Card.Root xstyle={[composerScene.glass, composerScene.liftedGlass]}>
           <Card.Content>
             <DemoComposer
               tone="dark"
@@ -786,10 +908,7 @@ function PendingLandingSpinnerProjection({ tone }: { tone: 'light' | 'dark' }) {
             type="button"
             icon
             variant="ghost"
-            className={cn(
-              'h-8 w-8 rounded-full shadow-xs transition-all',
-              'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-            )}
+            xstyle={composerScene.pendingAction}
             disabled
             aria-label="Submitting synthetic draft"
             onClick={() => setUnexpectedActions((count) => count + 1)}

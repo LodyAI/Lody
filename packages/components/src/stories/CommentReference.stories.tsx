@@ -7,6 +7,146 @@ import {
   type CommentReferenceChipItem,
 } from '@/components/chat/comment-reference-chip';
 import { CommentReferenceCard } from '@/components/ai-gui/comment-reference-card';
+const sceneStyles = stylex.create({
+  composerInput: {
+    width: '100%',
+    resize: 'none',
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    color: {
+      default: 'hsl(var(--foreground) / 1)',
+      '::placeholder': 'hsl(var(--muted-foreground) / 1)',
+    },
+    ':focus': { outline: '2px solid transparent', outlineOffset: '2px' },
+  },
+  userBubbles: {
+    marginInline: 'auto',
+    width: '100%',
+    maxWidth: '32rem',
+    padding: 'calc(var(--spacing) * 4)',
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 6)',
+    },
+  },
+  instructions: {
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: {
+      default: 'var(--color-blue-50)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-blue-950)',
+    },
+    color: {
+      default: 'var(--color-blue-700)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-blue-300)',
+    },
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+  threads: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 3)',
+    },
+  },
+  sendToChat: {
+    flexShrink: 0,
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted) / 1)' },
+    },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+  },
+  canvas2: {
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--primary))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'hsl(var(--primary-foreground))',
+  },
+  canvas3: {
+    'margin-left': 'auto',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--muted) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--leading-relaxed)',
+  },
+  caption: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  caption2: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  caption3: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  caption4: {
+    'margin-top': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+  canvas4: {
+    'margin-left': 'auto',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--muted) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+  caption5: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -220,7 +360,7 @@ export const ComposerWithReferences: StoryObj = {
 
     return (
       <div {...stylex.props(storyLayout.frame)}>
-        <div className="rounded-xl border border-input-border/70 bg-input/90 px-4 py-3">
+        <div {...stylex.props(storyLayoutStyles.canvas)}>
           {items.length > 0 && (
             <div {...stylex.props(storyLayout.row2)}>
               {items.map((item) => (
@@ -236,14 +376,11 @@ export const ComposerWithReferences: StoryObj = {
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={2}
-            className="w-full resize-none border-none bg-transparent text-sm leading-6 text-foreground placeholder:text-muted-foreground focus:outline-hidden"
+            {...stylex.props(sceneStyles.composerInput)}
             placeholder="Type your message..."
           />
           <div {...stylex.props(storyLayout.row3)}>
-            <button
-              type="button"
-              className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground"
-            >
+            <button type="button" {...stylex.props(storyLayoutStyles.canvas2)}>
               Send
             </button>
           </div>
@@ -258,7 +395,7 @@ export const ComposerWithReferences: StoryObj = {
 export const UserBubbleWithReferences: StoryObj = {
   name: 'User Bubble / With Comment References',
   render: () => (
-    <div className="mx-auto w-full max-w-lg space-y-6 p-4">
+    <div {...stylex.props(sceneStyles.userBubbles)}>
       {/* User message with one comment ref + text */}
       <div {...stylex.props(storyLayout.stack)}>
         <div {...stylex.props(storyLayout.stack2)}>
@@ -268,7 +405,7 @@ export const UserBubbleWithReferences: StoryObj = {
               onClick={() => alert('Navigate to diff')}
             />
           </div>
-          <div className="ml-auto rounded-2xl bg-muted px-4 py-2.5 text-sm leading-relaxed">
+          <div {...stylex.props(storyLayoutStyles.canvas3)}>
             Can you fix this edge case? The function should handle null inputs gracefully.
           </div>
         </div>
@@ -286,7 +423,7 @@ export const UserBubbleWithReferences: StoryObj = {
               onClick={() => alert('Navigate')}
             />
           </div>
-          <div className="ml-auto rounded-2xl bg-muted px-4 py-2.5 text-sm leading-relaxed">
+          <div {...stylex.props(storyLayoutStyles.canvas3)}>
             Please address both of these review comments. The useMemo one is especially important
             for performance.
           </div>
@@ -338,25 +475,25 @@ export const InteractiveFlow: StoryObj = {
     return (
       <div {...stylex.props(storyLayout.stack3)}>
         {/* Instructions */}
-        <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+        <div {...stylex.props(sceneStyles.instructions)}>
           Click the paper plane icon on a thread below to add it to the composer. Then click Send.
         </div>
 
         {/* Mock threads with send-to-chat buttons */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-medium text-muted-foreground">Comment Threads</h3>
+        <div {...stylex.props(sceneStyles.threads)}>
+          <h3 {...stylex.props(storyLayoutStyles.caption)}>Comment Threads</h3>
           {[mockReference, mockGitHubReference].map((ref, i) => (
-            <div key={i} className="flex items-start gap-2 rounded-lg border p-3">
+            <div key={i} {...stylex.props(storyLayoutStyles.row)}>
               <div {...stylex.props(storyLayout.section2)}>
-                <div className="text-xs font-medium">{ref.authorName}</div>
-                <div className="text-xs text-muted-foreground">
+                <div {...stylex.props(storyLayoutStyles.caption2)}>{ref.authorName}</div>
+                <div {...stylex.props(storyLayoutStyles.caption3)}>
                   {ref.path}:{ref.lineNumber}
                 </div>
-                <div className="mt-1 text-xs">{ref.commentBody}</div>
+                <div {...stylex.props(storyLayoutStyles.caption4)}>{ref.commentBody}</div>
               </div>
               <button
                 type="button"
-                className="shrink-0 rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                {...stylex.props(sceneStyles.sendToChat)}
                 onClick={() => handleSendToChat(ref)}
               >
                 Send to chat
@@ -367,10 +504,8 @@ export const InteractiveFlow: StoryObj = {
 
         {/* Sent messages */}
         {sentMessages.length > 0 && (
-          <div className="space-y-3">
-            <h3 className="text-xs font-medium text-muted-foreground">
-              Sent Messages (User Bubbles)
-            </h3>
+          <div {...stylex.props(sceneStyles.threads)}>
+            <h3 {...stylex.props(storyLayoutStyles.caption)}>Sent Messages (User Bubbles)</h3>
             {sentMessages.map((msg, i) => (
               <div key={i} {...stylex.props(storyLayout.stack)}>
                 <div {...stylex.props(storyLayout.stack2)}>
@@ -379,9 +514,7 @@ export const InteractiveFlow: StoryObj = {
                       <CommentReferenceCard reference={ref} onClick={() => alert('Navigate')} />
                     </div>
                   ))}
-                  {msg.text && (
-                    <div className="ml-auto rounded-2xl bg-muted px-4 py-2 text-sm">{msg.text}</div>
-                  )}
+                  {msg.text && <div {...stylex.props(storyLayoutStyles.canvas4)}>{msg.text}</div>}
                 </div>
               </div>
             ))}
@@ -390,8 +523,8 @@ export const InteractiveFlow: StoryObj = {
 
         {/* Composer */}
         <div>
-          <h3 className="mb-2 text-xs font-medium text-muted-foreground">Composer</h3>
-          <div className="rounded-xl border border-input-border/70 bg-input/90 px-4 py-3">
+          <h3 {...stylex.props(storyLayoutStyles.caption5)}>Composer</h3>
+          <div {...stylex.props(storyLayoutStyles.canvas)}>
             {composerItems.length > 0 && (
               <div {...stylex.props(storyLayout.row2)}>
                 {composerItems.map((item) => (
@@ -409,13 +542,13 @@ export const InteractiveFlow: StoryObj = {
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={2}
-              className="w-full resize-none border-none bg-transparent text-sm leading-6 text-foreground placeholder:text-muted-foreground focus:outline-hidden"
+              {...stylex.props(sceneStyles.composerInput)}
               placeholder="Type your message..."
             />
             <div {...stylex.props(storyLayout.row3)}>
               <button
                 type="button"
-                className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground"
+                {...stylex.props(storyLayoutStyles.canvas2)}
                 onClick={handleSend}
               >
                 Send

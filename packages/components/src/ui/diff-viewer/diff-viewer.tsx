@@ -399,6 +399,9 @@ export interface DiffViewerProps {
    * Class name for the container
    */
   className?: string;
+  xstyle?: stylex.StyleXStyles;
+  headerXstyle?: stylex.StyleXStyles;
+  contentXstyle?: stylex.StyleXStyles;
   /**
    * Whether to show the collapsible header
    * @default true
@@ -627,6 +630,9 @@ function DiffViewerImpl({
   diffStyle,
   responsiveSplit = false,
   className,
+  xstyle,
+  headerXstyle,
+  contentXstyle,
   showHeader = true,
   // stickyHeader remains on DiffViewerProps for API compatibility, but sticky is
   // forced off below so overflow-hidden can clip the rounded card border.
@@ -1337,7 +1343,8 @@ function DiffViewerImpl({
     return (
       <div
         ref={containerRef}
-        className={clsx(stylex.props(styles.headerless).className, className)}
+        className={clsx(stylex.props(styles.headerless, xstyle).className, className)}
+        style={stylex.props(styles.headerless, xstyle).style}
       >
         {diffContentContainer}
       </div>
@@ -1357,7 +1364,8 @@ function DiffViewerImpl({
         open={isControlledOpen ? open : undefined}
         onOpenChange={handleOpenChange}
         defaultOpen={isControlledOpen ? undefined : defaultOpen}
-        className={clsx(stylex.props(styles.chrome).className, className)}
+        className={clsx(stylex.props(styles.chrome, xstyle).className, className)}
+        style={stylex.props(styles.chrome, xstyle).style}
       >
         {renderHeader({ fileName, path, additions, deletions, CollapseToggle })}
         <Collapsible.Content className={stylex.props(styles.customContent).className}>
@@ -1373,7 +1381,7 @@ function DiffViewerImpl({
       <CollapsibleCard
         data-section-id="diff-viewer"
         id="diff-viewer"
-        xstyle={styles.chrome}
+        xstyle={[styles.chrome, xstyle]}
         className={className}
         open={isControlledOpen ? open : undefined}
         onOpenChange={handleOpenChange}
@@ -1386,7 +1394,7 @@ function DiffViewerImpl({
         <CollapsibleCardHeader
           sticky={false}
           position="relative"
-          xstyle={[styles.defaultHeader, isOpen && styles.defaultHeaderOpen]}
+          xstyle={[styles.defaultHeader, isOpen && styles.defaultHeaderOpen, headerXstyle]}
         >
           <FileIcon filePath={path} className={stylex.props(styles.fileIcon).className} />
           <div {...stylex.props(styles.pathRow)}>
@@ -1409,7 +1417,11 @@ function DiffViewerImpl({
           )}
         </CollapsibleCardHeader>
         {/* No bottom padding: green/red last rows meet the clipped card edge. */}
-        <CollapsibleCardContent noInternalScroll xstyle={styles.flushBody}>
+        <CollapsibleCardContent
+          noInternalScroll
+          xstyle={styles.flushBody}
+          containerXstyle={contentXstyle}
+        >
           {diffContentContainer}
         </CollapsibleCardContent>
       </CollapsibleCard>
@@ -1430,6 +1442,9 @@ const areDiffViewerPropsEqual = (prev: DiffViewerProps, next: DiffViewerProps): 
   prev.diffStyle === next.diffStyle &&
   prev.responsiveSplit === next.responsiveSplit &&
   prev.className === next.className &&
+  prev.xstyle === next.xstyle &&
+  prev.headerXstyle === next.headerXstyle &&
+  prev.contentXstyle === next.contentXstyle &&
   prev.showHeader === next.showHeader &&
   prev.stickyHeader === next.stickyHeader &&
   prev.cachePrerenderedHtml === next.cachePrerenderedHtml &&

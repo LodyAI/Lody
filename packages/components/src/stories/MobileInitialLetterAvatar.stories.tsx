@@ -3,6 +3,44 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { Folder } from 'lucide-react';
 
 import { MobileInitialLetterAvatar } from '@/components/mobile/mobile-initial-letter-avatar';
+const storyLayoutStylesStylesStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    width: '100%',
+    'max-width': '28rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 6)',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    'text-transform': 'uppercase',
+  },
+  label: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -38,12 +76,10 @@ function StoryShell() {
 
   return (
     <div {...stylex.props(storyLayout.row)}>
-      <div className="flex w-full max-w-md flex-col gap-6 rounded-2xl bg-background p-6 shadow-2xl">
+      <div {...stylex.props(storyLayoutStylesStyles.stack)}>
         {(['sm', 'md', 'lg'] as const).map((size) => (
           <div key={size}>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              size = {size}
-            </div>
+            <div {...stylex.props(storyLayoutStyles.caption)}>size = {size}</div>
             <div {...stylex.props(storyLayout.row2)}>
               {projects.map((p) => (
                 <div key={`${size}-${p.seed}`} {...stylex.props(storyLayout.row3)}>
@@ -51,9 +87,9 @@ function StoryShell() {
                     name={p.name}
                     hashSeed={p.seed}
                     size={size}
-                    fallbackIcon={<Folder className="h-3 w-3" />}
+                    fallbackIcon={<Folder {...stylex.props(storyLayoutStylesStylesStyles.frame)} />}
                   />
-                  <span className="text-xs text-muted-foreground">{p.name || '(empty)'}</span>
+                  <span {...stylex.props(storyLayoutStyles.label)}>{p.name || '(empty)'}</span>
                 </div>
               ))}
             </div>

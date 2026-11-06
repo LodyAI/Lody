@@ -23,6 +23,21 @@ import type {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { ComposerAgentRoleItem } from '@/lib/composer-agent-roles';
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -218,7 +233,7 @@ function StoryShell({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="rounded-md border border-border/60 bg-background px-3 py-1.5 text-sm text-foreground"
+          {...stylex.props(storyLayoutStyles.canvas)}
         >
           Open run config
         </button>

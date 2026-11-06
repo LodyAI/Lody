@@ -22,7 +22,9 @@ export type AcpSessionSelectProps = {
   iconOnly?: boolean;
   disabled?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   contentClassName?: string;
+  contentXstyle?: stylex.StyleXStyles;
   align?: 'start' | 'center' | 'end';
   ariaLabel?: string;
   /** Native hover tooltip for the trigger. Defaults to the selected option label. */
@@ -98,7 +100,9 @@ export function AcpSessionSelect({
   iconOnly = false,
   disabled = false,
   className,
+  xstyle,
   contentClassName,
+  contentXstyle,
   align = 'start',
   ariaLabel,
   triggerTitle,
@@ -133,6 +137,7 @@ export function AcpSessionSelect({
         variant === 'compact' && !iconOnly && styles.compactLabel,
         variant === 'default' && !iconOnly && styles.pill,
         variant === 'text' && !iconOnly && styles.plain,
+        xstyle,
       ]}
       className={className}
       aria-label={withSelectedLabel(ariaLabel)}
@@ -162,7 +167,12 @@ export function AcpSessionSelect({
   return (
     <Menu.Root>
       <Menu.Trigger render={trigger}>{trigger}</Menu.Trigger>
-      <Menu.Content align={align} minWidth={120} className={contentClassName}>
+      <Menu.Content
+        align={align}
+        minWidth={120}
+        className={contentClassName}
+        xstyle={contentXstyle}
+      >
         <Menu.RadioGroup value={value ?? ''} onValueChange={onChange}>
           {options.map((option) => {
             const menuItem = (

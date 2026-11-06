@@ -1,8 +1,19 @@
+import * as stylex from '@stylexjs/stylex';
 import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { FileTreeProviderView } from '@/components/sessions/components/file-tree-view';
 import { createFakeSessionFileProvider } from '@/lib/session-file-provider';
+const storyLayout = stylex.create({
+  frame: {
+    height: '640px',
+    width: '320px',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 // Renders the REAL session "Files" surface. `FileTreeProviderView` owns the
 // ScrollArea, the flat virtualized row list, and the row height / indent, so this
@@ -86,7 +97,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="h-[640px] w-[320px] border border-border bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

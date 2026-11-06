@@ -174,15 +174,23 @@ function usePrefersReducedMotion(): boolean {
 }
 
 /** Whisper-plus woven texture behind the whole sidebar. */
-export function SidebarFabricBackdrop({ className }: { className?: string }) {
+export function SidebarFabricBackdrop({
+  className,
+  xstyle,
+  canvasXstyle,
+}: {
+  className?: string;
+  xstyle?: stylex.StyleXStyles;
+  canvasXstyle?: stylex.StyleXStyles;
+}) {
   const hsl = useSidebarBackgroundHsl();
   const recipe = useMemo(() => (hsl ? backdropRecipe(hsl) : null), [hsl]);
   const light = useMemo(() => (hsl ? backdropLight(hsl[2]) : null), [hsl]);
   if (!recipe || !light) return null;
-  const layerProps = stylex.props(styles.layer);
+  const layerProps = stylex.props(styles.layer, xstyle);
   return (
     <div aria-hidden {...layerProps} className={clsx(layerProps.className, className)}>
-      <FabricSimulator recipe={recipe} light={light} xstyle={styles.canvas} />
+      <FabricSimulator recipe={recipe} light={light} xstyle={[styles.canvas, canvasXstyle]} />
     </div>
   );
 }
@@ -192,20 +200,28 @@ export function SidebarFabricBackdrop({ className }: { className?: string }) {
  * should be `relative` and carry `data-fabric-pointer-scope` so the sheen
  * follows the pointer across the footer (skipped under reduced motion).
  */
-export function SidebarFabricBand({ className }: { className?: string }) {
+export function SidebarFabricBand({
+  className,
+  xstyle,
+  canvasXstyle,
+}: {
+  className?: string;
+  xstyle?: stylex.StyleXStyles;
+  canvasXstyle?: stylex.StyleXStyles;
+}) {
   const hsl = useSidebarBackgroundHsl();
   const reducedMotion = usePrefersReducedMotion();
   const recipe = useMemo(() => (hsl ? bandRecipe(hsl) : null), [hsl]);
   const light = useMemo(() => (hsl ? bandLight(hsl[2]) : null), [hsl]);
   if (!recipe || !light) return null;
-  const layerProps = stylex.props(styles.layer);
+  const layerProps = stylex.props(styles.layer, xstyle);
   return (
     <div aria-hidden {...layerProps} className={clsx(layerProps.className, className)}>
       <FabricSimulator
         recipe={recipe}
         light={light}
         followPointer={!reducedMotion}
-        xstyle={styles.canvas}
+        xstyle={[styles.canvas, canvasXstyle]}
       />
     </div>
   );

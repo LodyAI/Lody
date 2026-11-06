@@ -5,6 +5,70 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import { Button } from '@lody/ui/button';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
+const sceneStyles = stylex.create({
+  widthReadout: {
+    marginLeft: 'calc(var(--spacing) * 1)',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontWeight: 'var(--font-weight-medium)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  mainHeader: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 11)',
+    alignItems: 'center',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--border) / 1)',
+      ':is(:where(.group\\/close-scope)[data-lody-action-active="true"] *)':
+        'hsl(var(--primary) / 1)',
+    },
+    paddingInline: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+  secondaryHeader: {
+    height: 'calc(var(--spacing) * 11)',
+    flexShrink: 0,
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--border) / 1)',
+      ':is(:where(.group\\/close-scope)[data-lody-action-active="true"] *)':
+        'hsl(var(--primary) / 1)',
+    },
+    padding: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    height: '100%',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-style': 'dashed',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  label: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  caption: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+});
+
 const storyLayout = stylex.create({
   stack: {
     display: 'flex',
@@ -51,12 +115,9 @@ function WidthReadout({ label }: { label: string }) {
     return () => observer.disconnect();
   }, []);
   return (
-    <div
-      ref={ref}
-      className="flex h-full items-center justify-center border border-dashed border-border bg-background text-sm text-muted-foreground"
-    >
+    <div ref={ref} {...stylex.props(storyLayoutStyles.row)}>
       {label}
-      <span className="ml-1 font-mono font-medium text-foreground">{width}px</span>
+      <span {...stylex.props(sceneStyles.widthReadout)}>{width}px</span>
     </div>
   );
 }
@@ -144,10 +205,12 @@ function LayoutHarness({
         <Button variant="secondary" size="small" onClick={() => setSidebarOpen(false)}>
           Close sidebar
         </Button>
-        <span className="text-xs text-muted-foreground">container: {containerWidthPx}px</span>
+        <span {...stylex.props(storyLayoutStyles.label)}>container: {containerWidthPx}px</span>
       </div>
       {semanticShortcuts && (
-        <p className="text-sm">Point at a pane and press F8 to close. Last closed: {lastClosed}</p>
+        <p {...stylex.props(storyLayoutStyles.caption)}>
+          Point at a pane and press F8 to close. Last closed: {lastClosed}
+        </p>
       )}
       <div
         ref={actionRootRef}
@@ -156,11 +219,7 @@ function LayoutHarness({
       >
         <DesktopSessionDetailLayout
           defaultSizes={{ main: 100 - defaultSidebarSize, sidebar: defaultSidebarSize }}
-          topBar={
-            <div className="flex h-11 items-center border-b border-border px-3 text-sm group-data-[lody-action-active=true]/close-scope:border-primary">
-              Session tabs
-            </div>
-          }
+          topBar={<div {...stylex.props(sceneStyles.mainHeader)}>Session tabs</div>}
           chatSurfaces={<WidthReadout label="Conversation" />}
           terminalDock={null}
           secondaryPanel={
@@ -168,9 +227,7 @@ function LayoutHarness({
               data-lody-action-scope="side-panel"
               className={clsx(stylex.props(storyLayout.stack2).className, 'group/close-scope')}
             >
-              <div className="h-11 shrink-0 border-b border-border p-3 text-sm group-data-[lody-action-active=true]/close-scope:border-primary">
-                Panel tabs
-              </div>
+              <div {...stylex.props(sceneStyles.secondaryHeader)}>Panel tabs</div>
               <WidthReadout label={empty ? 'Empty sidebar' : 'PR panel'} />
             </div>
           }

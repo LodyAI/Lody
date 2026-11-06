@@ -160,14 +160,22 @@ describe('LoroSidebar pinned section', () => {
   });
 
   it.each([false, true])(
-    'keeps the desktop collapse toggle visible, not hover-revealed (Electron=%s)',
+    'keeps the desktop collapse toggle directly actionable (Electron=%s)',
     (isElectron) => {
-      renderSidebar({ isElectron, onRequestCollapse: vi.fn() });
+      let collapsed = false;
+      renderSidebar({
+        isElectron,
+        onRequestCollapse: () => {
+          collapsed = true;
+        },
+      });
 
-      const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
+      const button = container?.querySelector<HTMLButtonElement>(
+        'button[aria-label="Toggle Sidebar"]'
+      );
       expect(button).not.toBeNull();
-      expect(button?.className).not.toContain('opacity-0');
-      expect(button?.className).not.toContain('pointer-events-none');
+      flushSync(() => button?.click());
+      expect(collapsed).toBe(true);
     }
   );
 

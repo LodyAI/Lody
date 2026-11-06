@@ -14,6 +14,19 @@ import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: '520px',
+    width: '390px',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -77,9 +90,7 @@ const finishedTurn: SessionHistoryParsed = {
 const Phone = ({ children }: { children: React.ReactNode }) => (
   <ForceMobileLayoutProvider force>
     <div {...stylex.props(storyLayout.row)}>
-      <div className="h-[520px] w-[390px] overflow-hidden rounded-2xl border border-border bg-background">
-        {children}
-      </div>
+      <div {...stylex.props(storyLayoutStyles.frame)}>{children}</div>
     </div>
   </ForceMobileLayoutProvider>
 );

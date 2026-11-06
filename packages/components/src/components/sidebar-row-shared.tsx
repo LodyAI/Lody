@@ -1451,16 +1451,19 @@ const SIDEBAR_SKELETON_ROW_WIDTHS = ['68%', '56%', '74%', '62%', '70%'] as const
  */
 export function SidebarListSkeleton({
   className,
+  xstyle,
   showHeaderIcon = true,
   sectionClassName = stylex.props(rowParts.listSpacing).className,
 }: {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   showHeaderIcon?: boolean;
   sectionClassName?: string;
 }) {
   return (
     <div
-      className={clsx(stylex.props(rowParts.listStack).className, className)}
+      className={clsx(stylex.props(rowParts.listStack, xstyle).className, className)}
+      style={stylex.props(rowParts.listStack, xstyle).style}
       data-sidebar-loading-skeleton=""
     >
       <div className={clsx(stylex.props(rowParts.skeletonSection).className, sectionClassName)}>

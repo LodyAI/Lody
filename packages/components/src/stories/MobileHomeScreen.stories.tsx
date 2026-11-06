@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useState, type CSSProperties } from 'react';
 import { fn } from 'storybook/test';
@@ -17,6 +18,28 @@ import {
   type MobileInboxItem,
   type MobileProjectsSubTab,
 } from '@/components/mobile/mobile-home-screen';
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflow: 'hidden',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
 
 const meta = {
   title: 'Mobile/MobileHomeScreen',
@@ -233,8 +256,8 @@ function MobileHomeScreenStory({
     useState<MobileProjectsSubTab>('local');
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
         <MobileHomeScreen
           theme={theme}
           workspace={{ id: 'lody', name: workspaceName }}

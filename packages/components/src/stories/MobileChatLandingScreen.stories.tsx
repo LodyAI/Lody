@@ -5,6 +5,127 @@ import { ArrowUp } from 'lucide-react';
 
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { Button } from '@lody/ui/button';
+const landingStory = stylex.create({
+  input: {
+    width: '100%',
+    resize: 'none',
+    backgroundColor: 'transparent',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    color: {
+      default: 'hsl(var(--input-foreground) / 1)',
+      '::placeholder': 'hsl(var(--input-placeholder) / 1)',
+    },
+    outlineStyle: { default: null, ':focus': 'none' },
+  },
+  context: {
+    flex: '1',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+    fontWeight: 'var(--font-weight-medium)',
+    boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+  },
+  hint: {
+    borderRadius: 'var(--radius-md)',
+    borderWidth:"1px",borderStyle:"solid",borderColor:"color-mix(in oklab, var(--color-amber-500) 40%, transparent)",
+    backgroundColor: 'color-mix(in oklab, var(--color-amber-500) 10%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: {
+      default: 'var(--color-amber-700)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-amber-300)',
+    },
+  },
+});
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflow: 'hidden',
+  },
+});
+
+const storyLayoutStylesStylesStylesStyles = stylex.create({
+  element: {
+    marginLeft: 'auto',
+  },
+});
+
+const storyLayoutStylesStylesStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  frame: {
+    width: '100%',
+    'border-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+    padding: 'calc(var(--spacing) * 3)',
+    'box-shadow':
+      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  label: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  row: {
+    display: 'flex',
+    width: '100%',
+    'max-width': '28rem',
+    gap: 'calc(var(--spacing) * 1)',
+    'border-radius': 'calc(infinity * 1px)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 40%, transparent)',
+    padding: 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+  canvas: {
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--card) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -22,23 +143,19 @@ const storyLayout = stylex.create({
 
 function MockComposer() {
   return (
-    <div className="w-full rounded-2xl border border-input-border/70 bg-input/90 p-3 shadow-sm">
-      <textarea
-        rows={2}
-        placeholder="问 Lody 任何事情。"
-        className="w-full resize-none bg-transparent text-sm leading-6 text-input-foreground placeholder:text-input-placeholder focus:outline-none"
-      />
+    <div {...stylex.props(storyLayoutStylesStyles.frame)}>
+      <textarea rows={2} placeholder="问 Lody 任何事情。" {...stylex.props(landingStory.input)} />
       <div {...stylex.props(storyLayout.row)}>
-        <span className="text-xs text-muted-foreground">claude-3.5-sonnet · zx-macbook</span>
+        <span {...stylex.props(storyLayoutStyles.label)}>claude-3.5-sonnet · zx-macbook</span>
         <Button
           type="button"
           variant="primary"
           aria-label="Send"
           icon
           shape="pill"
-          className="ml-auto"
+          xstyle={storyLayoutStylesStylesStylesStyles.element}
         >
-          <ArrowUp className="h-4 w-4" />
+          <ArrowUp {...stylex.props(storyLayoutStylesStylesStyles.frame)} />
         </Button>
       </div>
     </div>
@@ -47,10 +164,8 @@ function MockComposer() {
 
 function MockContextSwitch() {
   return (
-    <div className="flex w-full max-w-md gap-1 rounded-full border border-border/60 bg-muted/40 p-1 text-xs">
-      <button className="flex-1 rounded-full bg-background px-3 py-1.5 font-medium shadow">
-        Local
-      </button>
+    <div {...stylex.props(storyLayoutStyles.row)}>
+      <button {...stylex.props(landingStory.context)}>Local</button>
       <button {...stylex.props(storyLayout.canvas)}>GitHub</button>
       <button {...stylex.props(storyLayout.canvas)}>Chat</button>
     </div>
@@ -60,25 +175,20 @@ function MockContextSwitch() {
 function ChatLandingStoryShell({ withHints }: { withHints?: boolean }) {
   const [sidebarOpens, setSidebarOpens] = useState(0);
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div
-        data-sidebar-opens={sidebarOpens}
-        className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]"
-      >
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div data-sidebar-opens={sidebarOpens} {...stylex.props(phoneFrame.frame)}>
         <MobileChatLandingScreen
           title="开始对话"
           contextSwitch={<MockContextSwitch />}
           composer={<MockComposer />}
           noMachineHint={
             withHints ? (
-              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                没有可用的机器,请先连接一台。
-              </div>
+              <div {...stylex.props(landingStory.hint)}>没有可用的机器,请先连接一台。</div>
             ) : undefined
           }
           agentConfigHint={
             withHints ? (
-              <div className="rounded-md border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
+              <div {...stylex.props(storyLayoutStyles.canvas)}>
                 还未配置 Codex API key — 在设置中添加后即可使用。
               </div>
             ) : undefined

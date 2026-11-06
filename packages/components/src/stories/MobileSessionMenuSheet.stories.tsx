@@ -22,6 +22,24 @@ import {
   type MobileSessionMenuInfoRow,
   type MobileSessionMenuOwner,
 } from '@/components/mobile/mobile-session-menu-sheet';
+const menuGlyphs = stylex.create({
+  action: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)' },
+});
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
+
 const storyLayout = stylex.create({
   frame: {
     height: 'calc(var(--spacing) * 2)',
@@ -43,21 +61,21 @@ const storyLayout = stylex.create({
 const infoRows: MobileSessionMenuInfoRow[] = [
   {
     id: 'machine',
-    icon: <Monitor className="h-3.5 w-3.5" />,
+    icon: <Monitor {...stylex.props(menuGlyphs.action)} />,
     label: 'Machine',
     value: 'zx-macbook',
     trailing: <span {...stylex.props(storyLayout.frame)} aria-label="online" />,
   },
   {
     id: 'base',
-    icon: <GitBranch className="h-3.5 w-3.5" />,
+    icon: <GitBranch {...stylex.props(menuGlyphs.action)} />,
     label: 'Base',
     value: 'main',
     onCopy: fn(),
   },
   {
     id: 'current',
-    icon: <GitBranch className="h-3.5 w-3.5" />,
+    icon: <GitBranch {...stylex.props(menuGlyphs.action)} />,
     label: 'Branch',
     value: 'lody/solve-merge-conflicts-a1b2c3',
     onCopy: fn(),
@@ -67,40 +85,50 @@ const infoRows: MobileSessionMenuInfoRow[] = [
 const actions: MobileSessionMenuAction[] = [
   {
     id: 'find',
-    icon: <Search className="h-3.5 w-3.5" />,
+    icon: <Search {...stylex.props(menuGlyphs.action)} />,
     label: 'Find in session',
     onClick: fn(),
   },
   {
     id: 'fork',
-    icon: <GitFork className="h-3.5 w-3.5" />,
+    icon: <GitFork {...stylex.props(menuGlyphs.action)} />,
     label: 'Fork session',
     onClick: fn(),
   },
-  { id: 'rename', icon: <Pencil className="h-3.5 w-3.5" />, label: 'Rename Chat', onClick: fn() },
+  {
+    id: 'rename',
+    icon: <Pencil {...stylex.props(menuGlyphs.action)} />,
+    label: 'Rename Chat',
+    onClick: fn(),
+  },
   {
     id: 'copy-path',
-    icon: <Copy className="h-3.5 w-3.5" />,
+    icon: <Copy {...stylex.props(menuGlyphs.action)} />,
     label: 'Copy path',
     onClick: fn(),
     separatorBefore: true,
   },
   {
     id: 'copy-md',
-    icon: <FileText className="h-3.5 w-3.5" />,
+    icon: <FileText {...stylex.props(menuGlyphs.action)} />,
     label: 'Copy as Markdown',
     onClick: fn(),
   },
-  { id: 'copy-url', icon: <Link className="h-3.5 w-3.5" />, label: 'Copy URL', onClick: fn() },
+  {
+    id: 'copy-url',
+    icon: <Link {...stylex.props(menuGlyphs.action)} />,
+    label: 'Copy URL',
+    onClick: fn(),
+  },
   {
     id: 'share-image',
-    icon: <Image className="h-3.5 w-3.5" />,
+    icon: <Image {...stylex.props(menuGlyphs.action)} />,
     label: 'Share as image…',
     onClick: fn(),
   },
   {
     id: 'archive',
-    icon: <Archive className="h-3.5 w-3.5" />,
+    icon: <Archive {...stylex.props(menuGlyphs.action)} />,
     label: 'Archive session',
     onClick: fn(),
     separatorBefore: true,
@@ -124,7 +152,7 @@ function Harness({ owner: ownerProp }: { owner?: MobileSessionMenuOwner }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-md border border-border/60 bg-background px-3 py-1.5 text-sm text-foreground"
+        {...stylex.props(storyLayoutStyles.canvas)}
       >
         Open menu
       </button>
