@@ -86,10 +86,7 @@ export async function acceptSessionUserTurn(
   if (runtime.contentMode === 'e2ee' && roostBackend)
     throw new Error('e2ee_history_backend_unavailable');
   if (pending && (unprepared || pending.hasSession(sessionId) || roostBackend)) {
-    let targetMachineId = creation?.machineId;
-    if (!targetMachineId) {
-      targetMachineId = (found?.meta as SessionMeta | undefined)?.machineId;
-    }
+    const targetMachineId = meta?.machineId;
     if (roostBackend && delivery.kind === 'dispatch') {
       const machine = targetMachineId
         ? await runtime.repo.getDocMeta(getMachineRoomId(targetMachineId))

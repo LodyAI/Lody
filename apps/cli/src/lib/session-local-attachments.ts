@@ -98,8 +98,6 @@ export async function registerLocalAttachment(
   }
   let canonicalPath = source.canonical;
   if (input.managed) {
-    if (source.size > 100 * 1024 * 1024)
-      throw new Error('Generated attachment exceeds local storage limit');
     canonicalPath = path.join(root, key(scope, input.referenceId) + '.data');
     // Each registration has an immutable destination. A retry never replaces accepted bytes.
     try {
@@ -147,7 +145,7 @@ export async function resolveLocalAttachment(
   scope: LocalAttachmentScope,
   attachment: SessionLocalAttachment
 ) {
-  SessionLocalAttachmentSchema.parse(attachment);
+  const parsedAttachment = SessionLocalAttachmentSchema.parse(attachment);
   if (
     attachment.machineId !== scope.machineId ||
     attachment.sessionId !== scope.sessionId ||
@@ -161,7 +159,7 @@ export async function resolveLocalAttachment(
     saved.version !== 1 ||
     key(saved.scope, attachment.referenceId) !== key(scope, attachment.referenceId) ||
     JSON.stringify(SessionLocalAttachmentSchema.parse(saved.attachment)) !==
-      JSON.stringify(SessionLocalAttachmentSchema.parse(attachment))
+      JSON.stringify(parsedAttachment)
   )
     throw new Error('Invalid local attachment registration');
   const current = await readableFile(saved.originalPath);
