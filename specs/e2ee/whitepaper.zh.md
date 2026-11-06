@@ -1,9 +1,9 @@
 # Lody 安全白皮书
 
-Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)
 Translation: current
 
-Approved revision: 2026-11-06 账本用户编号；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)。上一版：2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
+Approved revision: 2026-11-06 恢复保险库整库换新；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)。上一版：2026-11-06 账本用户编号（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)）、2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
@@ -180,7 +180,7 @@ Owner/Admin 仍可主动换代。新成员、新设备、角色调整与 Owner �
 
 **手机与引导。** 获准手机本身可批准新设备，不必常驻 R 私钥。所有端及 Owner 都可确认风险后跳过恢复设置；加入时提醒，并逐工作区显示未设置、待验证或已验证等实际进度。配对完成、曾收到信封和已能恢复是不同状态。
 
-**更换与泄漏。** 普通更换先验证新方式再撤旧；确认泄漏时优先撤销，不为保持可恢复而继续保留已泄漏身份。单个 R 私钥泄漏影响对应工作区；恢复文件解锁密钥与相应云端密文一起泄漏，可能影响库中全部已覆盖工作区。只更换文件或删除入口不能使复制出去的 R 私钥失效，需要在受影响工作区替换、撤销 R 并换代；各工作区可分别成功或失败，不宣称跨工作区原子完成。撤销 R 不连带撤销它已经批准的 C，仍应检查是否存在其他可疑设备。登录控制下载，文件控制解密，两者不是密码学双因子。
+**更换与泄漏。** 普通更换先验证新方式再撤旧；确认泄漏时优先撤销，不为保持可恢复而继续保留已泄漏身份。单个 R 私钥泄漏影响对应工作区；恢复文件解锁密钥与相应云端密文一起泄漏，可能影响库中全部已覆盖工作区。只更换文件或删除入口不能使复制出去的 R 私钥失效，需要在受影响工作区替换、撤销 R 并换代；各工作区可分别成功或失败，不宣称跨工作区原子完成。撤销 R 不连带撤销它已经批准的 C，仍应检查是否存在其他可疑设备。丢失文件的用户可用一台仍可用的个人设备整库换新，见[恢复保险库 Spec](recovery-vault.zh.md#整库换新)。对已完成替换的工作区，旧文件不能再接纳设备或收到新密钥，但持有旧文件和账号的人仍能打开其中已有的密钥。登录控制下载，文件控制解密，两者不是密码学双因子。
 
 所有有效设备及恢复材料丢失，可能同时失去内容和 Owner 入口，但不阻断普通登录或创建新工作区。服务器不能接管秘密，删除备份也不能收回已泄漏历史。Owner 丢失全部钥匙后的账号注销规则仍待单独确定。
 

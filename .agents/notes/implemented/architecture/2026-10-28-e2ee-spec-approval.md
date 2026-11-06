@@ -149,6 +149,27 @@ The scope is the ledger user ID passages of the whitepaper and `permission-ledge
 
 Ledger records and their format do not change. Approval records intent only, not implementation, deployment or real-device acceptance.
 
+## Recovery vault whole-vault replacement
+
+On 2026-11-06, owner Zixuan Chen (zxch3n) approved [PR #2374](https://github.com/LodyAI/Lody/pull/2374) at head `5484218fd5157af1fd1d637865934db852e1cd96` in their own session `b12f1597-06ba-4a6e-944c-0395a7d58542` (account `js7cxcb4nzj3dpht6gc9vq8n517xznbm`, message `01a255e1-459c-4d10-947c-0210f3bcc9b1`) at 2026-11-06T18:22:22.775Z. Their words were "批准，16 份" (approve, 16). The approved files are:
+
+| File                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/recovery-vault.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/recovery-vault.md)             | `86953c0ea01020a5db93071e0dc1cf77eb0cb07b` |
+| [`specs/e2ee/recovery-vault.zh.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/recovery-vault.zh.md)       | `3793c3de37195c93c4dcc294e1f89b608e40f758` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/whitepaper.md)                     | `e00735bcb501e5de1d95c440baa57b0e0b5c4a09` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/whitepaper.zh.md)               | `a6362be095169d3840d81bac7f4f832b364ad5e7` |
+
+The closeout commit changes only approval metadata in these files and synchronizes the whitepaper with the same approved whole-vault replacement meaning; it does not change the approved requirements.
+
+The scope covers these points:
+
+- **Whole-vault replacement.** A user who lost the recovery file, or suspects it leaked, replaces the whole vault from a working personal device. The device creates and reopens the new file, admits and envelope-tests a new R in every workspace it can act on, revokes the old Rs through the ledger, then retires the old vault and makes the new one current. Routine replacement still needs V.
+- **States and the 16 limit.** A vault is `current`, `replacing` or `retired`; an account has at most one `current` and one `replacing`. Retired vaults count against a separate limit of 16, the number the owner approved; beyond that, replacement is refused until cleanup exists. Retired ciphertext stays readable and no entry is removed.
+- **Authority.** Retiring needs only the signed-in owner and a new index. A hijacked login can reserve, abandon and switch, but cannot revoke an R, read a vault, forge a package or stop the old file from opening. Restore ignores product state and is judged by the ledger.
+- **What the old file can still do.** For replaced workspaces, the old file can no longer admit devices or receive new keys, but anyone with the old file and the account can still open the keys it already has until rotation. Replacement does not erase copies. Passkeys must be enrolled again.
+- **Limits.** The flow needs a working personal device; a working passkey can restore one first. Workspaces the device cannot act on are named and may keep the old R. Ledger format and `formatVersion: 1` are unchanged, the flow is default-off, and the recovery vault remains outside the MVP. Approval records intent only, not implementation, deployment or real-device acceptance.
+
 ## Machine sharing
 
 On 2026-11-02, owner Zixuan Chen (zxch3n) approved the [machine sharing Spec](../../../../specs/e2ee/machine-sharing.md) by merging [PR #2228](https://github.com/LodyAI/Lody/pull/2228) as merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`. The approved [English text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md) has Git blob `37ce21f8e5a3db433b38ac0d2701fcacf6408080`; the approved [Chinese text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md) has Git blob `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`. Later changes that only record this approval are editorial. The scope includes the owner's decision that withdrawal blocks new starts and further authorized actions without forcibly terminating running commands, and the 2026-10-28 acceptance that withdrawal has no strict upper bound if the server keeps withholding newer policies. Approval records intent, not deployment or two-member product acceptance.
