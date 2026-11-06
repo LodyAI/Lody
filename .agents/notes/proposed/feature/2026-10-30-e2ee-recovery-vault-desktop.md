@@ -22,8 +22,12 @@ The owner approved the [Spec](../../../../specs/e2ee/recovery-vault.md) revision
 on 2026-10-31. On 2026-11-06 the owner approved a [revision](../../implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)
 that adds iPhone and Web passkey unlock, admits any passkey returning a real PRF result,
 and makes the authenticated package's genesis the trust anchor. It supersedes decision 4's
-macOS-only scope and the independent confirmation. Nothing here has been tested on a real
-device.
+macOS-only scope and the independent confirmation.
+
+On 2026-11-06 the owner also approved [whole-vault replacement](../../implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
+for a lost or leaked recovery file. It keeps one current vault and one recovery file,
+allows one temporary `replacing` vault, and caps retired vaults at 16. It adds to, rather
+than replaces, the six decisions above. Nothing here has been tested on a real device.
 
 ## Problem
 
@@ -37,6 +41,9 @@ remains a draft until it follows decisions 2 and 3.
 ## Decisions and rejected options
 
 **1. Vault scope: one per account.** The core index already holds many workspace entries.
+The [whole-vault replacement revision](../../implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
+keeps one `current` vault and one recovery file, permits one temporary `replacing` vault,
+and caps retired vaults at 16.
 
 - _Rejected: one vault per workspace._ The user would have to keep a file per workspace, and
   each new workspace would need a new offline backup.
@@ -118,6 +125,7 @@ unchanged. Several things remain unverified:
 
 - whether the macOS and Windows user-presence mechanisms behave on real devices;
 - whether the native module and associated domain work in a Developer ID build;
+- whether the whole-vault replacement flow and its 16-retired-vault limit behave as specified;
 - the backend work listed above.
 
 The owner approved the R credential parameters with the Spec revision.

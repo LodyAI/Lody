@@ -149,6 +149,27 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 
 账本记录及其格式不变。批准只记录意图，不代表实现、部署或真机验收。
 
+## 恢复保险库整库换新
+
+2026-11-06，owner Zixuan Chen（zxch3n）在本人会话 `b12f1597-06ba-4a6e-944c-0395a7d58542`（账号 `js7cxcb4nzj3dpht6gc9vq8n517xznbm`，消息 `01a255e1-459c-4d10-947c-0210f3bcc9b1`）中，于 2026-11-06T18:22:22.775Z 批准了 [PR #2374](https://github.com/LodyAI/Lody/pull/2374)，head 为 `5484218fd5157af1fd1d637865934db852e1cd96`，原话是"批准，16 份"。获批文件如下：
+
+| 文件                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/recovery-vault.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/recovery-vault.md)             | `86953c0ea01020a5db93071e0dc1cf77eb0cb07b` |
+| [`specs/e2ee/recovery-vault.zh.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/recovery-vault.zh.md)       | `3793c3de37195c93c4dcc294e1f89b608e40f758` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/whitepaper.md)                     | `e00735bcb501e5de1d95c440baa57b0e0b5c4a09` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/whitepaper.zh.md)               | `a6362be095169d3840d81bac7f4f832b364ad5e7` |
+
+收尾提交只改这些文件的批准元数据，并让白皮书同步同一套已批准的整库换新含义，不改变已批准的要求。
+
+批准范围包括：
+
+- **整库换新。** 丢失恢复文件或怀疑文件泄露的用户，从一台仍可用的个人设备整库换新。设备创建并重新打开新文件，对这台设备能处理的每个工作区接纳新 R 并做真实信封测试，通过账本撤销旧 R，然后退役旧保险库并把新保险库设为当前。常规替换仍然需要 V。
+- **状态与 16 份上限。** 保险库状态为 `current`、`replacing` 或 `retired`；一个账号最多一个 `current` 和一个 `replacing`。已退役保险库单独计数，上限为 16 份，即 owner 批准的数字；超过后拒绝换新，直到有清理功能。已退役密文仍可读，不移除任何条目。
+- **权限。** 退役只需要已登录的 owner 和新保险库已有索引。被盗登录可以预留、放弃和切换，但不能撤销 R、读保险库、伪造恢复包，也不能阻止旧文件打开。恢复不看产品状态，由账本判定。
+- **旧文件还能做什么。** 对已换新的工作区，旧文件不能再接纳设备或收到新密钥，但持有旧文件和账号的人在换钥发布前仍能打开其中已有的密钥。换新不会抹掉副本。passkey 需要重新登记。
+- **限制。** 流程需要一台能用的个人设备；仍可用的 passkey 可以先恢复一台设备。设备处理不了的工作区会被列出，其旧 R 可能继续有效。账本格式和 `formatVersion: 1` 不变，流程默认关闭，恢复保险库仍不在 MVP 内。批准只记录意图，不代表已实现、已部署或真机验收。
+
 ## 机器共享
 
 2026-11-02，owner Zixuan Chen（zxch3n）通过合入 [PR #2228](https://github.com/LodyAI/Lody/pull/2228)（merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`）批准[机器共享 Spec](../../../../specs/e2ee/machine-sharing.zh.md)。获批[英文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md)的 Git blob 为 `37ce21f8e5a3db433b38ac0d2701fcacf6408080`；获批[中文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md)的 Git blob 为 `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`。之后仅记录本次批准的修改属于编辑性修改。范围包括 owner 的决定：撤回后不能启动新任务、不能做需要授权的后续动作，但不强制终止已在运行的命令；以及 2026-10-28 接受的风险：服务端持续扣住更新策略时，撤回生效没有严格上限。批准只记录意图，不代表部署或双成员产品验收。

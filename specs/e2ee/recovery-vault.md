@@ -1,13 +1,9 @@
 # Recovery vault
 
-Status: draft · [last approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
 Translation: current
 
 [中文](recovery-vault.zh.md)
-
-This draft proposes [whole-vault replacement](#whole-vault-replacement-proposed), awaiting
-owner approval. Until then, the revision approved on 2026-11-06 stays in force. That section
-and the one-vault paragraph it changes are the only intended changes.
 
 ## Approved format boundaries
 
@@ -124,7 +120,7 @@ surviving device remains the primary path; the vault covers the case where no
 device survives. Without a vault or a surviving device, that content is lost.
 
 **One vault per account.** An account has one current vault and one recovery file;
-[whole-vault replacement](#whole-vault-replacement-proposed) is the only time a second vault
+[whole-vault replacement](#whole-vault-replacement) is the only time a second vault
 exists. An account with a vault does not create another. The
 vault index holds one entry per workspace membership. Desktop security settings
 create the vault and write the file only to a location the user chooses; Lody never
@@ -360,7 +356,7 @@ ignores the file's `serviceLocator` for connecting; a mismatch stops. A survivin
 may compare workspaces, but nothing requires it. Existing limits are unchanged: a device
 that saw no newer state still cannot prove it holds the latest head.
 
-## Whole-vault replacement (proposed)
+## Whole-vault replacement
 
 **Scenario.** A user lost their recovery file, or fears it leaked, but still has a working
 personal device. Without the file there is no V, so nothing inside the old vault can change.
