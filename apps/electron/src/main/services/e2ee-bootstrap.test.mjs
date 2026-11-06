@@ -6,7 +6,13 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { Deferred, Effect, Exit, Fiber, Result } from 'effect'
-import { Bytes, decodeRecord, hashRecordBytes, verifyLedger } from '@lody/e2ee-core/protocol'
+import {
+  accountIdFromUserId,
+  Bytes,
+  decodeRecord,
+  hashRecordBytes,
+  verifyLedger
+} from '@lody/e2ee-core/protocol'
 import { makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 
@@ -34,7 +40,7 @@ const safeStorage = {
   }
 }
 const intent = Object.freeze({
-  accountId: 'synthetic-account',
+  accountId: '2w8hg7s65mt3pgj9a1bnwsbcedx48wr',
   requestId: 'request-0123456789',
   name: 'Encrypted example',
   slug: 'encrypted-example'
@@ -56,10 +62,6 @@ const openOwner = (directory, override = (custody) => custody) =>
       directory,
       accountId: intent.accountId,
       custody: override(custody)
-    })
-    yield* bootstrap.recordAccountIdentity({
-      accountId: intent.accountId,
-      cryptoUserId: 'aa'.repeat(32)
     })
     return { custody, bootstrap }
   })
@@ -280,7 +282,6 @@ void test('hard process exit releases creation ownership and preserves incomplet
             if(stage==='device-retained') process.exit(73);
           })))
         }});
-        yield* bootstrap.recordAccountIdentity({accountId:intent.accountId,cryptoUserId:'aa'.repeat(32)});
         yield* bootstrap.prepareCreation(intent);
         process.exit(74);
       })));
@@ -386,7 +387,7 @@ void test('pre-credential developer creations require recreation instead of gene
   assert.equal(Buffer.from(stored(directory).record).toString('hex'), prepared.genesisRecordHex)
 })
 
-void test('D03 fixed identity survives reopen and signs multiple workspaces without replacing older signed originals', async (t) => {
+void test('one account signs every workspace with its own account ID, without replacing older signed originals', async (t) => {
   const directory = await fixture(t)
   const first = await prepare(directory)
   const second = await prepare(directory, {
@@ -404,232 +405,8 @@ void test('D03 fixed identity survives reopen and signs multiple workspaces with
   assert.ok(firstBody.userId.equals(secondBody.userId))
   assert.ok(!firstBody.membershipId.equals(secondBody.membershipId))
   assert.notEqual(first.genesisHashHex, second.genesisHashHex)
-  const changed = await execute(
-    Effect.gen(function* () {
-      const owner = yield* openOwner(directory)
-      return yield* Effect.result(
-        owner.bootstrap.recordAccountIdentity({
-          accountId: intent.accountId,
-          cryptoUserId: 'bb'.repeat(32)
-        })
-      )
-    })
-  )
-  assert.equal(changed.failure.code, 'conflict')
+  assert.equal(Result.getOrThrow(accountIdFromUserId(firstBody.userId)), intent.accountId)
   assert.deepEqual(await prepare(directory), first)
-})
-
-void test('D03 no registration fails before signing and succeeds on the next explicit registration without deleting originals', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const custody = yield* makeDesktopE2eeCustody({
-        directory: join(directory, 'custody'),
-        platform: 'linux',
-        safeStorage
-      })
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody
-      })
-      assert.equal(yield* bootstrap.creationNeedsAccountIdentity(intent), true)
-      const missing = yield* Effect.result(bootstrap.prepareCreation(intent))
-      assert.equal(missing.failure.code, 'account-identity-required')
-      assert.equal(stored(directory).record, null)
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-      assert.equal(yield* bootstrap.creationNeedsAccountIdentity(intent), false)
-      const signed = yield* bootstrap.prepareCreation(intent)
-      assert.ok(signed.genesisRecordHex)
-    })
-  )
-})
-
-void test('D03 write-before-publication failure retains old signed originals and the next registration call recovers', async (t) => {
-  const directory = await fixture(t)
-  const original = await prepare(directory)
-  await unlink(join(directory, 'account-identity.json'))
-  let failLink = true
-  await execute(
-    Effect.gen(function* () {
-      const custody = yield* makeDesktopE2eeCustody({
-        directory: join(directory, 'custody'),
-        platform: 'linux',
-        safeStorage
-      })
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody,
-        identityFiles: {
-          unlink,
-          link: async (...args) => {
-            if (failLink)
-              throw Object.assign(new Error('synthetic publish unavailable'), { code: 'EIO' })
-            return link(...args)
-          }
-        }
-      })
-      assert.equal(yield* bootstrap.creationNeedsAccountIdentity(intent), false)
-      assert.deepEqual(yield* bootstrap.prepareCreation(intent), original)
-      const failed = yield* Effect.result(
-        bootstrap.recordAccountIdentity({
-          accountId: intent.accountId,
-          cryptoUserId: 'aa'.repeat(32)
-        })
-      )
-      assert.equal(failed.failure.code, 'storage')
-      failLink = false
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-      assert.deepEqual(yield* bootstrap.prepareCreation(intent), original)
-    })
-  )
-  assert.deepEqual(await prepare(directory), original)
-})
-
-void test('D03 lost publication acknowledgment and failed auxiliary unlink preserve the valid ID; next access owns cleanup', async (t) => {
-  const directory = await fixture(t)
-  let cleanupBlocked = true
-  await execute(
-    Effect.gen(function* () {
-      const custody = yield* makeDesktopE2eeCustody({
-        directory: join(directory, 'custody'),
-        platform: 'linux',
-        safeStorage
-      })
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody,
-        identityFiles: {
-          link: async (...args) => {
-            await link(...args)
-            throw new Error('synthetic lost link receipt')
-          },
-          unlink: async (...args) => {
-            if (cleanupBlocked) throw new Error('synthetic cleanup busy')
-            return unlink(...args)
-          }
-        }
-      })
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-      assert.equal(
-        (yield* Effect.promise(() => readdir(directory))).filter((name) =>
-          name.endsWith('.pending')
-        ).length,
-        1
-      )
-      // nlink=2 is our own valid published copy and must not poison the next read.
-      assert.equal(yield* bootstrap.creationNeedsAccountIdentity(intent), false)
-      const prepared = yield* bootstrap.prepareCreation(intent)
-      assert.ok(prepared.genesisRecordHex)
-      cleanupBlocked = false
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-      assert.equal(
-        (yield* Effect.promise(() => readdir(directory))).filter((name) =>
-          name.endsWith('.pending')
-        ).length,
-        0
-      )
-    })
-  )
-})
-
-void test('D03 unknown cache and symlink stay untouched and do not enroll or sign', async (t) => {
-  for (const state of ['unknown', 'symlink']) {
-    const directory = await fixture(t)
-    const path = join(directory, 'account-identity.json')
-    const foreign = Buffer.from('{"version":99,"opaque":"must remain"}')
-    if (state === 'unknown') await writeFile(path, foreign, { mode: 0o600 })
-    else {
-      await writeFile(join(directory, 'foreign'), foreign, { mode: 0o600 })
-      await symlink(join(directory, 'foreign'), path)
-    }
-    await execute(
-      Effect.gen(function* () {
-        const custody = yield* makeDesktopE2eeCustody({
-          directory: join(directory, 'custody'),
-          platform: 'linux',
-          safeStorage
-        })
-        const bootstrap = yield* makeDesktopE2eeBootstrap({
-          directory,
-          accountId: intent.accountId,
-          custody
-        })
-        assert.ok(
-          Result.isFailure(yield* Effect.result(bootstrap.creationNeedsAccountIdentity(intent)))
-        )
-        assert.ok(
-          Result.isFailure(
-            yield* Effect.result(
-              bootstrap.recordAccountIdentity({
-                accountId: intent.accountId,
-                cryptoUserId: 'aa'.repeat(32)
-              })
-            )
-          )
-        )
-      })
-    )
-    assert.deepEqual(await readFile(path), foreign)
-    assert.equal(stored(directory), undefined)
-  }
-})
-
-void test('D03 hard exit before or after atomic publication preserves the first identity and cleanup responsibility', async (t) => {
-  const { runCommand, ProcessSpawnerLive, NodeProcessLive } =
-    await import('@lody/shared/node/process')
-  for (const stage of ['before-publish', 'after-publish']) {
-    const directory = await fixture(t)
-    const child = `
-      import { Effect } from 'effect';
-      import { link,unlink } from 'node:fs/promises';
-      import { makeDesktopE2eeBootstrap } from ${JSON.stringify(new URL('./e2ee-bootstrap.mts', import.meta.url).href)};
-      const directory=process.argv[1],stage=process.argv[2];
-      await Effect.runPromise(Effect.scoped(Effect.gen(function*(){
-        const bootstrap=yield* makeDesktopE2eeBootstrap({ directory,accountId:'synthetic-account',custody:{},identityFiles:{unlink,link:async(...args)=>{
-          if(stage==='after-publish') await link(...args);
-          process.exit(stage==='before-publish'?73:74);
-        }}});
-        yield* bootstrap.recordAccountIdentity({accountId:'synthetic-account',cryptoUserId:'aa'.repeat(32)});
-      })));`
-    const result = await Effect.runPromise(
-      runCommand({
-        command: process.execPath,
-        args: [
-          '--import',
-          import.meta.resolve('tsx'),
-          '--input-type=module',
-          '-e',
-          child,
-          directory,
-          stage
-        ],
-        cwd: new URL('../../../', import.meta.url).pathname,
-        env: { ...process.env },
-        maxOutputBytes: 65536
-      }).pipe(Effect.provide(ProcessSpawnerLive), Effect.provide(NodeProcessLive))
-    )
-    assert.equal(result.code, stage === 'before-publish' ? 73 : 74, result.stderr.toString())
-    assert.equal((await readdir(directory)).filter((name) => name.endsWith('.pending')).length, 1)
-    const signed = await prepare(directory)
-    const body = Result.getOrThrow(decodeRecord(Buffer.from(signed.genesisRecordHex, 'hex'))).body
-    assert.equal(Buffer.from(body.userId.toBytes()).toString('hex'), 'aa'.repeat(32))
-    assert.equal((await readdir(directory)).filter((name) => name.endsWith('.pending')).length, 0)
-  }
 })
 
 void test('an unreserved old identity refusal removes only renderer intent and retains the exact signed host original', async (t) => {

@@ -11,7 +11,8 @@
     "./account-requester": "./src/account-requester.ts",
     "./history": "./src/admission.ts",
     "./errors": "./src/errors.ts",
-    "./maintenance": "./src/maintenance.ts"
+    "./maintenance": "./src/maintenance.ts",
+    "./recovery-restore": "./src/recovery-restore.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

@@ -561,11 +561,6 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
   return Object.freeze({
     close,
     mailbox,
-    accountIdentity: () =>
-      request(
-        (client) => client.action(api.e2eeWorkspaces.accountIdentity, {}),
-        z.object({ accountId: z.string().min(1), cryptoUserId: hash })
-      ),
     memberCreateInvitation: (args: E2eeMemberRequests['createInvitation']) => {
       const original = {
         ...memberDeviceAccess(args),

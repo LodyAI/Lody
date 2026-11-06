@@ -144,7 +144,6 @@ function liveAccountPairingCloud(accountId: string): AccountPairingCloud {
         : Effect.fail(new Error('e2ee_account_mismatch'))
   )
   return {
-    accountIdentity: () => Effect.flatMap(current, (client) => client.accountIdentity()),
     history: (request) => Effect.flatMap(current, (client) => client.history(request)),
     appendRecord: (request) => Effect.flatMap(current, (client) => client.appendRecord(request)),
     keyServices: (access) =>
@@ -987,22 +986,6 @@ export class E2eeIpc extends IpcService {
       await scope((owner) =>
         owner.accountId === cloud.accountId
           ? owner.bootstrap.retireMemberJoin(pending)
-          : Effect.fail(new Error('e2ee_account_mismatch'))
-      )
-    }
-    const needsIdentity = await scope((owner) =>
-      owner.accountId === cloud.accountId
-        ? owner.bootstrap.memberJoinNeedsAccountIdentity()
-        : Effect.fail(new Error('e2ee_account_mismatch'))
-    )
-    if (needsIdentity) {
-      const identity = await Effect.runPromise(cloud.client.accountIdentity())
-      await scope((owner) =>
-        owner.accountId === cloud.accountId
-          ? owner.bootstrap.recordAccountIdentity({
-              accountId: cloud.accountId,
-              cryptoUserId: identity.cryptoUserId
-            })
           : Effect.fail(new Error('e2ee_account_mismatch'))
       )
     }

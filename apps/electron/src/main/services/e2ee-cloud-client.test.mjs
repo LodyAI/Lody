@@ -766,15 +766,10 @@ void test('access loss authority belongs to a credential response, never an exce
               { status: 560 }
             )
           )
-          for (const operation of [
-            client.accountIdentity(),
-            client.history({ workspaceId: access.workspaceId })
-          ]) {
-            const result = yield* Effect.result(operation)
-            assert.equal(result._tag, 'Failure')
-            assert.equal(result.failure instanceof E2eeMemberRemovedError, false)
-            assert.equal(result.failure instanceof E2eeDeviceRevokedError, false)
-          }
+          const result = yield* Effect.result(client.history({ workspaceId: access.workspaceId }))
+          assert.equal(result._tag, 'Failure')
+          assert.equal(result.failure instanceof E2eeMemberRemovedError, false)
+          assert.equal(result.failure instanceof E2eeDeviceRevokedError, false)
         })
       )
     )

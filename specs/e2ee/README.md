@@ -10,4 +10,4 @@
 These Specs describe intended architecture and retain explicit unresolved decisions.
 They do not enable product E2EE or approve unfinished protocol formats.
 
-Unapproved recovery proposal: [recovery vault](recovery-vault.md). The [permission ledger](permission-ledger.zh.md) has a limited approval scope.
+Recovery: [recovery vault](recovery-vault.md), approved. The [permission ledger](permission-ledger.zh.md) has a limited approval scope.

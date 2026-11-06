@@ -72,16 +72,16 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 
 2026-11-01，owner Zixuan Chen（zxch3n）经 E2EE 总调度转达，明确批准 [PR #2182](https://github.com/LodyAI/Lody/pull/2182) 中 revision `65db7d694a6979a0dc8e380815ca033eeddb958c` 的账号级个人设备配对增量。
 
-| 文件 | 获批 Git blob |
-| --- | --- |
-| [`specs/e2ee-foundations.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.md) | `e43047a7ff7c05de6b256f7fb3a5b43318bfbdde` |
-| [`specs/e2ee-foundations.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.zh.md) | `01f22d4d70465eb6604452b397eed51f97e6a2d9` |
-| [`specs/e2ee/desktop-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.md) | `2c37197221c7cdb962592c84f8e107b6f8a26840` |
+| 文件                                                                                                                                                | 获批 Git blob                              |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee-foundations.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.md)               | `e43047a7ff7c05de6b256f7fb3a5b43318bfbdde` |
+| [`specs/e2ee-foundations.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.zh.md)         | `01f22d4d70465eb6604452b397eed51f97e6a2d9` |
+| [`specs/e2ee/desktop-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.md)       | `2c37197221c7cdb962592c84f8e107b6f8a26840` |
 | [`specs/e2ee/desktop-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.zh.md) | `c4b74bd01d78df7b1f01a43e114c7435d20c358d` |
-| [`specs/e2ee/client-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.md) | `422a7ffd3b25e4ecc4c04849c1746526d77257d8` |
-| [`specs/e2ee/client-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.zh.md) | `7f0ce06045376377a086d821f70bfcc8625ca03b` |
-| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.md) | `3b15f26057a3b4616d22ca172853faba1e80ece8` |
-| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.zh.md) | `dddb0b50c023d3b9474d88afccbef4f94e84a83e` |
+| [`specs/e2ee/client-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.md)         | `422a7ffd3b25e4ecc4c04849c1746526d77257d8` |
+| [`specs/e2ee/client-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.zh.md)   | `7f0ce06045376377a086d821f70bfcc8625ca03b` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.md)                 | `3b15f26057a3b4616d22ca172853faba1e80ece8` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.zh.md)           | `dddb0b50c023d3b9474d88afccbef4f94e84a83e` |
 
 获批 revision 为 `65db7d69`。之后的提交在这些文件中只改了批准元数据：增量标题和状态行、白皮书的已批准修订行、批准链接，以及随标题改名而变化的章节锚点。它们没有改变已批准的要求。
 
@@ -105,6 +105,70 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 - **客户端保管。** 移动端可以自动发起，网页端需要显式确认；任意个人设备都可以批准。
 
 批准只记录意图，不代表已实现、已部署或真机验收。撤销和移除的语义不变。
+
+## 恢复保险库 passkey 解锁与可信锚
+
+2026-11-06，owner Zixuan Chen（zxch3n）通过 E2EE 总调度转达，批准了 [PR #2343](https://github.com/LodyAI/Lody/pull/2343)，head 为 `dec61678ac7b63ebf7768a6986c1844b5f278ce9`，原话是"批准 2343"。获批文件如下：
+
+| 文件                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/recovery-vault.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/recovery-vault.md)             | `adc4a96b31fc9eef0f0935d9f7a4001ec01145fb` |
+| [`specs/e2ee/recovery-vault.zh.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/recovery-vault.zh.md)       | `7709935680e641a5537168b5b3c326cdf7fd0af0` |
+| [`specs/e2ee/permission-ledger.zh.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/permission-ledger.zh.md) | `211f81d09c67da2dd8e78586aab0e7ce2c273948` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/whitepaper.md)                     | `b7834f7922281ca5901cd98740294126fc346647` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/whitepaper.zh.md)               | `83fca1fe454e4c9bc8ef0c6bdd86be302b79ecae` |
+
+之后的提交只改这些文件的批准元数据，并让白皮书的 passkey 表述和 client custody 状态说明与获批的恢复保险库文本一致。
+
+批准范围包括：
+
+- **Passkey 解锁**覆盖 macOS、iPhone 和 Web。RP 主机是 `vault.lody.ai`；Web 是隔离的只解锁界面，晚于 macOS 和 iPhone，也接受恢复文件；该功能要求 iOS 18.4。
+- **认证器。** 标准 WebAuthn 加 PRF，不设白名单。注册时没有报告 PRF 就明确拒绝，并引导用户使用恢复文件。Lody 只承诺并测试 iCloud 钥匙串。
+- **可信锚。** 通过认证的恢复包里的 genesis 就是锚，用户不用另存任何东西。这取代了独立确认。账本校验和当前代钥承诺校验保留。
+- **接受的残余风险。** 恶意运营方或接管 Lody 账号的人，同时骗用户使用攻击者制作的文件或 passkey，可以展示假工作区，但拿不到真实密钥。
+- **时机。** 恢复和 passkey 工作并行推进，全部默认关闭。
+
+账本记录和 `formatVersion: 1` 不变。批准只记录意图，不代表已实现、已部署或已通过真机验收。
+
+## 账本用户编号即账户 ID
+
+2026-11-06T19:47:07Z，owner（Lody 账号 `js7cxcb4nzj3dpht6gc9vq8n517xznbm`，消息 `ac3cc04f-be5d-4497-b9e6-e144bc7171f5`）经 E2EE 协调会话（`b12f1597`）转达，批准了 [PR #2365](https://github.com/LodyAI/Lody/pull/2365) 的 head `0d35850c1b4dd1d9ed50ed39f51222ad740c60cb`。原话是“批准 #2365，#2374 用别的办法”。本记录只覆盖 #2365 这部分。批准的文件如下：
+
+| 文件                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/permission-ledger.zh.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/permission-ledger.zh.md) | `30b77b2ccedfdb6ef8a744e4c9565e962f082c68` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/whitepaper.md)                     | `ca583dec691023aa7d8aa0a8226335b7422e83b6` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/whitepaper.zh.md)               | `ddd77ddccf0b83f6f89f927124cd101fe743a5c1` |
+
+后续提交对这些文件只改批准元数据。
+
+范围是白皮书和 `permission-ledger` 中关于账本用户编号的段落，以及[决定](2026-11-06-e2ee-ledger-user-id.zh.md)里的编码规则：
+
+- **含义。** 账本中稳定的用户编号编码账户 ID。它只指明账户，不证明谁持有签名密钥。
+- **编码。** 32 字节：首字节为字符数，其后是小写 Crockford base32 字符，每个 5 位、高位在前，其余位为 0。生产首次开放加密工作区创建时永久冻结。
+
+账本记录及其格式不变。批准只记录意图，不代表实现、部署或真机验收。
+
+## 恢复保险库整库换新
+
+2026-11-06，owner Zixuan Chen（zxch3n）在本人会话 `b12f1597-06ba-4a6e-944c-0395a7d58542`（账号 `js7cxcb4nzj3dpht6gc9vq8n517xznbm`，消息 `01a255e1-459c-4d10-947c-0210f3bcc9b1`）中，于 2026-11-06T18:22:22.775Z 批准了 [PR #2374](https://github.com/LodyAI/Lody/pull/2374)，head 为 `5484218fd5157af1fd1d637865934db852e1cd96`，原话是"批准，16 份"。获批文件如下：
+
+| 文件                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/recovery-vault.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/recovery-vault.md)             | `86953c0ea01020a5db93071e0dc1cf77eb0cb07b` |
+| [`specs/e2ee/recovery-vault.zh.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/recovery-vault.zh.md)       | `3793c3de37195c93c4dcc294e1f89b608e40f758` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/whitepaper.md)                     | `e00735bcb501e5de1d95c440baa57b0e0b5c4a09` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/whitepaper.zh.md)               | `a6362be095169d3840d81bac7f4f832b364ad5e7` |
+
+收尾提交只改这些文件的批准元数据，并让白皮书同步同一套已批准的整库换新含义，不改变已批准的要求。
+
+批准范围包括：
+
+- **整库换新。** 丢失恢复文件或怀疑文件泄露的用户，从一台仍可用的个人设备整库换新。设备创建并重新打开新文件，对这台设备能处理的每个工作区接纳新 R 并做真实信封测试，通过账本撤销旧 R，然后退役旧保险库并把新保险库设为当前。常规替换仍然需要 V。
+- **状态与 16 份上限。** 保险库状态为 `current`、`replacing` 或 `retired`；一个账号最多一个 `current` 和一个 `replacing`。已退役保险库单独计数，上限为 16 份，即 owner 批准的数字；超过后拒绝换新，直到有清理功能。已退役密文仍可读，不移除任何条目。
+- **权限。** 退役只需要已登录的 owner 和新保险库已有索引。被盗登录可以预留、放弃和切换，但不能撤销 R、读保险库、伪造恢复包，也不能阻止旧文件打开。恢复不看产品状态，由账本判定。
+- **旧文件还能做什么。** 对已换新的工作区，旧文件不能再接纳设备或收到新密钥，但持有旧文件和账号的人在换钥发布前仍能打开其中已有的密钥。换新不会抹掉副本。passkey 需要重新登记。
+- **限制。** 流程需要一台能用的个人设备；仍可用的 passkey 可以先恢复一台设备。设备处理不了的工作区会被列出，其旧 R 可能继续有效。账本格式和 `formatVersion: 1` 不变，流程默认关闭，恢复保险库仍不在 MVP 内。批准只记录意图，不代表已实现、已部署或真机验收。
 
 ## 机器共享
 
