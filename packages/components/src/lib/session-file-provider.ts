@@ -1,3 +1,4 @@
+import type { FileDiffContentsLoader } from '@pierre/diffs';
 import type {
   CodeCollabAllChangesScope,
   CodeCollabContentUnavailableReason,
@@ -20,6 +21,11 @@ import {
 } from './file-workspace-provider';
 import type { DiffTextChunkSource } from './diff-text-chunk-source';
 
+export type SessionFileDiffContentsLoader = (
+  diff: Parameters<FileDiffContentsLoader>[0],
+  signal?: AbortSignal
+) => ReturnType<FileDiffContentsLoader>;
+
 export type SessionFileProviderMode = 'live' | 'historical-turn';
 
 export type {
@@ -36,12 +42,15 @@ export type {
 export type SessionFileDiffResult =
   | {
       readonly status: 'ready';
+      readonly contentKey?: string;
       readonly path: string;
       readonly oldSnapshot: FileWorkspaceSnapshot;
       readonly newSnapshot: FileWorkspaceSnapshot;
     }
   | {
       readonly status: 'ready-parsed';
+      readonly contentKey?: string;
+      readonly loadDiffFiles?: SessionFileDiffContentsLoader;
       readonly path: string;
       readonly fileDiff: FileDiffMetadata;
       readonly oldTextLength: number;
@@ -86,9 +95,12 @@ export type SessionFileChangedFilesResult =
 // batch (the caller fetches it on demand via `getDiff`).
 export type SessionFileAllChangesDiffEntry = {
   readonly path: string;
+  readonly kind?: CodeCollabFileKind;
   readonly add?: number;
   readonly del?: number;
-  readonly diff: SessionFileDiffResult | { readonly status: 'deferred' };
+  readonly diff:
+    | SessionFileDiffResult
+    | { readonly status: 'deferred'; readonly contentKey?: string };
 };
 
 export type SessionFileAllChangesDiffResult =
@@ -108,18 +120,25 @@ export type SessionFileAllChangesDiffResult =
 
 export interface SessionFileHistoryProvider {
   readonly supportsHistoricalDiffs?: boolean;
+  readonly supportsCancellableDiffReads?: boolean;
   getDiff(
     pathOrFileId: string,
     turnId?: string,
     fileDiff?: FileDiff,
-    options?: { readonly allChangesScope?: CodeCollabAllChangesScope }
+    options?: {
+      readonly allChangesScope?: CodeCollabAllChangesScope;
+      readonly signal?: AbortSignal;
+    }
   ): Promise<SessionFileDiffResult>;
   listChangedFiles(turnId?: string): Promise<SessionFileChangedFilesResult>;
+  /** A successful live Branch read can replace the older index-derived change list. */
+  subscribeChangedFiles?(listener: () => void): () => void;
   // Batched "All Changes" (current disk vs base) diff. Optional: providers that cannot
   // batch simply omit it and callers fall back to per-file getDiff.
   getAllChangesDiff?(
     focusPath?: string,
-    scope?: CodeCollabAllChangesScope
+    scope?: CodeCollabAllChangesScope,
+    signal?: AbortSignal
   ): Promise<SessionFileAllChangesDiffResult>;
 }
 

@@ -5,6 +5,10 @@ import type {
   RecordTurnDiffInput,
   RecordTurnDiffResult,
   SnapshotPathInput,
+  SnapshotDescriptorInput,
+  SnapshotDescriptor,
+  SnapshotBytesInput,
+  SnapshotBytes,
   TurnDiffGcResult,
   TurnDiffFileSummary,
   TurnDiffSnapshot,
@@ -24,6 +28,14 @@ type TimedInput<Input extends { readonly nowMs?: number }> = Omit<Input, 'nowMs'
 };
 
 export interface TurnDiffWorkerCommandMap {
+  readonly 'snapshot-descriptor': {
+    readonly request: { readonly input: TimedInput<SnapshotDescriptorInput> };
+    readonly result: SnapshotDescriptor;
+  };
+  readonly 'snapshot-bytes': {
+    readonly request: { readonly input: TimedInput<SnapshotBytesInput> };
+    readonly result: SnapshotBytes;
+  };
   readonly init: {
     readonly request: { readonly options: TurnDiffStoreOptions; readonly nowMs: number };
     readonly result: null;

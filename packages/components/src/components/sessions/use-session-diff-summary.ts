@@ -245,6 +245,13 @@ export function useSessionDiffSummary(
   const providerModeActive = enabled && fileProvider !== null;
   const [state, setState] = useState<SessionDiffSummaryState>(INITIAL_STATE);
   const [diffInputsVersion, setDiffInputsVersion] = useState(0);
+  const [changedFilesRevision, setChangedFilesRevision] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    return fileProvider?.subscribeChangedFiles?.(() =>
+      setChangedFilesRevision((value) => value + 1)
+    );
+  }, [enabled, fileProvider]);
   const historyRef = useRef<SessionHistoryInput>(undefined);
   /** The entries the last accepted pass produced, for the per-frame compare. */
   const diffInputsSeenRef = useRef<SessionHistoryInput | undefined>(undefined);
@@ -307,7 +314,8 @@ export function useSessionDiffSummary(
       return undefined;
     }
 
-    const history = historyRef.current;
+    // Live Changes does not depend on the optional conversation history reader.
+    const history = historyRef.current ?? (fileProvider ? [] : undefined);
     if (!history) {
       return undefined;
     }
@@ -439,7 +447,14 @@ export function useSessionDiffSummary(
     return () => {
       cancelled = true;
     };
-  }, [enabled, fileProvider, fileProviderPending, diffInputsVersion, sessionId]);
+  }, [
+    enabled,
+    fileProvider,
+    fileProviderPending,
+    diffInputsVersion,
+    changedFilesRevision,
+    sessionId,
+  ]);
 
   useEffect(() => {
     let cancelled = false;

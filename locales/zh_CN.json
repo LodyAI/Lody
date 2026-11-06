@@ -2176,6 +2176,8 @@
   "sessions.fileDiff.loadOnDemand": "需要时再加载此文件。",
   "sessions.fileDiff.loading": "正在加载差异…",
   "sessions.fileDiff.loadingChanges": "正在加载变更…",
+  "sessions.fileDiff.focusNoBranchChanges": "该文件相对分支基线已无改动。",
+  "sessions.fileDiff.noChanges": "没有修改。",
   "sessions.fileDiff.noUncommittedChanges": "没有未提交的修改。",
   "sessions.fileDiff.preparingLargeDiff": "正在准备差异",
   "sessions.fileDiff.preparingLargeDiffDescription": "{{path}} 的差异正在主线程外解析。",
