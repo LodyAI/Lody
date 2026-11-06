@@ -249,6 +249,14 @@ workflow's.
 
 Identity protection comes from each host's platform (`PersonalHostPlatform.protection`).
 
+## Restore from a vault
+
+`prepareVaultRestore` builds a restore plan from an unlocked vault on a device that knows
+nothing about the workspace. The genesis comes only from the authenticated package, and
+the platform's ports open after that. Core then verifies the ledger, the package checkpoint
+and the current-epoch commitment before R admits the new device. No product flow calls it
+yet. [Spec](../../specs/e2ee/recovery-vault.md).
+
 ## Verification and limits
 
 `pnpm --filter @lody/e2ee-client test` runs fixed proof/credential-boundary tests.

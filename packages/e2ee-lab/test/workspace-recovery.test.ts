@@ -15,6 +15,11 @@ import {
   wipeRecoveryPackage,
 } from '@lody/e2ee-core/protocol';
 import { makeSqliteProtectedEpochKeys } from '@lody/e2ee-core/internal';
+import {
+  listVaultWorkspaces,
+  prepareVaultRestore,
+  type VaultRestorePorts,
+} from '@lody/e2ee-client/recovery-restore';
 import { makeLabRecoveryVaultStore } from '../src/platform/recovery-vault-sqlite';
 import { makeLabScenarioFixture } from '../src/platform/scenario-fixture';
 import { openLabWorkspaceSession, makeLabWorkspacePlatform } from '../src/platform/full-session';
@@ -203,49 +208,52 @@ it('uses the public facade to set up/test a real R via HTTP, then restores into 
                       recoveryFile: created.recoveryFile,
                       ...storage,
                     });
-                    const installed = yield* makeSqliteProtectedEpochKeys({
-                      path: join(root, 'temporary-R-keys.sqlite'),
-                      mode: 'create',
-                      genesis: f.genesis,
-                      recipient: recoveryPublic,
-                      ledger: f.ledger,
-                      protector: labSyntheticProtector,
+                    const [reference, ...others] = yield* listVaultWorkspaces(vault);
+                    expect(others).toHaveLength(0);
+                    return yield* prepareVaultRestore({
+                      vault,
+                      local: storage.local,
+                      reference: reference!,
+                      personalSigner: fresh,
+                      ports: ({ genesis, membershipId: selected, recovery }) =>
+                        Effect.gen(function* () {
+                          expect(genesis.equals(f.genesis)).toBe(true);
+                          expect(selected.equals(membershipId)).toBe(true);
+                          const installed = yield* makeSqliteProtectedEpochKeys({
+                            path: join(root, 'temporary-R-keys.sqlite'),
+                            mode: 'create',
+                            genesis,
+                            recipient: recovery,
+                            ledger: f.ledger,
+                            protector: labSyntheticProtector,
+                          });
+                          temporaryInstalled = installed;
+                          return {
+                            ledger: f.ledger,
+                            installed,
+                            fetchCurrentEnvelope,
+                            submitOriginalAsRecovery: (record, identity) =>
+                              Effect.scoped(
+                                Effect.gen(function* () {
+                                  const r = yield* openLabExistingWorkspace({
+                                    baseUrl: f.host.baseUrl,
+                                    genesis,
+                                    signer: identity,
+                                    path: join(root, 'temporary-R-feed.sqlite'),
+                                    journalPath: join(root, 'temporary-R-journal.sqlite'),
+                                    mode: 'create',
+                                    checkpoint: () => Effect.sync(f.point),
+                                    budget: { maxRecords: 100, maxBytes: 1024 * 1024 },
+                                  });
+                                  const result = yield* r.control.executeOriginal(record);
+                                  yield* r.control.acknowledge(result);
+                                  return result;
+                                })
+                              ),
+                            acquirePersonal: () => platform.acquire('create'),
+                          } satisfies VaultRestorePorts;
+                        }),
                     });
-                    temporaryInstalled = installed;
-                    return {
-                      workflow: {
-                        vault,
-                        local: storage.local,
-                        genesis: f.genesis,
-                        membershipId,
-                        personalSigner: fresh,
-                        ledger: f.ledger,
-                        installed,
-                        trust,
-                        fetchCurrentEnvelope,
-                        submitOriginal: () =>
-                          Effect.fail(new Error('setup unavailable on temporary R restore owner')),
-                      },
-                      submitOriginalAsRecovery: (record, identity) =>
-                        Effect.scoped(
-                          Effect.gen(function* () {
-                            const r = yield* openLabExistingWorkspace({
-                              baseUrl: f.host.baseUrl,
-                              genesis: f.genesis,
-                              signer: identity,
-                              path: join(root, 'temporary-R-feed.sqlite'),
-                              journalPath: join(root, 'temporary-R-journal.sqlite'),
-                              mode: 'create',
-                              checkpoint: () => Effect.sync(f.point),
-                              budget: { maxRecords: 100, maxBytes: 1024 * 1024 },
-                            });
-                            const result = yield* r.control.executeOriginal(record);
-                            yield* r.control.acknowledge(result);
-                            return result;
-                          })
-                        ),
-                      acquirePersonal: () => platform.acquire('create'),
-                    };
                   }),
               })
             )
@@ -381,6 +389,8 @@ it('resumes a replacement interrupted between selecting the candidate and re-poi
           const index = yield* created.vault.readIndex();
           expect(index.value.entries.filter((ref) => !ref.retired)).toHaveLength(1);
           yield* owner.close();
+          expect(index.value.entries.length).toBeGreaterThan(1);
+          expect(yield* listVaultWorkspaces(created.vault)).toHaveLength(1);
         })
       )
     );
