@@ -6289,6 +6289,20 @@ describe('encrypted queued input evidence', () => {
       })
     ));
 
+  it('starts a queued input when only a repackaged frame of its row is retained', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        const from = h.doc.version();
+        yield* h.prepareOriginal(h.ownerRpc, 'catch-up-turn', ownerAccount);
+        yield* h.pushRowAsPeer('101', 'catch-up-turn', ownerAccount);
+        yield* h.forward('second', from);
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+      })
+    ));
+
   it('starts queued inputs from two devices of one member', () =>
     run(false, (h) =>
       Effect.gen(function* () {

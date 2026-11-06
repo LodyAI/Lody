@@ -68,7 +68,9 @@ change.
 - *Bind the queue row's writer to the frame's signer.* Tried and removed. It needs a retained
   update frame for the row, and a row that reaches the machine in a snapshot has none, so an
   ordinary queued input stayed pending until it expired. Frames can also carry other peers'
-  operations during catch-up, which made per-peer attribution unreliable.
+  operations during catch-up, and recovery reads backward from the newest page and stops at the
+  target, so a repackaged frame can be seen before the original. Attributing peers or operations
+  to frame signers would then refuse a legitimate send. Do not reintroduce it in another form.
 
 - *Refuse at promotion.* A refused row would need its own terminal path and could stall the
   queue, and every promotion route would need the check. The start gate already has one
@@ -94,8 +96,9 @@ change.
   real promoted row through this failure path.
 - Frames grow the Session document, as `rpcDispatchOriginals` already does; nothing is pruned.
 - A request signer unknown to a stale ledger is refused rather than retried.
-- Starting after a cancel or edit is not an absolute boundary, by owner decision on 2026-11-06:
-  the ordinary path comes first. A frame stays valid for its signer until its deadline, and
+- Starting after a cancel or edit is not an absolute boundary. The owner accepted this on
+  2026-11-06: "这个不需要是绝对边界：'取消或编辑后不得再执行'不是绝对边界，我们要优先保证主路径可用好用
+  流畅。" A frame stays valid for its signer until its deadline, and
   deletion from a shared document does not revoke bytes another reader kept. A queue row reusing
   it is bound to the signed content and Turn, not to the row's writer, and the journal still
   allows one start. So a current writer, or the signer itself, can run a withdrawn input that
