@@ -41,12 +41,9 @@ change.
   carrying it must be signed by this machine. `automationEvidence` checks that before admission
   touches the rule or Inbox, and `claim` checks it again. Pending evidence defers the turn;
   anything else skips admission and the claim refuses it visibly.
-- **Requester.** `userId` remains unsigned by ledger identity, and no crypto-to-account mapping
-  exists on the machine. Host-scoped credentials and identity follow the machine account, so
-  `claim` refuses a turn that names that account unless its principal is `owner`. This applies
-  to every encrypted start, because a directly written row reaches the same consumers. MCP
-  environment, machine Git identity and MCP account credentials compare the label with the
-  machine account, so a non-owner principal receives none of them.
+- **Requester.** `userId` is display data, and the machine has no crypto-to-account mapping.
+  Host-scoped credentials and identity follow the machine account, so `claim` accepts that
+  account as requester only for the `owner` principal, on every encrypted start.
 - **Sending.** An encrypted queue send waits past the 200 ms preparation deadline, up to
   `QUEUED_ORIGINAL_DEADLINE_MS` and the caller's signal, because it cannot proceed without the
   frame. If no frame arrives, the input is not sent and the sender sees that. The writer retries
@@ -65,12 +62,8 @@ change.
 
 ## Alternatives
 
-- *Bind the queue row's writer to the frame's signer.* Tried and removed. It needs a retained
-  update frame for the row, and a row that reaches the machine in a snapshot has none, so an
-  ordinary queued input stayed pending until it expired. Frames can also carry other peers'
-  operations during catch-up, and recovery reads backward from the newest page and stops at the
-  target, so a repackaged frame can be seen before the original. Attributing peers or operations
-  to frame signers would then refuse a legitimate send. Do not reintroduce it in another form.
+- *Bind the queue row's writer to the frame's signer.* Tried and removed: it refused ordinary
+  sends under normal sync and snapshot delivery. Do not reintroduce it in another form.
 
 - *Refuse at promotion.* A refused row would need its own terminal path and could stall the
   queue, and every promotion route would need the check. The start gate already has one
@@ -96,17 +89,12 @@ change.
   real promoted row through this failure path.
 - Frames grow the Session document, as `rpcDispatchOriginals` already does; nothing is pruned.
 - A request signer unknown to a stale ledger is refused rather than retried.
-- Starting after a cancel or edit is not an absolute boundary. The owner accepted this on
-  2026-11-06: "这个不需要是绝对边界：'取消或编辑后不得再执行'不是绝对边界，我们要优先保证主路径可用好用
-  流畅。" A frame stays valid for its signer until its deadline, and
-  deletion from a shared document does not revoke bytes another reader kept. A queue row reusing
-  it is bound to the signed content and Turn, not to the row's writer, and the journal still
-  allows one start. So a current writer, or the signer itself, can run a withdrawn input that
-  its signer once signed, within that deadline.
+- A queued input is decided by its signed original: the signer's current rights and the
+  consistency of its content. The journal ensures one start. Withdrawal is best effort by
+  product decision, not an absolute guarantee.
 - Follow-up: an abort that lands inside the writer's enqueue call has no effect, and `written`
   has no post-check for a commit that silently changes nothing.
-- `userId` is checked only against the machine account. One member can still label an input
-  as another for attribution, and `resume` still comes from Session metadata.
+- `resume` still comes from Session metadata.
 - A removal that races a promotion this replica has not seen deletes the frame, and that Turn
   is then refused at start.
 
