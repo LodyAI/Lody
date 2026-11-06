@@ -13,7 +13,10 @@ import type {
   SessionDocDraft,
   SessionDocStore,
 } from '../atoms/runtime';
+import { QueueSignalError } from '../lib/session-accepted-inputs';
 import type { WorkspaceWriter } from './workspace-writer';
+
+const QUEUE_SIGNAL_RETRY_DELAYS_MS = [250, 1_000];
 
 // # WorkspaceWriter implementation
 //
@@ -60,6 +63,27 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       messageQueueUpdatedAt: updatedAt,
       messageQueueUpdateVersion: { updatedAt, frontiers },
     });
+  };
+
+  // The row is already committed, so a transient metadata failure must not strand it:
+  // an idle Session is not watched, and this signal is what brings its machine back.
+  const signalQueuedRow = async (
+    sessionId: string,
+    frontiers: ReturnType<LoroDoc['frontiers']>
+  ): Promise<void> => {
+    for (const delayMs of QUEUE_SIGNAL_RETRY_DELAYS_MS) {
+      try {
+        await bumpMessageQueueWatermark(sessionId, frontiers);
+        return;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    try {
+      await bumpMessageQueueWatermark(sessionId, frontiers);
+    } catch (cause) {
+      throw new QueueSignalError('Queued input was written but its signal failed', { cause });
+    }
   };
 
   const withPreviewVisualCommentStore = async <T>(
@@ -185,7 +209,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
         // Capture before releasing the store or yielding to another queue edit.
         return store.doc.frontiers();
       });
-      await bumpMessageQueueWatermark(sessionId, frontiers);
+      await signalQueuedRow(sessionId, frontiers);
     },
 
     async removeSessionMessage(sessionId, itemId) {

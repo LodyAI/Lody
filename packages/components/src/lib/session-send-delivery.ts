@@ -17,7 +17,7 @@ import debug from 'debug';
 import i18next from 'i18next';
 import { v4 as uuidv4 } from 'uuid';
 import type { SessionDocDraft, WorkspaceRuntime } from '@/atoms/runtime';
-import { SessionInputNotSentError } from './session-accepted-inputs';
+import { QueueSignalError, SessionInputNotSentError } from './session-accepted-inputs';
 import {
   EncryptedPrepareTimeout,
   isKnownMachineWithdrawal,
@@ -143,13 +143,14 @@ export async function writeUserTurn(
     try {
       await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue!);
     } catch (error) {
-      // Only the row decides the outcome: once committed it can run, so this send happened.
-      if (!(await hasQueuedRow(runtime, send.sessionId, send.entry.id))) {
+      // A committed row can run, so a failed signal still means the send happened.
+      if (!(error instanceof QueueSignalError)) {
         await releaseQueuedOriginal(runtime, send.sessionId, send.entry.id);
         throw error;
       }
       log('queue signal failed after %s/%s was written: %o', send.sessionId, send.entry.id, error);
     }
+    // No abort check follows: from here the row exists, so the send cannot be reported as stopped.
   } else if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
   else await runtime.writer.appendSessionTurn(send.sessionId, send.entry);
   if (late && !send.queue) settleOnLateWithdrawal(runtime, send, late);
@@ -257,12 +258,6 @@ export async function removeQueuedOriginal(
       if (draft.queueDispatchOriginals) delete draft.queueDispatchOriginals[userTurnId];
     });
   });
-}
-
-async function hasQueuedRow(runtime: SessionSendRuntime, sessionId: SessionId, turnId: string) {
-  return runtime.sendResources.withSessionStore(sessionId, (store) =>
-    (store.getState().mq ?? []).some((item) => item.userTurnId === turnId)
-  );
 }
 
 /** Cleanup after a failed or finished write must not replace that write's own outcome. */

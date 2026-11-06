@@ -26,7 +26,8 @@ import {
 } from '../src/lib/session-send-delivery';
 import { EncryptedPrepareTimeout } from '../src/lib/encrypted-dispatch-outcome';
 import { createEncryptedDispatchLegacy } from '../src/providers/encrypted-dispatch-legacy';
-import { SessionInputNotSentError } from '../src/lib/session-accepted-inputs';
+import { QueueSignalError, SessionInputNotSentError } from '../src/lib/session-accepted-inputs';
+import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 
 const SESSION = 'session' as SessionId;
 const BROKEN = 'broken' as SessionId;
@@ -469,26 +470,133 @@ it('removes the stored original when the queue row cannot be written', async () 
   expect(queuedOriginal(f, input.id)).toBeUndefined();
 });
 
-it('reports a queued send as written when its row committed before the failure', async () => {
+const failingEnqueue = (f: ReturnType<typeof fixture>, error: Error, commit: boolean) => {
+  f.runtime.writer.enqueueSessionMessage = async (sessionId, item) => {
+    if (commit)
+      await f.runtime.sendResources.withSessionStore(sessionId as SessionId, (store) =>
+        store.setState((draft: { mq?: unknown[] }) => {
+          draft.mq = [...(draft.mq ?? []), item];
+        })
+      );
+    throw error;
+  };
+};
+const queuedSend = (f: ReturnType<typeof fixture>, input: SessionHistory, signal?: AbortSignal) => {
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch ??= async () => preparedOriginal('0f'.repeat(32));
+  return writeUserTurn(
+    f.runtime,
+    { sessionId: SESSION, entry: input, delivery: { kind: 'queue' }, queue: queueRow(input) },
+    signal
+  );
+};
+
+it('reports a queued send as written when only its signal failed', async () => {
   const f = fixture();
   const input = entry('queued-committed');
-  f.runtime.contentMode = 'e2ee';
-  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('0f'.repeat(32));
-  f.runtime.writer.enqueueSessionMessage = async (sessionId, item) => {
-    await f.runtime.sendResources.withSessionStore(sessionId as SessionId, (store) =>
-      store.setState((draft: { mq?: unknown[] }) => {
-        draft.mq = [...(draft.mq ?? []), item];
-      })
-    );
-    throw new Error('synthetic watermark failure');
-  };
-  await writeUserTurn(f.runtime, {
-    sessionId: SESSION,
-    entry: input,
-    delivery: { kind: 'queue' },
-    queue: queueRow(input),
-  });
+  failingEnqueue(f, new QueueSignalError('synthetic signal failure'), true);
+  await queuedSend(f, input);
   expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+});
+
+it('reports a queued send as written when its row already left the queue', async () => {
+  const f = fixture();
+  const input = entry('queued-promoted-early');
+  failingEnqueue(f, new QueueSignalError('synthetic signal failure'), false);
+  await queuedSend(f, input);
+  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+});
+
+it('surfaces any other failure after the row committed and keeps its original', async () => {
+  const f = fixture();
+  const input = entry('queued-unknown');
+  failingEnqueue(f, new Error('synthetic store failure'), true);
+  await expect(queuedSend(f, input)).rejects.toThrow('synthetic store failure');
+  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+});
+
+it('surfaces an abort raised by the queue write', async () => {
+  const f = fixture();
+  const input = entry('queued-abort-error');
+  failingEnqueue(f, new DOMException('stopped', 'AbortError'), true);
+  await expect(queuedSend(f, input)).rejects.toMatchObject({ name: 'AbortError' });
+});
+
+it('keeps the original and the write failure when the cleanup check fails', async () => {
+  const f = fixture();
+  const input = entry('queued-unreadable');
+  failingEnqueue(f, new Error('synthetic store failure'), false);
+  const prepare = f.runtime.prepareEncryptedDispatch;
+  f.runtime.prepareEncryptedDispatch = prepare ?? (async () => preparedOriginal('0f'.repeat(32)));
+  const withSessionStore = f.runtime.sendResources.withSessionStore;
+  let reads = 0;
+  f.runtime.sendResources.withSessionStore = ((sessionId, work) =>
+    withSessionStore(sessionId, (store, signal) => {
+      reads += 1;
+      // Prepare stores the original on the first access; every later read is unavailable.
+      if (reads > 2) throw new Error('synthetic read failure');
+      return work(store, signal);
+    })) as typeof withSessionStore;
+  await expect(queuedSend(f, input)).rejects.toThrow('synthetic store failure');
+  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+});
+
+it('treats a send aborted after its row committed as written', async () => {
+  const f = fixture();
+  const input = entry('queued-abort-after');
+  const abort = new AbortController();
+  let wrote = false;
+  f.runtime.writer.enqueueSessionMessage = async () => {
+    wrote = true;
+    abort.abort();
+  };
+  await queuedSend(f, input, abort.signal);
+  expect(wrote).toBe(true);
+});
+
+const queueWriter = (fails: number) => {
+  let attempts = 0;
+  const writer = createDirectWorkspaceWriter({
+    repo: {
+      upsertDocMeta: async () => {
+        attempts += 1;
+        if (attempts <= fails) throw new Error('synthetic meta failure');
+      },
+    } as never,
+    acquireSessionStore: async () =>
+      ({ setState: () => {}, doc: { frontiers: () => [] } }) as never,
+    releaseSessionStoreRef: () => {},
+    acquirePreviewVisualCommentStore: async () => ({}) as never,
+    releasePreviewVisualCommentStoreRef: () => {},
+  });
+  return { writer, attempts: () => attempts };
+};
+
+it('retries the queue signal within its bound', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { writer, attempts } = queueWriter(2);
+    const sent = writer.enqueueSessionMessage(SESSION, { userTurnId: 'retried' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await sent;
+    expect(attempts()).toBe(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('reports an exhausted queue signal as a signal failure', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { writer, attempts } = queueWriter(100);
+    const sent = writer.enqueueSessionMessage(SESSION, { userTurnId: 'exhausted' });
+    const outcome = expect(sent).rejects.toBeInstanceOf(QueueSignalError);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await outcome;
+    expect(attempts()).toBe(3);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('drops the new original when an encrypted queue edit cannot be written', async () => {
