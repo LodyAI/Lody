@@ -29,6 +29,8 @@
   authorship. Start needs that input's signed original or this machine's local receipt;
   only the owner principal may name the machine account as requester
   ([evidence](../../../../.agents/notes/implemented/bug-fix/2026-11-05-e2ee-queued-input-evidence.md)).
+- Encrypted requesters come from the verified signer; access is decided locally; row
+  `userId` is display only ([decision](../../../../.agents/notes/implemented/bug-fix/2026-11-06-e2ee-verified-requester.md)).
 - Absent meta is unknown, not foreign: hold the TTL-bounded RPC stash until meta lands or
   a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC

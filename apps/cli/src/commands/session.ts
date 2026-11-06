@@ -2601,6 +2601,13 @@ async function readResolvedSessionMachineAccess(args: {
   requester: ResolvedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
+  const daemon = getDaemonWorkspace();
+  if (daemon?.checkEncryptedMachineAccess)
+    return await daemon.checkEncryptedMachineAccess({
+      machineId: args.machineId,
+      requesterUserId: args.requester.userId,
+      ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+    });
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (args.auth !== environment.auth) throw new Error('Session command identity mismatch');

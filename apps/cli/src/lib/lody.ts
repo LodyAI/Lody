@@ -182,6 +182,8 @@ export class Lody {
         workspaceId: options.workspaceId,
         targetMachineId: options.machineId,
         machineUserId: options.cloudPort.identity.userId,
+        ledgerIdentity: e2ee.ledgerIdentity,
+        authorizeMachineTarget: e2ee.authorizeMachineTarget,
         journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
         authorizeExecution: options.authorizeEncryptedExecution ?? e2ee.authorizeExecution,
         isExecutionOpen: e2ee.isExecutionOpen,

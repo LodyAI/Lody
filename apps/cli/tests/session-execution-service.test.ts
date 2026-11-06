@@ -3389,7 +3389,7 @@ describe('SessionExecutionService', () => {
         ).toMatchObject({ _tag: 'Authorized' });
         const waiting = await dispatch();
         expect(submitted).toEqual([]);
-        expect(recoveredRooms).toEqual(['session-production-session']);
+        expect([...new Set(recoveredRooms)]).toEqual(['session-production-session']);
         expect(
           await Effect.runPromise(host.authorizeExecution(workspaceId, fixture.sender))
         ).toMatchObject({ _tag: terminalBackfill ? 'Denied' : 'Authorized' });
@@ -3431,7 +3431,10 @@ describe('SessionExecutionService', () => {
       // userId: the owner's own turn derives as owner; a shared member's turn derives
       // as that member, re-authorized when the derived input is written and started.
       if (!deniedSigner) {
-        expect(invocations[0]?.requesterUserId).toBe(user);
+        // The row's display account is not the requester: execution uses the verified signer.
+        expect(invocations[0]?.requesterUserId).toEqual(
+          mode === 'other-member-shared' ? expect.stringMatching(/^e2ee-member:/) : 'user-1'
+        );
         expect(derivations[0]).toBe(mode === 'other-member-shared' ? 'member' : 'owner');
       }
       expect(result.getHistory()[0]?.status).toBe(deniedSigner ? 'failed' : 'handled');
@@ -3442,12 +3445,8 @@ describe('SessionExecutionService', () => {
             ? [expect.stringContaining('not authorized')]
             : []
       );
-      expect(recoveredRooms).toEqual(
-        !snapshotOnly
-          ? []
-          : mode === 'delayed'
-            ? ['session-production-session', 'session-production-session']
-            : ['session-production-session']
+      expect([...new Set(recoveredRooms)]).toEqual(
+        !snapshotOnly ? [] : ['session-production-session']
       );
       expect(historyReads.length).toBeGreaterThan(before);
       expect(

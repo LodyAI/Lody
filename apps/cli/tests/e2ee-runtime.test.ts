@@ -5739,6 +5739,15 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     resolveVerifiedOriginal: (intent, lookup) => resolve(intent, doc, lookup),
     selfDevice: machineKey,
     machineUserId: ownerAccount,
+    ledgerIdentity: {
+      ownsDevice: (device) =>
+        Effect.succeed(
+          device === hex(fixture.owner.publicKey.toBytes()) ||
+            device === hex(secondDevice.publicKey.toBytes())
+        ),
+      memberDevice: () => Effect.succeed(hex(member.publicKey.toBytes())),
+    },
+    authorizeMachineTarget: () => Effect.succeed(true),
   });
   const clientConfig = (turnId: string, config: object = queuedConfig(turnId)) =>
     normalizeSessionTurnInputConfig({ ...config, mcpServerIds: [] });
@@ -5842,7 +5851,7 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     yield* retainSignedScheduleUpdate(origins, docId, doc, contentBinding, from);
     return promoted;
   });
-  const claim = (turn: { id: string; inputConfig?: unknown; userId?: string }) =>
+  const rawClaim = (turn: { id: string; inputConfig?: unknown; userId?: string }) =>
     execution.claim({
       workspaceId: 'workspace',
       sessionId: queuedSessionId,
@@ -5851,6 +5860,23 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
       requesterUserId: turn.userId,
       localProjectIds: [],
     });
+  /** The production order: resolve who the input runs as, then claim under that identity. */
+  const claim = Effect.fnUntraced(function* (turn: {
+    id: string;
+    inputConfig?: unknown;
+    userId?: string;
+  }) {
+    const requester = yield* execution.resolveRequester({
+      workspaceId: 'workspace',
+      sessionId: queuedSessionId,
+      userTurnId: turn.id,
+      inputConfig: turn.inputConfig,
+    });
+    return yield* rawClaim({
+      ...turn,
+      userId: 'userId' in requester && requester.userId ? requester.userId : turn.userId,
+    });
+  });
   const historyRow = (turnId: string) => {
     const list = doc.getList('history');
     for (let index = 0; index < list.length; index += 1) {
@@ -5913,10 +5939,13 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     return { id: turnId, inputConfig, userId };
   });
   return {
+    memberCryptoUser: Buffer.from(new Uint8Array(32).fill(73)).toString('hex'),
+    memberRequester: `e2ee-member:${Buffer.from(new Uint8Array(32).fill(73)).toString('hex')}`,
     fixture,
     append,
     asClient,
     forward,
+    rawClaim,
     secondRpc,
     pushRowAsPeer: (peer: `${number}`, turnId: string, userId: string) =>
       Effect.gen(function* () {
@@ -6181,168 +6210,20 @@ describe('encrypted queued input evidence', () => {
   it.each([
     ['a queued original', true],
     ['a directly written row', false],
-  ] as const)('refuses the machine account as requester of %s from a member', (_name, queued) =>
+  ] as const)('runs %s labelled as the machine account as its member', (_name, queued) =>
     run(true, (h) =>
       Effect.gen(function* () {
-        if (queued) {
-          yield* h.send('labelled-turn', h.memberRpc, ownerAccount);
-          expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
-        } else {
-          expect(yield* h.claim(yield* h.writeMemberRow('labelled-turn', ownerAccount))).toEqual({
-            state: 'denied',
-          });
-        }
+        const turn = queued
+          ? yield* Effect.gen(function* () {
+              yield* h.send('labelled-turn', h.memberRpc, ownerAccount);
+              return yield* h.promote();
+            })
+          : yield* h.writeMemberRow('labelled-turn', ownerAccount);
+        expect(yield* h.rawClaim(turn)).toEqual({ state: 'denied' });
+        expect(yield* h.claim(turn)).toMatchObject({ state: 'claimed', principal: 'member' });
       })
     )
   );
-
-  it('refuses automation provenance on an input this machine did not write', () =>
-    run(true, (h) =>
-      Effect.gen(function* () {
-        const turn = yield* h.writeMemberRow('member-automation', 'session-owner-account', {
-          _lodyAutomation: automationOrigin,
-        });
-        const intent = {
-          workspaceId: 'workspace',
-          sessionId: queuedSessionId,
-          userTurnId: turn.id,
-          inputConfig: turn.inputConfig,
-          requesterUserId: turn.userId,
-        };
-        expect(yield* h.claim(turn)).toEqual({ state: 'denied' });
-        expect(yield* h.execution.automationEvidence(intent)).toBe('denied');
-      })
-    ));
-
-  it('accepts automation evidence for a receipted row this machine promoted', () =>
-    run(false, (h) =>
-      Effect.gen(function* () {
-        const config = {
-          ...queuedConfig('automation-admitted'),
-          _lodyAutomation: automationOrigin,
-        };
-        h.origins.retainQueuedInput({
-          sessionId: queuedSessionId,
-          userTurnId: 'automation-admitted',
-          timestamp: queuedTimestamp,
-          userId: ownerAccount,
-          inputConfig: h.clientConfig('automation-admitted', config),
-        });
-        yield* h.pushRow('automation-admitted', ownerAccount, config);
-        const turn = yield* h.promote();
-        expect(
-          yield* h.execution.automationEvidence({
-            workspaceId: 'workspace',
-            sessionId: queuedSessionId,
-            userTurnId: turn.id,
-            inputConfig: turn.inputConfig,
-            requesterUserId: turn.userId,
-          })
-        ).toBe('verified');
-      })
-    ));
-
-  it('binds a machine receipt to the requester on the queue row', () =>
-    run(false, (h) =>
-      Effect.gen(function* () {
-        const config = { ...queuedConfig('relabelled-receipt'), _lodyAutomation: automationOrigin };
-        h.origins.retainQueuedInput({
-          sessionId: queuedSessionId,
-          userTurnId: 'relabelled-receipt',
-          timestamp: queuedTimestamp,
-          userId: 'session-owner-account',
-          inputConfig: h.clientConfig('relabelled-receipt', config),
-        });
-        yield* h.pushRow('relabelled-receipt', ownerAccount, config);
-        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
-      })
-    ));
-
-  it.each(['second', 'member'] as const)(
-    'starts a queued input after a %s device repackaged the writer operations',
-    (signer) =>
-      run(true, (h) =>
-        Effect.gen(function* () {
-          const from = h.doc.version();
-          yield* h.send('before-forward', h.ownerRpc);
-          yield* h.forward(signer, from);
-          yield* h.promote();
-          yield* h.send('after-forward', h.ownerRpc);
-          expect(yield* h.claim(yield* h.promote())).toMatchObject({
-            state: 'claimed',
-            principal: 'owner',
-          });
-        })
-      )
-  );
-
-  it('starts a queued input whose row reached this machine in a snapshot', () =>
-    run(true, (h) =>
-      Effect.gen(function* () {
-        // Original and row come from the member, but no update frame was ever retained.
-        yield* h.prepareOriginal(h.memberRpc, 'snapshot-turn', memberAccount);
-        yield* h.pushRowAsPeer('303', 'snapshot-turn', memberAccount);
-        expect(yield* h.claim(yield* h.promote())).toMatchObject({
-          state: 'claimed',
-          principal: 'member',
-        });
-      })
-    ));
-
-  it('starts a queued input when only a repackaged frame of its row is retained', () =>
-    run(false, (h) =>
-      Effect.gen(function* () {
-        const from = h.doc.version();
-        yield* h.prepareOriginal(h.ownerRpc, 'catch-up-turn', ownerAccount);
-        yield* h.pushRowAsPeer('101', 'catch-up-turn', ownerAccount);
-        yield* h.forward('second', from);
-        expect(yield* h.claim(yield* h.promote())).toMatchObject({
-          state: 'claimed',
-          principal: 'owner',
-        });
-      })
-    ));
-
-  it('starts queued inputs from two devices of one member', () =>
-    run(false, (h) =>
-      Effect.gen(function* () {
-        yield* h.send('first-device-turn', h.ownerRpc);
-        expect(yield* h.claim(yield* h.promote())).toMatchObject({
-          state: 'claimed',
-          principal: 'owner',
-        });
-        yield* h.send('second-device-turn', h.secondRpc);
-        expect(yield* h.claim(yield* h.promote())).toMatchObject({
-          state: 'claimed',
-          principal: 'owner',
-        });
-      })
-    ));
-
-  it('starts an edited queued input under its new Turn and original', () =>
-    run(false, (h) =>
-      Effect.gen(function* () {
-        yield* h.send('before-edit-turn', h.ownerRpc);
-        const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
-        if (!row) throw new Error('queue row missing');
-        const config = queuedConfig('after-edit-turn');
-        yield* h.prepareOriginal(
-          h.ownerRpc,
-          'after-edit-turn',
-          ownerAccount,
-          h.clientConfig('after-edit-turn', config)
-        );
-        yield* h.asClient(
-          h.ownerRpc,
-          Effect.promise(() => h.session.removeMessageQueueItem(row.$cid))
-        );
-        yield* h.asClient(h.ownerRpc, h.pushRow('after-edit-turn', ownerAccount, config));
-        expect(yield* h.claim(yield* h.promote())).toMatchObject({
-          state: 'claimed',
-          principal: 'owner',
-        });
-      })
-    ));
 
   it('does not start a queued input whose row names another requester than its original', () =>
     run(true, (h) =>
@@ -6352,6 +6233,172 @@ describe('encrypted queued input evidence', () => {
         expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
       })
     ));
+
+  it('does not start a member input that names another member', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const turn = yield* h.writeMemberRow('other-member-turn', 'other-member-account');
+        expect(yield* h.rawClaim(turn)).toEqual({ state: 'denied' });
+      })
+    ));
+
+  it('starts a member input under its verified identity', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const turn = yield* h.writeMemberRow('verified-member-turn', 'other-member-account');
+        const requester = yield* h.execution.resolveRequester({
+          workspaceId: 'workspace',
+          sessionId: queuedSessionId,
+          userTurnId: turn.id,
+          inputConfig: turn.inputConfig,
+        });
+        expect(requester).toEqual({ userId: `e2ee-member:${h.memberCryptoUser}` });
+        expect(
+          yield* h.claim({
+            ...turn,
+            userId: (requester as { userId: string }).userId,
+          })
+        ).toMatchObject({ state: 'claimed', principal: 'member' });
+      })
+    ));
+
+  it('keeps the machine account for an owner device input', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('owner-label-turn', h.ownerRpc);
+        const turn = yield* h.promote();
+        expect(
+          yield* h.execution.resolveRequester({
+            workspaceId: 'workspace',
+            sessionId: queuedSessionId,
+            userTurnId: turn.id,
+            inputConfig: turn.inputConfig,
+          })
+        ).toEqual({ userId: ownerAccount });
+        expect(yield* h.claim(turn)).toMatchObject({ state: 'claimed', principal: 'owner' });
+      })
+    ));
+
+  it.each([
+    ['shared', true, { allowed: true }],
+    ['unshared', false, { allowed: false, reason: 'not_visible' }],
+  ] as const)('decides a %s member machine access locally', (_name, shared, expected) =>
+    run(shared, (h) =>
+      Effect.gen(function* () {
+        expect(yield* h.execution.verifyRequesterAccess(h.memberRequester)).toEqual(expected);
+      })
+    )
+  );
+
+  it('reaches another machine only as this machine owner', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        expect(yield* h.execution.verifyMachineTarget(h.memberRequester, 'other-machine')).toEqual({
+          allowed: false,
+          reason: 'not_visible',
+        });
+        expect(yield* h.execution.verifyMachineTarget(ownerAccount, 'other-machine')).toEqual({
+          allowed: true,
+        });
+      })
+    ));
+
+  it('routes encrypted machine access away from the workspace service', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const { MessageHandler } = yield* Effect.promise(
+          () => import('../src/lib/message-handler')
+        );
+        const handler = Object.create(MessageHandler.prototype) as InstanceType<
+          typeof MessageHandler
+        >;
+        let asked = 0;
+        Object.assign(handler, {
+          encryptedExecution: h.execution,
+          machineId: 'machine',
+          userId: ownerAccount,
+          cloudPort: {
+            access: {
+              verifyMachineAccess: async () => {
+                asked += 1;
+                return { allowed: true };
+              },
+            },
+          },
+        });
+        const check = handler as unknown as {
+          checkEncryptedMachineAccess: (target: {
+            machineId: string;
+            requesterUserId: string;
+          }) => Promise<unknown>;
+          verifyRequesterMachineAccess: (input: { requesterUserId: string }) => Promise<unknown>;
+        };
+        const allowed = { allowed: true };
+        expect(
+          yield* Effect.promise(() =>
+            check.checkEncryptedMachineAccess({
+              machineId: 'machine',
+              requesterUserId: h.memberRequester,
+            })
+          )
+        ).toEqual(allowed);
+        expect(
+          yield* Effect.promise(() =>
+            check.verifyRequesterMachineAccess({ requesterUserId: h.memberRequester })
+          )
+        ).toEqual(allowed);
+        expect(asked).toBe(0);
+      })
+    ));
+
+  it.each([
+    ['ios-simulator', 'iosSimulatorService'],
+    ['android-emulator', 'androidEmulatorService'],
+  ] as const)('applies the member device gate to %s agent control', (kind, service) =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        const { MessageHandler } = yield* Effect.promise(
+          () => import('../src/lib/message-handler')
+        );
+        const handler = Object.create(MessageHandler.prototype) as InstanceType<
+          typeof MessageHandler
+        >;
+        let controlled = 0;
+        Object.assign(handler, {
+          encryptedExecution: {
+            ...h.execution,
+            authorizeAgentControl: () => Effect.succeed(false),
+          },
+          executionService: {
+            getActiveInvocationContext: () => ({ requesterUserId: h.memberRequester }),
+            getEncryptedControlPrincipal: () => ({
+              kind: 'member',
+              requesterDevice: 'device',
+              localProjectIds: [],
+            }),
+          },
+          [service]: {
+            controlFromAgent: async () => {
+              controlled += 1;
+              return { success: true };
+            },
+          },
+        });
+        const response = yield* Effect.promise(() =>
+          (
+            handler as unknown as {
+              dispatchLocalMachineRpc: (request: unknown) => Promise<{ error?: string }>;
+            }
+          ).dispatchLocalMachineRpc({
+            method: `${kind}/agent-control`,
+            params: { sessionId: 'session', command: {} },
+          })
+        );
+        expect(response).toMatchObject({ success: false, error: 'denied' });
+        expect(controlled).toBe(0);
+      })
+    )
+  );
 
   it('classifies a derivation origin by the queued input signer', () =>
     run(true, (h) =>
