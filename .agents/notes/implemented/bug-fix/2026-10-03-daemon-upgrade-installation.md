@@ -1,62 +1,53 @@
-# Bind daemon upgrade handoff to the verified installation
+# Bind daemon updates to a stable recovery owner
 
 Status: implemented
 Translation: current
 PR: https://github.com/LodyAI/Lody/pull/1228
+Supersedes: [Windows npm shim](../../archived/bug-fix/2026-09-08-windows-daemon-upgrade.md)
 
 [中文](2026-10-03-daemon-upgrade-installation.zh.md)
 
 ## Abstract
 
-Remote upgrade installed Lody globally but spawned its replacement watchdog from
-the old watchdog's argv. A daemon launched from an npx cache could repeatedly
-install successfully while continuing to run the old version. The installer now
-returns an explicit, executable-version-checked entry from the installing npm's
-global root, and handoff requires matching-version readiness. External autostart
-definitions still require a one-time correction; code downloaded by an old
-watchdog cannot retroactively change that watchdog's handoff behavior.
+A daemon launched from an npx cache could install successfully while respawning its
+old entry; installed and running identity are different facts. Managed updates use
+signed immutable releases beneath a fixed SEA watchdog. That root retains the Host
+lease and observes the actual replacement before committing an operation. A separate
+ordinary Node increases initial download size; uncertain termination blocks recovery.
 
-## Decision and scope
+## Decision and rationale
 
-Resolve `npm root -g` through the same npm environment used by the global install.
-Read the installed package's declared bin instead of assuming its bundle layout,
-check package identity and exact requested version (or the concrete installed
-version for `latest`), constrain the resolved entry to the package, and execute
-that entry's `--version` before releasing the old Host lease. A PATH lookup for
-`lody` was rejected because inherited npx or alternate Node-installation paths
-can still select the old package.
+The earlier verified npm-bin handoff fixed destination selection but still depended
+on the user's npm environment, native installation scripts and lease handoff between
+owners. Windows shims additionally require an interpreter; quoting cannot solve
+installation ownership. PATH lookup and modifying shared global packages remain
+unsuitable update mechanisms.
 
-```text
-npm install -g -> npm root -g -> package/bin and executable version verification
-  -> release old Host -> spawn explicit installed entry -> matching-version ready
-```
+The fixed entry reads durable selection and operations in the existing data directory.
+It starts verified physical CLI files using an independently cached official Node.
+External Agent JS, keychain helpers and Workers require ordinary Node: SEA executes
+its embedded entry, not arbitrary scripts. Native modules retain their signed bytes.
+Each SEA also embeds Node, so initial transfer includes both runtime images. Reusing
+the existing watchdog avoids a new Rust launcher and overlapping restart owners.
 
-Ordinary launch behavior keeps its existing argv and legacy-ready compatibility.
-Upgrade handoff carries the verified entry/version across the termination boundary.
-Missing or incorrect readiness versions use the existing exact-child cleanup and
-ownership-aware recovery, without logging upgrade success. An older target without
-versioned readiness needs an explicit local restart. Recovery does not restore
-package files overwritten by npm.
+All old npm watchdogs need an explicit local migration and external service-entry
+correction; downloaded code cannot retroactively teach the old process this protocol.
+Arbitrary user services are never rewritten. Fixed-entry replacement stays an explicit
+installer operation rather than creating another self-replacement recovery cycle.
 
-This complements the [Windows npm shim fix](2026-09-08-windows-daemon-upgrade.md),
-which addressed command execution, not destination selection. The new
-[draft contract](../../../../specs/daemon-upgrade-installation.md) and
-[CLI recovery instructions](../../../../apps/cli/README.md#daemon-upgrades-and-autostart)
-describe current behavior. User-owned startup scripts are not rewritten or scanned;
-Windows and WSL installations must be repaired separately.
+Preparation keeps the old Worker serving. Only confirmed drain and termination allow
+a successor writer. An operation ID binds one target and its choices. Download ACK
+is not application evidence: exact running identity is required. Rollback persists
+the retained selection as well as its outcome. Network loss does not prove local
+failure. Windows automatic updates and encrypted lifecycle operations remain unsupported
+until their specific ownership and authorization boundaries are implemented.
 
-## Verification and limits
+## Evidence and limits
 
-Synthetic npm shims and real Node child processes cover install success/failure,
-global roots containing spaces, old npx argv, exact-version rejection, missing or
-escaping bins, executable-version mismatch, failed root lookup, cancellation,
-preserved arguments, and versioned readiness. Tests invoke no registry or real
-global installer. Real npm replacement and Windows/WSL device acceptance remain
-unverified; successful local tests do not establish those deployment guarantees.
-
-The four targeted suites pass (36 tests). Repository typechecking, lint, formatting,
-i18n/import/platform/public-boundary checks, and `pnpm run docs check` pass.
-`pnpm check` stops at the unmodified `workspace-git-service.test.ts` GitHub-remote
-backfill assertion (CLI: 3490 passed, one failed, four skipped); that failure also
-reproduces when the suite runs alone. The remaining full-workspace tests are not
-claimed as passed.
+The [installation contract](../../../../specs/daemon-upgrade-installation.md),
+[packaging guide](../../../../apps/cli/scripts/sea/README.md),
+[signed-release tests](../../../../apps/cli/src/lib/managed-daemon-release.test.ts) and
+[native fixture](../../../../apps/cli/scripts/sea/native-acceptance.mjs) cover different
+boundaries. Artifact probes do not establish full Agent acceptance or production
+signing. POSIX group tracking is cooperative process ownership, not a container
+against hostile children escaping their groups.

@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import path from 'node:path';
 import {
   accessSync,
@@ -335,7 +336,7 @@ child.on('exit', (code, signal) => { if (signal) process.kill(process.pid, signa
   if (process.platform === 'win32') {
     writeIfChanged(
       path.join(directory, 'git.cmd'),
-      `@echo off\r\n"${process.execPath}" "%~dp0git" %*\r\n`
+      `@echo off\r\n"${getCliNodeExecutable()}" "%~dp0git" %*\r\n`
     );
   }
   // Written last: a marker exists only for a fully materialized transport.

@@ -1,3 +1,8 @@
+import {
+  getSeaContext,
+  getCliNodeExecutable,
+  managedDaemonRoot,
+} from '@/lib/managed-daemon-release';
 import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -313,6 +318,12 @@ export async function spawnDaemonRunnerAndAwaitReady(
   } = {}
 ): Promise<SpawnDaemonRunnerResult> {
   const bin = options.installation?.bin ?? resolveLodyBin();
+  const sea = options.installation ? null : getSeaContext();
+  const fixedService = sea
+    ? path.join(managedDaemonRoot(), process.platform === 'win32' ? 'service.exe' : 'service')
+    : null;
+  if (fixedService && !fs.existsSync(fixedService))
+    throw new Error('Run daemon install before starting the managed service.');
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     [DAEMON_RUNNER_READY_FD_ENV]: String(DAEMON_RUNNER_READY_FD),
@@ -329,10 +340,11 @@ export async function spawnDaemonRunnerAndAwaitReady(
   // Windows, so the runner outlives the terminal that started it.
   const runner = startProcessLegacy(
     {
-      command: process.execPath,
+      command: fixedService ?? getCliNodeExecutable(),
       args: [
-        `--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`,
-        bin,
+        ...(sea
+          ? [`--node-options=--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`]
+          : [`--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`, bin]),
         'daemon-runner',
         ...passthroughArgs,
       ],

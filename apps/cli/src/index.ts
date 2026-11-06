@@ -4,6 +4,10 @@
 // 32-bit ARM has no prebuild. See utils/sqlite-runtime-support.ts.
 import './utils/sqlite-runtime-support';
 import './instrument';
+import {
+  configureManagedProcessObservation,
+  getManagedWorkerLaunchContext,
+} from './lib/managed-process-observation';
 import { Command } from 'commander';
 import { Cause, Effect, Layer } from 'effect';
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
@@ -34,6 +38,8 @@ import { applyDefaultDnsResultOrder } from './utils/dns-result-order';
 
 // Internal MCP processes use the same runtime and cleanup policy without retaining
 // the daemon, interactive commands and their unrelated implementation modules.
+configureManagedProcessObservation(getManagedWorkerLaunchContext().protocol);
+
 const registerUserCommands =
   process.argv[2] === '__internal'
     ? undefined

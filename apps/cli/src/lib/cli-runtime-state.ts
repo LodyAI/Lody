@@ -25,6 +25,7 @@ type UpsertCliRuntimeIssueInput = {
 type CliRuntimeStateReporterOptions = {
   machineId?: MachineId;
   pid?: number;
+  cliVersion?: string;
   supervisor?: CliRuntimeState['supervisor'];
   trackBackendConnectionAge?: boolean;
   now?: () => number;
@@ -32,6 +33,7 @@ type CliRuntimeStateReporterOptions = {
 
 export class CliRuntimeStateReporter {
   private readonly pid: number;
+  private readonly cliVersion?: string;
   private readonly supervisor: CliRuntimeState['supervisor'];
   private phase: CliRuntimePhase = 'starting';
   private startupStage: CliRuntimeStartupStage | undefined = 'bootstrap';
@@ -50,6 +52,7 @@ export class CliRuntimeStateReporter {
 
   constructor(options: CliRuntimeStateReporterOptions = {}) {
     this.pid = options.pid ?? process.pid;
+    this.cliVersion = options.cliVersion;
     this.machineId = options.machineId;
     this.supervisor = options.supervisor;
     this.trackBackendConnectionAge = options.trackBackendConnectionAge ?? true;
@@ -242,6 +245,7 @@ export class CliRuntimeStateReporter {
 
     return {
       schemaVersion: 1,
+      ...(this.cliVersion ? { cliVersion: this.cliVersion } : {}),
       phase: this.phase,
       startupStage: this.startupStage,
       connectivity: this.connectivity,

@@ -1,3 +1,17 @@
+import { ManagedDaemonUpgradeOptionsSchema } from '@lody/shared';
+import { EXIT_CODE_REMOTE_UPGRADE } from '@/lib/machine-lifecycle';
+import {
+  confirmManagedProcessTreesGone,
+  pruneManagedProcessTrees,
+  getManagedWorkerLaunchContext,
+} from '@/lib/managed-process-observation';
+import { Effect } from 'effect';
+import { requestManagedPreparation } from '@/lib/managed-daemon-ipc';
+import {
+  pauseMachineTurnsIfIdle,
+  pauseMachineTurns,
+  resumeMachineTurns,
+} from '@/session/machine-turn-admission';
 import { closeLoginShellApplicationLegacy } from '@/agent/login-shell-env';
 import { Command } from 'commander';
 import chalk from 'chalk';
@@ -75,6 +89,9 @@ import { configureManagedAgentRuntimeManager } from '@/agent/managed-agent-runti
 import { configureManagedRuntimeUpdateCoordinator } from '@/agent/managed-runtime-update-coordinator';
 import { hasBuiltinAgentCredentials } from './builtin-agent-credentials';
 
+const { protocol: managedDaemonProtocol, candidate: managedCandidate } =
+  getManagedWorkerLaunchContext();
+
 type StartAuthMethod =
   | 'e2ee_machine_service'
   | 'api_key'
@@ -150,8 +167,10 @@ export const startCommand = new Command('start')
     }
     const supervisorIdentity =
       identityResolution.status === 'supervised' ? identityResolution.identity : null;
+    if (managedCandidate) pauseMachineTurnsIfIdle();
     const machineLifecycleCapability = resolveMachineLifecycleCapability(
-      supervisorIdentity?.launchMode
+      supervisorIdentity?.launchMode,
+      { managed: managedDaemonProtocol, encrypted: !!options.pairedWorkspace }
     );
     const unregisterStartupSupervisorControl = registerLocalSupervisorControl({
       identity: supervisorIdentity,
@@ -227,6 +246,7 @@ export const startCommand = new Command('start')
     const runtimeStateReporter = new CliRuntimeStateReporter({
       supervisor: toRuntimeSupervisorIdentity(supervisorIdentity),
       trackBackendConnectionAge: platformKind === 'cloud',
+      cliVersion: version,
     });
     runtimeStateReporter.setStartupStage('bootstrap');
     const electronManaged = supervisorIdentity?.launchMode === 'electron';
@@ -646,6 +666,11 @@ async function startAgentService(
       ...(options.pairedWorkspace ? { localFirstBootstrap: false } : {}),
       startupTimeSync: startupTimeSync?.ready,
       machineLifecycleCapability,
+      prepareManagedUpgrade:
+        supervisorIdentity && machineLifecycleCapability.canRemoteUpgrade
+          ? (requestId, target, upgrade) =>
+              requestManagedPreparation(requestId, target, supervisorIdentity.token, upgrade)
+          : undefined,
       onFatalAuthFailure: (error) => triggerFatalAuthShutdown?.(error),
       onProcessLifecycleAction: (action) => triggerProcessLifecycleAction?.(action),
     });
@@ -654,6 +679,13 @@ async function startAgentService(
     await cloudPort.dispose();
     throw error;
   }
+  const treeObservationTimer = managedDaemonProtocol
+    ? setInterval(() => {
+        void Effect.runPromise(pruneManagedProcessTrees()).catch((error) =>
+          logger.debug('Process ownership observation remains unknown', error)
+        );
+      }, 60_000).unref()
+    : undefined;
   const eventLoopLagMonitor = startEventLoopLagMonitor(logger, { label: 'lody start' });
   const closeForegroundHostLease = async () => {
     const lease = foregroundHostLease;
@@ -661,6 +693,7 @@ async function startAgentService(
     await lease?.close();
   };
   const stopDaemonAndApplication = async () => {
+    if (treeObservationTimer) clearInterval(treeObservationTimer);
     await fleet.prepareForShutdown();
     const failures: unknown[] = [];
     for (const stop of [
@@ -674,6 +707,15 @@ async function startAgentService(
       } catch (error) {
         failures.push(error);
       }
+    }
+    if (failures.length === 0 && managedDaemonProtocol && process.send) {
+      await Effect.runPromise(confirmManagedProcessTreesGone);
+      await new Promise<void>((resolve, reject) =>
+        process.send?.(
+          { type: 'lody/managed-drained', instanceId: supervisorIdentity?.instanceId },
+          (error) => (error ? reject(error) : resolve())
+        )
+      );
     }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1)
@@ -745,16 +787,92 @@ async function startAgentService(
       });
   };
 
+  if (supervisorIdentity && managedDaemonProtocol) {
+    process.on('message', (message: unknown) => {
+      if (typeof message !== 'object' || message === null) return;
+      if (
+        'type' in message &&
+        message.type === 'lody/managed-resume' &&
+        'token' in message &&
+        message.token === supervisorIdentity.token
+      )
+        resumeMachineTurns();
+      if (
+        'type' in message &&
+        message.type === 'lody/managed-local-upgrade' &&
+        'token' in message &&
+        message.token === supervisorIdentity.token &&
+        'requestId' in message &&
+        typeof message.requestId === 'string' &&
+        'upgrade' in message
+      ) {
+        const upgrade = ManagedDaemonUpgradeOptionsSchema.safeParse(message.upgrade);
+        if (upgrade.success)
+          triggerProcessLifecycleAction?.({
+            action: 'upgrade',
+            exitCode: EXIT_CODE_REMOTE_UPGRADE,
+            requestId: message.requestId,
+            switchPolicy: upgrade.data.switchPolicy,
+            expiresAtMs: Date.now() + 24 * 60 * 60_000,
+          });
+      }
+    });
+  }
   triggerProcessLifecycleAction = (action) => {
     if (processLifecycleTriggered || fatalAuthTriggered) return;
     processLifecycleTriggered = true;
-    logger.info(
-      `Machine lifecycle ${action.action} requested; shutting down worker with exit code ${action.exitCode}.`
-    );
-    void shutdownController.shutdown({
-      exitCode: action.exitCode,
-      reason: `machine ${action.action} requested`,
-    });
+    const cancelPreparedUpdate = () => {
+      if (action.action === 'upgrade') action.onAbandoned?.();
+      if (action.action === 'upgrade' && process.connected && supervisorIdentity)
+        process.send?.(
+          {
+            type: 'lody/managed-cancel',
+            requestId: action.requestId,
+            supervisorToken: supervisorIdentity.token,
+          },
+          () => {}
+        );
+    };
+    const switchWhenIdle = async (): Promise<void> => {
+      if (
+        action.action === 'upgrade' &&
+        action.expiresAtMs !== undefined &&
+        Date.now() >= action.expiresAtMs
+      ) {
+        cancelPreparedUpdate();
+        processLifecycleTriggered = false;
+        logger.warn('Prepared update expired; old daemon remains running.');
+        return;
+      }
+      if (
+        action.action === 'upgrade' &&
+        action.switchPolicy !== 'immediate' &&
+        !pauseMachineTurnsIfIdle()
+      ) {
+        setTimeout(() => void switchWhenIdle(), 1000);
+        return;
+      }
+      if (action.action === 'upgrade' && action.switchPolicy === 'immediate') pauseMachineTurns();
+      try {
+        if (action.action === 'upgrade' && action.revalidate && !(await action.revalidate())) {
+          resumeMachineTurns();
+          cancelPreparedUpdate();
+          processLifecycleTriggered = false;
+          logger.warn('Update authorization expired or was revoked; old daemon remains running.');
+          return;
+        }
+        await shutdownController.shutdown({
+          exitCode: action.exitCode,
+          reason: `machine ${action.action} requested`,
+        });
+      } catch (error) {
+        resumeMachineTurns();
+        cancelPreparedUpdate();
+        processLifecycleTriggered = false;
+        logger.error('Managed update could not switch', error);
+      }
+    };
+    void switchWhenIdle();
   };
 
   try {

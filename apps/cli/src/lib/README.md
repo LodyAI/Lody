@@ -233,3 +233,13 @@ initialization-stall signals. `loro/session-active-presence-legacy.ts` is the
 MessageHandler construction/analytics entry. Visible Turns acquire the native lease;
 other lifecycle callbacks may update phases but cannot release it. Shutdown awaits
 those leases before closing documents. See the [presence guide](../../../../.agents/docs/cli-lib-loro-presence.md).
+
+## Managed daemon updates
+
+`managed-daemon-release.ts` verifies product/distribution signatures, bounds and
+resumes downloads, and owns versioned installations and per-operation records.
+`managed-daemon-ipc.ts` carries preparation over existing private supervisor IPC.
+`managed-process-observation.ts` records owned process groups and refuses a clean
+drain receipt when their termination is unknown. The fixed entry in
+`commands/daemon-runner.ts` owns selection, the uninterrupted Host lease and rollback;
+`session/machine-turn-admission.ts` pauses new turns across all workspaces.

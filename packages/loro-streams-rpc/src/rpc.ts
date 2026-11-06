@@ -1,3 +1,4 @@
+import { ManagedDaemonUpgradeOptionsSchema, type ManagedDaemonUpgradeOptions } from '@lody/shared';
 import {
   CodeCollabOpenDiffManifestResponseSchema,
   CodeCollabReadBlobResponseSchema,
@@ -362,7 +363,12 @@ const BaseRpcRequestSchema = z
 
 export const LoroMachineStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/status'),
-  params: z.object({ includeDisk: z.literal(true).optional() }).strict(),
+  params: z
+    .object({
+      includeDisk: z.literal(true).optional(),
+      includeDaemonUpdate: z.literal(true).optional(),
+    })
+    .strict(),
 }).strict();
 
 export const LoroMachinePreviewControlRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -417,6 +423,7 @@ export const LoroMachineUpgradeRpcRequestSchema = BaseRpcRequestSchema.extend({
       requestToken: z.string().trim().min(1),
       requestId: z.string().trim().min(1),
       targetVersion: z.string().trim().min(1).optional(),
+      upgrade: ManagedDaemonUpgradeOptionsSchema.optional(),
     })
     .strict(),
 }).strict();
@@ -3007,11 +3014,15 @@ export class LoroStreamsMachineRpcClient {
     timeoutMs?: number;
     /** Only for daemons advertising `machineDiskStatus`; older ones reject it. */
     includeDisk?: boolean;
+    includeDaemonUpdate?: boolean;
   }): Promise<MachineStatusResponse | null> {
     return (await this.sendRequest({
       method: 'machine/status',
       timeoutMs: options?.timeoutMs ?? 30_000,
-      params: options?.includeDisk ? { includeDisk: true as const } : {},
+      params: {
+        ...(options?.includeDisk ? { includeDisk: true as const } : {}),
+        ...(options?.includeDaemonUpdate ? { includeDaemonUpdate: true as const } : {}),
+      },
     })) as MachineStatusResponse | null;
   }
 
@@ -3102,16 +3113,18 @@ export class LoroStreamsMachineRpcClient {
     requestToken: string;
     requestId: string;
     targetVersion?: string;
+    upgrade?: ManagedDaemonUpgradeOptions;
     timeoutMs?: number;
   }): Promise<MachineUpgradeResponse | null> {
     return (await this.sendRequest({
       method: 'machine/upgrade',
-      timeoutMs: options.timeoutMs ?? 30_000,
+      timeoutMs: options.timeoutMs ?? (options.upgrade ? 12 * 60_000 : 30_000),
       params: {
         requesterUserId: options.requesterUserId,
         requestToken: options.requestToken,
         requestId: options.requestId,
         targetVersion: options.targetVersion,
+        upgrade: options.upgrade,
       },
     })) as MachineUpgradeResponse | null;
   }
@@ -3966,7 +3979,7 @@ export class LoroStreamsMachineRpcClient {
       | {
           method: 'machine/status';
           timeoutMs: number;
-          params: { includeDisk?: true };
+          params: { includeDisk?: true; includeDaemonUpdate?: true };
         }
       | {
           method: 'machine/preview-control' | 'machine/automation-control';
@@ -3997,6 +4010,7 @@ export class LoroStreamsMachineRpcClient {
             requestToken: string;
             requestId: string;
             targetVersion?: string;
+            upgrade?: ManagedDaemonUpgradeOptions;
           };
         }
       | {
@@ -4510,7 +4524,7 @@ export class LoroStreamsMachineRpcClient {
           request = {
             ...envelope,
             method: args.method,
-            params: args.params.includeDisk ? { includeDisk: true } : {},
+            params: args.params,
           };
           break;
         case 'machine/preview-control':

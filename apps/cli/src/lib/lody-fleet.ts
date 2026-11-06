@@ -1,3 +1,4 @@
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
 import type {
@@ -171,6 +172,11 @@ export class LodyFleet {
   private readonly onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   private readonly startupTimeSync?: Promise<void>;
   private readonly machineLifecycleCapability: MachineLifecycleCapability;
+  private readonly prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   private readonly prStatusPoller: PrStatusPollerShape;
   private readonly workspaceWatchCoordinator: WorkspaceWatchCoordinator;
 
@@ -233,6 +239,11 @@ export class LodyFleet {
     localFirstBootstrap?: boolean;
     startupTimeSync?: Promise<void>;
     machineLifecycleCapability: MachineLifecycleCapability;
+    prepareManagedUpgrade?: (
+      requestId: string,
+      target: string,
+      upgrade?: ManagedDaemonUpgradeOptions
+    ) => Promise<string>;
     onFatalAuthFailure?: (error: Error) => void;
     onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   }) {
@@ -251,6 +262,7 @@ export class LodyFleet {
     }
     this.runtimeStateReporter = options.runtimeStateReporter;
     this.machineLifecycleCapability = options.machineLifecycleCapability;
+    this.prepareManagedUpgrade = options.prepareManagedUpgrade;
     this.onFatalAuthFailure = options.onFatalAuthFailure;
     this.localWorkspaceCatalog = options.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.memoryPressure = new MemoryPressureSampler(this.logger);
@@ -1071,6 +1083,7 @@ export class LodyFleet {
           localWorkspaceCatalog: this.localWorkspaceCatalog,
           memoryPressure: this.memoryPressure,
           machineLifecycleCapability: this.machineLifecycleCapability,
+          prepareManagedUpgrade: this.prepareManagedUpgrade,
           closeSessionTerminals: (sessionId) => this.terminalPtyService.closeSession(sessionId),
           cleanupLocalProjectWorktreeSetupIfUnreferenced: (localProjectId) =>
             this.cleanupLocalProjectWorktreeSetupIfUnreferenced(localProjectId),

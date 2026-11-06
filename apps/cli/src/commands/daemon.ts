@@ -1,3 +1,8 @@
+import {
+  daemonInstallCommand,
+  daemonUpdateStatusCommand,
+  daemonUpgradeCommand,
+} from './daemon-install';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { fetchCliRuntimeState } from '@lody/cli-supervisor';
@@ -179,6 +184,9 @@ async function reportDaemonStartBlocked(
 }
 
 export const daemonCommand = new Command('daemon')
+  .addCommand(daemonInstallCommand)
+  .addCommand(daemonUpdateStatusCommand)
+  .addCommand(daemonUpgradeCommand)
   .description('Run lody as a background daemon service')
   .addCommand(
     new Command('start')
