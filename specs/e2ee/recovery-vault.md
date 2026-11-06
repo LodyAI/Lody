@@ -1,9 +1,13 @@
 # Recovery vault
 
-Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)
+Status: draft · [last approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)
 Translation: current
 
 [中文](recovery-vault.zh.md)
+
+This draft proposes [whole-vault replacement](#whole-vault-replacement-proposed), awaiting
+owner approval. Until then, the revision approved on 2026-11-06 stays in force. That section
+and the one-vault paragraph it changes are the only intended changes.
 
 ## Approved format boundaries
 
@@ -119,7 +123,9 @@ uses an offline recovery file to regain their encrypted workspaces. Pairing with
 surviving device remains the primary path; the vault covers the case where no
 device survives. Without a vault or a surviving device, that content is lost.
 
-**One vault per account.** An account has one vault and one recovery file; the
+**One vault per account.** An account has one current vault and one recovery file;
+[whole-vault replacement](#whole-vault-replacement-proposed) is the only time a second vault
+exists. An account with a vault does not create another. The
 vault index holds one entry per workspace membership. Desktop security settings
 create the vault and write the file only to a location the user chooses; Lody never
 uploads or syncs the file. The user enables recovery per workspace explicitly.
@@ -353,6 +359,91 @@ replace a vault that may be compromised. The client always uses its signed-in se
 ignores the file's `serviceLocator` for connecting; a mismatch stops. A surviving member
 may compare workspaces, but nothing requires it. Existing limits are unchanged: a device
 that saw no newer state still cannot prove it holds the latest head.
+
+## Whole-vault replacement (proposed)
+
+**Scenario.** A user lost their recovery file, or fears it leaked, but still has a working
+personal device. Without the file there is no V, so nothing inside the old vault can change.
+[Routine replacement](#new-device-recovery-and-retention) cannot help, because it needs V
+and produces no new file. The user replaces the whole vault instead.
+
+**Flow.** Desktop security settings offer "Replace recovery file" once the account has a
+vault. The device then:
+
+1. shows what will happen, and lists any workspace it cannot act on;
+2. creates a new vault and saves the new file, proving the saved file reopens it before
+   anything else happens;
+3. for each workspace where this device is an active member, admits a new R and passes the
+   real envelope test, as in ordinary setup;
+4. when every one has passed, revokes each old R through the ledger;
+5. asks the service to retire the old vault and make the new one current.
+
+The new vault needs no V from the old one. The device finds each old R in the verified
+ledger: an active recovery device of this membership that is not the new package's R.
+Admission and revocation use existing ledger records, so the ledger format and
+`formatVersion: 1` do not change. The flow is default-off behind the same gates.
+
+**Failure.** Until step 4 starts, the old vault and file work exactly as before, and a
+failure leaves the unfinished vault in the `replacing` state. Steps run from durable local
+intents without re-signing, and resuming needs the new file. From step 4, each workspace
+already has a tested new R, and a crash before step 5 is finished by resuming. If the new
+file is lost mid-way, the user abandons the attempt on the device that started it. Only that
+device's intents tell a new R from an old one, so it revokes the new Rs it admitted, then
+marks the unfinished vault `retired`. The user can then start again.
+
+**Workspaces this device cannot act on.** A device can only act on workspaces it belongs
+to. Others are named in step 1, and the user may pair the device first or continue. If they
+continue, the old R of those workspaces stays active, so the old file can still restore and
+admit devices there until a member device revokes it. The warning names those workspaces.
+
+**Current vault.** The service keeps one state per account vault: `current`, `replacing`
+or `retired`. A vault written before this revision counts as `current`.
+
+- An account has at most one `current` and one `replacing` vault. A second attempt on
+  another device is refused and told a replacement is running.
+- The vault stays `current` until step 5, which switches both vaults in one transaction.
+- `hasAccountVault` is true while any vault is not `retired`, so ordinary creation stays
+  refused during a replacement. It ignores retired vaults.
+- The account limit counts the two live slots; retired vaults count against a separate
+  limit of 16. Beyond that, replacement is refused until a later cleanup exists.
+- Retired ciphertext stays readable and is not deleted by this flow. No entry is removed.
+
+State is bookkeeping for the product, never trust. Restore ignores it and is judged by the
+ledger: a retired vault's revoked R stops at the existing active-R check, and a hostile
+service claiming otherwise changes nothing.
+
+**What login alone can do.** Retiring needs no V, because the old vault cannot be opened.
+The service checks only that the caller is the signed-in owner of both vaults, and that the
+new vault has an index.
+
+- _It can_ reserve a replacing vault, abandon one, and switch which vault is current.
+- _It cannot_ revoke any R, because that needs a personal device's ledger signature. It
+  cannot read a vault, forge a package, make a client trust a vault, or stop an old file
+  from opening. It cannot delete retired ciphertext through this flow.
+- _So a hijacked login_ can make the product show the wrong vault, or block ordinary
+  creation, but cannot remove real recovery. The real file still opens the real vault and
+  its R still works. Beginning and finishing a replacement notify the account's active
+  devices and email. This informs the user, and a hostile service can suppress it.
+
+**What the old file can still do.** The warning must say this plainly before step 2 and
+again before step 4: for the workspaces replaced, the old file can no longer admit new
+devices and receives no new keys, but anyone holding the old file and the account can still
+open the keys it already has.
+That covers history up to the revocation. Revocation marks the workspace for key rotation,
+and content stays readable to that holder until the rotation is published. Replacement
+does not erase copies, as [deleting ciphertext](#new-device-recovery-and-retention) never did.
+
+**Leaks.** For a suspected leak, the existing rule applies: revocation takes priority. The
+user may revoke an old R before its new R passes, accepting a gap in recovery for that
+workspace. Retirement still comes last.
+
+**Passkeys and retained V.** Passkeys wrap one vault's V, so they do not carry over. The
+user enrols them again on the new vault. An old passkey still opens the old vault, whose
+revoked R stops any restore. A device retaining the old V discards it at step 5.
+
+**What it cannot rescue.** The flow needs a working personal device. A passkey that still
+works can restore a device first. With no device, file or passkey, nothing can open the
+vault, and that content is lost.
 
 ## Boundaries and validation
 
