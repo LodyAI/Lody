@@ -229,6 +229,10 @@ export {
   parseRecoveryFile,
   wipeRecoveryPackage,
   verifiedPasskeyPrf,
+  verifiedPasskeyRegistration,
+  vaultPrfInput,
+  passkeyUserHandle,
+  vaultIdFromPasskeyUserHandle,
   disposePrf,
   ownVaultCiphertext,
   vaultCiphertextDigest,
@@ -238,5 +242,6 @@ export {
   type RecoveryIdentity,
   type RecoveryPrivatePackage,
   type VerifiedPasskeyPrf,
+  type VerifiedPasskeyRegistration,
   type VaultCiphertext,
 } from '../internal/recovery';

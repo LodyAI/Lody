@@ -10,6 +10,10 @@ import { makeWorkspaceRecovery } from '@lody/e2ee-core';
 import { type RecoveryVaultLocalStore } from '@lody/e2ee-core/services';
 import {
   verifiedPasskeyPrf,
+  verifiedPasskeyRegistration,
+  passkeyUserHandle,
+  vaultIdFromPasskeyUserHandle,
+  vaultPrfInput,
   disposePrf,
   wipeRecoveryPackage,
   generateRecoveryPackage,
@@ -130,9 +134,17 @@ describe('encrypted recovery vault and genuine workflow', () => {
             const index0 = yield* storage.store.readIndex(vault.vaultId);
             const prf = yield* verifiedPasskeyPrf({
               credentialId: 'synthetic-credential',
-              extension: { enabled: true, results: { first: new Uint8Array(32).fill(77).buffer } },
+              userVerified: true,
+              extension: { results: { first: new Uint8Array(32).fill(77).buffer } },
             });
-            yield* vault.addPasskey(prf);
+            yield* vault.addPasskey({
+              registration: yield* verifiedPasskeyRegistration({
+                credentialId: 'synthetic-credential',
+                extension: { enabled: true },
+              }),
+              assertion: prf,
+              label: 'Synthetic passkey',
+            });
             const reopened = yield* openRecoveryVault({ recoveryFile, ...storage }),
               fromPrf = yield* openRecoveryVaultWithPasskey({
                 vaultId: vault.vaultId,
@@ -146,7 +158,11 @@ describe('encrypted recovery vault and genuine workflow', () => {
               wipeRecoveryPackage(actual);
             }
             const unsupported = yield* Effect.result(
-              verifiedPasskeyPrf({ credentialId: 'login-only', extension: { enabled: false } })
+              verifiedPasskeyPrf({
+                credentialId: 'login-onlyA',
+                userVerified: true,
+                extension: { enabled: false },
+              })
             );
             expect(Result.isFailure(unsupported)).toBe(true);
             const clone = yield* Effect.result(
@@ -939,6 +955,240 @@ describe('encrypted recovery vault and genuine workflow', () => {
             expect((yield* vault.reserve(otherRef)).outcome).toBe('Existing');
             expect(yield* storage.store.readIndex(vault.vaultId)).toEqual(committed);
             expect((yield* vault.readIndex()).value.entries).toHaveLength(2);
+          })
+        )
+      );
+    }));
+});
+
+describe('passkey wrapping of one vault master key', () => {
+  const output = (fill: number) => new Uint8Array(32).fill(fill).buffer;
+  const passkey = Effect.fnUntraced(function* (credentialId: string, fill: number) {
+    return {
+      registration: yield* verifiedPasskeyRegistration({
+        credentialId,
+        extension: { enabled: true },
+      }),
+      assertion: yield* verifiedPasskeyPrf({
+        credentialId,
+        userVerified: true,
+        extension: { results: { first: output(fill) } },
+      }),
+      label: `Passkey ${credentialId}`,
+    };
+  });
+  const created = Effect.fnUntraced(function* (dir: string) {
+    const storage = yield* makeLabRecoveryVaultStore({
+      path: join(dir, 'vault.sqlite'),
+      mode: 'create',
+    });
+    const { vault, recoveryFile } = yield* createRecoveryVault({
+      locator: 'https://synthetic.invalid/vault',
+      ...storage,
+    });
+    return { storage, vault, recoveryFile };
+  });
+
+  it('judges each ceremony on what WebAuthn actually reports for it', async () => {
+    const first = output(1);
+    const rejected = async (work: Effect.Effect<unknown, unknown>) =>
+      Result.isFailure(await Effect.runPromise(Effect.result(work)));
+    const assertion = (input: {
+      credentialId?: string;
+      userVerified?: boolean;
+      extension: unknown;
+    }) => verifiedPasskeyPrf({ credentialId: 'abc_-Q', userVerified: true, ...input });
+
+    // A real authentication result has no `enabled`.
+    await Effect.runPromise(assertion({ extension: { results: { first } } }));
+    expect(await rejected(assertion({ extension: { enabled: false, results: { first } } }))).toBe(
+      true
+    );
+    expect(await rejected(assertion({ extension: { enabled: true } }))).toBe(true);
+    expect(
+      await rejected(assertion({ extension: { results: { first: new ArrayBuffer(31) } } }))
+    ).toBe(true);
+    expect(
+      await rejected(assertion({ userVerified: false, extension: { results: { first } } }))
+    ).toBe(true);
+    for (const credentialId of ['', 'padded==', 'not+base64url', 'A', 'QR', 'QUF'])
+      expect(await rejected(assertion({ credentialId, extension: { results: { first } } }))).toBe(
+        true
+      );
+
+    const registration = (extension: unknown) =>
+      verifiedPasskeyRegistration({ credentialId: 'abc_-Q', extension });
+    await Effect.runPromise(registration({ enabled: true }));
+    expect(await rejected(registration({ enabled: false }))).toBe(true);
+    expect(await rejected(registration({ results: { first } }))).toBe(true);
+    expect(await rejected(registration(undefined))).toBe(true);
+  });
+
+  it('opens one V from either passkey on a device that has no recovery file', async () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { storage, vault } = yield* created(dir);
+            const a = yield* passkey('credential-a', 21),
+              b = yield* passkey('credential-b', 22);
+            yield* vault.addPasskey(a);
+            yield* vault.addPasskey(b);
+            expect((yield* vault.listPasskeys()).map((row) => row.label)).toEqual([
+              'Passkey credential-a',
+              'Passkey credential-b',
+            ]);
+
+            // A new device learns the vault only from the ceremony's user handle.
+            const vaultId = yield* vaultIdFromPasskeyUserHandle(passkeyUserHandle(vault.vaultId));
+            expect(vaultId).toBe(vault.vaultId);
+            const pinless = yield* makeLabRecoveryVaultStore({
+              path: join(dir, 'other.sqlite'),
+              mode: 'create',
+            });
+            for (const credential of [a.assertion, b.assertion]) {
+              const session = yield* openRecoveryVaultWithPasskey({
+                vaultId,
+                locator: 'https://synthetic.invalid/vault',
+                credential,
+                store: storage.store,
+                local: pinless.local,
+              });
+              expect((yield* session.listPasskeys()).length).toBe(2);
+            }
+            // A different passkey never derives the wrapping key.
+            const stranger = yield* passkey('credential-a', 99);
+            const failed = yield* Effect.result(
+              openRecoveryVaultWithPasskey({
+                vaultId,
+                locator: 'https://synthetic.invalid/vault',
+                credential: stranger.assertion,
+                ...storage,
+              })
+            );
+            expect(Result.isFailure(failed)).toBe(true);
+          })
+        )
+      );
+    }));
+
+  it('rejects a user handle that is not a vault id and fixes one PRF input', async () => {
+    expect(new TextDecoder().decode(vaultPrfInput())).toBe('lody-e2ee/vault-v1/prf-input\0');
+    const short = await Effect.runPromise(
+      Effect.result(vaultIdFromPasskeyUserHandle(new Uint8Array(31)))
+    );
+    expect(Result.isFailure(short)).toBe(true);
+  });
+
+  it('refuses enrollment without a registration for the same credential', async () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { vault } = yield* created(dir);
+            const a = yield* passkey('credential-a', 21),
+              b = yield* passkey('credential-b', 22);
+            for (const forged of [
+              { ...a, registration: b.registration },
+              { ...a, registration: { credentialId: 'credential-a' } },
+            ]) {
+              const failed = yield* Effect.result(vault.addPasskey(forged));
+              expect(Result.isFailure(failed)).toBe(true);
+            }
+            expect(yield* vault.listPasskeys()).toEqual([]);
+          })
+        )
+      );
+    }));
+
+  it('keeps a listed wrap through index writes, refuses its deletion, and removes it on request', async () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { storage, vault } = yield* created(dir);
+            const f = yield* fixture();
+            const a = yield* passkey('credential-a', 21);
+            const entryId = yield* vault.addPasskey(a);
+
+            const bundle = yield* generateRecoveryPackage({
+              genesis: hex(f.initial.genesis.toBytes()),
+              membershipId: hex(f.membership.toBytes()),
+              generation: 0,
+              trust: {
+                source: 'synthetic',
+                genesisRecord: f.initial.record,
+                head: hex(f.view().head.toBytes()),
+                length: 1,
+              },
+            });
+            const candidate = yield* vault.upload(bundle);
+            wipeRecoveryPackage(bundle);
+            expect((yield* vault.reserve(candidate)).outcome).toBe('Committed');
+            expect((yield* vault.listPasskeys()).map((row) => row.entryId)).toEqual([entryId]);
+
+            const header = (yield* storage.store.readIndex(vault.vaultId))!;
+            const version = { revision: header.revision, digest: vaultCiphertextDigest(header) };
+            const deletion = yield* Effect.result(
+              storage.store.deleteUnreferenced(vault.vaultId, entryId, version)
+            );
+            expect(Result.isFailure(deletion)).toBe(true);
+            expect(yield* storage.store.readEntry(vault.vaultId, entryId)).not.toBeNull();
+
+            yield* vault.removePasskey(entryId);
+            expect(yield* vault.listPasskeys()).toEqual([]);
+            expect(yield* storage.store.readEntry(vault.vaultId, entryId)).toBeNull();
+            const removed = yield* Effect.result(
+              openRecoveryVaultWithPasskey({
+                vaultId: vault.vaultId,
+                locator: vault.locator,
+                credential: a.assertion,
+                ...storage,
+              })
+            );
+            expect(Result.isFailure(removed)).toBe(true);
+          })
+        )
+      );
+    }));
+
+  it('finishes an enrollment whose index commit was lost, and stops at the passkey limit', async () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const storage = yield* makeLabRecoveryVaultStore({
+              path: join(dir, 'vault.sqlite'),
+              mode: 'create',
+            });
+            let lose = true;
+            const store: typeof storage.store = {
+              ...storage.store,
+              compareAndSwapIndex: (...args) => {
+                if (!lose) return storage.store.compareAndSwapIndex(...args);
+                lose = false;
+                return Effect.fail(new Error('lost before commit'));
+              },
+            };
+            const { vault } = yield* createRecoveryVault({
+              locator: 'https://synthetic.invalid/vault',
+              store,
+              local: storage.local,
+            });
+            const a = yield* passkey('credential-a', 21);
+            expect(Result.isFailure(yield* Effect.result(vault.addPasskey(a)))).toBe(true);
+            expect(yield* vault.listPasskeys()).toEqual([]);
+
+            // The wrap is immutable and was uploaded, so the retry must reuse it.
+            const id = yield* vault.addPasskey(a);
+            expect((yield* vault.listPasskeys()).map((row) => row.entryId)).toEqual([id]);
+            expect(yield* vault.addPasskey(a)).toBe(id);
+
+            for (let n = 1; n < 8; n += 1)
+              yield* vault.addPasskey(yield* passkey(`credential-${n}`, n));
+            expect((yield* vault.listPasskeys()).length).toBe(8);
+            const ninth = yield* Effect.result(vault.addPasskey(yield* passkey('credential-9', 9)));
+            expect(Result.isFailure(ninth)).toBe(true);
           })
         )
       );
