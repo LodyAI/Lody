@@ -63,6 +63,14 @@ not a persisted read-receipt or execution gate: stateless HTTP requests do not
 share read state, and help does not block an otherwise valid operation. Tests verify
 the MCP documentation/validation boundary; they do not prove model adherence.
 
+Invalid command arguments retain their original validation issues and include
+the exact `lody_help({command: "..."})` call to read before correction or retry.
+The SDK input adapter keeps the original JSON Schema and validator; the daemon
+registration applies the same reminder to direct-call validation failures.
+Explicit error results also retain their content and structured error/retry
+fields, with a separate help reminder appended. These hints neither retry a
+command nor turn a non-retryable failure into permission to retry.
+
 Command help also explains how to interpret replies: cancellation acknowledgement
 does not prove execution has exited, idle/finished is not a task-success verdict,
 and durable completion precedes its delivery into the requesting conversation.

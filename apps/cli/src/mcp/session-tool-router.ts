@@ -1,5 +1,5 @@
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/server';
-import type { LodyToolServer } from './tool-help';
+import { commandHelpReminder, type LodyToolServer } from './tool-help';
 import { z } from 'zod';
 
 export type SessionToolHandler = (args: unknown) => Promise<CallToolResult>;
@@ -26,7 +26,16 @@ export function createSessionToolRegistrar(
     },
     callback: (args: z.output<T>) => Promise<CallToolResult>
   ) => {
-    handlers?.set(name, async (args) => callback(await config.inputSchema.parseAsync(args)));
+    handlers?.set(name, async (args) => {
+      const parsed = await config.inputSchema.safeParseAsync(args);
+      if (!parsed.success) {
+        throw new z.ZodError([
+          ...parsed.error.issues,
+          { code: 'custom', path: [], message: commandHelpReminder(name) },
+        ]);
+      }
+      return callback(parsed.data);
+    });
     const inputSchema: z.ZodObject = config.inputSchema;
     return server.registerTool(name, { ...config, inputSchema }, async (args) =>
       // The SDK has already parsed MCP input; only direct daemon calls need parsing here.
