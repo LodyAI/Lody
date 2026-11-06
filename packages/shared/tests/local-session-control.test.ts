@@ -180,3 +180,18 @@ it('routes Provider quota refresh by persisted config only in both local validat
     ).toBe(false);
   }
 });
+
+it('carries local-only attachment registration and preview through both native validators', () => {
+  const attachment = { type: 'local_attachment', referenceId: '7c9a50da-b02e-4edc-b1b1-d53a800d0423', machineId: 'machine', sessionId: 'session', turnId: 'turn', kind: 'image', fileName: 'image.png', mimeType: 'image/png', sizeBytes: 4 };
+  const scope = { machineId: 'machine', workspaceId: 'workspace', sessionId: 'session' };
+  for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+    expect(validate({ ...scope, type: 'session/attachment-register', turnId: 'turn', referenceId: attachment.referenceId, path: '/tmp/image.png', managed: false, kind: 'image', fileName: 'image.png', mimeType: 'image/png' })).toBe(true);
+    expect(validate({ ...scope, type: 'session/attachment-resolve', attachment })).toBe(true);
+    expect(validate({ ...scope, type: 'session/attachment-resolve', attachment: { ...attachment, referenceId: 12 } })).toBe(false);
+  }
+  for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+    expect(validate({ type: 'session/attachment-register_response', sessionId: 'session', success: true, attachment })).toBe(true);
+    expect(validate({ type: 'session/attachment-resolve_response', sessionId: 'session', success: true, path: '/tmp/image.png' })).toBe(true);
+    expect(validate({ type: 'session/attachment-register_response', sessionId: 'session', success: true })).toBe(false);
+  }
+});

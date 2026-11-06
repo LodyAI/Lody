@@ -225,6 +225,7 @@ describe('MessageHandler machine registration', () => {
         sessionHistoryWatch: 1,
         sessionHistoryPatches: 1,
         sessionInputAcceptance: 1,
+        localAttachments: 1,
         sessionInputDispatch: 1,
         mcpToolDiscovery: 1,
         mcpLocalAuthentication: 1,

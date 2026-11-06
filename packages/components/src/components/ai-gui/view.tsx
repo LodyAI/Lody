@@ -1,3 +1,6 @@
+import { getIpcServices } from '@/lib/electron-ipc-client';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import type { SessionLocalAttachment } from '@lody/shared';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
@@ -259,7 +262,7 @@ import {
   getSessionImageDataUrl,
   peekSessionImageUrl,
 } from '@/lib/session-image-cache';
-import { SessionFileCard, SessionFileCardList } from './session-file-card';
+import { SessionFileCard, SessionFileCardList, SessionFileCardLayout } from './session-file-card';
 import {
   SessionFilePreviewDialog,
   type SessionFilePreviewStatus,
@@ -685,6 +688,7 @@ export interface SessionChatStreamViewProps {
 export const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
+  openLocalFile?: (path: string) => void;
   copyContext?: (messageId: string) => void;
 }>({});
 const SessionImagePreviewContext = createContext<{
@@ -2483,10 +2487,11 @@ export const SessionChatStreamView = forwardRef<
     const chatActionContextValue = useMemo(
       () => ({
         copyContext: onCopyContext,
+        openLocalFile: onFilePathClick,
         ...(sendMessage ? { sendMessage } : {}),
         ...(onOpenHtmlFile ? { openHtmlFile: onOpenHtmlFile } : {}),
       }),
-      [onCopyContext, onOpenHtmlFile, sendMessage]
+      [onCopyContext, onOpenHtmlFile, onFilePathClick, sendMessage]
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
@@ -6376,6 +6381,8 @@ const renderAssistantContent = (
           align="start"
         />
       );
+    case 'local_attachment':
+      return <LocalAttachmentCard attachment={content} sessionId={sessionId} />;
     case 'file':
       return <SessionFileGroup files={[content]} sessionId={sessionId} align="start" />;
     case 'thought':
@@ -6974,6 +6981,69 @@ export const ImageGroupBubble = ({
  * one list (decision #3) at the call site; this component handles however many
  * it is handed.
  */
+export const LocalAttachmentCard = ({
+  attachment,
+  sessionId,
+}: {
+  attachment: SessionLocalAttachment;
+  sessionId: SessionId;
+}) => {
+  const { t } = useTranslation();
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const machineId = useAtomValue(localMachineIdAtom);
+  const readonly = useContext(SessionReadonlyContext);
+  const { openLocalFile } = useContext(SessionChatActionContext);
+  const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+  const binding = `${workspaceId}:${sessionId}:${attachment.referenceId}:${machineId}`;
+  const currentBinding = useRef<string | null>(binding);
+  currentBinding.current = binding;
+  useEffect(
+    () => () => {
+      currentBinding.current = null;
+    },
+    []
+  );
+  const available =
+    !readonly &&
+    machineId === attachment.machineId &&
+    sessionId === attachment.sessionId &&
+    !!workspaceId &&
+    !!openLocalFile;
+  return (
+    <SessionFileCardLayout
+      fileName={attachment.fileName}
+      mimeType={attachment.mimeType}
+      subtitle={
+        error ?? t('sessions.localAttachmentOnly', 'Available only on the original computer')
+      }
+      actionIcon={null}
+      failed={!!error}
+      isInteractive={available && !opening}
+      onClick={() => {
+        if (!available || !workspaceId) return;
+        setOpening(true);
+        setError(null);
+        const ipc = getIpcServices();
+        if (!ipc) {
+          setOpening(false);
+          setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'));
+          return;
+        }
+        void ipc.localProjects
+          .resolveLocalAttachment({ workspaceId, sessionId, attachment })
+          .then((filePath) => {
+            if (currentBinding.current === binding) openLocalFile?.(filePath);
+          })
+          .catch(() =>
+            setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'))
+          )
+          .finally(() => setOpening(false));
+      }}
+    />
+  );
+};
+
 export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGroup>[0]) => {
   const readonly = useContext(SessionReadonlyContext);
   return readonly ? (
@@ -7207,6 +7277,8 @@ const renderUserContent = (
           thumbnailSize={options.thumbnailSize}
         />
       );
+    case 'local_attachment':
+      return <LocalAttachmentCard attachment={content} sessionId={sessionId} />;
     case 'file':
       return <SessionFileGroup files={[content]} sessionId={sessionId} align="end" />;
     case 'thought':

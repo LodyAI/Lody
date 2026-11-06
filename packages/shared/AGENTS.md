@@ -128,3 +128,5 @@ Presence: E2EE requires UUID session IDs and bounded plaintext allowlists on pub
 ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-presence.md).
 
 Encrypted attachment manifests contain secret per-file keys and belong only in protected conversation content or local recovery receipts. Relay requests use opaque metadata and attachment-only grants; never publish a manifest or key in a URL. Format and recovery rationale: [attachment decision](../../.agents/notes/implemented/architecture/2026-10-28-encrypted-attachments.md).
+
+Native `local_attachment` inputs require exact submission scope and explicit inheritance. Never backfill or silently discard them. [Contract](../../.agents/docs/cli-lib-session-files.md#native-local-references).

@@ -1,4 +1,6 @@
 {
+  "sessions.localAttachmentOnly": "仅在原电脑上可用",
+  "sessions.localAttachmentUnavailable": "本地附件不可用",
   "lodyAgentAccounts.title": "Agent 账户",
   "lodyAgentAccounts.description": "这些凭据保存在所选机器上，存在凭据并不代表认证有效。",
   "lodyAgentAccounts.refresh": "刷新",

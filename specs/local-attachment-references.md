@@ -1,4 +1,4 @@
-# Direct local attachment references (separate follow-up PR)
+# Direct local attachment references
 
 Status: draft
 Translation: current
@@ -7,13 +7,13 @@ Translation: current
 
 ## Abstract
 
-A separate follow-up PR will let Electron send attachments to its local Daemon without uploading: original files retain their paths, while pathless content becomes managed local files, with neither automatic upload nor backfill. This needs a distinct reference protocol, trusted registration, Daemon resolution, preview, and version compatibility; originals are not immutable snapshots and do not widen Agent permissions. The current [attachment draft PR](session-files.md) changes preparation timing and pending submission while retaining existing transports, and does not depend on this proposal. This document preserves future design, not current implementation or acceptance requirements.
+Electron same-machine attachments use original paths or managed local files without automatic upload or backfill. This requires a distinct reference protocol, trusted registration, Daemon resolution, preview and version compatibility. Originals are not immutable snapshots and do not widen Agent permissions. This draft records the intended guarantees; the [attachment lifecycle](../.agents/docs/cli-lib-session-files.md) describes the implemented boundaries and current limitations.
 
 ## 1. Interface with the attachment draft PR
 
-Reuse the input snapshot, pending manager, and readiness boundary from the draft PR. Later replace eligible preparation strategies without building separate new-session and continuation send flows.
+Reuse the input snapshot, pending manager, and readiness boundary from the draft PR. Replace eligible preparation strategies without building separate new-session and continuation send flows.
 
-| Scenario                                             | Follow-up preparation                                                                         |
+| Scenario                                             | Preparation                                                                         |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Electron original file to verified local Daemon      | Validate/register original path without full reads/hashing/copying; return local reference    |
 | Electron pathless File/Blob to verified local Daemon | Atomically save to a persistent local attachment directory after Send; return local reference |
@@ -51,14 +51,25 @@ Add a distinct local-reference input representation across parsing, history norm
 
 Advertise a version through [Machine protocol negotiation](../packages/shared/AGENTS.md#machine-protocol-negotiation). Missing support disables new sends. Preserving opaque history in an old reader does not establish execution safety: an old Daemon must reject the entire execution request containing a new reference rather than run the remaining text. Combinations without that compatibility guarantee must not enable local-reference sending.
 
-## 3. Separate acceptance and open decisions
+## 3. Implementation scope
 
-The follow-up PR separately proves correct original-path URI encoding; no copies or traffic through actual attachment HTTP/backfill outlets; no fallback during failure/retry/restart scans; visual semantics and history retention for generated images; no authority expansion through forged/cross-session/cross-machine references; visible missing/redirected/unreadable/sandbox-denied files; whole-request rejection for unsupported execution; and consistent preview, resend, fork, sharing, and cleanup boundaries.
+The requested outcome is same-machine attachment use without Lody cloud upload. The following choices define the implementation boundary.
 
-That PR settles wire/IPC fields, submission binding, inherited fork authority, version capabilities and old-Daemon rejection, local image-adapter support, and file reclamation. These decisions do not block the draft PR, which must not claim permanently upload-free local attachments prematurely.
+- Apply one preparation strategy to new conversations, continuations and queued sends. Capture the original OS path before `snapshotAttachmentDrafts` slices the File; retain provenance only in local draft state. An edited or generated File must use managed bytes. Freeze the target machine with the send and recheck its trusted identity before registration and dispatch. Unknown identity keeps the message pending; known local failures never select cloud upload.
+- Introduce a distinct `local_attachment` input, with an opaque reference ID, owning machine, original submission identity, media kind and display metadata. Do not overload `file.sourcePath` or `transport: 'local'`. The local registry binds account/workspace, session, turn and reference to the canonical path and source kind. Registration is idempotent for the exact submission and rejects a different source under the same key. Retry uses that binding; resend creates a new authorized binding. Fork inheritance is an explicit local operation validating the source and destination, never implicit trust in copied history.
+- Store registry records and generated files in a dedicated durable local store outside the existing blob/backfill directory. Original files are never copied or reclaimed. Initially retain accepted managed files; automatic garbage collection is outside this change. Failed staging may delete only its own unpublished temporary files. A lost registry produces an unavailable reference, never an upload or arbitrary path lookup.
+- Preserve image semantics through the existing ACP image input plus a local resource link. The local resolver supplies bytes only for image input and preview, not for ordinary-file preparation. Protected workspaces use an admitted host-local operation; until that path is supported, they fail explicitly instead of falling back to plaintext IPC or uploading same-machine content.
+- Gate authoring on a versioned machine capability and whole-request rejection of unknown required input kinds. Implement the rejection boundary before enabling authoring. Unsupported combinations show an upgrade-required error and retain the draft. Parsing must not discard a new input and then execute the remaining text.
+- Render local references as normal attachment cards with an explicit local-only status. Local preview resolves the scoped registration through the existing narrow host boundary. Other devices cannot preview them. Cross-machine resend/fork is blocked until the user replaces the local-only attachment with an explicit transferred attachment. Sharing/export either discloses omission or refuses a complete attachment export; it never reads and uploads the local source implicitly.
 
-## 4. Evidence and status
+Remote targets and clients without native filesystem provenance retain existing transfers. This change does not make remote Agent execution offline, change model-provider input handling, or migrate old pending-backfill attachments. Exact API names and storage encoding are left to implementation; the scope and authorization checks above are not.
 
-Design based on inspection of `8c429a890037c5b21855ce7ef9f59e3677c25a38`; no implementation, separate model, or device acceptance. The split is recorded in the [decision note](../.agents/notes/implemented/architecture/2026-09-14-deferred-attachment-send.md). The existing blob/backfill path is described in [CLI attachment lifecycle](../.agents/docs/cli-lib-session-files.md).
+## 4. Acceptance
+
+Prove original-path URI encoding; no copies or traffic through actual attachment HTTP/backfill outlets for new same-machine references; no fallback during failure/retry/restart scans; visual semantics and history retention for generated images; no authority expansion through forged/cross-turn/cross-session/cross-machine references; visible missing/redirected/unreadable/sandbox-denied files; whole-request rejection for unsupported execution; and consistent preview, resend, fork, sharing, and cleanup boundaries. Include an offline same-machine send and an unchanged remote transfer, covering both landing and continuation flows.
+
+## 5. Evidence and status
+
+The native route is implemented in the shared preparation, Electron local control and Daemon registry boundaries. Behavioral tests cover local send without an account token, unchanged remote transfer, scoped resolution, generated-file retention, image input, resend, fork and sharing refusal. Independent code review covered transport validation and submission inheritance. Storybook covers the local-only card; packaged offline/upgrade and adapter sandbox acceptance remain unverified. Protected workspace registration and automatic managed-file reclamation are outside the supported implementation. The [earlier split decision](../.agents/notes/implemented/architecture/2026-09-14-deferred-attachment-send.md) explains why the existing draft owner is reused.
 
 Source entry points: `packages/components/src/lib/electron-session-file-sender.ts`, `apps/electron/src/main/ipc/services/local-projects-ipc.ts`, `apps/electron/src/preload/index.ts`, `apps/cli/src/lib/{message-handler,session-file-backfill,session-file-blob-store}.ts`, and `packages/shared/src/{message-schemas,session-input}.ts`. Original File path API: [Electron webUtils](https://www.electronjs.org/docs/latest/api/web-utils).

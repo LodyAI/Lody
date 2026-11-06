@@ -1,4 +1,6 @@
 {
+  "sessions.localAttachmentOnly": "Available only on the original computer",
+  "sessions.localAttachmentUnavailable": "Local attachment unavailable",
   "lodyAgentAccounts.title": "Agent accounts",
   "lodyAgentAccounts.description": "These credentials are saved on the selected machine. Their presence does not verify authentication.",
   "lodyAgentAccounts.refresh": "Refresh",

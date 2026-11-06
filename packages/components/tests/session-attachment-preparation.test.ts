@@ -1,3 +1,4 @@
+import * as electronIpc from '../src/lib/electron-ipc-client';
 import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -5,7 +6,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import {
   getSessionRoomId,
-  SESSION_FILE_MAX_COUNT,
+  getMachineRoomId,
   type MachineId,
   type SessionHistory,
   type SessionId,
@@ -38,27 +39,29 @@ const local = vi.hoisted(() => ({
   files: [] as string[],
   fail: false,
 }));
-vi.mock('../src/lib/electron-session-file-sender', () => ({
-  canUseElectronLocalFileSend: () => local.enabled,
-  sendSessionFileToLocalRuntime: async ({ file }: { file: File }) => {
-    if (local.fail) return { ok: false, error: 'Local handoff failed' };
-    local.files.push(await file.text());
+vi.mock('../src/lib/electron', () => ({ isElectronRenderer: () => local.enabled }));
+vi.mock('../src/lib/electron-local-attachment', () => ({
+  prepareElectronLocalAttachment: async ({
+    attachment,
+    sessionId,
+    turnId,
+  }: {
+    attachment: { source: Blob; name: string; kind: string; localReferenceId: string };
+    sessionId: string;
+    turnId: string;
+  }) => {
+    if (local.fail) throw new Error('Local handoff failed');
+    local.files.push(await attachment.source.text());
     return {
-      ok: true,
-      files: [
-        {
-          type: 'file',
-          transport: 'local',
-          fileId: file.name,
-          fileName: file.name,
-          mimeType: file.type,
-          sizeBytes: file.size,
-          machineId: 'machine',
-          sha256: 'a'.repeat(64),
-          textPreview: false,
-          uploadedAt: 1,
-        },
-      ],
+      type: 'local_attachment',
+      referenceId: attachment.localReferenceId,
+      machineId: 'machine',
+      sessionId,
+      turnId,
+      kind: attachment.kind,
+      fileName: attachment.name,
+      mimeType: 'image/png',
+      sizeBytes: attachment.source.size,
     };
   },
 }));
@@ -82,7 +85,7 @@ const MACHINE = 'machine' as MachineId;
  * The real workspace pending queue over a runtime whose session documents are
  * real Loro docs: "written" means present in that document's history.
  */
-function fixture(encrypted = false) {
+function fixture(encrypted = false, token: string | null = 'token') {
   const sessions = new Map<SessionId, ReturnType<typeof createConversationSession>>();
   const docs: LoroDoc[] = [];
   const open = (sessionId: SessionId) => {
@@ -97,6 +100,7 @@ function fixture(encrypted = false) {
   };
   const metas = new Map<string, Record<string, unknown>>([
     [getSessionRoomId(SESSION), { id: SESSION, machineId: MACHINE }],
+    [getMachineRoomId(MACHINE), { protocolCapabilities: { localAttachments: 1 } }],
   ]);
   const resources = createSessionSendResources({
     acquire: async (sessionId) => {
@@ -148,7 +152,7 @@ function fixture(encrypted = false) {
       : {}),
     accountId: 'attachment-test-account',
     workspaceId: 'workspace',
-    token: () => 'token',
+    token: () => token,
     localMachineId: () => local.machineId as MachineId | null,
   });
   cleanup.push(async () => {
@@ -404,67 +408,27 @@ it('transfers a canceled first send creation to the next text message', async ()
   });
 });
 
-it('writes a failed cloud image through the same-machine local handoff as a file receipt', async () => {
-  Object.assign(local, { enabled: true, machineId: 'machine' });
+it('retains a failed same-machine image without attempting cloud fallback', async () => {
+  Object.assign(local, { enabled: true, machineId: 'machine', fail: true });
+  const f = fixture(false, null);
+  upload.run = async (file) => ready(file);
+  f.pending.enqueue(send('blocked', ['image.png']));
+  const held = await failed(f.pending, 'blocked');
+  expect(f.turns()).toEqual([]);
+  expect(held.error).toBe('Local handoff failed');
+  expect(await held.attachments[0]?.source?.text()).toBe('image.png');
+});
+it('uses transfer for a different machine even from a desktop', async () => {
+  Object.assign(local, { enabled: true, machineId: 'other' });
   const f = fixture();
-  upload.run = async () => {
-    throw new Error('Image upload offline');
-  };
-  f.pending.enqueue(send('local-image', ['image.png']));
-  await f.delivered('local-image');
-  expect(local.files).toEqual(['image.png']);
+  upload.run = async (file) => ready(file);
+  f.pending.enqueue(send('remote-image', ['remote.png']));
+  await f.delivered('remote-image');
+  expect(local.files).toEqual([]);
   expect(f.turns()[0]?.items).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ type: 'file', transport: 'local', fileId: 'image.png' }),
-      expect.objectContaining({ type: 'text', text: 'keep local-image' }),
-    ])
+    expect.arrayContaining([expect.objectContaining({ type: 'image', imageId: 'remote.png' })])
   );
 });
-
-it.each(['remote', 'no-capability', 'canceled', 'file-limit', 'local-failure'])(
-  'keeps the message held without local image fallback for %s',
-  async (reason) => {
-    Object.assign(local, {
-      enabled: reason !== 'no-capability',
-      machineId: reason === 'remote' ? 'other' : 'machine',
-      fail: reason === 'local-failure',
-    });
-    const f = fixture();
-    const failure =
-      reason === 'canceled'
-        ? new DOMException('Upload canceled', 'AbortError')
-        : new Error('Image upload offline');
-    upload.run = async () => {
-      throw failure;
-    };
-    const value = send('blocked', ['image.png']);
-    if (reason === 'file-limit')
-      (value.entry.inputConfig as { inputBlocks: unknown[] }).inputBlocks = Array.from(
-        { length: SESSION_FILE_MAX_COUNT },
-        (_, i) => ({
-          type: 'file',
-          fileId: `existing-${i}`,
-          fileName: 'file',
-          mimeType: 'text/plain',
-          sizeBytes: 1,
-          transport: 'local' as const,
-          machineId: 'machine',
-          sha256: 'a'.repeat(64),
-          textPreview: false,
-          uploadedAt: 1,
-        })
-      );
-    f.pending.enqueue(value);
-    const held = await failed(f.pending, 'blocked');
-    expect(local.files).toEqual([]);
-    expect(f.turns()).toEqual([]);
-    expect(held).toMatchObject({
-      error: failure.message,
-      attachments: [expect.objectContaining({ error: failure.message })],
-    });
-    expect(held.attachments[0]?.source).toBeInstanceOf(Blob);
-  }
-);
 
 it('admits an already prepared local file in an encrypted workspace without uploading it', async () => {
   const f = fixture();
@@ -602,4 +566,49 @@ it('keeps an unknown-mode text draft unconsumed across rejection and an explicit
     await sending.catch(() => {});
     await rejectedSend.catch(() => {});
   }
+});
+
+it('sends a same-machine image without cloud authentication or a cloud transfer', async () => {
+  Object.assign(local, { enabled: true, machineId: 'machine' });
+  const f = fixture(false, null);
+  upload.run = async () => {
+    throw new Error('Cloud transfer must not be selected');
+  };
+  f.pending.enqueue(send('offline-image', ['image.png']));
+  await until(f.pending, (sends) => sends.length === 0 || sends.some((s) => !!s.error));
+  expect(f.turns()[0]?.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'local_attachment', kind: 'image' }),
+      expect.objectContaining({ type: 'text', text: 'keep offline-image' }),
+    ])
+  );
+});
+
+it('retains a same-machine draft when the daemon does not advertise local references', async () => {
+  Object.assign(local, { enabled: true, machineId: 'machine' });
+  const f = fixture(false, null);
+  f.metas.set(getMachineRoomId(MACHINE), { protocolCapabilities: {} });
+  f.pending.enqueue(send('old-daemon', ['image.png']));
+  const held = await failed(f.pending, 'old-daemon');
+  expect(held.error).toContain('Update the local daemon');
+  expect(f.turns()).toEqual([]);
+  expect(await held.attachments[0]?.source?.text()).toBe('image.png');
+});
+
+it('passes an original path through the actual native bridge without reading file bytes', async () => {
+  const { prepareElectronLocalAttachment } = await vi.importActual<typeof import('../src/lib/electron-local-attachment')>('../src/lib/electron-local-attachment');
+  const referenceId = crypto.randomUUID();
+  const expected = { type: 'local_attachment' as const, referenceId, machineId: 'machine', sessionId: 'session', turnId: 'turn', kind: 'file' as const, fileName: 'original.txt', mimeType: 'text/plain', sizeBytes: 9 };
+  let request: unknown;
+  const bridge = vi.spyOn(electronIpc, 'getIpcServices').mockReturnValue({ localProjects: { prepareLocalAttachment: async (payload: unknown) => { request = payload; return { ok: true, attachment: expected }; } } } as never);
+  try {
+    const source = new Blob(['synthetic']);
+    source.arrayBuffer = async () => { throw new Error('Original file bytes must not cross IPC'); };
+    await expect(prepareElectronLocalAttachment({ workspaceId: 'workspace', sessionId: 'session', machineId: 'machine', turnId: 'turn', signal: new AbortController().signal, attachment: {
+      id: 'draft', kind: 'file', source, name: 'original.txt', mimeType: 'text/plain', lastModified: 0,
+      localSourcePath: '/synthetic/original.txt', localReferenceId: referenceId,
+    } })).resolves.toEqual(expected);
+    expect(request).toMatchObject({ source: { path: '/synthetic/original.txt' }, referenceId, turnId: 'turn' });
+    expect((request as {source: unknown}).source).not.toHaveProperty('bytes');
+  } finally { bridge.mockRestore(); }
 });

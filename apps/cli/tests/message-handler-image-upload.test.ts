@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { withHistoryPort } from './history-port-fixture';
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -339,73 +341,90 @@ describe('MessageHandler image upload flow', () => {
     expect(harness.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
   });
 
-  it.each([false, true])('keeps late generated images on their exact turn or drops them (missing=%s)', async (missing) => {
-    const harness = createHarness();
-    handlers.push(harness.handler);
+  it.each([false, true])(
+    'keeps late generated images on their exact turn or drops them (missing=%s)',
+    async (missing) => {
+      const harness = createHarness();
+      handlers.push(harness.handler);
 
-    const sessionId = 'session-1' as SessionId;
-    const turnId = (harness.host.beginConversationTurn as (sessionId: SessionId) => string)(
-      sessionId
-    );
-    await (
-      harness.host.createAssistantEntryForTurn as (
-        sessionId: SessionId,
-        sessionDoc: TestHarness['sessionDoc'],
-        turnId: string,
-        modelInfo: undefined
-      ) => Promise<void>
-    )(sessionId, harness.sessionDoc, turnId, undefined);
+      const sessionId = 'session-1' as SessionId;
+      const turnId = (harness.host.beginConversationTurn as (sessionId: SessionId) => string)(
+        sessionId
+      );
+      await (
+        harness.host.createAssistantEntryForTurn as (
+          sessionId: SessionId,
+          sessionDoc: TestHarness['sessionDoc'],
+          turnId: string,
+          modelInfo: undefined
+        ) => Promise<void>
+      )(sessionId, harness.sessionDoc, turnId, undefined);
 
-    (harness.host.handleImageGenerationBegin as (sessionId: SessionId, event: unknown) => void)(
-      sessionId,
-      {
-        acpSessionId: 'acp-1',
-        callId: 'ig-1',
-      }
-    );
-    (harness.host.clearACPState as (sessionId: SessionId) => void)(sessionId);
+      (harness.host.handleImageGenerationBegin as (sessionId: SessionId, event: unknown) => void)(
+        sessionId,
+        {
+          acpSessionId: 'acp-1',
+          callId: 'ig-1',
+        }
+      );
+      (harness.host.clearACPState as (sessionId: SessionId) => void)(sessionId);
 
-    vi.spyOn(harness.host, 'validateSessionImageUploadPath').mockResolvedValue({
-      absolutePath: '/tmp/codex-image.png',
-      fileName: 'codex-image.png',
-      mimeType: 'image/png',
-      sizeBytes: 10,
-    });
-    const started = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
-    vi.spyOn(harness.host, 'uploadSessionImageFile').mockImplementation(async () => {
-      started.resolve(); await finish.promise; return {
-      imageId: 'img-codex',
-      fileName: 'codex-image.png',
-      mimeType: 'image/png',
-      sizeBytes: 10,
-      width: 100,
-      height: 50,
-      downloadUrl: 'https://example.com/img-codex',
-    }; });
+      vi.spyOn(harness.host, 'validateSessionImageUploadPath').mockResolvedValue({
+        absolutePath: '/tmp/codex-image.png',
+        fileName: 'codex-image.png',
+        mimeType: 'image/png',
+        sizeBytes: 10,
+      });
+      const started = Promise.withResolvers<void>(),
+        finish = Promise.withResolvers<void>();
+      vi.spyOn(harness.host, 'uploadSessionImageFile').mockImplementation(async () => {
+        started.resolve();
+        await finish.promise;
+        return {
+          imageId: 'img-codex',
+          fileName: 'codex-image.png',
+          mimeType: 'image/png',
+          sizeBytes: 10,
+          width: 100,
+          height: 50,
+          downloadUrl: 'https://example.com/img-codex',
+        };
+      });
 
-    (harness.host.handleImageGenerationEnd as (sessionId: SessionId, event: unknown) => void)(
-      sessionId,
-      {
-        acpSessionId: 'acp-1',
-        callId: 'ig-1',
-        status: 'completed',
-        savedPath: '/tmp/codex-image.png',
-      }
-    );
-    await started.promise;
-    const nextId = (harness.host.beginConversationTurn as (id: SessionId) => string)(sessionId);
-    await harness.host.createAssistantEntryForTurn(sessionId, harness.sessionDoc, nextId, undefined);
-    (harness.host.clearACPState as (id: SessionId) => void)(sessionId);
-    if (missing) harness.history.splice(0, 1);
-    finish.resolve();
-    await (harness.host.flushCodexGeneratedImageUploads as (sessionId: SessionId) => Promise<void>)(
-      sessionId
-    );
+      (harness.host.handleImageGenerationEnd as (sessionId: SessionId, event: unknown) => void)(
+        sessionId,
+        {
+          acpSessionId: 'acp-1',
+          callId: 'ig-1',
+          status: 'completed',
+          savedPath: '/tmp/codex-image.png',
+        }
+      );
+      await started.promise;
+      const nextId = (harness.host.beginConversationTurn as (id: SessionId) => string)(sessionId);
+      await harness.host.createAssistantEntryForTurn(
+        sessionId,
+        harness.sessionDoc,
+        nextId,
+        undefined
+      );
+      (harness.host.clearACPState as (id: SessionId) => void)(sessionId);
+      if (missing) harness.history.splice(0, 1);
+      finish.resolve();
+      await (
+        harness.host.flushCodexGeneratedImageUploads as (sessionId: SessionId) => Promise<void>
+      )(sessionId);
 
-    expect(harness.history.map((entry) => entry.id)).toEqual(missing ? [nextId] : [turnId, nextId]);
-    expect(harness.history.find((entry) => entry.id === nextId)?.items).toEqual([]);
-    if (!missing) expect(harness.history[0]?.items).toMatchObject([{ type: 'image_group', images: [{ imageId: 'img-codex' }] }]);
-  });
+      expect(harness.history.map((entry) => entry.id)).toEqual(
+        missing ? [nextId] : [turnId, nextId]
+      );
+      expect(harness.history.find((entry) => entry.id === nextId)?.items).toEqual([]);
+      if (!missing)
+        expect(harness.history[0]?.items).toMatchObject([
+          { type: 'image_group', images: [{ imageId: 'img-codex' }] },
+        ]);
+    }
+  );
 
   it('uploads completed-only Codex inline images without persisting base64', async () => {
     const harness = createHarness();
@@ -674,6 +693,67 @@ describe('MessageHandler image upload flow', () => {
         /must not be a symlink/
       );
     } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+  it('registers local files without upload and sends local images as visual input plus the original file URI', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-local-prompt-'));
+    vi.stubEnv('LODY_DATA_DIR', tempDir);
+    const { handler, host } = createHarness();
+    handlers.push(handler);
+    const source = path.join(tempDir, 'image # 中文.png');
+    const bytes = Buffer.from('synthetic image bytes');
+    await fs.writeFile(source, bytes);
+    const request = {
+      type: 'session/attachment-register' as const,
+      machineId: 'machine-1',
+      workspaceId: 'ws-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      referenceId: randomUUID(),
+      path: source,
+      managed: false,
+      kind: 'image' as const,
+      fileName: 'image.png',
+      mimeType: 'image/png',
+    };
+    try {
+      const responses: any[] = [];
+      await handler.handleMessage(request as never, {
+        source: 'runtime',
+        send: (message) => responses.push(message),
+      });
+      expect(responses.at(-1)).toMatchObject({ success: false });
+      await handler.handleMessage(request as never, {
+        source: 'local',
+        send: (message) => responses.push(message),
+      });
+      const attachment = responses.at(-1)?.attachment;
+      expect(attachment).toMatchObject({ type: 'local_attachment', kind: 'image' });
+      const blocks = await host.buildAcpPromptBlocks!({
+        workspaceId: 'ws-1',
+        sessionId: 'session-1',
+        userTurnId: 'turn-1',
+        inputBlocks: [attachment],
+      });
+      expect(blocks).toEqual([
+        { type: 'image', data: bytes.toString('base64'), mimeType: 'image/png' },
+        expect.objectContaining({
+          type: 'resource_link',
+          uri: pathToFileURL(await fs.realpath(source)).href,
+        }),
+      ]);
+      await expect(
+        host.buildAcpPromptBlocks!({
+          workspaceId: 'ws-1',
+          sessionId: 'session-1',
+          userTurnId: 'other-turn',
+          inputBlocks: [attachment, { type: 'text', text: 'must not run' }],
+        })
+      ).rejects.toThrow();
+      expect(await fs.readdir(tempDir)).not.toContain('session-files');
+    } finally {
+      vi.unstubAllEnvs();
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
