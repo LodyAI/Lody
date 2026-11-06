@@ -15,8 +15,8 @@ and a document-wide fork per frame. The owner decided on 2026-11-05 to drop this
 acceptance, accepting a simpler interim check; stronger integrity moves to Roost later. This
 note proposes evidence by author: signed purpose-8 dispatch originals for human input,
 including queued input; a local receipt for machine-authored input; and the frame signer
-plus a later-edit check for Schedules. The main loss is that a Schedule declaration no
-longer proves its exact payload. A human Turn with no dispatch original can no longer start.
+plus a later-edit check for Schedules. The main trade-off is that a Schedule declaration
+no longer proves its exact payload. A human Turn with no dispatch original can no longer start.
 Everything here comes from reading main `979b0efc5`; nothing was implemented or run.
 
 ## Scope
@@ -53,12 +53,9 @@ admission refuses Roost with `e2ee_history_backend_unavailable`.
 
 ### Findings that shape the design
 
-- **Queued input has no signer of its own.** A queued row becomes a history row written by
-  the machine, so the gate sees the machine as signer. The queue row's author is never
-  checked: `queuedItem.userId` is display data, and encrypted dispatch skips account admission
-  by design. Today's gate therefore evaluates the machine's rights, not the queuing member's.
-  This predates and is independent of forkAt, and removing the fork does not change it. Any
-  option must close it.
+- **Queued input needs its own evidence.** Promotion writes the history row on this machine,
+  so the row's signature names the machine. Every option has to carry the input's author
+  separately, independently of forkAt.
 - **The dispatch original is already a signed intent for human input.** It binds request ID,
   target machine, expiry, session, Turn, `userId`, timestamp and `inputConfig`, and that
   config normally carries `prompt` and `inputBlocks`. `resolveDispatchTurnInput` prefers them
@@ -67,8 +64,8 @@ admission refuses Roost with `e2ee_history_backend_unavailable`.
 - **The client already prepares a frame for queued sends.** `refuseKnownWithdrawnTarget` calls
   `prepareEncryptedDispatch` for every encrypted send, then discards the result.
 - **The fork carries more than the signer.** Comparing the reconstructed row with the current
-  one is what rejects a later edit to `inputConfig`, `items`, `scheduleRun` or `derivedFrom`
-  by another writer. Row fields are separate operations, and status updates share the same
+  one also covers later changes to `inputConfig`, `items`, `scheduleRun` and `derivedFrom`.
+  Row fields are separate operations, and status updates share the same
   map, so a container-level "changed since" check cannot replace it for Turns. It does work
   for Schedules, where `scheduleChangedSince` already exists and needs only a version.
 - **Machine-authored rows prove little by signature.** The machine already knows it wrote
@@ -86,13 +83,11 @@ admission refuses Roost with `e2ee_history_backend_unavailable`.
 | Client changes | None | Queue path only | Desktop, Web, mobile, CLI |
 | New format | None | One Session document map, one local table | New signed record and expiry rules |
 | `frames`/`spans` | Kept in full | Schedule rooms only | Removable |
-| Fails a non-negotiable | **Yes, the third: not recommended** | No; see the Schedule limit below | No |
+| Fails a non-negotiable | **Yes, the third: not recommended** | No; see the guarantees below | No |
 
-**Option A** is the literal minimum, about 40 changed lines with no rollout order. It loses
-the later-edit check, so the signature on a creation op would vouch for whatever the row says
-now. Any current writer could rewrite a pending Turn's prompt or add `derivedFrom`, and it
-would run as the original author. A revoked device could do the same if a host still admitted
-its writes, so revocation would rest on the server alone.
+**Option A** is the literal minimum, about 40 changed lines with no rollout order. It keeps the
+signer of a Turn's creation but no longer compares later row changes with what was signed, so
+it does not hold the third non-negotiable. It is not recommended.
 
 **Option C** is the design floated in earlier E2EE discussion: a member device signs session,
 Turn, content digest, config, optional `derivedFrom` and Schedule, target and deadline. It is
@@ -127,8 +122,8 @@ claim(userTurnId)
 - **Machine-authored input.** Each write site records `(sessionId, userTurnId, digest)` in a
   new table of `execution-origins.sqlite` before the history write. The digest covers the same
   projection the gate compares today. A row with neither a matching receipt nor a dispatch
-  original is refused, so another writer cannot forge `derivedFrom` or `scheduleRun`, and a
-  missed write site fails closed in tests. Automation queue rows record at enqueue, and
+  original does not start, including its `derivedFrom` and `scheduleRun`, and a missed write site
+  fails closed in tests. Automation queue rows record at enqueue, and
   promotion binds the final projection.
 - **Derivation.** Origin lookup reads the member's dispatch original from the document or
   receipt cache, then applies the existing rules unchanged. An origin with no frame refuses the
@@ -142,19 +137,20 @@ claim(userTurnId)
 - **Unchanged.** The `agent-start:<userTurnId>` journal, `authorizeExecution`, freshness fences,
   deadlines, RPC originals and retry behavior. The encrypt-or-refuse boundary is not touched.
 
-### Guarantees given up compared with today
+### Guarantees by option
 
-| # | Who | What they can do | Impact | Later owner |
+| Guarantee | Today | Option A | Option B | Option C |
 | --- | --- | --- | --- | --- |
-| 1 | A current member with write access | Publish a qualified snapshot holding a hostile definition and declaration under the op IDs of another member's real frame. A replica that took the snapshot first attributes it to that member | A persistent Schedule runs with the victim's rights on machines that replica serves. Needs op-ID prediction and delivery order; later edits still invalidate it | Roost |
-| 2 | A removed device plus a colluding host | The same, if the host admits its snapshot | As #1. Today's fork resists this; the [whitepaper](../../../../specs/e2ee/whitepaper.md) already excludes host/revoked-device collusion for snapshots, so the third guarantee holds only within that stated model. **Owner decision** | Roost |
-| 3 | A current member with write access | Edit `items` on a Turn whose `inputConfig` has blocks | The display can differ from what ran. Already true on the dispatch path; widened to all human Turns | Roost |
-| 4 | A current member with write access | Delete or overwrite a frame in the document map | That Turn does not start, unless a received copy is cached. Denial only, comparable to editing the row today | Roost |
-| 5 | Nobody, availability only | A human Turn with no original can no longer start; a derivation from it is refused | The sender sees the existing stale-pending refusal instead of a successful fallback. Preparation failure must become visible | Not applicable |
+| Signer identity at start | Yes | Yes | Yes | Yes |
+| Current-ledger check at start | Yes | Yes | Yes | Yes |
+| Executed Turn content matches what was signed | Yes | No | Yes | Yes |
+| Displayed `items` match what was signed | Fork path only | No | No | Yes |
+| Schedule declaration rejects later edits | Yes | Yes | Yes | Yes |
+| Schedule declaration proves its exact payload | Yes | No | No, left to Roost | Yes |
+| Human Turn starts with no dispatch original | Yes | Yes | No, the sender sees a refusal | No |
 
-Not given up: signer identity for human and machine input, current-ledger checks at start, and
-tamper detection on Turns. Queued input becomes stricter than today. A missing receipt on a
-restored machine denies that input rather than granting anything.
+Option B's trade-offs are availability on a missing original and the Schedule payload check.
+Both are owner decisions below. A missing machine receipt refuses that input.
 
 ## Roost follow-up
 
@@ -216,13 +212,12 @@ Regression scope: A, B, C, mobile and Schedule all rerun, including:
 - Owner and shared-member dispatch, with RPC arriving before and after history.
 - Queued input from each, including edit, automation rows and a queue older than its window.
 - MCP child Session, chat and Role from an owner Turn and a member Turn; denied cross-machine.
-- Schedule definition, manual run, edit-invalidates, foreign declaration and multi-project.
+- Schedule definition, manual run, edit-invalidates, signer checks and multi-project.
 - Daemon restart mid-claim, an exact retry of an uncertain start, and a snapshot-only replica.
 - Device revocation, member removal and sharing withdrawal during a pending start.
 
-The adversarial fixtures in `apps/cli/tests/e2ee-runtime.test.ts` carry over, except the
-same-peer/counter case, which Schedule limit #1 changes. A new fixture should show that a
-foreign writer's queue row cannot start, red before PR 3.
+The fixtures in `apps/cli/tests/e2ee-runtime.test.ts` carry over, except the case that pins the
+Schedule payload check.
 
 ## Spec impact
 
@@ -235,23 +230,21 @@ note does not approve any Spec.
 
 ## Open decisions
 
-1. Whether the queued-input gap is fixed before launch rather than with the rest of this work.
-2. Whether Schedule limits #1 and #2 are acceptable, or Schedules keep their fork until Roost.
-3. Whether a human Turn with no original may fail closed (recommended) rather than keep a fallback.
-4. Approval of the Spec revision above.
+1. Whether the Schedule payload check may move to Roost, or Schedules keep their fork until then.
+2. Whether a human Turn with no original may fail closed (recommended) rather than keep a fallback.
+3. Approval of the Spec revision above.
 
 ## Alternatives rejected
 
-- *Trust the row with no evidence.* Any writer could start work as anyone, and a revoked device
-  relies on the server alone. It breaks the third guarantee.
+- *Trust the row with no evidence.* It keeps no signer identity at start, so it does not hold the
+  third guarantee.
 - *Signed feature frames for Schedules.* Same format work as Option C, with a 15-minute cap.
-- *A last-editor check on each row key.* `LoroMap.getLastEditor` reports a peer, which a writer
-  chooses, and does not cover nested containers.
+- *A last-editor check on each row key.* `LoroMap.getLastEditor` reports only a peer and does not
+  cover nested containers.
 
 ## Verification limits
 
-Inventory and findings come from code reading. No tests ran, and the queue finding has no
-reproducing fixture yet. `frontiersToVV` exists in the pinned `loro-crdt` 1.17.0 typings, but its
+Inventory and findings come from code reading. No tests ran. `frontiersToVV` exists in the pinned `loro-crdt` 1.17.0 typings, but its
 behavior on snapshot-only replicas and the cost of today's fork were not exercised or measured. Mobile behavior is not established from this
 repository. Sizes are estimates.
 
