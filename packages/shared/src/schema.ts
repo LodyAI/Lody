@@ -714,10 +714,6 @@ export const sessionHistorySchema = schema.LoroMap({
   /** Encrypted only: this machine wrote the row by promoting a queue item. The row's
    * signer is then not its author, so the start needs the input's own evidence. */
   queuedInput: schema.Boolean({ required: false }),
-  /** The Loro peer that last named this Turn on its queue row. */
-  queuedBy: schema.String({ required: false }),
-  /** The queue row this Turn was promoted from. */
-  queuedRow: schema.String({ required: false }),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**

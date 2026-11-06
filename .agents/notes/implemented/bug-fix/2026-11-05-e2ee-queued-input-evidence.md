@@ -27,16 +27,6 @@ change.
   the current ledger, binds session, Turn, `userId` and config to the signed row, and returns
   the signer. The existing `authorizeExecution` then applies current membership, device state
   and sharing.
-- **Writer.** A frame stays valid until its deadline and any reader can copy its bytes, so the
-  row that uses it must be its signer's too. In the same tick as the history write, promotion
-  records in the signed row the queue row's ID, as `queuedRow`, and the Loro peer that last
-  wrote its `userTurnId`, as `queuedBy`. `retain` attributes operations in `operation_signers`.
-  A frame can repackage other peers' operations, as `exportUpdates` does during catch-up, and a
-  replica applies the first delivery, so a signer owns only operations no earlier frame
-  delivered. The start reads that peer's evidence back from its newest operation to the latest
-  change to the row, and requires its signer to be the frame's signer. A gap is recovered like a
-  missing original and stays pending until the deadline. An edited or removed input therefore
-  cannot start again.
 - **Separate map.** `rpcDispatchOriginals` is compared strictly, and promotion adds `resume`.
   Reading a queue frame from it would make a CLI without this change deny the Turn.
 - **Comparison.** `queuedInputEvidence` is the canonical form of what the author chose. It
@@ -75,6 +65,11 @@ change.
 
 ## Alternatives
 
+- *Bind the queue row's writer to the frame's signer.* Tried and removed. It needs a retained
+  update frame for the row, and a row that reaches the machine in a snapshot has none, so an
+  ordinary queued input stayed pending until it expired. Frames can also carry other peers'
+  operations during catch-up, which made per-peer attribution unreliable.
+
 - *Refuse at promotion.* A refused row would need its own terminal path and could stall the
   queue, and every promotion route would need the check. The start gate already has one
   visible refusal path.
@@ -99,13 +94,12 @@ change.
   real promoted row through this failure path.
 - Frames grow the Session document, as `rpcDispatchOriginals` already does; nothing is pruned.
 - A request signer unknown to a stale ledger is refused rather than retried.
-- Follow-up: the signer itself can requeue its own frame's Turn within its deadline, and another
-  device of the same member counts as a different writer. Frame and row come from one client, so
-  ordinary sends and edits are unaffected. Making withdrawal irreversible for the author needs
-  its own decision.
-- A promoted row without `queuedBy` is refused at start, with no recovery. This covers rows
-  promoted before this change.
-- Follow-up: `operation_signers` only grows and needs a retention policy.
+- Starting after a cancel or edit is not an absolute boundary, by owner decision on 2026-11-06:
+  the ordinary path comes first. A frame stays valid for its signer until its deadline, and
+  deletion from a shared document does not revoke bytes another reader kept. A queue row reusing
+  it is bound to the signed content and Turn, not to the row's writer, and the journal still
+  allows one start. So a current writer, or the signer itself, can run a withdrawn input that
+  its signer once signed, within that deadline.
 - Follow-up: an abort that lands inside the writer's enqueue call has no effect, and `written`
   has no post-check for a commit that silently changes nothing.
 - `userId` is checked only against the machine account. One member can still label an input

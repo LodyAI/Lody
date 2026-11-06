@@ -6,7 +6,7 @@ import {
 } from '@lody/shared';
 import { isDeepStrictEqual } from 'node:util';
 import { Effect, type Scope } from 'effect';
-import type { ContainerID, LoroDoc, OpId, PeerID } from 'loro-crdt';
+import type { LoroDoc, OpId } from 'loro-crdt';
 import type { PayloadProtectionOpenInput } from '@loro-dev/streams-crdt';
 import type { EncryptedExecutionIntent } from './agent-execution';
 import type { ExecutionOrigins } from './execution-origins';
@@ -143,28 +143,9 @@ export function makeVerifiedExecutionOriginal(options: {
             verified.args.sessionId !== intent.sessionId ||
             verified.args.userTurnId !== intent.userTurnId ||
             verified.args.userId !== row.userId ||
-            queuedInputEvidence(verified.args.inputConfig) !== evidence ||
-            typeof row.queuedBy !== 'string' ||
-            typeof row.queuedRow !== 'string'
+            queuedInputEvidence(verified.args.inputConfig) !== evidence
           )
             return undefined;
-          // The original proves what its signer asked for once. The queue row must be
-          // that signer's too, so a withdrawn original cannot return through another writer.
-          const resource = sessionContentResource(intent.sessionId);
-          const peer = row.queuedBy as PeerID;
-          const queueRow = row.queuedRow as ContainerID;
-          let writer = options.origins.queueRowSigner(doc, resource, peer, queueRow);
-          if (writer.missing && options.recover) {
-            yield* options.recover(
-              getSessionRoomId(intent.sessionId as SessionId),
-              writer.missing,
-              (request) => options.openContent(intent, request)
-            );
-            writer = options.origins.queueRowSigner(doc, resource, peer, queueRow);
-          }
-          if (writer.missing)
-            return { state: 'pending-evidence' as const, expiresAt: verified.expiresAt };
-          if (writer.signer !== verified.requesterDevice) return undefined;
           return {
             requesterDevice: verified.requesterDevice,
             requesterCryptoUserId: hex(member.userId.toBytes()),

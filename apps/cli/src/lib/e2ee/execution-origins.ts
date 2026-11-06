@@ -20,11 +20,9 @@ import { Clock, Effect, type Scope } from 'effect';
 import {
   decodeImportBlobMeta,
   isContainer,
-  type ContainerID,
   type LoroDoc,
   type LoroMap,
   type OpId,
-  type PeerID,
 } from 'loro-crdt';
 import type { PayloadProtectionOpenInput } from '@loro-dev/streams-crdt';
 import { z } from 'zod';
@@ -95,8 +93,6 @@ const projection = (map: LoroMap) => {
     scheduleRun: read('scheduleRun'),
     derivedFrom: read('derivedFrom'),
     queuedInput: read('queuedInput'),
-    queuedBy: read('queuedBy'),
-    queuedRow: read('queuedRow'),
     // A promoted row's requester is copied from its queue item, so it is signed content.
     ...(read('queuedInput') === true ? { userId: read('userId') } : {}),
   };
@@ -136,8 +132,6 @@ export class ExecutionOrigins {
       db.exec(`CREATE TABLE IF NOT EXISTS frames(digest TEXT PRIMARY KEY, resource TEXT NOT NULL, sealed BLOB NOT NULL, aad BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS spans(resource TEXT NOT NULL, peer TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, digest TEXT NOT NULL,
         PRIMARY KEY(resource, peer, start, end, digest));
-        CREATE TABLE IF NOT EXISTS operation_signers(resource TEXT NOT NULL, peer TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, signer TEXT NOT NULL,
-        PRIMARY KEY(resource, peer, start));
         CREATE TABLE IF NOT EXISTS queued_inputs(session TEXT NOT NULL, turn TEXT NOT NULL, digest TEXT NOT NULL,
         PRIMARY KEY(session, turn, digest));`);
       return body(db);
@@ -184,65 +178,12 @@ export class ExecutionOrigins {
     );
   }
 
-  /** A frame may repackage operations its signer did not write, and a replica applies the
-   * first delivery. So only operations no earlier frame delivered belong to this signer. */
-  private attributeOperations(
-    db: Database.Database,
-    resource: string,
-    peer: string,
-    start: number,
-    end: number,
-    signer: string
-  ) {
-    const insert = db.prepare('INSERT OR IGNORE INTO operation_signers VALUES (?, ?, ?, ?, ?)');
-    const earlier = db
-      .prepare(
-        'SELECT start, end FROM operation_signers WHERE resource=? AND peer=? AND start<? AND end>? ORDER BY start'
-      )
-      .all(resource, peer, end, start)
-      .map((row) => z.object({ start: z.number(), end: z.number() }).parse(row));
-    let cursor = start;
-    for (const span of earlier) {
-      if (span.start > cursor) insert.run(resource, peer, cursor, span.start, signer);
-      cursor = Math.max(cursor, span.end);
-    }
-    if (cursor < end) insert.run(resource, peer, cursor, end, signer);
-  }
-
-  /** Who last touched a queue row as this peer, reading continuous evidence back from the
-   * peer's newest operation. `missing` names the operation whose frame is still needed. */
-  queueRowSigner(doc: LoroDoc, resource: string, peer: PeerID, row: ContainerID) {
-    const spans = this.database((db) =>
-      db
-        .prepare(
-          'SELECT start, end, signer FROM operation_signers WHERE resource=? AND peer=? ORDER BY start DESC'
-        )
-        .all(resource, peer)
-        .map((value) =>
-          z.object({ start: z.number(), end: z.number(), signer: z.string() }).parse(value)
-        )
-    );
-    let cursor = doc.version().get(peer) ?? 0;
-    for (const span of spans) {
-      if (span.start >= cursor) continue;
-      if (span.end < cursor) return { missing: { peer, counter: cursor - 1 } as OpId };
-      const changed = doc.getChangedContainersIn(
-        { peer, counter: span.start },
-        cursor - span.start
-      );
-      if (changed.includes(row)) return { signer: span.signer };
-      cursor = span.start;
-    }
-    return { missing: { peer, counter: Math.max(cursor - 1, 0) } as OpId };
-  }
-
   /** Called only after signature AND AEAD verification; snapshot opens never call it. */
   retain(
     resource: string,
     request: PayloadProtectionOpenInput,
     plaintext: Uint8Array,
-    target?: OpId,
-    signer?: string
+    target?: OpId
   ): boolean {
     if (
       request.context.kind !== 'update_batch' ||
@@ -268,10 +209,7 @@ export class ExecutionOrigins {
           for (const { meta } of decoded) {
             for (const [peer, end] of meta.partialEndVersionVector.toJSON()) {
               const start = meta.partialStartVersionVector.get(peer) ?? 0;
-              if (start < end) {
-                insert.run(resource, peer, start, end, digest);
-                if (signer) this.attributeOperations(db, resource, peer, start, end, signer);
-              }
+              if (start < end) insert.run(resource, peer, start, end, digest);
             }
           }
         })
@@ -482,8 +420,6 @@ export class ExecutionOrigins {
                       timestamp: current.timestamp,
                       inputConfig: current.inputConfig,
                       userId: current.userId,
-                      queuedBy: current.queuedBy,
-                      queuedRow: current.queuedRow,
                     },
                   }
                 : {}),

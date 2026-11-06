@@ -64,7 +64,6 @@ import {
   Context,
   Clock,
   Effect,
-  Exit,
   Fiber,
   Layer,
   Result,
@@ -5542,13 +5541,7 @@ const retainSignedScheduleUpdate = Effect.fnUntraced(function* (
   });
   const request = { ...sealed, context, additionalData: Uint8Array.from([...sealed.header, 9]) };
   const opened = yield* binding.openAuthenticated(request);
-  origins.retain(
-    `doc:${docId}`,
-    request,
-    opened.plaintext,
-    undefined,
-    hex(opened.author.device.toBytes())
-  );
+  origins.retain(`doc:${docId}`, request, opened.plaintext);
   opened.plaintext.fill(0);
   return request;
 });
@@ -5668,6 +5661,7 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
       kind: 'personal',
     })
   );
+  const secondRpc = sender('queued-second', secondDevice);
 
   let meta = {
     id: queuedSessionId,
@@ -5824,25 +5818,14 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
   const send = Effect.fnUntraced(function* (
     turnId: string,
     rpc?: typeof memberRpc,
-    userId = rpc === ownerRpc ? ownerAccount : memberAccount
+    userId = rpc === ownerRpc || rpc === secondRpc ? ownerAccount : memberAccount
   ) {
     if (rpc) yield* prepareOriginal(rpc, turnId, userId);
-    if (rpc) yield* asClient(rpc, pushRow(turnId, userId));
+    if (rpc === memberRpc || rpc === ownerRpc) yield* asClient(rpc, pushRow(turnId, userId));
     else yield* pushRow(turnId, userId);
   });
-  const promote = Effect.fnUntraced(function* (duringPromotion?: () => Promise<void>) {
+  const promote = Effect.fnUntraced(function* () {
     const from = doc.version();
-    if (duringPromotion) {
-      const record = session.setQueuePromotionRecord.bind(session);
-      let fired = false;
-      session.setQueuePromotionRecord = (async (...args: Parameters<typeof record>) => {
-        if (!fired) {
-          fired = true;
-          await duringPromotion();
-        }
-        return record(...args);
-      }) as typeof record;
-    }
     const promoted = yield* Effect.promise(() =>
       (
         watcher as unknown as {
@@ -5934,11 +5917,14 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     append,
     asClient,
     forward,
-    /** Another signer's work under the owner's Loro peer, which any writer may choose. */
-    borrowOwnerPeer: <A, E, R>(work: Effect.Effect<A, E, R>) =>
-      Effect.suspend(() => {
-        doc.setPeerId('101');
-        return work;
+    secondRpc,
+    pushRowAsPeer: (peer: `${number}`, turnId: string, userId: string) =>
+      Effect.gen(function* () {
+        doc.commit();
+        doc.setPeerId(peer);
+        yield* pushRow(turnId, userId);
+        doc.commit();
+        doc.setPeerId(machinePeer);
       }),
     claim,
     doc,
@@ -6272,58 +6258,6 @@ describe('encrypted queued input evidence', () => {
       })
     ));
 
-  it('does not start an original replayed by another writer after a removal', () =>
-    run(true, (h) =>
-      Effect.gen(function* () {
-        yield* h.send('withdrawn-turn', h.ownerRpc);
-        const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
-        if (!row) throw new Error('queue row missing');
-        yield* h.asClient(
-          h.ownerRpc,
-          Effect.promise(() => h.session.removeMessageQueueItem(row.$cid))
-        );
-        yield* h.asClient(h.memberRpc, h.pushRow('withdrawn-turn', ownerAccount));
-        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
-      })
-    ));
-
-  it('does not start an original replayed by another writer after an edit', () =>
-    run(true, (h) =>
-      Effect.gen(function* () {
-        yield* h.send('edited-away-turn', h.ownerRpc);
-        const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
-        if (!row) throw new Error('queue row missing');
-        const map = () => h.doc.getContainerById(row.$cid as never) as unknown as LoroMap;
-        yield* h.asClient(
-          h.ownerRpc,
-          Effect.sync(() => map().set('userTurnId', 'edited-turn'))
-        );
-        yield* h.asClient(
-          h.memberRpc,
-          Effect.sync(() => map().set('userTurnId', 'edited-away-turn'))
-        );
-        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
-      })
-    ));
-
-  it('does not start a replayed original written under the signer own peer', () =>
-    run(true, (h) =>
-      Effect.gen(function* () {
-        yield* h.send('borrowed-peer-turn', h.ownerRpc);
-        const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
-        if (!row) throw new Error('queue row missing');
-        yield* h.asClient(
-          h.ownerRpc,
-          Effect.promise(() => h.session.removeMessageQueueItem(row.$cid))
-        );
-        yield* h.asClient(
-          h.memberRpc,
-          h.borrowOwnerPeer(h.pushRow('borrowed-peer-turn', ownerAccount))
-        );
-        expect(yield* h.claim(yield* h.promote())).toEqual({ state: 'denied' });
-      })
-    ));
-
   it.each(['second', 'member'] as const)(
     'starts a queued input after a %s device repackaged the writer operations',
     (signer) =>
@@ -6342,27 +6276,57 @@ describe('encrypted queued input evidence', () => {
       )
   );
 
-  it('does not start an original whose row changes during promotion', () =>
+  it('starts a queued input whose row reached this machine in a snapshot', () =>
     run(true, (h) =>
       Effect.gen(function* () {
-        yield* h.send('raced-turn', h.ownerRpc);
+        // Original and row come from the member, but no update frame was ever retained.
+        yield* h.prepareOriginal(h.memberRpc, 'snapshot-turn', memberAccount);
+        yield* h.pushRowAsPeer('303', 'snapshot-turn', memberAccount);
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'member',
+        });
+      })
+    ));
+
+  it('starts queued inputs from two devices of one member', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('first-device-turn', h.ownerRpc);
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+        yield* h.send('second-device-turn', h.secondRpc);
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+      })
+    ));
+
+  it('starts an edited queued input under its new Turn and original', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('before-edit-turn', h.ownerRpc);
         const row = (yield* Effect.promise(() => h.session.getMessageQueue()))[0];
         if (!row) throw new Error('queue row missing');
-        const map = h.doc.getContainerById(row.$cid as never) as unknown as LoroMap;
-        const outcome = yield* h
-          .promote(() =>
-            Effect.runPromise(
-              Effect.scoped(
-                h.asClient(
-                  h.memberRpc,
-                  Effect.sync(() => map.set('userTurnId', 'other-turn'))
-                )
-              )
-            )
-          )
-          .pipe(Effect.exit);
-        if (Exit.isSuccess(outcome))
-          expect(yield* h.claim(outcome.value)).toEqual({ state: 'denied' });
+        const config = queuedConfig('after-edit-turn');
+        yield* h.prepareOriginal(
+          h.ownerRpc,
+          'after-edit-turn',
+          ownerAccount,
+          h.clientConfig('after-edit-turn', config)
+        );
+        yield* h.asClient(
+          h.ownerRpc,
+          Effect.promise(() => h.session.removeMessageQueueItem(row.$cid))
+        );
+        yield* h.asClient(h.ownerRpc, h.pushRow('after-edit-turn', ownerAccount, config));
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
       })
     ));
 

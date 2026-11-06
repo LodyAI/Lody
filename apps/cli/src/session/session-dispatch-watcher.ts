@@ -1,6 +1,5 @@
 import { createDaemonLossTasks } from '@/lib/e2ee/client-loss-observer';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
-import type { ContainerID, LoroMap } from 'loro-crdt';
 import { MemoryBindingSchema } from '@lody/shared';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
@@ -2243,18 +2242,6 @@ export class SessionDispatchWatcher {
     return resolveDispatchTurnInput(entry);
   }
 
-  /** Names who last pointed the queue row at this Turn. It runs in the history write's own
-   * tick, so a later check cannot read a row an import changed after promotion began. */
-  private queueRowStamp(sessionDoc: SessionDocumentHandle) {
-    if (!this.deps.encryptedWorkspace) return undefined;
-    return (entry: SessionHistoryInput, item: { $cid: string }): SessionHistoryInput => {
-      const row = sessionDoc.handle?.doc.getContainerById(item.$cid as ContainerID);
-      const queuedBy =
-        row?.kind() === 'Map' ? (row as LoroMap).getLastEditor('userTurnId') : undefined;
-      return { ...entry, queuedRow: item.$cid, ...(queuedBy ? { queuedBy } : {}) };
-    };
-  }
-
   private buildQueuedMessageEntry(
     queuedItem: Awaited<ReturnType<SessionBackend['getMessageQueue']>>[number],
     meta: SessionMeta,
@@ -2425,7 +2412,6 @@ export class SessionDispatchWatcher {
           existingEntry ?? this.buildQueuedMessageEntry(queuedItem, latestMeta, record.userTurnId);
         if (!entry) continue;
         await backend.promoteQueuedTurn({
-          stampEntry: this.queueRowStamp(sessionDoc),
           item: queuedItem,
           entry,
           operationId,
@@ -2512,7 +2498,6 @@ export class SessionDispatchWatcher {
             const pending = getPendingUserTurnActivationId(currentMeta);
             if (pending && pending !== queuedTurnId) return null;
             const promoted = await backend.promoteQueuedTurn({
-              stampEntry: this.queueRowStamp(sessionDoc),
               item: queuedItem,
               entry: existing,
               operationId,
@@ -2567,7 +2552,6 @@ export class SessionDispatchWatcher {
       }
 
       const promoted = await backend.promoteQueuedTurn({
-        stampEntry: this.queueRowStamp(sessionDoc),
         item: queuedItem,
         entry,
         operationId,

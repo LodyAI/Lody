@@ -946,13 +946,7 @@ async function openWorkspaceOwned(
               originalFrame.context.kind === 'update_batch'
             ) {
               try {
-                executionOrigins.retain(
-                  descriptor.resource,
-                  originalFrame,
-                  result.plaintext,
-                  undefined,
-                  hex(result.author.device.toBytes())
-                );
+                executionOrigins.retain(descriptor.resource, originalFrame, result.plaintext);
                 originWriteFailed = false;
               } catch {
                 if (!originWriteFailed)

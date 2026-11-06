@@ -52,13 +52,7 @@ export type VerifiedExecutionOriginal = {
   /** Present only on a machine-authored input derived from a shared member's Turn. */
   derivedFrom?: DerivationOrigin;
   /** The signed row's content when it is marked as promoted from a queue item. */
-  queued?: {
-    timestamp: unknown;
-    inputConfig: unknown;
-    userId: unknown;
-    queuedBy: unknown;
-    queuedRow: unknown;
-  };
+  queued?: { timestamp: unknown; inputConfig: unknown; userId: unknown };
 };
 export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
 export type ResolveVerifiedExecutionOriginal = (
