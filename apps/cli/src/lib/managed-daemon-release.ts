@@ -1,7 +1,7 @@
 import { ManagedDaemonUpgradeOptionsSchema } from '@lody/shared';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createHash, createPublicKey, randomUUID, verify } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { z } from 'zod';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
@@ -52,13 +52,6 @@ export const DaemonReleaseSchema = z
   })
   .strict();
 export type DaemonRelease = z.infer<typeof DaemonReleaseSchema>;
-const EnvelopeSchema = z
-  .object({
-    keyId: z.string().min(1),
-    payload: z.string().max(65536),
-    signature: z.string().max(128),
-  })
-  .strict();
 const ContextSchema = z.object({
   metadata: z.object({
     format: z.literal(1),
@@ -74,7 +67,6 @@ const ContextSchema = z.object({
       size: z.number().int().positive(),
       version: z.literal('26.13.0'),
     }),
-    keys: z.record(z.string(), z.string()),
   }),
   nodePath: z.string(),
   releaseDir: z.string(),
@@ -95,18 +87,9 @@ export function managedDaemonRoot(): string {
 }
 export function verifyDaemonRelease(
   raw: string,
-  trust: Pick<SeaContext['metadata'], 'keys' | 'product'> & { distribution?: string }
+  trust: Pick<SeaContext['metadata'], 'product'> & { distribution?: string }
 ): DaemonRelease {
-  const envelope = EnvelopeSchema.parse(JSON.parse(raw));
-  const pem = trust.keys[envelope.keyId];
-  if (!pem) throw new Error('Unknown daemon release key');
-  const key = createPublicKey(pem);
-  if (
-    key.asymmetricKeyType !== 'ed25519' ||
-    !verify(null, Buffer.from(envelope.payload), key, Buffer.from(envelope.signature, 'base64'))
-  )
-    throw new Error('Invalid daemon release signature');
-  const release = DaemonReleaseSchema.parse(JSON.parse(envelope.payload));
+  const release = DaemonReleaseSchema.parse(JSON.parse(raw));
   if (
     release.product !== trust.product ||
     release.distribution !== (trust.distribution ?? `${trust.product}-daemon`) ||
@@ -386,7 +369,7 @@ async function downloadArtifact(
     await fs.rm(temporary, { force: true });
   }
 }
-/** Signed target is resolved once; never accept a remote command or artifact URL. */
+/** Target is resolved once; never accept a remote command or artifact URL. */
 export async function prepareManagedRelease(
   context: SeaContext,
   target: string,
@@ -449,9 +432,6 @@ export async function prepareManagedRelease(
     installationForRelease(release).node,
     options.signal
   );
-  await writeManagedRecord(
-    path.join(directory, 'manifest.json'),
-    EnvelopeSchema.parse(JSON.parse(envelope))
-  );
+  await writeManagedRecord(path.join(directory, 'manifest.json'), release);
   return { release, envelope, capsule };
 }

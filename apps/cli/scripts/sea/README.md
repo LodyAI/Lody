@@ -2,7 +2,7 @@
 
 The npm bin stays JavaScript. `stage.mjs` gathers the built CLI, file-based Workers,
 WASM and target native dependencies. `build.mjs` embeds that complete tree in a
-Node 26.13.0 SEA with product-specific public Ed25519 keys. A fixed installed SEA
+Node 26.13.0 SEA. A fixed installed SEA
 runs the existing watchdog and keeps the Host lease; versioned Workers run under
 a separately cached, ordinary official Node. SEA cannot interpret external JS.
 
@@ -25,12 +25,14 @@ node apps/cli/scripts/sea/finalize.mjs finalize.json
 
 Stage configuration contains `staging`, `dist`, `cliRoot`. Build configuration adds
 `output`, `node`, `product` (`lody-oss` or `lody-cloud`), `distribution`, `version`,
-`channel`, `platform` and `keys` (key-ID to public PEM). Build on the native target
+`channel` and `platform`. Build on the native target
 using the pinned Node. Finalize configuration contains `capsule`, `node`,
-`outputDir`, `keyId`, `source` (full publishing source SHA); its private signing key
-comes only from `LODY_DAEMON_RELEASE_PRIVATE_KEY`. Finalize freezes `manifest.json`,
+`outputDir`, `source` (full publishing source SHA). Finalize freezes `manifest.json`,
 `daemon.gz` and `node.gz` after platform signing. Do not rebuild same-version bytes
-on publication retry. Public builds and cloud builds require separate product keys.
+on publication retry. The updater trusts the configured HTTPS artifact service for manifests and checks
+SHA-256 of compressed and extracted files. These hashes detect corruption; they
+do not authenticate a manifest replaced along with its artifacts. No release
+key pair is required. OSS and cloud retain separate product/distribution checks.
 
 The installer extracts to the existing installation-profile data directory and
 fetches the additional Node from the public artifact store, checking the exact
@@ -47,13 +49,13 @@ contracts. A release changing existing-store schemas or requiring irreversible
 migration must use a separately reviewed protocol/data-format rollout; the current
 verifier rejects other values. Candidates pause new turns until identity and local
 readiness are committed. Preparation uses independent databases and never credential
-reads. Startup must not introduce pre-commit live-data migration. The signed
+reads. Startup must not introduce pre-commit live-data migration. The manifest
 compatibility declaration is a publisher responsibility, not an automatic proof
 that arbitrary future source changes preserve storage compatibility.
 
 `test:sea` builds a small real executable and tests external JS and relocated Workers
 with no Node in PATH. `test:sea:native` is an opt-in, heavier POSIX acceptance command:
-it stages the real built CLI, uses ephemeral keys and an isolated local artifact
+it stages the real built CLI, uses an isolated local artifact
 server/data directory, installs with empty PATH, probes native bindings/Workers,
 updates, and injects a clean failed candidate to exercise rollback. It retains its
 fixture directory and reports sizes. These checks do not establish production

@@ -18,15 +18,6 @@ if (
   throw new Error('Invalid SEA product/version/channel');
 if (config.platform !== `${process.platform}-${process.arch}`)
   throw new Error('Build SEA on its target platform');
-if (!config.keys || !Object.keys(config.keys).length)
-  throw new Error('SEA requires embedded public release keys');
-for (const value of Object.values(config.keys)) {
-  if (typeof value !== 'string' || !value.startsWith('-----BEGIN PUBLIC KEY-----'))
-    throw new Error('Only public PEM keys may be embedded');
-  const { createPublicKey } = await import('node:crypto');
-  if (createPublicKey(value).asymmetricKeyType !== 'ed25519')
-    throw new Error('Release keys must be Ed25519 public keys');
-}
 const distribution = config.distribution ?? `${config.product}-daemon`;
 if (!/^[a-z][a-z0-9-]{0,79}$/.test(distribution)) throw new Error('Invalid artifact distribution');
 const staging = path.resolve(config.staging),
@@ -55,7 +46,6 @@ const metadata = {
     archiveSha256: digest(nodeArchive),
     archiveSize: nodeArchive.length,
   },
-  keys: config.keys,
 };
 const metadataPath = output + '.metadata.json',
   payloadPath = output + '.payload.gz';

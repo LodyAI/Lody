@@ -134,7 +134,7 @@ retain their existing terminal behavior.
 Interactive startup retains a three-minute hang backstop; see the
 [cold-start decision](../../.agents/notes/implemented/bug-fix/2026-10-16-daemon-ready-timeout-slow-cold-start.md).
 
-Managed daemon updates use a fixed SEA service entry and immutable signed releases.
+Managed daemon updates use a fixed SEA service entry and immutable SHA-256-checked releases.
 The entry holds the Host lease while replacing its Worker, using a pinned ordinary
 Node for external JavaScript. No remote `npm install`, login shell, system Node,
 native compilation or global prefix write is involved. The npm CLI remains JavaScript.

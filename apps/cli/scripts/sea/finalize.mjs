@@ -2,21 +2,11 @@
 // Run AFTER platform signing/notarization. Freeze these exact bytes for all retries.
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const privateKey = createPrivateKey(process.env.LODY_DAEMON_RELEASE_PRIVATE_KEY ?? '');
-if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error('Expected Ed25519 signing key');
 const metadata = JSON.parse(fs.readFileSync(config.capsule + '.metadata.json', 'utf8'));
 if (!/^[a-f0-9]{40}$/.test(config.source)) throw new Error('Expected full source SHA');
-const trusted = metadata.keys[config.keyId];
-if (
-  !trusted ||
-  !createPublicKey(trusted)
-    .export({ type: 'spki', format: 'der' })
-    .equals(createPublicKey(privateKey).export({ type: 'spki', format: 'der' }))
-)
-  throw new Error('Signing key differs from embedded trust');
 function artifact(input, name) {
   const raw = fs.readFileSync(input),
     compressed = gzipSync(raw, { level: 9 });
@@ -53,13 +43,7 @@ if (
   manifest.node.size !== metadata.node.archiveSize
 )
   throw new Error('Node changed after SEA build');
-const payload = JSON.stringify(manifest);
-const envelope = {
-  keyId: config.keyId,
-  payload,
-  signature: sign(null, Buffer.from(payload), privateKey).toString('base64'),
-};
-fs.writeFileSync(path.join(config.outputDir, 'manifest.json'), JSON.stringify(envelope) + '\n', {
+fs.writeFileSync(path.join(config.outputDir, 'manifest.json'), JSON.stringify(manifest) + '\n', {
   flag: 'wx',
 });
 console.log(

@@ -7,7 +7,6 @@ import http from 'node:http';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { generateKeyPairSync } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const execute = promisify(execFile);
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -18,8 +17,6 @@ const root = await fsp.mkdtemp('/tmp/lody-sea-native-');
 console.log(JSON.stringify({ fixture: root }));
 const version = JSON.parse(await fsp.readFile(path.join(repo, 'apps/cli/package.json'))).version;
 const platform = `${process.platform}-${process.arch}`;
-const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-const keys = { fixture: publicKey.export({ type: 'spki', format: 'pem' }).toString() };
 const runtime = {};
 const run = async (command, args, opts = {}) => {
   try {
@@ -47,7 +44,6 @@ const cfg = {
   version,
   channel: 'stable',
   platform,
-  keys,
 };
 const save = async (name, value) => {
   const file = path.join(root, name);
@@ -64,27 +60,15 @@ async function build(name, staging, releaseVersion) {
   if (process.platform === 'darwin')
     await run('/usr/bin/codesign', ['--force', '--sign', '-', output]);
   const directory = path.join(root, name + '-release');
-  await run(
-    process.execPath,
-    [
-      path.join(scripts, 'finalize.mjs'),
-      await save(name + '-final.json', {
-        capsule: output,
-        node: process.execPath,
-        outputDir: directory,
-        keyId: 'fixture',
-        source: 'a'.repeat(40),
-      }),
-    ],
-    {
-      env: {
-        PATH: process.env.PATH,
-        LODY_DAEMON_RELEASE_PRIVATE_KEY: privateKey
-          .export({ type: 'pkcs8', format: 'pem' })
-          .toString(),
-      },
-    }
-  );
+  await run(process.execPath, [
+    path.join(scripts, 'finalize.mjs'),
+    await save(name + '-final.json', {
+      capsule: output,
+      node: process.execPath,
+      outputDir: directory,
+      source: 'a'.repeat(40),
+    }),
+  ]);
   return { output, directory };
 }
 const initial = await build('initial', cfg.staging, version);
@@ -237,7 +221,7 @@ try {
     await fsp.readFile(path.join(data, 'daemon-managed', 'selected.json'), 'utf8')
   );
   const updatedManifest = JSON.parse(
-    JSON.parse(await fsp.readFile(path.join(updated.directory, 'manifest.json'), 'utf8')).payload
+    await fsp.readFile(path.join(updated.directory, 'manifest.json'), 'utf8')
   );
   assert.equal(
     selected.digest,

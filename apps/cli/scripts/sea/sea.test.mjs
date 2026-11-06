@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { generateKeyPairSync } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 const require = createRequire(import.meta.url),
@@ -25,7 +24,6 @@ test('SEA retains a relocated Worker and runs external JS with managed Node whil
       path.join(staging, 'index.js'),
       `import {Worker} from 'node:worker_threads'; import{execFileSync}from'node:child_process'; const context=globalThis[Symbol.for('lody.sea.context')]; const child=execFileSync(context.nodePath,['--input-type=module','-e','process.stdout.write("external-js-ok")'],{encoding:'utf8'}); const worker=new Worker(new URL('./worker.js',import.meta.url)); worker.on('message',value=>console.log(JSON.stringify({child,worker:value})));`
     );
-    const { publicKey } = generateKeyPairSync('ed25519');
     const capsule = path.join(root, 'daemon');
     const config = {
       staging,
@@ -35,7 +33,6 @@ test('SEA retains a relocated Worker and runs external JS with managed Node whil
       version: '1.2.3',
       channel: 'stable',
       platform: `${process.platform}-${process.arch}`,
-      keys: { test: publicKey.export({ type: 'spki', format: 'pem' }).toString() },
     };
     const file = path.join(root, 'build.json');
     fs.writeFileSync(file, JSON.stringify(config));

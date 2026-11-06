@@ -52,10 +52,13 @@ its embedded Node again. The earlier 55 MiB gzip sample is not a complete instal
 budget; measure the capsule, additional Node, extracted files and retained releases.
 
 Sign owned native modules before embedding them, preserve their bytes, then sign
-the final executable and generate the signed manifest from final bytes. Platform
-signature policy and product-manifest verification are separate checks. The fixed
-entry embeds the product's trusted Ed25519 keys. OSS and cloud use separate product
-identities and release keys; neither accepts the other's release.
+the final executable and generate the SHA-256 manifest from final bytes. Platform
+signatures remain required. Update manifests are trusted through the configured
+HTTPS artifact service; compressed and extracted files must match their SHA-256
+values. There is no separate release key pair or manifest signature. Replacing
+both the manifest and artifacts at that service is outside this integrity check.
+OSS and cloud retain separate product/distribution identities; neither accepts
+the other's release.
 
 Node 26.13.0 is the initial SEA/runtime pin. Official Linux glibc builds require
 kernel 4.18+, glibc 2.28+ and GLIBCXX_3.4.25+, plus any stricter native dependency
@@ -86,10 +89,10 @@ flowchart TD
   machine generation. Resolve floating channels once. Requests accept no arbitrary
   package specs, commands or artifact URLs. Follow the [operation contract](machine-lifecycle-ack.md).
 - **R2 Preparation.** Download to staging with bounded attempts, cancellation and
-  resumable transfers. Verify a signed release manifest binding version, channel,
-  platform, size, digest, launcher protocol and data compatibility against locally
-  trusted release keys. A checksum from the same unauthenticated source is not
-  sufficient. Enforce safe extraction and resource limits. Probe bundled Node and
+  resumable transfers. Validate a release manifest declaring version, channel,
+  platform, size, digest, launcher protocol and data compatibility from the trusted
+  HTTPS artifact service. Check compressed and extracted SHA-256 values, enforce
+  safe extraction and resource limits. Probe bundled Node and
   required native modules in isolation without opening live databases/credentials.
   Publish the immutable release only after validation. Preparation failure never
   stops the old daemon.

@@ -11,7 +11,7 @@ Supersedes: [Windows npm shim](../../archived/bug-fix/2026-09-08-windows-daemon-
 
 A daemon launched from an npx cache could install successfully while respawning its
 old entry; installed and running identity are different facts. Managed updates use
-signed immutable releases beneath a fixed SEA watchdog. That root retains the Host
+SHA-256-checked immutable releases beneath a fixed SEA watchdog. That root retains the Host
 lease and observes the actual replacement before committing an operation. A separate
 ordinary Node increases initial download size; uncertain termination blocks recovery.
 
@@ -30,6 +30,11 @@ its embedded entry, not arbitrary scripts. Native modules retain their signed by
 Each SEA also embeds Node, so initial transfer includes both runtime images. Reusing
 the existing watchdog avoids a new Rust launcher and overlapping restart owners.
 
+The configured HTTPS artifact service is trusted to publish release manifests.
+Compressed and extracted files must match their SHA-256 values. No independent
+release signing keys are configured; replacing both manifest and artifacts at
+the trusted service is outside this integrity guarantee. Platform signing remains.
+
 All old npm watchdogs need an explicit local migration and external service-entry
 correction; downloaded code cannot retroactively teach the old process this protocol.
 Arbitrary user services are never rewritten. Fixed-entry replacement stays an explicit
@@ -46,7 +51,7 @@ until their specific ownership and authorization boundaries are implemented.
 
 The [installation contract](../../../../specs/daemon-upgrade-installation.md),
 [packaging guide](../../../../apps/cli/scripts/sea/README.md),
-[signed-release tests](../../../../apps/cli/src/lib/managed-daemon-release.test.ts) and
+[release-integrity tests](../../../../apps/cli/src/lib/managed-daemon-release.test.ts) and
 [native fixture](../../../../apps/cli/scripts/sea/native-acceptance.mjs) cover different
 boundaries. Artifact probes do not establish full Agent acceptance or production
 signing. POSIX group tracking is cooperative process ownership, not a container

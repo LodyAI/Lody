@@ -67,7 +67,7 @@ export const daemonUpdateStatusCommand = new Command('update-status')
   });
 
 export const daemonUpgradeCommand = new Command('upgrade')
-  .description('Prepare a signed managed daemon update; wait for idle by default')
+  .description('Prepare a checksummed managed daemon update; wait for idle by default')
   .option('--target-version <version>', 'Exact version or latest', 'latest')
   .option('--channel <channel>', 'stable, next or nightly', 'stable')
   .option('--immediate', 'Interrupt running tasks after preparation')

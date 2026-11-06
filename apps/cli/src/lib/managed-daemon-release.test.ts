@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import {
   prepareManagedRelease,
@@ -14,8 +14,6 @@ import {
   type DaemonRelease,
   type SeaContext,
 } from './managed-daemon-release';
-const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-const keys = { release: publicKey.export({ type: 'spki', format: 'pem' }).toString() };
 const digest = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 const bytes = Buffer.from('synthetic Lody executable');
 const compressed = gzipSync(bytes);
@@ -41,14 +39,7 @@ const release: DaemonRelease = {
   capsule: artifact,
   node: { ...artifact, file: 'node.gz' },
 };
-const envelope = (value: unknown) => {
-  const payload = JSON.stringify(value);
-  return JSON.stringify({
-    keyId: 'release',
-    payload,
-    signature: sign(null, Buffer.from(payload), privateKey).toString('base64'),
-  });
-};
+const manifestJson = (value: unknown) => JSON.stringify(value);
 const dirs: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -70,7 +61,6 @@ async function fixture() {
       serviceProtocol: 1,
       payloadSha256: 'c'.repeat(64),
       node: { sha256: artifact.contentSha256, size: bytes.length, version: '26.13.0' },
-      keys,
     },
     capsulePath: '/fixed/service',
     releaseDir: '/original/payload',
@@ -78,33 +68,32 @@ async function fixture() {
   };
   return { dir, context };
 }
-describe('signed managed daemon installation', () => {
-  it('rejects tampered, foreign-product, foreign-platform and incompatible releases before installation', () => {
-    const trust = { product: 'lody-oss' as const, keys };
-    expect(verifyDaemonRelease(envelope(release), trust).version).toBe('1.2.3');
-    const changed = JSON.parse(envelope(release));
-    changed.payload = changed.payload.replace('1.2.3', '9.9.9');
-    expect(() => verifyDaemonRelease(JSON.stringify(changed), trust)).toThrow(/signature/);
+describe('checksummed managed daemon installation', () => {
+  it('rejects foreign-product, foreign-platform and incompatible releases before installation', () => {
+    const trust = { product: 'lody-oss' as const };
+    expect(verifyDaemonRelease(manifestJson(release), trust).version).toBe('1.2.3');
     expect(() =>
-      verifyDaemonRelease(envelope({ ...release, product: 'lody-cloud' }), trust)
+      verifyDaemonRelease(manifestJson({ ...release, product: 'lody-cloud' }), trust)
     ).toThrow(/mismatch/);
     expect(() =>
       verifyDaemonRelease(
-        envelope({
+        manifestJson({
           ...release,
           platform: process.platform === 'linux' ? 'darwin-arm64' : 'linux-x64',
         }),
         trust
       )
     ).toThrow(/mismatch/);
-    expect(() => verifyDaemonRelease(envelope({ ...release, dataFormat: 2 }), trust)).toThrow();
+    expect(() => verifyDaemonRelease(manifestJson({ ...release, dataFormat: 2 }), trust)).toThrow();
   });
-  it('prepares signed bytes without changing the current service or selection, and reuses the exact Node cache', async () => {
+  it('prepares checksummed bytes without changing the current service or selection, and reuses the exact Node cache', async () => {
     const { dir, context } = await fixture();
     const downloads: string[] = [];
     vi.stubGlobal('fetch', async (url: string) => {
       downloads.push(url);
-      return new Response(url.endsWith('.json') ? envelope(release) : new Uint8Array(compressed));
+      return new Response(
+        url.endsWith('.json') ? manifestJson(release) : new Uint8Array(compressed)
+      );
     });
     const prepared = await prepareManagedRelease(context, '1.2.3');
     expect(await fs.readFile(prepared.capsule)).toEqual(bytes);
@@ -116,21 +105,34 @@ describe('signed managed daemon installation', () => {
     expect(downloads.filter((url) => url.endsWith('/node.gz'))).toHaveLength(1);
     expect(await fs.readdir(dir)).toEqual(['daemon-managed']);
   });
-  it('a bad artifact never publishes an executable or a successful update record', async () => {
-    const { dir, context } = await fixture();
-    vi.stubGlobal(
-      'fetch',
-      async (url: string) =>
-        new Response(
-          url.endsWith('.json')
-            ? envelope(release)
-            : new Uint8Array(gzipSync(Buffer.from('tampered bytes')))
-        )
-    );
-    await expect(prepareManagedRelease(context, '1.2.3')).rejects.toThrow(/artifact|Oversized/);
-    await expect(fs.access(path.join(dir, 'daemon-managed', 'selected.json'))).rejects.toThrow();
-    expect(await readManagedOperation()).toBeNull();
-  });
+  it.each(['compressed', 'extracted'] as const)(
+    'a bad %s SHA never publishes an executable or a successful update record',
+    async (stage) => {
+      const badRelease =
+        stage === 'extracted'
+          ? { ...release, capsule: { ...artifact, contentSha256: '0'.repeat(64) } }
+          : release;
+      const badCompressed = Buffer.from(compressed);
+      badCompressed[10] ^= 1;
+      const { dir, context } = await fixture();
+      vi.stubGlobal(
+        'fetch',
+        async (url: string) =>
+          new Response(
+            url.endsWith('.json')
+              ? manifestJson(badRelease)
+              : new Uint8Array(stage === 'extracted' ? compressed : badCompressed)
+          )
+      );
+      await expect(prepareManagedRelease(context, '1.2.3')).rejects.toThrow(
+        stage === 'extracted'
+          ? 'Daemon executable digest mismatch'
+          : 'Daemon artifact digest mismatch'
+      );
+      await expect(fs.access(path.join(dir, 'daemon-managed', 'selected.json'))).rejects.toThrow();
+      expect(await readManagedOperation()).toBeNull();
+    }
+  );
   it('preserves a durable unknown operation and refuses corrupt state instead of treating it as a fresh install', async () => {
     const { dir, context } = await fixture();
     const operation = {
@@ -161,11 +163,11 @@ describe('signed managed daemon installation', () => {
   });
 });
 
-it('resumes interrupted signed transfers by byte range without changing the old installation', async () => {
+it('resumes interrupted checksummed transfers by byte range without changing the old installation', async () => {
   const { context } = await fixture();
   let capsuleRequests = 0;
   vi.stubGlobal('fetch', async (url: string, options?: RequestInit) => {
-    if (url.endsWith('.json')) return new Response(envelope(release));
+    if (url.endsWith('.json')) return new Response(manifestJson(release));
     if (!url.endsWith('/daemon.gz')) return new Response(new Uint8Array(compressed));
     if (++capsuleRequests === 1) {
       let pulls = 0;
@@ -215,7 +217,7 @@ it('keeps terminal operation IDs after later updates, so an old authorized reque
   );
   expect((await readManagedOperation())?.requestId).toBe('second');
 });
-it('bounds an unsigned manifest before parsing or retaining its entire response', async () => {
+it('bounds a manifest before parsing or retaining its entire response', async () => {
   const { context } = await fixture();
   vi.stubGlobal('fetch', async () => new Response(new Uint8Array(131073)));
   await expect(prepareManagedRelease(context, '1.2.3')).rejects.toThrow(/Oversized/);
