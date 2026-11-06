@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -11,7 +19,8 @@ import {
   createAccountRecoveryVault,
   inspectRecoveryFile,
   recoveryVaultEnabled,
-  recoveryVaultFailure
+  recoveryVaultFailure,
+  saveRecoveryFile
 } from './e2ee-recovery-vault.mts'
 
 const response = (value) => Response.json({ status: 'success', value })
@@ -231,6 +240,66 @@ void test('a failed save uploads nothing, so the account can still create a vaul
     )
     assert.equal(Exit.isFailure(failed), true)
     assert.equal(service.entries.size, 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('saving over a readable file never exposes the new material at the old mode', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const path = join(dir, 'lody-recovery.lodyrecovery')
+    writeFileSync(path, 'previous backup')
+    chmodSync(path, 0o644)
+    const secret = Buffer.from('new recovery material')
+    let checked = false
+    await saveRecoveryFile(path, secret, {
+      write: async (handle, bytes) => {
+        await handle.writeFile(bytes)
+        // Fully written but not yet in place: the target is untouched, the copy private.
+        assert.equal(readFileSync(path, 'utf8'), 'previous backup')
+        const [temporary] = readdirSync(dir).filter((name) => name !== 'lody-recovery.lodyrecovery')
+        assert.equal(statSync(join(dir, temporary)).mode & 0o777, 0o600)
+        checked = true
+      }
+    })
+    assert.equal(checked, true)
+    assert.deepEqual(readFileSync(path), secret)
+    assert.equal(statSync(path).mode & 0o777, 0o600)
+    assert.deepEqual(readdirSync(dir), ['lody-recovery.lodyrecovery'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('a failed save keeps the existing file byte for byte and leaves no temporary', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const path = join(dir, 'lody-recovery.lodyrecovery')
+    writeFileSync(path, 'previous backup')
+    await assert.rejects(
+      saveRecoveryFile(path, Buffer.from('new recovery material'), {
+        write: async (handle, bytes) => {
+          await handle.write(bytes, 0, 4)
+          throw new Error('synthetic disk failure')
+        }
+      }),
+      /synthetic disk failure/
+    )
+    assert.equal(readFileSync(path, 'utf8'), 'previous backup')
+    assert.deepEqual(readdirSync(dir), ['lody-recovery.lodyrecovery'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('a first save creates a private file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const path = join(dir, 'lody-recovery.lodyrecovery')
+    await saveRecoveryFile(path, Buffer.from('new recovery material'))
+    assert.equal(statSync(path).mode & 0o777, 0o600)
+    assert.deepEqual(readdirSync(dir), ['lody-recovery.lodyrecovery'])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

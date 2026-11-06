@@ -6,7 +6,7 @@ import {
 } from '@lody/e2ee-machine-sharing/schemas'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync } from 'node:fs'
-import { chmod, open as openFile, readFile, writeFile } from 'node:fs/promises'
+import { open as openFile, readFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -48,7 +48,8 @@ import {
   createAccountRecoveryVault,
   inspectRecoveryFile,
   recoveryVaultEnabled,
-  recoveryVaultFailure
+  recoveryVaultFailure,
+  saveRecoveryFile
 } from '../../services/e2ee-recovery-vault.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
@@ -3275,9 +3276,7 @@ export class E2eeIpc extends IpcService {
         locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
         persist: (file) =>
           Effect.tryPromise(async () => {
-            await writeFile(path, file, { mode: 0o600 })
-            // `mode` applies only to a new file; the user may have chosen an existing one.
-            await chmod(path, 0o600)
+            await saveRecoveryFile(path, file)
             return new Uint8Array(await readFile(path))
           })
       })

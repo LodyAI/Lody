@@ -1,6 +1,9 @@
 import { RecoveryVaults } from '@lody/e2ee-core'
 import { sqliteRecoveryVaultLocalStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/services'
+import { randomUUID } from 'node:crypto'
+import { open, rename, rm, type FileHandle } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { Effect, Layer } from 'effect'
 
 /** Default-off gate for the post-MVP recovery vault. Proposal: specs/e2ee/recovery-vault.md. */
@@ -30,6 +33,33 @@ export function recoveryVaultFailure(error: unknown): Error {
     if (error._tag === 'LocalStoreError') return new Error('e2ee_recovery_storage')
   }
   return new Error('e2ee_recovery_failed')
+}
+
+/**
+ * Replace `path` atomically. The temporary is created exclusively at 0600 beside the
+ * target, so the material is never readable at a target's older mode, and a failed
+ * write leaves any existing file untouched. `write` is a seam for failure tests.
+ */
+export async function saveRecoveryFile(
+  path: string,
+  file: Uint8Array,
+  options: { readonly write?: (handle: FileHandle, file: Uint8Array) => Promise<unknown> } = {}
+) {
+  const temporary = join(dirname(path), `.lody-recovery-${randomUUID()}.tmp`)
+  const write = options.write ?? ((handle, bytes) => handle.writeFile(bytes))
+  try {
+    const handle = await open(temporary, 'wx', 0o600)
+    try {
+      await write(handle, file)
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    await rename(temporary, path)
+  } catch (error) {
+    await rm(temporary, { force: true })
+    throw error
+  }
 }
 
 interface RecoveryVaultIo {
