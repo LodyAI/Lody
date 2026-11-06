@@ -49,7 +49,9 @@ change.
   machine account, so a non-owner principal receives none of them.
 - **Sending.** An encrypted queue send waits past the 200 ms preparation deadline, up to
   `QUEUED_ORIGINAL_DEADLINE_MS` and the caller's signal, because it cannot proceed without the
-  frame. If no frame arrives, the input is not sent and the sender sees that.
+  frame. If no frame arrives, the input is not sent and the sender sees that. A failure after
+  the row committed is a written send, because the row can run; its signal may then wait for
+  the Session's next check.
 - **Editing and removal.** Originals are immutable per Turn, so an edit that changes the input
   takes a new `userTurnId`, `operationId` and timestamp. Toggling the editing flag does not. An
   edit, a removal and a failed queue write delete the Turn's stored frame, unless a queue row or
@@ -75,7 +77,8 @@ change.
   Web and mobile get this through their `lody-oss` revision, so that update must ship with the
   CLI. Rows queued before an upgrade behave the same way, and an automation row queued before
   it has a receipt in the older digest, so it is refused too. This is not migrated: the window
-  is the input's 15 minutes, E2EE is at the test-build stage, and the rule's next run requeues.
+  is the input's 15 minutes, E2EE is at the test-build stage, and a recurring rule's next run
+  requeues. A one-off or manual run has no such guarantee.
 - A queued input keeps its original 15-minute window, as before.
 - Frames grow the Session document, as `rpcDispatchOriginals` already does; nothing is pruned.
 - A request signer unknown to a stale ledger is refused rather than retried.

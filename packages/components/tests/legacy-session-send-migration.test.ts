@@ -469,7 +469,7 @@ it('removes the stored original when the queue row cannot be written', async () 
   expect(queuedOriginal(f, input.id)).toBeUndefined();
 });
 
-it('keeps the stored original when the queue row committed before the failure', async () => {
+it('reports a queued send as written when its row committed before the failure', async () => {
   const f = fixture();
   const input = entry('queued-committed');
   f.runtime.contentMode = 'e2ee';
@@ -482,14 +482,12 @@ it('keeps the stored original when the queue row committed before the failure', 
     );
     throw new Error('synthetic watermark failure');
   };
-  await expect(
-    writeUserTurn(f.runtime, {
-      sessionId: SESSION,
-      entry: input,
-      delivery: { kind: 'queue' },
-      queue: queueRow(input),
-    })
-  ).rejects.toThrow('synthetic watermark failure');
+  await writeUserTurn(f.runtime, {
+    sessionId: SESSION,
+    entry: input,
+    delivery: { kind: 'queue' },
+    queue: queueRow(input),
+  });
   expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
 });
 

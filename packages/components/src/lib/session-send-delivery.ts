@@ -143,8 +143,12 @@ export async function writeUserTurn(
     try {
       await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue!);
     } catch (error) {
-      await releaseQueuedOriginal(runtime, send.sessionId, send.entry.id);
-      throw error;
+      // Only the row decides the outcome: once committed it can run, so this send happened.
+      if (!(await hasQueuedRow(runtime, send.sessionId, send.entry.id))) {
+        await releaseQueuedOriginal(runtime, send.sessionId, send.entry.id);
+        throw error;
+      }
+      log('queue signal failed after %s/%s was written: %o', send.sessionId, send.entry.id, error);
     }
   } else if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
   else await runtime.writer.appendSessionTurn(send.sessionId, send.entry);
@@ -253,6 +257,12 @@ export async function removeQueuedOriginal(
       if (draft.queueDispatchOriginals) delete draft.queueDispatchOriginals[userTurnId];
     });
   });
+}
+
+async function hasQueuedRow(runtime: SessionSendRuntime, sessionId: SessionId, turnId: string) {
+  return runtime.sendResources.withSessionStore(sessionId, (store) =>
+    (store.getState().mq ?? []).some((item) => item.userTurnId === turnId)
+  );
 }
 
 /** Cleanup after a failed or finished write must not replace that write's own outcome. */
