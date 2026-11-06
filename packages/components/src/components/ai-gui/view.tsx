@@ -5321,7 +5321,7 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Only builtin DSH exposes these thought rows. Reuse answer sizing,
+  /* Only builtin DSH and Pi expose these thought rows. Reuse answer sizing,
      preserving thought search identity and the separate disclosure label.
      The thought is prose on the rail, with no glyph: it is the agent's own
      words, and an icon beside every paragraph of it read as a list of
