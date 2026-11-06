@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { LodyToolServer } from './tool-help';
 import { z } from 'zod';
 import {
   ScheduleProposalDestinationSchema,
@@ -36,7 +36,7 @@ const proposeInputSchema = z
   })
   .strict();
 
-export function registerScheduleTools(server: McpServer, deps: Dependencies): void {
+export function registerScheduleTools(server: LodyToolServer, deps: Dependencies): void {
   const call = async (command: ScheduleCommand) => {
     try {
       return {
@@ -60,6 +60,7 @@ export function registerScheduleTools(server: McpServer, deps: Dependencies): vo
   server.registerTool(
     'lody_schedule_list',
     {
+      summary: 'Find scheduled tasks in this workspace and their owner-machine execution scope.',
       description:
         'List scheduled-task summaries in the current workspace. Use get for details; execution belongs to the owner machine.',
       inputSchema: listInputSchema,
@@ -69,6 +70,7 @@ export function registerScheduleTools(server: McpServer, deps: Dependencies): vo
   server.registerTool(
     'lody_schedule_get',
     {
+      summary: 'Read one scheduled task prompt, configuration activity and upcoming run times.',
       description:
         'Read a Schedule, its prompt, recent configuration activity and next five times. Ordinary Sessions own execution results.',
       inputSchema: getInputSchema,
@@ -78,6 +80,7 @@ export function registerScheduleTools(server: McpServer, deps: Dependencies): vo
   server.registerTool(
     'lody_schedule_pause',
     {
+      summary: 'Pause future schedule runs; already accepted Sessions continue.',
       description:
         'Pause a Schedule owned by the authenticated user. Already accepted Sessions continue. Reuse requestId when retrying. Resume requires a human.',
       inputSchema: pauseInputSchema,
@@ -87,6 +90,8 @@ export function registerScheduleTools(server: McpServer, deps: Dependencies): vo
   server.registerTool(
     'lody_schedule_propose',
     {
+      summary:
+        'Propose scheduled work for user confirmation; it is created only when the user clicks Create.',
       description: [
         'Propose a scheduled task from what the user described. This writes a card into the',
         'current chat with a Create button; the user creates the schedule by pressing it — do not',

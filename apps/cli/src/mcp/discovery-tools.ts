@@ -13,6 +13,17 @@ export function registerDiscoveryTools(
   registerTool: ReturnType<typeof createSessionToolRegistrar>,
   withDiscovery: <T>(read: (discovery: ResourceDiscovery) => Promise<T>) => Promise<T>
 ) {
+  const summaries: Record<DiscoveryResource, string> = {
+    machine:
+      'Discover machine ids, liveness, capabilities and quotas; optionally inspect resources.',
+    project:
+      'Find local projects and enabled GitHub repositories for explicit workspace selection.',
+    agent_config:
+      'Find agent configurations and their supported models/run options across machines.',
+    agent_role:
+      'Find saved agent Roles, target machines/configurations and delegation availability.',
+    mcp: 'List workspace MCP configurations and current-turn selections, without connection values.',
+  };
   const descriptions: Record<DiscoveryResource, string> = {
     machine:
       'List readable machines, including offline machines, with online/offline/unknown presence, protocol capabilities and synced agent quota windows (most used first, with reset times). Pass includeResources to also ask each listed online machine for memory and disk; a machine that cannot answer reports resources unavailable.',
@@ -55,6 +66,7 @@ export function registerDiscoveryTools(
     registerTool(
       `lody_${resource}_list`,
       {
+        summary: summaries[resource],
         description: `${descriptions[resource]} Returns a bounded page (default 20, maximum 100); follow nextCursor with the same filters to enumerate all entries. If sync.state is syncing, cached results may be incomplete; retry before treating absence as final.`,
         inputSchema: ResourceListSchemas[resource],
         annotations: { readOnlyHint: true },
@@ -66,6 +78,10 @@ export function registerDiscoveryTools(
     registerTool(
       `lody_${resource}_get`,
       {
+        summary:
+          resource === 'agent_role'
+            ? 'Read instructions, target bindings and pinned run configuration for one Role.'
+            : 'Read supported models and run options for one agent configuration.',
         description: `Read one ${resource} by stable id from its list tool. CATALOG_SYNCING is retryable.`,
         inputSchema: resourceGetInputSchema,
         annotations: { readOnlyHint: true },
