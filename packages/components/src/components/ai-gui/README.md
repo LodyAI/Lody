@@ -8,7 +8,8 @@ start open, tools closed, and explicit toggles remain respected. DSH thought pro
 uses the same Markdown typography as ordinary answers, aligned with its disclosure
 label and shown in secondary text color; tool
 labels and details retain their compact process styling. While streaming,
-intermediate prose stays visible in order. Once a final answer is complete, the shared finished-work disclosure collapses earlier prose and tools;
+intermediate prose stays visible in order. When the turn finishes, the final contiguous text run before trailing attachments,
+plans or notices stays visible, and the shared work disclosure folds earlier prose and tools;
 expanding it restores their order and independent disclosure states. Interrupted
 turns without an answer remain visible. Duration follows the shared header/footer
 policy. Both layout and virtual-row caches include provider visibility. Other providers retain their grouping and filtering. This is
