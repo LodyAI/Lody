@@ -1,11 +1,13 @@
 # 账号级公开 E2EE 身份
 
-Status: proposed
+Status: rejected
 Translation: current
 Date: 2026-10-26
 [English](2026-10-26-e2ee-account-global-identity.md)
 
 ## 摘要
+
+已于 2026-11-06 否决：账本用户 ID 现在就是账户 ID，不再有随机值、注册表和客户端缓存，见[决定](../../implemented/architecture/2026-11-06-e2ee-ledger-user-id.zh.md)。下文描述的是已移除的设计，保留它是为了避免不计成本地重新引入随机注册表。
 
 过去每次创建工作区都生成新的加密用户编号。已批准的账号固定编号现在在签名前从
 认证控制面取得，存入账号目录的独立不可变 JSON 文件。网络请求在账号保管锁外；保存结果

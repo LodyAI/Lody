@@ -1,11 +1,13 @@
 # Account-global public E2EE identity
 
-Status: proposed
+Status: rejected
 Translation: current
 Date: 2026-10-26
 [中文](2026-10-26-e2ee-account-global-identity.zh.md)
 
 ## Abstract
+
+Rejected on 2026-11-06: the ledger user ID is now the account ID itself, so no random value, registry or client cache exists; see [the decision](../../implemented/architecture/2026-11-06-e2ee-ledger-user-id.md). The text below describes the removed design and is kept so that a random registry is not reintroduced without its known cost.
 
 Creating a workspace previously generated a new crypto user ID each time. The
 approved account-global identity is now obtained from the authenticated control

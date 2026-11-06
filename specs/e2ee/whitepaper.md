@@ -1,9 +1,11 @@
 # Lody Security Whitepaper
 
-Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)
+Status: draft
 Translation: current
 
-Approved revision: 2026-11-06 recovery passkey unlock and trust anchor; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor). Previous: 2026-11-01 account-wide pairing, 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
+Draft change 2026-11-06: the ledger user ID is the account ID ([decision](../../.agents/notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.md)). Only the stable user ID sentence in the organization section awaits approval; the rest of this document is unchanged from the last approved revision.
+
+Last approved revision: 2026-11-06 recovery passkey unlock and trust anchor; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor). Previous: 2026-11-01 account-wide pairing, 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
@@ -33,7 +35,7 @@ Each platform should use its native security facilities to protect stored keys w
 
 ## 1. System Boundary and Threat Model
 
-Version one creates an encrypted organization (Org) directly, without a Team layer. Each encrypted Org has its own membership, permissions, signed ledger, and content keys, with exactly one transferable highest-authority Owner. Server membership tables or billing roles do not grant decryption or management authority; eligibility comes from that Org's trusted authorization state (an authenticated signed snapshot plus verified increments, or an independent full audit). A product workspace MUST bind one-to-one to a fixed Org genesis, independent of names or login sessions. Encrypted workspaces are newly created; existing plaintext workspaces are not converted in place. A stable encryption-user ID is separate from email and account display, and management authority is separate from billing responsibility.
+Version one creates an encrypted organization (Org) directly, without a Team layer. Each encrypted Org has its own membership, permissions, signed ledger, and content keys, with exactly one transferable highest-authority Owner. Server membership tables or billing roles do not grant decryption or management authority; eligibility comes from that Org's trusted authorization state (an authenticated signed snapshot plus verified increments, or an independent full audit). A product workspace MUST bind one-to-one to a fixed Org genesis, independent of names or login sessions. Encrypted workspaces are newly created; existing plaintext workspaces are not converted in place. The stable user ID in the ledger encodes the account ID, so it is separate from email and account display. It names an account and does not prove who holds a signing key. Management authority is separate from billing responsibility.
 
 Beta MUST support macOS, Windows and Linux desktop, Web, mobile (iOS and Android), and CLI together. The exact Beta feature set remains subject to acceptance; unfinished optional features stay unavailable. Device and recovery private keys require protection. Local content, drafts, indexes and caches keep existing storage; extra application-level encryption and mandatory disk encryption are outside this integration scope. Offline drafts still require reliable persistence.
 

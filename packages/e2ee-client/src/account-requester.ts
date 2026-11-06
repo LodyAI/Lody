@@ -5,7 +5,7 @@ import type {
   E2eeWorkspaceHistoryRequest,
 } from '@lody/cloud-api';
 import type { E2eeAccountPairingRuntime, E2eeWorkspaceRuntime } from '@lody/platform';
-import { decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol';
+import { accountUserId, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import type {
   AccountPairingApproverWorkspace,
   AccountPairingRequesterWorkspace,
@@ -131,7 +131,8 @@ export function makePortableAccountPairingRequester(input: {
   history: (
     request: E2eeWorkspaceHistoryRequest
   ) => Effect.Effect<E2eeWorkspaceHistoryPage, unknown>;
-  accountIdentity: () => Effect.Effect<{ readonly cryptoUserId: string }, unknown>;
+  /** The signed-in account; its encoded user ID finds this account's ledger member. */
+  accountId: string;
   diagnostics?: (tag: string, error: unknown) => void;
 }): () => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown> {
   const remember = input.diagnostics ?? (() => {});
@@ -166,9 +167,10 @@ export function makePortableAccountPairingRequester(input: {
   const membership = Effect.fnUntraced(function* (
     view: Effect.Success<ReturnType<typeof verified>>['view']
   ) {
-    const { cryptoUserId } = yield* input.accountIdentity();
-    const mine = [...view.inspectState().members.entries()].filter(
-      ([, member]) => toHex(member.userId.toBytes()) === cryptoUserId
+    const userId = accountUserId(input.accountId);
+    if (Result.isFailure(userId)) return yield* Effect.fail(fail('missing-binding'));
+    const mine = [...view.inspectState().members.entries()].filter(([, member]) =>
+      member.userId.equals(userId.success)
     );
     if (mine.length !== 1) return yield* Effect.fail(fail('missing-binding'));
     return mine[0]![0];
