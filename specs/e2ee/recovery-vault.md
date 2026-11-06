@@ -6,7 +6,7 @@ Translation: current
 [中文](recovery-vault.zh.md)
 
 This draft proposes [passkey unlock](#passkey-unlock-proposed) on macOS, iPhone and
-Web and a [trust anchor taken from the package](#trust-anchor-proposed-awaiting-owner-confirmation),
+Web and a [trust anchor taken from the package](#trust-anchor),
 which exceed the [revision approved on 2026-10-31](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration).
 It awaits owner approval. Until then, that approved revision stays in force. Passages
 about passkeys, the trust anchor and the service gap are the only intended changes;
@@ -14,7 +14,7 @@ everything else keeps its approved meaning.
 
 ## Approved format boundaries
 
-On 2026-10-28, owner Zixuan Chen (zxch3n) approved only these boundaries, recorded in the [approval note](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md) ([approval update #2032](https://github.com/LodyAI/Lody/pull/2032)). Recovery admission keeps the existing ledger tag 4 and `lody-e2ee/possess/v2\0` bytes; genesis is unchanged. The encrypted recovery package uses `formatVersion: 1` and contains the recovery generation and trusted ledger material; the trust anchor comes from an authenticated package, as [proposed below](#trust-anchor-proposed-awaiting-owner-confirmation). A source locator or a server response alone does not establish that anchor, and no package proves the latest ledger head.
+On 2026-10-28, owner Zixuan Chen (zxch3n) approved only these boundaries, recorded in the [approval note](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md) ([approval update #2032](https://github.com/LodyAI/Lody/pull/2032)). Recovery admission keeps the existing ledger tag 4 and `lody-e2ee/possess/v2\0` bytes; genesis is unchanged. The encrypted recovery package uses `formatVersion: 1` and contains the recovery generation and trusted ledger material; the trust anchor comes from an authenticated package, as [set out below](#trust-anchor). A source locator or a server response alone does not establish that anchor, and no package proves the latest ledger head.
 
 Before recovery is accepted, import R's keys, replay the ledger from the package's genesis, actually decrypt a current-epoch envelope addressed to R and verify the recovered key against its ledger commitment. The R signature binds the encryption public key but alone does not prove possession of its private key. The package version and these boundaries were approved on 2026-10-28; on 2026-10-31 the owner approved this Spec as a whole ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration)). The recovery vault remains outside the MVP. The core package carries `formatVersion: 1` and rejects any other or missing version; its private keys must be the exact 48-byte RFC 8410 PKCS#8 encodings for Ed25519 and X25519 (accepted by the owner on 2026-10-31, see the approval note). Approval does not establish deployed or real-device behavior.
 
@@ -277,21 +277,23 @@ and every R in the vault. Unlike a compromised browser device, which exposes onl
 browser's workspaces, this reaches all covered workspaces and lets the attacker admit
 devices until R is revoked. Three limits must be stated plainly:
 
-- *Unlock-only and in-page confirmation are product rules, not security boundaries.*
+- _Unlock-only and in-page confirmation are product rules, not security boundaries._
   Tampered code ignores them and calls WebAuthn directly. Unlock-only is still useful,
   because routine V use never happens on Web.
-- *The risk is not confined to Web users.* A passkey enrolled on a Mac syncs and can be
+- _The risk is not confined to Web users._ A passkey enrolled on a Mac syncs and can be
   requested at the RP host from any browser, even if the user never uses Web. Native
   code avoids server-delivered JavaScript, but the credential is not bound to the app.
   An operator controlling the RP host can always try this, even with no Web surface.
-- *The real barrier is user approval plus isolation.* The system prompt names the RP
+- _The real barrier is user approval plus isolation._ The system prompt names the RP
   and the credential and cannot be drawn by page code. A dedicated host excludes
   ordinary compromise of the Web app, its dependencies and its subdomains. It does not
   exclude a hostile operator.
 
 **Other authenticators.** There is no allow-list and no attestation requirement: any
-provider works if its real ceremonies meet the contract. Lody promises only iCloud
-Keychain on macOS and iPhone. Other managers and hardware keys are not promised. The
+provider works if its real ceremonies return a PRF result that meets the contract. When
+a registration reports no PRF, the client says so plainly, does not enrol that passkey and
+points the user to the recovery file. Lody promises and tests only iCloud Keychain on
+macOS and iPhone. Other managers and hardware keys are not promised. The
 first native phase uses only the platform provider, so hardware keys can work only on
 Web, where the browser passes PRF through.
 
@@ -315,50 +317,49 @@ surface, after macOS and iPhone, and other devices join it by ordinary pairing; 
 surface also accepts the recovery file; the passkey feature requires iOS 18.4; and
 recovery and passkey work run now, in parallel.
 
-Awaiting confirmation; this draft is written as if they are accepted:
+On the same date the owner decided two more. Authenticators use standard WebAuthn with
+PRF and no allow-list, as [described above](#passkey-unlock-proposed). The trust anchor
+is the genesis inside the authenticated package, as [described below](#trust-anchor).
 
-- **Other authenticators.** Standard WebAuthn with PRF and no allow-list, promising only
-  iCloud Keychain.
-- **Trust anchor.** The [proposal above](#trust-anchor-proposed-awaiting-owner-confirmation).
+## Trust anchor
 
-## Trust anchor (proposed, awaiting owner confirmation)
+**Decision.** On 2026-11-06 the owner decided that the genesis inside an authenticated
+recovery package is the trust anchor. The user saves no fingerprint, prints nothing and
+asks nobody. This replaces the earlier "independently confirm" requirement and needs no
+ledger change, because the genesis record already binds the workspace.
 
-**Proposal.** The genesis inside an authenticated recovery package is the trust anchor.
-The user saves no fingerprint, prints nothing and asks nobody. This replaces the earlier
-"independently confirm" requirement. It needs no ledger change, because the genesis
-record already binds the workspace.
+**Restore flow.** The client authenticates the vault, takes the genesis from the package,
+verifies the ledger, then has R admit the new device. Ledger verification replays the
+complete signed history from that genesis. The history must contain the package's `head`
+and `length` checkpoint and must show R active; a shorter or forked history stops. The
+client must also decrypt R's current-epoch envelope and check the recovered key against
+its ledger commitment. Retained state exported from another device is still not trust.
 
 **Why this is enough.** A package is a sealed note from the user's own earlier device to
-their later one. That device had verified the workspace before it wrote the package, and
-only a holder of V can produce one that decrypts. The new device then replays the
-complete signed history from that genesis. The history must contain the package's
-`head` and `length` checkpoint, and it must show R active; a shorter or forked history
-stops. Retained state exported from another device is still not accepted as trust.
+their later one. That device verified the workspace before writing it, and only a holder
+of V can produce one that decrypts.
 
-**What the old rule guarded against.** The permission ledger says a correct decryption
-does not by itself qualify as a trust anchor when a backup location returns another R or
-genesis. It predates this analysis and names no attacker. Taken attacker by attacker:
+**The old rule.** The permission ledger used to say that a correct decryption does not by
+itself qualify as a trust anchor when a backup location returns another R or genesis. It
+named no attacker. Taken attacker by attacker:
 
-| Attacker | Can do | Other genesis accepted? |
-| --- | --- | --- |
-| Service or network, no V | Withhold, roll back to an older authentic package, hide newer ledger records | No. It cannot forge a package, and an older package carries the same genesis. |
-| Holder of V (leaked file or wrap with its passkey, compromised device retaining V), with vault write access | Write a package naming a lookalike workspace | Yes, but this attacker already opens every real R until it is revoked. |
-| Anyone who gets the user to use a file or passkey the attacker made | Present the attacker's own vault, if it can also place that vault under this account | Yes, a lookalike workspace, but the user's real keys stay out of reach. |
+| Attacker                                                                                                               | Can do                                                                       | Other genesis accepted?                                                       |
+| ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Service or network, without any V                                                                                      | Withhold, roll back to an older authentic package, hide newer ledger records | No. It cannot forge a package, and an older package carries the same genesis. |
+| Holder of this vault's V (leaked file, wrap plus its passkey, compromised device retaining V), with vault write access | Write a package naming a lookalike workspace                                 | Yes, but this attacker already opens every real R until it is revoked.        |
+| Hostile operator or Lody account takeover, plus a user tricked into using a file or passkey the attacker made          | Present the attacker's own vault under this account                          | Yes, a lookalike workspace. This attacker never has the user's V.             |
 
-**Conclusion.** No attacker without V can make a client accept another genesis, unless
-the user is tricked into using the attacker's own file or passkey. In the remaining
-cases an independent anchor would help only narrowly: it would stop a lookalike
-workspace, which is a forgery the user could type secrets into. It would not protect
-real workspaces, and it costs every user a second artifact to keep safe. If that artifact
-is lost, recovery fails even though the user holds everything else. The recommendation
-is therefore to drop it and accept this residual risk.
-
-**Rules that keep this true.** The client always uses its signed-in service and ignores
-the file's `serviceLocator` for connecting; a mismatch stops. A vault that may be
-compromised is replaced, not kept. A surviving member may compare workspaces, but
-nothing requires it. Existing limits are unchanged: a device that saw no newer state
-still cannot prove it holds the latest head. On approval, the matching row in the
-[permission ledger](permission-ledger.zh.md) must be reworded in the same change.
+**Residual risk.** The third row is the only way to reach another genesis without the
+user's V. The service isolates vaults per account, so a tricked file alone is not enough:
+the attacker must also control the service or the user's Lody account. The real
+workspaces and their keys stay out of reach, and the exposure is whatever the user then
+puts into the fake workspace. An independent anchor would stop only this case, costs every
+user a second artifact, and makes recovery fail when that artifact is lost. It is
+therefore removed. The simple defence is to treat only the user's own file as valid and to
+replace a vault that may be compromised. The client always uses its signed-in service and
+ignores the file's `serviceLocator` for connecting; a mismatch stops. A surviving member
+may compare workspaces, but nothing requires it. Existing limits are unchanged: a device
+that saw no newer state still cannot prove it holds the latest head.
 
 ## Boundaries and validation
 

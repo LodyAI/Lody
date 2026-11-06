@@ -1,7 +1,9 @@
 # Lody Security Whitepaper
 
-Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#whitepaper-2026-10-31-revision)
+Status: draft · [last approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#whitepaper-2026-10-31-revision)
 Translation: current
+
+Awaiting owner approval: only the recovery trust anchor, as in the [recovery vault](recovery-vault.md#trust-anchor). Everything else keeps its approved meaning.
 
 Approved revision: 2026-11-01 account-wide pairing; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#account-wide-personal-device-pairing). Previous: 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
 
@@ -172,7 +174,7 @@ First-time recovery setup for a workspace MUST satisfy the following completion 
 1. Generate an independent R for this user and workspace, and unlock the vault using the file or a verified PRF recovery entry.
 2. Encrypt R's private-key package locally, upload it, and read back and decrypt it. Ordinary cloud-account credentials cannot decrypt it.
 3. Register R's public keys in the workspace ledger through the user's active personal device, then verify the result. Uploading the private-key package grants no authority.
-4. Persist a current-epoch envelope for the enrolled R. Mark this workspace recoverable only after independently confirming the trust anchor, importing R keys, actually decrypting the current-epoch envelope and checking the recovered key against the ledger commitment.
+4. Persist a current-epoch envelope for the enrolled R. Mark this workspace recoverable only after importing R keys, verifying the ledger from the authenticated package's genesis, actually decrypting the current-epoch envelope and checking the recovered key against the ledger commitment.
 
 Generation, vault upload and ledger registration form a resumable multi-step process, not a cross-store atomic transaction. Another device of the same user joining this workspace reuses its active R. Readmission after removal uses a new membership and a new R, without reviving retired devices or reusing retired public keys.
 

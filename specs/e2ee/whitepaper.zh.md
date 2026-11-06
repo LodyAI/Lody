@@ -1,7 +1,9 @@
 # Lody 安全白皮书
 
-Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#whitepaper-2026-10-31-修订)
+Status: draft · [上次批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#whitepaper-2026-10-31-修订)
 Translation: current
+
+待 owner 批准：仅恢复可信锚，见[恢复保险库](recovery-vault.zh.md#可信锚)。其余内容保持已批准的含义。
 
 Approved revision: 2026-11-01 账号级配对；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账号级个人设备配对)。上一版：2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
 
@@ -168,7 +170,7 @@ Owner/Admin 仍可主动换代。新成员、新设备、角色调整与 Owner �
 1. 在客户端为本用户、本工作区生成独立 R，并打开恢复文件或经验证可用的 PRF 恢复入口。
 2. 在客户端加密 R 的私钥包，上传恢复库，回读并确认能解开；普通云端账号凭证不能完成这一步解密。
 3. 用本人的有效个人设备把 R 公钥登记到该工作区账本，验证结果；上传私钥包本身不授予权限。
-4. 给已登记 R 保存当前代密钥信封，独立确认可信锚、导入 R 密钥、实际解密当前代信封并根据账本承诺核对代钥后，才将该工作区标为可恢复。
+4. 给已登记 R 保存当前代密钥信封，导入 R 密钥、从通过认证的恢复包里的 genesis 校验账本、实际解密当前代信封并根据账本承诺核对代钥后，才将该工作区标为可恢复。
 
 生成 R、上传私钥包和登记 R 是可恢复的多步流程，不宣称跨库与账本原子提交。同一用户的第二台设备加入已有工作区时复用该工作区有效 R，无须每台设备新建一个。成员被移除后重新加入，使用新的成员实例及新 R，不复活旧设备或复用已退役公钥。
 
