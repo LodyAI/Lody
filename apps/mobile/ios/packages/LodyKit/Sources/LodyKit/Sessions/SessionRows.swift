@@ -231,7 +231,7 @@ enum SessionRows {
 
   private static func trailingActions(_ session: SessionItem) -> [LodyListAction] {
     let read = action("read", "session.action.read", "envelope.open")
-    return isUnread(session) ? [read, archive(session.archived)] : [archive(session.archived)]
+    return needsEmphasis(session) ? [read, archive(session.archived)] : [archive(session.archived)]
   }
 
   private static func rename() -> LodyListAction { action("rename", "session.action.rename", "pencil") }

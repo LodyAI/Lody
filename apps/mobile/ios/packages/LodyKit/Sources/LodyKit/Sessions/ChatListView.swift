@@ -190,9 +190,15 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       }
     }
     let changed = Set(next.keys).filter { key in entries[key].map { !Self.same($0.row, next[key]!.row, $0.expanded, next[key]!.expanded) } ?? false }
+    // Recreate cells when commands change to discard the previous swipe presentation.
+    let actionsChanged = Set(next.keys).filter { key in
+      guard let old = entries[key], let new = next[key] else { return false }
+      return old.row.actions != new.row.actions || old.row.leadingActions != new.row.leadingActions
+    }
     entries = next
     titles = nextTitles
-    snapshot.reconfigureItems(Array(changed))
+    snapshot.reloadItems(Array(actionsChanged))
+    snapshot.reconfigureItems(Array(changed.subtracting(actionsChanged)))
     dataSource.apply(snapshot, animatingDifferences: window != nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
       self?.updateBackdrop()
     }
@@ -301,7 +307,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     }
     guard !actions.isEmpty else { return nil }
     let config = UISwipeActionsConfiguration(actions: actions)
-    config.performsFirstActionWithFullSwipe = !leading
+    config.performsFirstActionWithFullSwipe = false
     return config
   }
 
