@@ -75,6 +75,12 @@ import {
   isLocalProjectWorktreeConfigRequest,
 } from '@/session/worktree/worktree-setup-config-store';
 import { formatErrorMessage, formatErrorWithCauses } from '@/utils/format-error';
+import {
+  authorityStamp,
+  authorityTimeLeft,
+  withinAuthorityLimit,
+  type AuthorityStamp,
+} from './e2ee/authority-clock';
 import { Logger } from '@/utils/logger';
 import { traceAsync } from '@/utils/trace-span';
 import type { CloudAccessSnapshot, CloudPort } from '@lody/platform';
@@ -223,8 +229,9 @@ export class LodyFleet {
   private remoteBridgeOfflineRefused = false;
   /** Set once the list outage's grace window ends, cleared when the list answers. */
   private remoteBridgeOutage = false;
-  private workspaceListConfirmedAt: number | null = null;
-  private readonly encryptedAuthorityConfirmedAt = new Map<string, number>();
+  private authorityClock = authorityStamp;
+  private workspaceListConfirmedAt: AuthorityStamp | null = null;
+  private readonly encryptedAuthorityConfirmedAt = new Map<string, AuthorityStamp>();
   private readonly suspendedEncryptedWorkspaces = new Set<string>();
   private encryptedAuthorityTimer: NodeJS.Timeout | null = null;
   // Last valid workspace list, retried after an apply/reconcile failure. The
@@ -574,7 +581,7 @@ export class LodyFleet {
           }
           this.runtimeStateReporter.clearIssue('workspace_subscription_error');
           this.lastValidWorkspaceListResult = result;
-          this.workspaceListConfirmedAt = Date.now();
+          this.workspaceListConfirmedAt = this.authorityClock();
           this.endRemoteBridgeOutage();
           const applyPromise = this.applyRemoteWorkspaceList(result);
           void applyPromise.then(
@@ -1535,7 +1542,7 @@ export class LodyFleet {
     this.encryptedAuthorityTimer = null;
     const remoteBridge = this.remoteBridge;
     if (!remoteBridge) return;
-    this.workspaceListConfirmedAt ??= Date.now();
+    const listConfirmedAt = (this.workspaceListConfirmedAt ??= this.authorityClock());
     let nextCheckMs = Number.POSITIVE_INFINITY;
     for (const [workspaceId, runtime] of this.runtimes) {
       if (!this.remoteBridgeOutage || this.stopped) return;
@@ -1544,14 +1551,17 @@ export class LodyFleet {
         this.suspendedEncryptedWorkspaces.has(workspaceId)
       )
         continue;
-      const age =
-        Date.now() -
-        Math.max(
-          this.encryptedAuthorityConfirmedAt.get(workspaceId) ?? 0,
-          this.workspaceListConfirmedAt
+      const workspaceConfirmedAt = this.encryptedAuthorityConfirmedAt.get(workspaceId);
+      const confirmedAt =
+        workspaceConfirmedAt && workspaceConfirmedAt.monotonic > listConfirmedAt.monotonic
+          ? workspaceConfirmedAt
+          : listConfirmedAt;
+      const now = this.authorityClock();
+      if (withinAuthorityLimit(confirmedAt, now, FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS)) {
+        nextCheckMs = Math.min(
+          nextCheckMs,
+          authorityTimeLeft(confirmedAt, now, FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS)
         );
-      if (age >= 0 && age < FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS) {
-        nextCheckMs = Math.min(nextCheckMs, FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS - age);
         continue;
       }
       this.logger.warn(`[fleet] Suspending encrypted workspace ${workspaceId}: access unconfirmed`);
@@ -1573,7 +1583,7 @@ export class LodyFleet {
   }
 
   /** `startedAt` is taken before the read's network I/O, so slow reads cannot extend the limit. */
-  private confirmEncryptedAuthority(workspaceId: string, startedAt: number): void {
+  private confirmEncryptedAuthority(workspaceId: string, startedAt: AuthorityStamp): void {
     if (this.stopped) return;
     this.encryptedAuthorityConfirmedAt.set(workspaceId, startedAt);
     if (!this.remoteBridgeOutage) return;
