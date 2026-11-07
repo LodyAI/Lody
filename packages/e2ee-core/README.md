@@ -16,8 +16,10 @@ syncs through Loro / Durable Streams or a comparable append-only log.
 ## Availability
 
 The service architecture is reusable, but this is currently a private workspace
-package (`private: true`, version `0.0.0`), not a published SDK. Production E2EE
-composition is not enabled. Node SQLite, Loro Streams and opt-in browser ledger/original IndexedDB adapters
+package (`private: true`, version `0.0.0`), not a published SDK. Cloud composition
+wires these services for desktop, CLI and mobile. The public OSS desktop stays
+local-only. New encrypted-workspace creation stays behind the developer preference.
+[Bootstrap](../../.agents/docs/e2ee-workspace-bootstrap.md). Node SQLite, Loro Streams and opt-in browser ledger/original IndexedDB adapters
 are provided, together with opt-in browser custody and key/snapshot journals. Platform qualification remains a host responsibility. Backend ports and
 `/host` define what another backend must implement; they do not deploy a server.
 

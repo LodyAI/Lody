@@ -1,32 +1,57 @@
 # Repository rules
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
-Map: [README.md](README.md#repository).
+
+## Where to read
+
+Read the ancestor and scoped `AGENTS.md` files for the paths you change, then
+the Specs, `.agents/docs/` pages, module READMEs, and the notes they link.
+Search notes before reversing a recorded decision. Triggers below also bind
+callers outside the owner's directory. [README.md](README.md#repository) lists
+directories and is not the rule source. Archives are history, not current authority.
+
+- Encrypted workspaces, account pairing, recovery, ledger identity, key delivery,
+  machine sharing, or execution during a backend outage: read
+  [platform E2EE](packages/platform/AGENTS.md#e2ee-workspace-control),
+  [e2ee-core](packages/e2ee-core/AGENTS.md), and the
+  [bootstrap guide](.agents/docs/e2ee-workspace-bootstrap.md). Personal-device
+  hosts also read [e2ee-client](packages/e2ee-client/AGENTS.md). Machine-service
+  policy also reads [e2ee-machine-sharing](packages/e2ee-machine-sharing/AGENTS.md).
+- Session history, quotes, steer, queued input, delegation, or MCP/Role catalogs
+  and their UI: read [shared contracts](packages/shared/AGENTS.md). MCP tool
+  acceptance and replies also read [CLI MCP](apps/cli/src/mcp/AGENTS.md).
+- Automations, including external checks and cross-session control: read
+  [automations](apps/cli/src/automations/AGENTS.md).
+- Native iOS or Android: read [mobile](apps/mobile/AGENTS.md), then that platform's file.
+- Desktop composition, packaging, quit, or the embedded CLI: read
+  [electron](apps/electron/AGENTS.md).
+- Provider authentication, Lody Agent connections, or advertised ACP sign-in: read
+  [agent](apps/cli/src/agent/AGENTS.md) and
+  [Lody Agent setup](packages/components/src/components/settings/README.md#lody-agent-setup).
+- Code Collab diffs or content-addressed snapshots: read
+  [turn-diff-store](packages/turn-diff-store/AGENTS.md) and
+  [code-collab](apps/cli/src/lib/code-collab/AGENTS.md).
+- Composition, capability-gated settings, telemetry, or managed-runtime downloads:
+  read [platform contracts](packages/platform/AGENTS.md).
 
 ## Context and documentation
 
-- Read the applicable ancestor/scoped `AGENTS.md` files and task-relevant Specs,
-  `.agents/docs/`, and module READMEs, then the notes they link for the rationale.
-  Search notes directly before reversing a recorded decision. Follow the required
-  topic links below when their trigger applies, including changes outside the
-  owner's directory. Archives are history, not current authority.
 - A note you rely on that is stale, unlinked, or in the wrong lifecycle is fixed in
   the same PR ([maintenance on read](.agents/notes/AGENTS.md#maintenance-on-read)).
 - Specs express intent, docs explain implementation, notes record decisions.
   Distinguish bugs, stale docs, and unimplemented intent using code and evidence;
   never change a Spec to justify a bug.
-- Before creating or editing a Spec, read [Spec rules](specs/AGENTS.md), including
-  status and approval requirements. Reserve Specs for consequential decisions
-  needing human review; prefer an existing Spec. Ordinary fixes need no new Spec.
-- Add/update an [Agent Note](.agents/notes/AGENTS.md#when-to-write) in the same PR
-  only for durable rationale: alternatives, unenforceable constraints, measurements,
-  formats or ownership. A fix that is merely done belongs in its PR and test.
-  Every new note runs the [supersession check](.agents/notes/AGENTS.md#supersession);
-  keep implemented notes' cited facts current. Report deferred notes for read-only work.
-- Update affected docs/READMEs. Run `pnpm run docs status` at start and
-  `pnpm run docs check` at finish; review SHA-protected changes before confirming.
-  Checks and translations establish neither correctness nor approval; translation
-  may follow later. See [document maintenance](.agents/README.md).
+- Before creating or editing a Spec, read [Spec rules](specs/AGENTS.md). Reserve
+  Specs for consequential decisions that need human review, and prefer an existing
+  Spec. Ordinary fixes need no new Spec.
+- Add or update an [Agent Note](.agents/notes/AGENTS.md#when-to-write) in the same
+  PR only for durable rationale. A fix that is merely done belongs in its PR and
+  test. Every new note runs the [supersession check](.agents/notes/AGENTS.md#supersession);
+  keep implemented notes' cited facts current, and report deferred notes for read-only work.
+- Update affected docs and READMEs. Run `pnpm run docs status` at start and
+  `pnpm run docs check` at finish, and review SHA-protected changes before confirming.
+  Checks and translations establish neither correctness nor approval. See
+  [document maintenance](.agents/README.md).
 - Keep PR docs compact: consolidate decisions, evidence and limits; avoid fix/run logs.
   Follow [submission consolidation](.agents/AGENTS.md#documentation-at-submission).
 - Keep binding rules in the nearest `AGENTS.md` as complete sentences (new scopes
@@ -37,23 +62,18 @@ Map: [README.md](README.md#repository).
 ## Effect reference
 
 For Effect work, use the [Effect skill](.agents/skills/effect-ts/SKILL.md) to select
-review, debug, feature/fix or migration mode. Read the consuming package's resolved
-`effect/AGENTS.md` completely once per version in the current context; then follow
-task-relevant links and source. Preserve locked versions and behavioral acceptance.
-Explicit v3 migrations also use the
+review, debug, feature/fix or migration mode, including its version-matched
+`effect/AGENTS.md` read. Explicit v3 migrations also use the
 [migration skill](.agents/skills/effect-v3-to-v4/SKILL.md).
 
-Lody is migrating lifecycle code to native Effect v4. For feature/fix work touching
-effectful modules, assess a small native migration; prefer it in the same PR when
-it directly helps the task, actual dependencies are ready, and the unit can be
-completed and behavior-tested within a small reviewable scope. About 500 additional
-changed lines is a sizing guide, not an acceptance or approval gate. Keep pure
-computation ordinary and preserve behavior outside the requested change. Do not
-extend the migration into unfinished dependency chains.
-For migration scope, read relevant [charter](.agents/notes/proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger)
-rows and the [selection guide](.agents/docs/cli-effect-ts.md#small-migrations-during-feature-and-fix-work).
-Apply the charter's completion criteria; update its unit ledger when a migration
-changes dependencies, native boundaries, consumers or ownership.
+Lifecycle code is moving to native Effect v4. When a feature or fix touches an
+effectful module, assess a small native migration and prefer it in the same PR
+when it directly helps, real dependencies are ready, and the unit stays reviewable.
+Do not extend it into unfinished dependency chains. Pure computation stays ordinary.
+Scope, the sizing guide, and completion criteria are in the
+[selection guide](.agents/docs/cli-effect-ts.md#small-migrations-during-feature-and-fix-work).
+Update the [charter ledger](.agents/notes/proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger)
+when migration facts change.
 
 ## Repository boundary
 
@@ -68,21 +88,14 @@ changes dependencies, native boundaries, consumers or ownership.
 - The OSS desktop is local-only; authenticated product-cloud requests are forbidden.
   Public managed-runtime downloads are the exception. Shared packages stay
   platform-neutral; local telemetry is hard-disabled.
-- Before changing composition, capability-gated settings, telemetry, or runtime
-  downloads, read [platform contracts](packages/platform/AGENTS.md).
-- Before changing daemon protocol negotiation, MCP/Role catalogs or their UI
-  consumers, per-turn MCP selection, or Role creation/dispatch, read [shared contracts](packages/shared/AGENTS.md).
-- `packages/acp-extension-kimi` and `packages/acp-extension-pi` stay outside the root pnpm graph in isolated
-  submodule workspace; consume only its separately built, checksummed managed-runtime
-  artifact and versioned ACP contract. Shared ACP extension contracts belong in the
-  public `LodyAI/acp-extension-core` submodule, consumed through the root workspace;
-  never duplicate them locally.
-- Magpie: desktop confirmation or explicit local CLI import; loopback mappings and public token.
-  Keep gateway metadata outside env and catalogs under Lody data, never user profiles.
-  [Contract](specs/magpie-provider-import.md).
-- Pi provider migration requires owner confirmation and the target's `builtinPi`
-  protocol capability. Preserve provider IDs and settings; never convert legacy
-  native session IDs. Contract: [builtin Pi](specs/builtin-pi.md).
+- `packages/acp-extension-kimi` and `packages/acp-extension-pi` stay outside the root
+  pnpm graph as isolated submodules. Consume each only through its separately built,
+  checksummed managed runtime and the versioned ACP contract. Shared ACP extension
+  contracts belong in the public `LodyAI/acp-extension-core` submodule, consumed
+  through the root workspace; never duplicate them locally.
+- Before changing Magpie import or builtin Pi migration, read
+  [Magpie](specs/magpie-provider-import.md) and [builtin Pi](specs/builtin-pi.md).
+  Keep their confirmation, loopback, identity, and catalog constraints.
 - Viewer packaging/version changes must follow its [rules](packages/code-review-viewer/AGENTS.md).
   Package-scope or cloud/local composition changes require `pnpm check:public-boundary`.
 
@@ -92,7 +105,7 @@ changes dependencies, native boundaries, consumers or ownership.
   `Leeeon233`, or `wibus-wee`; otherwise community. Before planning a community
   contribution, read [.github/AGENTS.md](.github/AGENTS.md) for size/assignment rules.
   Read it before any PR/Issue work as well.
-- Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), with Node-API 10+; use the pnpm in `package.json`. See the
+- Use the Node range in `package.json` `engines` and the pnpm version in `packageManager`, with Node-API 10+. See the
   [runtime security decision](.agents/notes/implemented/bug-fix/2026-10-22-node-security-runtime-floor.md).
   `pnpm install` (nested checkouts skip it); standalone work uses a separate clone.
   `pnpm start:local` starts the desktop; root `pnpm build` uses the same local composition.
@@ -108,13 +121,13 @@ changes dependencies, native boundaries, consumers or ownership.
   luck. Assert observable behavior, not mock call counts.
 - Lody lint, typecheck, formatting and test commands skip all nested ACP adapter submodules (`packages/acp-extension-*` below the public root). Their internal tests are maintained independently; retain Lody-owned integration and packaging checks.
 
-- Keep tests only for concrete Lody product/domain assumptions or installation,
-  compilation, packaging and release guarantees. Generic helper correctness is not
-  sufficient. Delete shallow tests in the changed scope: source-string/regex assertions,
-  mock-call-only checks and duplicates that cannot detect a behavioral regression.
-  Test the real boundary and resulting state, including failure paths; retain
-  meaningful compile-failure contracts. Extend the owning suite instead of adding
-  a file per small fix. Do not delete behavioral coverage merely to reduce counts.
+- Keep tests for concrete Lody product, domain, installation, compilation, packaging
+  or release behavior. Generic helper correctness is not sufficient. Delete shallow
+  tests in the changed scope: source-string or regex assertions, mock-call-only
+  checks, and duplicates that cannot catch a behavioral regression. Test the real
+  boundary and resulting state, including failures, and keep compile-failure contracts.
+  Extend the owning suite. Do not add a file per small fix, and do not drop behavioral
+  coverage to reduce counts.
 - Before changing teardown, retry, fencing or readiness, read
   [failure containment](.agents/docs/failure-containment.md); preserve verified safe
   reuse and bounded ownership while isolating independent work.

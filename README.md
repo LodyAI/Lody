@@ -165,10 +165,13 @@ action to trigger CI. Existing releases and their assets are preserved on reruns
 - `packages/platform` — Platform capabilities and integrations
 - `packages/shared` — Shared schemas, protocols, and utilities
 - `packages/cloud-api` — Optional-cloud protocol names and DTOs
-- `packages/e2ee-core` — End-to-end encryption library: signed ledger, key delivery, services and adapters ([reading guide](packages/e2ee-core/README.md), not yet wired into the product)
+- `packages/e2ee-core` — End-to-end encryption library: signed ledger, key delivery, services and adapters ([reading guide](packages/e2ee-core/README.md)). Product hosts: [workspace bootstrap](.agents/docs/e2ee-workspace-bootstrap.md)
+- `packages/e2ee-client` — Personal-device E2EE host
+- `packages/e2ee-machine-sharing` — Machine-service sharing policy
 - `packages/e2ee-lab` — Local adversarial consumers and persistence probes for `@lody/e2ee-core`
+- `packages/turn-diff-store` — Local content-addressed turn snapshots
 - `packages/loro-streams-rpc` — RPC over Loro Streams
-- `packages/acp-extension-{core,kimi}` — ACP extension submodule workspaces
+- `packages/acp-extension-{core,kimi,pi}` — ACP extension submodule workspaces. Kimi and Pi stay outside the root pnpm graph
 - `site-docs` — Website, documentation, and blog
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and the community PR size policy.
