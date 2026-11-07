@@ -335,6 +335,12 @@ enum ChatContextViewProbe {
         let text = (rendered.subviews.first as! FileMarkdownView).textLabelView.attributedText
         let bodyRange = (text.string as NSString).range(of: "Body")
         let bodyFont = text.attribute(.font, at: bodyRange.location, effectiveRange: nil) as? UIFont
+        checks["bodySize-\(secondary)-\(streaming)"] = bodyFont?.pointSize == UIFont.dynamic(of: secondary ? 15 : 16, compatibleWith: .current).pointSize
+        let heading = store.view(id: "heading-\(secondary)-\(streaming)", text: "## Heading",
+          secondary: secondary, streaming: streaming, width: 300)
+        let headingText = (heading.subviews.first as! FileMarkdownView).textLabelView.attributedText
+        let headingFont = headingText.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        checks["headingSize-\(secondary)-\(streaming)"] = headingFont?.pointSize == UIFont.dynamic(of: secondary ? 17 : 18, compatibleWith: .current).pointSize
         for token in ["inline", "boldcode", "linkedcode"] {
           let range = (text.string as NSString).range(of: token)
           let key = "inline-\(token)-\(secondary)-\(streaming)"

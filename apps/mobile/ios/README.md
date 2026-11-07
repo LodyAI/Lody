@@ -73,7 +73,9 @@ What that week actually looked like:
 The iOS app uses fixed Ink accents in both light and dark appearances, including
 Send and Stop; conversation activity/status colors remain unchanged. Appearance settings retain dark-background and app-icon choices,
 without an accent-color picker. Process status labels use the same regular type
-as their duration. Chat inline code matches the body size in a monospaced face. Prose blocks use
+as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
+thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+Chat inline code matches the body size in a monospaced face. Prose blocks use
 secondary-label grey (links retain link blue); fenced code retains its own sizing
 and colours. With MarkdownView's shared code colour, a list or quote containing a
 fence keeps its original code colours throughout that block.
