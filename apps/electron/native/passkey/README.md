@@ -4,8 +4,8 @@ AuthenticationServices passkey ceremonies with PRF, for the [recovery vault](../
 The main process calls it through `src/main/services/e2ee-passkey-macos.mts`. Without the built
 addon, or below macOS 15, the port reports unavailable, so ordinary builds are unaffected.
 
-**This code has never been compiled or run.** It was written on Linux from Apple's headers as
-mirrored by public bindings. The first Mac build may need fixes.
+**This code compiles but has never run.** It builds with Xcode 27.2 for Electron 44.9.3 on arm64.
+No signed build or real ceremony has exercised it.
 
 ## Build
 

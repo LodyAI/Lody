@@ -12,6 +12,8 @@ import {
   parseRecoveryFile,
   type DeviceSigner
 } from '@lody/e2ee-core/protocol'
+import { E2eePasskeyCancelled, type E2eePasskeyPort } from '@lody/platform/e2ee-passkey'
+import { enrollVaultPasskey, unlockVaultWithPasskey } from '@lody/e2ee-client/passkey-unlock'
 import {
   readRecoveryHistory,
   recoveryLedger,
@@ -51,12 +53,14 @@ const publicCodes = new Set([
   'rollback',
   'storage',
   'missing',
-  'random-unavailable'
+  'random-unavailable',
+  'prf-unavailable'
 ])
 /** Only stable, non-secret reason codes cross IPC; storage/backend detail stays in main. */
 export function recoveryVaultFailure(error: unknown): Error {
   const code =
     typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
+  if (error instanceof E2eePasskeyCancelled) return new Error('e2ee_recovery_cancelled')
   if (publicCodes.has(code)) return new Error(`e2ee_recovery_${code}`)
   if (typeof error === 'object' && error !== null && '_tag' in error) {
     if (error._tag === 'BackendError') return new Error('e2ee_recovery_unavailable')
@@ -361,17 +365,49 @@ export const abandonAccountVaultReplacement = (
     }).pipe(Effect.provide(vaults(io)))
   )
 
-/** Set up recovery for one workspace from the account's recovery file. */
-export const setupWorkspaceRecovery = (
+/** How a vault opens: the recovery file, or a passkey through a real ceremony. */
+export type RecoveryUnlock =
+  | { readonly file: Uint8Array }
+  | { readonly passkey: E2eePasskeyPort; readonly locator: string }
+
+const openVault = (unlock: RecoveryUnlock) =>
+  Effect.gen(function* () {
+    const service = yield* RecoveryVaults
+    if ('file' in unlock) return yield* service.open({ recoveryFile: new Uint8Array(unlock.file) })
+    return yield* unlockVaultWithPasskey({
+      port: unlock.passkey,
+      open: ({ vaultId, credential }) =>
+        service.openWithPasskey({ vaultId, locator: unlock.locator, credential })
+    })
+  })
+
+/** Add a passkey to the account's vault. Adding one needs V, so the file opens it. */
+export const enrollRecoveryPasskey = (
   io: RecoveryVaultIo & {
     readonly file: Uint8Array
+    readonly port: E2eePasskeyPort
+    readonly label: string
+  }
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const vault = yield* openVault({ file: io.file })
+      yield* enrollVaultPasskey({ port: io.port, vault, label: io.label })
+      return { passkeys: (yield* vault.listPasskeys()).length }
+    }).pipe(Effect.provide(vaults(io)))
+  )
+
+/** Set up recovery for one workspace, opening the vault with its file or a passkey. */
+export const setupWorkspaceRecovery = (
+  io: RecoveryVaultIo & {
+    readonly unlock: RecoveryUnlock
     readonly replacement: Pick<RecoveryVaultReplacement, 'state'>
     readonly target: RecoveryWorkspaceTarget
   }
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const vault = yield* (yield* RecoveryVaults).open({ recoveryFile: new Uint8Array(io.file) })
+      const vault = yield* openVault(io.unlock)
       const { current } = yield* io.replacement.state()
       if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
       const owner = yield* io.target.owner({
@@ -501,13 +537,13 @@ export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
 /** Restore every workspace a file or passkey covers. See `restoreVaultWorkspaces`. */
 export const restoreAccountWorkspaces = (
   io: RecoveryVaultIo & {
-    readonly file: Uint8Array
+    readonly unlock: RecoveryUnlock
     readonly workspaces: readonly RecoveryRestoreTarget[]
   }
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const vault = yield* (yield* RecoveryVaults).open({ recoveryFile: new Uint8Array(io.file) })
+      const vault = yield* openVault(io.unlock)
       return yield* restoreVaultWorkspaces({
         vault,
         local: yield* RecoveryVaultLocalStore,
