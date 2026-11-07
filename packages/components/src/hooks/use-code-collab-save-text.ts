@@ -496,6 +496,7 @@ export function useCodeCollabSaveText(
       }
       event.preventDefault();
       event.returnValue = '';
+      console.warn('[Renderer] Unload blocked', { category: 'unsaved-editor' });
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
