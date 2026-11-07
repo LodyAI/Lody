@@ -11,7 +11,11 @@ import {
   type RecoveryVault,
   type RecoverySubmitResult,
 } from '@lody/e2ee-core';
-import { replaceAccountVault } from '@lody/e2ee-client/vault-replacement';
+import {
+  abandonVaultReplacement,
+  planVaultReplacement,
+  replaceAccountVault,
+} from '@lody/e2ee-client/vault-replacement';
 import { type RecoveryVaultLocalStore } from '@lody/e2ee-core/services';
 import {
   verifiedPasskeyPrf,
@@ -1058,6 +1062,84 @@ describe('encrypted recovery vault and genuine workflow', () => {
         )
       );
     }));
+  it('revokes the old R first on a suspected leak, even while the new R cannot pass', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            let finished = 0;
+            const run = () =>
+              replaceAccountVault({
+                workspaces: [
+                  {
+                    name: 'synthetic workspace',
+                    setup: r.newOwner.setup,
+                    revokeOtherRecoveryDevices: r.newOwner.revokeOtherRecoveryDevices,
+                  },
+                ],
+                compromised: true,
+                finish: () =>
+                  Effect.sync(() => {
+                    finished += 1;
+                  }),
+              });
+            r.failEnvelope(true);
+            expect(Result.isFailure(yield* Effect.result(run()))).toBe(true);
+            expect(r.recoveryDevices()).not.toContain(r.oldR);
+            expect(finished).toBe(0);
+            r.failEnvelope(false);
+            expect(yield* run()).toEqual({ outcome: 'Committed' });
+            expect(r.recoveryDevices()).toHaveLength(1);
+            expect(finished).toBe(1);
+          })
+        )
+      );
+    }));
+  it('abandons a replacement by revoking only the new R, then starts again', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            expect(r.recoveryDevices()).toHaveLength(2);
+            let abandoned = 0;
+            const run = () =>
+              abandonVaultReplacement({
+                workspaces: [
+                  {
+                    name: 'synthetic workspace',
+                    revokeOwnRecoveryDevice: r.newOwner.revokeOwnRecoveryDevice,
+                  },
+                ],
+                abandon: () =>
+                  Effect.sync(() => {
+                    abandoned += 1;
+                  }),
+              });
+            expect(yield* run()).toEqual({ outcome: 'Committed' });
+            expect(r.recoveryDevices()).toEqual([r.oldR]);
+            expect(abandoned).toBe(1);
+            // Rerunning after a lost reply signs nothing new.
+            const before = r.f.records.length;
+            expect(yield* run()).toEqual({ outcome: 'Committed' });
+            expect(r.f.records).toHaveLength(before);
+          })
+        )
+      );
+    }));
+  it('names the workspaces a device cannot act on', () => {
+    expect(
+      planVaultReplacement(
+        [
+          { id: 'a', name: 'Alpha' },
+          { id: 'b', name: 'Beta' },
+        ],
+        new Set(['a'])
+      )
+    ).toEqual({ covered: [{ id: 'a', name: 'Alpha' }], uncovered: [{ id: 'b', name: 'Beta' }] });
+  });
   it('concurrent first setup on two durable clients reuses the winning R and leaves no duplicate ledger identity', async () =>
     inDir(async (dir) => {
       await Effect.runPromise(

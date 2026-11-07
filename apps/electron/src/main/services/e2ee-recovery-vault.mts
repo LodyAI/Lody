@@ -1,4 +1,6 @@
 import { RecoveryVaults } from '@lody/e2ee-core'
+import { parseRecoveryFile } from '@lody/e2ee-core/protocol'
+import { planVaultReplacement } from '@lody/e2ee-client/vault-replacement'
 import { sqliteRecoveryVaultLocalStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/services'
 import { randomUUID } from 'node:crypto'
@@ -17,6 +19,7 @@ export const MAX_RECOVERY_FILE_BYTES = 4096
 const publicCodes = new Set([
   'invalid-input',
   'exists',
+  'replacing',
   'authentication',
   'rollback',
   'storage',
@@ -81,6 +84,40 @@ const vaults = (io: RecoveryVaultIo) =>
     )
   )
 
+/** Save a new vault's file, then upload it. `beforeUpload` runs with the saved file. */
+const createVaultWithSavedFile = (
+  io: RecoveryVaultIo & {
+    readonly locator: string
+    readonly persist: (file: Uint8Array) => Effect.Effect<Uint8Array, unknown>
+    readonly beforeUpload?: (file: Uint8Array) => Effect.Effect<void, unknown>
+  }
+) =>
+  Effect.gen(function* () {
+    const service = yield* RecoveryVaults
+    let saved: Uint8Array = new Uint8Array()
+    return yield* Effect.gen(function* () {
+      const created = yield* service.create({
+        locator: io.locator,
+        persistFile: (file) =>
+          io.persist(new Uint8Array(file)).pipe(
+            Effect.flatMap((read) => {
+              saved = read
+              return read.length === file.length && read.every((byte, i) => byte === file[i])
+                ? Effect.void
+                : Effect.fail({ code: 'storage' })
+            }),
+            Effect.flatMap(() => io.beforeUpload?.(saved) ?? Effect.void)
+          )
+      })
+      created.recoveryFile.fill(0)
+      const reopened = yield* service.open({ recoveryFile: new Uint8Array(saved) })
+      if (reopened.vaultId !== created.vault.vaultId)
+        return yield* Effect.fail({ code: 'authentication' })
+      yield* reopened.readIndex()
+      return { vaultId: reopened.vaultId }
+    }).pipe(Effect.ensuring(Effect.sync(() => saved.fill(0))))
+  })
+
 /**
  * Create the account vault and prove the saved file reopens it. One account has
  * one vault, so an existing vault stops this before anything is written. `persist`
@@ -99,30 +136,82 @@ export const createAccountRecoveryVault = (
   Effect.scoped(
     Effect.gen(function* () {
       if (yield* io.exists) return yield* Effect.fail({ code: 'exists' })
-      const service = yield* RecoveryVaults
-      let saved: Uint8Array = new Uint8Array()
-      return yield* Effect.gen(function* () {
-        const created = yield* service.create({
-          locator: io.locator,
-          persistFile: (file) =>
-            io.persist(new Uint8Array(file)).pipe(
-              Effect.flatMap((read) => {
-                saved = read
-                return read.length === file.length && read.every((byte, i) => byte === file[i])
-                  ? Effect.void
-                  : Effect.fail({ code: 'storage' })
-              })
-            )
-        })
-        created.recoveryFile.fill(0)
-        const reopened = yield* service.open({ recoveryFile: new Uint8Array(saved) })
-        if (reopened.vaultId !== created.vault.vaultId)
-          return yield* Effect.fail({ code: 'authentication' })
-        yield* reopened.readIndex()
-        return { vaultId: reopened.vaultId }
-      }).pipe(Effect.ensuring(Effect.sync(() => saved.fill(0))))
+      return yield* createVaultWithSavedFile(io)
     }).pipe(Effect.provide(vaults(io)))
   )
+
+/** The service's replacement bookkeeping. It never decides trust. */
+export interface RecoveryVaultReplacement {
+  readonly state: () => Effect.Effect<
+    { readonly current: string | null; readonly replacing: string | null },
+    unknown
+  >
+  readonly reserve: (vaultId: string) => Effect.Effect<void, unknown>
+  readonly abandon: (vaultId: string) => Effect.Effect<void, unknown>
+}
+
+/**
+ * Start a whole-vault replacement: save a new file, reserve its vault, then upload.
+ * The service binds a vault at its first write, so the reservation comes first, and
+ * the old vault stays current throughout.
+ */
+export const beginAccountVaultReplacement = (
+  io: RecoveryVaultIo & {
+    readonly locator: string
+    readonly replacement: RecoveryVaultReplacement
+    readonly persist: (file: Uint8Array) => Effect.Effect<Uint8Array, unknown>
+  }
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const state = yield* io.replacement.state()
+      if (!state.current) return yield* Effect.fail({ code: 'missing' })
+      if (state.replacing) return yield* Effect.fail({ code: 'replacing' })
+      return yield* createVaultWithSavedFile({
+        ...io,
+        beforeUpload: (file) =>
+          Effect.try({
+            try: () => {
+              const parsed = parseRecoveryFile(file)
+              parsed.unlock.fill(0)
+              return parsed.vaultId
+            },
+            catch: () => ({ code: 'invalid-input' })
+          }).pipe(Effect.flatMap(io.replacement.reserve))
+      })
+    }).pipe(Effect.provide(vaults(io)))
+  )
+
+/** What a replacement would cover, and whether one is already running. */
+export const recoveryReplacementPlan = (io: {
+  readonly replacement: Pick<RecoveryVaultReplacement, 'state'>
+  readonly accountWorkspaces: Effect.Effect<
+    readonly { readonly id: string; readonly name: string }[],
+    unknown
+  >
+  readonly hasIdentity: (workspaceId: string) => boolean
+}) =>
+  Effect.gen(function* () {
+    const state = yield* io.replacement.state()
+    const workspaces = yield* io.accountWorkspaces
+    return {
+      replaceable: state.current !== null,
+      replacing: state.replacing !== null,
+      ...planVaultReplacement(
+        workspaces,
+        new Set(workspaces.map((row) => row.id).filter(io.hasIdentity))
+      )
+    }
+  })
+
+/** Retire an unfinished replacement. The current vault is untouched. */
+export const abandonAccountVaultReplacement = (replacement: RecoveryVaultReplacement) =>
+  Effect.gen(function* () {
+    const { replacing } = yield* replacement.state()
+    if (!replacing) return { abandoned: false }
+    yield* replacement.abandon(replacing)
+    return { abandoned: true }
+  })
 
 /**
  * Open a vault from a user-supplied recovery file and authenticate its index.

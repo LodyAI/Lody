@@ -97,6 +97,9 @@ const accountDirectory = (accountId: string) =>
 /** The account-wide pairing journal; it holds no secret and no private key. */
 export const desktopAccountPairingDatabase = (accountId: string) =>
   join(accountDirectory(accountId), 'account-pairing.sqlite')
+/** Whether this device holds an identity for the workspace. */
+export const desktopE2eeHasWorkspaceIdentity = (accountId: string, workspaceId: string) =>
+  existsSync(identityDirectory(accountId, workspaceId))
 /** Account-scoped recovery-vault journal (pins and intents only, never secrets). */
 export const desktopE2eeRecoveryJournalPath = (accountId: string) =>
   join(accountDirectory(accountId), 'recovery-vault.sqlite')

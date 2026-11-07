@@ -1,9 +1,10 @@
 import { useAtomValue } from 'jotai';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
+import { AlertDialog } from '@/ui/dialog';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -21,7 +22,14 @@ const styles = stylex.create({
   actions: { display: 'flex', gap: space[2], flexWrap: 'wrap' },
 });
 
+type Plan = {
+  replaceable: boolean;
+  replacing: boolean;
+  covered: readonly { id: string; name: string }[];
+  uncovered: readonly { id: string; name: string }[];
+};
 type Result =
+  | { kind: 'notice'; key: 'e2ee.recovery.replaceBegun' | 'e2ee.recovery.replaceAbandoned' }
   | { kind: 'created'; vaultId: string }
   | { kind: 'opened'; vaultId: string; count: number }
   | { kind: 'error'; code: string };
@@ -37,6 +45,21 @@ export function RecoveryVaultSection() {
   const e2ee = getIpcServices()?.e2ee;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>();
+  const [plan, setPlan] = useState<Plan>();
+  const [dialog, setDialog] = useState<'begin' | 'continue'>();
+  useEffect(() => {
+    if (!enabled || !e2ee) return;
+    let live = true;
+    void e2ee.recoveryReplacementPlan().then(
+      (next) => {
+        if (live) setPlan(next);
+      },
+      () => undefined
+    );
+    return () => {
+      live = false;
+    };
+  }, [enabled, e2ee, result]);
   if (!enabled || !e2ee) return null;
   const run = async (work: () => Promise<Result | undefined>) => {
     if (busy) return;
@@ -83,7 +106,35 @@ export function RecoveryVaultSection() {
           >
             {t('e2ee.recovery.check')}
           </Button>
+          {plan?.replaceable && !plan.replacing && (
+            <Button variant="secondary" disabled={busy} onClick={() => setDialog('begin')}>
+              {t('e2ee.recovery.replace')}
+            </Button>
+          )}
         </div>
+        {plan?.replacing && (
+          <>
+            <p aria-live="polite">{t('e2ee.recovery.replacing')}</p>
+            <div {...stylex.props(styles.actions)}>
+              <Button disabled={busy} onClick={() => setDialog('continue')}>
+                {t('e2ee.recovery.replaceContinue')}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    await e2ee.abandonRecoveryReplacement();
+                    return { kind: 'notice', key: 'e2ee.recovery.replaceAbandoned' };
+                  })
+                }
+              >
+                {t('e2ee.recovery.replaceAbandon')}
+              </Button>
+            </div>
+          </>
+        )}
+        {result?.kind === 'notice' && <p aria-live="polite">{t(result.key)}</p>}
         {result?.kind === 'created' && (
           <p aria-live="polite">{t('e2ee.recovery.created', { vaultId: short(result.vaultId) })}</p>
         )}
@@ -98,16 +149,94 @@ export function RecoveryVaultSection() {
               {t(
                 result.code.includes('e2ee_recovery_disabled')
                   ? 'e2ee.recovery.disabled'
-                  : result.code.includes('e2ee_recovery_exists')
-                    ? 'e2ee.recovery.exists'
-                    : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
-                      ? 'e2ee.recovery.wrongFile'
-                      : 'e2ee.recovery.failed'
+                  : result.code.includes('e2ee_recovery_setup-unavailable')
+                    ? 'e2ee.recovery.setupUnavailable'
+                    : result.code.includes('e2ee_recovery_replacing')
+                      ? 'e2ee.recovery.replacingElsewhere'
+                      : result.code.includes('e2ee_recovery_exists')
+                        ? 'e2ee.recovery.exists'
+                        : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
+                          ? 'e2ee.recovery.wrongFile'
+                          : 'e2ee.recovery.failed'
               )}
             </Alert.Description>
           </Alert.Root>
         )}
       </div>
+      <AlertDialog.Root
+        open={dialog !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setDialog(undefined);
+        }}
+      >
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
+              {t(
+                dialog === 'continue'
+                  ? 'e2ee.recovery.replaceRevokeTitle'
+                  : 'e2ee.recovery.replaceTitle'
+              )}
+            </AlertDialog.Title>
+            <AlertDialog.Description>
+              {dialog === 'begin' && t('e2ee.recovery.replaceBody')}{' '}
+              {t('e2ee.recovery.replaceOldFile')}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          {!!plan?.uncovered.length && (
+            <div {...stylex.props(styles.body)}>
+              <p>{t('e2ee.recovery.replaceUncovered')}</p>
+              <ul>
+                {plan.uncovered.map((workspace) => (
+                  <li key={workspace.id}>{workspace.name}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={busy}>{t('common.cancel')}</AlertDialog.Cancel>
+            {dialog === 'continue' && (
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  setDialog(undefined);
+                  void run(async () => {
+                    await e2ee.continueRecoveryReplacement();
+                    return undefined;
+                  });
+                }}
+              >
+                {t('e2ee.recovery.replaceRevokeFirst')}
+              </Button>
+            )}
+            <Button
+              variant="destructive"
+              disabled={busy}
+              onClick={() => {
+                const step = dialog;
+                setDialog(undefined);
+                void run(async () => {
+                  if (step === 'continue') {
+                    await e2ee.continueRecoveryReplacement();
+                    return undefined;
+                  }
+                  const begun = await e2ee.beginRecoveryReplacement();
+                  return begun.outcome === 'begun'
+                    ? { kind: 'notice', key: 'e2ee.recovery.replaceBegun' }
+                    : undefined;
+                });
+              }}
+            >
+              {t(
+                dialog === 'continue'
+                  ? 'e2ee.recovery.replaceContinue'
+                  : 'e2ee.recovery.replaceSave'
+              )}
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </CompactSection>
   );
 }

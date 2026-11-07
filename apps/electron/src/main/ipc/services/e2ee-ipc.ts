@@ -36,6 +36,7 @@ import {
   cleanupRemovedDesktopWorkspace,
   publicAccessLoss,
   desktopAccountPairingDatabase,
+  desktopE2eeHasWorkspaceIdentity,
   desktopE2eeRecoveryJournalPath
 } from '../../services/e2ee-account-runtime'
 import {
@@ -45,11 +46,15 @@ import {
 } from '../../services/e2ee-account-pairing-host.mjs'
 import {
   MAX_RECOVERY_FILE_BYTES,
+  abandonAccountVaultReplacement,
+  beginAccountVaultReplacement,
   createAccountRecoveryVault,
   inspectRecoveryFile,
+  recoveryReplacementPlan,
   recoveryVaultEnabled,
   recoveryVaultFailure,
-  saveRecoveryFile
+  saveRecoveryFile,
+  type RecoveryVaultReplacement
 } from '../../services/e2ee-recovery-vault.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
@@ -3211,6 +3216,11 @@ export class E2eeIpc extends IpcService {
       store: RecoveryVaultStore['Service']
       journalPath: string
       exists: Effect.Effect<boolean, unknown>
+      replacement: RecoveryVaultReplacement
+      accountWorkspaces: Effect.Effect<
+        readonly { readonly id: string; readonly name: string }[],
+        unknown
+      >
     }) => Effect.Effect<A, unknown>
   ): Promise<A> {
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
@@ -3221,7 +3231,9 @@ export class E2eeIpc extends IpcService {
           accountId,
           store: client.recoveryVault(),
           journalPath: desktopE2eeRecoveryJournalPath(accountId),
-          exists: client.hasRecoveryVault()
+          exists: client.hasRecoveryVault(),
+          replacement: client.recoveryVaultReplacement(),
+          accountWorkspaces: client.recoveryVaultAccountWorkspaces()
         })
       ).catch((error) => {
         throw recoveryVaultFailure(error)
@@ -3265,6 +3277,62 @@ export class E2eeIpc extends IpcService {
       })
     )
     return { outcome: 'created' as const, vaultId: created.vaultId }
+  }
+  /** Default-off: what replacing the recovery file would cover from this device. */
+  @IpcMethod()
+  async recoveryReplacementPlan() {
+    sender()
+    return this.recoveryOperation(({ accountId, replacement, accountWorkspaces }) =>
+      recoveryReplacementPlan({
+        replacement,
+        accountWorkspaces,
+        hasIdentity: (workspaceId) => desktopE2eeHasWorkspaceIdentity(accountId, workspaceId)
+      })
+    )
+  }
+  /** Default-off: save a new file and reserve its vault. The current vault keeps working. */
+  @IpcMethod()
+  async beginRecoveryReplacement() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      defaultPath: 'lody-recovery.lodyrecovery',
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const target = owner
+      ? await dialog.showSaveDialog(owner, options)
+      : await dialog.showSaveDialog(options)
+    if (target.canceled || !target.filePath) return { outcome: 'cancelled' as const }
+    const path = target.filePath
+    const begun = await this.recoveryOperation(({ store, journalPath, replacement }) =>
+      beginAccountVaultReplacement({
+        store,
+        journalPath,
+        replacement,
+        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
+        persist: (file) =>
+          Effect.tryPromise(async () => {
+            await saveRecoveryFile(path, file)
+            return new Uint8Array(await readFile(path))
+          })
+      })
+    )
+    return { outcome: 'begun' as const, vaultId: begun.vaultId }
+  }
+  /** Default-off: per-workspace recovery setup is not wired on desktop, so no R can be
+   * admitted or revoked here yet. */
+  @IpcMethod()
+  async continueRecoveryReplacement() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    throw new Error('e2ee_recovery_setup-unavailable')
+  }
+  /** Default-off: retire the unfinished vault. No new R exists on desktop yet to revoke. */
+  @IpcMethod()
+  async abandonRecoveryReplacement() {
+    sender()
+    return this.recoveryOperation(({ replacement }) => abandonAccountVaultReplacement(replacement))
   }
   /** Default-off: open a vault from a chosen recovery file and authenticate its
    * index. This checks the file; it neither restores a workspace nor admits a device. */
