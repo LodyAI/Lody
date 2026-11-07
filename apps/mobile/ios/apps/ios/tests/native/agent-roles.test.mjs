@@ -198,7 +198,10 @@ test('discovery filters private rows, keeps broken targets visible, and lists on
   // The new-chat Role row seeds the composer from what a target pins (web), so the
   // safe pinned values are listed; secret-shaped keys and memory never leave the row.
   const mine = snapshot.roles.find((role) => role.id === 'mine');
-  assert.deepEqual(mine.targets[0].runConfig, { modelId: 'model', configOptionValues: { safe: 'yes' } });
+  assert.deepEqual(mine.targets[0].runConfig, {
+    modelId: 'model',
+    configOptionValues: { safe: 'yes' },
+  });
   assert.equal(mine.emoji, '🧪');
   assert.equal(snapshot.roles.find((role) => role.id === 'shared').emoji, '🪼');
   assert.equal(JSON.stringify(snapshot).includes('fixture-memory'), false);
