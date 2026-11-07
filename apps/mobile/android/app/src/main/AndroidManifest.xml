@@ -18,7 +18,7 @@
         <activity
             android:name="app.lody.android.home.HomeActivity"
             android:exported="true"
-            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:theme="@style/Theme.Lody"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

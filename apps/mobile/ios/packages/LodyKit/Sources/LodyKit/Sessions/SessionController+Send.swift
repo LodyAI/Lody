@@ -130,6 +130,7 @@ extension SessionController {
     ]
     let busy = control.running || sender?.awaitingReply == true || sender?.sending == true || OutboxDispatcher.busy.contains(session.status)
     composer["actionBar"] = actionBarState(session, busy: busy)
+    composer["usage"] = sessionUsage(session, feed: feed)
     adjustComposer(&composer)
     apply("composer", Self.json(composer), chat.setComposerState)
     apply("options", composerModel.optionsJSON, chat.setComposerOptions)
@@ -137,6 +138,23 @@ extension SessionController {
     renderDecisions(feed)
     renderEditable(feed, enabled: live && state.connected && !state.loading && !session.archived && sender?.sending != true
       && !control.controlling && !feed.overflow && !deleting && !locked)
+  }
+
+  private func sessionUsage(_ session: SessionItem, feed: SessionFeedState) -> [String: Any]? {
+    var usage = feed.usageJSON.flatMap { CreateJSON.decode(ChatSessionUsage.self, $0) } ?? ChatSessionUsage()
+    let model = composerModel.active.modelId
+    let catalog = RemoteSettingsContext.current().agentUsage[session.machineId]
+    if catalog != nil || (model != nil && model != usage.modelId) { usage.quota = nil }
+    if let quota = SessionUsageSelection.quota(catalog, configId: session.agentConfigId, provider: session.agentType, model: model) {
+      usage.quota = .init(name: quota.name, windows: quota.windows.map {
+        .init(label: $0.label, usedPercent: $0.usedPercent, duration: $0.duration, resetsAt: $0.resetsAt)
+      })
+    }
+    let previousLabel = model == usage.modelId ? usage.modelLabel : nil
+    usage.modelLabel = composerModel.capability?.models.first { $0.id == model }?.name ?? previousLabel ?? model
+    usage.quotaEligible = usage.quota != nil
+    guard usage.visible, let data = try? JSONEncoder().encode(usage) else { return nil }
+    return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
   }
 
   func apply(_ key: String, _ value: String, _ set: (String) -> Void) {

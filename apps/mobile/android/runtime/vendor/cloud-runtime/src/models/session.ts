@@ -1,3 +1,4 @@
+import { type SessionUsage } from '../protocol/session-usage.ts';
 import { type TurnMetadata } from '../protocol/turnMetadata.ts';
 export type SystemNoticeMeta = {
   reason?: string;
@@ -97,6 +98,7 @@ export type Envelope = {
   reason?: string;
   revision: number;
   billableTurnCount?: number;
+  usage?: SessionUsage;
   awaitingUserSince?: number;
   preview?: { label: string; active: boolean };
   composer?: {

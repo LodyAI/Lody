@@ -42,13 +42,13 @@ final class TasksController: UIViewController, UICollectionViewDelegate {
 
   private static func layout() -> UICollectionViewLayout {
     var configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-    configuration.backgroundColor = .systemGroupedBackground
+    configuration.backgroundColor = .lodyGroupedBackground
     return UICollectionViewCompositionalLayout.list(using: configuration)
   }
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemGroupedBackground
+    view.backgroundColor = .lodyGroupedBackground
     segments.insertSegment(withTitle: String(localized: "native.chat.tasks.subagents", bundle: .lody), at: 0, animated: false)
     segments.insertSegment(withTitle: String(localized: "native.chat.tasks.others", bundle: .lody), at: 1, animated: false)
     segments.selectedSegmentIndex = 0

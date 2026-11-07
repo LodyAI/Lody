@@ -1,4 +1,5 @@
 import UIKit
+import LodyDesignSystem
 
 func luminance(_ color: UIColor) -> CGFloat {
   var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
@@ -38,9 +39,22 @@ let dark = UITraitCollection(userInterfaceStyle: .dark)
 let lightHigh = UITraitCollection(traitsFrom: [light, UITraitCollection(accessibilityContrast: .high)])
 let darkHigh = UITraitCollection(traitsFrom: [dark, UITraitCollection(accessibilityContrast: .high)])
 
-for background in ["soft", "black"] {
+for background in ["", "soft", "black", "unknown"] {
   UserDefaults.standard.set(background, forKey: "darkBackground")
   for traits in [light, dark, lightHigh, darkHigh] {
+    let soft = UIColor(red: 17.0 / 255, green: 17.0 / 255, blue: 19.0 / 255, alpha: 1)
+    let expected = traits.userInterfaceStyle == .dark ? soft : UIColor.systemBackground
+    let grouped = traits.userInterfaceStyle == .dark ? soft : UIColor.systemGroupedBackground
+    for canvas in [UIColor.lodyBackground, .lodyOpaqueBackground] {
+      precondition(same(canvas, expected, traits), "Legacy background preferences cannot change the opaque canvas")
+    }
+    precondition(same(.lodyGroupedBackground, grouped, traits))
+    precondition(same(.lodySoftDarkBackground, soft, traits), "Camera surfaces stay soft dark even in light mode")
+    if traits.userInterfaceStyle == .dark {
+      precondition(same(LodyUIColor.bgBase, soft, traits))
+      precondition(same(LodyUIColor.bgGrouped, soft, traits))
+    }
+    precondition(contrast(.white, .lodySoftDarkBackground, traits) >= 7, "Camera controls remain readable")
     precondition(same(.lodyGround, .lodyBackground, traits), "The design ground is the system Lody background")
     precondition(contrast(.lodyInk, .lodyGround, traits) >= 12, "Ink reads as primary text")
     precondition(contrast(.lodySecondary, .lodyGround, traits) >= 4.5, "Secondary text meets 4.5:1 on \(background)")

@@ -126,3 +126,16 @@ let body = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(RemoteSe
 precondition((body["edit"] as! [String: Any])["enabledByDefault"] == nil && body["remove"] == nil, "Only the kind's fields are sent")
 
 print("PASS: remote settings sections, agent usage rings and pace, saved snapshots, failure mapping")
+
+let scopedQuotas = AgentUsage(configs: [AgentUsageConfig(id: "a", name: "Codex", provider: "codex", eligible: true, rateLimitsAvailable: true)], quotas: [
+  AgentQuota(id: "codex", provider: "codex", agentConfigId: "b", windows: []),
+  AgentQuota(id: "codex", provider: "codex", windows: []),
+  AgentQuota(id: "codex_bengalfox", provider: "codex", agentConfigId: "a", name: "Codex Spark", windows: []),
+])
+precondition(SessionUsageSelection.quota(scopedQuotas, configId: "a", provider: "codex", model: "gpt-5.3-codex") == nil)
+precondition(SessionUsageSelection.quota(scopedQuotas, configId: "a", provider: "codex", model: "gpt-5.3-codex-spark")?.id == "codex_bengalfox")
+precondition(SessionUsageSelection.quota(scopedQuotas, configId: "b", provider: "codex", model: nil) == nil)
+var unsupportedQuotas = scopedQuotas
+unsupportedQuotas.configs[0].rateLimitsAvailable = false
+precondition(SessionUsageSelection.quota(unsupportedQuotas, configId: "a", provider: "codex", model: nil) == nil)
+print("PASS: session quota exact account, model-specific Spark selection and capability gating")

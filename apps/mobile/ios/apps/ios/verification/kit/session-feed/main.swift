@@ -23,7 +23,7 @@ final class LocalStore: @unchecked Sendable {
   var unwatched = 0
   var reconnects = 0
   nonisolated static func envelope(_ revision: Int, _ text: String) -> String {
-    #"{"v":1,"status":"live","revision":\#(revision),"preview":{"label":"localhost:5173","active":true},"entries":[{"id":"reply","role":"assistant","finished":true,"items":[{"type":"text","text":"\#(text)"}]}]}"#
+    #"{"v":1,"status":"live","revision":\#(revision),"usage":{"context":{"used":84000,"size":200000},"isContextCompacting":false},"preview":{"label":"localhost:5173","active":true},"entries":[{"id":"reply","role":"assistant","finished":true,"items":[{"type":"text","text":"\#(text)"}]}]}"#
   }
   var service: SessionFeedService {
     .init(watch: { _, receive in self.watched += 1; self.receive = receive; return { self.unwatched += 1 } },
@@ -51,6 +51,8 @@ final class LocalStore: @unchecked Sendable {
     fixture.send(1, 3, "live")
     try await wait { feed.state.status == "live" }
     precondition(feed.state.preview?.label == "localhost:5173")
+    let usage = try JSONSerialization.jsonObject(with: Data(feed.state.usageJSON!.utf8)) as! [String: Any]
+    precondition((usage["context"] as? [String: Int]) == ["used": 84000, "size": 200000])
     precondition(!feed.state.isLiveUpdate, "The first live snapshot must replace the cache without replay")
     fixture.send(0, 100, "stale-generation")
     fixture.send(1, 2, "stale-revision")

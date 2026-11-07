@@ -140,7 +140,7 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
       withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
     )
     config.baseForegroundColor = .label
-    config.background.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.8)
+    config.background.backgroundColor = UIColor.lodyBackground.withAlphaComponent(0.8)
     config.cornerStyle = .capsule
     close.configuration = config
     close.accessibilityLabel = String(localized: "native.chat.image.closePreview", bundle: .lody)
@@ -150,7 +150,7 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
     counter.font = UIFont.systemFont(ofSize: size, weight: .medium).withTabularNumbers()
     counter.textColor = .label
     counter.textAlignment = .center
-    counter.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.8)
+    counter.backgroundColor = UIColor.lodyBackground.withAlphaComponent(0.8)
     counter.clipsToBounds = true
     counter.onIncrement = { [weak self] in self?.movePage(1) }
     counter.onDecrement = { [weak self] in self?.movePage(-1) }

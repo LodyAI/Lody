@@ -1,23 +1,5 @@
 import UIKit
 
-enum LodyDarkBackground: String {
-  case soft
-  case black
-
-  static var current: Self {
-    Self(rawValue: UserDefaults.standard.string(forKey: "darkBackground") ?? "") ?? .soft
-  }
-
-  static func save(_ value: String) {
-    let next = Self(rawValue: value) ?? .soft
-    guard next != current else { return }
-    UserDefaults.standard.set(next.rawValue, forKey: "darkBackground")
-    DispatchQueue.main.async {
-      NotificationCenter.default.post(name: .lodyAppearanceDidChange, object: nil)
-    }
-  }
-}
-
 enum LodyAccent {
   static let color = UIColor.lodyInk
   static let foregroundColor = UIColor.lodyGround
@@ -60,13 +42,14 @@ func lodyTint(_ value: String) -> UIColor? {
 }
 
 extension UIColor {
+  /// Fixed dark media canvas, including when the device uses light mode.
+  static let lodySoftDarkBackground = UIColor(red: 0x11 / 255, green: 0x11 / 255, blue: 0x13 / 255, alpha: 1)
+
   static let lodyBackground = UIColor { traits in
     if traits.userInterfaceStyle != .dark {
       return UIColor.systemBackground.resolvedColor(with: traits)
     }
-    return LodyDarkBackground.current == .soft
-      ? UIColor(red: 0x11 / 255, green: 0x11 / 255, blue: 0x13 / 255, alpha: 1)
-      : .black
+    return .lodySoftDarkBackground
   }
 
   static let lodySidebar = UIColor { traits in
@@ -74,10 +57,7 @@ extension UIColor {
     if traits.userInterfaceStyle != .dark {
       return UIColor(white: high ? 0xEE / 255 : 0xF7 / 255, alpha: 1)
     }
-    if LodyDarkBackground.current == .soft {
-      return UIColor(white: high ? 0x20 / 255 : 0x18 / 255, alpha: 1)
-    }
-    return UIColor(white: high ? 0x18 / 255 : 0x0E / 255, alpha: 1)
+    return UIColor(white: high ? 0x20 / 255 : 0x18 / 255, alpha: 1)
   }
 
   static let lodyGroupedBackground = UIColor { traits in
@@ -90,7 +70,7 @@ extension UIColor {
   /// the semantic color inside the provider to retain automatic theme/contrast
   /// updates without promoting the canvas itself to a vibrant material.
   static let lodyOpaqueBackground = UIColor { traits in
-    UIColor.systemBackground.resolvedColor(with: traits)
+    UIColor.lodyBackground.resolvedColor(with: traits)
   }
 
   /// Glass sheets resolve grouped semantics to vibrant fills. Rows that still
@@ -111,7 +91,7 @@ extension UIColor {
 
   /// Recessed chip on the reading canvas. Light is Tailwind `neutral-100`;
   /// dark matches `secondarySystemBackground` so file cards and code blocks
-  /// sit on black without a mid-grey slab.
+  /// sit on the soft dark canvas without a mid-grey slab.
   static let lodyInset = UIColor { traits in
     traits.userInterfaceStyle == .dark
       ? UIColor(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1)

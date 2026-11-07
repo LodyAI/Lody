@@ -50,3 +50,18 @@ the result goes to RN), run `pnpm contract`, and add its envelopes to
 `contract/fixtures/to-runtime.json` / `to-host.json`. Both
 `apps/ios/tests/cloud/contract.test.mjs` and
 `swift test --package-path packages/lody-core` check the same fixtures.
+
+## Conversation usage
+
+Session summaries carry an optional `usage` display projection through the existing
+session/sessionCache events: `context: {used,size} | null`,
+`isContextCompacting`, `quotaEligible`, `quota: AgentQuota | null`, and optional
+`modelId` / `modelLabel`. Context uses the session's `contextWindowUsage`; the
+latest context-compaction tool determines compaction state, including completion.
+The selected quota matches the session's exact Agent Config and model (named tier,
+exact ID, Codex Spark, generic), gated by subscription-account eligibility and the
+config's advertised rate-limit capability. Catalog changes refresh retained session
+summaries, without another subscription, polling, or forecast service. Quota reset
+values are epoch seconds, preserved even after expiry; native UI owns relative /
+absolute formatting, never estimating a new balance from the clock. A local,
+unsent model choice must not relabel a quota selected for another `modelId`.
