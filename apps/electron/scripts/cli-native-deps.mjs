@@ -13,7 +13,9 @@ import { fileURLToPath } from 'node:url'
 // ELECTRON_RUN_AS_NODE inside the app binary) — no ABI-specific rebuild.
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const electronAppRoot = path.resolve(__dirname, '..')
-const cliAppRoot = path.resolve(electronAppRoot, '../cli')
+const cliAppRoot = process.env.LODY_CLI_SOURCE_ROOT
+  ? path.resolve(process.env.LODY_CLI_SOURCE_ROOT)
+  : path.resolve(electronAppRoot, '../cli')
 const require = createRequire(import.meta.url)
 
 // Mirror of the published CLI's runtime dependencies (enforced by
@@ -58,7 +60,9 @@ const EXCLUDED_PACKAGE_DIRS = new Set([
   'test',
   'node_modules'
 ])
-export const stagedCliDir = path.join(electronAppRoot, 'resources', 'cli')
+export const stagedCliDir = process.env.LODY_CLI_STAGING_DIR
+  ? path.resolve(process.env.LODY_CLI_STAGING_DIR)
+  : path.join(electronAppRoot, 'resources', 'cli')
 export const stagedNodeModulesDir = path.join(stagedCliDir, 'node_modules')
 export const stagedSqliteDir = path.join(stagedNodeModulesDir, 'better-sqlite3')
 export const stagedNodePtyDir = path.join(stagedNodeModulesDir, '@lydell', 'node-pty')

@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, readdir, link, unlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
@@ -55,7 +56,7 @@ const machineKeyringOperation = (
       catch: () => failure('unavailable'),
     });
     const output = yield* runCommandOk({
-      command: process.execPath,
+      command: getCliNodeExecutable(),
       args: ['--input-type=module', '-e', keyringHelper],
       env: { ...process.env },
       input: JSON.stringify({ moduleUrl, account, operation, value }),

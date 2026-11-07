@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { startProcessLegacy } from '@lody/shared/node/process';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -19,7 +20,7 @@ export async function startBaguetteProcess(
   for (const key of ['HOME', 'PATH', 'TMPDIR', 'DEVELOPER_DIR', 'ELECTRON_RUN_AS_NODE'])
     if (process.env[key]) env[key] = process.env[key];
   const { child: worker } = startProcessLegacy({
-    command: process.execPath,
+    command: getCliNodeExecutable(),
     args: [workerPath, binary],
     processGroup: false,
     options: { env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] },

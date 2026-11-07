@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -472,7 +473,7 @@ function launchWorkspaceWatchChild(_generation: number): WorkspaceWatchChild {
   if (existsSync(productionEntry)) {
     return startProcessLegacy(
       {
-        command: process.execPath,
+        command: getCliNodeExecutable(),
         args: [productionEntry],
         options: {
           env,

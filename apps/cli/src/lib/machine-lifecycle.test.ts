@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildLodyUpgradeInstallArgs,
   normalizeMachineUpgradeTargetVersion,
   resolveMachineLifecycleCapability,
-  resolveNpmExecutable,
 } from './machine-lifecycle';
 
 describe('machine lifecycle helpers', () => {
@@ -27,25 +25,12 @@ describe('machine lifecycle helpers', () => {
     expect(() => normalizeMachineUpgradeTargetVersion('next')).toThrow(/exact semver/);
   });
 
-  it('builds a fixed npm global install command for lody only', () => {
-    expect(buildLodyUpgradeInstallArgs('1.2.3')).toEqual([
-      'install',
-      '-g',
-      'lody@1.2.3',
-      '--registry=https://registry.npmjs.org',
-    ]);
-  });
-
-  it('uses npm.cmd on Windows', () => {
-    expect(resolveNpmExecutable('win32')).toBe('npm.cmd');
-    expect(resolveNpmExecutable('linux')).toBe('npm');
-  });
-
-  it('enables remote lifecycle only for supervised daemon workers', () => {
+  it('legacy daemons require explicit migration instead of remote npm installation', () => {
     expect(resolveMachineLifecycleCapability('daemon')).toEqual({
       launchMode: 'daemon',
       canRemoteRestart: true,
-      canRemoteUpgrade: true,
+      canRemoteUpgrade: false,
+      reason: 'unsupported_install',
     });
   });
 
@@ -67,3 +52,23 @@ describe('machine lifecycle helpers', () => {
     });
   });
 });
+
+describe('managed lifecycle capability', () => {
+  it('requires a managed plaintext daemon with proven process containment', () => {
+    expect(
+      resolveMachineLifecycleCapability('daemon', { managed: true, platform: 'linux' })
+        .canRemoteUpgrade
+    ).toBe(true);
+    expect(
+      resolveMachineLifecycleCapability('daemon', { managed: true, encrypted: true })
+        .canRemoteUpgrade
+    ).toBe(false);
+    expect(
+      resolveMachineLifecycleCapability('daemon', { managed: true, platform: 'win32' })
+        .canRemoteUpgrade
+    ).toBe(false);
+  });
+});
+
+// Installation safety: a successful shutdown receipt must include retained
+// detached groups even when their original root has already exited.

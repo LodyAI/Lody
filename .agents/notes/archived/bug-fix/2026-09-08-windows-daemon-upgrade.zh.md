@@ -1,6 +1,7 @@
 # 通过 npm 命令脚本启动 Windows daemon 升级
 
 Status: implemented
+Archived: 2026-11-06
 Translation: current
 PR: https://github.com/LodyAI/Lody/pull/488
 
@@ -20,7 +21,7 @@ Windows 命令脚本的解析和转义。测试使用合成 npm 可执行文件�
 这是对现有 Windows 行为的修复，不改变产品意图或协议。
 
 生命周期确认响应发送失败后可能卡在 pending 的问题，由同一 PR 中单独的
-[ACK 修复](2026-09-08-machine-lifecycle-ack.md)处理。
+[ACK 修复](../../implemented/bug-fix/2026-09-08-machine-lifecycle-ack.md)处理。
 未找到升级启动器的现有归属 Note。
 
 ## 证据与验证
@@ -28,7 +29,7 @@ Windows 命令脚本的解析和转义。测试使用合成 npm 可执行文件�
 - [Node 的 Windows 命令脚本文档](https://nodejs.org/api/child_process.html#spawning-bat-and-cmd-files-on-windows)
   说明了对解释器的要求。
 - [实现](../../../../apps/cli/src/lib/machine-lifecycle.ts)使用已有依赖，无需修改 manifest 或锁文件。
-- [回归测试](../../../../apps/cli/src/lib/machine-lifecycle-upgrade.test.ts)把 PATH 隔离到含空格的临时目录，
+- [回归测试](https://github.com/LodyAI/Lody/blob/d1386868d9a8dfe185ec060266136c6b50a81ab6/apps/cli/src/lib/machine-lifecycle-upgrade.test.ts)把 PATH 隔离到含空格的临时目录，
   Windows 执行 `.cmd`，POSIX 执行 shell 脚本，覆盖退出码 0 和 1。
 - macOS 上的 10 项定向生命周期测试通过；允许已有本地 IPC 测试在沙箱外创建 socket 后，
   `pnpm check` 通过。测试不覆盖 registry 访问、原生模块替换、Windows 进程树取消

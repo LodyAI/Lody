@@ -1,3 +1,8 @@
+import { z } from 'zod';
+import {
+  ManagedDaemonUpgradeOptionsSchema,
+  type ManagedDaemonUpgradeOptions,
+} from '../daemon-update';
 import crypto from 'node:crypto';
 import net from 'node:net';
 import os from 'node:os';
@@ -51,6 +56,11 @@ type AcquireLocalCliHostLeaseOptions = {
   shutdownControl?: {
     token: string;
     onRequest: () => void;
+    onUpgrade?: (request: {
+      requestId: string;
+      targetVersion: string;
+      upgrade: ManagedDaemonUpgradeOptions;
+    }) => Promise<void>;
   };
 };
 
@@ -213,6 +223,17 @@ function isShutdownRequest(
   );
 }
 
+const HostUpgradeRequestSchema = z
+  .object({
+    type: z.literal('lody/host-upgrade'),
+    instanceId: z.string().min(1),
+    token: z.string().min(1),
+    requestId: z.string().min(1),
+    targetVersion: z.string().min(1),
+    upgrade: ManagedDaemonUpgradeOptionsSchema,
+  })
+  .strict();
+
 function tokensEqual(actual: string, expected: string): boolean {
   const actualBytes = Buffer.from(actual);
   const expectedBytes = Buffer.from(expected);
@@ -259,6 +280,23 @@ async function createListeningHost(
         value = JSON.parse(line);
       } catch {
         socket.end(`${JSON.stringify({ ok: false, error: 'invalid_request' })}\n`);
+        return;
+      }
+      const upgrade = HostUpgradeRequestSchema.safeParse(value);
+      if (
+        upgrade.success &&
+        record.mode === 'daemon' &&
+        shutdownControl?.onUpgrade &&
+        upgrade.data.instanceId === record.instanceId &&
+        tokensEqual(upgrade.data.token, shutdownControl.token)
+      ) {
+        void shutdownControl.onUpgrade(upgrade.data).then(
+          () => socket.end(`${JSON.stringify({ ok: true })}\n`),
+          (error) =>
+            socket.end(
+              `${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : 'upgrade_failed' })}\n`
+            )
+        );
         return;
       }
       if (
@@ -346,14 +384,35 @@ export async function acquireLocalCliHostLease(
   };
 }
 
-export async function requestLocalCliHostShutdown(options: {
+type HostControlOptions = {
   instanceId: string;
   token: string;
   expectedPid?: number;
   expectedMode?: LocalCliHostMode;
   endpoint?: LocalCliHostEndpoint;
   timeoutMs?: number;
-}): Promise<{ ok: true; record: LocalCliHostRecord } | { ok: false; error: string }> {
+};
+
+export async function requestLocalCliHostShutdown(options: HostControlOptions) {
+  return requestLocalCliHostControl(options);
+}
+export async function requestLocalCliHostUpgrade(
+  options: HostControlOptions & {
+    requestId: string;
+    targetVersion: string;
+    upgrade: ManagedDaemonUpgradeOptions;
+  }
+) {
+  return requestLocalCliHostControl(options, {
+    requestId: options.requestId,
+    targetVersion: options.targetVersion,
+    upgrade: options.upgrade,
+  });
+}
+async function requestLocalCliHostControl(
+  options: HostControlOptions,
+  upgrade?: { requestId: string; targetVersion: string; upgrade: ManagedDaemonUpgradeOptions }
+): Promise<{ ok: true; record: LocalCliHostRecord } | { ok: false; error: string }> {
   const endpoint = options.endpoint ?? getLocalCliHostEndpoint();
   const timeoutMs = options.timeoutMs ?? HOST_REQUEST_TIMEOUT_MS;
   return await new Promise((resolve) => {
@@ -401,7 +460,8 @@ export async function requestLocalCliHostShutdown(options: {
           }
           socket.write(
             `${JSON.stringify({
-              type: 'lody/host-shutdown',
+              type: upgrade ? 'lody/host-upgrade' : 'lody/host-shutdown',
+              ...(upgrade ?? {}),
               instanceId: options.instanceId,
               token: options.token,
             })}\n`

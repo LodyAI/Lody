@@ -42,3 +42,7 @@ ready。它必须容纳慢硬件、冷加载模块、启动期网络请求以及
 已在运行旧版本的 watchdog 内部的时限，见
 [CLI 恢复步骤](../../../../apps/cli/README.md#daemon-upgrades-and-autostart)。
 相关决策：[绑定已验证的升级安装](2026-10-03-daemon-upgrade-installation.zh.md)。
+
+## 当前所有权
+
+三分钟兜底超时继续用于交互式 daemon 启动。本文描述的旧 runner 之间的远程交接属于历史机制；托管 SEA 更新在固定进程下替换 Worker。所有旧 npm 安装都需要显式迁移，发布新超时不会修复已经运行的旧监护进程。

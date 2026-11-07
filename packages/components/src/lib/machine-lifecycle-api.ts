@@ -1,3 +1,5 @@
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
+import { DEFAULT_RUNTIME_ARTIFACTS_BASE_URL } from '@lody/platform';
 import { z } from 'zod';
 import { requireCloudAuthBaseUrl } from './cloud-http-port';
 
@@ -88,6 +90,7 @@ export async function mintMachineLifecycleRequestToken({
   action,
   requestId,
   targetVersion,
+  upgrade,
   sessionToken,
   authBaseUrl,
 }: {
@@ -96,6 +99,7 @@ export async function mintMachineLifecycleRequestToken({
   action: MachineLifecycleAction;
   requestId: string;
   targetVersion?: string;
+  upgrade?: ManagedDaemonUpgradeOptions;
   sessionToken: string;
   authBaseUrl?: string;
 }): Promise<MintMachineLifecycleRequestTokenResult> {
@@ -123,6 +127,7 @@ export async function mintMachineLifecycleRequestToken({
           action,
           requestId,
           ...(action === 'upgrade' && targetVersion ? { targetVersion } : {}),
+          ...(action === 'upgrade' && upgrade ? { upgrade } : {}),
         }),
       }
     );
@@ -176,6 +181,34 @@ export async function fetchLatestCliVersion({
       latestVersion: parsed.data.latestVersion,
       cacheTtlMs: parsed.data.cacheTtlMs,
     };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Public release hint only. The target daemon verifies the signed manifest itself. */
+export async function fetchLatestDaemonVersion(
+  channel: 'stable' | 'next' | 'nightly'
+): Promise<FetchLatestCliVersionResult> {
+  if (!requireCloudAuthBaseUrl('remoteMachines'))
+    return { ok: false, error: 'missing_cloud_capability' };
+  try {
+    // Every channel moves only after all platform assets exist. This representative
+    // signed platform manifest supplies the common version, not execution authority.
+    const response = await fetch(
+      `${DEFAULT_RUNTIME_ARTIFACTS_BASE_URL}/api/runtimes/${channel === 'next' ? 'lody-cloud-next-daemon' : 'lody-cloud-daemon'}/channels/darwin-arm64/${channel}.json`,
+      { signal: AbortSignal.timeout(15000), cache: 'no-store' }
+    );
+    if (!response.ok) throw new Error(`Daemon channel unavailable: ${response.status}`);
+    const envelope = z.object({ payload: z.string().max(65536) }).parse(await response.json());
+    const manifest = z
+      .object({
+        product: z.literal('lody-cloud'),
+        version: z.string().regex(/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/),
+        channel: z.literal(channel),
+      })
+      .parse(JSON.parse(envelope.payload));
+    return { ok: true, latestVersion: manifest.version, cacheTtlMs: 60000 };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
